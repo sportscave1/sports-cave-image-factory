@@ -87,6 +87,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+st.set_option("server.maxUploadSize", 200)
+
 
 def inject_styles():
     st.markdown(
