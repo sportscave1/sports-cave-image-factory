@@ -1,0 +1,1391 @@
+from pathlib import Path
+from io import BytesIO
+from PIL import Image, ImageOps
+import zipfile
+import re
+import shutil
+from datetime import datetime
+from textwrap import dedent
+
+
+# -----------------------------------
+# TEMPLATE FINDER
+# -----------------------------------
+
+def find_file(preferred_name, fallback_patterns, folder):
+    preferred = folder / preferred_name
+
+    if preferred.exists():
+        return preferred
+
+    for pattern in fallback_patterns:
+        matches = list(folder.glob(pattern))
+        if matches:
+            return matches[0]
+
+    raise FileNotFoundError(
+        f"Could not find {preferred_name}. Checked folder: {folder}"
+    )
+
+
+# -----------------------------------
+# PLACEMENT RULES
+# -----------------------------------
+
+MASTER_FRAMED_BOX = (84, 204, 824, 583)
+
+UNFRAMED_ART_BOX = (84, 210, 824, 580)
+
+SIZE_GUIDE_BOXES = {
+    "x_large": (633, 147, 655, 462),
+    "large":   (101, 248, 426, 300),
+    "medium":  (115, 812, 289, 204),
+    "small":   (567, 863, 179, 126),
+}
+
+LIFESTYLE_REFERENCE_FILE_NAME = "00-upload-this-black-framed-reference.webp"
+
+LIFESTYLE_IMAGE_VARIANTS = {
+    "01-man-cave-prompt.txt": "man-cave-lifestyle",
+    "02-office-prompt.txt": "office-lifestyle",
+    "03-living-room-prompt.txt": "living-room-lifestyle",
+    "04-close-up-wall-prompt.txt": "close-up-wall-lifestyle",
+    "05-limited-edition-detail-prompt.txt": "limited-edition-detail-lifestyle",
+    "06-instant-experience-cover-prompt.txt": "instant-experience-cover-lifestyle",
+    "07-home-sports-bar-prompt.txt": "home-sports-bar-lifestyle",
+    "08-collector-display-room-prompt.txt": "collector-display-room-lifestyle",
+    "09-luxury-entry-wall-prompt.txt": "luxury-entry-wall-lifestyle",
+    "10-premium-unboxing-prompt.txt": "premium-unboxing-lifestyle",
+    "11-wall-upgrade-moment-prompt.txt": "wall-upgrade-moment-lifestyle",
+    "12-fireplace-feature-wall-prompt.txt": "fireplace-feature-wall-lifestyle",
+    "13-premium-bedroom-prompt.txt": "premium-bedroom-lifestyle",
+    "14-home-gym-prompt.txt": "home-gym-lifestyle",
+    "15-premium-gift-reveal-prompt.txt": "premium-gift-reveal-lifestyle",
+}
+
+PRODUCT_PAGE_PROMPT_FILENAMES = {
+    "01-man-cave-prompt.txt",
+    "02-office-prompt.txt",
+    "03-living-room-prompt.txt",
+}
+
+LIFESTYLE_PROMPT_SPECS = [
+    (
+        "01-man-cave-prompt.txt",
+        "Man Cave",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic lifestyle mockup using the uploaded image as the exact reference for the framed artwork.
+            The artwork and frame must remain exactly the same as the uploaded image.
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text.
+            Do not change the badge.
+            Do not crop the artwork.
+            Do not blur the artwork.
+            Do not stretch, warp, bend, squash, or distort the frame or artwork.
+
+            Place the exact uploaded Sports Cave landscape frame realistically inside a premium man cave interior.
+
+            The space must feel masculine, minimal, premium, and collector-driven.
+            Use a clean man cave setting with subtle realism only.
+            Keep the background restrained and believable.
+
+            Use a neutral premium palette:
+            black, charcoal, warm timber, off-white, soft beige, concrete, plaster, or matte painted walls.
+
+            The frame must look physically real:
+            premium black timber frame, realistic depth, sharp corners, subtle texture, and believable wall shadows.
+
+            Add realistic glass over the frame.
+            The glass should have soft natural reflections and subtle premium glare from the room lighting.
+            The glare must feel believable and must not cover or ruin the artwork.
+
+            Use premium cinematic lighting:
+            soft natural light, controlled highlights, and realistic shadow falloff behind and below the frame.
+
+            The frame should feel mounted on a real wall, not pasted on.
+
+            Composition:
+            square 1024 x 1024 canvas.
+            The framed artwork is the hero.
+            Place it at realistic eye-level height.
+            Show believable scale.
+            A slight natural viewing angle is allowed, but the frame and artwork must keep correct landscape proportions and must not look perspective-distorted.
+
+            Background styling:
+            minimal premium man cave only.
+            You may include subtle realistic decor such as a blurred leather chair, a simple shelf, or a soft foreground object, but keep it minimal.
+            Do not add clutter.
+            Do not add neon signs.
+            Do not add random sports logos.
+            Do not add extra wall art.
+            Do not add people.
+            Do not add text overlays.
+            Do not add watermarks.
+
+            Final result:
+            photorealistic premium man cave mockup with the exact uploaded design and frame, realistic glass, premium shadows, and believable lighting.
+            """
+        ).strip(),
+    ),
+    (
+        "02-office-prompt.txt",
+        "Office",
+        dedent(
+            """
+            Using the design and frame from the last image created, create another 1024 x 1024 ultra-realistic lifestyle mockup.
+
+            Keep the exact same artwork and the exact same black landscape frame.
+            Do not redesign the artwork.
+            Do not change the colours, layout, text, badge, crop, or composition inside the frame.
+            Do not blur, stretch, warp, or distort the artwork or frame.
+
+            This version must place the framed artwork in a premium office setting.
+
+            The office should feel like a different house or location from the previous image.
+            Use a different wall colour from the last image so it feels like a new environment.
+            Also use a different viewing angle so it feels like a fresh perspective.
+
+            The frame must remain physically realistic:
+            premium black timber frame, real depth, sharp corners, subtle texture, and realistic wall mounting.
+
+            Add realistic glass over the artwork with soft premium reflections and subtle glare.
+            The glare should feel natural and believable, without blocking the artwork too much.
+
+            Use premium cinematic lighting with realistic highlights and shadows.
+            The lighting and shadows should feel different from the previous image while still looking premium and natural.
+
+            Room style:
+            minimal premium office.
+            Clean, refined, masculine, and realistic.
+            Use a neutral palette with a different wall tone than the last scene.
+            You may use off-white, warm grey, beige, matte olive-grey, charcoal, concrete, or soft plaster tones.
+
+            Keep the background minimal and realistic.
+            You may include subtle office details only if they help realism, such as a desk edge, chair, bookshelf, or side table.
+            Do not clutter the space.
+            Do not add random sports logos.
+            Do not add extra artwork.
+            Do not add text overlays.
+            Do not add watermarks.
+
+            Composition:
+            square 1024 x 1024 canvas.
+            The framed artwork is the hero.
+            Show believable scale and realistic eye-level placement.
+            Use a different angle from the previous image, but preserve the correct landscape proportions of the frame and artwork.
+
+            Final result:
+            photorealistic premium office mockup using the same exact design and frame as the previous image, with a different wall colour, different angle, and different premium lighting so it feels like a different house and a different view.
+            """
+        ).strip(),
+    ),
+    (
+        "03-living-room-prompt.txt",
+        "Living Room",
+        dedent(
+            """
+            Using the design and frame from the last image created, create another 1024 x 1024 ultra-realistic lifestyle mockup. Use a different angle and different wall colour so it looks like a different house and camera angle to the previous generation.
+            Keep the exact same artwork and the exact same black landscape frame.
+            Do not redesign the artwork.
+            Do not change the colours, layout, text, badge, crop, or composition inside the frame.
+            Do not blur, stretch, warp, or distort the artwork or frame.
+
+            This version must place the framed artwork in a premium living room setting.
+
+            The living room should feel like a different house or location from the previous images.
+            Use a different wall colour again so it feels like a fresh new space.
+            Also use a different angle so this mockup feels like a new premium view.
+
+            The frame must look physically real:
+            premium black timber frame, realistic depth, sharp corners, subtle texture, and believable mounting on the wall.
+
+            Add realistic glass over the artwork.
+            The glass should have soft natural reflections and subtle premium glare from the room lighting.
+            The glare must feel realistic and controlled without hiding the artwork.
+
+            Use premium cinematic lighting:
+            soft natural light, controlled highlights, and realistic shadows behind and below the frame.
+            The scene should feel bright enough to look premium, but still warm and realistic.
+
+            Room style:
+            minimal premium living room.
+            Clean, restrained, masculine, collector-driven, and believable.
+            Use a refined neutral palette with a different wall colour from the office and man cave versions.
+            You may use warm beige, light greige, soft concrete, off-white, muted taupe, or matte painted plaster walls.
+
+            Keep the background minimal.
+            You may include subtle realistic decor such as part of a sofa, side table, floor lamp, or soft foreground object, but keep everything understated.
+            Do not add clutter.
+            Do not add neon signs.
+            Do not add random sports logos.
+            Do not add extra wall art.
+            Do not add people.
+            Do not add text overlays.
+            Do not add watermarks.
+
+            Composition:
+            square 1024 x 1024 canvas.
+            The framed artwork is the hero.
+            Show believable scale.
+            Place it at realistic eye-level height.
+            Use a different angle from the previous versions, while preserving the correct landscape proportions of the frame and artwork.
+
+            Final result:
+            photorealistic premium living room mockup using the same exact design and frame as the previous image, with real glass, premium shadows, different wall colour, and a fresh angle so it feels like a different house and a different premium scene.
+            """
+        ).strip(),
+    ),
+    (
+        "04-close-up-wall-prompt.txt",
+        "Close-Up Premium Wall Shot",
+        dedent(
+            """
+            Using the uploaded artwork and frame as the exact reference, create a 1024 x 1024 ultra-realistic close-up lifestyle mockup. Use a different angle and different wall colour so it looks like a different house and camera angle to the previous generation.
+            The artwork and frame must remain exactly the same as the uploaded image.
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text.
+            Do not change the badge.
+            Do not crop the artwork.
+            Do not blur the artwork.
+            Do not stretch, warp, bend, squash, or distort the frame or artwork.
+            Create a close-up shot of the framed artwork mounted on a premium wall, as if it is hanging in someone's real home.
+            The frame should be the hero of the image.
+            No room decor.
+            No furniture.
+            No shelves.
+            No plants.
+            No lamps.
+            No extra wall art.
+            No people.
+            No logos.
+            No added text.
+            No clutter.
+            Use only the framed artwork on a premium textured wall.
+            The wall should feel realistic and high-end:
+            matte plaster, soft concrete, warm beige, off-white, charcoal, muted taupe, or clean gallery-style painted wall.
+            Use a wall colour that makes the black frame and artwork stand out.
+            Camera angle:
+            close-up view.
+            Slight natural angle from one side.
+            The angle should feel premium and realistic, like a professional product photo.
+            Do not over-angle it.
+            Do not create heavy perspective distortion.
+            The frame and artwork must keep correct landscape proportions.
+            Frame realism:
+            premium black timber frame.
+            Realistic depth.
+            Sharp corners.
+            Clean edges.
+            Subtle timber texture.
+            Believable thickness.
+            Natural shadow behind the frame.
+            Glass realism:
+            add realistic glass over the artwork.
+            The glass should show soft natural reflections and subtle premium glare.
+            The glare must look real, controlled, and high-end.
+            Do not let the glare hide the artwork.
+            Do not add fake glow.
+            Lighting:
+            premium cinematic lighting.
+            Soft natural light from one side.
+            Controlled highlights.
+            Realistic shadow falloff behind and below the frame.
+            The frame should look physically mounted on the wall, not pasted on.
+            Composition:
+            square 1024 x 1024 canvas.
+            Close enough to show the frame quality, glass, shadows, and artwork detail.
+            Leave a small amount of premium wall space around the frame for realism.
+            The final image should feel clean, expensive, sharp, and believable.
+            Final result:
+            photorealistic close-up wall mockup of the exact supplied Sports Cave artwork and black frame, with real glass glare, premium shadows, realistic wall texture, and no distractions.
+            """
+        ).strip(),
+    ),
+    (
+        "05-limited-edition-detail-prompt.txt",
+        "Limited Edition Magnifying Glass Detail Shot",
+        dedent(
+            """
+            Using the uploaded artwork and frame as the exact reference, create a 1024 x 1024 ultra-realistic limited edition detail mockup.
+            The artwork and frame must remain exactly the same as the uploaded image.
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text.
+            Do not change the badge.
+            Do not crop the artwork.
+            Do not blur the artwork.
+            Do not stretch, warp, bend, squash, or distort the frame or artwork.
+            This image must highlight the limited edition detail on the uploaded Sports Cave design.
+            Use a realistic magnifying glass placed over or near the limited edition badge, edition plate, edition number, collector badge, certificate-style detail, or numbered edition area visible in the uploaded artwork.
+            The magnifying glass must feel physically real:
+            clear glass lens, premium metal rim, realistic handle, natural reflections, soft shadows, and believable distortion only inside the lens.
+            The magnified area should clearly show the limited edition text, edition number, numbered plate, or collector detail.
+            The magnification must look realistic and premium.
+            Do not make the magnified area cartoonish.
+            Do not over-enlarge the text.
+            Do not distort the artwork outside the magnifying glass.
+            Do not create fake text.
+            Do not change the edition number.
+            Do not add new badges.
+            Do not add new logos.
+            Do not add extra text overlays.
+            Do not add watermarks.
+            If the uploaded artwork has the limited edition detail near the bottom centre, place the magnifying glass naturally over that area.
+            If the uploaded artwork has the limited edition detail in another location, place the magnifying glass over the correct visible limited edition detail.
+            If the uploaded artwork includes both a collector badge and a numbered edition plate, prioritise the numbered edition plate.
+            The frame must remain physically realistic:
+            premium black timber frame, real depth, sharp corners, subtle timber texture, and believable wall mounting.
+            Add realistic glass over the frame.
+            The artwork glass and magnifying glass should both have believable reflections, but the reflections must not hide the limited edition detail.
+            Use premium cinematic lighting:
+            soft natural light from one side, controlled highlights, realistic shadows, and subtle premium glare.
+            The scene must feel like a professional product detail photo for a premium collector release.
+            Composition:
+            square 1024 x 1024 canvas.
+            The framed artwork should still be clearly visible, but the limited edition detail must become the hero.
+            The magnifying glass should sit naturally in the foreground, angled slightly, with realistic depth and shadow.
+            Keep the frame and artwork proportions correct.
+            Use a clean premium wall background:
+            matte plaster, warm beige, soft concrete, charcoal, muted taupe, off-white, or gallery-style painted wall.
+            No room decor.
+            No furniture.
+            No people.
+            No random props except the magnifying glass.
+            No clutter.
+            No neon signs.
+            No extra wall art.
+            No random sports logos.
+            No added text.
+            Final result:
+            photorealistic premium close-up mockup of the exact uploaded Sports Cave framed artwork, with a realistic magnifying glass highlighting the limited edition detail, real glass reflections, premium shadows, and a collector-driven product photography feel.
+            """
+        ).strip(),
+    ),
+    (
+        "06-instant-experience-cover-prompt.txt",
+        "Instant Experience Cover Banner",
+        dedent(
+            """
+            Using the uploaded Sports Cave product image as the exact reference, create a 1024 x 1024 ultra-realistic Instant Experience cover image for a Meta ad.
+            This image will be used as the top cover of an Instant Experience ad, with the product catalogue automatically appearing underneath, so the image must instantly create desire, scarcity and premium collector value.
+            The uploaded framed artwork must remain exactly the same.
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text inside the artwork.
+            Do not change the badge.
+            Do not crop the artwork.
+            Do not blur the artwork.
+            Do not stretch, warp, bend, squash, or distort the frame or artwork.
+            Do not create fake signatures, fake logos, fake edition numbers, or fake artwork details.
+            Do not change the frame colour unless the uploaded reference already shows that frame colour.
+            Create a premium square advertising cover that combines:
+            A realistic lifestyle-style framed artwork hero shot at the top.
+            A luxury black and gold scarcity CTA panel at the bottom.
+            The framed artwork should take up the top 60-68% of the canvas.
+            Place the exact uploaded Sports Cave framed artwork on a premium wall, as if it is hanging in a real home, office, man cave, collector room, or gallery-style space.
+            The room should feel:
+            premium, masculine, minimal, cinematic, collector-driven, realistic and high-end.
+            Use a refined neutral background:
+            warm beige, soft concrete, charcoal, off-white, muted taupe, plaster wall, gallery wall, or warm grey.
+            The frame must look physically real:
+            premium black timber frame, realistic depth, sharp corners, subtle timber texture, clean edges, correct landscape proportions, and believable wall mounting.
+            Add realistic glass over the framed artwork.
+            The glass must show:
+            soft natural reflections, subtle premium glare, realistic highlight streaks, and believable room reflections.
+            The glare must feel expensive and real, but it must not cover or ruin the artwork.
+            Use premium cinematic lighting:
+            soft natural light from one side, controlled warm highlights, realistic shadows behind and below the frame, and subtle shadow falloff on the wall.
+            The artwork must look mounted on the wall, not pasted on.
+            Use a slight natural viewing angle if needed, but do not over-angle the frame.
+            The frame and artwork must keep correct proportions and must not look warped or distorted.
+            Bottom CTA panel:
+            Add a premium black textured banner panel across the bottom 32-40% of the image.
+            The panel should feel luxury and collector-grade:
+            deep black, subtle dark texture, soft gold highlights, faint vignette, refined metallic glow, and clean spacing.
+            Add a subtle gold light flare or glow line between the framed artwork section and the CTA panel, similar to a premium collector campaign.
+            Text overlay on the bottom panel must be clean, centred, readable on mobile, and limited to three lines only.
+            Use this exact text:
+            LIMITED TO 100 WORLDWIDE
+            Once it sells out, it's gone.
+            Claim Your Edition
+            Text styling:
+            The first line should be large, premium, uppercase, serif-style, white or soft metallic gold.
+            The second line should be smaller, clean, white or warm ivory.
+            The third line should feel like a premium CTA, gold, slightly smaller than the main headline, and highly readable.
+            Do not add too much text.
+            Do not add paragraphs.
+            Do not add extra product information.
+            Do not add prices.
+            Do not add discount messaging.
+            Do not add "shop now" buttons.
+            Do not add fake UI elements.
+            Do not add random logos.
+            Do not add people.
+            Do not add clutter.
+            Do not add extra wall art.
+            Do not add social media icons.
+            Do not add watermarks.
+            Composition:
+            square 1024 x 1024 canvas.
+            The framed artwork is the hero.
+            The bottom scarcity message must feel like part of a premium ad campaign, not a cheap banner.
+            Leave enough breathing room so the text is readable on mobile.
+            The final image should look like a luxury limited-edition collector release, designed to make fans tap into the Instant Experience catalogue below.
+            Final result:
+            a photorealistic premium Sports Cave Instant Experience cover image featuring the exact uploaded framed artwork, realistic wall mounting, real glass reflections, premium glare, believable shadows, luxury black and gold bottom CTA panel, and strong limited-edition scarcity messaging.
+            """
+        ).strip(),
+    ),
+    (
+        "07-home-sports-bar-prompt.txt",
+        "Premium Home Sports Bar",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic Meta ad carousel mockup using the uploaded image as the exact reference for the framed artwork.
+            This image is for a paid Meta ad carousel, not a standard product page image. It must instantly create desire, ownership, and premium collector value.
+            The artwork and frame must remain exactly the same as the uploaded image.
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text inside the artwork.
+            Do not change the badge.
+            Do not crop the artwork.
+            Do not blur the artwork.
+            Do not stretch, warp, bend, squash, or distort the frame or artwork.
+            Place the exact uploaded Sports Cave landscape frame realistically inside a premium home sports bar setting.
+            The room must feel like the kind of place a serious fan would watch finals, rivalries, title fights, race days, or derby nights.
+            The space should feel premium, masculine, cinematic, and collector-driven - not cheap, cluttered, or gimmicky.
+            Use a refined home bar environment:
+            dark stone benchtop, matte black cabinetry, warm timber shelving, subtle glassware, soft bar lighting, premium stools, and a faint out-of-focus TV glow in the background.
+            Do not use neon signs.
+            Do not use random sports logos.
+            Do not use beer branding.
+            Do not use team branding.
+            Do not add extra wall art.
+            Do not add people.
+            Do not add text overlays.
+            Do not add watermarks.
+            The framed artwork must be the hero of the image.
+            It should be mounted behind or near the bar as the main statement piece.
+            Show believable scale, as if the customer can imagine it in their own home bar or fan space.
+            The frame must look physically real:
+            premium black timber frame, realistic depth, sharp corners, subtle texture, and believable wall mounting.
+            Add realistic glass over the frame.
+            The glass must show soft premium reflections and subtle natural glare from the bar lighting.
+            The glare must feel believable and must not hide or ruin the artwork.
+            Lighting:
+            cinematic evening lighting.
+            Warm practical lights.
+            Controlled highlights.
+            Soft shadows behind and below the frame.
+            Subtle reflections on the glass.
+            Premium contrast without making the artwork too dark.
+            Composition:
+            square 1024 x 1024 canvas.
+            The framed artwork should take up strong visual space, roughly 45-60% of the image.
+            Use a slight natural angle to make the scene feel real, but preserve the correct landscape proportions.
+            The image must stop the scroll and make the viewer think: "That belongs in my space."
+            Final result:
+            a photorealistic premium home sports bar ad mockup with the exact uploaded Sports Cave framed artwork, realistic glass, premium shadows, cinematic lighting, and strong collector appeal.
+            """
+        ).strip(),
+    ),
+    (
+        "08-collector-display-room-prompt.txt",
+        "Collector Display Room",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic Meta ad carousel mockup using the uploaded image as the exact reference for the framed artwork.
+            This image is for a high-converting Meta ad carousel. It must feel like a premium collector piece being displayed in a serious fan's private collection.
+            The artwork and frame must remain exactly the same as the uploaded image.
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text inside the artwork.
+            Do not change the badge.
+            Do not crop the artwork.
+            Do not blur the artwork.
+            Do not stretch, warp, bend, squash, or distort the frame or artwork.
+            Place the exact uploaded Sports Cave landscape frame inside a premium collector display room.
+            The space should feel like a private sports collector's room, not a messy bedroom or generic man cave.
+            Use a refined display environment:
+            dark matte walls, warm timber or black shelving, a glass display cabinet, subtle memorabilia silhouettes, premium lighting strips, and carefully placed collector items.
+            The collector items must stay subtle and out of focus.
+            They should add atmosphere without competing with the framed artwork.
+            Do not add recognisable team logos.
+            Do not add random athlete photos.
+            Do not add extra wall art.
+            Do not add people.
+            Do not add text overlays.
+            Do not add watermarks.
+            Do not make the room cluttered.
+            Do not make it look like a retail shop.
+            The framed artwork must be the clear hero.
+            It should feel like the prized piece in the collection.
+            Position it above or beside the display cabinet, with enough breathing room around it to feel premium.
+            The frame must look physically real:
+            premium black timber frame, realistic depth, sharp corners, subtle texture, and believable wall shadows.
+            Add realistic glass over the artwork.
+            The glass should show soft reflections from the display lighting.
+            The glare should feel premium, subtle, and natural.
+            Do not let reflections obscure the artwork.
+            Lighting:
+            collector-room lighting.
+            Controlled spotlight effect on the framed artwork.
+            Soft warm highlights.
+            Deep but clean shadows.
+            A cinematic black, gold, charcoal, and warm timber palette.
+            Composition:
+            square 1024 x 1024 canvas.
+            The framed artwork must dominate the visual hierarchy.
+            Use a slightly angled camera perspective from one side, like a premium interior photography shot.
+            Keep the frame proportions accurate and undistorted.
+            The image should communicate:
+            limited edition,
+            collector value,
+            ownership,
+            scarcity,
+            and pride.
+            Final result:
+            a photorealistic premium collector display room ad mockup with the exact uploaded Sports Cave framed artwork, realistic glass, controlled cinematic lighting, subtle memorabilia atmosphere, and strong limited-edition collector energy.
+            """
+        ).strip(),
+    ),
+    (
+        "09-luxury-entry-wall-prompt.txt",
+        "Luxury Entry Statement Wall",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic Meta ad carousel mockup using the uploaded image as the exact reference for the framed artwork.
+            This image is for a paid Meta ad carousel. It must show the artwork as a premium statement piece inside a stylish home, designed to make viewers imagine owning it immediately.
+            The artwork and frame must remain exactly the same as the uploaded image.
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text inside the artwork.
+            Do not change the badge.
+            Do not crop the artwork.
+            Do not blur the artwork.
+            Do not stretch, warp, bend, squash, or distort the frame or artwork.
+            Place the exact uploaded Sports Cave landscape frame on a premium luxury entryway or hallway statement wall.
+            This must feel different from a living room, office, man cave, or close-up wall shot.
+            The space should feel refined, clean, architectural, and expensive.
+            Use a luxury hallway or entry space with:
+            matte plaster wall,
+            stone or timber floor,
+            soft wall lighting,
+            a slim console table,
+            subtle sculptural decor,
+            and controlled negative space.
+            The artwork should feel like the first thing someone sees when they walk into the home.
+            Do not add clutter.
+            Do not add people.
+            Do not add random sports logos.
+            Do not add extra wall art.
+            Do not add text overlays.
+            Do not add watermarks.
+            Do not make the space look like a hotel lobby.
+            Do not make the room too bright or sterile.
+            The frame must look physically real:
+            premium black timber frame, realistic depth, sharp corners, subtle texture, and believable wall mounting.
+            Add realistic glass over the artwork.
+            The glass should show soft architectural reflections and controlled premium glare.
+            The glare must feel realistic and must not hide the artwork.
+            Lighting:
+            premium architectural lighting.
+            Soft warm wall lights or ceiling spotlights.
+            Natural shadow falloff behind and below the frame.
+            Subtle highlights on the glass and frame edges.
+            The scene should feel cinematic, minimal, and collector-driven.
+            Composition:
+            square 1024 x 1024 canvas.
+            The framed artwork should be the hero.
+            Show enough of the hallway or entryway to make the viewer feel the scale and premium placement.
+            Use a clean editorial camera angle, slightly off-centre, with strong depth and realism.
+            Preserve the correct landscape proportions of the artwork and frame.
+            The image should communicate:
+            this is not just decoration,
+            this is a statement piece,
+            this belongs in a home owned by a real fan.
+            Final result:
+            a photorealistic premium luxury entry statement wall ad mockup with the exact uploaded Sports Cave framed artwork, realistic glass, premium shadows, architectural lighting, and strong scroll-stopping collector appeal.
+            """
+        ).strip(),
+    ),
+]
+
+LIFESTYLE_PROMPT_SPECS.extend([
+    (
+        "10-premium-unboxing-prompt.txt",
+        "Premium Unboxing / Collector Arrival",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic Meta ad mockup using the uploaded Sports Cave image as the exact reference for the framed artwork.
+
+            This image is for a paid Meta ad and must feel like the customer has just received a premium collector piece.
+
+            The artwork and frame must remain exactly the same as the uploaded image.
+
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text.
+            Do not change the badge.
+            Do not crop the artwork.
+            Do not blur the artwork.
+            Do not stretch, warp, bend, squash, or distort the frame or artwork.
+
+            Place the exact framed artwork in a premium unboxing scene.
+
+            The frame should be resting carefully on a luxury timber, stone, or matte black surface, partly lifted from premium protective packaging.
+
+            Use tasteful packaging details:
+
+            black shipping box or kraft protective box
+            soft tissue paper
+            subtle black/gold wrapping detail
+            clean protective corners
+            a blank premium thank-you card with no readable text
+
+            The scene should feel expensive, real, and gift-worthy.
+
+            Do not add fake logos.
+            Do not add fake edition numbers.
+            Do not add fake certificates.
+            Do not add extra readable text.
+            Do not add people or faces.
+            Do not make it look cheap or messy.
+
+            The frame must look physically real with depth, sharp corners, timber texture, realistic glass reflections, and believable shadows.
+
+            Lighting should feel like premium product photography: soft natural light, gentle highlights on the glass, realistic shadow falloff, and clean contrast.
+
+            Final result:
+            A premium collector unboxing ad image that makes the product feel valuable, gift-worthy, and exciting to receive.
+            """
+        ).strip(),
+    ),
+    (
+        "11-wall-upgrade-moment-prompt.txt",
+        "The Wall Upgrade Moment",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic Meta ad mockup using the uploaded Sports Cave image as the exact reference for the framed artwork.
+
+            This image should capture the moment the customer has just upgraded their wall with the artwork.
+
+            The artwork and frame must remain exactly the same as the uploaded image.
+
+            Do not redesign the artwork.
+            Do not change the colours, layout, text, badge, crop, or internal composition.
+            Do not blur, stretch, warp, bend, squash, or distort the frame or artwork.
+
+            Place the exact framed artwork mounted on a clean premium wall, with subtle styling that suggests it has just been installed.
+
+            Include tasteful installation details only:
+
+            a small spirit level on a nearby console or floor
+            soft packaging material below
+            a clean wall hook or hanging guide nearby
+            subtle shadow from the frame
+            no mess, no clutter
+
+            The image should feel like:
+            "This is the moment the room changed."
+
+            The setting should be minimal, modern, and premium. Use matte plaster, warm grey, beige, soft concrete, charcoal, or off-white walls.
+
+            The framed artwork must be the hero and should feel freshly installed, perfectly level, and premium.
+
+            Do not add people.
+            Do not add hands.
+            Do not add text overlays.
+            Do not add extra wall art.
+            Do not add random sports logos.
+            Do not add watermarks.
+
+            Add realistic glass reflections, premium glare, frame depth, and natural shadows.
+
+            Final result:
+            A high-converting "room upgrade" ad creative that makes the viewer imagine putting the piece on their own wall today.
+            """
+        ).strip(),
+    ),
+    (
+        "12-fireplace-feature-wall-prompt.txt",
+        "Luxury Fireplace Feature Wall",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic Meta ad mockup using the uploaded image as the exact reference for the framed Sports Cave artwork.
+
+            This image is for a premium Meta ad and must make the artwork feel like the hero piece of an expensive feature wall.
+
+            The artwork and frame must remain exactly the same as the uploaded image.
+
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text.
+            Do not change the badge.
+            Do not crop, blur, stretch, warp, bend, squash, or distort the frame or artwork.
+
+            Place the exact framed artwork above or beside a premium modern fireplace feature wall.
+
+            The space should feel architectural, warm, masculine, and expensive.
+
+            Use details like:
+
+            stone fireplace surround
+            matte plaster wall
+            warm ambient lighting
+            low modern furniture edge
+            subtle timber or concrete textures
+            clean negative space
+
+            The fireplace should support the product, not overpower it. The artwork must remain the main focal point.
+
+            Do not add people.
+            Do not add extra wall art.
+            Do not add random sports logos.
+            Do not add text overlays.
+            Do not add watermarks.
+            Do not make it look like a hotel lobby.
+
+            The frame must look physically mounted, with real depth, natural wall shadows, premium glass reflections, and subtle glare.
+
+            Lighting should feel cinematic and warm, like an expensive evening interior shoot.
+
+            Final result:
+            A premium fireplace feature-wall ad image that makes the artwork feel like a serious statement piece for a high-end home.
+            """
+        ).strip(),
+    ),
+    (
+        "13-premium-bedroom-prompt.txt",
+        "Premium Bedroom / Private Retreat",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic Meta ad mockup using the uploaded image as the exact reference for the framed artwork.
+
+            This image is for a paid Meta ad and should show the artwork in a more personal, emotional setting - a private room where the customer sees it every day.
+
+            The artwork and frame must remain exactly the same as the uploaded image.
+
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text.
+            Do not change the badge.
+            Do not crop, blur, stretch, warp, bend, squash, or distort the frame or artwork.
+
+            Place the exact framed Sports Cave artwork inside a premium bedroom or private retreat.
+
+            The room should feel refined, masculine, calm, and expensive - not messy, childish, or overly decorated.
+
+            Use:
+
+            premium bed linen
+            soft wall lighting
+            matte plaster or warm neutral wall
+            timber bedside table
+            subtle luxury decor
+            controlled negative space
+
+            The artwork should feel like a personal reminder of greatness, memory, identity, or obsession.
+
+            Do not add people.
+            Do not add extra wall art.
+            Do not add random sports logos.
+            Do not add text overlays.
+            Do not add watermarks.
+            Do not make it look like a hotel room catalogue image.
+
+            The frame must look physically real with premium black timber depth, sharp corners, realistic wall shadows, and natural glass glare.
+
+            Final result:
+            A premium bedroom lifestyle ad that makes the artwork feel personal, emotional, and worth owning.
+            """
+        ).strip(),
+    ),
+    (
+        "14-home-gym-prompt.txt",
+        "Home Gym / Motivation Wall",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic Meta ad mockup using the uploaded image as the exact reference for the framed Sports Cave artwork.
+
+            This image is for a high-attention Meta ad. It should connect the artwork with motivation, discipline, greatness, and daily identity.
+
+            The artwork and frame must remain exactly the same as the uploaded image.
+
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text.
+            Do not change the badge.
+            Do not crop, blur, stretch, warp, bend, squash, or distort the frame or artwork.
+
+            Place the exact framed artwork on the wall of a premium private home gym or training space.
+
+            The room should feel high-end, clean, masculine, and aspirational.
+
+            Use subtle gym details only:
+
+            matte black dumbbells
+            clean rubber flooring
+            timber or concrete wall texture
+            soft mirror reflection
+            premium bench or training equipment edge
+            controlled lighting
+
+            The gym should not look commercial, cheap, sweaty, or cluttered. It should feel like a private luxury training room.
+
+            Do not add people.
+            Do not add brand logos.
+            Do not add motivational text overlays.
+            Do not add extra posters.
+            Do not add watermarks.
+
+            The framed artwork must be the hero. It should feel like the piece that sets the tone for the room.
+
+            Add realistic glass reflections, premium glare, frame depth, and believable wall shadows.
+
+            Final result:
+            A scroll-stopping home gym ad creative that links the artwork with motivation, winning, discipline, and greatness.
+            """
+        ).strip(),
+    ),
+    (
+        "15-premium-gift-reveal-prompt.txt",
+        "Premium Gift Reveal Scene",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic Meta ad mockup using the uploaded Sports Cave image as the exact reference for the framed artwork.
+
+            This image is for a paid Meta ad and must position the product as the perfect premium gift for a serious fan.
+
+            The artwork and frame must remain exactly the same as the uploaded image.
+
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text.
+            Do not change the badge.
+            Do not crop, blur, stretch, warp, bend, squash, or distort the frame or artwork.
+
+            Create a premium gift reveal scene.
+
+            The framed artwork should be leaning safely against a luxury wall or resting on a premium surface, surrounded by tasteful gift details.
+
+            Use:
+
+            black or gold wrapping paper
+            premium ribbon
+            clean gift box
+            blank gift card with no readable text
+            soft warm lighting
+            luxury home setting
+
+            The mood should feel emotional, premium, and personal - like someone has just received a meaningful collector piece.
+
+            Do not add people.
+            Do not add fake text.
+            Do not add fake logos.
+            Do not add fake edition certificates.
+            Do not add random sports branding.
+            Do not add watermarks.
+            Do not make it look like Christmas unless specifically requested.
+
+            The artwork must stay sharp, readable, and unchanged. The frame must show real depth, premium glass reflections, subtle glare, and believable shadows.
+
+            Final result:
+            A premium gift-focused Meta ad image that makes the product feel meaningful, valuable, and easy to buy for someone who loves the sport.
+            """
+        ).strip(),
+    ),
+])
+
+
+# -----------------------------------
+# HELPERS
+# -----------------------------------
+
+def slugify(text):
+    text = text.strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    text = re.sub(r"-+", "-", text)
+    return text.strip("-")
+
+
+def fit_artwork_to_box(artwork, box_width, box_height):
+    artwork = artwork.convert("RGB")
+
+    art_ratio = artwork.width / artwork.height
+    box_ratio = box_width / box_height
+
+    if art_ratio > box_ratio:
+        new_height = box_height
+        new_width = int(new_height * art_ratio)
+    else:
+        new_width = box_width
+        new_height = int(new_width / art_ratio)
+
+    resized = artwork.resize((new_width, new_height), Image.LANCZOS)
+
+    left = (new_width - box_width) // 2
+    top = (new_height - box_height) // 2
+    right = left + box_width
+    bottom = top + box_height
+
+    return resized.crop((left, top, right, bottom))
+
+
+def resize_to_1024(image):
+    return image.resize((1024, 1024), Image.LANCZOS)
+
+
+def save_review_and_assets(image, review_dir, webp_dir, jpg_dir, review_name, webp_name, jpg_name):
+    review_path = review_dir / review_name
+    webp_path = webp_dir / webp_name
+    jpg_path = jpg_dir / jpg_name
+
+    image_1024 = resize_to_1024(image)
+
+    image_1024.save(review_path, format="PNG")
+
+    image_1024.save(
+        webp_path,
+        format="WEBP",
+        quality=82,
+        method=6
+    )
+
+    image_1024.save(
+        jpg_path,
+        format="JPEG",
+        quality=92,
+        optimize=True,
+    )
+
+    return review_path, webp_path, jpg_path
+
+
+# -----------------------------------
+# GENERATORS
+# -----------------------------------
+
+def generate_framed_product_image(
+    template_path,
+    artwork,
+    box,
+    review_dir,
+    webp_dir,
+    jpg_dir,
+    review_name,
+    webp_name,
+    jpg_name,
+):
+    template = Image.open(template_path).convert("RGB")
+
+    x, y, w, h = box
+    fitted_artwork = fit_artwork_to_box(artwork, w, h)
+
+    template.paste(fitted_artwork, (x, y))
+
+    return save_review_and_assets(
+        template,
+        review_dir,
+        webp_dir,
+        jpg_dir,
+        review_name,
+        webp_name,
+        jpg_name,
+    )
+
+
+def generate_unframed_product_image(
+    template_path,
+    artwork,
+    art_box,
+    review_dir,
+    webp_dir,
+    jpg_dir,
+    review_name,
+    webp_name,
+    jpg_name,
+):
+    template = Image.open(template_path).convert("RGB")
+
+    x, y, w, h = art_box
+    fitted_artwork = fit_artwork_to_box(artwork, w, h)
+
+    template.paste(fitted_artwork, (x, y))
+
+    return save_review_and_assets(
+        template,
+        review_dir,
+        webp_dir,
+        jpg_dir,
+        review_name,
+        webp_name,
+        jpg_name,
+    )
+
+
+def generate_size_guide(template_path, artwork, review_dir, webp_dir, jpg_dir, webp_name, jpg_name):
+    template = Image.open(template_path).convert("RGB")
+
+    for _, box in SIZE_GUIDE_BOXES.items():
+        x, y, w, h = box
+        fitted_artwork = fit_artwork_to_box(artwork, w, h)
+        template.paste(fitted_artwork, (x, y))
+
+    return save_review_and_assets(
+        template,
+        review_dir,
+        webp_dir,
+        jpg_dir,
+        "size-guide-output.png",
+        webp_name,
+        jpg_name,
+    )
+
+
+def create_shopify_pack_zip(zip_dir, product_slug, webp_dir):
+    zip_path = zip_dir / f"{product_slug}-shopify-pack-webp.zip"
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for webp_file in sorted(webp_dir.glob("*.webp")):
+            zipf.write(webp_file, arcname=webp_file.name)
+
+    return zip_path
+
+
+def create_social_media_pack_zip(zip_dir, product_slug, jpg_dir):
+    zip_path = zip_dir / f"{product_slug}-social-media-pack-jpg.zip"
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for jpg_file in sorted(jpg_dir.glob("*.jpg")):
+            zipf.write(jpg_file, arcname=jpg_file.name)
+
+    return zip_path
+
+
+def get_prompt_group(prompt_filename):
+    if prompt_filename in PRODUCT_PAGE_PROMPT_FILENAMES:
+        return "product_page"
+
+    return "socials"
+
+
+def get_asset_zip_folder(file_path):
+    file_path = Path(file_path)
+    file_name = file_path.name
+
+    for prompt_filename, variant_slug in LIFESTYLE_IMAGE_VARIANTS.items():
+        if variant_slug in file_name:
+            if get_prompt_group(prompt_filename) == "product_page":
+                return "WEBP"
+
+            return "jpg"
+
+    return "WEBP"
+
+
+def generate_lifestyle_prompt_pack(product_name, sport_category, product_slug, run_dir, black_framed_webp_path):
+    prompt_dir = run_dir / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+
+    reference_image_path = prompt_dir / LIFESTYLE_REFERENCE_FILE_NAME
+    shutil.copy2(black_framed_webp_path, reference_image_path)
+
+    prompt_paths = []
+
+    for filename, _, prompt_body in LIFESTYLE_PROMPT_SPECS:
+        prompt_path = prompt_dir / filename
+        prompt_text = dedent(
+            f"""
+            Product name: {product_name}
+            Sport category: {sport_category}
+            Reference image: Upload the black framed WebP from this run into ChatGPT before using this prompt.
+
+            {prompt_body}
+            """
+        ).strip()
+        prompt_path.write_text(prompt_text + "\n", encoding="utf-8")
+        prompt_paths.append(prompt_path)
+
+    prompt_zip_path = run_dir / "zip" / f"{product_slug}-chatgpt-lifestyle-prompts.zip"
+
+    with zipfile.ZipFile(prompt_zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        zipf.write(reference_image_path, arcname=reference_image_path.name)
+        for prompt_path in prompt_paths:
+            zipf.write(prompt_path, arcname=prompt_path.name)
+
+    return prompt_dir, reference_image_path, prompt_paths, prompt_zip_path
+
+
+def create_complete_pack_zip(zip_dir, product_slug, webp_dir, jpg_dir, prompt_dir=None):
+    complete_zip_path = zip_dir / f"{product_slug}-complete-package.zip"
+
+    with zipfile.ZipFile(complete_zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for webp_file in sorted(webp_dir.glob("*.webp")):
+            zipf.write(webp_file, arcname=f"WEBP/{webp_file.name}")
+
+        for jpg_file in sorted(jpg_dir.glob("*.jpg")):
+            zipf.write(jpg_file, arcname=f"jpg/{jpg_file.name}")
+
+    return complete_zip_path
+
+
+def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_bytes):
+    run_dir = Path(run_dir)
+    webp_dir = run_dir / "webp"
+    jpg_dir = run_dir / "jpg"
+    webp_dir.mkdir(parents=True, exist_ok=True)
+    jpg_dir.mkdir(parents=True, exist_ok=True)
+
+    variant_slug = LIFESTYLE_IMAGE_VARIANTS[prompt_filename]
+    webp_output_path = webp_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}.webp"
+    jpg_output_path = jpg_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}.jpg"
+
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    image_1024 = ImageOps.fit(image, (1024, 1024), method=Image.LANCZOS)
+    image_1024.save(
+        webp_output_path,
+        format="WEBP",
+        quality=82,
+        method=6,
+    )
+
+    image_1024.save(
+        jpg_output_path,
+        format="JPEG",
+        quality=92,
+        optimize=True,
+    )
+
+    return {
+        "webp_path": webp_output_path,
+        "jpg_path": jpg_output_path,
+    }
+
+
+# -----------------------------------
+# MAIN BACKEND FUNCTION
+# -----------------------------------
+
+def generate_product_images(product_name, sport_category, artwork_file_path, base_dir=None):
+    if base_dir is None:
+        base_dir = Path(__file__).resolve().parent
+    else:
+        base_dir = Path(base_dir)
+
+    templates_dir = base_dir / "templates"
+    output_dir = base_dir / "output"
+
+    product_slug = slugify(product_name) or "sports-cave-product"
+    sport_slug = slugify(sport_category) or "sports"
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    run_dir = output_dir / "runs" / f"{product_slug}-{timestamp}"
+
+    review_dir = run_dir / "review"
+    webp_dir = run_dir / "webp"
+    jpg_dir = run_dir / "jpg"
+    zip_dir = run_dir / "zip"
+    upload_dir = run_dir / "uploaded"
+
+    review_dir.mkdir(parents=True, exist_ok=True)
+    webp_dir.mkdir(parents=True, exist_ok=True)
+    jpg_dir.mkdir(parents=True, exist_ok=True)
+    zip_dir.mkdir(parents=True, exist_ok=True)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    black_template = find_file(
+        "black-frame-template.jpg",
+        ["black-framed*.jpg", "*black*.jpg"],
+        templates_dir
+    )
+
+    oak_template = find_file(
+        "oak-frame-template.jpg",
+        ["oak-framed*.jpg", "*oak*.jpg"],
+        templates_dir
+    )
+
+    white_template = find_file(
+        "white-frame-template.jpg",
+        ["white-framed*.jpg", "*white*.jpg"],
+        templates_dir
+    )
+
+    unframed_template = find_file(
+        "unframed-template.jpg",
+        ["unframed*.jpg", "*unframed*.jpg"],
+        templates_dir
+    )
+
+    size_guide_template = find_file(
+        "size-guide-template.jpg",
+        ["*sizing-guide*.jpg", "*size-guide*.jpg"],
+        templates_dir
+    )
+
+    artwork_file_path = Path(artwork_file_path)
+    saved_artwork_path = upload_dir / "artwork-original"
+    saved_artwork_path = saved_artwork_path.with_suffix(artwork_file_path.suffix)
+
+    shutil.copy2(artwork_file_path, saved_artwork_path)
+
+    artwork = Image.open(saved_artwork_path).convert("RGB")
+
+    review_paths = []
+    webp_paths = []
+    jpg_paths = []
+    generated_assets = {}
+
+    jobs = [
+        {
+            "key": "black",
+            "type": "framed",
+            "template": black_template,
+            "review_name": "black-framed-output.png",
+            "webp_name": f"{product_slug}-black-framed-{sport_slug}-wall-art.webp",
+            "jpg_name": f"{product_slug}-black-framed-{sport_slug}-wall-art.jpg",
+        },
+        {
+            "key": "size-guide",
+            "type": "size_guide",
+            "template": size_guide_template,
+            "review_name": "size-guide-output.png",
+            "webp_name": f"{product_slug}-framed-{sport_slug}-wall-art-sizing-guide.webp",
+            "jpg_name": f"{product_slug}-framed-{sport_slug}-wall-art-sizing-guide.jpg",
+        },
+        {
+            "key": "oak",
+            "type": "framed",
+            "template": oak_template,
+            "review_name": "oak-framed-output.png",
+            "webp_name": f"{product_slug}-oak-framed-{sport_slug}-wall-art.webp",
+            "jpg_name": f"{product_slug}-oak-framed-{sport_slug}-wall-art.jpg",
+        },
+        {
+            "key": "white",
+            "type": "framed",
+            "template": white_template,
+            "review_name": "white-framed-output.png",
+            "webp_name": f"{product_slug}-white-framed-{sport_slug}-wall-art.webp",
+            "jpg_name": f"{product_slug}-white-framed-{sport_slug}-wall-art.jpg",
+        },
+        {
+            "key": "unframed",
+            "type": "unframed",
+            "template": unframed_template,
+            "review_name": "unframed-output.png",
+            "webp_name": f"{product_slug}-unframed-{sport_slug}-wall-art.webp",
+            "jpg_name": f"{product_slug}-unframed-{sport_slug}-wall-art.jpg",
+        },
+    ]
+
+    for job in jobs:
+        if job["type"] == "framed":
+            review_path, webp_path, jpg_path = generate_framed_product_image(
+                job["template"],
+                artwork,
+                MASTER_FRAMED_BOX,
+                review_dir,
+                webp_dir,
+                jpg_dir,
+                job["review_name"],
+                job["webp_name"],
+                job["jpg_name"],
+            )
+
+        elif job["type"] == "size_guide":
+            review_path, webp_path, jpg_path = generate_size_guide(
+                job["template"],
+                artwork,
+                review_dir,
+                webp_dir,
+                jpg_dir,
+                job["webp_name"],
+                job["jpg_name"],
+            )
+
+        elif job["type"] == "unframed":
+            review_path, webp_path, jpg_path = generate_unframed_product_image(
+                job["template"],
+                artwork,
+                UNFRAMED_ART_BOX,
+                review_dir,
+                webp_dir,
+                jpg_dir,
+                job["review_name"],
+                job["webp_name"],
+                job["jpg_name"],
+            )
+
+        review_paths.append(review_path)
+        webp_paths.append(webp_path)
+        jpg_paths.append(jpg_path)
+        generated_assets[job["key"]] = {
+            "review_path": review_path,
+            "webp_path": webp_path,
+            "jpg_path": jpg_path,
+        }
+
+    black_framed_webp_path = generated_assets["black"]["webp_path"]
+    black_framed_jpg_path = generated_assets["black"]["jpg_path"]
+    prompt_dir = None
+    prompt_paths = []
+    prompt_zip_path = None
+    zip_path = None
+    lifestyle_pack_error = None
+
+    try:
+        prompt_dir, reference_image_path, prompt_paths, prompt_zip_path = generate_lifestyle_prompt_pack(
+            product_name,
+            sport_category,
+            product_slug,
+            run_dir,
+            black_framed_webp_path,
+        )
+    except Exception as error:
+        lifestyle_pack_error = str(error)
+
+    zip_path = create_complete_pack_zip(
+        zip_dir,
+        product_slug,
+        webp_dir,
+        jpg_dir,
+        prompt_dir,
+    )
+
+    return {
+        "product_slug": product_slug,
+        "sport_slug": sport_slug,
+        "run_dir": run_dir,
+        "review_dir": review_dir,
+        "webp_dir": webp_dir,
+        "jpg_dir": jpg_dir,
+        "zip_path": zip_path,
+        "complete_zip_path": zip_path,
+        "review_paths": review_paths,
+        "webp_paths": webp_paths,
+        "jpg_paths": jpg_paths,
+        "black_framed_webp_path": black_framed_webp_path,
+        "black_framed_jpg_path": black_framed_jpg_path,
+        "prompt_dir": prompt_dir,
+        "prompt_paths": prompt_paths,
+        "prompt_zip_path": prompt_zip_path,
+        "lifestyle_mockup_paths": {},
+        "lifestyle_pack_error": lifestyle_pack_error,
+    }
