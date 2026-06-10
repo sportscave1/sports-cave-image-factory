@@ -87,7 +87,8 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-st.set_option("server.maxUploadSize", 200)
+# Limit per-file upload size (MB). Lowered to 5MB to prevent build/runtime issues on Render.
+st.set_option("server.maxUploadSize", 5)
 
 
 def inject_styles():
@@ -206,6 +207,17 @@ def get_product_upload_prompt(metadata, update_existing=False):
     action = "update the existing Shopify product" if update_existing else "create a new Shopify product"
     action_phrase = "Update the existing product with these new images, replacing the old media." if update_existing else "Create the product from scratch and assign the images correctly."
 
+    upload_instructions = (
+        "Attach every file from the Shopify uploads folder to ChatGPT when prompted. "
+        "Also attach or reference the Shopify HTML preview file so ChatGPT can see the intended image order and labels."
+    )
+
+    if update_existing:
+        upload_instructions = (
+            "Attach every file from the Shopify uploads folder to ChatGPT and use them to replace the existing product images. "
+            "Keep the product handle the same and ensure the old media is replaced with the new files."
+        )
+
     header = (
         "You are a Shopify upload specialist working through ChatGPT. "
         f"Use the image files from the Shopify uploads folder and the product details below to {action}. "
@@ -230,6 +242,7 @@ Important Shopify CSV columns to use when importing or updating a product:
 {csv_header}
 
 Use the images from the Shopify uploads folder and the HTML preview file at {metadata.get('shopify_uploads_html_path')}.
+{upload_instructions}
 {action_phrase}
 
 Instructions:
@@ -239,7 +252,7 @@ Instructions:
 - Do not create duplicate products when updating existing items.
 - Use the CSV header structure above to generate the import data or the Shopify product upload request.
 
-When you are ready, copy the full prompt and paste it into ChatGPT, then upload all Shopify preview images from the folder so ChatGPT can complete the product creation or update workflow.
+If you are not using a CSV file, make sure the same values are included in the Shopify product fields. Copy the full prompt and paste it into ChatGPT, then attach all Shopify preview images so ChatGPT can complete the product creation or update workflow.
 """
     return prompt.strip()
 
@@ -921,26 +934,47 @@ def render_product_uploads_page():
         "Use the Shopify upload assets created by a finished run to push a new product or update an existing product in Shopify through ChatGPT."
     )
 
+    st.info(
+        "This page is an instructional prompt generator. It provides the exact text you need to copy into ChatGPT, attach the Shopify upload images and HTML preview, and then execute the new-product or update-product workflow in ChatGPT."
+    )
+
+    st.markdown(
+        "- `New Shopify product` will generate a prompt for creating a brand new product in Shopify.\n"
+        "- `Update existing product` will generate a prompt for replacing the images on an existing Shopify product.\n"
+        "- If you already have a `shopify-uploads` folder and HTML preview, attach those files in ChatGPT when prompted."
+    )
+
     runs = get_local_recent_runs(limit=10)
-    if not runs:
-        st.warning("Generate a mockup run first so the Shopify uploads folder and HTML preview are available.")
-        return
+    metadata = None
 
-    run_names = [run.name for run in runs]
-    selected_run_name = st.selectbox("Choose a recent run", run_names)
-    selected_run = next((run for run in runs if run.name == selected_run_name), None)
+    if runs:
+        run_names = [run.name for run in runs]
+        selected_run_name = st.selectbox("Choose a recent run", run_names)
+        selected_run = next((run for run in runs if run.name == selected_run_name), None)
 
-    if selected_run is None:
-        st.warning("Select a run above to load the Shopify upload prompt and image preview.")
-        return
+        if selected_run is not None:
+            metadata = load_run_metadata(selected_run)
+            st.markdown(f"**Run:** {metadata['run_name']}")
+            st.markdown(f"**Product:** {metadata.get('product_name', 'Unknown')}")
+            st.markdown(f"**Sport category:** {metadata.get('sport_category', 'Unknown')}")
+        else:
+            st.warning("Select a run above to load the Shopify upload prompt and image preview.")
+    else:
+        st.warning(
+            "No local run folders were found in output/runs. You can still use this page as a prompt generator for ChatGPT if you already have Shopify upload assets elsewhere."
+        )
 
-    metadata = load_run_metadata(selected_run)
+    if metadata is None:
+        metadata = {
+            "run_name": "example-run",
+            "product_name": "Example Product",
+            "sport_category": "Example Sport",
+            "product_slug": "example-product",
+            "shopify_uploads_dir": "shopify-uploads",
+            "shopify_uploads_html_path": "shopify-uploads/index.html",
+        }
     shopify_uploads_dir = Path(metadata["shopify_uploads_dir"])
     shopify_html_path = Path(metadata["shopify_uploads_html_path"])
-
-    st.markdown(f"**Run:** {metadata['run_name']}")
-    st.markdown(f"**Product:** {metadata.get('product_name', 'Unknown')}")
-    st.markdown(f"**Sport category:** {metadata.get('sport_category', 'Unknown')}")
 
     if shopify_uploads_dir.exists():
         upload_files = sorted(shopify_uploads_dir.glob("*.webp"))
@@ -961,7 +995,9 @@ def render_product_uploads_page():
             for upload_file in upload_files:
                 st.write(f"- {upload_file.name}")
     else:
-        st.warning("No Shopify uploads folder was found for this run. Generate the run again to create it.")
+        st.info(
+            "No local shopify-uploads folder was found for this run. If you already have the folder and HTML preview elsewhere, attach them in ChatGPT as described below."
+        )
 
     st.divider()
     st.write(
