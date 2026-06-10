@@ -815,16 +815,24 @@ def render_mockups_page():
                         artwork_file_path=temp_artwork_path,
                         base_dir=BASE_DIR,
                     )
-                    result = rebuild_result_artifacts(result)
-                    result = sync_result_to_google_drive(result)
-                    st.session_state.last_generation_result = result
                 except Exception as error:
-                    st.error("Something went wrong while generating the images.")
+                    st.error("Something went wrong while generating the image assets.")
                     st.exception(error)
+                    result = None
                 finally:
                     if temp_artwork_path is not None:
                         with suppress(FileNotFoundError, PermissionError):
                             temp_artwork_path.unlink()
+
+                if result is not None:
+                    try:
+                        result = rebuild_result_artifacts(result)
+                    except Exception as error:
+                        st.error("Something went wrong while preparing the download package.")
+                        st.exception(error)
+
+                    result = sync_result_to_google_drive(result)
+                    st.session_state.last_generation_result = result
 
     if st.session_state.last_generation_result is not None:
         render_generation_result(st.session_state.last_generation_result)

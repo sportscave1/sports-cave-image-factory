@@ -1,11 +1,24 @@
 from pathlib import Path
 from io import BytesIO
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, ImageFile, UnidentifiedImageError
 import zipfile
 import re
 import shutil
 from datetime import datetime
 from textwrap import dedent
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+
+def load_artwork_image(image_path):
+    try:
+        with Image.open(image_path) as image:
+            image.load()
+            return image.convert("RGB")
+    except UnidentifiedImageError as error:
+        raise RuntimeError(
+            f"Cannot open artwork file {image_path}. Please upload a valid JPG, PNG, or WEBP image."
+        ) from error
 
 
 # -----------------------------------
@@ -1261,7 +1274,15 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
     webp_output_path = webp_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}.webp"
     jpg_output_path = jpg_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}.jpg"
 
-    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            image.load()
+            image = image.convert("RGB")
+    except UnidentifiedImageError as error:
+        raise RuntimeError(
+            "Cannot read the uploaded lifestyle image. Please upload a valid JPG, PNG, or WEBP file."
+        ) from error
+
     image_1024 = ImageOps.fit(image, (1024, 1024), method=Image.LANCZOS)
     image_1024.save(
         webp_output_path,
@@ -1350,7 +1371,7 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
 
     shutil.copy2(artwork_file_path, saved_artwork_path)
 
-    artwork = Image.open(saved_artwork_path).convert("RGB")
+    artwork = load_artwork_image(saved_artwork_path)
 
     review_paths = []
     webp_paths = []
