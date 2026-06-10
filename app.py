@@ -87,9 +87,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Limit per-file upload size (MB). Lowered to 5MB to prevent build/runtime issues on Render.
-st.set_option("server.maxUploadSize", 5)
-
 
 def inject_styles():
     st.markdown(
