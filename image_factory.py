@@ -1018,7 +1018,55 @@ def reset_directory_contents(directory):
             child.unlink()
 
 
-def rebuild_export_folders(run_dir, assets):
+def create_shopify_uploads_html(run_dir, shopify_uploads_dir, product_name, sport_category):
+    shopify_uploads_dir = Path(shopify_uploads_dir)
+    image_files = sorted(shopify_uploads_dir.glob("*.webp"))
+    index_path = shopify_uploads_dir / "index.html"
+
+    html_lines = [
+        "<!DOCTYPE html>",
+        "<html lang=\"en\">",
+        "<head>",
+        "  <meta charset=\"UTF-8\">",
+        f"  <title>Shopify Uploads - {product_name}</title>",
+        "  <style>",
+        "    body { font-family: Arial, sans-serif; background: #f7f4ee; color: #1a1a1a; padding: 24px; }",
+        "    .image-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }",
+        "    .image-card { border: 1px solid #ddd; border-radius: 12px; padding: 12px; background: #fff; }",
+        "    .image-card img { width: 100%; height: auto; border-radius: 8px; }",
+        "    .image-card p { margin: 8px 0 0; font-size: 0.92rem; color: #333; }",
+        "  </style>",
+        "</head>",
+        "<body>",
+        f"  <h1>Shopify Uploads for {product_name}</h1>",
+        f"  <p><strong>Sports category:</strong> {sport_category}</p>",
+        "  <p>Upload these images and paste the prompt text from the Product Uploads page into ChatGPT. Use this page to copy all image filenames and make sure the new Shopify product gets the correct visuals.</p>",
+        "  <div class=\"image-grid\">",
+    ]
+
+    if image_files:
+        for image_file in image_files:
+            html_lines.extend([
+                "    <div class=\"image-card\">",
+                f"      <img src=\"{image_file.name}\" alt=\"{image_file.name}\">",
+                f"      <p>{image_file.name}</p>",
+                "    </div>",
+            ])
+    else:
+        html_lines.append("    <p>No Shopify upload images were found yet.</p>")
+
+    html_lines.extend([
+        "  </div>",
+        "  <p style=\"margin-top:24px;font-size:0.95rem;color:#555;\">When using ChatGPT, attach these image files and copy the product prompt from the Product Uploads page. For existing products, use the Update Existing Product prompt to replace the old images with these new ones.</p>",
+        "</body>",
+        "</html>",
+    ])
+
+    index_path.write_text("\n".join(html_lines), encoding="utf-8")
+    return index_path
+
+
+def rebuild_export_folders(run_dir, assets, product_name="", sport_category=""):
     run_dir = Path(run_dir)
     shopify_uploads_dir = run_dir / SHOPIFY_UPLOADS_FOLDER_NAME
     socials_dir = run_dir / SOCIALS_FOLDER_NAME
@@ -1039,8 +1087,11 @@ def rebuild_export_folders(run_dir, assets):
         if should_export_asset_to_socials(asset) and jpg_path and Path(jpg_path).exists():
             shutil.copy2(jpg_path, socials_dir / Path(jpg_path).name)
 
+    create_shopify_uploads_html(run_dir, shopify_uploads_dir, product_name, sport_category)
+
     return {
         "shopify_uploads_dir": shopify_uploads_dir,
+        "shopify_uploads_html_path": shopify_uploads_dir / "index.html",
         "socials_dir": socials_dir,
     }
 
@@ -1501,7 +1552,7 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
     except Exception as error:
         lifestyle_pack_error = str(error)
 
-    export_dirs = rebuild_export_folders(run_dir, assets)
+    export_dirs = rebuild_export_folders(run_dir, assets, product_name=product_name, sport_category=sport_category)
     complete_zip_path = create_complete_pack_zip(
         zip_dir,
         product_slug,
@@ -1523,6 +1574,7 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         "social_zip_path": None,
         "complete_zip_path": complete_zip_path,
         "shopify_uploads_dir": export_dirs["shopify_uploads_dir"],
+        "shopify_uploads_html_path": export_dirs.get("shopify_uploads_html_path"),
         "socials_dir": export_dirs["socials_dir"],
         "review_paths": review_paths,
         "webp_paths": webp_paths,

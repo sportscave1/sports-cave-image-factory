@@ -176,6 +176,74 @@ def get_product_name_from_upload(uploaded_file):
     return Path(uploaded_file.name).stem.strip()
 
 
+def load_run_metadata(run_dir):
+    run_dir = Path(run_dir)
+    manifest_path = run_dir / "manifest.json"
+    metadata = {}
+
+    if manifest_path.exists():
+        try:
+            metadata = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            metadata = {}
+
+    metadata["run_dir"] = str(run_dir)
+    metadata["run_name"] = run_dir.name
+    metadata["product_name"] = metadata.get("product_name", run_dir.name)
+    metadata["sport_category"] = metadata.get("sport_category", "")
+    metadata["product_slug"] = metadata.get("product_slug", run_dir.name)
+    metadata["shopify_uploads_dir"] = str(run_dir / "shopify-uploads")
+    metadata["shopify_uploads_html_path"] = str(run_dir / "shopify-uploads" / "index.html")
+    metadata["prompt_dir"] = str(run_dir / "chatgpt-prompts")
+    return metadata
+
+
+def get_product_upload_prompt(metadata, update_existing=False):
+    product_name = metadata.get("product_name", "")
+    sport_category = metadata.get("sport_category", "")
+    product_handle = metadata.get("product_slug", "")
+    image_folder = metadata.get("shopify_uploads_dir", "shopify-uploads")
+    action = "update the existing Shopify product" if update_existing else "create a new Shopify product"
+    action_phrase = "Update the existing product with these new images, replacing the old media." if update_existing else "Create the product from scratch and assign the images correctly."
+
+    header = (
+        "You are a Shopify upload specialist working through ChatGPT. "
+        f"Use the image files from the Shopify uploads folder and the product details below to {action}. "
+        "Copy the prompt exactly and attach the uploaded images when ChatGPT asks."
+    )
+
+    csv_header = (
+        "Handle,Title,Body (HTML),Vendor,Product Category,Type,Tags,Published,"
+        "Option1 Name,Option1 Value,Variant SKU,Variant Grams,Variant Inventory Tracker,"
+        "Variant Inventory Policy,Variant Fulfillment Service,Variant Price,Variant Compare At Price,"
+        "Variant Requires Shipping,Variant Taxable,Image Src,Image Position,Image Alt Text,Status"
+    )
+
+    prompt = f"""
+{header}
+
+Product name: {product_name}
+Sport category: {sport_category}
+Product handle: {product_handle}
+
+Important Shopify CSV columns to use when importing or updating a product:
+{csv_header}
+
+Use the images from the Shopify uploads folder and the HTML preview file at {metadata.get('shopify_uploads_html_path')}.
+{action_phrase}
+
+Instructions:
+- If this is a new product, create it with the provided handle and assign the uploaded images to the correct variant positions.
+- If updating an existing product, keep the product handle the same and replace the current product images with the new uploaded images.
+- Ensure all image filenames are copied into ChatGPT and attached in the order needed for Shopify.
+- Do not create duplicate products when updating existing items.
+- Use the CSV header structure above to generate the import data or the Shopify product upload request.
+
+When you are ready, copy the full prompt and paste it into ChatGPT, then upload all Shopify preview images from the folder so ChatGPT can complete the product creation or update workflow.
+"""
+    return prompt.strip()
+
+
 def get_sport_category(selected_option, custom_value):
     if selected_option == "Custom":
         return custom_value.strip()
@@ -260,6 +328,7 @@ def normalize_generation_result(result):
         "jpg_paths": [],
         "shopify_uploads_dir": None,
         "socials_dir": None,
+        "shopify_uploads_html_path": None,
         "assets": [],
         "lifestyle_mockup_paths": {},
         "lifestyle_pack_error": None,
@@ -438,9 +507,15 @@ def rebuild_result_artifacts(result):
     zip_dir = run_dir / "zip"
     image_factory.reset_directory_contents(zip_dir)
 
-    export_dirs = image_factory.rebuild_export_folders(run_dir, result["assets"])
+    export_dirs = image_factory.rebuild_export_folders(
+        run_dir,
+        result["assets"],
+        product_name=result.get("product_name", ""),
+        sport_category=result.get("sport_category", ""),
+    )
     result["zip_dir"] = zip_dir
     result["shopify_uploads_dir"] = export_dirs["shopify_uploads_dir"]
+    result["shopify_uploads_html_path"] = export_dirs.get("shopify_uploads_html_path")
     result["socials_dir"] = export_dirs["socials_dir"]
     result["zip_path"] = None
     result["social_zip_path"] = None
@@ -840,6 +915,87 @@ def render_mockups_page():
         render_generation_result(st.session_state.last_generation_result)
 
 
+def render_product_uploads_page():
+    st.title("Product Uploads")
+    st.caption(
+        "Use the Shopify upload assets created by a finished run to push a new product or update an existing product in Shopify through ChatGPT."
+    )
+
+    runs = get_local_recent_runs(limit=10)
+    if not runs:
+        st.warning("Generate a mockup run first so the Shopify uploads folder and HTML preview are available.")
+        return
+
+    run_names = [run.name for run in runs]
+    selected_run_name = st.selectbox("Choose a recent run", run_names)
+    selected_run = next((run for run in runs if run.name == selected_run_name), None)
+
+    if selected_run is None:
+        st.warning("Select a run above to load the Shopify upload prompt and image preview.")
+        return
+
+    metadata = load_run_metadata(selected_run)
+    shopify_uploads_dir = Path(metadata["shopify_uploads_dir"])
+    shopify_html_path = Path(metadata["shopify_uploads_html_path"])
+
+    st.markdown(f"**Run:** {metadata['run_name']}")
+    st.markdown(f"**Product:** {metadata.get('product_name', 'Unknown')}")
+    st.markdown(f"**Sport category:** {metadata.get('sport_category', 'Unknown')}")
+
+    if shopify_uploads_dir.exists():
+        upload_files = sorted(shopify_uploads_dir.glob("*.webp"))
+        st.write(f"{len(upload_files)} Shopify upload images found.")
+
+        if shopify_html_path.exists():
+            st.download_button(
+                "Download Shopify HTML preview",
+                shopify_html_path.read_bytes(),
+                file_name="shopify-uploads-preview.html",
+                mime="text/html",
+            )
+        else:
+            st.warning("Shopify HTML preview is not available yet. Generate or rebuild the run to create it.")
+
+        if upload_files:
+            st.write("**Shopify upload image files:**")
+            for upload_file in upload_files:
+                st.write(f"- {upload_file.name}")
+    else:
+        st.warning("No Shopify uploads folder was found for this run. Generate the run again to create it.")
+
+    st.divider()
+    st.write(
+        "Use the two buttons below to reveal the ChatGPT prompt text. Attach the Shopify upload images and copy the prompt into ChatGPT."
+    )
+
+    new_prompt_key = f"show_new_prompt::{metadata['run_name']}"
+    existing_prompt_key = f"show_existing_prompt::{metadata['run_name']}"
+
+    if new_prompt_key not in st.session_state:
+        st.session_state[new_prompt_key] = False
+    if existing_prompt_key not in st.session_state:
+        st.session_state[existing_prompt_key] = False
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Show prompt for NEW Shopify product", key=f"new-prompt-button::{metadata['run_name']}"):
+            st.session_state[new_prompt_key] = True
+            st.session_state[existing_prompt_key] = False
+
+    with col2:
+        if st.button("Show prompt for UPDATE existing product", key=f"update-prompt-button::{metadata['run_name']}"):
+            st.session_state[existing_prompt_key] = True
+            st.session_state[new_prompt_key] = False
+
+    if st.session_state[new_prompt_key]:
+        st.subheader("New Product Prompt")
+        st.code(get_product_upload_prompt(metadata, update_existing=False), language=None)
+
+    if st.session_state[existing_prompt_key]:
+        st.subheader("Update Existing Product Prompt")
+        st.code(get_product_upload_prompt(metadata, update_existing=True), language=None)
+
+
 def test_google_drive_connection():
     section_ids = ensure_drive_sections()
     test_dir = BASE_DIR / "output" / "_drive_test"
@@ -939,7 +1095,7 @@ def main():
     elif current_page == "Limited Editions":
         render_placeholder_page("Limited Editions", "Limited edition tracking will live here.")
     elif current_page == "Product Uploads":
-        render_placeholder_page("Product Uploads", "Shopify product creation will live here.")
+        render_product_uploads_page()
     elif current_page == "Settings":
         render_settings_page()
     else:
