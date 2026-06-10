@@ -1,6 +1,6 @@
-streamlit==1.27.0
+streamlit>=1.36,<2
 # Use a Pillow release with prebuilt wheels for modern Python versions to avoid build failures on Render
-Pillow==10.4.0
+pillow==10.4.0
 google-api-python-client==2.109.0
 google-auth==2.23.0
 google-auth-httplib2==0.1.0
