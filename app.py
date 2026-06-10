@@ -1,21 +1,48 @@
 from contextlib import suppress
-import base64
-import importlib
 from pathlib import Path
+import json
+import os
 import tempfile
 
+from dotenv import load_dotenv
 import streamlit as st
-import streamlit.components.v1 as components
 
-import image_factory as image_factory_module
+import drive_storage
+import image_factory
 
 
-image_factory = importlib.reload(image_factory_module)
+load_dotenv()
 
 
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
-
+MENU_OPTIONS = [
+    "Mockups",
+    "Google Drive",
+    "Limited Editions",
+    "Product Uploads",
+    "Settings",
+]
+APP_VERSION = "Build 2026-06-11"
+DRIVE_SECTION_NAMES = {
+    "mockups": "Mockups",
+    "limited_editions": "Limited Editions",
+    "product_uploads": "Product Uploads",
+    "system_logs": "System Logs",
+}
+PASSWORD_ENV_KEYS = (
+    "APP_PASSWORD",
+    "STREAMLIT_PASSWORD",
+    "SPORTS_CAVE_PASSWORD",
+    "SITE_PASSWORD",
+)
+LEGACY_BASE_ASSET_SPECS = [
+    ("black", "Black Framed"),
+    ("size-guide", "Size Guide"),
+    ("oak", "Oak Framed"),
+    ("white", "White Framed"),
+    ("unframed", "Unframed"),
+]
 SPORT_OPTIONS = [
     "Soccer",
     "Motorsport",
@@ -30,7 +57,6 @@ SPORT_OPTIONS = [
     "Tennis",
     "Custom",
 ]
-
 PROMPT_LABELS = {
     "01-man-cave-prompt.txt": "01 - Man Cave (Product Page)",
     "02-office-prompt.txt": "02 - Office (Product Page)",
@@ -48,7 +74,6 @@ PROMPT_LABELS = {
     "14-home-gym-prompt.txt": "14 - Home Gym / Motivation Wall (Social)",
     "15-premium-gift-reveal-prompt.txt": "15 - Premium Gift Reveal Scene (Social)",
 }
-
 PRODUCT_PAGE_PROMPT_NAMES = {
     "01-man-cave-prompt.txt",
     "02-office-prompt.txt",
@@ -56,7 +81,67 @@ PRODUCT_PAGE_PROMPT_NAMES = {
 }
 
 
-def get_recent_runs(limit=5):
+st.set_page_config(
+    page_title="Sports Cave Image Factory",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+
+def inject_styles():
+    st.markdown(
+        """
+        <style>
+        [data-testid="stAppViewContainer"] {
+            background: #f7f4ee;
+        }
+
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, #111315 0%, #1b1d21 100%);
+        }
+
+        [data-testid="stSidebar"] * {
+            color: #f6f1e7;
+        }
+
+        div[data-testid="stRadio"] label p {
+            font-weight: 600;
+        }
+
+        .sc-shell-card {
+            background: rgba(255, 252, 246, 0.94);
+            border: 1px solid #e5dbc6;
+            border-radius: 18px;
+            padding: 1rem 1.15rem;
+        }
+
+        .sc-muted {
+            color: #6b675f;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def init_session_state():
+    if "selected_page" not in st.session_state:
+        st.session_state.selected_page = "Mockups"
+
+    if "product_name" not in st.session_state:
+        st.session_state.product_name = ""
+
+    if "last_uploaded_file_name" not in st.session_state:
+        st.session_state.last_uploaded_file_name = None
+
+    if "last_autofilled_product_name" not in st.session_state:
+        st.session_state.last_autofilled_product_name = ""
+
+    if "last_generation_result" not in st.session_state:
+        st.session_state.last_generation_result = None
+
+
+def get_local_recent_runs(limit=5):
     if not RUNS_DIR.exists():
         return []
 
@@ -67,11 +152,19 @@ def get_recent_runs(limit=5):
     )[:limit]
 
 
-def get_sport_category(selected_option, custom_value):
-    if selected_option == "Custom":
-        return custom_value.strip()
+def get_recent_runs(limit=5):
+    if drive_storage.is_drive_configured():
+        try:
+            recent_drive_runs = drive_storage.list_recent_drive_runs(limit=limit)
+            if recent_drive_runs:
+                return recent_drive_runs
+        except Exception:
+            pass
 
-    return selected_option.strip()
+    return [
+        {"name": path.name, "source": "local", "path": path}
+        for path in get_local_recent_runs(limit=limit)
+    ]
 
 
 def get_product_name_from_upload(uploaded_file):
@@ -81,12 +174,131 @@ def get_product_name_from_upload(uploaded_file):
     return Path(uploaded_file.name).stem.strip()
 
 
-def render_download_button(label, file_path, mime):
+def get_sport_category(selected_option, custom_value):
+    if selected_option == "Custom":
+        return custom_value.strip()
+
+    return selected_option.strip()
+
+
+def normalize_asset(asset):
+    defaults = {
+        "key": None,
+        "label": "Image",
+        "review_path": None,
+        "webp_path": None,
+        "jpg_path": None,
+        "include_in_zip": True,
+        "asset_group": "generated",
+        "prompt_filename": None,
+        "export_to_shopify": True,
+        "export_to_socials": True,
+    }
+    normalized = defaults.copy()
+    normalized.update(asset or {})
+    return normalized
+
+
+def ensure_result_assets(result):
+    assets = [normalize_asset(asset) for asset in result.get("assets", [])]
+    if assets:
+        result["assets"] = assets
+        return result
+
+    review_paths = result.get("review_paths", [])
+    webp_paths = result.get("webp_paths", [])
+    jpg_paths = result.get("jpg_paths", [])
+    legacy_assets = []
+
+    for index, (asset_key, asset_label) in enumerate(LEGACY_BASE_ASSET_SPECS):
+        if index >= len(review_paths) and index >= len(webp_paths) and index >= len(jpg_paths):
+            continue
+
+        review_path = review_paths[index] if index < len(review_paths) else None
+        webp_path = webp_paths[index] if index < len(webp_paths) else None
+        jpg_path = jpg_paths[index] if index < len(jpg_paths) else None
+        legacy_assets.append(
+            normalize_asset(
+                image_factory.build_asset_record(
+                    key=asset_key,
+                    label=asset_label,
+                    review_path=review_path,
+                    webp_path=webp_path,
+                    jpg_path=jpg_path,
+                )
+            )
+        )
+
+    result["assets"] = legacy_assets
+    return result
+
+
+def normalize_generation_result(result):
+    defaults = {
+        "product_name": None,
+        "sport_category": None,
+        "created_at": None,
+        "product_slug": None,
+        "sport_slug": None,
+        "run_dir": None,
+        "review_dir": None,
+        "webp_dir": None,
+        "jpg_dir": None,
+        "zip_dir": None,
+        "zip_path": None,
+        "social_zip_path": None,
+        "prompt_zip_path": None,
+        "complete_zip_path": None,
+        "black_framed_webp_path": None,
+        "black_framed_jpg_path": None,
+        "prompt_dir": None,
+        "prompt_paths": [],
+        "review_paths": [],
+        "webp_paths": [],
+        "jpg_paths": [],
+        "shopify_uploads_dir": None,
+        "socials_dir": None,
+        "assets": [],
+        "lifestyle_mockup_paths": {},
+        "lifestyle_pack_error": None,
+        "manifest_path": None,
+        "uploaded_files": [],
+        "drive_root_id": None,
+        "drive_root_url": None,
+        "drive_run_id": None,
+        "drive_run_url": None,
+        "drive_sync_enabled": False,
+        "drive_sync_error": None,
+        "drive_sync_message": None,
+    }
+    normalized = defaults.copy()
+    normalized.update(result or {})
+    normalized = ensure_result_assets(normalized)
+    return normalized
+
+
+def get_asset_checkbox_key(run_dir, asset_key):
+    return f"include-asset::{run_dir}::{asset_key}"
+
+
+def get_lifestyle_asset_key(prompt_filename):
+    return f"lifestyle::{prompt_filename}"
+
+
+def get_prompt_label(prompt_path):
+    prompt_name = Path(prompt_path).name
+    return PROMPT_LABELS.get(prompt_name, prompt_name)
+
+
+def is_product_page_prompt(prompt_path):
+    return Path(prompt_path).name in PRODUCT_PAGE_PROMPT_NAMES
+
+
+def render_download_button(label, file_path, mime, key):
     if not file_path:
         return
 
     file_path = Path(file_path)
-
     if not file_path.exists():
         return
 
@@ -95,53 +307,215 @@ def render_download_button(label, file_path, mime):
         data=file_path.read_bytes(),
         file_name=file_path.name,
         mime=mime,
+        key=key,
+        use_container_width=True,
     )
 
 
-def get_prompt_label(prompt_path):
-    prompt_name = Path(prompt_path).name
-    return PROMPT_LABELS.get(prompt_name, prompt_name)
+def prime_asset_selection_state(result):
+    if not result["run_dir"]:
+        return
+
+    for asset in result["assets"]:
+        state_key = get_asset_checkbox_key(result["run_dir"], asset["key"])
+        if state_key not in st.session_state:
+            st.session_state[state_key] = asset["include_in_zip"]
 
 
-def render_copy_prompt_control(prompt_text, prompt_name):
-    encoded_prompt = base64.b64encode(prompt_text.encode("utf-8")).decode("ascii")
-    button_id = f"copy-prompt-{prompt_name.replace('.', '-').replace('_', '-')}"
+def upsert_result_asset(result, asset_record):
+    result = normalize_generation_result(result)
+    normalized_asset = normalize_asset(asset_record)
 
-    components.html(
-        f"""
-        <button
-            id="{button_id}"
-            style="
-                width: 100%;
-                height: 40px;
-                border: 1px solid #d0d7de;
-                border-radius: 10px;
-                background: #ffffff;
-                color: #1f2937;
-                font-size: 14px;
-                font-family: sans-serif;
-                font-weight: 600;
-                cursor: pointer;
-            "
-            onclick="
-                const text = atob('{encoded_prompt}');
-                navigator.clipboard.writeText(text).then(() => {{
-                    const btn = document.getElementById('{button_id}');
-                    const original = btn.innerHTML;
-                    btn.innerHTML = 'Copied';
-                    setTimeout(() => btn.innerHTML = original, 1200);
-                }});
-            "
-        >
-            Copy Prompt
-        </button>
-        """,
-        height=46,
+    for index, existing_asset in enumerate(result["assets"]):
+        if existing_asset["key"] == normalized_asset["key"]:
+            merged_asset = existing_asset.copy()
+            merged_asset.update(normalized_asset)
+            result["assets"][index] = normalize_asset(merged_asset)
+            return result
+
+    result["assets"].append(normalized_asset)
+    return result
+
+
+def write_local_manifest(result, uploaded_files=None):
+    result = normalize_generation_result(result)
+    if not result["run_dir"]:
+        return None
+
+    manifest_path = Path(result["run_dir"]) / "manifest.json"
+    manifest_data = {}
+
+    if manifest_path.exists():
+        with manifest_path.open("r", encoding="utf-8") as file_handle:
+            manifest_data = json.load(file_handle)
+
+    manifest_data.update(
+        {
+            "product_name": result["product_name"],
+            "product_slug": result["product_slug"],
+            "sport_category": result["sport_category"],
+            "created_at": result["created_at"],
+            "local_run_path": str(Path(result["run_dir"]).resolve()),
+            "drive_folder_id": result["drive_run_id"],
+            "drive_folder_link": result["drive_run_url"],
+            "uploaded_files": uploaded_files
+            if uploaded_files is not None
+            else manifest_data.get("uploaded_files", []),
+        }
     )
 
+    manifest_path.write_text(json.dumps(manifest_data, indent=2), encoding="utf-8")
+    result["manifest_path"] = manifest_path
+    return manifest_path
 
-def is_product_page_prompt(prompt_path):
-    return Path(prompt_path).name in PRODUCT_PAGE_PROMPT_NAMES
+
+def ensure_drive_sections():
+    root_folder_id = drive_storage.get_root_folder_id()
+    if not root_folder_id:
+        raise drive_storage.DriveStorageError(
+            "GOOGLE_DRIVE_ROOT_FOLDER_ID is missing."
+        )
+
+    section_ids = {}
+    for key, folder_name in DRIVE_SECTION_NAMES.items():
+        section_ids[key] = drive_storage.ensure_drive_folder(root_folder_id, folder_name)
+
+    return section_ids
+
+
+def sync_result_to_google_drive(result):
+    result = normalize_generation_result(result)
+    write_local_manifest(result)
+
+    if not result["run_dir"]:
+        return result
+
+    if not drive_storage.is_drive_configured():
+        result["drive_sync_enabled"] = False
+        result["drive_sync_error"] = None
+        result["drive_sync_message"] = (
+            "Google Drive is not configured. Files were saved locally only."
+        )
+        return result
+
+    try:
+        section_ids = ensure_drive_sections()
+        upload_info = drive_storage.upload_folder_to_drive(
+            result["run_dir"],
+            section_ids["mockups"],
+        )
+        manifest_data = drive_storage.create_or_update_manifest(
+            result["run_dir"],
+            upload_info["folder_id"],
+            upload_info["uploaded_files"],
+        )
+        result["drive_sync_enabled"] = True
+        result["drive_root_id"] = drive_storage.get_root_folder_id()
+        result["drive_root_url"] = drive_storage.get_drive_folder_link(result["drive_root_id"])
+        result["drive_run_id"] = upload_info["folder_id"]
+        result["drive_run_url"] = upload_info["folder_link"]
+        result["uploaded_files"] = manifest_data.get("uploaded_files", upload_info["uploaded_files"])
+        result["drive_sync_error"] = None
+        result["drive_sync_message"] = "Saved to Google Drive"
+        write_local_manifest(result, uploaded_files=result["uploaded_files"])
+    except Exception as error:
+        result["drive_sync_enabled"] = True
+        result["drive_sync_error"] = str(error)
+        result["drive_sync_message"] = None
+
+    return result
+
+
+def rebuild_result_artifacts(result):
+    result = normalize_generation_result(result)
+
+    if not result["run_dir"] or not result["product_slug"]:
+        return result
+
+    run_dir = Path(result["run_dir"])
+    zip_dir = run_dir / "zip"
+    zip_dir.mkdir(parents=True, exist_ok=True)
+
+    export_dirs = image_factory.rebuild_export_folders(run_dir, result["assets"])
+    result["zip_dir"] = zip_dir
+    result["shopify_uploads_dir"] = export_dirs["shopify_uploads_dir"]
+    result["socials_dir"] = export_dirs["socials_dir"]
+    result["zip_path"] = image_factory.create_shopify_pack_zip(
+        zip_dir,
+        result["product_slug"],
+        Path(result["shopify_uploads_dir"]),
+    )
+    result["social_zip_path"] = image_factory.create_social_media_pack_zip(
+        zip_dir,
+        result["product_slug"],
+        Path(result["socials_dir"]),
+    )
+    result["prompt_zip_path"] = None
+
+    if result["prompt_dir"] and Path(result["prompt_dir"]).exists():
+        result["prompt_zip_path"] = image_factory.create_prompt_pack_zip(
+            zip_dir,
+            result["product_slug"],
+            Path(result["prompt_dir"]),
+        )
+
+    result["complete_zip_path"] = image_factory.create_complete_pack_zip(
+        zip_dir,
+        result["product_slug"],
+        prompt_dir=result["prompt_dir"],
+        assets=result["assets"],
+    )
+    write_local_manifest(result)
+    return result
+
+
+def apply_asset_selection_from_session(result):
+    result = normalize_generation_result(result)
+    prime_asset_selection_state(result)
+
+    selections_changed = False
+
+    for asset in result["assets"]:
+        state_key = get_asset_checkbox_key(result["run_dir"], asset["key"])
+        selected = bool(st.session_state.get(state_key, asset["include_in_zip"]))
+        if selected != asset["include_in_zip"]:
+            asset["include_in_zip"] = selected
+            selections_changed = True
+
+    if selections_changed:
+        result = rebuild_result_artifacts(result)
+        result = sync_result_to_google_drive(result)
+        st.session_state.last_generation_result = result
+
+    return result
+
+
+def set_all_asset_selection(result, include_in_zip):
+    result = normalize_generation_result(result)
+
+    for asset in result["assets"]:
+        state_key = get_asset_checkbox_key(result["run_dir"], asset["key"])
+        st.session_state[state_key] = include_in_zip
+        asset["include_in_zip"] = include_in_zip
+
+    return result
+
+
+def build_lifestyle_asset(prompt_path, saved_paths):
+    prompt_filename = Path(prompt_path).name
+    is_product_page_asset = image_factory.is_product_page_prompt_filename(prompt_filename)
+    return image_factory.build_asset_record(
+        key=get_lifestyle_asset_key(prompt_filename),
+        label=get_prompt_label(prompt_path),
+        review_path=saved_paths.get("jpg_path") or saved_paths.get("webp_path"),
+        webp_path=saved_paths.get("webp_path"),
+        jpg_path=saved_paths.get("jpg_path"),
+        include_in_zip=True,
+        asset_group="lifestyle",
+        prompt_filename=prompt_filename,
+        export_to_shopify=is_product_page_asset,
+        export_to_socials=True,
+    )
 
 
 def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
@@ -155,46 +529,65 @@ def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
         image_bytes=uploaded_file.getvalue(),
     )
 
-    result["lifestyle_mockup_paths"][Path(prompt_path).name] = saved_paths
+    prompt_filename = Path(prompt_path).name
+    result["lifestyle_mockup_paths"][prompt_filename] = saved_paths
+    result = upsert_result_asset(result, build_lifestyle_asset(prompt_path, saved_paths))
 
-    prompt_dir = Path(result["prompt_dir"]) if result["prompt_dir"] else None
-    webp_dir = Path(result["run_dir"]) / "webp"
-    jpg_dir = Path(result["run_dir"]) / "jpg"
-    zip_path = image_factory.create_complete_pack_zip(
-        Path(result["run_dir"]) / "zip",
-        result["product_slug"],
-        webp_dir,
-        jpg_dir,
-        prompt_dir,
-    )
-    result["zip_path"] = zip_path
-    result["complete_zip_path"] = zip_path
+    state_key = get_asset_checkbox_key(result["run_dir"], get_lifestyle_asset_key(prompt_filename))
+    if state_key not in st.session_state:
+        st.session_state[state_key] = True
+
     result["lifestyle_pack_error"] = None
+    result = rebuild_result_artifacts(result)
+    return sync_result_to_google_drive(result)
+
+
+def render_asset_selection_controls(result):
+    result = normalize_generation_result(result)
+
+    if not result["assets"]:
+        return result
+
+    included_count = sum(1 for asset in result["assets"] if asset["include_in_zip"])
+    st.subheader("ZIP Image Selection")
+    st.caption(
+        f"{included_count} of {len(result['assets'])} images are currently included. "
+        "Untick any image to leave it out of the ZIP downloads."
+    )
+
+    select_col, clear_col = st.columns(2)
+    with select_col:
+        if st.button("Select All Images", use_container_width=True):
+            result = set_all_asset_selection(result, True)
+            result = rebuild_result_artifacts(result)
+            result = sync_result_to_google_drive(result)
+            st.session_state.last_generation_result = result
+            st.rerun()
+    with clear_col:
+        if st.button("Clear All Images", use_container_width=True):
+            result = set_all_asset_selection(result, False)
+            result = rebuild_result_artifacts(result)
+            result = sync_result_to_google_drive(result)
+            st.session_state.last_generation_result = result
+            st.rerun()
 
     return result
 
 
-def normalize_generation_result(result):
-    defaults = {
-        "complete_zip_path": None,
-        "zip_path": None,
-        "prompt_zip_path": None,
-        "black_framed_webp_path": None,
-        "black_framed_jpg_path": None,
-        "prompt_paths": [],
-        "review_paths": [],
-        "run_dir": None,
-        "product_slug": None,
-        "sport_slug": None,
-        "prompt_dir": None,
-        "jpg_dir": None,
-        "jpg_paths": [],
-        "lifestyle_mockup_paths": {},
-        "lifestyle_pack_error": None,
-    }
-    normalized = defaults.copy()
-    normalized.update(result)
-    return normalized
+def render_generated_previews(result):
+    st.subheader("Generated Previews")
+    preview_cols = st.columns(2)
+    base_assets = [asset for asset in result["assets"] if asset["asset_group"] == "generated"]
+
+    for index, asset in enumerate(base_assets):
+        with preview_cols[index % 2]:
+            checkbox_key = get_asset_checkbox_key(result["run_dir"], asset["key"])
+            st.checkbox("Include in ZIP", key=checkbox_key)
+
+            preview_path = asset["review_path"] or asset["webp_path"] or asset["jpg_path"]
+            if preview_path and Path(preview_path).exists():
+                st.image(str(preview_path), caption=asset["label"], width="stretch")
+                st.caption(Path(preview_path).name)
 
 
 def render_prompt_cards(result, prompt_paths, heading):
@@ -207,35 +600,32 @@ def render_prompt_cards(result, prompt_paths, heading):
     for index, prompt_path in enumerate(prompt_paths):
         with cols[index % 3]:
             st.markdown(f"**{get_prompt_label(prompt_path)}**")
-            render_copy_prompt_control(prompt_path.read_text(encoding="utf-8"), prompt_path.name)
+            with st.expander("View Prompt"):
+                st.code(prompt_path.read_text(encoding="utf-8"), language=None)
 
             prompt_name = prompt_path.name
             saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
 
             if saved_lifestyle_paths:
-                if isinstance(saved_lifestyle_paths, dict):
-                    saved_webp_path = saved_lifestyle_paths.get("webp_path")
-                    saved_jpg_path = saved_lifestyle_paths.get("jpg_path")
-                else:
-                    saved_webp_path = saved_lifestyle_paths
-                    saved_jpg_path = None
+                saved_webp_path = saved_lifestyle_paths.get("webp_path")
+                saved_jpg_path = saved_lifestyle_paths.get("jpg_path")
+                asset_key = get_lifestyle_asset_key(prompt_name)
+                checkbox_key = get_asset_checkbox_key(result["run_dir"], asset_key)
 
-                if saved_webp_path and Path(saved_webp_path).exists():
+                preview_path = saved_webp_path or saved_jpg_path
+                if preview_path and Path(preview_path).exists():
+                    st.checkbox("Include in ZIP", key=checkbox_key)
                     st.image(
-                        str(saved_webp_path),
-                        caption=Path(saved_webp_path).name,
-                        use_container_width=True,
+                        str(preview_path),
+                        caption=Path(preview_path).name,
+                        width="stretch",
                     )
-                    if saved_jpg_path:
-                        st.caption(
-                            f"Included in ZIP as {Path(saved_webp_path).name} and {Path(saved_jpg_path).name}"
-                        )
 
             uploaded_lifestyle_image = st.file_uploader(
                 "Upload image from ChatGPT",
                 type=["png", "jpg", "jpeg", "webp"],
                 key=f"lifestyle-upload::{result['run_dir']}::{prompt_name}",
-                help="Upload the ChatGPT generation here and it will be added into the final ZIP.",
+                help="Upload the finished ChatGPT lifestyle image here.",
             )
 
             if st.button(
@@ -244,7 +634,7 @@ def render_prompt_cards(result, prompt_paths, heading):
                 use_container_width=True,
             ):
                 if uploaded_lifestyle_image is None:
-                    st.warning("Upload or paste the generated lifestyle image first.")
+                    st.warning("Upload the generated lifestyle image first.")
                 else:
                     try:
                         updated_result = save_uploaded_lifestyle_result(
@@ -259,35 +649,77 @@ def render_prompt_cards(result, prompt_paths, heading):
                         st.exception(error)
 
 
-def render_generation_result(result):
-    result = normalize_generation_result(result)
-    package_zip_path = result["complete_zip_path"] or result["zip_path"]
-    st.success("Images generated successfully.")
+def render_downloads(result):
+    download_cols = st.columns(4)
 
-    if package_zip_path:
+    with download_cols[0]:
+        render_download_button(
+            "Download Shopify Pack ZIP",
+            result["zip_path"],
+            "application/zip",
+            key=f"download-shopify::{result['run_dir']}",
+        )
+    with download_cols[1]:
+        render_download_button(
+            "Download Social Media ZIP",
+            result["social_zip_path"],
+            "application/zip",
+            key=f"download-social::{result['run_dir']}",
+        )
+    with download_cols[2]:
+        render_download_button(
+            "Download ChatGPT Prompt ZIP",
+            result["prompt_zip_path"],
+            "application/zip",
+            key=f"download-prompts::{result['run_dir']}",
+        )
+    with download_cols[3]:
         render_download_button(
             "Download Complete Package ZIP",
-            package_zip_path,
+            result["complete_zip_path"],
             "application/zip",
+            key=f"download-complete::{result['run_dir']}",
         )
 
+
+def render_generation_result(result):
+    result = apply_asset_selection_from_session(result)
+    result = render_asset_selection_controls(result)
+    st.success("Images generated successfully.")
+
     if result["run_dir"]:
-        st.info(f"Saved output folder: {result['run_dir']}")
+        st.caption(f"Local run folder: `{result['run_dir']}`")
 
-    st.subheader("Generated Previews")
-    preview_cols = st.columns(2)
+    render_downloads(result)
 
-    for index, preview_path in enumerate(result["review_paths"]):
-        with preview_cols[index % 2]:
-            st.image(
-                str(preview_path),
-                caption=Path(preview_path).name,
-                use_container_width=True,
+    if result["drive_run_url"]:
+        st.success("Saved to Google Drive")
+        st.markdown(f"[Open Google Drive run folder]({result['drive_run_url']})")
+    elif result["drive_sync_error"]:
+        st.warning(
+            "Google Drive upload failed, but the local ZIP downloads are still ready. "
+            f"{result['drive_sync_error']}"
+        )
+    else:
+        st.info("Google Drive is not configured. Files were saved locally only.")
+
+    if result["shopify_uploads_dir"]:
+        with suppress(FileNotFoundError):
+            st.caption(
+                f"{len(list(Path(result['shopify_uploads_dir']).glob('*.webp')))} WEBP files ready for Shopify uploads."
             )
+
+    if result["socials_dir"]:
+        with suppress(FileNotFoundError):
+            st.caption(
+                f"{len(list(Path(result['socials_dir']).glob('*.jpg')))} JPG files ready for socials."
+            )
+
+    render_generated_previews(result)
 
     if result["lifestyle_pack_error"]:
         st.warning(
-            "The Shopify image set was created, but the lifestyle prompt pack could not be prepared for this run: "
+            "The base image set was created, but the prompt pack could not be prepared for this run: "
             f"{result['lifestyle_pack_error']}"
         )
 
@@ -299,151 +731,273 @@ def render_generation_result(result):
 
     if prompt_paths:
         st.info(
-            "At the bottom you can copy each prompt, upload the finished ChatGPT image into the little plus box, and it will be added into the final ZIP. "
-            "The ZIP includes shopify-uploads, social-media, and chatgpt-prompts folders."
+            "Use the prompts below for ChatGPT lifestyle images, then upload the finished images back into the matching cards."
         )
-        st.markdown(
-            """
-            1. Download the ZIP and use `chatgpt-prompts/00-upload-this-black-framed-reference.webp` as the reference in ChatGPT.
-            2. Use Man Cave, Office, and Living Room for Product Page lifestyle images.
-            3. Use the rest of the prompts for Socials.
-            4. Upload each finished ChatGPT image back into its matching box below.
-            5. Download the ZIP again when you are done to get the updated package.
-            """
-        )
-
         product_page_prompts = [path for path in prompt_paths if is_product_page_prompt(path)]
         social_prompts = [path for path in prompt_paths if not is_product_page_prompt(path)]
 
-        render_prompt_cards(result, product_page_prompts, "Product Page Lifestyle Mockups")
-        render_prompt_cards(result, social_prompts, "Social Lifestyle Mockups")
+        render_prompt_cards(
+            result,
+            product_page_prompts,
+            "Product Page Lifestyle Mockups",
+        )
+        render_prompt_cards(
+            result,
+            social_prompts,
+            "Social Lifestyle Mockups",
+        )
     else:
-        st.caption("Generate a new run to create the optional ChatGPT lifestyle prompt pack.")
+        st.caption("Generate a new run to create the ChatGPT lifestyle prompt pack.")
 
 
-st.set_page_config(
-    page_title="Sports Cave Image Factory",
-    layout="wide",
-)
+def render_recent_runs_sidebar():
+    recent_runs = get_recent_runs(limit=5)
+    if not recent_runs:
+        return
 
-if "product_name" not in st.session_state:
-    st.session_state.product_name = ""
+    st.sidebar.divider()
+    st.sidebar.subheader("Recent Runs")
+    for run_entry in recent_runs:
+        if run_entry.get("url"):
+            st.sidebar.markdown(f"[{run_entry['name']}]({run_entry['url']})")
+        else:
+            st.sidebar.caption(run_entry["name"])
 
-if "last_uploaded_file_name" not in st.session_state:
-    st.session_state.last_uploaded_file_name = None
 
-if "last_autofilled_product_name" not in st.session_state:
-    st.session_state.last_autofilled_product_name = ""
-
-if "last_generation_result" not in st.session_state:
-    st.session_state.last_generation_result = None
-
-with st.sidebar:
-    st.header("How It Works")
-    st.write("1. Upload the finished artwork file.")
-    st.write("2. Enter the product name.")
-    st.write("3. Choose the sport category.")
-    st.write("4. Click Generate Images.")
-    st.write("5. Review the previews, add any ChatGPT lifestyle images below, and download the final ZIP.")
-
-    recent_runs = get_recent_runs()
-
-    if recent_runs:
-        st.divider()
-        st.subheader("Recent Jobs")
-        for run_path in recent_runs:
-            st.caption(run_path.name)
-
-st.title("Sports Cave Image Factory")
-st.caption(
-    "Upload one finished artwork, generate the base images, then add any ChatGPT lifestyle images into one final ZIP package."
-)
-
-uploaded_file = st.file_uploader(
-    "Upload finished Sports Cave artwork",
-    type=["jpg", "jpeg", "png", "webp"],
-    help="Upload the final flattened artwork that should appear in every mockup.",
-)
-
-autofill_product_name = get_product_name_from_upload(uploaded_file)
-
-if uploaded_file is not None and uploaded_file.name != st.session_state.last_uploaded_file_name:
-    if (
-        not st.session_state.product_name.strip()
-        or st.session_state.product_name == st.session_state.last_autofilled_product_name
-    ):
-        st.session_state.product_name = autofill_product_name
-
-    st.session_state.last_uploaded_file_name = uploaded_file.name
-    st.session_state.last_autofilled_product_name = autofill_product_name
-
-elif uploaded_file is None and st.session_state.last_uploaded_file_name is not None:
-    if st.session_state.product_name == st.session_state.last_autofilled_product_name:
-        st.session_state.product_name = ""
-
-    st.session_state.last_uploaded_file_name = None
-    st.session_state.last_autofilled_product_name = ""
-
-product_name = st.text_input(
-    "Product name",
-    key="product_name",
-    placeholder="Example: Arsenal The Wait Is Over",
-    help="This fills from the uploaded filename without the file extension, and you can still change it.",
-)
-
-sport_option = st.selectbox(
-    "Sport category",
-    options=SPORT_OPTIONS,
-    index=0,
-)
-
-custom_sport = ""
-if sport_option == "Custom":
-    custom_sport = st.text_input(
-        "Custom sport category",
-        placeholder="Example: Formula 1",
+def render_sidebar():
+    st.sidebar.title("Sports Cave")
+    st.sidebar.caption("Image Factory")
+    st.sidebar.caption(APP_VERSION)
+    st.sidebar.radio(
+        "Navigation",
+        MENU_OPTIONS,
+        key="selected_page",
+        label_visibility="collapsed",
     )
 
-generate_clicked = st.button("Generate Images", type="primary")
+    if st.session_state.selected_page == "Mockups":
+        st.sidebar.divider()
+        st.sidebar.subheader("How It Works")
+        st.sidebar.write("1. Upload the finished artwork file.")
+        st.sidebar.write("2. Enter the product name.")
+        st.sidebar.write("3. Choose the sport category.")
+        st.sidebar.write("4. Click Generate Images.")
+        st.sidebar.write("5. Tick only the images you want in the ZIPs.")
+        st.sidebar.write("6. Add any ChatGPT lifestyle images below.")
 
-if uploaded_file is not None:
-    st.subheader("Uploaded Artwork")
-    st.image(uploaded_file, caption=uploaded_file.name, use_container_width=True)
-
-if generate_clicked:
-    sport_category = get_sport_category(sport_option, custom_sport)
-
-    if uploaded_file is None:
-        st.error("Please upload an artwork image first.")
-    elif not product_name.strip():
-        st.error("Please enter a product name.")
-    elif not sport_category:
-        st.error("Please enter a sport category.")
+    st.sidebar.divider()
+    st.sidebar.subheader("Storage")
+    if drive_storage.is_drive_configured():
+        root_folder_id = drive_storage.get_root_folder_id()
+        st.sidebar.caption("Google Drive configured: Yes")
+        st.sidebar.caption(f"Root folder ID: `{root_folder_id}`")
+        st.sidebar.markdown(
+            f"[Open root folder]({drive_storage.get_drive_folder_link(root_folder_id)})"
+        )
     else:
-        with st.spinner("Generating Sports Cave product images..."):
-            temp_artwork_path = None
-            suffix = Path(uploaded_file.name).suffix or ".jpg"
+        st.sidebar.caption("Google Drive configured: No")
+        st.sidebar.caption("Local output is active until Drive is configured.")
 
-            try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-                    temp_file.write(uploaded_file.getbuffer())
-                    temp_artwork_path = Path(temp_file.name)
+    render_recent_runs_sidebar()
 
-                result = image_factory.generate_product_images(
-                    product_name=product_name,
-                    sport_category=sport_category,
-                    artwork_file_path=temp_artwork_path,
-                    base_dir=BASE_DIR,
-                )
-                st.session_state.last_generation_result = result
 
-            except Exception as error:
-                st.error("Something went wrong.")
-                st.exception(error)
-            finally:
-                if temp_artwork_path is not None:
-                    with suppress(FileNotFoundError, PermissionError):
-                        temp_artwork_path.unlink()
+def render_mockups_page():
+    st.title("Sports Cave Image Factory")
+    st.caption(
+        "Upload one finished artwork, generate the base images, then download the ZIP packs or add ChatGPT lifestyle images."
+    )
 
-if st.session_state.last_generation_result is not None:
-    render_generation_result(st.session_state.last_generation_result)
+    uploaded_file = st.file_uploader(
+        "Upload finished Sports Cave artwork",
+        type=["jpg", "jpeg", "png", "webp"],
+        help="Upload the final flattened artwork that should appear in every mockup.",
+    )
+
+    autofill_product_name = get_product_name_from_upload(uploaded_file)
+
+    if uploaded_file is not None and uploaded_file.name != st.session_state.last_uploaded_file_name:
+        if (
+            not st.session_state.product_name.strip()
+            or st.session_state.product_name == st.session_state.last_autofilled_product_name
+        ):
+            st.session_state.product_name = autofill_product_name
+
+        st.session_state.last_uploaded_file_name = uploaded_file.name
+        st.session_state.last_autofilled_product_name = autofill_product_name
+
+    elif uploaded_file is None and st.session_state.last_uploaded_file_name is not None:
+        if st.session_state.product_name == st.session_state.last_autofilled_product_name:
+            st.session_state.product_name = ""
+
+        st.session_state.last_uploaded_file_name = None
+        st.session_state.last_autofilled_product_name = ""
+
+    product_name = st.text_input(
+        "Product name",
+        key="product_name",
+        placeholder="Example: Arsenal The Wait Is Over",
+    )
+
+    sport_option = st.selectbox(
+        "Sport category",
+        options=SPORT_OPTIONS,
+        index=0,
+    )
+
+    custom_sport = ""
+    if sport_option == "Custom":
+        custom_sport = st.text_input(
+            "Custom sport category",
+            placeholder="Example: Formula 1",
+        )
+
+    generate_clicked = st.button("Generate Images", type="primary")
+
+    if uploaded_file is not None:
+        st.subheader("Uploaded Artwork")
+        st.image(uploaded_file, caption=uploaded_file.name, width="stretch")
+
+    if generate_clicked:
+        sport_category = get_sport_category(sport_option, custom_sport)
+
+        if uploaded_file is None:
+            st.error("Please upload an artwork image first.")
+        elif not product_name.strip():
+            st.error("Please enter a product name.")
+        elif not sport_category:
+            st.error("Please enter a sport category.")
+        else:
+            with st.spinner("Generating Sports Cave product images..."):
+                temp_artwork_path = None
+                suffix = Path(uploaded_file.name).suffix or ".jpg"
+
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+                        temp_file.write(uploaded_file.getbuffer())
+                        temp_artwork_path = Path(temp_file.name)
+
+                    result = image_factory.generate_product_images(
+                        product_name=product_name,
+                        sport_category=sport_category,
+                        artwork_file_path=temp_artwork_path,
+                        base_dir=BASE_DIR,
+                    )
+                    result = rebuild_result_artifacts(result)
+                    result = sync_result_to_google_drive(result)
+                    st.session_state.last_generation_result = result
+                except Exception as error:
+                    st.error("Something went wrong while generating the images.")
+                    st.exception(error)
+                finally:
+                    if temp_artwork_path is not None:
+                        with suppress(FileNotFoundError, PermissionError):
+                            temp_artwork_path.unlink()
+
+    if st.session_state.last_generation_result is not None:
+        render_generation_result(st.session_state.last_generation_result)
+
+
+def test_google_drive_connection():
+    section_ids = ensure_drive_sections()
+    test_dir = BASE_DIR / "output" / "_drive_test"
+    test_dir.mkdir(parents=True, exist_ok=True)
+    test_file = test_dir / "google-drive-connection-test.txt"
+    test_file.write_text("Sports Cave Image Factory connection test", encoding="utf-8")
+
+    try:
+        return drive_storage.upload_file_to_drive(
+            test_file,
+            section_ids["system_logs"],
+            mime_type="text/plain",
+        )
+    finally:
+        with suppress(FileNotFoundError, PermissionError):
+            test_file.unlink()
+
+
+def render_google_drive_page():
+    st.title("Google Drive")
+    st.caption("Service-account Drive storage for Sports Cave runs.")
+
+    root_folder_id = drive_storage.get_root_folder_id()
+    drive_configured = drive_storage.is_drive_configured()
+
+    if drive_configured:
+        st.success("Status: Connected")
+    else:
+        st.info("Status: Not connected")
+
+    st.write(f"Root folder ID: `{root_folder_id or 'Not set'}`")
+    if root_folder_id:
+        st.markdown(
+            f"[Open root folder]({drive_storage.get_drive_folder_link(root_folder_id)})"
+        )
+
+    if st.button("Test Google Drive Connection", type="primary", disabled=not drive_configured):
+        try:
+            uploaded_test_file = test_google_drive_connection()
+            st.success("Google Drive connection test succeeded.")
+            st.markdown(f"[Open uploaded test file]({uploaded_test_file['drive_link']})")
+        except Exception as error:
+            st.error(f"Google Drive connection test failed: {error}")
+
+    st.subheader("Recent Drive Runs")
+    if drive_configured:
+        try:
+            recent_runs = drive_storage.list_recent_drive_runs(limit=20)
+        except Exception as error:
+            st.warning(f"Could not load recent Drive runs: {error}")
+            recent_runs = []
+    else:
+        recent_runs = []
+
+    if recent_runs:
+        for run_entry in recent_runs:
+            st.markdown(f"- [{run_entry['name']}]({run_entry['url']})")
+    else:
+        st.caption("No Drive runs found yet.")
+
+
+def get_password_protection_status():
+    for env_key in PASSWORD_ENV_KEYS:
+        if os.getenv(env_key):
+            return "Enabled"
+
+    return "Managed outside app or not detected"
+
+
+def render_settings_page():
+    st.title("Settings")
+    st.caption("Current app and environment status.")
+
+    st.write(f"**Password protection:** {get_password_protection_status()}")
+    st.write(f"**Google Drive configured:** {'Yes' if drive_storage.is_drive_configured() else 'No'}")
+    st.write(f"**Root folder ID present:** {'Yes' if drive_storage.get_root_folder_id() else 'No'}")
+    st.write(f"**Output folder path:** `{RUNS_DIR}`")
+    st.write(f"**App version:** {APP_VERSION}")
+
+
+def render_placeholder_page(title, body):
+    st.title(title)
+    st.caption(body)
+
+
+def main():
+    inject_styles()
+    init_session_state()
+    render_sidebar()
+
+    current_page = st.session_state.selected_page
+    if current_page == "Google Drive":
+        render_google_drive_page()
+    elif current_page == "Limited Editions":
+        render_placeholder_page("Limited Editions", "Limited edition tracking will live here.")
+    elif current_page == "Product Uploads":
+        render_placeholder_page("Product Uploads", "Shopify product creation will live here.")
+    elif current_page == "Settings":
+        render_settings_page()
+    else:
+        render_mockups_page()
+
+
+main()

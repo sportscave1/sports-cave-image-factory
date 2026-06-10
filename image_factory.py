@@ -44,6 +44,11 @@ SIZE_GUIDE_BOXES = {
 }
 
 LIFESTYLE_REFERENCE_FILE_NAME = "00-upload-this-black-framed-reference.webp"
+SHOPIFY_UPLOADS_FOLDER_NAME = "shopify-uploads"
+SOCIALS_FOLDER_NAME = "socials"
+PROMPTS_FOLDER_NAME = "chatgpt-prompts"
+WEBP_CACHE_FOLDER_NAME = "_webp-cache"
+JPG_CACHE_FOLDER_NAME = "_jpg-cache"
 
 LIFESTYLE_IMAGE_VARIANTS = {
     "01-man-cave-prompt.txt": "man-cave-lifestyle",
@@ -951,6 +956,82 @@ def resize_to_1024(image):
     return image.resize((1024, 1024), Image.LANCZOS)
 
 
+def build_asset_record(
+    key,
+    label,
+    review_path=None,
+    webp_path=None,
+    jpg_path=None,
+    include_in_zip=True,
+    asset_group="generated",
+    prompt_filename=None,
+    export_to_shopify=True,
+    export_to_socials=True,
+):
+    return {
+        "key": key,
+        "label": label,
+        "review_path": review_path,
+        "webp_path": webp_path,
+        "jpg_path": jpg_path,
+        "include_in_zip": include_in_zip,
+        "asset_group": asset_group,
+        "prompt_filename": prompt_filename,
+        "export_to_shopify": export_to_shopify,
+        "export_to_socials": export_to_socials,
+    }
+
+
+def is_product_page_prompt_filename(prompt_filename):
+    return prompt_filename in PRODUCT_PAGE_PROMPT_FILENAMES
+
+
+def should_export_asset_to_shopify(asset):
+    return bool(asset.get("export_to_shopify")) and bool(asset.get("webp_path"))
+
+
+def should_export_asset_to_socials(asset):
+    return bool(asset.get("export_to_socials")) and bool(asset.get("jpg_path"))
+
+
+def reset_directory_contents(directory):
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    for child in directory.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+
+def rebuild_export_folders(run_dir, assets):
+    run_dir = Path(run_dir)
+    shopify_uploads_dir = run_dir / SHOPIFY_UPLOADS_FOLDER_NAME
+    socials_dir = run_dir / SOCIALS_FOLDER_NAME
+
+    reset_directory_contents(shopify_uploads_dir)
+    reset_directory_contents(socials_dir)
+
+    for asset in sorted(assets, key=lambda item: item.get("label", item.get("key", "")).lower()):
+        if not asset.get("include_in_zip", True):
+            continue
+
+        webp_path = asset.get("webp_path")
+        jpg_path = asset.get("jpg_path")
+
+        if should_export_asset_to_shopify(asset) and webp_path and Path(webp_path).exists():
+            shutil.copy2(webp_path, shopify_uploads_dir / Path(webp_path).name)
+
+        if should_export_asset_to_socials(asset) and jpg_path and Path(jpg_path).exists():
+            shutil.copy2(jpg_path, socials_dir / Path(jpg_path).name)
+
+    return {
+        "shopify_uploads_dir": shopify_uploads_dir,
+        "socials_dir": socials_dir,
+    }
+
+
 def save_review_and_assets(image, review_dir, webp_dir, jpg_dir, review_name, webp_name, jpg_name):
     review_path = review_dir / review_name
     webp_path = webp_dir / webp_name
@@ -1078,6 +1159,17 @@ def create_social_media_pack_zip(zip_dir, product_slug, jpg_dir):
     return zip_path
 
 
+def create_prompt_pack_zip(zip_dir, product_slug, prompt_dir):
+    zip_path = zip_dir / f"{product_slug}-chatgpt-lifestyle-prompts.zip"
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for prompt_file in sorted(Path(prompt_dir).glob("*")):
+            if prompt_file.is_file():
+                zipf.write(prompt_file, arcname=prompt_file.name)
+
+    return zip_path
+
+
 def get_prompt_group(prompt_filename):
     if prompt_filename in PRODUCT_PAGE_PROMPT_FILENAMES:
         return "product_page"
@@ -1100,7 +1192,7 @@ def get_asset_zip_folder(file_path):
 
 
 def generate_lifestyle_prompt_pack(product_name, sport_category, product_slug, run_dir, black_framed_webp_path):
-    prompt_dir = run_dir / "prompts"
+    prompt_dir = run_dir / PROMPTS_FOLDER_NAME
     prompt_dir.mkdir(parents=True, exist_ok=True)
 
     reference_image_path = prompt_dir / LIFESTYLE_REFERENCE_FILE_NAME
@@ -1122,33 +1214,51 @@ def generate_lifestyle_prompt_pack(product_name, sport_category, product_slug, r
         prompt_path.write_text(prompt_text + "\n", encoding="utf-8")
         prompt_paths.append(prompt_path)
 
-    prompt_zip_path = run_dir / "zip" / f"{product_slug}-chatgpt-lifestyle-prompts.zip"
-
-    with zipfile.ZipFile(prompt_zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        zipf.write(reference_image_path, arcname=reference_image_path.name)
-        for prompt_path in prompt_paths:
-            zipf.write(prompt_path, arcname=prompt_path.name)
+    prompt_zip_path = None
 
     return prompt_dir, reference_image_path, prompt_paths, prompt_zip_path
 
 
-def create_complete_pack_zip(zip_dir, product_slug, webp_dir, jpg_dir, prompt_dir=None):
+def create_complete_pack_zip(zip_dir, product_slug, webp_dir=None, jpg_dir=None, prompt_dir=None, assets=None):
     complete_zip_path = zip_dir / f"{product_slug}-complete-package.zip"
 
     with zipfile.ZipFile(complete_zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for webp_file in sorted(webp_dir.glob("*.webp")):
-            zipf.write(webp_file, arcname=f"WEBP/{webp_file.name}")
+        if assets is not None:
+            for asset in sorted(assets, key=lambda item: item.get("label", item.get("key", "")).lower()):
+                if not asset.get("include_in_zip", True):
+                    continue
 
-        for jpg_file in sorted(jpg_dir.glob("*.jpg")):
-            zipf.write(jpg_file, arcname=f"jpg/{jpg_file.name}")
+                webp_path = asset.get("webp_path")
+                jpg_path = asset.get("jpg_path")
+
+                if webp_path and Path(webp_path).exists():
+                    webp_path = Path(webp_path)
+                    zipf.write(webp_path, arcname=f"WEBP/{webp_path.name}")
+
+                if jpg_path and Path(jpg_path).exists():
+                    jpg_path = Path(jpg_path)
+                    zipf.write(jpg_path, arcname=f"jpg/{jpg_path.name}")
+        else:
+            if webp_dir is not None:
+                for webp_file in sorted(Path(webp_dir).glob("*.webp")):
+                    zipf.write(webp_file, arcname=f"WEBP/{webp_file.name}")
+
+            if jpg_dir is not None:
+                for jpg_file in sorted(Path(jpg_dir).glob("*.jpg")):
+                    zipf.write(jpg_file, arcname=f"jpg/{jpg_file.name}")
+
+        if prompt_dir is not None and Path(prompt_dir).exists():
+            for prompt_file in sorted(Path(prompt_dir).glob("*")):
+                if prompt_file.is_file():
+                    zipf.write(prompt_file, arcname=f"chatgpt-prompts/{prompt_file.name}")
 
     return complete_zip_path
 
 
 def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_bytes):
     run_dir = Path(run_dir)
-    webp_dir = run_dir / "webp"
-    jpg_dir = run_dir / "jpg"
+    webp_dir = run_dir / WEBP_CACHE_FOLDER_NAME
+    jpg_dir = run_dir / JPG_CACHE_FOLDER_NAME
     webp_dir.mkdir(parents=True, exist_ok=True)
     jpg_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1198,8 +1308,8 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
     run_dir = output_dir / "runs" / f"{product_slug}-{timestamp}"
 
     review_dir = run_dir / "review"
-    webp_dir = run_dir / "webp"
-    jpg_dir = run_dir / "jpg"
+    webp_dir = run_dir / WEBP_CACHE_FOLDER_NAME
+    jpg_dir = run_dir / JPG_CACHE_FOLDER_NAME
     zip_dir = run_dir / "zip"
     upload_dir = run_dir / "uploaded"
 
@@ -1251,10 +1361,12 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
     webp_paths = []
     jpg_paths = []
     generated_assets = {}
+    assets = []
 
     jobs = [
         {
             "key": "black",
+            "label": "Black Framed",
             "type": "framed",
             "template": black_template,
             "review_name": "black-framed-output.png",
@@ -1263,6 +1375,7 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         },
         {
             "key": "size-guide",
+            "label": "Size Guide",
             "type": "size_guide",
             "template": size_guide_template,
             "review_name": "size-guide-output.png",
@@ -1271,6 +1384,7 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         },
         {
             "key": "oak",
+            "label": "Oak Framed",
             "type": "framed",
             "template": oak_template,
             "review_name": "oak-framed-output.png",
@@ -1279,6 +1393,7 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         },
         {
             "key": "white",
+            "label": "White Framed",
             "type": "framed",
             "template": white_template,
             "review_name": "white-framed-output.png",
@@ -1287,6 +1402,7 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         },
         {
             "key": "unframed",
+            "label": "Unframed",
             "type": "unframed",
             "template": unframed_template,
             "review_name": "unframed-output.png",
@@ -1341,13 +1457,21 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
             "webp_path": webp_path,
             "jpg_path": jpg_path,
         }
+        assets.append(
+            build_asset_record(
+                key=job["key"],
+                label=job["label"],
+                review_path=review_path,
+                webp_path=webp_path,
+                jpg_path=jpg_path,
+            )
+        )
 
     black_framed_webp_path = generated_assets["black"]["webp_path"]
     black_framed_jpg_path = generated_assets["black"]["jpg_path"]
     prompt_dir = None
     prompt_paths = []
     prompt_zip_path = None
-    zip_path = None
     lifestyle_pack_error = None
 
     try:
@@ -1361,23 +1485,44 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
     except Exception as error:
         lifestyle_pack_error = str(error)
 
-    zip_path = create_complete_pack_zip(
+    export_dirs = rebuild_export_folders(run_dir, assets)
+    zip_path = create_shopify_pack_zip(
         zip_dir,
         product_slug,
-        webp_dir,
-        jpg_dir,
-        prompt_dir,
+        export_dirs["shopify_uploads_dir"],
+    )
+    social_zip_path = create_social_media_pack_zip(
+        zip_dir,
+        product_slug,
+        export_dirs["socials_dir"],
+    )
+
+    if prompt_dir is not None and Path(prompt_dir).exists():
+        prompt_zip_path = create_prompt_pack_zip(zip_dir, product_slug, prompt_dir)
+
+    complete_zip_path = create_complete_pack_zip(
+        zip_dir,
+        product_slug,
+        prompt_dir=prompt_dir,
+        assets=assets,
     )
 
     return {
+        "product_name": product_name,
+        "sport_category": sport_category,
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "product_slug": product_slug,
         "sport_slug": sport_slug,
         "run_dir": run_dir,
         "review_dir": review_dir,
         "webp_dir": webp_dir,
         "jpg_dir": jpg_dir,
+        "zip_dir": zip_dir,
         "zip_path": zip_path,
-        "complete_zip_path": zip_path,
+        "social_zip_path": social_zip_path,
+        "complete_zip_path": complete_zip_path,
+        "shopify_uploads_dir": export_dirs["shopify_uploads_dir"],
+        "socials_dir": export_dirs["socials_dir"],
         "review_paths": review_paths,
         "webp_paths": webp_paths,
         "jpg_paths": jpg_paths,
@@ -1386,6 +1531,7 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         "prompt_dir": prompt_dir,
         "prompt_paths": prompt_paths,
         "prompt_zip_path": prompt_zip_path,
+        "assets": assets,
         "lifestyle_mockup_paths": {},
         "lifestyle_pack_error": lifestyle_pack_error,
     }

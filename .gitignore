@@ -1,5 +1,7 @@
 .venv/
 .env
+credentials.json
+service-account.json
 input/
 output/
 __pycache__/
