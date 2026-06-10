@@ -205,13 +205,13 @@ def get_product_upload_prompt(metadata, update_existing=False):
     action_phrase = "Update the existing product with these new images, replacing the old media." if update_existing else "Create the product from scratch and assign the images correctly."
 
     upload_instructions = (
-        "Attach every file from the Shopify uploads folder to ChatGPT when prompted. "
+        "Attach every WEBP file from the shopify-uploads folder to ChatGPT when prompted. "
         "Also attach or reference the Shopify HTML preview file so ChatGPT can see the intended image order and labels."
     )
 
     if update_existing:
         upload_instructions = (
-            "Attach every file from the Shopify uploads folder to ChatGPT and use them to replace the existing product images. "
+            "Attach every WEBP file from the shopify-uploads folder to ChatGPT and use them to replace the existing product images. "
             "Keep the product handle the same and ensure the old media is replaced with the new files."
         )
 
@@ -238,7 +238,7 @@ Product handle: {product_handle}
 Important Shopify CSV columns to use when importing or updating a product:
 {csv_header}
 
-Use the images from the Shopify uploads folder and the HTML preview file at {metadata.get('shopify_uploads_html_path')}.
+Use the WEBP files from the shopify-uploads folder and the HTML preview file at {metadata.get('shopify_uploads_html_path')}.
 {upload_instructions}
 {action_phrase}
 
@@ -936,6 +936,11 @@ def render_product_uploads_page():
     )
 
     st.markdown(
+        "1. Copy and paste every WEBP file from the `shopify-uploads` folder into ChatGPT so ChatGPT has the image files needed to push to Shopify.\n"
+        "2. Place one of the prompts below into ChatGPT beneath the product images and press Start. After pressing accept, ChatGPT should push the Shopify product.\n"
+        "3. Review the draft Shopify product, ensure all details are correct, set the product to active, activate all collections/catalogues, and set stock amounts.\n"
+        "4. View the live product page on sportscaveshop.com and confirm there are no mistakes.\n"
+        "\n"
         "- `New Shopify product` will generate a prompt for creating a brand new product in Shopify.\n"
         "- `Update existing product` will generate a prompt for replacing the images on an existing Shopify product.\n"
         "- If you already have a `shopify-uploads` folder and HTML preview, attach those files in ChatGPT when prompted."
