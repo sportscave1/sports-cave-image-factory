@@ -1247,11 +1247,6 @@ def create_complete_pack_zip(zip_dir, product_slug, webp_dir=None, jpg_dir=None,
                 for jpg_file in sorted(Path(jpg_dir).glob("*.jpg")):
                     zipf.write(jpg_file, arcname=f"jpg/{jpg_file.name}")
 
-        if prompt_dir is not None and Path(prompt_dir).exists():
-            for prompt_file in sorted(Path(prompt_dir).glob("*")):
-                if prompt_file.is_file():
-                    zipf.write(prompt_file, arcname=f"chatgpt-prompts/{prompt_file.name}")
-
     return complete_zip_path
 
 
@@ -1486,24 +1481,9 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         lifestyle_pack_error = str(error)
 
     export_dirs = rebuild_export_folders(run_dir, assets)
-    zip_path = create_shopify_pack_zip(
-        zip_dir,
-        product_slug,
-        export_dirs["shopify_uploads_dir"],
-    )
-    social_zip_path = create_social_media_pack_zip(
-        zip_dir,
-        product_slug,
-        export_dirs["socials_dir"],
-    )
-
-    if prompt_dir is not None and Path(prompt_dir).exists():
-        prompt_zip_path = create_prompt_pack_zip(zip_dir, product_slug, prompt_dir)
-
     complete_zip_path = create_complete_pack_zip(
         zip_dir,
         product_slug,
-        prompt_dir=prompt_dir,
         assets=assets,
     )
 
@@ -1518,8 +1498,8 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         "webp_dir": webp_dir,
         "jpg_dir": jpg_dir,
         "zip_dir": zip_dir,
-        "zip_path": zip_path,
-        "social_zip_path": social_zip_path,
+        "zip_path": None,
+        "social_zip_path": None,
         "complete_zip_path": complete_zip_path,
         "shopify_uploads_dir": export_dirs["shopify_uploads_dir"],
         "socials_dir": export_dirs["socials_dir"],

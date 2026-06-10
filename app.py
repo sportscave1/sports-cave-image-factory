@@ -434,35 +434,19 @@ def rebuild_result_artifacts(result):
 
     run_dir = Path(result["run_dir"])
     zip_dir = run_dir / "zip"
-    zip_dir.mkdir(parents=True, exist_ok=True)
+    image_factory.reset_directory_contents(zip_dir)
 
     export_dirs = image_factory.rebuild_export_folders(run_dir, result["assets"])
     result["zip_dir"] = zip_dir
     result["shopify_uploads_dir"] = export_dirs["shopify_uploads_dir"]
     result["socials_dir"] = export_dirs["socials_dir"]
-    result["zip_path"] = image_factory.create_shopify_pack_zip(
-        zip_dir,
-        result["product_slug"],
-        Path(result["shopify_uploads_dir"]),
-    )
-    result["social_zip_path"] = image_factory.create_social_media_pack_zip(
-        zip_dir,
-        result["product_slug"],
-        Path(result["socials_dir"]),
-    )
+    result["zip_path"] = None
+    result["social_zip_path"] = None
     result["prompt_zip_path"] = None
-
-    if result["prompt_dir"] and Path(result["prompt_dir"]).exists():
-        result["prompt_zip_path"] = image_factory.create_prompt_pack_zip(
-            zip_dir,
-            result["product_slug"],
-            Path(result["prompt_dir"]),
-        )
 
     result["complete_zip_path"] = image_factory.create_complete_pack_zip(
         zip_dir,
         result["product_slug"],
-        prompt_dir=result["prompt_dir"],
         assets=result["assets"],
     )
     write_local_manifest(result)
@@ -486,17 +470,6 @@ def apply_asset_selection_from_session(result):
         result = rebuild_result_artifacts(result)
         result = sync_result_to_google_drive(result)
         st.session_state.last_generation_result = result
-
-    return result
-
-
-def set_all_asset_selection(result, include_in_zip):
-    result = normalize_generation_result(result)
-
-    for asset in result["assets"]:
-        state_key = get_asset_checkbox_key(result["run_dir"], asset["key"])
-        st.session_state[state_key] = include_in_zip
-        asset["include_in_zip"] = include_in_zip
 
     return result
 
@@ -554,22 +527,6 @@ def render_asset_selection_controls(result):
         f"{included_count} of {len(result['assets'])} images are currently included. "
         "Untick any image to leave it out of the ZIP downloads."
     )
-
-    select_col, clear_col = st.columns(2)
-    with select_col:
-        if st.button("Select All Images", use_container_width=True):
-            result = set_all_asset_selection(result, True)
-            result = rebuild_result_artifacts(result)
-            result = sync_result_to_google_drive(result)
-            st.session_state.last_generation_result = result
-            st.rerun()
-    with clear_col:
-        if st.button("Clear All Images", use_container_width=True):
-            result = set_all_asset_selection(result, False)
-            result = rebuild_result_artifacts(result)
-            result = sync_result_to_google_drive(result)
-            st.session_state.last_generation_result = result
-            st.rerun()
 
     return result
 
@@ -650,36 +607,12 @@ def render_prompt_cards(result, prompt_paths, heading):
 
 
 def render_downloads(result):
-    download_cols = st.columns(4)
-
-    with download_cols[0]:
-        render_download_button(
-            "Download Shopify Pack ZIP",
-            result["zip_path"],
-            "application/zip",
-            key=f"download-shopify::{result['run_dir']}",
-        )
-    with download_cols[1]:
-        render_download_button(
-            "Download Social Media ZIP",
-            result["social_zip_path"],
-            "application/zip",
-            key=f"download-social::{result['run_dir']}",
-        )
-    with download_cols[2]:
-        render_download_button(
-            "Download ChatGPT Prompt ZIP",
-            result["prompt_zip_path"],
-            "application/zip",
-            key=f"download-prompts::{result['run_dir']}",
-        )
-    with download_cols[3]:
-        render_download_button(
-            "Download Complete Package ZIP",
-            result["complete_zip_path"],
-            "application/zip",
-            key=f"download-complete::{result['run_dir']}",
-        )
+    render_download_button(
+        "Download ZIP",
+        result["complete_zip_path"],
+        "application/zip",
+        key=f"download-complete::{result['run_dir']}",
+    )
 
 
 def render_generation_result(result):
@@ -782,7 +715,7 @@ def render_sidebar():
         st.sidebar.write("2. Enter the product name.")
         st.sidebar.write("3. Choose the sport category.")
         st.sidebar.write("4. Click Generate Images.")
-        st.sidebar.write("5. Tick only the images you want in the ZIPs.")
+        st.sidebar.write("5. Tick only the images you want in the ZIP.")
         st.sidebar.write("6. Add any ChatGPT lifestyle images below.")
 
     st.sidebar.divider()
@@ -804,7 +737,7 @@ def render_sidebar():
 def render_mockups_page():
     st.title("Sports Cave Image Factory")
     st.caption(
-        "Upload one finished artwork, generate the base images, then download the ZIP packs or add ChatGPT lifestyle images."
+        "Upload one finished artwork, generate the base images, then download one ZIP or add ChatGPT lifestyle images."
     )
 
     uploaded_file = st.file_uploader(
@@ -917,7 +850,7 @@ def test_google_drive_connection():
 
 def render_google_drive_page():
     st.title("Google Drive")
-    st.caption("Service-account Drive storage for Sports Cave runs.")
+    st.caption("OAuth refresh-token Drive storage for Sports Cave runs.")
 
     root_folder_id = drive_storage.get_root_folder_id()
     drive_configured = drive_storage.is_drive_configured()
@@ -973,6 +906,9 @@ def render_settings_page():
     st.write(f"**Password protection:** {get_password_protection_status()}")
     st.write(f"**Google Drive configured:** {'Yes' if drive_storage.is_drive_configured() else 'No'}")
     st.write(f"**Root folder ID present:** {'Yes' if drive_storage.get_root_folder_id() else 'No'}")
+    st.write(f"**OAuth client ID present:** {'Yes' if os.getenv('GOOGLE_OAUTH_CLIENT_ID') else 'No'}")
+    st.write(f"**OAuth client secret present:** {'Yes' if os.getenv('GOOGLE_OAUTH_CLIENT_SECRET') else 'No'}")
+    st.write(f"**OAuth refresh token present:** {'Yes' if os.getenv('GOOGLE_OAUTH_REFRESH_TOKEN') else 'No'}")
     st.write(f"**Output folder path:** `{RUNS_DIR}`")
     st.write(f"**App version:** {APP_VERSION}")
 

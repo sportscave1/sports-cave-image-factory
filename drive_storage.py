@@ -1,4 +1,3 @@
-import base64
 import json
 import mimetypes
 import os
@@ -8,11 +7,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 try:
-    from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+    from google.oauth2.credentials import Credentials as UserCredentials
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
 except ModuleNotFoundError:
-    ServiceAccountCredentials = None
+    UserCredentials = None
     build = None
     MediaFileUpload = None
 
@@ -23,6 +22,7 @@ load_dotenv()
 DRIVE_SCOPE = "https://www.googleapis.com/auth/drive"
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 MOCKUPS_FOLDER_NAME = "Mockups"
+TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 
 class DriveStorageError(RuntimeError):
@@ -30,44 +30,10 @@ class DriveStorageError(RuntimeError):
 
 
 def _require_google_client():
-    if (
-        ServiceAccountCredentials is None
-        or build is None
-        or MediaFileUpload is None
-    ):
+    if UserCredentials is None or build is None or MediaFileUpload is None:
         raise DriveStorageError(
             "Google Drive libraries are not installed. Run `pip install -r requirements.txt`."
         )
-
-
-def _load_service_account_info():
-    base64_value = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON_BASE64", "").strip()
-    raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-
-    if base64_value:
-        try:
-            raw_json = base64.b64decode(base64_value).decode("utf-8")
-        except Exception as error:
-            raise DriveStorageError(
-                "GOOGLE_SERVICE_ACCOUNT_JSON_BASE64 could not be decoded."
-            ) from error
-
-    if not raw_json:
-        return None
-
-    try:
-        return json.loads(raw_json)
-    except json.JSONDecodeError as error:
-        raise DriveStorageError(
-            "Google service account JSON is not valid JSON."
-        ) from error
-
-
-def is_drive_configured():
-    try:
-        return bool(get_root_folder_id() and _load_service_account_info())
-    except DriveStorageError:
-        return False
 
 
 def get_root_folder_id():
@@ -75,20 +41,46 @@ def get_root_folder_id():
     return root_folder_id or None
 
 
+def _get_oauth_config():
+    return {
+        "client_id": os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip(),
+        "client_secret": os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip(),
+        "refresh_token": os.getenv("GOOGLE_OAUTH_REFRESH_TOKEN", "").strip(),
+    }
+
+
+def is_drive_configured():
+    oauth_config = _get_oauth_config()
+    return bool(
+        get_root_folder_id()
+        and oauth_config["client_id"]
+        and oauth_config["client_secret"]
+        and oauth_config["refresh_token"]
+    )
+
+
 @lru_cache(maxsize=1)
 def get_drive_service():
     _require_google_client()
 
-    service_account_info = _load_service_account_info()
+    oauth_config = _get_oauth_config()
     root_folder_id = get_root_folder_id()
 
-    if service_account_info is None or not root_folder_id:
+    if not root_folder_id:
+        raise DriveStorageError("GOOGLE_DRIVE_ROOT_FOLDER_ID is missing.")
+
+    if not oauth_config["client_id"] or not oauth_config["client_secret"] or not oauth_config["refresh_token"]:
         raise DriveStorageError(
-            "Google Drive is not configured. Add GOOGLE_DRIVE_ROOT_FOLDER_ID and a service account JSON env var."
+            "Google Drive is not configured. Add GOOGLE_OAUTH_CLIENT_ID, "
+            "GOOGLE_OAUTH_CLIENT_SECRET, and GOOGLE_OAUTH_REFRESH_TOKEN."
         )
 
-    credentials = ServiceAccountCredentials.from_service_account_info(
-        service_account_info,
+    credentials = UserCredentials(
+        token=None,
+        refresh_token=oauth_config["refresh_token"],
+        token_uri=TOKEN_URI,
+        client_id=oauth_config["client_id"],
+        client_secret=oauth_config["client_secret"],
         scopes=[DRIVE_SCOPE],
     )
     return build("drive", "v3", credentials=credentials, cache_discovery=False)

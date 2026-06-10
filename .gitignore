@@ -1,5 +1,7 @@
 .venv/
 .env
+client_secret.json
+token.json
 credentials.json
 service-account.json
 input/
