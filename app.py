@@ -1,9 +1,9 @@
 from contextlib import suppress
-from io import BytesIO
 from pathlib import Path
 import json
 import logging
 import os
+import shutil
 import tempfile
 
 from PIL import Image, UnidentifiedImageError
@@ -1553,6 +1553,8 @@ def validate_uploaded_artwork(uploaded_file):
     file_size = getattr(uploaded_file, "size", None)
     if file_size is not None and file_size <= 0:
         raise ValueError("Uploaded file is empty.")
+    if file_size is not None and file_size > image_factory.MAX_UPLOAD_SIZE_BYTES:
+        raise ValueError("Uploaded file is larger than 15MB. Please upload an image under 15MB.")
 
     filename = getattr(uploaded_file, "name", "")
     suffix = Path(filename).suffix.lower()
@@ -1560,15 +1562,26 @@ def validate_uploaded_artwork(uploaded_file):
         raise ValueError("Unsupported file type. Upload JPG, JPEG, PNG, or WEBP.")
 
     try:
-        with Image.open(BytesIO(uploaded_file.getbuffer())) as image:
-            image.load()
-            image.convert("RGB")
+        image_factory.log_memory("Before upload validation")
+        uploaded_file.seek(0)
+        with Image.open(uploaded_file) as image:
+            width, height = image.size
+            image.verify()
+        image_factory.log_memory("After upload validation")
     except UnidentifiedImageError as error:
         raise ValueError(
             "Uploaded file is not a valid image. Please upload a valid JPG, PNG, or WEBP file."
         ) from error
     except Exception as error:
         raise RuntimeError("Unable to validate uploaded artwork file.") from error
+    finally:
+        uploaded_file.seek(0)
+
+    return {
+        "file_size": file_size,
+        "width": width,
+        "height": height,
+    }
 
 
 def get_sport_category(selected_option, custom_value):
@@ -1640,6 +1653,7 @@ def normalize_generation_result(result):
         "sport_slug": None,
         "run_dir": None,
         "review_dir": None,
+        "preview_dir": None,
         "webp_dir": None,
         "jpg_dir": None,
         "zip_dir": None,
@@ -1669,6 +1683,7 @@ def normalize_generation_result(result):
         "drive_sync_enabled": False,
         "drive_sync_error": None,
         "drive_sync_message": None,
+        "status_text": None,
     }
     normalized = defaults.copy()
     normalized.update(result or {})
@@ -1701,14 +1716,15 @@ def render_download_button(label, file_path, mime, key):
     if not file_path.exists():
         return
 
-    st.download_button(
-        label=label,
-        data=file_path.read_bytes(),
-        file_name=file_path.name,
-        mime=mime,
-        key=key,
-        use_container_width=True,
-    )
+    with file_path.open("rb") as file_handle:
+        st.download_button(
+            label=label,
+            data=file_handle,
+            file_name=file_path.name,
+            mime=mime,
+            key=key,
+            use_container_width=True,
+        )
 
 
 def prime_asset_selection_state(result):
@@ -1833,7 +1849,7 @@ def rebuild_result_artifacts(result):
 
     run_dir = Path(result["run_dir"])
     zip_dir = run_dir / "zip"
-    image_factory.reset_directory_contents(zip_dir)
+    zip_dir.mkdir(parents=True, exist_ok=True)
 
     export_dirs = image_factory.rebuild_export_folders(
         run_dir,
@@ -1845,15 +1861,18 @@ def rebuild_result_artifacts(result):
     result["shopify_uploads_dir"] = export_dirs["shopify_uploads_dir"]
     result["shopify_uploads_html_path"] = export_dirs.get("shopify_uploads_html_path")
     result["socials_dir"] = export_dirs["socials_dir"]
-    result["zip_path"] = None
-    result["social_zip_path"] = None
-    result["prompt_zip_path"] = None
 
-    result["complete_zip_path"] = image_factory.create_complete_pack_zip(
-        zip_dir,
-        result["product_slug"],
-        assets=result["assets"],
-    )
+    for key in ("zip_path", "social_zip_path", "complete_zip_path"):
+        existing_path = result.get(key)
+        if existing_path:
+            with suppress(FileNotFoundError, PermissionError):
+                Path(existing_path).unlink()
+        result[key] = None
+
+    prompt_zip_path = result.get("prompt_zip_path")
+    if prompt_zip_path and not Path(prompt_zip_path).exists():
+        result["prompt_zip_path"] = None
+
     write_local_manifest(result)
     return result
 
@@ -1873,10 +1892,80 @@ def apply_asset_selection_from_session(result):
 
     if selections_changed:
         result = rebuild_result_artifacts(result)
-        result = sync_result_to_google_drive(result)
         st.session_state.last_generation_result = result
 
     return result
+
+
+def build_shopify_zip_package(result):
+    result = rebuild_result_artifacts(result)
+    shopify_uploads_dir = result.get("shopify_uploads_dir")
+
+    if not shopify_uploads_dir or not Path(shopify_uploads_dir).exists():
+        raise FileNotFoundError("Shopify upload files are not available for this run.")
+
+    zip_dir = Path(result["zip_dir"] or (Path(result["run_dir"]) / "zip"))
+    zip_dir.mkdir(parents=True, exist_ok=True)
+    result["zip_path"] = image_factory.create_shopify_pack_zip(
+        zip_dir,
+        result["product_slug"],
+        Path(shopify_uploads_dir),
+    )
+    result["status_text"] = "Shopify ZIP ready."
+    return sync_result_to_google_drive(result)
+
+
+def build_lifestyle_prompt_pack(result):
+    result = normalize_generation_result(result)
+
+    if not result["run_dir"] or not result["black_framed_webp_path"]:
+        raise FileNotFoundError("The black framed reference image is missing for this run.")
+
+    run_dir = Path(result["run_dir"])
+    zip_dir = Path(result["zip_dir"] or (run_dir / "zip"))
+    zip_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt_dir, _, prompt_paths, _ = image_factory.generate_lifestyle_prompt_pack(
+        result["product_name"],
+        result["sport_category"],
+        result["product_slug"],
+        run_dir,
+        Path(result["black_framed_webp_path"]),
+    )
+
+    result["prompt_dir"] = prompt_dir
+    result["prompt_paths"] = prompt_paths
+    result["prompt_zip_path"] = image_factory.create_prompt_pack_zip(
+        zip_dir,
+        result["product_slug"],
+        prompt_dir,
+    )
+    result["lifestyle_pack_error"] = None
+    result["status_text"] = "Lifestyle prompt pack ready."
+    write_local_manifest(result)
+    return sync_result_to_google_drive(result)
+
+
+def build_complete_download_pack(result):
+    result = rebuild_result_artifacts(result)
+    zip_dir = Path(result["zip_dir"] or (Path(result["run_dir"]) / "zip"))
+    zip_dir.mkdir(parents=True, exist_ok=True)
+
+    prompt_dir = result.get("prompt_dir")
+    if prompt_dir and not Path(prompt_dir).exists():
+        prompt_dir = None
+        result["prompt_dir"] = None
+        result["prompt_paths"] = []
+        result["prompt_zip_path"] = None
+
+    result["complete_zip_path"] = image_factory.create_complete_pack_zip(
+        zip_dir,
+        result["product_slug"],
+        prompt_dir=prompt_dir,
+        assets=result["assets"],
+    )
+    result["status_text"] = "Complete download pack ready."
+    return sync_result_to_google_drive(result)
 
 
 def build_lifestyle_asset(prompt_path, saved_paths):
@@ -1886,6 +1975,7 @@ def build_lifestyle_asset(prompt_path, saved_paths):
         key=get_lifestyle_asset_key(prompt_filename),
         label=get_prompt_label(prompt_path),
         review_path=saved_paths.get("jpg_path") or saved_paths.get("webp_path"),
+        preview_path=saved_paths.get("preview_path"),
         webp_path=saved_paths.get("webp_path"),
         jpg_path=saved_paths.get("jpg_path"),
         include_in_zip=True,
@@ -1904,7 +1994,7 @@ def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
         product_slug=result["product_slug"],
         sport_slug=result["sport_slug"],
         prompt_filename=Path(prompt_path).name,
-        image_bytes=uploaded_file.getvalue(),
+        image_file=uploaded_file,
     )
 
     prompt_filename = Path(prompt_path).name
@@ -1916,6 +2006,7 @@ def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
         st.session_state[state_key] = True
 
     result["lifestyle_pack_error"] = None
+    result["status_text"] = f"Saved lifestyle image for {get_prompt_label(prompt_path)}."
     result = rebuild_result_artifacts(result)
     return sync_result_to_google_drive(result)
 
@@ -1927,34 +2018,52 @@ def render_asset_selection_controls(result):
         return result
 
     included_count = sum(1 for asset in result["assets"] if asset["include_in_zip"])
-    st.subheader("ZIP Image Selection")
+    st.subheader("Pack Selection")
     st.caption(
         f"{included_count} of {len(result['assets'])} images are currently included. "
-        "Untick any image to leave it out of the ZIP downloads."
+        "Untick any image to leave it out of the optional ZIP packs and export folders."
     )
 
     return result
 
 
+def render_asset_download_controls(asset, run_dir):
+    download_cols = st.columns(2)
+    with download_cols[0]:
+        render_download_button(
+            "WEBP",
+            asset.get("webp_path"),
+            "image/webp",
+            key=f"download-webp::{run_dir}::{asset['key']}",
+        )
+    with download_cols[1]:
+        render_download_button(
+            "JPG",
+            asset.get("jpg_path"),
+            "image/jpeg",
+            key=f"download-jpg::{run_dir}::{asset['key']}",
+        )
+
+
 def render_generated_previews(result):
     st.subheader("Generated Previews")
+    st.caption("These are lightweight preview files only. Full export images stay on disk until you download them.")
     preview_cols = st.columns(2)
     base_assets = [asset for asset in result["assets"] if asset["asset_group"] == "generated"]
 
     for index, asset in enumerate(base_assets):
         with preview_cols[index % 2]:
             checkbox_key = get_asset_checkbox_key(result["run_dir"], asset["key"])
-            st.checkbox("Include in ZIP", key=checkbox_key)
+            st.checkbox("Include in packs", key=checkbox_key)
 
-            preview_path = (
-                asset.get("preview_path")
-                or asset.get("review_path")
-                or asset.get("webp_path")
-                or asset.get("jpg_path")
-            )
+            preview_path = asset.get("preview_path")
             if preview_path and Path(preview_path).exists():
                 st.image(str(preview_path), caption=asset["label"], width=380)
                 st.caption(Path(preview_path).name)
+            else:
+                st.caption("Preview not available.")
+
+            render_asset_download_controls(asset, result["run_dir"])
 
 
 def render_prompt_cards(result, prompt_paths, heading):
@@ -1976,17 +2085,27 @@ def render_prompt_cards(result, prompt_paths, heading):
             if saved_lifestyle_paths:
                 saved_webp_path = saved_lifestyle_paths.get("webp_path")
                 saved_jpg_path = saved_lifestyle_paths.get("jpg_path")
+                saved_preview_path = saved_lifestyle_paths.get("preview_path")
                 asset_key = get_lifestyle_asset_key(prompt_name)
                 checkbox_key = get_asset_checkbox_key(result["run_dir"], asset_key)
 
-                preview_path = saved_webp_path or saved_jpg_path
+                preview_path = saved_preview_path
                 if preview_path and Path(preview_path).exists():
-                    st.checkbox("Include in ZIP", key=checkbox_key)
+                    st.checkbox("Include in packs", key=checkbox_key)
                     st.image(
                         str(preview_path),
                         caption=Path(preview_path).name,
                         width=360,
                     )
+
+                render_asset_download_controls(
+                    {
+                        "key": asset_key,
+                        "webp_path": saved_webp_path,
+                        "jpg_path": saved_jpg_path,
+                    },
+                    result["run_dir"],
+                )
 
             uploaded_lifestyle_image = st.file_uploader(
                 "Upload image from ChatGPT",
@@ -2016,53 +2135,98 @@ def render_prompt_cards(result, prompt_paths, heading):
                         st.exception(error)
 
 
-def render_downloads(result):
-    render_download_button(
-        "Download ZIP",
-        result["complete_zip_path"],
-        "application/zip",
-        key=f"download-complete::{result['run_dir']}",
-    )
+def render_optional_package_controls(result):
+    st.subheader("Optional Packs")
+    st.caption("The first generate step stays lightweight. Create heavier ZIP packages only when you need them.")
+
+    package_specs = [
+        {
+            "button_label": "Create Shopify ZIP",
+            "download_label": "Download Shopify ZIP",
+            "path_key": "zip_path",
+            "mime": "application/zip",
+            "builder": build_shopify_zip_package,
+            "error_message": "Could not create the Shopify ZIP.",
+        },
+        {
+            "button_label": "Create Lifestyle Prompt Pack",
+            "download_label": "Download Lifestyle Prompt Pack",
+            "path_key": "prompt_zip_path",
+            "mime": "application/zip",
+            "builder": build_lifestyle_prompt_pack,
+            "error_message": "Could not create the lifestyle prompt pack.",
+        },
+        {
+            "button_label": "Create Complete Download Pack",
+            "download_label": "Download Complete Download Pack",
+            "path_key": "complete_zip_path",
+            "mime": "application/zip",
+            "builder": build_complete_download_pack,
+            "error_message": "Could not create the complete download pack.",
+        },
+    ]
+
+    package_cols = st.columns(3)
+    for index, package_spec in enumerate(package_specs):
+        with package_cols[index]:
+            if st.button(
+                package_spec["button_label"],
+                key=f"create-package::{result['run_dir']}::{package_spec['path_key']}",
+                use_container_width=True,
+            ):
+                try:
+                    updated_result = package_spec["builder"](result)
+                    st.session_state.last_generation_result = updated_result
+                    st.rerun()
+                except Exception as error:
+                    st.error(package_spec["error_message"])
+                    st.exception(error)
+
+            render_download_button(
+                package_spec["download_label"],
+                result.get(package_spec["path_key"]),
+                package_spec["mime"],
+                key=f"download-package::{result['run_dir']}::{package_spec['path_key']}",
+            )
 
 
 def render_generation_result(result):
     result = apply_asset_selection_from_session(result)
     result = render_asset_selection_controls(result)
-    st.success("Images generated successfully.")
+    st.success(result.get("status_text") or "Core Sports Cave product images are ready.")
 
     if result["run_dir"]:
         st.caption(f"Local run folder: `{result['run_dir']}`")
 
-    render_downloads(result)
+    if result.get("shopify_uploads_dir"):
+        with suppress(FileNotFoundError):
+            st.caption(
+                f"{len(list(Path(result['shopify_uploads_dir']).glob('*.webp')))} WEBP files ready for Shopify uploads."
+            )
+
+    if result.get("socials_dir"):
+        with suppress(FileNotFoundError):
+            st.caption(
+                f"{len(list(Path(result['socials_dir']).glob('*.jpg')))} JPG files ready for socials."
+            )
 
     if result["drive_run_url"]:
         st.success("Saved to Google Drive")
         st.markdown(f"[Open Google Drive run folder]({result['drive_run_url']})")
     elif result["drive_sync_error"]:
         st.warning(
-            "Google Drive upload failed, but the local ZIP downloads are still ready. "
+            "Google Drive upload failed, but the local files are still ready. "
             f"{result['drive_sync_error']}"
         )
     else:
         st.info("Google Drive is not configured. Files were saved locally only.")
 
-    if result["shopify_uploads_dir"]:
-        with suppress(FileNotFoundError):
-            st.caption(
-                f"{len(list(Path(result['shopify_uploads_dir']).glob('*.webp')))} WEBP files ready for Shopify uploads."
-            )
-
-    if result["socials_dir"]:
-        with suppress(FileNotFoundError):
-            st.caption(
-                f"{len(list(Path(result['socials_dir']).glob('*.jpg')))} JPG files ready for socials."
-            )
-
     render_generated_previews(result)
+    render_optional_package_controls(result)
 
     if result["lifestyle_pack_error"]:
         st.warning(
-            "The base image set was created, but the prompt pack could not be prepared for this run: "
+            "The core image set was created, but one of the optional pack steps reported an issue: "
             f"{result['lifestyle_pack_error']}"
         )
 
@@ -2090,7 +2254,7 @@ def render_generation_result(result):
             "Social Lifestyle Mockups",
         )
     else:
-        st.caption("Generate a new run to create the ChatGPT lifestyle prompt pack.")
+        st.caption("Create the Lifestyle Prompt Pack above to unlock the ChatGPT lifestyle prompt cards.")
 
 
 def render_recent_runs_sidebar():
@@ -2121,12 +2285,12 @@ def render_sidebar():
     if st.session_state.selected_page == "Mockups":
         st.sidebar.divider()
         st.sidebar.subheader("How It Works")
-        st.sidebar.write("1. Upload the finished artwork file.")
-        st.sidebar.write("2. Enter the product name.")
-        st.sidebar.write("3. Choose the sport category.")
-        st.sidebar.write("4. Click Generate Images.")
-        st.sidebar.write("5. Tick only the images you want in the ZIP.")
-        st.sidebar.write("6. Add any ChatGPT lifestyle images below.")
+        st.sidebar.write("1. Upload artwork.")
+        st.sidebar.write("2. Generate core Shopify images.")
+        st.sidebar.write("3. Review lightweight previews.")
+        st.sidebar.write("4. Download individual files.")
+        st.sidebar.write("5. Create optional packs only when needed.")
+        st.sidebar.write("6. Add ChatGPT lifestyle images if needed.")
 
     st.sidebar.divider()
     st.sidebar.subheader("Storage")
@@ -2147,9 +2311,11 @@ def render_sidebar():
 def render_mockups_page():
     st.title("Sports Cave Image Factory")
     st.caption(
-        "Upload one finished artwork, generate the base images, then download one ZIP or add ChatGPT lifestyle images."
+        "Upload one finished artwork, generate the five core Shopify images first, then create heavier packs only on demand."
     )
+    st.caption("Upload limit: 15MB. Working images are capped to 2400px and UI previews are capped to 900px.")
 
+    st.subheader("1. Upload Artwork")
     uploaded_file = st.file_uploader(
         "Upload finished Sports Cave artwork",
         type=["jpg", "jpeg", "png", "webp"],
@@ -2194,7 +2360,8 @@ def render_mockups_page():
             placeholder="Example: Formula 1",
         )
 
-    generate_clicked = st.button("Generate Images", type="primary")
+    st.subheader("2. Generate Core Shopify Images")
+    generate_clicked = st.button("Generate Core Shopify Images", type="primary")
 
     if uploaded_file is not None:
         st.subheader("Uploaded Artwork")
@@ -2227,16 +2394,17 @@ def render_mockups_page():
             if not sport_category:
                 raise ValueError("Please enter a sport category.")
 
-            update_status("Validating uploaded artwork...", 5)
+            update_status("Validating upload...", 5)
             validate_uploaded_artwork(uploaded_file)
 
-            update_status("Preparing artwork file for generation...", 15)
+            update_status("Preparing lightweight working image...", 15)
             suffix = Path(uploaded_file.name).suffix or ".jpg"
+            uploaded_file.seek(0)
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-                temp_file.write(uploaded_file.getbuffer())
+                shutil.copyfileobj(uploaded_file, temp_file)
                 temp_artwork_path = Path(temp_file.name)
+            uploaded_file.seek(0)
 
-            update_status("Generating Sports Cave product images...", 20)
             result = image_factory.generate_product_images(
                 product_name=product_name,
                 sport_category=sport_category,
@@ -2245,17 +2413,22 @@ def render_mockups_page():
                 status_callback=lambda msg, progress=None: update_status(msg, progress),
             )
 
-            update_status("Finalizing generated assets...", 65)
+            update_status("Creating downloads...", 92)
             result = rebuild_result_artifacts(result)
-
-            update_status("Syncing results to Google Drive if configured...", 85)
             result = sync_result_to_google_drive(result)
-
-            update_status("Generation completed successfully.", 100, level="success")
+            result["status_text"] = "Done"
+            image_factory.log_memory("Completion")
+            update_status("Done", 100, level="success")
             st.session_state.last_generation_result = result
+        except image_factory.MemoryLimitExceededError as error:
+            logging.exception("Generation stopped by memory limit")
+            status_container.error(str(error))
+            st.error(str(error))
+            st.exception(error)
         except Exception as error:
             logging.exception("Generation failed")
             status_container.error("Generation failed. See details below.")
+            st.error("Generation failed. See details below.")
             st.exception(error)
         finally:
             if temp_artwork_path is not None:

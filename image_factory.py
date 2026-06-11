@@ -1,20 +1,85 @@
 from pathlib import Path
-from io import BytesIO
 from PIL import Image, ImageOps, ImageFile, UnidentifiedImageError
+import gc
+import os
 import zipfile
 import re
 import shutil
 from datetime import datetime
 from textwrap import dedent
 
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
 ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+MAX_UPLOAD_SIZE_BYTES = 15 * 1024 * 1024
+MAX_WORKING_EDGE = 2400
+MAX_PREVIEW_EDGE = 900
+EXPORT_IMAGE_EDGE = 1024
+EXPORT_WEBP_QUALITY = 85
+EXPORT_WEBP_METHOD = 4
+EXPORT_JPG_QUALITY = 92
+PREVIEW_WEBP_QUALITY = 70
+PREVIEW_WEBP_METHOD = 4
+MEMORY_LIMIT_MB = 430
+MEMORY_LIMIT_MESSAGE = (
+    "Memory limit reached before completion. Try a smaller uploaded image or upgrade the Render instance."
+)
+
+
+class MemoryLimitExceededError(RuntimeError):
+    pass
+
+
+def get_memory_usage_mb():
+    if psutil is None:
+        return None
+
+    process = psutil.Process(os.getpid())
+    return process.memory_info().rss / 1024 / 1024
+
+
+def log_memory(stage):
+    memory_usage = get_memory_usage_mb()
+    if memory_usage is None:
+        print(f"MEMORY MB: unavailable | {stage}")
+        return None
+
+    print(f"MEMORY MB: {memory_usage:.1f} | {stage}")
+    return memory_usage
+
+
+def ensure_memory_available(stage):
+    memory_usage = log_memory(stage)
+    if memory_usage is not None and memory_usage >= MEMORY_LIMIT_MB:
+        raise MemoryLimitExceededError(MEMORY_LIMIT_MESSAGE)
+
+    return memory_usage
+
+
+def close_image(image):
+    if image is None:
+        return
+
+    try:
+        image.close()
+    except Exception:
+        pass
+
+
+def collect_garbage(stage):
+    gc.collect()
+    ensure_memory_available(stage)
 
 
 def load_artwork_image(image_path):
     try:
         with Image.open(image_path) as image:
             image.load()
-            return image.convert("RGB")
+            return ImageOps.exif_transpose(image).convert("RGB")
     except UnidentifiedImageError as error:
         raise RuntimeError(
             f"Cannot open artwork file {image_path}. Please upload a valid JPG, PNG, or WEBP image."
@@ -944,30 +1009,99 @@ def slugify(text):
 
 
 def fit_artwork_to_box(artwork, box_width, box_height):
-    artwork = artwork.convert("RGB")
-
-    art_ratio = artwork.width / artwork.height
-    box_ratio = box_width / box_height
-
-    if art_ratio > box_ratio:
-        new_height = box_height
-        new_width = int(new_height * art_ratio)
-    else:
-        new_width = box_width
-        new_height = int(new_width / art_ratio)
-
-    resized = artwork.resize((new_width, new_height), Image.LANCZOS)
-
-    left = (new_width - box_width) // 2
-    top = (new_height - box_height) // 2
-    right = left + box_width
-    bottom = top + box_height
-
-    return resized.crop((left, top, right, bottom))
+    return ImageOps.fit(
+        artwork,
+        (box_width, box_height),
+        method=Image.LANCZOS,
+        centering=(0.5, 0.5),
+    )
 
 
 def resize_to_1024(image):
-    return image.resize((1024, 1024), Image.LANCZOS)
+    return image.resize((EXPORT_IMAGE_EDGE, EXPORT_IMAGE_EDGE), Image.LANCZOS)
+
+
+def prepare_working_artwork(image_path, upload_dir):
+    upload_dir = Path(upload_dir)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    working_path = upload_dir / "artwork-working.jpg"
+
+    ensure_memory_available("Before source image open")
+    artwork = load_artwork_image(image_path)
+
+    try:
+        ensure_memory_available("After source image open")
+
+        if max(artwork.size) > MAX_WORKING_EDGE:
+            artwork.thumbnail((MAX_WORKING_EDGE, MAX_WORKING_EDGE), Image.LANCZOS)
+
+        artwork.save(
+            working_path,
+            format="JPEG",
+            quality=EXPORT_JPG_QUALITY,
+            optimize=True,
+        )
+    finally:
+        close_image(artwork)
+        del artwork
+        collect_garbage("After preparing lightweight working image")
+
+    return working_path
+
+
+def create_preview_file(source_image_path, preview_dir, preview_name):
+    preview_dir = Path(preview_dir)
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    preview_path = preview_dir / preview_name
+
+    ensure_memory_available(f"Before preview creation: {preview_name}")
+    preview_image = load_artwork_image(source_image_path)
+
+    try:
+        preview_image.thumbnail((MAX_PREVIEW_EDGE, MAX_PREVIEW_EDGE), Image.LANCZOS)
+        preview_image.save(
+            preview_path,
+            format="WEBP",
+            quality=PREVIEW_WEBP_QUALITY,
+            method=PREVIEW_WEBP_METHOD,
+        )
+    finally:
+        close_image(preview_image)
+        del preview_image
+        collect_garbage(f"After preview creation: {preview_name}")
+
+    return preview_path
+
+
+def cleanup_old_runs(output_dir, keep_latest=5, active_run_dir=None):
+    runs_dir = Path(output_dir) / "runs"
+    if not runs_dir.exists():
+        return []
+
+    active_run_dir = Path(active_run_dir).resolve() if active_run_dir else None
+    run_dirs = sorted(
+        [path for path in runs_dir.iterdir() if path.is_dir()],
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+    kept_runs = 0
+    deleted_runs = []
+
+    for run_dir in run_dirs:
+        resolved_run_dir = run_dir.resolve()
+        if active_run_dir is not None and resolved_run_dir == active_run_dir:
+            kept_runs += 1
+            continue
+
+        if kept_runs < keep_latest:
+            kept_runs += 1
+            continue
+
+        shutil.rmtree(run_dir)
+        deleted_runs.append(run_dir)
+
+    return deleted_runs
 
 
 def build_asset_record(
@@ -1074,6 +1208,7 @@ def rebuild_export_folders(run_dir, assets, product_name="", sport_category=""):
     shopify_uploads_dir = run_dir / SHOPIFY_UPLOADS_FOLDER_NAME
     socials_dir = run_dir / SOCIALS_FOLDER_NAME
 
+    log_memory("Before export folder rebuild")
     reset_directory_contents(shopify_uploads_dir)
     reset_directory_contents(socials_dir)
 
@@ -1091,6 +1226,7 @@ def rebuild_export_folders(run_dir, assets, product_name="", sport_category=""):
             shutil.copy2(jpg_path, socials_dir / Path(jpg_path).name)
 
     create_shopify_uploads_html(run_dir, shopify_uploads_dir, product_name, sport_category)
+    log_memory("After export folder rebuild")
 
     return {
         "shopify_uploads_dir": shopify_uploads_dir,
@@ -1104,38 +1240,29 @@ def save_review_and_assets(image, review_dir, webp_dir, jpg_dir, review_name, we
     webp_path = webp_dir / webp_name
     jpg_path = jpg_dir / jpg_name
 
-    preview_dir = review_dir.parent / PREVIEW_FOLDER_NAME
-    preview_dir.mkdir(parents=True, exist_ok=True)
-    preview_path = preview_dir / f"{Path(review_name).stem}-preview.jpg"
-
     image_1024 = resize_to_1024(image)
+    try:
+        image_1024.save(review_path, format="PNG")
 
-    image_1024.save(review_path, format="PNG")
+        image_1024.save(
+            webp_path,
+            format="WEBP",
+            quality=EXPORT_WEBP_QUALITY,
+            method=EXPORT_WEBP_METHOD,
+        )
 
-    image_1024.save(
-        webp_path,
-        format="WEBP",
-        quality=82,
-        method=6
-    )
+        image_1024.save(
+            jpg_path,
+            format="JPEG",
+            quality=EXPORT_JPG_QUALITY,
+            optimize=True,
+        )
+    finally:
+        close_image(image_1024)
+        del image_1024
+        gc.collect()
 
-    image_1024.save(
-        jpg_path,
-        format="JPEG",
-        quality=92,
-        optimize=True,
-    )
-
-    preview_image = image_1024.copy()
-    preview_image.thumbnail((900, 900), Image.LANCZOS)
-    preview_image.save(
-        preview_path,
-        format="JPEG",
-        quality=78,
-        optimize=True,
-    )
-
-    return review_path, webp_path, jpg_path, preview_path
+    return review_path, webp_path, jpg_path
 
 
 # -----------------------------------
@@ -1144,92 +1271,127 @@ def save_review_and_assets(image, review_dir, webp_dir, jpg_dir, review_name, we
 
 def generate_framed_product_image(
     template_path,
-    artwork,
+    artwork_path,
     box,
     review_dir,
-    preview_dir,
     webp_dir,
     jpg_dir,
     review_name,
     webp_name,
     jpg_name,
 ):
-    template = Image.open(template_path).convert("RGB")
+    template = None
+    artwork = None
+    fitted_artwork = None
 
-    x, y, w, h = box
-    fitted_artwork = fit_artwork_to_box(artwork, w, h)
+    try:
+        template = load_artwork_image(template_path)
+        artwork = load_artwork_image(artwork_path)
 
-    template.paste(fitted_artwork, (x, y))
-
-    return save_review_and_assets(
-        template,
-        review_dir,
-        preview_dir,
-        webp_dir,
-        jpg_dir,
-        review_name,
-        webp_name,
-        jpg_name,
-    )
-
-
-def generate_unframed_product_image(
-    template_path,
-    artwork,
-    art_box,
-    review_dir,
-    preview_dir,
-    webp_dir,
-    jpg_dir,
-    review_name,
-    webp_name,
-    jpg_name,
-):
-    template = Image.open(template_path).convert("RGB")
-
-    x, y, w, h = art_box
-    fitted_artwork = fit_artwork_to_box(artwork, w, h)
-
-    template.paste(fitted_artwork, (x, y))
-
-    return save_review_and_assets(
-        template,
-        review_dir,
-        preview_dir,
-        webp_dir,
-        jpg_dir,
-        review_name,
-        webp_name,
-        jpg_name,
-    )
-
-
-def generate_size_guide(template_path, artwork, review_dir, preview_dir, webp_dir, jpg_dir, webp_name, jpg_name):
-    template = Image.open(template_path).convert("RGB")
-
-    for _, box in SIZE_GUIDE_BOXES.items():
         x, y, w, h = box
         fitted_artwork = fit_artwork_to_box(artwork, w, h)
         template.paste(fitted_artwork, (x, y))
 
-    return save_review_and_assets(
-        template,
-        review_dir,
-        preview_dir,
-        webp_dir,
-        jpg_dir,
-        "size-guide-output.png",
-        webp_name,
-        jpg_name,
-    )
+        return save_review_and_assets(
+            template,
+            review_dir,
+            webp_dir,
+            jpg_dir,
+            review_name,
+            webp_name,
+            jpg_name,
+        )
+    finally:
+        close_image(fitted_artwork)
+        close_image(artwork)
+        close_image(template)
+        del fitted_artwork, artwork, template
+        gc.collect()
 
 
-def create_shopify_pack_zip(zip_dir, product_slug, webp_dir):
+def generate_unframed_product_image(
+    template_path,
+    artwork_path,
+    art_box,
+    review_dir,
+    webp_dir,
+    jpg_dir,
+    review_name,
+    webp_name,
+    jpg_name,
+):
+    template = None
+    artwork = None
+    fitted_artwork = None
+
+    try:
+        template = load_artwork_image(template_path)
+        artwork = load_artwork_image(artwork_path)
+
+        x, y, w, h = art_box
+        fitted_artwork = fit_artwork_to_box(artwork, w, h)
+        template.paste(fitted_artwork, (x, y))
+
+        return save_review_and_assets(
+            template,
+            review_dir,
+            webp_dir,
+            jpg_dir,
+            review_name,
+            webp_name,
+            jpg_name,
+        )
+    finally:
+        close_image(fitted_artwork)
+        close_image(artwork)
+        close_image(template)
+        del fitted_artwork, artwork, template
+        gc.collect()
+
+
+def generate_size_guide(template_path, artwork_path, review_dir, webp_dir, jpg_dir, webp_name, jpg_name):
+    template = None
+    artwork = None
+
+    try:
+        template = load_artwork_image(template_path)
+        artwork = load_artwork_image(artwork_path)
+
+        for _, box in SIZE_GUIDE_BOXES.items():
+            x, y, w, h = box
+            fitted_artwork = fit_artwork_to_box(artwork, w, h)
+            try:
+                template.paste(fitted_artwork, (x, y))
+            finally:
+                close_image(fitted_artwork)
+                del fitted_artwork
+
+        return save_review_and_assets(
+            template,
+            review_dir,
+            webp_dir,
+            jpg_dir,
+            "size-guide-output.png",
+            webp_name,
+            jpg_name,
+        )
+    finally:
+        close_image(artwork)
+        close_image(template)
+        del artwork, template
+        gc.collect()
+
+
+def create_shopify_pack_zip(zip_dir, product_slug, shopify_uploads_dir):
     zip_path = zip_dir / f"{product_slug}-shopify-pack-webp.zip"
 
+    ensure_memory_available("Before zip creation: Shopify pack")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for webp_file in sorted(webp_dir.glob("*.webp")):
-            zipf.write(webp_file, arcname=webp_file.name)
+        for upload_file in sorted(Path(shopify_uploads_dir).glob("*")):
+            if upload_file.is_file():
+                zipf.write(upload_file, arcname=upload_file.name)
+
+    ensure_memory_available("After zip creation: Shopify pack")
 
     return zip_path
 
@@ -1237,21 +1399,25 @@ def create_shopify_pack_zip(zip_dir, product_slug, webp_dir):
 def create_social_media_pack_zip(zip_dir, product_slug, jpg_dir):
     zip_path = zip_dir / f"{product_slug}-social-media-pack-jpg.zip"
 
+    ensure_memory_available("Before zip creation: Social media pack")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         for jpg_file in sorted(jpg_dir.glob("*.jpg")):
             zipf.write(jpg_file, arcname=jpg_file.name)
 
+    ensure_memory_available("After zip creation: Social media pack")
     return zip_path
 
 
 def create_prompt_pack_zip(zip_dir, product_slug, prompt_dir):
     zip_path = zip_dir / f"{product_slug}-chatgpt-lifestyle-prompts.zip"
 
+    ensure_memory_available("Before zip creation: Prompt pack")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         for prompt_file in sorted(Path(prompt_dir).glob("*")):
             if prompt_file.is_file():
                 zipf.write(prompt_file, arcname=prompt_file.name)
 
+    ensure_memory_available("After zip creation: Prompt pack")
     return zip_path
 
 
@@ -1299,14 +1465,13 @@ def generate_lifestyle_prompt_pack(product_name, sport_category, product_slug, r
         prompt_path.write_text(prompt_text + "\n", encoding="utf-8")
         prompt_paths.append(prompt_path)
 
-    prompt_zip_path = None
-
-    return prompt_dir, reference_image_path, prompt_paths, prompt_zip_path
+    return prompt_dir, reference_image_path, prompt_paths, None
 
 
 def create_complete_pack_zip(zip_dir, product_slug, webp_dir=None, jpg_dir=None, prompt_dir=None, assets=None):
     complete_zip_path = zip_dir / f"{product_slug}-complete-package.zip"
 
+    ensure_memory_available("Before zip creation: Complete pack")
     with zipfile.ZipFile(complete_zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         if assets is not None:
             for asset in sorted(assets, key=lambda item: item.get("label", item.get("key", "")).lower()):
@@ -1332,47 +1497,87 @@ def create_complete_pack_zip(zip_dir, product_slug, webp_dir=None, jpg_dir=None,
                 for jpg_file in sorted(Path(jpg_dir).glob("*.jpg")):
                     zipf.write(jpg_file, arcname=f"jpg/{jpg_file.name}")
 
+        if prompt_dir is not None:
+            for prompt_file in sorted(Path(prompt_dir).glob("*")):
+                if prompt_file.is_file():
+                    zipf.write(prompt_file, arcname=f"{PROMPTS_FOLDER_NAME}/{prompt_file.name}")
+
+    ensure_memory_available("After zip creation: Complete pack")
     return complete_zip_path
 
 
-def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_bytes):
+def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, image_file):
     run_dir = Path(run_dir)
     webp_dir = run_dir / WEBP_CACHE_FOLDER_NAME
     jpg_dir = run_dir / JPG_CACHE_FOLDER_NAME
+    preview_dir = run_dir / PREVIEW_FOLDER_NAME
     webp_dir.mkdir(parents=True, exist_ok=True)
     jpg_dir.mkdir(parents=True, exist_ok=True)
+    preview_dir.mkdir(parents=True, exist_ok=True)
 
     variant_slug = LIFESTYLE_IMAGE_VARIANTS[prompt_filename]
     webp_output_path = webp_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}.webp"
     jpg_output_path = jpg_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}.jpg"
+    preview_output_path = preview_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}-preview.webp"
 
+    if hasattr(image_file, "seek"):
+        image_file.seek(0)
+
+    ensure_memory_available(f"Before source image open: {prompt_filename}")
     try:
-        with Image.open(BytesIO(image_bytes)) as image:
+        with Image.open(image_file) as image:
             image.load()
-            image = image.convert("RGB")
+            image_1024 = ImageOps.fit(
+                ImageOps.exif_transpose(image).convert("RGB"),
+                (EXPORT_IMAGE_EDGE, EXPORT_IMAGE_EDGE),
+                method=Image.LANCZOS,
+            )
     except UnidentifiedImageError as error:
         raise RuntimeError(
             "Cannot read the uploaded lifestyle image. Please upload a valid JPG, PNG, or WEBP file."
         ) from error
+    finally:
+        if hasattr(image_file, "seek"):
+            image_file.seek(0)
 
-    image_1024 = ImageOps.fit(image, (1024, 1024), method=Image.LANCZOS)
-    image_1024.save(
-        webp_output_path,
-        format="WEBP",
-        quality=82,
-        method=6,
-    )
+    ensure_memory_available(f"After source image open: {prompt_filename}")
 
-    image_1024.save(
-        jpg_output_path,
-        format="JPEG",
-        quality=92,
-        optimize=True,
-    )
+    try:
+        image_1024.save(
+            webp_output_path,
+            format="WEBP",
+            quality=EXPORT_WEBP_QUALITY,
+            method=EXPORT_WEBP_METHOD,
+        )
+
+        image_1024.save(
+            jpg_output_path,
+            format="JPEG",
+            quality=EXPORT_JPG_QUALITY,
+            optimize=True,
+        )
+
+        preview_image = image_1024.copy()
+        try:
+            preview_image.thumbnail((MAX_PREVIEW_EDGE, MAX_PREVIEW_EDGE), Image.LANCZOS)
+            preview_image.save(
+                preview_output_path,
+                format="WEBP",
+                quality=PREVIEW_WEBP_QUALITY,
+                method=PREVIEW_WEBP_METHOD,
+            )
+        finally:
+            close_image(preview_image)
+            del preview_image
+    finally:
+        close_image(image_1024)
+        del image_1024
+        collect_garbage(f"After saving lifestyle mockup: {prompt_filename}")
 
     return {
         "webp_path": webp_output_path,
         "jpg_path": jpg_output_path,
+        "preview_path": preview_output_path,
     }
 
 
@@ -1453,8 +1658,8 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
     saved_artwork_path = saved_artwork_path.with_suffix(artwork_file_path.suffix)
 
     shutil.copy2(artwork_file_path, saved_artwork_path)
-
-    artwork = load_artwork_image(saved_artwork_path)
+    report("Preparing lightweight working image...", 15)
+    working_artwork_path = prepare_working_artwork(saved_artwork_path, upload_dir)
 
     review_paths = []
     webp_paths = []
@@ -1466,6 +1671,8 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         {
             "key": "black",
             "label": "Black Framed",
+            "status": "Generating black frame...",
+            "progress": 30,
             "type": "framed",
             "template": black_template,
             "review_name": "black-framed-output.png",
@@ -1473,17 +1680,10 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
             "jpg_name": f"{product_slug}-black-framed-{sport_slug}-wall-art.jpg",
         },
         {
-            "key": "size-guide",
-            "label": "Size Guide",
-            "type": "size_guide",
-            "template": size_guide_template,
-            "review_name": "size-guide-output.png",
-            "webp_name": f"{product_slug}-framed-{sport_slug}-wall-art-sizing-guide.webp",
-            "jpg_name": f"{product_slug}-framed-{sport_slug}-wall-art-sizing-guide.jpg",
-        },
-        {
             "key": "oak",
             "label": "Oak Framed",
+            "status": "Generating oak frame...",
+            "progress": 42,
             "type": "framed",
             "template": oak_template,
             "review_name": "oak-framed-output.png",
@@ -1493,6 +1693,8 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         {
             "key": "white",
             "label": "White Framed",
+            "status": "Generating white frame...",
+            "progress": 54,
             "type": "framed",
             "template": white_template,
             "review_name": "white-framed-output.png",
@@ -1502,24 +1704,37 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         {
             "key": "unframed",
             "label": "Unframed",
+            "status": "Generating unframed...",
+            "progress": 66,
             "type": "unframed",
             "template": unframed_template,
             "review_name": "unframed-output.png",
             "webp_name": f"{product_slug}-unframed-{sport_slug}-wall-art.webp",
             "jpg_name": f"{product_slug}-unframed-{sport_slug}-wall-art.jpg",
         },
+        {
+            "key": "size-guide",
+            "label": "Size Guide",
+            "status": "Generating size guide...",
+            "progress": 78,
+            "type": "size_guide",
+            "template": size_guide_template,
+            "review_name": "size-guide-output.png",
+            "webp_name": f"{product_slug}-framed-{sport_slug}-wall-art-sizing-guide.webp",
+            "jpg_name": f"{product_slug}-framed-{sport_slug}-wall-art-sizing-guide.jpg",
+        },
     ]
 
-    for index, job in enumerate(jobs, start=1):
-        report(f"Generating {job['label']} image...", 30 + int((index - 1) * 12))
+    for job in jobs:
+        report(job["status"], job["progress"])
+        ensure_memory_available(f"Before mockup generation: {job['label']}")
 
         if job["type"] == "framed":
-            review_path, webp_path, jpg_path, preview_path = generate_framed_product_image(
+            review_path, webp_path, jpg_path = generate_framed_product_image(
                 job["template"],
-                artwork,
+                working_artwork_path,
                 MASTER_FRAMED_BOX,
                 review_dir,
-                preview_dir,
                 webp_dir,
                 jpg_dir,
                 job["review_name"],
@@ -1528,11 +1743,10 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
             )
 
         elif job["type"] == "size_guide":
-            review_path, webp_path, jpg_path, preview_path = generate_size_guide(
+            review_path, webp_path, jpg_path = generate_size_guide(
                 job["template"],
-                artwork,
+                working_artwork_path,
                 review_dir,
-                preview_dir,
                 webp_dir,
                 jpg_dir,
                 job["webp_name"],
@@ -1540,12 +1754,11 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
             )
 
         elif job["type"] == "unframed":
-            review_path, webp_path, jpg_path, preview_path = generate_unframed_product_image(
+            review_path, webp_path, jpg_path = generate_unframed_product_image(
                 job["template"],
-                artwork,
+                working_artwork_path,
                 UNFRAMED_ART_BOX,
                 review_dir,
-                preview_dir,
                 webp_dir,
                 jpg_dir,
                 job["review_name"],
@@ -1556,22 +1769,35 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         review_paths.append(review_path)
         webp_paths.append(webp_path)
         jpg_paths.append(jpg_path)
+        asset_record = build_asset_record(
+            key=job["key"],
+            label=job["label"],
+            review_path=review_path,
+            preview_path=None,
+            webp_path=webp_path,
+            jpg_path=jpg_path,
+        )
         generated_assets[job["key"]] = {
             "review_path": review_path,
-            "preview_path": preview_path,
+            "preview_path": None,
             "webp_path": webp_path,
             "jpg_path": jpg_path,
+            "asset_record": asset_record,
         }
-        assets.append(
-            build_asset_record(
-                key=job["key"],
-                label=job["label"],
-                review_path=review_path,
-                preview_path=preview_path,
-                webp_path=webp_path,
-                jpg_path=jpg_path,
-            )
+        assets.append(asset_record)
+
+        collect_garbage(f"After mockup generation: {job['label']}")
+
+    report("Creating lightweight previews...", 88)
+    for job in jobs:
+        review_path = generated_assets[job["key"]]["review_path"]
+        preview_path = create_preview_file(
+            review_path,
+            preview_dir,
+            f"{Path(review_path).stem}-preview.webp",
         )
+        generated_assets[job["key"]]["preview_path"] = preview_path
+        generated_assets[job["key"]]["asset_record"]["preview_path"] = preview_path
 
     black_framed_webp_path = generated_assets["black"]["webp_path"]
     black_framed_jpg_path = generated_assets["black"]["jpg_path"]
@@ -1581,22 +1807,11 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
     lifestyle_pack_error = None
 
     try:
-        prompt_dir, reference_image_path, prompt_paths, prompt_zip_path = generate_lifestyle_prompt_pack(
-            product_name,
-            sport_category,
-            product_slug,
-            run_dir,
-            black_framed_webp_path,
-        )
+        cleanup_old_runs(output_dir, keep_latest=5, active_run_dir=run_dir)
     except Exception as error:
-        lifestyle_pack_error = str(error)
+        report(f"Run cleanup warning: {error}")
 
-    export_dirs = rebuild_export_folders(run_dir, assets, product_name=product_name, sport_category=sport_category)
-    complete_zip_path = create_complete_pack_zip(
-        zip_dir,
-        product_slug,
-        assets=assets,
-    )
+    ensure_memory_available("Completion")
 
     return {
         "product_name": product_name,
@@ -1606,15 +1821,16 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         "sport_slug": sport_slug,
         "run_dir": run_dir,
         "review_dir": review_dir,
+        "preview_dir": preview_dir,
         "webp_dir": webp_dir,
         "jpg_dir": jpg_dir,
         "zip_dir": zip_dir,
         "zip_path": None,
         "social_zip_path": None,
-        "complete_zip_path": complete_zip_path,
-        "shopify_uploads_dir": export_dirs["shopify_uploads_dir"],
-        "shopify_uploads_html_path": export_dirs.get("shopify_uploads_html_path"),
-        "socials_dir": export_dirs["socials_dir"],
+        "complete_zip_path": None,
+        "shopify_uploads_dir": None,
+        "shopify_uploads_html_path": None,
+        "socials_dir": None,
         "review_paths": review_paths,
         "webp_paths": webp_paths,
         "jpg_paths": jpg_paths,
