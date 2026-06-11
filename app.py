@@ -80,6 +80,43 @@ PRODUCT_PAGE_PROMPT_NAMES = {
     "03-living-room-prompt.txt",
 }
 
+NEW_SHOPIFY_PRODUCT_PROMPT = """I have uploaded final approved Sports Cave WebP product images.
+Use SOP 07B.
+Create a new Shopify product directly through the connected Shopify tool.
+Do not create a CSV.
+Do not ask me to manually upload images.
+Upload all supplied WebP images to Shopify, create the product as a Draft, add all images in the correct Sports Cave order, write the product title, handle, Sports Cave-style emotional description, SEO meta title, SEO meta description, image alt text, tags, variants, SKUs, pricing, compare-at pricing, and variant image mapping.
+Keep the product unpublished.
+Use the product subject, sport, athlete, team, rivalry, or moment from the uploaded images. If unclear, ask before creating the draft.
+Follow the Sports Cave description style:
+Short. Emotional. Nostalgic. Identity-driven. Collector-focused.
+The buyer should feel:
+“That’s me. I remember that. I need this.”"""
+
+UPDATE_EXISTING_PRODUCT_PROMPT = """I have uploaded final approved replacement Sports Cave WebP product images.
+
+Use SOP 07C.
+
+Update the existing Shopify product directly through the connected Shopify tool.
+
+Do not create a CSV.
+Do not create a new product.
+Do not ask me to manually upload images.
+
+Find the existing product using the product URL, handle, title, or product subject I provide.
+
+Upload all supplied WebP images to Shopify, attach them to the existing product, replace the old product images, apply the correct Sports Cave image order, write unique SEO-friendly alt text for every image, and reassign variant images correctly.
+
+Black variants use the black frame image.
+Oak variants use the oak frame image.
+White variants use the white frame image.
+Unframed variants use the unframed image.
+
+Keep the existing product status unchanged.
+Keep the existing product title, handle, description, SEO, tags, prices, SKUs, variants, inventory, collections, and metafields unchanged unless I specifically ask you to update them.
+
+If the correct product is unclear, ask before making changes."""
+
 
 st.set_page_config(
     page_title="Sports Cave Image Factory",
@@ -197,61 +234,7 @@ def load_run_metadata(run_dir):
 
 
 def get_product_upload_prompt(metadata, update_existing=False):
-    product_name = metadata.get("product_name", "")
-    sport_category = metadata.get("sport_category", "")
-    product_handle = metadata.get("product_slug", "")
-    image_folder = metadata.get("shopify_uploads_dir", "shopify-uploads")
-    action = "update the existing Shopify product" if update_existing else "create a new Shopify product"
-    action_phrase = "Update the existing product with these new images, replacing the old media." if update_existing else "Create the product from scratch and assign the images correctly."
-
-    upload_instructions = (
-        "Attach every WEBP file from the shopify-uploads folder to ChatGPT when prompted. "
-        "Also attach or reference the Shopify HTML preview file so ChatGPT can see the intended image order and labels."
-    )
-
-    if update_existing:
-        upload_instructions = (
-            "Attach every WEBP file from the shopify-uploads folder to ChatGPT and use them to replace the existing product images. "
-            "Keep the product handle the same and ensure the old media is replaced with the new files."
-        )
-
-    header = (
-        "You are a Shopify upload specialist working through ChatGPT. "
-        f"Use the image files from the Shopify uploads folder and the product details below to {action}. "
-        "Copy the prompt exactly and attach the uploaded images when ChatGPT asks."
-    )
-
-    csv_header = (
-        "Handle,Title,Body (HTML),Vendor,Product Category,Type,Tags,Published,"
-        "Option1 Name,Option1 Value,Variant SKU,Variant Grams,Variant Inventory Tracker,"
-        "Variant Inventory Policy,Variant Fulfillment Service,Variant Price,Variant Compare At Price,"
-        "Variant Requires Shipping,Variant Taxable,Image Src,Image Position,Image Alt Text,Status"
-    )
-
-    prompt = f"""
-{header}
-
-Product name: {product_name}
-Sport category: {sport_category}
-Product handle: {product_handle}
-
-Important Shopify CSV columns to use when importing or updating a product:
-{csv_header}
-
-Use the WEBP files from the shopify-uploads folder and the HTML preview file at {metadata.get('shopify_uploads_html_path')}.
-{upload_instructions}
-{action_phrase}
-
-Instructions:
-- If this is a new product, create it with the provided handle and assign the uploaded images to the correct variant positions.
-- If updating an existing product, keep the product handle the same and replace the current product images with the new uploaded images.
-- Ensure all image filenames are copied into ChatGPT and attached in the order needed for Shopify.
-- Do not create duplicate products when updating existing items.
-- Use the CSV header structure above to generate the import data or the Shopify product upload request.
-
-If you are not using a CSV file, make sure the same values are included in the Shopify product fields. Copy the full prompt and paste it into ChatGPT, then attach all Shopify preview images so ChatGPT can complete the product creation or update workflow.
-"""
-    return prompt.strip()
+    return UPDATE_EXISTING_PRODUCT_PROMPT if update_existing else NEW_SHOPIFY_PRODUCT_PROMPT
 
 
 def get_sport_category(selected_option, custom_value):
@@ -1027,11 +1010,21 @@ def render_product_uploads_page():
 
     if st.session_state[new_prompt_key]:
         st.subheader("New Product Prompt")
-        st.code(get_product_upload_prompt(metadata, update_existing=False), language=None)
+        st.text_area(
+            "",
+            value=get_product_upload_prompt(metadata, update_existing=False),
+            height=420,
+            key=f"new-prompt-area::{metadata['run_name']}",
+        )
 
     if st.session_state[existing_prompt_key]:
         st.subheader("Update Existing Product Prompt")
-        st.code(get_product_upload_prompt(metadata, update_existing=True), language=None)
+        st.text_area(
+            "",
+            value=get_product_upload_prompt(metadata, update_existing=True),
+            height=420,
+            key=f"update-prompt-area::{metadata['run_name']}",
+        )
 
 
 def test_google_drive_connection():
