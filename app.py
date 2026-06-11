@@ -80,7 +80,927 @@ PRODUCT_PAGE_PROMPT_NAMES = {
     "03-living-room-prompt.txt",
 }
 
-NEW_SHOPIFY_PRODUCT_PROMPT = """I have uploaded final approved Sports Cave WebP product images.
+NEW_SHOPIFY_PRODUCT_PROMPT = """SOP 07B — Sports Cave Shopify Product Creation Using ChatGPT + Shopify Connector
+Direct Draft Product Upload Version — No CSV Import Required
+Goal
+Create a complete new Sports Cave Shopify product directly through ChatGPT using the connected Shopify tool.
+This SOP replaces the old CSV import workflow for new product uploads.
+ChatGPT must:
+Create the Shopify product as a Draft
+Upload all supplied final WebP product images to Shopify
+Use those Shopify-uploaded images in the product gallery
+Create all required variants
+Set pricing and compare-at pricing
+Assign variant images correctly
+Write the product description in the correct Sports Cave style
+Create SEO meta title and meta description for maximum organic search value
+Write unique image alt text for every image
+Add clean tags for automated collections
+Leave the product unpublished until manually approved
+No CSV import is required.
+No manual Shopify image upload is required.
+No product should be published automatically.
+
+Brutal Rule
+Never publish a new product automatically.
+Every new Sports Cave product must be created as:
+Status: Draft
+Published: false
+The product must only be published after the final manual review confirms:
+Images are correct
+Product title is correct
+Description feels premium
+Variants are correct
+Prices are correct
+Variant image mapping is correct
+SEO fields are complete
+Tags are clean
+Mobile preview looks strong
+Product feels ready to sell
+
+Required Uploads
+Before running this SOP, upload all final approved WebP product images.
+Images should already be:
+Final production assets
+Optimised WebP files
+Correctly cropped
+Correctly sized
+Visually approved
+Ready for Shopify upload
+Do not ask ChatGPT to redesign, edit, crop, stylise, resize, relight, or change any product image during this SOP.
+This SOP is for Shopify product creation only.
+
+Required Product Inputs
+Along with the WebP images, provide as much of the following as possible:
+Product subject
+Example: Greg Murphy, Cristiano Ronaldo, Arsenal, Shane Warne
+Sport or category
+Example: Motorsport, Football, NBA, Cricket, Boxing, Tennis
+Athlete, team, rivalry, or moment
+Example: Bathurst 2003 Lap of the Gods, Manchester United years, Arsenal title charge
+Product title idea if already chosen
+Optional
+Collection/category if known
+Example: Motor Racing Wall Art, Football Wall Art, NBA Wall Art
+Any required wording that must appear in the product description
+Optional
+Any wording that must not appear
+Optional
+If the uploaded images make the product subject obvious, ChatGPT may infer the subject and create the product copy from the visuals.
+If the subject is unclear, ChatGPT must ask before creating the Shopify draft.
+
+Shopify Product Creation Rule
+ChatGPT must create the product directly in Shopify using the connected Shopify tool.
+The product must be created as a draft first.
+Default Shopify product fields:
+Vendor: Sports Cave
+Product type: Framed Art
+Status: Draft
+Published: false
+Gift card: false
+Requires shipping: true
+Taxable: true
+Condition: New
+Product category: Home & Garden > Decor > Artwork > Posters, Prints & Visual Artwork
+If Shopify rejects or does not support a category/taxonomy field through the connector, leave that field blank and continue. Do not guess controlled Shopify metafield values.
+
+High-Risk Shopify Metafield Rule
+Do not fill Shopify-controlled category metafields unless Shopify provides safe accepted values.
+Leave the following blank unless the value is confirmed inside Shopify:
+Art movement
+Art style
+Artwork authenticity
+Artwork frame material
+Colour
+Condition metafields
+Frame style
+Material
+Orientation
+Painting medium
+Print edition type
+Rarity
+Signature placement
+Sports logo
+Suitable space
+Theme
+Printing method
+Do not invent values such as:
+Modernism
+Reproduction
+Horizontal
+Limited edition
+Paper
+Wood
+Black
+Gold
+Framed
+Sports
+These may look correct but can break Shopify category validation.
+Default action:
+Leave Shopify taxonomy metafields blank unless safely accepted by Shopify.
+
+Product Title Rules
+Create a short, premium, SEO-friendly product title.
+Rules:
+Must include Wall Art
+Maximum 10 words where possible
+Clear subject first
+No cheap marketplace-style wording
+No keyword stuffing
+No “poster print canvas home decor gift” style titles
+Good examples:
+Greg Murphy Bathurst Wall Art
+Cristiano Ronaldo Manchester United Wall Art
+Arsenal The Wait Is Over Wall Art
+Shane Warne MCG Wall Art
+Kobe Bryant Lakers Wall Art
+Lionel Messi World Cup Wall Art
+Peter Brock Bathurst Wall Art
+Bad examples:
+Premium Limited Edition Sports Poster Print Wall Decor Gift
+New Framed Motorsport Poster For Man Cave
+Cool Racing Car Sports Artwork Canvas Print
+The title should feel premium, clean, and collectible.
+
+Shopify Handle Rules
+Create a lowercase, hyphenated Shopify handle.
+Rules:
+Lowercase only
+Hyphens only
+Short and clean
+Include main subject and Wall Art
+No filler words
+No “limited-edition-premium-poster-print” clutter
+Good examples:
+greg-murphy-bathurst-wall-art
+cristiano-ronaldo-manchester-united-wall-art
+arsenal-the-wait-is-over-wall-art
+shane-warne-mcg-wall-art
+
+Product Description Rules
+The product description must follow the Sports Cave emotional collector style.
+It must be:
+Short
+Emotional
+Nostalgic
+Identity-driven
+Collector-focused
+Built for mobile reading
+Written like a premium sports tribute, not a product listing
+The buyer should read it and think:
+“That’s me. I remember that. I need this.”
+
+Description Length
+Preferred length:
+65–105 words
+Maximum:
+125 words
+Do not over-explain.
+
+Description HTML Rules
+Use clean Shopify-safe HTML only.
+Allowed:
+<p>
+<strong>
+<br>
+<em>
+Do not use:
+<div>
+<section>
+inline CSS
+classes
+tables
+bullet lists
+emoji
+data-start
+data-end
+
+Words To Avoid In The Visible Description
+In the visible product description body, avoid these words where possible:
+art
+artwork
+poster
+product
+wall decor
+print
+Use these instead:
+edition
+limited edition
+collector edition
+piece
+release
+tribute
+moment
+frame
+legacy
+drop
+SEO keywords can still be used in the SEO title, SEO description, product title, tags, and image alt text.
+The visible description should sell emotion first.
+
+Sports Cave Description Structure
+Every product description must follow this structure:
+
+1. Emotional Hook
+One or two short lines.
+Examples:
+<p><strong>Some moments don’t fade.</strong><br>They live on the wall.</p>
+
+<p><strong>Before the trophies, there was the hunger.</strong></p>
+
+<p><strong>This wasn’t just a game.</strong><br>It was the moment everything changed.</strong></p>
+The hook should feel like Nike meets sports nostalgia.
+Short. Sharp. Emotional.
+
+2. Nostalgia Trigger
+Bring the fan back to the moment, era, shirt, stadium, rivalry, roar, colour, car, track, or pressure.
+Examples:
+<p>The roar. The colours. The rivalry. That split-second every real fan still remembers.</p>
+
+<p>The shirt. The number. The stadium under lights. A whole era in one frame.</p>
+
+<p>The mountain. The engine note. The lap that still gets talked about like folklore.</p>
+This section should make the fan feel the memory.
+
+3. Identity Line
+Tell the buyer who this is for.
+Examples:
+<p>Built for fans who were there in spirit, even if they watched from the couch.</p>
+
+<p>Made for the ones who still talk about that night.</p>
+
+<p>For the collector who knows this meant more than a scoreline.</p>
+The buyer must feel seen.
+
+4. Scarcity Close
+Short, direct, urgent.
+Examples:
+<p><strong>Only 100 made. Secure yours before it’s gone.</strong></p>
+
+<p><strong>Numbered edition. Once they’re gone, they’re gone.</strong></p>
+
+<p><strong>A collector’s piece for real fans. Don’t miss this drop.</strong></p>
+No long urgency paragraphs.
+No fake hype.
+No over-selling.
+
+Final Description Format
+Use this structure:
+<p><strong>[Short emotional hook.]</strong><br>[Optional second punch line.]</p>
+<p>[Nostalgia trigger: 2–4 short sentences tied to the sport, athlete, rivalry, era, stadium, car, track, shirt, or moment.]</p>
+<p>[Identity line for the true fan or collector.]</p>
+<p><strong>[Scarcity close.]</strong></p>
+
+Description Style Examples
+Motorsport Example
+<p><strong>Some laps become legend.</strong><br>This was one of them.</p>
+<p>The mountain. The pressure. The engine note echoing through Bathurst. One lap, no room for fear, and a moment that still gives real racing fans chills.</p>
+<p>Made for the ones who remember when motorsport felt raw, loud, and untouchable.</p>
+<p><strong>Only 100 made. Secure yours before it’s gone.</strong></p>
+Football Example
+<p><strong>Before the records, there was the obsession.</strong><br>Old Trafford felt it first.</p>
+<p>The red shirt. The number seven. The stepovers. The stare. Those European nights when defenders knew what was coming — and still couldn’t stop it.</p>
+<p>Built for fans who remember the rise before the world called him inevitable.</p>
+<p><strong>Only 100 made. Secure yours before this edition disappears.</strong></p>
+NBA Example
+<p><strong>Some players change the game.</strong><br>Others become the standard.</p>
+<p>The footwork. The stare. The final shot. Every era has stars, but only a few leave a mark that never fades.</p>
+<p>For the fans who still measure greatness against the legends.</p>
+<p><strong>Numbered edition. Once they’re gone, they’re gone.</strong></p>
+Cricket Example
+<p><strong>Some spells never leave the memory.</strong><br>They echo through summer forever.</p>
+<p>The white zinc. The packed stands. The pause before the ball ripped sideways. Real cricket fans know exactly what that felt like.</p>
+<p>Made for the ones who still talk about legends like they watched them yesterday.</p>
+<p><strong>Only 100 made. Secure yours before it’s gone.</strong></p>
+
+SEO Meta Tag Rules
+SEO must be built for maximum organic reach while still sounding premium.
+The goal is to rank for high-intent product searches, not generic low-quality traffic.
+
+SEO Meta Title
+Rules:
+Maximum 55–60 characters preferred
+Include the main subject
+Include Wall Art
+Use the strongest relevant keyword naturally
+Keep it clean and premium
+Do not stuff keywords
+Do not include the website URL
+Do not use fake hype words
+Good examples:
+Greg Murphy Bathurst Wall Art
+Cristiano Ronaldo Man United Wall Art
+Arsenal The Wait Is Over Wall Art
+Shane Warne Cricket Wall Art
+Peter Brock Bathurst Wall Art
+Kobe Bryant Lakers Wall Art
+If space allows and it feels natural, add a high-intent modifier:
+Limited Edition
+Framed
+Bathurst
+NBA
+Cricket
+Football
+Example:
+Greg Murphy Bathurst Wall Art | Limited Edition
+Only use a separator if it still fits cleanly under 60 characters.
+
+SEO Meta Description
+Rules:
+Maximum 150–155 characters preferred
+Mention the subject
+Include one strong SEO keyword naturally
+Mention limited edition or collector appeal
+Make it emotional enough to win clicks
+Do not include the website URL
+Do not say “elevate your space”
+Do not sound generic
+Do not keyword stuff
+Structure:
+[Subject/moment] + [SEO keyword] + [collector scarcity/emotion].
+Good examples:
+Greg Murphy Bathurst wall art celebrating the Lap of the Gods. A limited edition collector piece for true motorsport fans.
+Cristiano Ronaldo Manchester United wall art built for fans who remember the rise, the number seven, and the hunger. Limited to 100.
+Arsenal wall art for fans who believe the wait is over. A numbered collector edition built around pride, history, and belief.
+
+SEO Keyword Selection Rules
+Choose keywords based on the product subject.
+Use the most relevant keywords only.
+Do not force every keyword into one product.
+
+Core Sports Cave Keywords
+Use naturally where relevant:
+sports wall art
+framed sports art
+framed sports memorabilia
+limited edition sports prints
+man cave wall art
+premium sports collectibles
+sports art prints
+sports posters Australia
+Only use sports posters Australia when the product is Australian-based.
+Examples:
+Use for:
+Bathurst
+V8 Supercars
+Greg Murphy
+Peter Brock
+Allan Moffat
+Shane Warne
+Australian cricket
+AFL
+Melbourne Cup
+Australian racing moments
+Do not use for:
+NBA USA products
+Premier League products
+European football products
+US boxing products
+
+Sport-Specific SEO Keyword Map
+Motorsport / Bathurst / V8
+Use keywords such as:
+motorsport wall art
+Bathurst wall art
+V8 Supercars wall art
+motor racing wall art
+framed sports memorabilia
+sports posters Australia
+limited edition sports prints
+man cave wall art
+Best for:
+Greg Murphy
+Peter Brock
+Allan Moffat
+Bathurst moments
+Australian touring cars
+
+NBA / Basketball
+Use keywords such as:
+NBA wall art
+basketball wall art
+Michael Jordan wall art
+Kobe Bryant wall art
+LeBron James wall art
+framed sports art
+man cave wall art
+premium sports collectibles
+Best for:
+Michael Jordan
+Kobe Bryant
+LeBron James
+Stephen Curry
+Jalen Brunson
+Knicks, Lakers, Bulls, Warriors
+
+Football / Soccer
+Use keywords such as:
+football wall art
+soccer wall art
+Cristiano Ronaldo wall art
+Lionel Messi wall art
+Premier League wall art
+framed sports art
+limited edition sports prints
+sports wall art
+Best for:
+Cristiano Ronaldo
+Lionel Messi
+Arsenal
+Manchester United
+Real Madrid
+World Cup moments
+Premier League legends
+
+Cricket
+Use keywords such as:
+cricket wall art
+cricket memorabilia
+Shane Warne wall art
+sports posters Australia
+limited edition sports prints
+man cave wall art
+Best for:
+Shane Warne
+Don Bradman
+Ricky Ponting
+Pat Cummins
+Ashes moments
+Australian cricket icons
+
+Boxing / Combat
+Use keywords such as:
+boxing wall art
+Muhammad Ali wall art
+Mike Tyson wall art
+combat sports wall art
+framed sports art
+premium sports collectibles
+man cave wall art
+
+Horse Racing
+Use keywords such as:
+horse racing wall art
+horse racing memorabilia
+Melbourne Cup wall art
+framed sports memorabilia
+sports posters Australia
+premium sports collectibles
+
+Tennis
+Use keywords such as:
+tennis wall art
+tennis sports wall art
+framed sports art
+premium sports collectibles
+limited edition sports prints
+
+Image Upload Rules
+ChatGPT must upload every supplied final WebP image to Shopify.
+Do not skip valid images.
+Do not manually ask the user to upload images to Shopify Files.
+Do not use local file paths in the final product.
+Only use Shopify-hosted media once uploaded successfully.
+If an image upload fails, ChatGPT must stop and report which file failed.
+
+Product Image Order
+Use this Sports Cave media order:
+Black frame image
+Lifestyle/mockup image 1
+Lifestyle/mockup image 2
+Lifestyle/mockup image 3
+Office or man cave image
+Size guide image
+Oak frame image
+White frame image
+Unframed image
+If fewer or more lifestyle images are supplied, keep this general order:
+Black frame
+Lifestyle/mockups
+Size guide
+Oak frame
+White frame
+Unframed
+Every valid supplied image must be included.
+Only remove exact duplicate files.
+
+Image Naming Rules Before Upload
+Where possible, rename files before Shopify upload using:
+Lowercase letters
+Hyphens only
+Product-specific names
+Accurate image descriptor
+Do not include:
+final
+compressed
+v2
+copy
+new
+test
+random numbers
+unnecessary descriptors
+Good examples:
+greg-murphy-bathurst-wall-art-black-frame.webp
+greg-murphy-bathurst-wall-art-living-room.webp
+greg-murphy-bathurst-wall-art-man-cave.webp
+greg-murphy-bathurst-wall-art-sizing-guide.webp
+greg-murphy-bathurst-wall-art-oak-frame.webp
+greg-murphy-bathurst-wall-art-white-frame.webp
+greg-murphy-bathurst-wall-art-unframed.webp
+
+Image Alt Text Rules
+Every image must have unique SEO-friendly alt text.
+Rules:
+110–125 characters preferred
+Natural sentence-style wording
+Mention subject
+Mention image type or setting
+Use one SEO keyword only if it fits naturally
+Do not keyword stuff
+Do not repeat the same alt text for every image
+Do not describe irrelevant furniture too heavily
+Do not overuse “premium”
+Good structure:
+[Image type] + [subject] + [sport/keyword] + [fan/collector context].
+
+Alt Text Examples
+Black frame:
+Black framed Greg Murphy Bathurst wall art celebrating the Lap of the Gods for Australian motorsport fans.
+Living room:
+Greg Murphy Bathurst wall art displayed in a modern living room for collectors of iconic racing moments.
+Man cave:
+Greg Murphy Lap of the Gods framed sports memorabilia styled in a dark man cave for true V8 racing fans.
+Size guide:
+Greg Murphy Bathurst wall art size guide showing framed options for limited edition motorsport collectors.
+Oak frame:
+Oak framed Greg Murphy Bathurst wall art with collector styling for fans of Australian motor racing history.
+White frame:
+White framed Greg Murphy Bathurst wall art featuring the Lap of the Gods moment for motorsport collectors.
+Unframed:
+Unframed Greg Murphy Bathurst sports poster Australia design celebrating the legendary Lap of the Gods.
+
+Variant Structure
+Create exactly 16 variants.
+Option 1 Name:
+Frame
+Frame values in this order:
+Black
+Oak
+White
+Unframed
+Option 2 Name:
+Size
+Size values in this order for each frame:
+XL - 62 × 87 cm (24.4 × 34.3 in)
+L - 45 × 62 cm (17.7 × 24.4 in)
+M - 30 × 45 cm (11.8 × 17.7 in)
+S - 21 × 30 cm (8.3 × 11.8 in)
+Variant order must be:
+Black / XL
+Black / L
+Black / M
+Black / S
+Oak / XL
+Oak / L
+Oak / M
+Oak / S
+White / XL
+White / L
+White / M
+White / S
+Unframed / XL
+Unframed / L
+Unframed / M
+Unframed / S
+
+Pricing Rules
+Use AUD pricing.
+Framed Black, Oak, White
+XL:
+Price: 329.00
+Compare-at price: 428.00
+L:
+Price: 249.00
+Compare-at price: 324.00
+M:
+Price: 199.00
+Compare-at price: 259.00
+S:
+Price: 149.00
+Compare-at price: 194.00
+Unframed
+XL:
+Price: 149.00
+Compare-at price: 194.00
+L:
+Price: 109.00
+Compare-at price: 142.00
+M:
+Price: 79.00
+Compare-at price: 103.00
+S:
+Price: 49.00
+Compare-at price: 64.00
+
+Inventory and Shipping Rules
+Default settings:
+Track inventory: true if supported
+Inventory policy: continue unless instructed otherwise
+Fulfillment service: manual unless Shopify fulfilment settings require otherwise
+Requires shipping: true
+Taxable: true
+Weight unit: kg
+If inventory quantity is not supplied or cannot be safely set through the Shopify connector, ChatGPT must leave inventory for manual review.
+Do not use inventory deny unless stock is being controlled correctly.
+
+SKU Rules
+Create clean unique SKUs.
+Rules:
+Uppercase letters and numbers only
+No spaces
+No special symbols
+Product-specific prefix
+Size/frame suffix
+Create a short SKU prefix from the product subject.
+Examples:
+Greg Murphy Lap of the Gods:
+Prefix:
+GMLG
+Cristiano Ronaldo Manchester United:
+Prefix:
+CRMU
+Arsenal The Wait Is Over:
+Prefix:
+ATWIO
+
+SKU Suffix System
+Black:
+A1B = XL Black
+A2B = L Black
+A3B = M Black
+A4B = S Black
+Oak:
+A1O = XL Oak
+A2O = L Oak
+A3O = M Oak
+A4O = S Oak
+White:
+A1W = XL White
+A2W = L White
+A3W = M White
+A4W = S White
+Unframed:
+A1 = XL Unframed
+A2 = L Unframed
+A3 = M Unframed
+A4 = S Unframed
+Example:
+GMLGA1B
+GMLGA2B
+GMLGA3B
+GMLGA4B
+GMLGA1O
+GMLGA1W
+GMLGA1
+All 16 SKUs must be unique.
+
+Variant Image Mapping
+Assign variant images correctly.
+Rules:
+Black variants use the black frame image
+Oak variants use the oak frame image
+White variants use the white frame image
+Unframed variants use the unframed image
+Do not assign these as variant images:
+Lifestyle images
+Living room images
+Office images
+Man cave images
+Size guide images
+Close-up detail images
+These belong in the gallery only.
+
+Tags
+Use 8–16 clean, relevant tags.
+Every product should include:
+Collector Series
+Limited Edition
+Sports Wall Art
+Limited Edition Sports Prints
+Framed Sports Art
+Man Cave Wall Art
+Then add sport/product-specific tags.
+
+Motorsport Tag Examples
+Motorsport Wall Art
+Motor Racing Wall Art
+Bathurst Wall Art
+V8 Supercars Wall Art
+Sports Posters Australia
+Greg Murphy
+Bathurst
+Lap Of The Gods
+
+Football Tag Examples
+Football Wall Art
+Soccer Wall Art
+Premier League Wall Art
+Cristiano Ronaldo Wall Art
+Lionel Messi Wall Art
+Arsenal
+Manchester United
+Real Madrid
+
+NBA Tag Examples
+NBA Wall Art
+Basketball Wall Art
+Kobe Bryant Wall Art
+Michael Jordan Wall Art
+Lakers Wall Art
+Bulls Wall Art
+New York Knicks
+Jalen Brunson
+
+Cricket Tag Examples
+Cricket Wall Art
+Cricket Memorabilia
+Shane Warne Wall Art
+Sports Posters Australia
+Australian Cricket
+Ashes Cricket
+
+Tags To Avoid Unless Proven
+Do not use these unless specifically instructed:
+Best Seller
+Best Selling
+Popular
+Viral
+Trending
+Featured
+New Arrival
+Only use performance-based tags when proven by sales data.
+
+Collections
+Default safer method:
+Use tags to trigger automated collections.
+ChatGPT may assign collections directly only if the Shopify connector safely supports collection assignment.
+Every product usually needs to appear in:
+Collector Series Wall Art
+Best Online Sports Wall Art
+Sport collection examples:
+NBA product → NBA Wall Art
+Motorsport product → Motor Racing Wall Art
+Cricket product → Cricket Wall Art
+Football product → Football Wall Art
+Horse racing product → Horse Racing Wall Art
+Combat product → Combat Wall Art
+NFL product → NFL Wall Art
+Ice Hockey product → Ice Hockey Wall Art
+Baseball product → Baseball Wall Art
+Tennis product → Tennis Wall Art
+WWE product → WWE Wrestling Wall Art
+Only use these collections when specifically instructed:
+Popular
+Featured Sports Wall Art
+Best Selling Wall Art UK
+
+Google Shopping Fields
+If the Shopify connector supports Google Shopping fields, use:
+Google Shopping condition: New
+Google Shopping custom product: True
+Google Shopping age group: Adult if required
+Google Shopping gender: Unisex if required
+If Google Shopping fields are not safely supported through the connector, leave them for manual review.
+Do not invent Google taxonomy values.
+
+Product Category
+Use:
+Home & Garden > Decor > Artwork > Posters, Prints & Visual Artwork
+If Shopify rejects the product category through the connector, leave it blank and continue.
+Do not let category setup block product creation.
+
+Pre-Creation Checklist
+Before creating the Shopify draft, ChatGPT must confirm internally:
+Product subject is clear
+Sport/category is clear
+Product title is clean
+Handle is clean
+Description follows Sports Cave structure
+SEO title is under 60 characters
+SEO description is under 155 characters
+All supplied images are WebP
+All supplied images are final assets
+All supplied images are included
+Image order is planned
+Alt text is unique for every image
+16 variants are planned
+Prices are correct
+Compare-at prices are correct
+Compare-at prices are correct
+SKUs are unique
+Product will be draft
+Product will not be published
+
+Shopify Creation Workflow
+ChatGPT must complete the workflow in this order:
+Identify product subject from uploads and user context
+Create product title
+Create Shopify handle
+Write Sports Cave-style description
+Create SEO title
+Create SEO description
+Generate tags
+Generate unique image alt text
+Upload all supplied WebP images to Shopify
+Create Shopify product as Draft
+Add all images to the product in correct order
+Create all 16 variants
+Add prices and compare-at prices
+Add SKUs
+Assign variant images
+Add tags
+Add product type and vendor
+Add product category only if safe
+Leave product unpublished
+Return the draft product link or confirmation
+
+Post-Creation Validation
+After creating the draft product, ChatGPT must verify:
+Product exists in Shopify
+Product is Draft
+Product is not published
+Product title is correct
+Handle is correct
+Product description has clean HTML
+All images uploaded successfully
+Image order is correct
+All image alt text is applied where supported
+All 16 variants exist
+Variant order is correct
+Prices are correct
+Compare-at prices are correct
+SKUs are unique
+Variant images are mapped correctly
+Tags are applied
+SEO title is applied
+SEO description is applied
+No unsupported category metafields were filled
+If the connector cannot verify a field, ChatGPT must clearly state what needs manual review.
+
+Manual Review Checklist Before Publishing
+Open the draft product in Shopify and check:
+Product title
+Product images
+Image order
+Image quality
+Image alt text
+Description formatting
+Product description strength
+Variant selector
+Variant images
+Prices
+Compare-at prices
+SKUs
+Tags
+Collections
+SEO title
+SEO description
+Product category
+Inventory
+Markets
+Google Shopping fields
+Mobile preview
+Desktop preview
+Only publish when the product feels premium and ready.
+
+Failure Rules
+If Shopify product creation fails, ChatGPT must not guess or retry blindly.
+Check these first:
+Did image upload fail?
+Did Shopify reject the product category?
+Did Shopify reject a controlled metafield?
+Did variant creation fail?
+Did a SKU duplicate an existing SKU?
+Did the product handle already exist?
+Did the connector lack permission to upload media?
+Did the connector lack permission to create products?
+Fastest safe fix:
+Create product without risky category fields
+Leave taxonomy metafields blank
+Re-upload failed images
+Use a slightly adjusted handle if the handle already exists
+Keep product as Draft
+
+No-Publish Rule
+ChatGPT must never publish the product unless the user explicitly says:
+Publish this product now.
+Even then, ChatGPT must confirm the product has been reviewed first.
+Default status is always:
+Draft
+
+Final Execution Prompt
+Use this prompt when uploading a new product:
+
+I have uploaded final approved Sports Cave WebP product images.
 Use SOP 07B.
 Create a new Shopify product directly through the connected Shopify tool.
 Do not create a CSV.
@@ -91,8 +1011,13 @@ Use the product subject, sport, athlete, team, rivalry, or moment from the uploa
 Follow the Sports Cave description style:
 Short. Emotional. Nostalgic. Identity-driven. Collector-focused.
 The buyer should feel:
-“That’s me. I remember that. I need this.”"""
+“That’s me. I remember that. I need this.”
 
+Final Rule
+This SOP exists to remove CSV import risk and manual Shopify upload work.
+ChatGPT should now create the product directly in Shopify as a clean draft.
+The only manual step left should be final approval and publishing.
+"""
 UPDATE_EXISTING_PRODUCT_PROMPT = """I have uploaded final approved replacement Sports Cave WebP product images.
 
 Use SOP 07C.
