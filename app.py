@@ -12,11 +12,10 @@ import os
 import re
 import shutil
 import tempfile
-import urllib.error
-import urllib.request
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from dotenv import load_dotenv
+import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -31,18 +30,12 @@ BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
 UPLOAD_PREVIEW_DIR = BASE_DIR / "output" / "_ui-upload-previews"
 ENABLE_GOOGLE_DRIVE = os.getenv("ENABLE_GOOGLE_DRIVE", "false").lower() == "true"
-GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "1fe5OggyDdmgNw-LrLviA0B6JfD3wEqzuH6LA0JF_FR4")
-GOOGLE_SHEET_TAB = os.getenv("GOOGLE_SHEET_TAB", "Edition Log")
-GOOGLE_SHEET_HEADER_ROW = int(os.getenv("GOOGLE_SHEET_HEADER_ROW", "4"))
 GOOGLE_SHEET_URL = os.getenv(
     "GOOGLE_SHEET_URL",
     "https://docs.google.com/spreadsheets/d/1fe5OggyDdmgNw-LrLviA0B6JfD3wEqzuH6LA0JF_FR4/edit?gid=634918132#gid=634918132",
 )
 EDITION_LOG_JSON_URL = os.getenv("EDITION_LOG_JSON_URL", "").strip()
-GOOGLE_SERVICE_ACCOUNT_JSON_ENV = "GOOGLE_SERVICE_ACCOUNT_JSON"
 SHOPIFY_STORE_BASE_URL = os.getenv("SHOPIFY_STORE_BASE_URL", "https://sportscaveshop.com").rstrip("/")
-EDITION_PRODUCT_LINKS_PATH = BASE_DIR / "edition_product_links.json"
-PRODUCT_SUMMARY_TAB = "Product Summary"
 ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
     "ZIP_SAVE_DRIVE_FOLDER_URL",
     "https://drive.google.com/drive/folders/1FfXmTVuVGkD7PFhRjAtvPDZOn7Gpk3q_",
@@ -1555,6 +1548,10 @@ def canonicalize_sheet_key(normalized_key):
         "notes": {"notes", "note"},
         "shopify_handle": {"shopify_handle", "handle"},
         "product_url": {"product_url", "shopify_product_url", "url"},
+        "email": {"email", "customer_email"},
+        "address": {"address", "shipping_address", "customer_address"},
+        "phone": {"phone", "customer_phone", "phone_number"},
+        "tracking_number": {"tracking_number", "tracking", "tracking_no"},
     }
 
     for canonical_key, aliases in header_aliases.items():
@@ -1607,6 +1604,16 @@ def normalize_lookup_name(value):
     return normalize_whitespace(value).casefold()
 
 
+EDITION_LOG_INTERNAL_FIELD_LABELS = (
+    ("shopify_order", "Shopify Order #"),
+    ("customer_name", "Customer Name"),
+    ("email", "Email"),
+    ("address", "Address"),
+    ("phone", "Phone"),
+    ("tracking_number", "Tracking Number"),
+)
+
+
 def extract_drive_folder_id(folder_url):
     if not folder_url:
         return None
@@ -1636,10 +1643,6 @@ def render_external_link(label, url, key):
         st.markdown(f"[{label}]({url})")
 
 
-def get_google_service_account_json():
-    return os.getenv(GOOGLE_SERVICE_ACCOUNT_JSON_ENV, "").strip()
-
-
 def get_edition_log_json_url():
     return EDITION_LOG_JSON_URL
 
@@ -1647,136 +1650,49 @@ def get_edition_log_json_url():
 def get_edition_log_connection_status():
     return {
         "json_url_found": bool(get_edition_log_json_url()),
-        "service_account_found": bool(get_google_service_account_json()),
     }
 
 
-def load_local_edition_product_links():
-    if not EDITION_PRODUCT_LINKS_PATH.exists():
-        return {}
-
-    try:
-        payload = json.loads(EDITION_PRODUCT_LINKS_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-    if not isinstance(payload, dict):
-        return {}
-
-    normalized_links = {}
-    for product_name, product_url in payload.items():
-        clean_name = normalize_lookup_name(product_name)
-        clean_url = normalize_whitespace(product_url)
-        if clean_name and clean_url:
-            normalized_links[clean_name] = clean_url
-
-    return normalized_links
-
-
-def get_google_sheets_service(service_account_json):
-    from google.oauth2.service_account import Credentials
-    from googleapiclient.discovery import build
-
-    credentials_info = json.loads(service_account_json)
-    credentials = Credentials.from_service_account_info(
-        credentials_info,
-        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"],
-    )
-    return build("sheets", "v4", credentials=credentials, cache_discovery=False)
-
-
 def fetch_edition_log_json_rows(endpoint_url):
-    request = urllib.request.Request(
-        endpoint_url,
-        headers={"Accept": "application/json"},
-    )
-
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            payload = response.read()
-            charset = response.headers.get_content_charset() or "utf-8"
-    except urllib.error.URLError as error:
+        response = requests.get(
+            endpoint_url,
+            headers={"Accept": "application/json"},
+            timeout=10,
+            allow_redirects=True,
+        )
+        response.raise_for_status()
+    except requests.RequestException as error:
         raise RuntimeError(f"Could not fetch Edition Log JSON endpoint: {error}") from error
 
     try:
-        data = json.loads(payload.decode(charset))
-    except Exception as error:
+        data = response.json()
+    except ValueError as error:
+        response_preview = normalize_whitespace(response.text[:120]).casefold()
+        if response_preview.startswith("<!doctype html") or response_preview.startswith("<html"):
+            raise ValueError("Edition Log endpoint returned HTML instead of JSON.") from error
+
         raise ValueError("Edition Log endpoint returned invalid JSON.") from error
 
-    if not isinstance(data, list):
-        raise ValueError("Edition Log endpoint returned invalid JSON. Expected a list of rows.")
-
-    return data
-
-
-def read_google_sheet_values(service_account_json, sheet_id, tab_name, start_cell):
-    sheets_service = get_google_sheets_service(service_account_json)
-    range_name = f"'{tab_name}'!{start_cell}:ZZ"
-
-    try:
-        response = sheets_service.spreadsheets().values().get(
-            spreadsheetId=sheet_id,
-            range=range_name,
-        ).execute()
-    except Exception as error:
-        error_message = str(error)
-        if "Unable to parse range" in error_message or "Requested entity was not found" in error_message:
-            raise RuntimeError(f"Could not find tab: {tab_name}") from error
-
-        raise
-
-    return response.get("values", [])
-
-
-def build_sheet_records(values, header_row_number):
-    if not values:
-        raise ValueError(f"Header row {header_row_number} appears to be empty.")
-
-    header_row = values[0]
-    if not any(normalize_whitespace(cell) for cell in header_row):
-        raise ValueError(f"Header row {header_row_number} appears to be empty.")
-
-    header_definitions = []
-    for column_index, header_value in enumerate(header_row):
-        display_name = normalize_whitespace(header_value)
-        if not display_name:
-            continue
-
-        header_definitions.append(
-            (
-                column_index,
-                display_name,
-                canonicalize_sheet_key(normalize_sheet_header_name(display_name)),
+    if isinstance(data, dict):
+        rows = data.get("rows")
+        if not isinstance(rows, list):
+            raise ValueError(
+                "Edition Log endpoint returned invalid JSON. Expected a rows list."
             )
-        )
+        return rows
 
-    if not header_definitions:
-        raise ValueError(f"Header row {header_row_number} appears to be empty.")
+    if isinstance(data, list):
+        return data
 
-    records = []
-    for offset, row_values in enumerate(values[1:], start=1):
-        if not any(normalize_whitespace(cell) for cell in row_values):
-            continue
-
-        record = {
-            "_row_number": header_row_number + offset,
-            "_sheet_position": offset,
-            "_raw": {},
-        }
-
-        for column_index, display_name, canonical_key in header_definitions:
-            cell_value = normalize_whitespace(row_values[column_index] if column_index < len(row_values) else "")
-            record[canonical_key] = cell_value
-            record["_raw"][display_name] = cell_value
-
-        record["_parsed_date"] = parse_sheet_date(record.get("date_sent"))
-        records.append(record)
-
-    return records
+    raise ValueError(
+        "Edition Log endpoint returned invalid JSON. Expected a list of rows or an object with a rows list."
+    )
 
 
 def build_records_from_json_rows(json_rows):
     records = []
+    had_date_parse_failure = False
 
     for index, row_data in enumerate(json_rows, start=1):
         if not isinstance(row_data, dict):
@@ -1813,118 +1729,50 @@ def build_records_from_json_rows(json_rows):
             record["_raw"][display_name] = value
 
         record["_parsed_date"] = parse_sheet_date(record.get("date_sent"))
+        if normalize_whitespace(record.get("date_sent")) and record["_parsed_date"] is None:
+            had_date_parse_failure = True
         records.append(record)
 
-    return records
+    return records, had_date_parse_failure
 
 
-def detect_product_summary_header_row(values):
-    candidate_keys = {"product_name", "product_url", "shopify_handle", "edition_name", "handle", "url"}
+def sort_edition_records(records, had_date_parse_failure=False):
+    if had_date_parse_failure:
+        return list(records)
 
-    for row_index, row_values in enumerate(values):
-        normalized_keys = {
-            canonicalize_sheet_key(normalize_sheet_header_name(cell))
-            for cell in row_values
-            if normalize_whitespace(cell)
-        }
-        if {"edition_name", "shopify_handle"} <= normalized_keys or {"product_name", "product_url"} <= normalized_keys:
-            return row_index
-        if len(candidate_keys.intersection(normalized_keys)) >= 2:
-            return row_index
-
-    return None
-
-
-def build_product_summary_lookup(values):
-    if not values:
-        return {}
-
-    header_row_index = detect_product_summary_header_row(values)
-    if header_row_index is None:
-        return {}
-
-    summary_records = build_sheet_records(values[header_row_index:], header_row_index + 1)
-    lookup = {}
-
-    for record in summary_records:
-        product_name = record.get("edition_name") or record.get("product_name") or ""
-        product_url = normalize_whitespace(record.get("product_url"))
-        shopify_handle = normalize_whitespace(record.get("shopify_handle"))
-        resolved_url = product_url or build_shopify_product_url_from_handle(shopify_handle)
-
-        if product_name and resolved_url:
-            lookup[normalize_lookup_name(product_name)] = resolved_url
-
-    return lookup
-
-
-def sort_edition_records(records):
     dated_records = [record for record in records if record.get("_parsed_date") is not None]
-    undated_records = [record for record in records if record.get("_parsed_date") is None]
+    if not dated_records:
+        return list(records)
 
-    dated_records.sort(
-        key=lambda record: (
-            record["_parsed_date"],
-            -record["_sheet_position"],
-        ),
-        reverse=True,
-    )
-
-    return dated_records + undated_records
+    return sorted(records, key=lambda record: record.get("_parsed_date") or datetime.min, reverse=True)
 
 
-def resolve_product_link(record, product_summary_lookup, local_links_lookup):
-    shopify_handle = normalize_whitespace(record.get("shopify_handle"))
-    if shopify_handle:
-        return build_shopify_product_url_from_handle(shopify_handle)
-
+def resolve_product_link(record):
     product_url = normalize_whitespace(record.get("product_url"))
     if product_url:
         return product_url
 
-    product_name = normalize_lookup_name(record.get("edition_name"))
-    if product_name in product_summary_lookup:
-        return product_summary_lookup[product_name]
+    shopify_handle = normalize_whitespace(record.get("shopify_handle"))
+    if shopify_handle:
+        return build_shopify_product_url_from_handle(shopify_handle)
 
-    return local_links_lookup.get(product_name)
+    return None
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_limited_editions_snapshot(json_url, sheet_id, sheet_tab, header_row, service_account_json):
-    if json_url:
-        edition_rows = build_records_from_json_rows(fetch_edition_log_json_rows(json_url))
-    else:
-        edition_values = read_google_sheet_values(
-            service_account_json,
-            sheet_id,
-            sheet_tab,
-            f"A{header_row}",
-        )
-        edition_rows = build_sheet_records(edition_values, header_row)
+def load_limited_editions_snapshot(json_url):
+    if not json_url:
+        raise ValueError("Edition Log is not connected yet. Add EDITION_LOG_JSON_URL in Render environment variables.")
 
-    product_summary_lookup = {}
-    if (not json_url) and service_account_json and sheet_id:
-        try:
-            product_summary_values = read_google_sheet_values(
-                service_account_json,
-                sheet_id,
-                PRODUCT_SUMMARY_TAB,
-                "A1",
-            )
-            product_summary_lookup = build_product_summary_lookup(product_summary_values)
-        except Exception:
-            product_summary_lookup = {}
-
-    local_links_lookup = load_local_edition_product_links()
-    sorted_rows = sort_edition_records(edition_rows)
+    edition_rows, had_date_parse_failure = build_records_from_json_rows(fetch_edition_log_json_rows(json_url))
+    sorted_rows = sort_edition_records(edition_rows, had_date_parse_failure=had_date_parse_failure)
 
     for row in sorted_rows:
-        row["_product_link"] = resolve_product_link(row, product_summary_lookup, local_links_lookup)
+        row["_product_link"] = resolve_product_link(row)
 
     return {
         "rows": sorted_rows,
-        "product_summary_lookup": product_summary_lookup,
-        "local_links_lookup": local_links_lookup,
+        "had_date_parse_failure": had_date_parse_failure,
     }
 
 
@@ -1981,8 +1829,10 @@ def build_limited_editions_table_rows(rows, include_internal=False):
         }
 
         if include_internal:
-            dashboard_row["Shopify Order #"] = normalize_whitespace(row.get("shopify_order")) or "-"
-            dashboard_row["Customer Name"] = normalize_whitespace(row.get("customer_name")) or "-"
+            for field_key, field_label in EDITION_LOG_INTERNAL_FIELD_LABELS:
+                field_value = normalize_whitespace(row.get(field_key))
+                if field_value:
+                    dashboard_row[field_label] = field_value
 
         dashboard_rows.append(dashboard_row)
 
@@ -1991,8 +1841,21 @@ def build_limited_editions_table_rows(rows, include_internal=False):
 
 def render_limited_editions_empty_state():
     st.warning(
-        "Edition Log is not connected yet. Add EDITION_LOG_JSON_URL in Render environment variables, or connect Google Sheets credentials."
+        "Edition Log is not connected yet. Add EDITION_LOG_JSON_URL in Render environment variables."
     )
+
+
+def render_limited_editions_load_error(error):
+    st.error("Could not load Edition Log from the live JSON URL.")
+    st.exception(error)
+    st.caption("Possible causes:")
+    st.caption("- Apps Script web app is not deployed")
+    st.caption("- The web app URL is wrong")
+    st.caption("- Web app permissions are not set to Anyone with the link")
+    st.caption("- Apps Script returned HTML instead of JSON")
+    st.caption("- The endpoint returned invalid JSON")
+    if GOOGLE_SHEET_URL:
+        render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet-error")
 
 
 @lru_cache(maxsize=1)
@@ -3263,43 +3126,19 @@ def render_limited_editions_page():
             render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet")
 
     connection_status = get_edition_log_connection_status()
-    status_cols = st.columns(2)
-    status_cols[0].caption(
+    st.caption(
         f"Edition Log JSON URL: {'Found' if connection_status['json_url_found'] else 'Missing'}"
-    )
-    status_cols[1].caption(
-        f"Google service account: {'Found' if connection_status['service_account_found'] else 'Missing'}"
     )
 
     json_url = get_edition_log_json_url()
-    service_account_json = get_google_service_account_json()
-    if (not json_url and not service_account_json) or (not json_url and not GOOGLE_SHEET_ID):
+    if not json_url:
         render_limited_editions_empty_state()
         return
 
     try:
-        snapshot = load_limited_editions_snapshot(
-            json_url,
-            GOOGLE_SHEET_ID,
-            GOOGLE_SHEET_TAB,
-            GOOGLE_SHEET_HEADER_ROW,
-            service_account_json,
-        )
-    except RuntimeError as error:
-        st.error(str(error))
-        if GOOGLE_SHEET_URL:
-            render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet-error")
-        return
-    except ValueError as error:
-        st.warning(str(error))
-        if GOOGLE_SHEET_URL:
-            render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet-warning")
-        return
+        snapshot = load_limited_editions_snapshot(json_url)
     except Exception as error:
-        st.error("Could not load the Limited Editions dashboard.")
-        st.exception(error)
-        if GOOGLE_SHEET_URL:
-            render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet-debug")
+        render_limited_editions_load_error(error)
         return
 
     rows = snapshot["rows"]
@@ -3322,7 +3161,10 @@ def render_limited_editions_page():
 
     st.divider()
     st.subheader("Latest Editions Sent Out")
-    st.caption("Newest rows first where the sheet date can be parsed. Product links appear whenever a handle or URL is available.")
+    if snapshot.get("had_date_parse_failure"):
+        st.caption("Date parsing failed for at least one row, so the dashboard is keeping the original endpoint order.")
+    else:
+        st.caption("Newest rows first where the date could be parsed. Product links appear whenever a URL or Shopify handle is available.")
 
     latest_cols = st.columns(2)
     for index, row in enumerate(rows[:12]):
@@ -3477,10 +3319,7 @@ def render_settings_page():
 
     st.write(f"**Password protection:** {get_password_protection_status()}")
     st.write(f"**Edition Log JSON URL present:** {'Yes' if get_edition_log_json_url() else 'No'}")
-    st.write(f"**Google Sheet ID present:** {'Yes' if GOOGLE_SHEET_ID else 'No'}")
-    st.write(
-        f"**Google service account JSON present:** {'Yes' if get_google_service_account_json() else 'No'}"
-    )
+    st.write(f"**Edition Log sheet shortcut URL present:** {'Yes' if bool(GOOGLE_SHEET_URL) else 'No'}")
     st.write(f"**Google Drive lightweight flag:** {'Enabled' if ENABLE_GOOGLE_DRIVE else 'Disabled'}")
     if ENABLE_GOOGLE_DRIVE:
         st.write("**Google Drive configured:** Open the Google Drive page to inspect the current connection.")
