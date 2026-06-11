@@ -1,4 +1,5 @@
 from contextlib import suppress
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 import gc
@@ -8,6 +9,7 @@ import importlib
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 
@@ -27,6 +29,17 @@ BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
 UPLOAD_PREVIEW_DIR = BASE_DIR / "output" / "_ui-upload-previews"
 ENABLE_GOOGLE_DRIVE = os.getenv("ENABLE_GOOGLE_DRIVE", "false").lower() == "true"
+GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "1fe5OggyDdmgNw-LrLviA0B6JfD3wEqzuH6LA0JF_FR4")
+GOOGLE_SHEET_TAB = os.getenv("GOOGLE_SHEET_TAB", "Edition Log")
+GOOGLE_SHEET_HEADER_ROW = int(os.getenv("GOOGLE_SHEET_HEADER_ROW", "4"))
+GOOGLE_SHEET_URL = os.getenv(
+    "GOOGLE_SHEET_URL",
+    "https://docs.google.com/spreadsheets/d/1fe5OggyDdmgNw-LrLviA0B6JfD3wEqzuH6LA0JF_FR4/edit?gid=634918132#gid=634918132",
+)
+GOOGLE_SERVICE_ACCOUNT_JSON_ENV = "GOOGLE_SERVICE_ACCOUNT_JSON"
+SHOPIFY_STORE_BASE_URL = os.getenv("SHOPIFY_STORE_BASE_URL", "https://sportscaveshop.com").rstrip("/")
+EDITION_PRODUCT_LINKS_PATH = BASE_DIR / "edition_product_links.json"
+PRODUCT_SUMMARY_TAB = "Product Summary"
 MENU_OPTIONS = ["Mockups", "Limited Editions", "Product Uploads", "Settings"]
 if ENABLE_GOOGLE_DRIVE:
     MENU_OPTIONS.insert(1, "Google Drive")
@@ -1500,6 +1513,390 @@ def log_app_memory(stage):
     image_factory.log_memory(stage)
 
 
+def normalize_whitespace(value):
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def normalize_sheet_header_name(value):
+    normalized = re.sub(r"[^a-z0-9]+", "_", normalize_whitespace(value).lower())
+    return normalized.strip("_")
+
+
+def canonicalize_sheet_key(normalized_key):
+    header_aliases = {
+        "date_sent": {"date_sent", "sent_date", "date"},
+        "shopify_order": {
+            "shopify_order",
+            "shopify_order_number",
+            "shopify_order_no",
+            "shopify_order_",
+            "order_number",
+            "order_no",
+        },
+        "customer_name": {"customer_name", "customer"},
+        "edition_name": {"edition_name", "product_name", "product", "name"},
+        "edition_no": {"edition_no", "edition_number", "edition"},
+        "frame": {"frame"},
+        "size": {"size"},
+        "prodigi_product_option": {
+            "prodigi_product_option",
+            "prodigi_option",
+            "prodigi_product",
+        },
+        "shipping": {"shipping", "shipping_method"},
+        "status": {"status"},
+        "notes": {"notes", "note"},
+        "shopify_handle": {"shopify_handle", "handle"},
+        "product_url": {"product_url", "shopify_product_url", "url"},
+    }
+
+    for canonical_key, aliases in header_aliases.items():
+        if normalized_key in aliases:
+            return canonical_key
+
+    return normalized_key
+
+
+def parse_sheet_date(value):
+    text_value = normalize_whitespace(value)
+    if not text_value:
+        return None
+
+    for date_format in (
+        "%d/%m/%Y",
+        "%d/%m/%y",
+        "%d-%m-%Y",
+        "%d-%m-%y",
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+        "%d %b %Y",
+        "%d %B %Y",
+    ):
+        try:
+            return datetime.strptime(text_value, date_format)
+        except ValueError:
+            continue
+
+    if re.fullmatch(r"\d+(\.\d+)?", text_value):
+        try:
+            excel_days = float(text_value)
+            if excel_days > 30000:
+                return datetime(1899, 12, 30) + timedelta(days=excel_days)
+        except ValueError:
+            pass
+
+    return None
+
+
+def format_sheet_date(value):
+    parsed_date = parse_sheet_date(value)
+    if parsed_date is not None:
+        return parsed_date.strftime("%-d/%-m/%Y") if os.name != "nt" else parsed_date.strftime("%#d/%#m/%Y")
+
+    return normalize_whitespace(value) or "-"
+
+
+def normalize_lookup_name(value):
+    return normalize_whitespace(value).casefold()
+
+
+def build_shopify_product_url_from_handle(handle):
+    clean_handle = normalize_whitespace(handle).strip("/")
+    if not clean_handle:
+        return None
+
+    return f"{SHOPIFY_STORE_BASE_URL}/products/{clean_handle}"
+
+
+def render_external_link(label, url, key):
+    if not url:
+        return
+
+    if hasattr(st, "link_button"):
+        st.link_button(label, url, key=key, use_container_width=False)
+    else:
+        st.markdown(f"[{label}]({url})")
+
+
+def get_google_service_account_json():
+    return os.getenv(GOOGLE_SERVICE_ACCOUNT_JSON_ENV, "").strip()
+
+
+def load_local_edition_product_links():
+    if not EDITION_PRODUCT_LINKS_PATH.exists():
+        return {}
+
+    try:
+        payload = json.loads(EDITION_PRODUCT_LINKS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+    if not isinstance(payload, dict):
+        return {}
+
+    normalized_links = {}
+    for product_name, product_url in payload.items():
+        clean_name = normalize_lookup_name(product_name)
+        clean_url = normalize_whitespace(product_url)
+        if clean_name and clean_url:
+            normalized_links[clean_name] = clean_url
+
+    return normalized_links
+
+
+def get_google_sheets_service(service_account_json):
+    from google.oauth2.service_account import Credentials
+    from googleapiclient.discovery import build
+
+    credentials_info = json.loads(service_account_json)
+    credentials = Credentials.from_service_account_info(
+        credentials_info,
+        scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"],
+    )
+    return build("sheets", "v4", credentials=credentials, cache_discovery=False)
+
+
+def read_google_sheet_values(service_account_json, sheet_id, tab_name, start_cell):
+    sheets_service = get_google_sheets_service(service_account_json)
+    range_name = f"'{tab_name}'!{start_cell}:ZZ"
+
+    try:
+        response = sheets_service.spreadsheets().values().get(
+            spreadsheetId=sheet_id,
+            range=range_name,
+        ).execute()
+    except Exception as error:
+        error_message = str(error)
+        if "Unable to parse range" in error_message or "Requested entity was not found" in error_message:
+            raise RuntimeError(f"Could not find tab: {tab_name}") from error
+
+        raise
+
+    return response.get("values", [])
+
+
+def build_sheet_records(values, header_row_number):
+    if not values:
+        raise ValueError(f"Header row {header_row_number} appears to be empty.")
+
+    header_row = values[0]
+    if not any(normalize_whitespace(cell) for cell in header_row):
+        raise ValueError(f"Header row {header_row_number} appears to be empty.")
+
+    header_definitions = []
+    for column_index, header_value in enumerate(header_row):
+        display_name = normalize_whitespace(header_value)
+        if not display_name:
+            continue
+
+        header_definitions.append(
+            (
+                column_index,
+                display_name,
+                canonicalize_sheet_key(normalize_sheet_header_name(display_name)),
+            )
+        )
+
+    if not header_definitions:
+        raise ValueError(f"Header row {header_row_number} appears to be empty.")
+
+    records = []
+    for offset, row_values in enumerate(values[1:], start=1):
+        if not any(normalize_whitespace(cell) for cell in row_values):
+            continue
+
+        record = {
+            "_row_number": header_row_number + offset,
+            "_sheet_position": offset,
+            "_raw": {},
+        }
+
+        for column_index, display_name, canonical_key in header_definitions:
+            cell_value = normalize_whitespace(row_values[column_index] if column_index < len(row_values) else "")
+            record[canonical_key] = cell_value
+            record["_raw"][display_name] = cell_value
+
+        record["_parsed_date"] = parse_sheet_date(record.get("date_sent"))
+        records.append(record)
+
+    return records
+
+
+def detect_product_summary_header_row(values):
+    candidate_keys = {"product_name", "product_url", "shopify_handle", "edition_name", "handle", "url"}
+
+    for row_index, row_values in enumerate(values):
+        normalized_keys = {
+            canonicalize_sheet_key(normalize_sheet_header_name(cell))
+            for cell in row_values
+            if normalize_whitespace(cell)
+        }
+        if {"edition_name", "shopify_handle"} <= normalized_keys or {"product_name", "product_url"} <= normalized_keys:
+            return row_index
+        if len(candidate_keys.intersection(normalized_keys)) >= 2:
+            return row_index
+
+    return None
+
+
+def build_product_summary_lookup(values):
+    if not values:
+        return {}
+
+    header_row_index = detect_product_summary_header_row(values)
+    if header_row_index is None:
+        return {}
+
+    summary_records = build_sheet_records(values[header_row_index:], header_row_index + 1)
+    lookup = {}
+
+    for record in summary_records:
+        product_name = record.get("edition_name") or record.get("product_name") or ""
+        product_url = normalize_whitespace(record.get("product_url"))
+        shopify_handle = normalize_whitespace(record.get("shopify_handle"))
+        resolved_url = product_url or build_shopify_product_url_from_handle(shopify_handle)
+
+        if product_name and resolved_url:
+            lookup[normalize_lookup_name(product_name)] = resolved_url
+
+    return lookup
+
+
+def sort_edition_records(records):
+    dated_records = [record for record in records if record.get("_parsed_date") is not None]
+    undated_records = [record for record in records if record.get("_parsed_date") is None]
+
+    dated_records.sort(
+        key=lambda record: (
+            record["_parsed_date"],
+            -record["_sheet_position"],
+        ),
+        reverse=True,
+    )
+
+    return dated_records + undated_records
+
+
+def resolve_product_link(record, product_summary_lookup, local_links_lookup):
+    shopify_handle = normalize_whitespace(record.get("shopify_handle"))
+    if shopify_handle:
+        return build_shopify_product_url_from_handle(shopify_handle)
+
+    product_url = normalize_whitespace(record.get("product_url"))
+    if product_url:
+        return product_url
+
+    product_name = normalize_lookup_name(record.get("edition_name"))
+    if product_name in product_summary_lookup:
+        return product_summary_lookup[product_name]
+
+    return local_links_lookup.get(product_name)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def load_limited_editions_snapshot(sheet_id, sheet_tab, header_row, service_account_json):
+    edition_values = read_google_sheet_values(
+        service_account_json,
+        sheet_id,
+        sheet_tab,
+        f"A{header_row}",
+    )
+    edition_rows = build_sheet_records(edition_values, header_row)
+
+    product_summary_lookup = {}
+    try:
+        product_summary_values = read_google_sheet_values(
+            service_account_json,
+            sheet_id,
+            PRODUCT_SUMMARY_TAB,
+            "A1",
+        )
+        product_summary_lookup = build_product_summary_lookup(product_summary_values)
+    except Exception:
+        product_summary_lookup = {}
+
+    local_links_lookup = load_local_edition_product_links()
+    sorted_rows = sort_edition_records(edition_rows)
+
+    for row in sorted_rows:
+        row["_product_link"] = resolve_product_link(row, product_summary_lookup, local_links_lookup)
+
+    return {
+        "rows": sorted_rows,
+        "product_summary_lookup": product_summary_lookup,
+        "local_links_lookup": local_links_lookup,
+    }
+
+
+def build_limited_editions_history(rows):
+    history_by_product = {}
+
+    for row in rows:
+        product_name = normalize_whitespace(row.get("edition_name")) or "Untitled Product"
+        history_entry = history_by_product.setdefault(
+            product_name,
+            {
+                "edition_name": product_name,
+                "edition_numbers": [],
+                "latest_sent": format_sheet_date(row.get("date_sent")),
+                "latest_date": row.get("_parsed_date"),
+                "total_logged": 0,
+                "product_link": row.get("_product_link"),
+            },
+        )
+
+        edition_number = normalize_whitespace(row.get("edition_no"))
+        if edition_number and edition_number not in history_entry["edition_numbers"]:
+            history_entry["edition_numbers"].append(edition_number)
+
+        history_entry["total_logged"] += 1
+        if history_entry["product_link"] is None and row.get("_product_link"):
+            history_entry["product_link"] = row.get("_product_link")
+
+    history_rows = list(history_by_product.values())
+    history_rows.sort(
+        key=lambda item: (
+            item["latest_date"] is not None,
+            item["latest_date"] or datetime.min,
+            item["edition_name"].casefold(),
+        ),
+        reverse=True,
+    )
+    return history_rows
+
+
+def build_limited_editions_table_rows(rows, include_internal=False):
+    dashboard_rows = []
+
+    for row in rows:
+        dashboard_row = {
+            "Edition Name": normalize_whitespace(row.get("edition_name")) or "Untitled Product",
+            "Edition No.": normalize_whitespace(row.get("edition_no")) or "-",
+            "Frame": normalize_whitespace(row.get("frame")) or "-",
+            "Size": normalize_whitespace(row.get("size")) or "-",
+            "Date Sent": format_sheet_date(row.get("date_sent")),
+            "Shipping": normalize_whitespace(row.get("shipping")) or "-",
+            "Status": normalize_whitespace(row.get("status")) or "-",
+            "Notes": normalize_whitespace(row.get("notes")) or "",
+        }
+
+        if include_internal:
+            dashboard_row["Shopify Order #"] = normalize_whitespace(row.get("shopify_order")) or "-"
+            dashboard_row["Customer Name"] = normalize_whitespace(row.get("customer_name")) or "-"
+
+        dashboard_rows.append(dashboard_row)
+
+    return dashboard_rows
+
+
+def render_limited_editions_empty_state():
+    st.warning(
+        "Google Sheets is not connected yet. Add GOOGLE_SERVICE_ACCOUNT_JSON and GOOGLE_SHEET_ID in Render environment variables."
+    )
+    if GOOGLE_SHEET_URL:
+        render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet-empty")
+
+
 @lru_cache(maxsize=1)
 def get_drive_storage_module():
     if not ENABLE_GOOGLE_DRIVE:
@@ -2473,6 +2870,13 @@ def render_sidebar():
         st.sidebar.write("3. Review lightweight previews.")
         st.sidebar.write("4. Download one ZIP bundle.")
         st.sidebar.write("5. Use the prompt sections below if you want ChatGPT lifestyle images.")
+    elif st.session_state.selected_page == "Limited Editions":
+        st.sidebar.divider()
+        st.sidebar.subheader("Limited Editions")
+        st.sidebar.write("1. Open the live edition dashboard.")
+        st.sidebar.write("2. Refresh the sheet when needed.")
+        st.sidebar.write("3. Check previous edition numbers by product.")
+        st.sidebar.write("4. Expand internal details only when needed.")
 
     st.sidebar.divider()
     st.sidebar.subheader("Storage")
@@ -2679,6 +3083,144 @@ def render_product_uploads_page():
     )
 
 
+def render_limited_editions_page():
+    log_app_memory("Page load: Limited Editions")
+    st.title("Limited Editions")
+    st.caption(
+        "Live edition dispatch tracking from the Sports Cave Google Sheet. This page stays lightweight and only refreshes the sheet when you open it or press Refresh."
+    )
+
+    action_cols = st.columns([1, 1, 3])
+    with action_cols[0]:
+        if st.button("Refresh Edition Log", type="primary", use_container_width=True):
+            load_limited_editions_snapshot.clear()
+            st.rerun()
+    with action_cols[1]:
+        if GOOGLE_SHEET_URL:
+            render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet")
+
+    service_account_json = get_google_service_account_json()
+    if not GOOGLE_SHEET_ID or not service_account_json:
+        render_limited_editions_empty_state()
+        return
+
+    try:
+        snapshot = load_limited_editions_snapshot(
+            GOOGLE_SHEET_ID,
+            GOOGLE_SHEET_TAB,
+            GOOGLE_SHEET_HEADER_ROW,
+            service_account_json,
+        )
+    except RuntimeError as error:
+        st.error(str(error))
+        if GOOGLE_SHEET_URL:
+            render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet-error")
+        return
+    except ValueError as error:
+        st.warning(str(error))
+        if GOOGLE_SHEET_URL:
+            render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet-warning")
+        return
+    except Exception as error:
+        st.error("Could not load the Limited Editions dashboard.")
+        st.exception(error)
+        if GOOGLE_SHEET_URL:
+            render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet-debug")
+        return
+
+    rows = snapshot["rows"]
+    if not rows:
+        st.info("No edition log rows were found yet.")
+        if GOOGLE_SHEET_URL:
+            render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet-empty-data")
+        return
+
+    latest_row = rows[0]
+    submitted_count = sum(1 for row in rows if "submitted" in normalize_whitespace(row.get("status")).casefold())
+    latest_edition_sent = normalize_whitespace(latest_row.get("edition_no")) or "-"
+    latest_product_sent = normalize_whitespace(latest_row.get("edition_name")) or "Untitled Product"
+
+    metric_cols = st.columns(4)
+    metric_cols[0].metric("Total editions logged", str(len(rows)))
+    metric_cols[1].metric("Submitted editions", str(submitted_count))
+    metric_cols[2].metric("Latest edition sent", latest_edition_sent)
+    metric_cols[3].metric("Latest product sent", latest_product_sent)
+
+    st.divider()
+    st.subheader("Latest Editions Sent Out")
+    st.caption("Newest rows first where the sheet date can be parsed. Product links appear whenever a handle or URL is available.")
+
+    latest_cols = st.columns(2)
+    for index, row in enumerate(rows[:12]):
+        with latest_cols[index % 2]:
+            edition_name = normalize_whitespace(row.get("edition_name")) or "Untitled Product"
+            edition_number = normalize_whitespace(row.get("edition_no")) or "-"
+            frame = normalize_whitespace(row.get("frame")) or "-"
+            size = normalize_whitespace(row.get("size")) or "-"
+            status = normalize_whitespace(row.get("status")) or "-"
+            shipping = normalize_whitespace(row.get("shipping")) or "-"
+            notes = normalize_whitespace(row.get("notes"))
+
+            st.markdown(f"**{edition_name}**")
+            st.write(f"Edition #{edition_number}")
+            st.caption(f"{frame} / {size}")
+            st.caption(f"Status: {status}")
+            st.caption(f"Sent: {format_sheet_date(row.get('date_sent'))}")
+            st.caption(f"Shipping: {shipping}")
+            if notes:
+                st.caption(f"Notes: {notes}")
+            if row.get("_product_link"):
+                render_external_link("Open Product", row["_product_link"], f"open-product::{row['_row_number']}")
+            st.markdown("---")
+
+    st.subheader("Previous Edition Numbers Sent")
+    st.caption("Quick product-by-product reference so you can see which edition numbers have already gone out.")
+    product_search = st.text_input(
+        "Find product",
+        placeholder="Start typing a product name...",
+        key="limited-editions-product-search",
+    )
+
+    history_rows = build_limited_editions_history(rows)
+    if product_search.strip():
+        search_text = normalize_lookup_name(product_search)
+        history_rows = [
+            history_row
+            for history_row in history_rows
+            if search_text in normalize_lookup_name(history_row["edition_name"])
+        ]
+
+    if history_rows:
+        history_cols = st.columns(2)
+        for index, history_row in enumerate(history_rows):
+            with history_cols[index % 2]:
+                previous_numbers = ", ".join(history_row["edition_numbers"]) if history_row["edition_numbers"] else "-"
+                st.markdown(f"**{history_row['edition_name']}**")
+                st.caption(f"Previous editions sent: {previous_numbers}")
+                st.caption(f"Total logged: {history_row['total_logged']}")
+                st.caption(f"Latest sent: {history_row['latest_sent']}")
+                if history_row.get("product_link"):
+                    render_external_link(
+                        "Open Product",
+                        history_row["product_link"],
+                        f"open-history-product::{normalize_sheet_header_name(history_row['edition_name'])}",
+                    )
+                st.markdown("---")
+    else:
+        st.info("No matching products were found for that search.")
+
+    with st.expander("Internal details"):
+        show_internal_details = st.checkbox(
+            "Show internal order/customer details",
+            key="limited-editions-show-internal",
+        )
+        st.dataframe(
+            build_limited_editions_table_rows(rows, include_internal=show_internal_details),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+
 def test_google_drive_connection():
     drive_storage = get_drive_storage_module()
     section_ids = ensure_drive_sections()
@@ -2760,6 +3302,10 @@ def render_settings_page():
     st.caption("Current app and environment status.")
 
     st.write(f"**Password protection:** {get_password_protection_status()}")
+    st.write(f"**Google Sheet ID present:** {'Yes' if GOOGLE_SHEET_ID else 'No'}")
+    st.write(
+        f"**Google service account JSON present:** {'Yes' if get_google_service_account_json() else 'No'}"
+    )
     st.write(f"**Google Drive lightweight flag:** {'Enabled' if ENABLE_GOOGLE_DRIVE else 'Disabled'}")
     if ENABLE_GOOGLE_DRIVE:
         st.write("**Google Drive configured:** Open the Google Drive page to inspect the current connection.")
@@ -2789,7 +3335,7 @@ def main():
     if current_page == "Google Drive":
         render_google_drive_page()
     elif current_page == "Limited Editions":
-        render_placeholder_page("Limited Editions", "Limited edition tracking will live here.")
+        render_limited_editions_page()
     elif current_page == "Product Uploads":
         render_product_uploads_page()
     elif current_page == "Settings":
