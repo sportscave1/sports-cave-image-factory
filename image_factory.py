@@ -1465,6 +1465,23 @@ def create_shopify_pack_zip(zip_dir, product_slug, shopify_uploads_dir):
     return zip_path
 
 
+def create_download_bundle_zip(zip_dir, product_slug, shopify_uploads_dir, jpg_dir):
+    zip_path = zip_dir / f"{product_slug}-download-bundle.zip"
+
+    ensure_memory_available("Before zip creation: Download bundle")
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for upload_file in sorted(Path(shopify_uploads_dir).glob("*")):
+            if upload_file.is_file():
+                zipf.write(upload_file, arcname=f"{SHOPIFY_UPLOADS_FOLDER_NAME}/{upload_file.name}")
+
+        for jpg_file in sorted(Path(jpg_dir).glob("*.jpg")):
+            if jpg_file.is_file():
+                zipf.write(jpg_file, arcname=f"jpg/{jpg_file.name}")
+
+    ensure_memory_available("After zip creation: Download bundle")
+    return zip_path
+
+
 def create_social_media_pack_zip(zip_dir, product_slug, jpg_dir):
     zip_path = zip_dir / f"{product_slug}-social-media-pack-jpg.zip"
 

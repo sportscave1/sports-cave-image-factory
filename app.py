@@ -3,6 +3,7 @@ from functools import lru_cache
 from pathlib import Path
 import gc
 import hashlib
+import html
 import importlib
 import json
 import logging
@@ -13,6 +14,7 @@ import tempfile
 from PIL import Image, ImageOps, UnidentifiedImageError
 from dotenv import load_dotenv
 import streamlit as st
+import streamlit.components.v1 as components
 
 import image_factory
 
@@ -1801,6 +1803,66 @@ def render_download_button(label, file_path, mime, key):
         )
 
 
+def render_copyable_prompt(title, prompt_text, key):
+    textarea_height = min(780, max(320, (prompt_text.count("\n") + 1) * 18 + 80))
+    component_height = textarea_height + 96
+    safe_title = html.escape(title)
+    safe_text = html.escape(prompt_text)
+
+    components.html(
+        f"""
+        <div style="border:1px solid #ddd6ca;border-radius:16px;padding:16px;background:#ffffff;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;">
+            <strong style="font-size:1rem;color:#243040;">{safe_title}</strong>
+            <button
+              id="copy-button-{key}"
+              type="button"
+              style="border:none;border-radius:999px;padding:10px 16px;background:#243040;color:#ffffff;font-weight:600;cursor:pointer;"
+            >
+              Copy Prompt
+            </button>
+          </div>
+          <textarea
+            id="prompt-text-{key}"
+            readonly
+            style="width:100%;height:{textarea_height}px;border:1px solid #ddd6ca;border-radius:12px;padding:12px;background:#faf8f4;color:#1f2937;font-size:0.95rem;line-height:1.45;resize:none;box-sizing:border-box;"
+          >{safe_text}</textarea>
+        </div>
+        <script>
+        (() => {{
+          const button = document.getElementById("copy-button-{key}");
+          const textarea = document.getElementById("prompt-text-{key}");
+          const originalLabel = button.innerText;
+
+          async function copyPrompt() {{
+            textarea.focus();
+            textarea.select();
+            textarea.setSelectionRange(0, textarea.value.length);
+
+            try {{
+              if (navigator.clipboard && window.isSecureContext) {{
+                await navigator.clipboard.writeText(textarea.value);
+              }} else {{
+                document.execCommand("copy");
+              }}
+            }} catch (error) {{
+              document.execCommand("copy");
+            }}
+
+            button.innerText = "Copied";
+            setTimeout(() => {{
+              button.innerText = originalLabel;
+            }}, 1400);
+          }}
+
+          button.addEventListener("click", copyPrompt);
+        }})();
+        </script>
+        """,
+        height=component_height,
+    )
+
+
 def prime_asset_selection_state(result):
     if not result["run_dir"]:
         return
@@ -1999,6 +2061,62 @@ def build_shopify_zip_package(result):
     return result
 
 
+def ensure_lifestyle_prompts(result):
+    result = normalize_generation_result(result)
+
+    existing_prompt_paths = [
+        str(Path(prompt_path))
+        for prompt_path in result.get("prompt_paths", [])
+        if Path(prompt_path).exists()
+    ]
+    if existing_prompt_paths:
+        result["prompt_paths"] = existing_prompt_paths
+        return result
+
+    if not result["run_dir"] or not result["black_framed_webp_path"]:
+        return result
+
+    prompt_dir, _, prompt_paths, _ = image_factory.generate_lifestyle_prompt_pack(
+        result["product_name"],
+        result["sport_category"],
+        result["product_slug"],
+        Path(result["run_dir"]),
+        Path(result["black_framed_webp_path"]),
+    )
+    result["prompt_dir"] = str(prompt_dir)
+    result["prompt_paths"] = [str(prompt_path) for prompt_path in prompt_paths]
+    result["prompt_zip_path"] = None
+    write_local_manifest(result)
+    return result
+
+
+def ensure_primary_download_zip(result):
+    result = normalize_generation_result(result)
+    existing_zip_path = result.get("zip_path")
+    if existing_zip_path and Path(existing_zip_path).exists():
+        return result
+
+    result = rebuild_result_artifacts(result)
+    shopify_uploads_dir = result.get("shopify_uploads_dir")
+    socials_dir = result.get("socials_dir")
+
+    if not shopify_uploads_dir or not Path(shopify_uploads_dir).exists():
+        raise FileNotFoundError("Shopify upload files are not available for this run.")
+    if not socials_dir or not Path(socials_dir).exists():
+        raise FileNotFoundError("JPG export files are not available for this run.")
+
+    zip_dir = Path(result["zip_dir"] or (Path(result["run_dir"]) / "zip"))
+    zip_dir.mkdir(parents=True, exist_ok=True)
+    result["zip_path"] = image_factory.create_download_bundle_zip(
+        zip_dir,
+        result["product_slug"],
+        Path(shopify_uploads_dir),
+        Path(socials_dir),
+    )
+    write_local_manifest(result)
+    return result
+
+
 def build_lifestyle_prompt_pack(result):
     result = normalize_generation_result(result)
 
@@ -2086,10 +2204,6 @@ def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
     result["lifestyle_mockup_paths"][prompt_filename] = saved_paths
     result = upsert_result_asset(result, build_lifestyle_asset(prompt_path, saved_paths))
 
-    state_key = get_asset_checkbox_key(result["run_dir"], get_lifestyle_asset_key(prompt_filename))
-    if state_key not in st.session_state:
-        st.session_state[state_key] = True
-
     result["lifestyle_pack_error"] = None
     result["status_text"] = f"Saved lifestyle image for {get_prompt_label(prompt_path)}."
     result = rebuild_result_artifacts(result)
@@ -2138,17 +2252,24 @@ def render_generated_previews(result):
 
     for index, asset in enumerate(base_assets):
         with preview_cols[index % 2]:
-            checkbox_key = get_asset_checkbox_key(result["run_dir"], asset["key"])
-            st.checkbox("Include in packs", key=checkbox_key)
-
             preview_path = asset.get("preview_path")
             if preview_path and Path(preview_path).exists():
                 st.image(str(preview_path), caption=asset["label"], width=380)
-                st.caption(Path(preview_path).name)
             else:
                 st.caption("Preview not available.")
 
-            render_asset_download_controls(asset, result["run_dir"])
+
+def render_primary_zip_download(result, section_key):
+    st.subheader("Download ZIP")
+    st.caption(
+        "One ZIP only. It includes the `shopify-uploads` WEBP files, the HTML preview, and all JPG image exports."
+    )
+    render_download_button(
+        "Download ZIP",
+        result.get("zip_path"),
+        "application/zip",
+        key=f"download-primary-zip::{result['run_dir']}::{section_key}",
+    )
 
 
 def render_prompt_cards(result, prompt_paths, heading):
@@ -2168,29 +2289,16 @@ def render_prompt_cards(result, prompt_paths, heading):
             saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
 
             if saved_lifestyle_paths:
-                saved_webp_path = saved_lifestyle_paths.get("webp_path")
-                saved_jpg_path = saved_lifestyle_paths.get("jpg_path")
                 saved_preview_path = saved_lifestyle_paths.get("preview_path")
-                asset_key = get_lifestyle_asset_key(prompt_name)
-                checkbox_key = get_asset_checkbox_key(result["run_dir"], asset_key)
 
                 preview_path = saved_preview_path
                 if preview_path and Path(preview_path).exists():
-                    st.checkbox("Include in packs", key=checkbox_key)
                     st.image(
                         str(preview_path),
                         caption=Path(preview_path).name,
                         width=360,
                     )
-
-                render_asset_download_controls(
-                    {
-                        "key": asset_key,
-                        "webp_path": saved_webp_path,
-                        "jpg_path": saved_jpg_path,
-                    },
-                    result["run_dir"],
-                )
+                    st.caption("Saved. It will be included the next time you download the ZIP.")
 
             uploaded_lifestyle_image = st.file_uploader(
                 "Upload image from ChatGPT",
@@ -2200,7 +2308,7 @@ def render_prompt_cards(result, prompt_paths, heading):
             )
 
             if st.button(
-                "Add To ZIP",
+                "Save Image",
                 key=f"save-lifestyle::{result['run_dir']}::{prompt_name}",
                 use_container_width=True,
             ):
@@ -2276,8 +2384,10 @@ def render_optional_package_controls(result):
 
 
 def render_generation_result(result):
-    result = apply_asset_selection_from_session(result)
-    result = render_asset_selection_controls(result)
+    result = normalize_generation_result(result)
+    result = ensure_lifestyle_prompts(result)
+    result = ensure_primary_download_zip(result)
+    st.session_state.last_generation_result = result
     st.success(result.get("status_text") or "Core Sports Cave product images are ready.")
 
     if result["run_dir"]:
@@ -2304,12 +2414,12 @@ def render_generation_result(result):
             f"{result['drive_sync_error']}"
         )
 
+    render_primary_zip_download(result, "top")
     render_generated_previews(result)
-    render_optional_package_controls(result)
 
     if result["lifestyle_pack_error"]:
         st.warning(
-            "The core image set was created, but one of the optional pack steps reported an issue: "
+            "The core image set was created, but one of the prompt steps reported an issue: "
             f"{result['lifestyle_pack_error']}"
         )
 
@@ -2336,8 +2446,8 @@ def render_generation_result(result):
             social_prompts,
             "Social Lifestyle Mockups",
         )
-    else:
-        st.caption("Create the Lifestyle Prompt Pack above to unlock the ChatGPT lifestyle prompt cards.")
+
+    render_primary_zip_download(result, "bottom")
 
 
 def render_recent_runs_sidebar():
@@ -2361,9 +2471,8 @@ def render_sidebar():
         st.sidebar.write("1. Upload artwork.")
         st.sidebar.write("2. Generate core Shopify images.")
         st.sidebar.write("3. Review lightweight previews.")
-        st.sidebar.write("4. Download individual files.")
-        st.sidebar.write("5. Create optional packs only when needed.")
-        st.sidebar.write("6. Add ChatGPT lifestyle images if needed.")
+        st.sidebar.write("4. Download one ZIP bundle.")
+        st.sidebar.write("5. Use the prompt sections below if you want ChatGPT lifestyle images.")
 
     st.sidebar.divider()
     st.sidebar.subheader("Storage")
@@ -2379,7 +2488,7 @@ def render_mockups_page():
     log_app_memory("Page load: Mockups")
     st.title("Sports Cave Image Factory")
     st.caption(
-        "Upload one finished artwork, generate the five core Shopify images first, then create heavier packs only on demand."
+        "Upload one finished artwork, generate the five core Shopify images, then download one simple ZIP bundle."
     )
     st.caption("Upload limit: 10MB. Working images are capped to 2000px and UI previews are capped to 900px.")
 
@@ -2538,13 +2647,13 @@ def render_product_uploads_page():
     )
 
     st.info(
-        "This page does not scan local runs. Attach your own `shopify-uploads` WEBP files and HTML preview in ChatGPT, then use one of the prompt buttons below."
+        "This page does not scan local runs. Attach your own `shopify-uploads` WEBP files and HTML preview in ChatGPT, then copy one of the prompts below."
     )
 
     st.markdown(
         "1. Drag every WEBP file from your `shopify-uploads` folder into ChatGPT.\n"
         "2. Drag the matching HTML preview into ChatGPT if you have it.\n"
-        "3. Click one of the prompt buttons below and paste that prompt into ChatGPT.\n"
+        "3. Click the copy button on the prompt you need, then paste it into ChatGPT.\n"
         "4. Review the draft Shopify product carefully before publishing.\n"
         "\n"
         "- `New Shopify product` will generate a prompt for creating a brand new product in Shopify.\n"
@@ -2553,46 +2662,21 @@ def render_product_uploads_page():
     )
 
     st.divider()
-    st.write(
-        "Use the two buttons below to reveal the ChatGPT prompt text. Attach your files in ChatGPT, then paste the prompt below them."
+    st.write("Both prompts are ready below. Copy the one you need and paste it into ChatGPT under your uploaded files.")
+
+    render_copyable_prompt(
+        "New Shopify Product Prompt",
+        get_product_upload_prompt({}, update_existing=False),
+        "new-shopify-product-prompt",
     )
 
-    new_prompt_key = "show_new_prompt::manual"
-    existing_prompt_key = "show_existing_prompt::manual"
+    st.divider()
 
-    if new_prompt_key not in st.session_state:
-        st.session_state[new_prompt_key] = False
-    if existing_prompt_key not in st.session_state:
-        st.session_state[existing_prompt_key] = False
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Show prompt for NEW Shopify product", key="new-prompt-button::manual"):
-            st.session_state[new_prompt_key] = True
-            st.session_state[existing_prompt_key] = False
-
-    with col2:
-        if st.button("Show prompt for UPDATE existing product", key="update-prompt-button::manual"):
-            st.session_state[existing_prompt_key] = True
-            st.session_state[new_prompt_key] = False
-
-    if st.session_state[new_prompt_key]:
-        st.subheader("New Product Prompt")
-        st.text_area(
-            "",
-            value=get_product_upload_prompt({}, update_existing=False),
-            height=420,
-            key="new-prompt-area::manual",
-        )
-
-    if st.session_state[existing_prompt_key]:
-        st.subheader("Update Existing Product Prompt")
-        st.text_area(
-            "",
-            value=get_product_upload_prompt({}, update_existing=True),
-            height=420,
-            key="update-prompt-area::manual",
-        )
+    render_copyable_prompt(
+        "Update Existing Product Prompt",
+        get_product_upload_prompt({}, update_existing=True),
+        "update-existing-shopify-product-prompt",
+    )
 
 
 def test_google_drive_connection():
