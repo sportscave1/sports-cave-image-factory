@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import tempfile
+import traceback
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from dotenv import load_dotenv
@@ -99,6 +100,78 @@ PRODUCT_PAGE_PROMPT_NAMES = {
     "02-office-prompt.txt",
     "03-living-room-prompt.txt",
 }
+EDITION_LOG_REQUEST_HEADERS = {
+    "Accept": "application/json,text/plain,*/*",
+    "User-Agent": "SportsCaveImageFactory/1.0",
+}
+EDITION_LOG_HTML_WARNING = (
+    "The Edition Log URL returned an HTML page instead of JSON. Open the URL in an incognito browser. "
+    "If you do not see raw JSON, redeploy Apps Script as a Web App with Execute as: Me and "
+    "Who has access: Anyone with the link."
+)
+EXPECTED_APPS_SCRIPT_JSON_CODE = """function doGet(e) {
+const SHEET_NAME = "Edition Log";
+const HEADER_ROW = 4;
+const DATA_START_ROW = 5;
+
+const ss = SpreadsheetApp.getActiveSpreadsheet();
+const sheet = ss.getSheetByName(SHEET_NAME);
+
+if (!sheet) {
+return jsonResponse({ error: "Sheet not found: " + SHEET_NAME });
+}
+
+const lastRow = sheet.getLastRow();
+const lastCol = sheet.getLastColumn();
+
+if (lastRow < DATA_START_ROW) {
+return jsonResponse([]);
+}
+
+const headers = sheet
+.getRange(HEADER_ROW, 1, 1, lastCol)
+.getValues()[0]
+.map(String);
+
+const rows = sheet
+.getRange(DATA_START_ROW, 1, lastRow - DATA_START_ROW + 1, lastCol)
+.getDisplayValues();
+
+const safeColumns = [
+"Date Sent",
+"Edition Name",
+"Edition No.",
+"Frame",
+"Size",
+"Shipping",
+"Status",
+"Notes",
+"Product URL",
+"Shopify Handle"
+];
+
+const output = rows
+.map(row => {
+const item = {};
+headers.forEach((header, index) => {
+if (safeColumns.includes(header)) {
+item[header] = row[index] || "";
+}
+});
+return item;
+})
+.filter(item => {
+return Object.values(item).some(value => String(value).trim() !== "");
+});
+
+return jsonResponse(output);
+}
+
+function jsonResponse(data) {
+return ContentService
+.createTextOutput(JSON.stringify(data))
+.setMimeType(ContentService.MimeType.JSON);
+}"""
 
 NEW_SHOPIFY_PRODUCT_PROMPT = """SOP 07B — Sports Cave Shopify Product Creation Using ChatGPT + Shopify Connector
 Direct Draft Product Upload Version — No CSV Import Required
@@ -1508,6 +1581,9 @@ def init_session_state():
     if "uploaded_preview_path" not in st.session_state:
         st.session_state.uploaded_preview_path = None
 
+    if "limited_editions_test_result" not in st.session_state:
+        st.session_state.limited_editions_test_result = None
+
 
 def log_app_memory(stage):
     image_factory.log_memory(stage)
@@ -1653,41 +1729,189 @@ def get_edition_log_connection_status():
     }
 
 
-def fetch_edition_log_json_rows(endpoint_url):
-    try:
-        response = requests.get(
-            endpoint_url,
-            headers={"Accept": "application/json"},
-            timeout=10,
-            allow_redirects=True,
-        )
-        response.raise_for_status()
-    except requests.RequestException as error:
-        raise RuntimeError(f"Could not fetch Edition Log JSON endpoint: {error}") from error
+class EditionLogEndpointError(RuntimeError):
+    def __init__(self, user_message, diagnostics, debug_error=None):
+        super().__init__(user_message)
+        self.user_message = user_message
+        self.diagnostics = diagnostics
+        self.debug_error = debug_error
 
-    try:
-        data = response.json()
-    except ValueError as error:
-        response_preview = normalize_whitespace(response.text[:120]).casefold()
-        if response_preview.startswith("<!doctype html") or response_preview.startswith("<html"):
-            raise ValueError("Edition Log endpoint returned HTML instead of JSON.") from error
 
-        raise ValueError("Edition Log endpoint returned invalid JSON.") from error
+def build_edition_log_response_preview(text, max_chars=300):
+    preview = (text or "")[:max_chars]
+    return preview.replace("\r", " ").replace("\n", " ")
 
+
+def response_looks_like_html(text):
+    stripped_text = (text or "").lstrip().casefold()
+    return (
+        stripped_text.startswith("<!doctype")
+        or stripped_text.startswith("<html")
+        or "<body" in stripped_text
+    )
+
+
+def convert_to_public_apps_script_url(endpoint_url):
+    match = re.match(
+        r"^(https://script\.google\.com)/a/macros/[^/]+/s/([^/]+)/(exec|dev)(\?.*)?$",
+        normalize_whitespace(endpoint_url),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    base_url, deployment_id, mode, query_string = match.groups()
+    query_suffix = query_string or ""
+    return f"{base_url}/macros/s/{deployment_id}/{mode}{query_suffix}"
+
+
+def summarize_edition_log_payload(data):
     if isinstance(data, dict):
         rows = data.get("rows")
         if not isinstance(rows, list):
             raise ValueError(
                 "Edition Log endpoint returned invalid JSON. Expected a rows list."
             )
-        return rows
+        return rows, "rows"
 
     if isinstance(data, list):
-        return data
+        return data, "list"
 
     raise ValueError(
         "Edition Log endpoint returned invalid JSON. Expected a list of rows or an object with a rows list."
     )
+
+
+def request_edition_log_endpoint(request_url):
+    diagnostics = {
+        "requested_url": request_url,
+        "final_url": None,
+        "status_code": None,
+        "content_type": None,
+        "response_preview": "",
+        "response_looks_like": "Unknown",
+        "json_format": None,
+    }
+
+    try:
+        response = requests.get(
+            request_url,
+            headers=EDITION_LOG_REQUEST_HEADERS,
+            timeout=10,
+            allow_redirects=True,
+        )
+    except requests.RequestException as error:
+        raise EditionLogEndpointError(
+            f"Could not fetch Edition Log JSON endpoint: {error}",
+            diagnostics,
+            debug_error=error,
+        ) from error
+
+    response_text = response.text or ""
+    diagnostics["final_url"] = response.url
+    diagnostics["status_code"] = response.status_code
+    diagnostics["content_type"] = response.headers.get("content-type", "")
+    diagnostics["response_preview"] = build_edition_log_response_preview(response_text)
+    diagnostics["response_looks_like"] = "HTML" if response_looks_like_html(response_text) else "JSON-like"
+
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as error:
+        raise EditionLogEndpointError(
+            f"Edition Log URL returned HTTP {response.status_code}.",
+            diagnostics,
+            debug_error=error,
+        ) from error
+
+    if response_looks_like_html(response_text):
+        raise EditionLogEndpointError(
+            EDITION_LOG_HTML_WARNING,
+            diagnostics,
+        )
+
+    try:
+        data = response.json()
+    except ValueError as error:
+        if response_looks_like_html(response_text):
+            raise EditionLogEndpointError(
+                EDITION_LOG_HTML_WARNING,
+                diagnostics,
+                debug_error=error,
+            ) from error
+
+        raise EditionLogEndpointError(
+            "Edition Log endpoint returned invalid JSON. Expected a list of rows or an object with a rows list.",
+            diagnostics,
+            debug_error=error,
+        ) from error
+
+    try:
+        rows, json_format = summarize_edition_log_payload(data)
+    except ValueError as error:
+        raise EditionLogEndpointError(
+            str(error),
+            diagnostics,
+            debug_error=error,
+        ) from error
+
+    diagnostics["json_format"] = json_format
+    diagnostics["response_looks_like"] = "JSON"
+    return rows, diagnostics
+
+
+def fetch_edition_log_json_rows(endpoint_url):
+    requested_url = normalize_whitespace(endpoint_url)
+    overall_diagnostics = {
+        "original_url_exists": bool(requested_url),
+        "original_url": requested_url,
+        "requested_url": requested_url,
+        "final_url": None,
+        "status_code": None,
+        "content_type": None,
+        "response_preview": "",
+        "response_looks_like": "Unknown",
+        "json_format": None,
+        "retried_public_url_format": False,
+        "attempted_urls": [],
+    }
+
+    try:
+        rows, diagnostics = request_edition_log_endpoint(requested_url)
+        overall_diagnostics.update(diagnostics)
+        overall_diagnostics["attempted_urls"].append(diagnostics["requested_url"])
+        return rows, overall_diagnostics
+    except EditionLogEndpointError as first_error:
+        overall_diagnostics.update(first_error.diagnostics)
+        overall_diagnostics["attempted_urls"].append(first_error.diagnostics["requested_url"])
+
+        public_url = convert_to_public_apps_script_url(requested_url)
+        should_retry = (
+            first_error.diagnostics.get("response_looks_like") == "HTML"
+            and public_url
+            and public_url != requested_url
+        )
+        if not should_retry:
+            raise EditionLogEndpointError(
+                first_error.user_message,
+                overall_diagnostics,
+                debug_error=first_error.debug_error,
+            ) from first_error
+
+        overall_diagnostics["retried_public_url_format"] = True
+
+        try:
+            rows, retry_diagnostics = request_edition_log_endpoint(public_url)
+            overall_diagnostics.update(retry_diagnostics)
+            overall_diagnostics["attempted_urls"].append(retry_diagnostics["requested_url"])
+            return rows, overall_diagnostics
+        except EditionLogEndpointError as retry_error:
+            overall_diagnostics.update(retry_error.diagnostics)
+            overall_diagnostics["attempted_urls"].append(retry_error.diagnostics["requested_url"])
+            raise EditionLogEndpointError(
+                retry_error.user_message,
+                overall_diagnostics,
+                debug_error=retry_error.debug_error,
+            ) from retry_error
 
 
 def build_records_from_json_rows(json_rows):
@@ -1764,7 +1988,8 @@ def load_limited_editions_snapshot(json_url):
     if not json_url:
         raise ValueError("Edition Log is not connected yet. Add EDITION_LOG_JSON_URL in Render environment variables.")
 
-    edition_rows, had_date_parse_failure = build_records_from_json_rows(fetch_edition_log_json_rows(json_url))
+    json_rows, endpoint_diagnostics = fetch_edition_log_json_rows(json_url)
+    edition_rows, had_date_parse_failure = build_records_from_json_rows(json_rows)
     sorted_rows = sort_edition_records(edition_rows, had_date_parse_failure=had_date_parse_failure)
 
     for row in sorted_rows:
@@ -1773,6 +1998,7 @@ def load_limited_editions_snapshot(json_url):
     return {
         "rows": sorted_rows,
         "had_date_parse_failure": had_date_parse_failure,
+        "endpoint_diagnostics": endpoint_diagnostics,
     }
 
 
@@ -1843,19 +2069,114 @@ def render_limited_editions_empty_state():
     st.warning(
         "Edition Log is not connected yet. Add EDITION_LOG_JSON_URL in Render environment variables."
     )
+    render_limited_editions_setup_help(html_issue=False)
 
 
-def render_limited_editions_load_error(error):
+def render_limited_editions_setup_help(html_issue=False):
+    if html_issue:
+        st.info(
+            "Apps Script is returning an HTML page, not JSON. Check the Apps Script deployment:\n"
+            "\n"
+            "1. Deploy as Web app\n"
+            "2. Execute as: Me\n"
+            "3. Who has access: Anyone with the link\n"
+            "4. Copy the Web app URL, not the Deployment ID\n"
+            "5. Test the URL in incognito. It must show raw JSON."
+        )
+    else:
+        st.info(
+            "Add EDITION_LOG_JSON_URL to Render, then open the URL in an incognito browser. "
+            "If it does not show raw JSON, redeploy the Apps Script Web App before using this page."
+        )
+    with st.expander("Expected Apps Script JSON code"):
+        st.code(EXPECTED_APPS_SCRIPT_JSON_CODE, language="javascript")
+
+
+def render_limited_editions_diagnostics(diagnostics):
+    if not diagnostics:
+        return
+
+    st.caption("Endpoint diagnostics")
+    st.write(f"**Original URL exists:** {'Yes' if diagnostics.get('original_url_exists') else 'No'}")
+    st.write(f"**Requested URL:** {diagnostics.get('requested_url') or '-'}")
+    st.write(f"**Final response URL:** {diagnostics.get('final_url') or '-'}")
+    st.write(f"**HTTP status code:** {diagnostics.get('status_code') or '-'}")
+    st.write(f"**Content-Type:** {diagnostics.get('content_type') or '-'}")
+    st.write(f"**Response looks like:** {diagnostics.get('response_looks_like') or '-'}")
+    if diagnostics.get("json_format"):
+        st.write(f"**JSON format:** {diagnostics.get('json_format')}")
+    if diagnostics.get("retried_public_url_format"):
+        st.info("Retried using public Apps Script URL format.")
+    attempted_urls = diagnostics.get("attempted_urls") or []
+    if attempted_urls:
+        st.write(f"**Attempted URLs:** {len(attempted_urls)}")
+        for attempt_index, attempt_url in enumerate(attempted_urls, start=1):
+            st.caption(f"{attempt_index}. {attempt_url}")
+    with st.expander("Response preview", expanded=False):
+        st.code(diagnostics.get("response_preview") or "-", language=None)
+
+
+def render_limited_editions_load_error(error, diagnostics=None):
     st.error("Could not load Edition Log from the live JSON URL.")
-    st.exception(error)
-    st.caption("Possible causes:")
-    st.caption("- Apps Script web app is not deployed")
-    st.caption("- The web app URL is wrong")
-    st.caption("- Web app permissions are not set to Anyone with the link")
-    st.caption("- Apps Script returned HTML instead of JSON")
-    st.caption("- The endpoint returned invalid JSON")
+    if isinstance(error, EditionLogEndpointError):
+        st.warning(error.user_message)
+    else:
+        st.warning(str(error))
+    render_limited_editions_diagnostics(diagnostics)
+    render_limited_editions_setup_help(
+        html_issue=bool(diagnostics and diagnostics.get("response_looks_like") == "HTML")
+    )
+    with st.expander("Debug details"):
+        if diagnostics:
+            st.json(diagnostics)
+        st.code("".join(traceback.format_exception(type(error), error, error.__traceback__)))
     if GOOGLE_SHEET_URL:
         render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet-error")
+
+
+def test_edition_log_url(json_url):
+    try:
+        rows, diagnostics = fetch_edition_log_json_rows(json_url)
+        return {
+            "ok": True,
+            "message": f"Edition Log URL returned JSON successfully. Rows found: {len(rows)}.",
+            "diagnostics": diagnostics,
+            "debug_details": None,
+        }
+    except EditionLogEndpointError as error:
+        return {
+            "ok": False,
+            "message": error.user_message,
+            "diagnostics": error.diagnostics,
+            "debug_details": "".join(
+                traceback.format_exception(type(error), error, error.__traceback__)
+            ),
+        }
+    except Exception as error:
+        return {
+            "ok": False,
+            "message": str(error),
+            "diagnostics": None,
+            "debug_details": "".join(
+                traceback.format_exception(type(error), error, error.__traceback__)
+            ),
+        }
+
+
+def render_edition_log_test_result(test_result):
+    if not test_result:
+        return
+
+    st.subheader("Edition Log URL Test")
+    if test_result.get("ok"):
+        st.success(test_result.get("message") or "Edition Log URL test succeeded.")
+    else:
+        st.warning(test_result.get("message") or "Edition Log URL test failed.")
+
+    render_limited_editions_diagnostics(test_result.get("diagnostics"))
+    if test_result.get("debug_details"):
+        with st.expander("Debug details"):
+            st.code(test_result["debug_details"])
 
 
 @lru_cache(maxsize=1)
@@ -3116,21 +3437,32 @@ def render_limited_editions_page():
         "Live edition dispatch tracking from the Sports Cave Edition Log. This page stays lightweight and only refreshes the data when you open it or press Refresh."
     )
 
-    action_cols = st.columns([1, 1, 3])
+    action_cols = st.columns([1, 1, 1, 2])
     with action_cols[0]:
         if st.button("Refresh Edition Log", type="primary", use_container_width=True):
             load_limited_editions_snapshot.clear()
+            st.session_state.limited_editions_test_result = None
             st.rerun()
     with action_cols[1]:
         if GOOGLE_SHEET_URL:
             render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet")
+    with action_cols[2]:
+        json_url = get_edition_log_json_url()
+        if st.button(
+            "Test Edition Log URL",
+            use_container_width=True,
+            disabled=not bool(json_url),
+        ):
+            st.session_state.limited_editions_test_result = test_edition_log_url(json_url)
+            st.rerun()
 
     connection_status = get_edition_log_connection_status()
     st.caption(
         f"Edition Log JSON URL: {'Found' if connection_status['json_url_found'] else 'Missing'}"
     )
 
-    json_url = get_edition_log_json_url()
+    render_edition_log_test_result(st.session_state.limited_editions_test_result)
+
     if not json_url:
         render_limited_editions_empty_state()
         return
@@ -3138,7 +3470,8 @@ def render_limited_editions_page():
     try:
         snapshot = load_limited_editions_snapshot(json_url)
     except Exception as error:
-        render_limited_editions_load_error(error)
+        diagnostics = error.diagnostics if isinstance(error, EditionLogEndpointError) else None
+        render_limited_editions_load_error(error, diagnostics=diagnostics)
         return
 
     rows = snapshot["rows"]
@@ -3158,6 +3491,9 @@ def render_limited_editions_page():
     metric_cols[1].metric("Submitted editions", str(submitted_count))
     metric_cols[2].metric("Latest edition sent", latest_edition_sent)
     metric_cols[3].metric("Latest product sent", latest_product_sent)
+
+    with st.expander("Endpoint diagnostics"):
+        render_limited_editions_diagnostics(snapshot.get("endpoint_diagnostics"))
 
     st.divider()
     st.subheader("Latest Editions Sent Out")
@@ -3188,6 +3524,14 @@ def render_limited_editions_page():
             if row.get("_product_link"):
                 render_external_link("Open Product", row["_product_link"], f"open-product::{row['_row_number']}")
             st.markdown("---")
+
+    st.subheader("Recent Dispatch Table")
+    st.caption("A quick lightweight table so you can scan the latest editions sent out at a glance.")
+    st.dataframe(
+        build_limited_editions_table_rows(rows[:25], include_internal=False),
+        hide_index=True,
+        use_container_width=True,
+    )
 
     st.subheader("Previous Edition Numbers Sent")
     st.caption("Quick product-by-product reference so you can see which edition numbers have already gone out.")
