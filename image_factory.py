@@ -15,11 +15,16 @@ except ImportError:
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
-MAX_UPLOAD_SIZE_BYTES = 15 * 1024 * 1024
-MAX_WORKING_EDGE = 2400
+RENDER_LIGHTWEIGHT_MODE = True
+MAX_UPLOAD_MB = 10
+MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+MAX_SOURCE_PIXELS = 25_000_000
+MAX_WORKING_EDGE = 2000
 MAX_PREVIEW_EDGE = 900
+MAX_STORED_RUNS = 3
 EXPORT_IMAGE_EDGE = 1024
-EXPORT_WEBP_QUALITY = 85
+WEBP_EXPORT_QUALITY = 82
+EXPORT_WEBP_QUALITY = WEBP_EXPORT_QUALITY
 EXPORT_WEBP_METHOD = 4
 EXPORT_JPG_QUALITY = 92
 PREVIEW_WEBP_QUALITY = 70
@@ -27,6 +32,10 @@ PREVIEW_WEBP_METHOD = 4
 MEMORY_LIMIT_MB = 430
 MEMORY_LIMIT_MESSAGE = (
     "Memory limit reached before completion. Try a smaller uploaded image or upgrade the Render instance."
+)
+PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE = (
+    "Memory limit reached while preparing the uploaded artwork. "
+    "Try exporting the artwork as JPG/WebP under 10MB, or upgrade Render to a higher-memory instance."
 )
 
 
@@ -52,10 +61,10 @@ def log_memory(stage):
     return memory_usage
 
 
-def ensure_memory_available(stage):
+def ensure_memory_available(stage, error_message=MEMORY_LIMIT_MESSAGE):
     memory_usage = log_memory(stage)
     if memory_usage is not None and memory_usage >= MEMORY_LIMIT_MB:
-        raise MemoryLimitExceededError(MEMORY_LIMIT_MESSAGE)
+        raise MemoryLimitExceededError(error_message)
 
     return memory_usage
 
@@ -70,9 +79,17 @@ def close_image(image):
         pass
 
 
-def collect_garbage(stage):
+def collect_garbage(stage, error_message=MEMORY_LIMIT_MESSAGE):
     gc.collect()
-    ensure_memory_available(stage)
+    ensure_memory_available(stage, error_message=error_message)
+
+
+def log_image_details(stage, image_format, width, height, file_size_bytes):
+    file_size_mb = file_size_bytes / 1024 / 1024 if file_size_bytes else 0
+    print(
+        f"[image_factory] {stage}: format={image_format or 'unknown'} "
+        f"size={width}x{height} pixels={width * height} file_mb={file_size_mb:.2f}"
+    )
 
 
 def load_artwork_image(image_path):
@@ -1024,27 +1041,79 @@ def resize_to_1024(image):
 def prepare_working_artwork(image_path, upload_dir):
     upload_dir = Path(upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
-    working_path = upload_dir / "artwork-working.jpg"
+    image_path = Path(image_path)
+    working_path = upload_dir / "working-artwork.webp"
 
-    ensure_memory_available("Before source image open")
-    artwork = load_artwork_image(image_path)
+    ensure_memory_available(
+        "Before source image open",
+        error_message=PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE,
+    )
+
+    source_image = None
+    working_image = None
 
     try:
-        ensure_memory_available("After source image open")
+        source_image = Image.open(image_path)
+        source_format = (source_image.format or image_path.suffix.lstrip(".") or "unknown").upper()
+        source_width, source_height = source_image.size
+        file_size_bytes = image_path.stat().st_size if image_path.exists() else 0
 
-        if max(artwork.size) > MAX_WORKING_EDGE:
-            artwork.thumbnail((MAX_WORKING_EDGE, MAX_WORKING_EDGE), Image.LANCZOS)
-
-        artwork.save(
-            working_path,
-            format="JPEG",
-            quality=EXPORT_JPG_QUALITY,
-            optimize=True,
+        log_image_details(
+            "Source upload metadata",
+            source_format,
+            source_width,
+            source_height,
+            file_size_bytes,
         )
+        log_memory("After reading source metadata")
+
+        if source_format in {"JPEG", "JPG"}:
+            source_image.draft("RGB", (MAX_WORKING_EDGE, MAX_WORKING_EDGE))
+
+        if max(source_image.size) > MAX_WORKING_EDGE or (source_image.width * source_image.height) > MAX_SOURCE_PIXELS:
+            source_image.thumbnail(
+                (MAX_WORKING_EDGE, MAX_WORKING_EDGE),
+                Image.LANCZOS,
+                reducing_gap=3.0,
+            )
+            log_memory("After source downscale before transpose")
+
+        working_image = ImageOps.exif_transpose(source_image)
+
+        if max(working_image.size) > MAX_WORKING_EDGE or (working_image.width * working_image.height) > MAX_SOURCE_PIXELS:
+            working_image.thumbnail(
+                (MAX_WORKING_EDGE, MAX_WORKING_EDGE),
+                Image.LANCZOS,
+                reducing_gap=3.0,
+            )
+
+        if working_image.mode != "RGB":
+            rgb_image = working_image.convert("RGB")
+            close_image(working_image)
+            working_image = rgb_image
+
+        working_image.save(
+            working_path,
+            format="WEBP",
+            quality=EXPORT_WEBP_QUALITY,
+            method=EXPORT_WEBP_METHOD,
+        )
+        log_memory("After downscaled working image saved")
+    except UnidentifiedImageError as error:
+        raise RuntimeError(
+            f"Cannot open artwork file {image_path}. Please upload a valid JPG, PNG, or WEBP image."
+        ) from error
     finally:
-        close_image(artwork)
-        del artwork
-        collect_garbage("After preparing lightweight working image")
+        close_image(working_image)
+        close_image(source_image)
+        del working_image, source_image
+        gc.collect()
+        log_memory("After closing source image")
+
+    collect_garbage(
+        "After preparing lightweight working image",
+        error_message=PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE,
+    )
 
     return working_path
 
@@ -1073,7 +1142,7 @@ def create_preview_file(source_image_path, preview_dir, preview_name):
     return preview_path
 
 
-def cleanup_old_runs(output_dir, keep_latest=5, active_run_dir=None):
+def cleanup_old_runs(output_dir, keep_latest=MAX_STORED_RUNS, active_run_dir=None):
     runs_dir = Path(output_dir) / "runs"
     if not runs_dir.exists():
         return []
@@ -1805,11 +1874,6 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
     prompt_paths = []
     prompt_zip_path = None
     lifestyle_pack_error = None
-
-    try:
-        cleanup_old_runs(output_dir, keep_latest=5, active_run_dir=run_dir)
-    except Exception as error:
-        report(f"Run cleanup warning: {error}")
 
     ensure_memory_available("Completion")
 

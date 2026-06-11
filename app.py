@@ -1,16 +1,19 @@
 from contextlib import suppress
+from functools import lru_cache
 from pathlib import Path
+import gc
+import hashlib
+import importlib
 import json
 import logging
 import os
 import shutil
 import tempfile
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 from dotenv import load_dotenv
 import streamlit as st
 
-import drive_storage
 import image_factory
 
 
@@ -20,13 +23,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
-MENU_OPTIONS = [
-    "Mockups",
-    "Google Drive",
-    "Limited Editions",
-    "Product Uploads",
-    "Settings",
-]
+UPLOAD_PREVIEW_DIR = BASE_DIR / "output" / "_ui-upload-previews"
+ENABLE_GOOGLE_DRIVE = os.getenv("ENABLE_GOOGLE_DRIVE", "false").lower() == "true"
+MENU_OPTIONS = ["Mockups", "Limited Editions", "Product Uploads", "Settings"]
+if ENABLE_GOOGLE_DRIVE:
+    MENU_OPTIONS.insert(1, "Google Drive")
 APP_VERSION = "Build 2026-06-11"
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
@@ -1486,6 +1487,75 @@ def init_session_state():
     if "last_generation_result" not in st.session_state:
         st.session_state.last_generation_result = None
 
+    if "uploaded_preview_signature" not in st.session_state:
+        st.session_state.uploaded_preview_signature = None
+
+    if "uploaded_preview_path" not in st.session_state:
+        st.session_state.uploaded_preview_path = None
+
+
+def log_app_memory(stage):
+    image_factory.log_memory(stage)
+
+
+@lru_cache(maxsize=1)
+def get_drive_storage_module():
+    if not ENABLE_GOOGLE_DRIVE:
+        raise RuntimeError("Google Drive is disabled in lightweight mode.")
+
+    return importlib.import_module("drive_storage")
+
+
+def get_uploaded_file_signature(uploaded_file):
+    if uploaded_file is None:
+        return None
+
+    name = getattr(uploaded_file, "name", "")
+    size = getattr(uploaded_file, "size", 0)
+    return hashlib.sha1(f"{name}|{size}".encode("utf-8")).hexdigest()[:16]
+
+
+def create_uploaded_preview(uploaded_file):
+    preview_signature = get_uploaded_file_signature(uploaded_file)
+    if preview_signature is None:
+        return None
+
+    UPLOAD_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+    preview_path = UPLOAD_PREVIEW_DIR / f"{preview_signature}.webp"
+    if preview_path.exists():
+        return preview_path
+
+    source_image = None
+    preview_image = None
+
+    try:
+        log_app_memory("Before upload preview creation")
+        uploaded_file.seek(0)
+        source_image = Image.open(uploaded_file)
+        if (source_image.format or "").upper() in {"JPEG", "JPG"}:
+            source_image.draft("RGB", (image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE))
+
+        preview_image = ImageOps.exif_transpose(source_image).convert("RGB")
+        preview_image.thumbnail((image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE), Image.LANCZOS)
+        preview_image.save(
+            preview_path,
+            format="WEBP",
+            quality=image_factory.PREVIEW_WEBP_QUALITY,
+            method=image_factory.PREVIEW_WEBP_METHOD,
+        )
+        log_app_memory("After upload preview creation")
+        return preview_path
+    finally:
+        uploaded_file.seek(0)
+        if preview_image is not None:
+            with suppress(Exception):
+                preview_image.close()
+        if source_image is not None:
+            with suppress(Exception):
+                source_image.close()
+        del preview_image, source_image
+        gc.collect()
+
 
 def get_local_recent_runs(limit=5):
     if not RUNS_DIR.exists():
@@ -1499,8 +1569,9 @@ def get_local_recent_runs(limit=5):
 
 
 def get_recent_runs(limit=5):
-    if drive_storage.is_drive_configured():
+    if ENABLE_GOOGLE_DRIVE:
         try:
+            drive_storage = get_drive_storage_module()
             recent_drive_runs = drive_storage.list_recent_drive_runs(limit=limit)
             if recent_drive_runs:
                 return recent_drive_runs
@@ -1554,7 +1625,10 @@ def validate_uploaded_artwork(uploaded_file):
     if file_size is not None and file_size <= 0:
         raise ValueError("Uploaded file is empty.")
     if file_size is not None and file_size > image_factory.MAX_UPLOAD_SIZE_BYTES:
-        raise ValueError("Uploaded file is larger than 15MB. Please upload an image under 15MB.")
+        raise ValueError(
+            "Uploaded image is too large for the current Render instance. "
+            "Please upload a JPG or WebP under 10MB."
+        )
 
     filename = getattr(uploaded_file, "name", "")
     suffix = Path(filename).suffix.lower()
@@ -1785,6 +1859,7 @@ def write_local_manifest(result, uploaded_files=None):
 
 
 def ensure_drive_sections():
+    drive_storage = get_drive_storage_module()
     root_folder_id = drive_storage.get_root_folder_id()
     if not root_folder_id:
         raise drive_storage.DriveStorageError(
@@ -1804,6 +1879,14 @@ def sync_result_to_google_drive(result):
 
     if not result["run_dir"]:
         return result
+
+    if not ENABLE_GOOGLE_DRIVE:
+        result["drive_sync_enabled"] = False
+        result["drive_sync_error"] = None
+        result["drive_sync_message"] = "Google Drive is disabled in lightweight mode."
+        return result
+
+    drive_storage = get_drive_storage_module()
 
     if not drive_storage.is_drive_configured():
         result["drive_sync_enabled"] = False
@@ -1912,7 +1995,8 @@ def build_shopify_zip_package(result):
         Path(shopify_uploads_dir),
     )
     result["status_text"] = "Shopify ZIP ready."
-    return sync_result_to_google_drive(result)
+    write_local_manifest(result)
+    return result
 
 
 def build_lifestyle_prompt_pack(result):
@@ -1943,7 +2027,7 @@ def build_lifestyle_prompt_pack(result):
     result["lifestyle_pack_error"] = None
     result["status_text"] = "Lifestyle prompt pack ready."
     write_local_manifest(result)
-    return sync_result_to_google_drive(result)
+    return result
 
 
 def build_complete_download_pack(result):
@@ -1965,7 +2049,8 @@ def build_complete_download_pack(result):
         assets=result["assets"],
     )
     result["status_text"] = "Complete download pack ready."
-    return sync_result_to_google_drive(result)
+    write_local_manifest(result)
+    return result
 
 
 def build_lifestyle_asset(prompt_path, saved_paths):
@@ -2008,7 +2093,7 @@ def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
     result["lifestyle_pack_error"] = None
     result["status_text"] = f"Saved lifestyle image for {get_prompt_label(prompt_path)}."
     result = rebuild_result_artifacts(result)
-    return sync_result_to_google_drive(result)
+    return result
 
 
 def render_asset_selection_controls(result):
@@ -2210,16 +2295,14 @@ def render_generation_result(result):
                 f"{len(list(Path(result['socials_dir']).glob('*.jpg')))} JPG files ready for socials."
             )
 
-    if result["drive_run_url"]:
+    if ENABLE_GOOGLE_DRIVE and result["drive_run_url"]:
         st.success("Saved to Google Drive")
         st.markdown(f"[Open Google Drive run folder]({result['drive_run_url']})")
-    elif result["drive_sync_error"]:
+    elif ENABLE_GOOGLE_DRIVE and result["drive_sync_error"]:
         st.warning(
             "Google Drive upload failed, but the local files are still ready. "
             f"{result['drive_sync_error']}"
         )
-    else:
-        st.info("Google Drive is not configured. Files were saved locally only.")
 
     render_generated_previews(result)
     render_optional_package_controls(result)
@@ -2258,17 +2341,7 @@ def render_generation_result(result):
 
 
 def render_recent_runs_sidebar():
-    recent_runs = get_recent_runs(limit=5)
-    if not recent_runs:
-        return
-
-    st.sidebar.divider()
-    st.sidebar.subheader("Recent Runs")
-    for run_entry in recent_runs:
-        if run_entry.get("url"):
-            st.sidebar.markdown(f"[{run_entry['name']}]({run_entry['url']})")
-        else:
-            st.sidebar.caption(run_entry["name"])
+    return
 
 
 def render_sidebar():
@@ -2294,26 +2367,21 @@ def render_sidebar():
 
     st.sidebar.divider()
     st.sidebar.subheader("Storage")
-    if drive_storage.is_drive_configured():
-        root_folder_id = drive_storage.get_root_folder_id()
-        st.sidebar.caption("Google Drive configured: Yes")
-        st.sidebar.caption(f"Root folder ID: `{root_folder_id}`")
-        st.sidebar.markdown(
-            f"[Open root folder]({drive_storage.get_drive_folder_link(root_folder_id)})"
-        )
+    if ENABLE_GOOGLE_DRIVE:
+        st.sidebar.caption("Google Drive available on its own page.")
+        st.sidebar.caption("Drive authentication and syncing stay idle until you open Drive actions.")
     else:
-        st.sidebar.caption("Google Drive configured: No")
-        st.sidebar.caption("Local output is active until Drive is configured.")
-
-    render_recent_runs_sidebar()
+        st.sidebar.caption("Google Drive disabled in lightweight mode.")
+        st.sidebar.caption("Local output stays isolated unless Drive is enabled explicitly.")
 
 
 def render_mockups_page():
+    log_app_memory("Page load: Mockups")
     st.title("Sports Cave Image Factory")
     st.caption(
         "Upload one finished artwork, generate the five core Shopify images first, then create heavier packs only on demand."
     )
-    st.caption("Upload limit: 15MB. Working images are capped to 2400px and UI previews are capped to 900px.")
+    st.caption("Upload limit: 10MB. Working images are capped to 2000px and UI previews are capped to 900px.")
 
     st.subheader("1. Upload Artwork")
     uploaded_file = st.file_uploader(
@@ -2340,6 +2408,8 @@ def render_mockups_page():
 
         st.session_state.last_uploaded_file_name = None
         st.session_state.last_autofilled_product_name = ""
+        st.session_state.uploaded_preview_signature = None
+        st.session_state.uploaded_preview_path = None
 
     product_name = st.text_input(
         "Product name",
@@ -2365,7 +2435,24 @@ def render_mockups_page():
 
     if uploaded_file is not None:
         st.subheader("Uploaded Artwork")
-        st.image(uploaded_file, caption=uploaded_file.name, width=400)
+        preview_signature = get_uploaded_file_signature(uploaded_file)
+        preview_path = st.session_state.uploaded_preview_path
+        preview_missing = not preview_path or not Path(preview_path).exists()
+        if preview_signature != st.session_state.uploaded_preview_signature or preview_missing:
+            try:
+                preview_path = create_uploaded_preview(uploaded_file)
+                st.session_state.uploaded_preview_signature = preview_signature
+                st.session_state.uploaded_preview_path = str(preview_path) if preview_path else None
+            except Exception as error:
+                st.warning(f"Could not create upload preview: {error}")
+                st.session_state.uploaded_preview_signature = preview_signature
+                st.session_state.uploaded_preview_path = None
+
+        preview_path = st.session_state.uploaded_preview_path
+        if preview_path and Path(preview_path).exists():
+            st.image(str(preview_path), caption=uploaded_file.name, width=400)
+        else:
+            st.caption("Lightweight preview unavailable until the upload is processed.")
 
     if generate_clicked:
         sport_category = get_sport_category(sport_option, custom_sport)
@@ -2398,6 +2485,7 @@ def render_mockups_page():
             validate_uploaded_artwork(uploaded_file)
 
             update_status("Preparing lightweight working image...", 15)
+            log_app_memory("Mockup generation start")
             suffix = Path(uploaded_file.name).suffix or ".jpg"
             uploaded_file.seek(0)
             with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
@@ -2415,7 +2503,11 @@ def render_mockups_page():
 
             update_status("Creating downloads...", 92)
             result = rebuild_result_artifacts(result)
-            result = sync_result_to_google_drive(result)
+            image_factory.cleanup_old_runs(
+                BASE_DIR / "output",
+                keep_latest=image_factory.MAX_STORED_RUNS,
+                active_run_dir=Path(result["run_dir"]),
+            )
             result["status_text"] = "Done"
             image_factory.log_memory("Completion")
             update_status("Done", 100, level="success")
@@ -2424,7 +2516,6 @@ def render_mockups_page():
             logging.exception("Generation stopped by memory limit")
             status_container.error(str(error))
             st.error(str(error))
-            st.exception(error)
         except Exception as error:
             logging.exception("Generation failed")
             status_container.error("Generation failed. See details below.")
@@ -2440,88 +2531,34 @@ def render_mockups_page():
 
 
 def render_product_uploads_page():
+    log_app_memory("Page load: Product Uploads")
     st.title("Product Uploads")
     st.caption(
-        "Use the Shopify upload assets created by a finished run to push a new product or update an existing product in Shopify through ChatGPT."
+        "Use this lightweight prompt page when you already have your Shopify upload images and HTML preview ready to drag into ChatGPT."
     )
 
     st.info(
-        "This page is an instructional prompt generator. It provides the exact text you need to copy into ChatGPT, attach the Shopify upload images and HTML preview, and then execute the new-product or update-product workflow in ChatGPT."
+        "This page does not scan local runs. Attach your own `shopify-uploads` WEBP files and HTML preview in ChatGPT, then use one of the prompt buttons below."
     )
 
     st.markdown(
-        "1. Copy and paste every WEBP file from the `shopify-uploads` folder into ChatGPT so ChatGPT has the image files needed to push to Shopify.\n"
-        "2. Place one of the prompts below into ChatGPT beneath the product images and press Start. After pressing accept, ChatGPT should push the Shopify product.\n"
-        "3. Review the draft Shopify product, ensure all details are correct, set the product to active, activate all collections/catalogues, and set stock amounts.\n"
-        "4. View the live product page on sportscaveshop.com and confirm there are no mistakes.\n"
+        "1. Drag every WEBP file from your `shopify-uploads` folder into ChatGPT.\n"
+        "2. Drag the matching HTML preview into ChatGPT if you have it.\n"
+        "3. Click one of the prompt buttons below and paste that prompt into ChatGPT.\n"
+        "4. Review the draft Shopify product carefully before publishing.\n"
         "\n"
         "- `New Shopify product` will generate a prompt for creating a brand new product in Shopify.\n"
         "- `Update existing product` will generate a prompt for replacing the images on an existing Shopify product.\n"
-        "- If you already have a `shopify-uploads` folder and HTML preview, attach those files in ChatGPT when prompted."
+        "- This page stays manual on purpose so it remains fast and lightweight on Render."
     )
-
-    runs = get_local_recent_runs(limit=10)
-    metadata = None
-
-    if runs:
-        run_names = [run.name for run in runs]
-        selected_run_name = st.selectbox("Choose a recent run", run_names)
-        selected_run = next((run for run in runs if run.name == selected_run_name), None)
-
-        if selected_run is not None:
-            metadata = load_run_metadata(selected_run)
-            st.markdown(f"**Run:** {metadata['run_name']}")
-            st.markdown(f"**Product:** {metadata.get('product_name', 'Unknown')}")
-            st.markdown(f"**Sport category:** {metadata.get('sport_category', 'Unknown')}")
-        else:
-            st.warning("Select a run above to load the Shopify upload prompt and image preview.")
-    else:
-        st.warning(
-            "No local run folders were found in output/runs. You can still use this page as a prompt generator for ChatGPT if you already have Shopify upload assets elsewhere."
-        )
-
-    if metadata is None:
-        metadata = {
-            "run_name": "example-run",
-            "product_name": "Example Product",
-            "sport_category": "Example Sport",
-            "product_slug": "example-product",
-            "shopify_uploads_dir": "shopify-uploads",
-            "shopify_uploads_html_path": "shopify-uploads/index.html",
-        }
-    shopify_uploads_dir = Path(metadata["shopify_uploads_dir"])
-    shopify_html_path = Path(metadata["shopify_uploads_html_path"])
-
-    if shopify_uploads_dir.exists():
-        upload_files = sorted(shopify_uploads_dir.glob("*.webp"))
-        st.write(f"{len(upload_files)} Shopify upload images found.")
-
-        if shopify_html_path.exists():
-            st.download_button(
-                "Download Shopify HTML preview",
-                shopify_html_path.read_bytes(),
-                file_name="shopify-uploads-preview.html",
-                mime="text/html",
-            )
-        else:
-            st.warning("Shopify HTML preview is not available yet. Generate or rebuild the run to create it.")
-
-        if upload_files:
-            st.write("**Shopify upload image files:**")
-            for upload_file in upload_files:
-                st.write(f"- {upload_file.name}")
-    else:
-        st.info(
-            "No local shopify-uploads folder was found for this run. If you already have the folder and HTML preview elsewhere, attach them in ChatGPT as described below."
-        )
 
     st.divider()
     st.write(
-        "Use the two buttons below to reveal the ChatGPT prompt text. Attach the Shopify upload images and copy the prompt into ChatGPT."
+        "Use the two buttons below to reveal the ChatGPT prompt text. Attach your files in ChatGPT, then paste the prompt below them."
     )
 
-    new_prompt_key = f"show_new_prompt::{metadata['run_name']}"
-    existing_prompt_key = f"show_existing_prompt::{metadata['run_name']}"
+    new_prompt_key = "show_new_prompt::manual"
+    existing_prompt_key = "show_existing_prompt::manual"
 
     if new_prompt_key not in st.session_state:
         st.session_state[new_prompt_key] = False
@@ -2530,12 +2567,12 @@ def render_product_uploads_page():
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("Show prompt for NEW Shopify product", key=f"new-prompt-button::{metadata['run_name']}"):
+        if st.button("Show prompt for NEW Shopify product", key="new-prompt-button::manual"):
             st.session_state[new_prompt_key] = True
             st.session_state[existing_prompt_key] = False
 
     with col2:
-        if st.button("Show prompt for UPDATE existing product", key=f"update-prompt-button::{metadata['run_name']}"):
+        if st.button("Show prompt for UPDATE existing product", key="update-prompt-button::manual"):
             st.session_state[existing_prompt_key] = True
             st.session_state[new_prompt_key] = False
 
@@ -2543,22 +2580,23 @@ def render_product_uploads_page():
         st.subheader("New Product Prompt")
         st.text_area(
             "",
-            value=get_product_upload_prompt(metadata, update_existing=False),
+            value=get_product_upload_prompt({}, update_existing=False),
             height=420,
-            key=f"new-prompt-area::{metadata['run_name']}",
+            key="new-prompt-area::manual",
         )
 
     if st.session_state[existing_prompt_key]:
         st.subheader("Update Existing Product Prompt")
         st.text_area(
             "",
-            value=get_product_upload_prompt(metadata, update_existing=True),
+            value=get_product_upload_prompt({}, update_existing=True),
             height=420,
-            key=f"update-prompt-area::{metadata['run_name']}",
+            key="update-prompt-area::manual",
         )
 
 
 def test_google_drive_connection():
+    drive_storage = get_drive_storage_module()
     section_ids = ensure_drive_sections()
     test_dir = BASE_DIR / "output" / "_drive_test"
     test_dir.mkdir(parents=True, exist_ok=True)
@@ -2577,9 +2615,15 @@ def test_google_drive_connection():
 
 
 def render_google_drive_page():
+    log_app_memory("Google Drive section render")
     st.title("Google Drive")
     st.caption("OAuth refresh-token Drive storage for Sports Cave runs.")
 
+    if not ENABLE_GOOGLE_DRIVE:
+        st.info("Google Drive is disabled in lightweight mode. Set `ENABLE_GOOGLE_DRIVE=true` to use this page.")
+        return
+
+    drive_storage = get_drive_storage_module()
     root_folder_id = drive_storage.get_root_folder_id()
     drive_configured = drive_storage.is_drive_configured()
 
@@ -2632,8 +2676,13 @@ def render_settings_page():
     st.caption("Current app and environment status.")
 
     st.write(f"**Password protection:** {get_password_protection_status()}")
-    st.write(f"**Google Drive configured:** {'Yes' if drive_storage.is_drive_configured() else 'No'}")
-    st.write(f"**Root folder ID present:** {'Yes' if drive_storage.get_root_folder_id() else 'No'}")
+    st.write(f"**Google Drive lightweight flag:** {'Enabled' if ENABLE_GOOGLE_DRIVE else 'Disabled'}")
+    if ENABLE_GOOGLE_DRIVE:
+        st.write("**Google Drive configured:** Open the Google Drive page to inspect the current connection.")
+        st.write("**Root folder ID present:** Checked only on the Google Drive page")
+    else:
+        st.write("**Google Drive configured:** Disabled in lightweight mode")
+        st.write("**Root folder ID present:** Not checked while Drive is disabled")
     st.write(f"**OAuth client ID present:** {'Yes' if os.getenv('GOOGLE_OAUTH_CLIENT_ID') else 'No'}")
     st.write(f"**OAuth client secret present:** {'Yes' if os.getenv('GOOGLE_OAUTH_CLIENT_SECRET') else 'No'}")
     st.write(f"**OAuth refresh token present:** {'Yes' if os.getenv('GOOGLE_OAUTH_REFRESH_TOKEN') else 'No'}")
@@ -2652,6 +2701,7 @@ def main():
     render_sidebar()
 
     current_page = st.session_state.selected_page
+    log_app_memory(f"Page load start: {current_page}")
     if current_page == "Google Drive":
         render_google_drive_page()
     elif current_page == "Limited Editions":
@@ -2662,6 +2712,7 @@ def main():
         render_settings_page()
     else:
         render_mockups_page()
+    log_app_memory(f"Page load end: {current_page}")
 
 
 main()
