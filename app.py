@@ -12,6 +12,8 @@ import os
 import re
 import shutil
 import tempfile
+import urllib.error
+import urllib.request
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from dotenv import load_dotenv
@@ -36,10 +38,15 @@ GOOGLE_SHEET_URL = os.getenv(
     "GOOGLE_SHEET_URL",
     "https://docs.google.com/spreadsheets/d/1fe5OggyDdmgNw-LrLviA0B6JfD3wEqzuH6LA0JF_FR4/edit?gid=634918132#gid=634918132",
 )
+EDITION_LOG_JSON_URL = os.getenv("EDITION_LOG_JSON_URL", "").strip()
 GOOGLE_SERVICE_ACCOUNT_JSON_ENV = "GOOGLE_SERVICE_ACCOUNT_JSON"
 SHOPIFY_STORE_BASE_URL = os.getenv("SHOPIFY_STORE_BASE_URL", "https://sportscaveshop.com").rstrip("/")
 EDITION_PRODUCT_LINKS_PATH = BASE_DIR / "edition_product_links.json"
 PRODUCT_SUMMARY_TAB = "Product Summary"
+ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
+    "ZIP_SAVE_DRIVE_FOLDER_URL",
+    "https://drive.google.com/drive/folders/1FfXmTVuVGkD7PFhRjAtvPDZOn7Gpk3q_",
+).strip()
 MENU_OPTIONS = ["Mockups", "Limited Editions", "Product Uploads", "Settings"]
 if ENABLE_GOOGLE_DRIVE:
     MENU_OPTIONS.insert(1, "Google Drive")
@@ -1600,6 +1607,17 @@ def normalize_lookup_name(value):
     return normalize_whitespace(value).casefold()
 
 
+def extract_drive_folder_id(folder_url):
+    if not folder_url:
+        return None
+
+    match = re.search(r"/folders/([a-zA-Z0-9_-]+)", folder_url)
+    if match:
+        return match.group(1)
+
+    return None
+
+
 def build_shopify_product_url_from_handle(handle):
     clean_handle = normalize_whitespace(handle).strip("/")
     if not clean_handle:
@@ -1620,6 +1638,17 @@ def render_external_link(label, url, key):
 
 def get_google_service_account_json():
     return os.getenv(GOOGLE_SERVICE_ACCOUNT_JSON_ENV, "").strip()
+
+
+def get_edition_log_json_url():
+    return EDITION_LOG_JSON_URL
+
+
+def get_edition_log_connection_status():
+    return {
+        "json_url_found": bool(get_edition_log_json_url()),
+        "service_account_found": bool(get_google_service_account_json()),
+    }
 
 
 def load_local_edition_product_links():
@@ -1654,6 +1683,30 @@ def get_google_sheets_service(service_account_json):
         scopes=["https://www.googleapis.com/auth/spreadsheets.readonly"],
     )
     return build("sheets", "v4", credentials=credentials, cache_discovery=False)
+
+
+def fetch_edition_log_json_rows(endpoint_url):
+    request = urllib.request.Request(
+        endpoint_url,
+        headers={"Accept": "application/json"},
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = response.read()
+            charset = response.headers.get_content_charset() or "utf-8"
+    except urllib.error.URLError as error:
+        raise RuntimeError(f"Could not fetch Edition Log JSON endpoint: {error}") from error
+
+    try:
+        data = json.loads(payload.decode(charset))
+    except Exception as error:
+        raise ValueError("Edition Log endpoint returned invalid JSON.") from error
+
+    if not isinstance(data, list):
+        raise ValueError("Edition Log endpoint returned invalid JSON. Expected a list of rows.")
+
+    return data
 
 
 def read_google_sheet_values(service_account_json, sheet_id, tab_name, start_cell):
@@ -1715,6 +1768,49 @@ def build_sheet_records(values, header_row_number):
             cell_value = normalize_whitespace(row_values[column_index] if column_index < len(row_values) else "")
             record[canonical_key] = cell_value
             record["_raw"][display_name] = cell_value
+
+        record["_parsed_date"] = parse_sheet_date(record.get("date_sent"))
+        records.append(record)
+
+    return records
+
+
+def build_records_from_json_rows(json_rows):
+    records = []
+
+    for index, row_data in enumerate(json_rows, start=1):
+        if not isinstance(row_data, dict):
+            continue
+
+        normalized_pairs = []
+        for key, value in row_data.items():
+            display_name = normalize_whitespace(key)
+            if not display_name:
+                continue
+
+            normalized_pairs.append(
+                (
+                    display_name,
+                    canonicalize_sheet_key(normalize_sheet_header_name(display_name)),
+                    normalize_whitespace(value),
+                )
+            )
+
+        if not normalized_pairs:
+            continue
+
+        if not any(value for _, _, value in normalized_pairs):
+            continue
+
+        record = {
+            "_row_number": index,
+            "_sheet_position": index,
+            "_raw": {},
+        }
+
+        for display_name, canonical_key, value in normalized_pairs:
+            record[canonical_key] = value
+            record["_raw"][display_name] = value
 
         record["_parsed_date"] = parse_sheet_date(record.get("date_sent"))
         records.append(record)
@@ -1794,26 +1890,30 @@ def resolve_product_link(record, product_summary_lookup, local_links_lookup):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def load_limited_editions_snapshot(sheet_id, sheet_tab, header_row, service_account_json):
-    edition_values = read_google_sheet_values(
-        service_account_json,
-        sheet_id,
-        sheet_tab,
-        f"A{header_row}",
-    )
-    edition_rows = build_sheet_records(edition_values, header_row)
-
-    product_summary_lookup = {}
-    try:
-        product_summary_values = read_google_sheet_values(
+def load_limited_editions_snapshot(json_url, sheet_id, sheet_tab, header_row, service_account_json):
+    if json_url:
+        edition_rows = build_records_from_json_rows(fetch_edition_log_json_rows(json_url))
+    else:
+        edition_values = read_google_sheet_values(
             service_account_json,
             sheet_id,
-            PRODUCT_SUMMARY_TAB,
-            "A1",
+            sheet_tab,
+            f"A{header_row}",
         )
-        product_summary_lookup = build_product_summary_lookup(product_summary_values)
-    except Exception:
-        product_summary_lookup = {}
+        edition_rows = build_sheet_records(edition_values, header_row)
+
+    product_summary_lookup = {}
+    if (not json_url) and service_account_json and sheet_id:
+        try:
+            product_summary_values = read_google_sheet_values(
+                service_account_json,
+                sheet_id,
+                PRODUCT_SUMMARY_TAB,
+                "A1",
+            )
+            product_summary_lookup = build_product_summary_lookup(product_summary_values)
+        except Exception:
+            product_summary_lookup = {}
 
     local_links_lookup = load_local_edition_product_links()
     sorted_rows = sort_edition_records(edition_rows)
@@ -1891,10 +1991,27 @@ def build_limited_editions_table_rows(rows, include_internal=False):
 
 def render_limited_editions_empty_state():
     st.warning(
-        "Google Sheets is not connected yet. Add GOOGLE_SERVICE_ACCOUNT_JSON and GOOGLE_SHEET_ID in Render environment variables."
+        "Edition Log is not connected yet. Add EDITION_LOG_JSON_URL in Render environment variables, or connect Google Sheets credentials."
     )
-    if GOOGLE_SHEET_URL:
-        render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet-empty")
+
+
+@lru_cache(maxsize=1)
+def import_drive_storage_module():
+    return importlib.import_module("drive_storage")
+
+
+def save_zip_to_drive_folder(zip_path):
+    folder_id = extract_drive_folder_id(ZIP_SAVE_DRIVE_FOLDER_URL)
+    if not folder_id:
+        raise RuntimeError("ZIP save folder URL is missing or invalid.")
+
+    drive_storage = import_drive_storage_module()
+    if not drive_storage.is_drive_configured():
+        raise RuntimeError(
+            "Google Drive save is not connected yet. Add the Google Drive OAuth environment variables to enable Save ZIP."
+        )
+
+    return drive_storage.upload_file_to_drive(zip_path, folder_id, mime_type="application/zip")
 
 
 @lru_cache(maxsize=1)
@@ -1902,7 +2019,7 @@ def get_drive_storage_module():
     if not ENABLE_GOOGLE_DRIVE:
         raise RuntimeError("Google Drive is disabled in lightweight mode.")
 
-    return importlib.import_module("drive_storage")
+    return import_drive_storage_module()
 
 
 def get_uploaded_file_signature(uploaded_file):
@@ -2156,6 +2273,10 @@ def normalize_generation_result(result):
         "drive_sync_enabled": False,
         "drive_sync_error": None,
         "drive_sync_message": None,
+        "zip_drive_file_link": None,
+        "zip_drive_folder_url": ZIP_SAVE_DRIVE_FOLDER_URL or None,
+        "zip_drive_message": None,
+        "zip_drive_error": None,
         "status_text": None,
     }
     normalized = defaults.copy()
@@ -2657,16 +2778,58 @@ def render_generated_previews(result):
 
 
 def render_primary_zip_download(result, section_key):
-    st.subheader("Download ZIP")
+    st.subheader("Save ZIP")
     st.caption(
-        "One ZIP only. It includes the `shopify-uploads` WEBP files, the HTML preview, and all JPG image exports."
+        "One ZIP only. Save it into the correct Google Drive folder, or use the backup download if Drive save is not connected."
     )
-    render_download_button(
-        "Download ZIP",
-        result.get("zip_path"),
-        "application/zip",
-        key=f"download-primary-zip::{result['run_dir']}::{section_key}",
-    )
+    action_cols = st.columns([1, 1, 1.2])
+
+    with action_cols[0]:
+        if st.button(
+            "Save ZIP",
+            key=f"save-primary-zip::{result['run_dir']}::{section_key}",
+            use_container_width=True,
+        ):
+            try:
+                upload_info = save_zip_to_drive_folder(Path(result["zip_path"]))
+                result["zip_drive_file_link"] = upload_info.get("drive_link")
+                result["zip_drive_folder_url"] = ZIP_SAVE_DRIVE_FOLDER_URL or result.get("zip_drive_folder_url")
+                result["zip_drive_message"] = "ZIP saved to the Google Drive folder."
+                result["zip_drive_error"] = None
+                st.session_state.last_generation_result = result
+                st.rerun()
+            except Exception as error:
+                result["zip_drive_message"] = None
+                result["zip_drive_error"] = str(error)
+                st.session_state.last_generation_result = result
+                st.rerun()
+
+    with action_cols[1]:
+        if ZIP_SAVE_DRIVE_FOLDER_URL:
+            render_external_link(
+                "Open Drive Folder",
+                ZIP_SAVE_DRIVE_FOLDER_URL,
+                f"open-zip-drive-folder::{result['run_dir']}::{section_key}",
+            )
+
+    with action_cols[2]:
+        render_download_button(
+            "Download ZIP Instead",
+            result.get("zip_path"),
+            "application/zip",
+            key=f"download-primary-zip::{result['run_dir']}::{section_key}",
+        )
+
+    if result.get("zip_drive_message"):
+        st.success(result["zip_drive_message"])
+        if result.get("zip_drive_file_link"):
+            render_external_link(
+                "Open Saved ZIP",
+                result["zip_drive_file_link"],
+                f"open-saved-zip::{result['run_dir']}::{section_key}",
+            )
+    elif result.get("zip_drive_error"):
+        st.info(result["zip_drive_error"])
 
 
 def render_prompt_cards(result, prompt_paths, heading):
@@ -2695,7 +2858,7 @@ def render_prompt_cards(result, prompt_paths, heading):
                         caption=Path(preview_path).name,
                         width=360,
                     )
-                    st.caption("Saved. It will be included the next time you download the ZIP.")
+                    st.caption("Saved. It will be included the next time you save the ZIP.")
 
             uploaded_lifestyle_image = st.file_uploader(
                 "Upload image from ChatGPT",
@@ -2705,7 +2868,7 @@ def render_prompt_cards(result, prompt_paths, heading):
             )
 
             if st.button(
-                "Save Image",
+                "Add To ZIP",
                 key=f"save-lifestyle::{result['run_dir']}::{prompt_name}",
                 use_container_width=True,
             ):
@@ -3087,7 +3250,7 @@ def render_limited_editions_page():
     log_app_memory("Page load: Limited Editions")
     st.title("Limited Editions")
     st.caption(
-        "Live edition dispatch tracking from the Sports Cave Google Sheet. This page stays lightweight and only refreshes the sheet when you open it or press Refresh."
+        "Live edition dispatch tracking from the Sports Cave Edition Log. This page stays lightweight and only refreshes the data when you open it or press Refresh."
     )
 
     action_cols = st.columns([1, 1, 3])
@@ -3099,13 +3262,24 @@ def render_limited_editions_page():
         if GOOGLE_SHEET_URL:
             render_external_link("Open Edition Log Sheet", GOOGLE_SHEET_URL, "open-edition-log-sheet")
 
+    connection_status = get_edition_log_connection_status()
+    status_cols = st.columns(2)
+    status_cols[0].caption(
+        f"Edition Log JSON URL: {'Found' if connection_status['json_url_found'] else 'Missing'}"
+    )
+    status_cols[1].caption(
+        f"Google service account: {'Found' if connection_status['service_account_found'] else 'Missing'}"
+    )
+
+    json_url = get_edition_log_json_url()
     service_account_json = get_google_service_account_json()
-    if not GOOGLE_SHEET_ID or not service_account_json:
+    if (not json_url and not service_account_json) or (not json_url and not GOOGLE_SHEET_ID):
         render_limited_editions_empty_state()
         return
 
     try:
         snapshot = load_limited_editions_snapshot(
+            json_url,
             GOOGLE_SHEET_ID,
             GOOGLE_SHEET_TAB,
             GOOGLE_SHEET_HEADER_ROW,
@@ -3302,6 +3476,7 @@ def render_settings_page():
     st.caption("Current app and environment status.")
 
     st.write(f"**Password protection:** {get_password_protection_status()}")
+    st.write(f"**Edition Log JSON URL present:** {'Yes' if get_edition_log_json_url() else 'No'}")
     st.write(f"**Google Sheet ID present:** {'Yes' if GOOGLE_SHEET_ID else 'No'}")
     st.write(
         f"**Google service account JSON present:** {'Yes' if get_google_service_account_json() else 'No'}"

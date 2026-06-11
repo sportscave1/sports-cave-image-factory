@@ -1470,7 +1470,7 @@ def create_download_bundle_zip(zip_dir, product_slug, shopify_uploads_dir, jpg_d
 
     ensure_memory_available("Before zip creation: Download bundle")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
-        for upload_file in sorted(Path(shopify_uploads_dir).glob("*")):
+        for upload_file in sorted(Path(shopify_uploads_dir).glob("*.webp")):
             if upload_file.is_file():
                 zipf.write(upload_file, arcname=f"{SHOPIFY_UPLOADS_FOLDER_NAME}/{upload_file.name}")
 

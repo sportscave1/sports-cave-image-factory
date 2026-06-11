@@ -64,10 +64,6 @@ def get_drive_service():
     _require_google_client()
 
     oauth_config = _get_oauth_config()
-    root_folder_id = get_root_folder_id()
-
-    if not root_folder_id:
-        raise DriveStorageError("GOOGLE_DRIVE_ROOT_FOLDER_ID is missing.")
 
     if not oauth_config["client_id"] or not oauth_config["client_secret"] or not oauth_config["refresh_token"]:
         raise DriveStorageError(
