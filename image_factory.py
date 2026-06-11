@@ -62,6 +62,7 @@ SOCIALS_FOLDER_NAME = "socials"
 PROMPTS_FOLDER_NAME = "chatgpt-prompts"
 WEBP_CACHE_FOLDER_NAME = "_webp-cache"
 JPG_CACHE_FOLDER_NAME = "_jpg-cache"
+PREVIEW_FOLDER_NAME = "previews"
 
 LIFESTYLE_IMAGE_VARIANTS = {
     "01-man-cave-prompt.txt": "man-cave-lifestyle",
@@ -973,6 +974,7 @@ def build_asset_record(
     key,
     label,
     review_path=None,
+    preview_path=None,
     webp_path=None,
     jpg_path=None,
     include_in_zip=True,
@@ -985,6 +987,7 @@ def build_asset_record(
         "key": key,
         "label": label,
         "review_path": review_path,
+        "preview_path": preview_path,
         "webp_path": webp_path,
         "jpg_path": jpg_path,
         "include_in_zip": include_in_zip,
@@ -1101,6 +1104,10 @@ def save_review_and_assets(image, review_dir, webp_dir, jpg_dir, review_name, we
     webp_path = webp_dir / webp_name
     jpg_path = jpg_dir / jpg_name
 
+    preview_dir = review_dir.parent / PREVIEW_FOLDER_NAME
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    preview_path = preview_dir / f"{Path(review_name).stem}-preview.jpg"
+
     image_1024 = resize_to_1024(image)
 
     image_1024.save(review_path, format="PNG")
@@ -1119,7 +1126,16 @@ def save_review_and_assets(image, review_dir, webp_dir, jpg_dir, review_name, we
         optimize=True,
     )
 
-    return review_path, webp_path, jpg_path
+    preview_image = image_1024.copy()
+    preview_image.thumbnail((900, 900), Image.LANCZOS)
+    preview_image.save(
+        preview_path,
+        format="JPEG",
+        quality=78,
+        optimize=True,
+    )
+
+    return review_path, webp_path, jpg_path, preview_path
 
 
 # -----------------------------------
@@ -1131,6 +1147,7 @@ def generate_framed_product_image(
     artwork,
     box,
     review_dir,
+    preview_dir,
     webp_dir,
     jpg_dir,
     review_name,
@@ -1147,6 +1164,7 @@ def generate_framed_product_image(
     return save_review_and_assets(
         template,
         review_dir,
+        preview_dir,
         webp_dir,
         jpg_dir,
         review_name,
@@ -1160,6 +1178,7 @@ def generate_unframed_product_image(
     artwork,
     art_box,
     review_dir,
+    preview_dir,
     webp_dir,
     jpg_dir,
     review_name,
@@ -1176,6 +1195,7 @@ def generate_unframed_product_image(
     return save_review_and_assets(
         template,
         review_dir,
+        preview_dir,
         webp_dir,
         jpg_dir,
         review_name,
@@ -1184,7 +1204,7 @@ def generate_unframed_product_image(
     )
 
 
-def generate_size_guide(template_path, artwork, review_dir, webp_dir, jpg_dir, webp_name, jpg_name):
+def generate_size_guide(template_path, artwork, review_dir, preview_dir, webp_dir, jpg_dir, webp_name, jpg_name):
     template = Image.open(template_path).convert("RGB")
 
     for _, box in SIZE_GUIDE_BOXES.items():
@@ -1195,6 +1215,7 @@ def generate_size_guide(template_path, artwork, review_dir, webp_dir, jpg_dir, w
     return save_review_and_assets(
         template,
         review_dir,
+        preview_dir,
         webp_dir,
         jpg_dir,
         "size-guide-output.png",
@@ -1359,7 +1380,16 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
 # MAIN BACKEND FUNCTION
 # -----------------------------------
 
-def generate_product_images(product_name, sport_category, artwork_file_path, base_dir=None):
+def generate_product_images(product_name, sport_category, artwork_file_path, base_dir=None, status_callback=None):
+    def report(message, progress=None):
+        if callable(status_callback):
+            try:
+                status_callback(message, progress)
+            except Exception:
+                pass
+
+        if message:
+            print(f"[image_factory] {message}")
     if base_dir is None:
         base_dir = Path(__file__).resolve().parent
     else:
@@ -1375,12 +1405,14 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
     run_dir = output_dir / "runs" / f"{product_slug}-{timestamp}"
 
     review_dir = run_dir / "review"
+    preview_dir = run_dir / PREVIEW_FOLDER_NAME
     webp_dir = run_dir / WEBP_CACHE_FOLDER_NAME
     jpg_dir = run_dir / JPG_CACHE_FOLDER_NAME
     zip_dir = run_dir / "zip"
     upload_dir = run_dir / "uploaded"
 
     review_dir.mkdir(parents=True, exist_ok=True)
+    preview_dir.mkdir(parents=True, exist_ok=True)
     webp_dir.mkdir(parents=True, exist_ok=True)
     jpg_dir.mkdir(parents=True, exist_ok=True)
     zip_dir.mkdir(parents=True, exist_ok=True)
@@ -1478,13 +1510,16 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         },
     ]
 
-    for job in jobs:
+    for index, job in enumerate(jobs, start=1):
+        report(f"Generating {job['label']} image...", 30 + int((index - 1) * 12))
+
         if job["type"] == "framed":
-            review_path, webp_path, jpg_path = generate_framed_product_image(
+            review_path, webp_path, jpg_path, preview_path = generate_framed_product_image(
                 job["template"],
                 artwork,
                 MASTER_FRAMED_BOX,
                 review_dir,
+                preview_dir,
                 webp_dir,
                 jpg_dir,
                 job["review_name"],
@@ -1493,10 +1528,11 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
             )
 
         elif job["type"] == "size_guide":
-            review_path, webp_path, jpg_path = generate_size_guide(
+            review_path, webp_path, jpg_path, preview_path = generate_size_guide(
                 job["template"],
                 artwork,
                 review_dir,
+                preview_dir,
                 webp_dir,
                 jpg_dir,
                 job["webp_name"],
@@ -1504,11 +1540,12 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
             )
 
         elif job["type"] == "unframed":
-            review_path, webp_path, jpg_path = generate_unframed_product_image(
+            review_path, webp_path, jpg_path, preview_path = generate_unframed_product_image(
                 job["template"],
                 artwork,
                 UNFRAMED_ART_BOX,
                 review_dir,
+                preview_dir,
                 webp_dir,
                 jpg_dir,
                 job["review_name"],
@@ -1521,6 +1558,7 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         jpg_paths.append(jpg_path)
         generated_assets[job["key"]] = {
             "review_path": review_path,
+            "preview_path": preview_path,
             "webp_path": webp_path,
             "jpg_path": jpg_path,
         }
@@ -1529,6 +1567,7 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
                 key=job["key"],
                 label=job["label"],
                 review_path=review_path,
+                preview_path=preview_path,
                 webp_path=webp_path,
                 jpg_path=jpg_path,
             )

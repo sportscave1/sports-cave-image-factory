@@ -1,9 +1,12 @@
 from contextlib import suppress
+from io import BytesIO
 from pathlib import Path
 import json
+import logging
 import os
 import tempfile
 
+from PIL import Image, UnidentifiedImageError
 from dotenv import load_dotenv
 import streamlit as st
 
@@ -12,6 +15,7 @@ import image_factory
 
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -1018,29 +1022,409 @@ This SOP exists to remove CSV import risk and manual Shopify upload work.
 ChatGPT should now create the product directly in Shopify as a clean draft.
 The only manual step left should be final approval and publishing.
 """
-UPDATE_EXISTING_PRODUCT_PROMPT = """I have uploaded final approved replacement Sports Cave WebP product images.
-
+UPDATE_EXISTING_PRODUCT_PROMPT = """
+SOP 07C — Sports Cave Shopify Existing Product Image Update Using ChatGPT + Shopify Connector
+Direct Product Media Replacement Version — No CSV Import Required
+Goal
+Update an existing Sports Cave Shopify product directly through ChatGPT using the connected Shopify tool.
+This SOP is for existing products only.
+ChatGPT must:
+Find the correct existing Shopify product
+Upload all supplied final WebP replacement images to Shopify
+Replace the existing product gallery images with the new supplied images
+Apply the new images in the correct Sports Cave media order
+Write or update unique SEO image alt text
+Reassign variant images correctly
+Keep the existing product handle unless instructed otherwise
+Keep existing product pricing unless instructed otherwise
+Keep existing variants unless instructed otherwise
+Keep existing product status unchanged
+Leave the product unpublished if it is already unpublished
+Do not create a duplicate product
+Do not use CSV import
+Do not ask the user to manually upload images to Shopify
+Brutal Rule
+Never create a new Shopify product when the task is to update an existing product.
+ChatGPT must update the existing product only.
+Before making changes, ChatGPT must confirm it has found the correct existing product by matching at least one of the following:
+Shopify product URL
+Shopify product handle
+Exact product title
+Product ID
+Clear product subject with only one matching Shopify product
+If there is more than one possible match, ChatGPT must stop and ask the user to confirm the correct product.
+Required Uploads
+Before running this SOP, upload all final approved replacement WebP product images.
+Images should already be:
+Final production assets
+Optimised WebP files
+Correctly cropped
+Correctly sized
+Visually approved
+Ready for Shopify upload
+Do not ask ChatGPT to redesign, edit, crop, stylise, resize, relight, or change any product image during this SOP.
+This SOP is for Shopify product image replacement and product media updating only.
+Required Product Inputs
+Provide one of the following:
+Existing Shopify product URL
+Existing Shopify product handle
+Exact existing Shopify product title
+Product subject and sport/category if the product can be clearly identified
+Also provide:
+Final approved replacement WebP images
+Any images that must stay on the product, if any
+Any images that must be removed, if any
+Any title, description, SEO, or tag changes required
+If the user only uploads images and gives no product URL, handle, or title, ChatGPT must identify the likely product from Shopify search but must ask for confirmation before replacing images.
+Default Update Scope
+Unless the user specifically requests more, ChatGPT must update only:
+Product images
+Image order
+Image alt text
+Variant image mapping
+ChatGPT must not change these unless requested:
+Product title
+Product handle
+Product description
+SEO title
+SEO description
+Tags
+Product type
+Vendor
+Collections
+Prices
+Compare-at prices
+Variants
+SKUs
+Inventory
+Product status
+Publishing status
+Markets
+Google Shopping fields
+Shopify category metafields
+No-Publish / Status Rule
+ChatGPT must never publish, unpublish, archive, or change the product status unless the user specifically asks.
+Default action:
+If product is Active, keep Active
+If product is Draft, keep Draft
+If product is Archived, stop and ask before updating
+Do not automatically publish an updated product.
+Existing Product Safety Rule
+Before replacing images, ChatGPT must verify internally:
+Correct product has been found
+Product title matches user intent
+Product handle matches user intent
+Uploaded images match the product subject
+Replacement images are WebP
+Images appear to be final assets
+New image order is planned
+Variant image mapping is planned
+No duplicate product will be created
+If there is uncertainty, ChatGPT must ask before updating.
+Image Replacement Rule
+ChatGPT must replace the existing product images with the new supplied images.
+Default behaviour:
+Upload all supplied replacement WebP images to Shopify
+Add the new Shopify-hosted images to the existing product
+Apply image alt text to each new image where supported
+Reorder the product gallery into the correct Sports Cave order
+Assign the correct variant images
+Remove old product images after the new images are confirmed uploaded and attached
+Do not remove old images first.
+Safe sequence:
+Upload new images first
+Attach new images to product
+Confirm new images are present
+Assign variant images
+Confirm variant image mapping
+Then remove old images that are being replaced
+This prevents the product being left with no images if upload fails.
+Image Preservation Rule
+If the existing product has images that should remain, the user must clearly say so.
+Examples:
+Keep the size guide
+Keep the lifestyle image
+Keep the old black frame image
+Only replace the mockups
+Only replace the frame images
+If the user says “replace the images” or “update to these new images,” ChatGPT should assume all old gallery images should be replaced by the newly supplied images.
+Product Image Order
+Use this Sports Cave media order:
+Black frame image
+Lifestyle/mockup image 1
+Lifestyle/mockup image 2
+Lifestyle/mockup image 3
+Office, hallway, living room, sports bar, or man cave image
+Size guide image
+Oak frame image
+White frame image
+Unframed image
+If fewer or more lifestyle images are supplied, keep this general order:
+Black frame
+Lifestyle/mockups
+Size guide
+Oak frame
+White frame
+Unframed
+Every valid supplied image must be included.
+Only remove exact duplicate files.
+Image Naming Rules Before Upload
+Where possible, rename files before Shopify upload using:
+Lowercase letters
+Hyphens only
+Product-specific names
+Accurate image descriptor
+Do not include:
+final
+compressed
+v2
+copy
+new
+test
+random numbers
+unnecessary descriptors
+Good examples:
+greg-murphy-bathurst-wall-art-black-frame.webp
+greg-murphy-bathurst-wall-art-living-room.webp
+greg-murphy-bathurst-wall-art-man-cave.webp
+greg-murphy-bathurst-wall-art-sizing-guide.webp
+greg-murphy-bathurst-wall-art-oak-frame.webp
+greg-murphy-bathurst-wall-art-white-frame.webp
+greg-murphy-bathurst-wall-art-unframed.webp
+Image Alt Text Rules
+Every replacement image must have unique SEO-friendly alt text.
+Rules:
+110–125 characters preferred
+Natural sentence-style wording
+Mention the subject
+Mention image type or setting
+Use one SEO keyword only if it fits naturally
+Do not keyword stuff
+Do not repeat the same alt text for every image
+Do not describe irrelevant furniture too heavily
+Do not overuse “premium”
+Good structure:
+[Image type] + [subject] + [sport/keyword] + [fan/collector context].
+Alt Text Examples
+Black frame:
+Black framed Greg Murphy Bathurst wall art celebrating the Lap of the Gods for Australian motorsport fans.
+Living room:
+Greg Murphy Bathurst wall art displayed in a modern living room for collectors of iconic racing moments.
+Man cave:
+Greg Murphy Lap of the Gods framed sports memorabilia styled in a dark man cave for true V8 racing fans.
+Size guide:
+Greg Murphy Bathurst wall art size guide showing framed options for limited edition motorsport collectors.
+Oak frame:
+Oak framed Greg Murphy Bathurst wall art with collector styling for fans of Australian motor racing history.
+White frame:
+White framed Greg Murphy Bathurst wall art featuring the Lap of the Gods moment for motorsport collectors.
+Unframed:
+Unframed Greg Murphy Bathurst sports poster Australia design celebrating the legendary Lap of the Gods.
+Variant Image Mapping
+After replacing product images, ChatGPT must reassign variant images correctly.
+Rules:
+Black variants use the black frame image
+Oak variants use the oak frame image
+White variants use the white frame image
+Unframed variants use the unframed image
+Do not assign these as variant images:
+Lifestyle images
+Living room images
+Office images
+Hallway images
+Sports bar images
+Man cave images
+Size guide images
+Close-up detail images
+These belong in the product gallery only.
+Variant Structure Protection Rule
+Existing product variants must not be deleted or recreated unless specifically requested.
+Default action:
+Keep all existing variants
+Keep existing variant order
+Keep existing prices
+Keep existing compare-at prices
+Keep existing SKUs
+Only update variant image assignments
+If the product has broken, missing, or incorrect variants, ChatGPT must report the issue and ask before making variant changes.
+Pricing Protection Rule
+Do not change pricing during an image replacement update unless the user specifically asks.
+Existing prices must remain unchanged.
+Existing compare-at prices must remain unchanged.
+Inventory Protection Rule
+Do not change inventory during an image replacement update unless the user specifically asks.
+Existing inventory tracking must remain unchanged.
+Existing inventory policy must remain unchanged.
+Existing stock quantities must remain unchanged.
+SEO Update Rule
+Default action:
+Update image alt text only.
+Do not rewrite SEO title or SEO meta description unless the user asks.
+If the user asks to refresh SEO at the same time, follow the Sports Cave SEO rules:
+SEO title should be under 60 characters
+SEO description should be under 155 characters
+Use the main subject and strongest relevant wall art keyword
+Keep it premium and clean
+Do not keyword stuff
+Do not use generic phrases like “elevate your space”
+Product Description Update Rule
+Default action:
+Do not change the existing product description.
+If the user asks to update the product description, rewrite it in the Sports Cave emotional collector style:
+Short
+Emotional
+Nostalgic
+Identity-driven
+Collector-focused
+Built for mobile reading
+Description structure:
+Emotional hook
+Nostalgia trigger
+Identity line
+Scarcity close
+Allowed HTML:
+Do not use:
+Tags and Collections Protection Rule
+Do not change tags or collections during an image replacement update unless the user specifically asks.
+Existing automated collection logic may depend on tags.
+If tags are updated, use only clean, relevant Sports Cave tags.
+Do not add performance-based tags unless proven:
+Best Seller
+Best Selling
+Popular
+Viral
+Trending
+Featured
+New Arrival
+Shopify Category and Metafield Protection Rule
+Do not update Shopify-controlled category metafields during an image replacement update unless specifically instructed and safe accepted values are provided.
+Leave the following unchanged:
+Art movement
+Art style
+Artwork authenticity
+Artwork frame material
+Colour
+Condition metafields
+Frame style
+Material
+Orientation
+Painting medium
+Print edition type
+Rarity
+Signature placement
+Sports logo
+Suitable space
+Theme
+Printing method
+Do not invent values.
+Existing Product Update Workflow
+ChatGPT must complete the workflow in this order:
+Identify the existing Shopify product
+Confirm the product match if there is any uncertainty
+Review current product images and variant image mapping where possible
+Identify all supplied replacement WebP images
+Plan the new Sports Cave image order
+Generate unique alt text for every replacement image
+Upload all replacement images to Shopify
+Attach the new images to the existing product
+Reorder the product gallery correctly
+Assign black frame image to all Black variants
+Assign oak frame image to all Oak variants
+Assign white frame image to all White variants
+Assign unframed image to all Unframed variants
+Confirm new images are attached successfully
+Remove old images that are being replaced
+Keep product status unchanged
+Verify the updated product
+Return the product link and manual review checklist
+Post-Update Validation
+After updating the product, ChatGPT must verify:
+Correct existing product was updated
+No duplicate product was created
+Product status was not changed
+Product title was not changed unless requested
+Product handle was not changed unless requested
+All new images uploaded successfully
+Old images were removed only after new images were attached
+Image order is correct
+Image alt text is applied where supported
+All 16 variants still exist if the product previously had 16 variants
+Variant image mapping is correct
+Prices were not changed unless requested
+Compare-at prices were not changed unless requested
+SKUs were not changed unless requested
+Inventory was not changed unless requested
+Tags were not changed unless requested
+SEO fields were not changed unless requested
+No unsupported category metafields were filled
+If the Shopify connector cannot verify a field, ChatGPT must clearly state what needs manual review.
+Manual Review Checklist After Updating Images
+After updating the product, ChatGPT must verify:
+Open the product in Shopify and check:
+Correct product was updated
+No duplicate product was created
+Product images
+Image order
+Image quality
+Image alt text
+Black variant image
+Oak variant image
+White variant image
+Unframed variant image
+Variant selector
+Prices
+Compare-at prices
+SKUs
+Inventory
+Tags
+Collections
+SEO title
+SEO description
+Mobile preview
+Desktop preview
+Live product page if product is active
+Only consider the update complete when the product looks premium and ready to sell.
+Failure Rules
+If the Shopify product update fails, ChatGPT must not guess or retry blindly.
+Check these first:
+Could the existing product not be found?
+Were multiple matching products found?
+Did image upload fail?
+Did Shopify reject one or more media files?
+Did the connector lack permission to upload media?
+Did the connector lack permission to update products?
+Did variant image assignment fail?
+Did old image deletion fail?
+Did alt text fail to apply?
+Did Shopify timeout during media processing?
+Fastest safe fix:
+Do not remove old images until new images are confirmed
+Retry failed image upload once
+If upload still fails, report the failed file
+If product match is unclear, ask user for product URL or handle
+If variant mapping fails, leave product images updated and report variant mapping for manual review
+Do not create a new product as a workaround.
+Final Execution Prompt
+Use this prompt when updating an existing product:
+I have uploaded final approved replacement Sports Cave WebP product images.
 Use SOP 07C.
-
 Update the existing Shopify product directly through the connected Shopify tool.
-
 Do not create a CSV.
 Do not create a new product.
 Do not ask me to manually upload images.
-
 Find the existing product using the product URL, handle, title, or product subject I provide.
-
 Upload all supplied WebP images to Shopify, attach them to the existing product, replace the old product images, apply the correct Sports Cave image order, write unique SEO-friendly alt text for every image, and reassign variant images correctly.
-
 Black variants use the black frame image.
 Oak variants use the oak frame image.
 White variants use the white frame image.
 Unframed variants use the unframed image.
-
 Keep the existing product status unchanged.
 Keep the existing product title, handle, description, SEO, tags, prices, SKUs, variants, inventory, collections, and metafields unchanged unless I specifically ask you to update them.
-
-If the correct product is unclear, ask before making changes."""
+If the correct product is unclear, ask before making changes.
+Final Rule
+This SOP exists to replace manual Shopify image updates and prevent duplicate products.
+ChatGPT should update the existing Shopify product directly, replace the old images safely, reassign variant images, and leave only final manual review.
+"""
 
 
 st.set_page_config(
@@ -1162,6 +1546,31 @@ def get_product_upload_prompt(metadata, update_existing=False):
     return UPDATE_EXISTING_PRODUCT_PROMPT if update_existing else NEW_SHOPIFY_PRODUCT_PROMPT
 
 
+def validate_uploaded_artwork(uploaded_file):
+    if uploaded_file is None:
+        raise ValueError("Please upload an artwork image first.")
+
+    file_size = getattr(uploaded_file, "size", None)
+    if file_size is not None and file_size <= 0:
+        raise ValueError("Uploaded file is empty.")
+
+    filename = getattr(uploaded_file, "name", "")
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise ValueError("Unsupported file type. Upload JPG, JPEG, PNG, or WEBP.")
+
+    try:
+        with Image.open(BytesIO(uploaded_file.getbuffer())) as image:
+            image.load()
+            image.convert("RGB")
+    except UnidentifiedImageError as error:
+        raise ValueError(
+            "Uploaded file is not a valid image. Please upload a valid JPG, PNG, or WEBP file."
+        ) from error
+    except Exception as error:
+        raise RuntimeError("Unable to validate uploaded artwork file.") from error
+
+
 def get_sport_category(selected_option, custom_value):
     if selected_option == "Custom":
         return custom_value.strip()
@@ -1174,6 +1583,7 @@ def normalize_asset(asset):
         "key": None,
         "label": "Image",
         "review_path": None,
+        "preview_path": None,
         "webp_path": None,
         "jpg_path": None,
         "include_in_zip": True,
@@ -1536,9 +1946,14 @@ def render_generated_previews(result):
             checkbox_key = get_asset_checkbox_key(result["run_dir"], asset["key"])
             st.checkbox("Include in ZIP", key=checkbox_key)
 
-            preview_path = asset["review_path"] or asset["webp_path"] or asset["jpg_path"]
+            preview_path = (
+                asset.get("preview_path")
+                or asset.get("review_path")
+                or asset.get("webp_path")
+                or asset.get("jpg_path")
+            )
             if preview_path and Path(preview_path).exists():
-                st.image(str(preview_path), caption=asset["label"], width="stretch")
+                st.image(str(preview_path), caption=asset["label"], width=380)
                 st.caption(Path(preview_path).name)
 
 
@@ -1570,7 +1985,7 @@ def render_prompt_cards(result, prompt_paths, heading):
                     st.image(
                         str(preview_path),
                         caption=Path(preview_path).name,
-                        width="stretch",
+                        width=360,
                     )
 
             uploaded_lifestyle_image = st.file_uploader(
@@ -1783,51 +2198,69 @@ def render_mockups_page():
 
     if uploaded_file is not None:
         st.subheader("Uploaded Artwork")
-        st.image(uploaded_file, caption=uploaded_file.name, width="stretch")
+        st.image(uploaded_file, caption=uploaded_file.name, width=400)
 
     if generate_clicked:
         sport_category = get_sport_category(sport_option, custom_sport)
 
-        if uploaded_file is None:
-            st.error("Please upload an artwork image first.")
-        elif not product_name.strip():
-            st.error("Please enter a product name.")
-        elif not sport_category:
-            st.error("Please enter a sport category.")
-        else:
-            with st.spinner("Generating Sports Cave product images..."):
-                temp_artwork_path = None
-                suffix = Path(uploaded_file.name).suffix or ".jpg"
+        temp_artwork_path = None
+        status_container = st.empty()
+        progress_bar = st.progress(0)
 
-                try:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-                        temp_file.write(uploaded_file.getbuffer())
-                        temp_artwork_path = Path(temp_file.name)
+        def update_status(message, progress=None, level="info"):
+            logging.info(message)
+            if level == "error":
+                status_container.error(message)
+            elif level == "success":
+                status_container.success(message)
+            else:
+                status_container.info(message)
 
-                    result = image_factory.generate_product_images(
-                        product_name=product_name,
-                        sport_category=sport_category,
-                        artwork_file_path=temp_artwork_path,
-                        base_dir=BASE_DIR,
-                    )
-                except Exception as error:
-                    st.error("Something went wrong while generating the image assets.")
-                    st.exception(error)
-                    result = None
-                finally:
-                    if temp_artwork_path is not None:
-                        with suppress(FileNotFoundError, PermissionError):
-                            temp_artwork_path.unlink()
+            if progress is not None:
+                progress_bar.progress(min(max(int(progress), 0), 100))
 
-                if result is not None:
-                    try:
-                        result = rebuild_result_artifacts(result)
-                    except Exception as error:
-                        st.error("Something went wrong while preparing the download package.")
-                        st.exception(error)
+        try:
+            if uploaded_file is None:
+                raise ValueError("Please upload an artwork image first.")
+            if not product_name.strip():
+                raise ValueError("Please enter a product name.")
+            if not sport_category:
+                raise ValueError("Please enter a sport category.")
 
-                    result = sync_result_to_google_drive(result)
-                    st.session_state.last_generation_result = result
+            update_status("Validating uploaded artwork...", 5)
+            validate_uploaded_artwork(uploaded_file)
+
+            update_status("Preparing artwork file for generation...", 15)
+            suffix = Path(uploaded_file.name).suffix or ".jpg"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+                temp_file.write(uploaded_file.getbuffer())
+                temp_artwork_path = Path(temp_file.name)
+
+            update_status("Generating Sports Cave product images...", 20)
+            result = image_factory.generate_product_images(
+                product_name=product_name,
+                sport_category=sport_category,
+                artwork_file_path=temp_artwork_path,
+                base_dir=BASE_DIR,
+                status_callback=lambda msg, progress=None: update_status(msg, progress),
+            )
+
+            update_status("Finalizing generated assets...", 65)
+            result = rebuild_result_artifacts(result)
+
+            update_status("Syncing results to Google Drive if configured...", 85)
+            result = sync_result_to_google_drive(result)
+
+            update_status("Generation completed successfully.", 100, level="success")
+            st.session_state.last_generation_result = result
+        except Exception as error:
+            logging.exception("Generation failed")
+            status_container.error("Generation failed. See details below.")
+            st.exception(error)
+        finally:
+            if temp_artwork_path is not None:
+                with suppress(FileNotFoundError, PermissionError):
+                    temp_artwork_path.unlink()
 
     if st.session_state.last_generation_result is not None:
         render_generation_result(st.session_state.last_generation_result)
