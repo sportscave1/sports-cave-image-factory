@@ -22,7 +22,7 @@ MAX_SOURCE_PIXELS = 25_000_000
 MAX_WORKING_EDGE = 2000
 MAX_PREVIEW_EDGE = 900
 MAX_STORED_RUNS = 3
-EXPORT_IMAGE_EDGE = 1024
+MAX_EXPORT_EDGE = 1600
 WEBP_EXPORT_QUALITY = 82
 EXPORT_WEBP_QUALITY = WEBP_EXPORT_QUALITY
 EXPORT_WEBP_METHOD = 4
@@ -1034,8 +1034,13 @@ def fit_artwork_to_box(artwork, box_width, box_height):
     )
 
 
-def resize_to_1024(image):
-    return image.resize((EXPORT_IMAGE_EDGE, EXPORT_IMAGE_EDGE), Image.LANCZOS)
+def resize_for_export(image, max_edge=MAX_EXPORT_EDGE):
+    if max(image.size) <= max_edge:
+        return image.copy()
+
+    resized_image = image.copy()
+    resized_image.thumbnail((max_edge, max_edge), Image.LANCZOS)
+    return resized_image
 
 
 def prepare_working_artwork(image_path, upload_dir):
@@ -1309,26 +1314,26 @@ def save_review_and_assets(image, review_dir, webp_dir, jpg_dir, review_name, we
     webp_path = webp_dir / webp_name
     jpg_path = jpg_dir / jpg_name
 
-    image_1024 = resize_to_1024(image)
+    export_image = resize_for_export(image)
     try:
-        image_1024.save(review_path, format="PNG")
+        export_image.save(review_path, format="PNG")
 
-        image_1024.save(
+        export_image.save(
             webp_path,
             format="WEBP",
             quality=EXPORT_WEBP_QUALITY,
             method=EXPORT_WEBP_METHOD,
         )
 
-        image_1024.save(
+        export_image.save(
             jpg_path,
             format="JPEG",
             quality=EXPORT_JPG_QUALITY,
             optimize=True,
         )
     finally:
-        close_image(image_1024)
-        del image_1024
+        close_image(export_image)
+        del export_image
         gc.collect()
 
     return review_path, webp_path, jpg_path
@@ -1610,14 +1615,20 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
         image_file.seek(0)
 
     ensure_memory_available(f"Before source image open: {prompt_filename}")
+    image_export = None
+    working_image = None
     try:
         with Image.open(image_file) as image:
             image.load()
-            image_1024 = ImageOps.fit(
-                ImageOps.exif_transpose(image).convert("RGB"),
-                (EXPORT_IMAGE_EDGE, EXPORT_IMAGE_EDGE),
+            working_image = ImageOps.exif_transpose(image).convert("RGB")
+            export_edge = max(1, min(MAX_EXPORT_EDGE, working_image.width, working_image.height))
+            image_export = ImageOps.fit(
+                working_image,
+                (export_edge, export_edge),
                 method=Image.LANCZOS,
             )
+            close_image(working_image)
+            del working_image
     except UnidentifiedImageError as error:
         raise RuntimeError(
             "Cannot read the uploaded lifestyle image. Please upload a valid JPG, PNG, or WEBP file."
@@ -1629,21 +1640,21 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
     ensure_memory_available(f"After source image open: {prompt_filename}")
 
     try:
-        image_1024.save(
+        image_export.save(
             webp_output_path,
             format="WEBP",
             quality=EXPORT_WEBP_QUALITY,
             method=EXPORT_WEBP_METHOD,
         )
 
-        image_1024.save(
+        image_export.save(
             jpg_output_path,
             format="JPEG",
             quality=EXPORT_JPG_QUALITY,
             optimize=True,
         )
 
-        preview_image = image_1024.copy()
+        preview_image = image_export.copy()
         try:
             preview_image.thumbnail((MAX_PREVIEW_EDGE, MAX_PREVIEW_EDGE), Image.LANCZOS)
             preview_image.save(
@@ -1656,8 +1667,8 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
             close_image(preview_image)
             del preview_image
     finally:
-        close_image(image_1024)
-        del image_1024
+        close_image(image_export)
+        del image_export
         collect_garbage(f"After saving lifestyle mockup: {prompt_filename}")
 
     return {

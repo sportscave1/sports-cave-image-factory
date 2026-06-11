@@ -1,6 +1,8 @@
 from contextlib import suppress
+import csv
 from datetime import datetime, timedelta
 from functools import lru_cache
+import io
 from pathlib import Path
 import gc
 import hashlib
@@ -13,6 +15,7 @@ import re
 import shutil
 import tempfile
 import traceback
+from urllib.parse import parse_qs, urlparse
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from dotenv import load_dotenv
@@ -30,6 +33,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
 UPLOAD_PREVIEW_DIR = BASE_DIR / "output" / "_ui-upload-previews"
+EDITION_LOG_CACHE_PATH = BASE_DIR / "output" / "_cache" / "edition-log-snapshot.json"
+EDITION_LOG_HEADER_ROW = 4
+EDITION_LOG_DATA_START_ROW = 5
+EDITION_LOG_SHEET_NAME = "Edition Log"
 ENABLE_GOOGLE_DRIVE = os.getenv("ENABLE_GOOGLE_DRIVE", "false").lower() == "true"
 GOOGLE_SHEET_URL = os.getenv(
     "GOOGLE_SHEET_URL",
@@ -1782,6 +1789,201 @@ def summarize_edition_log_payload(data):
     )
 
 
+def parse_google_sheet_url(sheet_url):
+    parsed_url = urlparse(normalize_whitespace(sheet_url))
+    path_match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", parsed_url.path)
+    if not path_match:
+        return None
+
+    query = parse_qs(parsed_url.query)
+    fragment_query = parse_qs(parsed_url.fragment)
+    gid = None
+    for source in (query, fragment_query):
+        if source.get("gid"):
+            gid = normalize_whitespace(source["gid"][0])
+            break
+
+    return {
+        "sheet_id": path_match.group(1),
+        "gid": gid,
+    }
+
+
+def build_google_sheet_csv_export_url(sheet_url):
+    parsed_sheet = parse_google_sheet_url(sheet_url)
+    if not parsed_sheet:
+        return None
+
+    if parsed_sheet.get("gid"):
+        export_url = f"https://docs.google.com/spreadsheets/d/{parsed_sheet['sheet_id']}/export?format=csv&gid={parsed_sheet['gid']}"
+        return export_url
+
+    export_url = (
+        f"https://docs.google.com/spreadsheets/d/{parsed_sheet['sheet_id']}"
+        f"/gviz/tq?tqx=out:csv&sheet={EDITION_LOG_SHEET_NAME.replace(' ', '%20')}"
+    )
+    return export_url
+
+
+def build_records_from_sheet_values(values, header_row_number=EDITION_LOG_HEADER_ROW):
+    if not values or len(values) < header_row_number:
+        return []
+
+    header_index = header_row_number - 1
+    header_row = values[header_index]
+    if not any(normalize_whitespace(cell) for cell in header_row):
+        return []
+
+    header_definitions = []
+    for column_index, header_value in enumerate(header_row):
+        display_name = normalize_whitespace(header_value)
+        if not display_name:
+            continue
+
+        header_definitions.append(
+            (
+                column_index,
+                display_name,
+                canonicalize_sheet_key(normalize_sheet_header_name(display_name)),
+            )
+        )
+
+    if not header_definitions:
+        return []
+
+    records = []
+    for row_index, row_values in enumerate(values[EDITION_LOG_DATA_START_ROW - 1 :], start=EDITION_LOG_DATA_START_ROW):
+        if not any(normalize_whitespace(cell) for cell in row_values):
+            continue
+
+        record = {
+            "_row_number": row_index,
+            "_sheet_position": row_index,
+            "_raw": {},
+        }
+        for column_index, display_name, canonical_key in header_definitions:
+            cell_value = normalize_whitespace(row_values[column_index] if column_index < len(row_values) else "")
+            record[canonical_key] = cell_value
+            record["_raw"][display_name] = cell_value
+
+        records.append(record)
+
+    return records
+
+
+def build_json_rows_from_sheet_values(values):
+    records = build_records_from_sheet_values(values)
+    json_rows = []
+    for record in records:
+        raw_row = record.get("_raw", {})
+        if raw_row:
+            json_rows.append(raw_row)
+    return json_rows
+
+
+def save_edition_log_snapshot_cache(rows, diagnostics):
+    EDITION_LOG_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "saved_at": datetime.now().isoformat(),
+        "rows": rows,
+        "diagnostics": diagnostics,
+    }
+    EDITION_LOG_CACHE_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def load_edition_log_snapshot_cache():
+    if not EDITION_LOG_CACHE_PATH.exists():
+        return None
+
+    try:
+        payload = json.loads(EDITION_LOG_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        return None
+
+    return payload
+
+
+def request_google_sheet_csv_export(sheet_url):
+    export_url = build_google_sheet_csv_export_url(sheet_url)
+    diagnostics = {
+        "requested_url": export_url,
+        "final_url": None,
+        "status_code": None,
+        "content_type": None,
+        "response_preview": "",
+        "response_looks_like": "Unknown",
+        "json_format": "sheet_csv",
+        "data_source": "Google Sheet CSV fallback",
+    }
+
+    if not export_url:
+        raise EditionLogEndpointError(
+            "Could not build a Google Sheet export URL from GOOGLE_SHEET_URL.",
+            diagnostics,
+        )
+
+    try:
+        response = requests.get(
+            export_url,
+            headers=EDITION_LOG_REQUEST_HEADERS,
+            timeout=10,
+            allow_redirects=True,
+        )
+    except requests.RequestException as error:
+        raise EditionLogEndpointError(
+            f"Could not fetch the Google Sheet CSV fallback: {error}",
+            diagnostics,
+            debug_error=error,
+        ) from error
+
+    response_text = response.text or ""
+    diagnostics["final_url"] = response.url
+    diagnostics["status_code"] = response.status_code
+    diagnostics["content_type"] = response.headers.get("content-type", "")
+    diagnostics["response_preview"] = build_edition_log_response_preview(response_text)
+    diagnostics["response_looks_like"] = "HTML" if response_looks_like_html(response_text) else "CSV-like"
+
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as error:
+        raise EditionLogEndpointError(
+            f"Google Sheet export URL returned HTTP {response.status_code}.",
+            diagnostics,
+            debug_error=error,
+        ) from error
+
+    if response_looks_like_html(response_text):
+        raise EditionLogEndpointError(
+            "The Google Sheet export fallback returned an HTML page instead of CSV.",
+            diagnostics,
+        )
+
+    try:
+        csv_rows = list(csv.reader(io.StringIO(response_text)))
+    except Exception as error:
+        raise EditionLogEndpointError(
+            "Could not parse the Google Sheet CSV fallback response.",
+            diagnostics,
+            debug_error=error,
+        ) from error
+
+    json_rows = build_json_rows_from_sheet_values(csv_rows)
+    if not json_rows:
+        raise EditionLogEndpointError(
+            "The Google Sheet CSV fallback did not return any usable edition rows.",
+            diagnostics,
+        )
+
+    return json_rows, diagnostics
+
+
 def request_edition_log_endpoint(request_url):
     diagnostics = {
         "requested_url": request_url,
@@ -1873,6 +2075,9 @@ def fetch_edition_log_json_rows(endpoint_url):
         "json_format": None,
         "retried_public_url_format": False,
         "attempted_urls": [],
+        "data_source": "Apps Script JSON endpoint",
+        "sheet_fallback_attempted": False,
+        "sheet_fallback_used": False,
     }
 
     try:
@@ -1883,6 +2088,7 @@ def fetch_edition_log_json_rows(endpoint_url):
     except EditionLogEndpointError as first_error:
         overall_diagnostics.update(first_error.diagnostics)
         overall_diagnostics["attempted_urls"].append(first_error.diagnostics["requested_url"])
+        last_error = first_error
 
         public_url = convert_to_public_apps_script_url(requested_url)
         should_retry = (
@@ -1890,28 +2096,43 @@ def fetch_edition_log_json_rows(endpoint_url):
             and public_url
             and public_url != requested_url
         )
-        if not should_retry:
-            raise EditionLogEndpointError(
-                first_error.user_message,
-                overall_diagnostics,
-                debug_error=first_error.debug_error,
-            ) from first_error
+        if should_retry:
+            overall_diagnostics["retried_public_url_format"] = True
 
-        overall_diagnostics["retried_public_url_format"] = True
+            try:
+                rows, retry_diagnostics = request_edition_log_endpoint(public_url)
+                overall_diagnostics.update(retry_diagnostics)
+                overall_diagnostics["attempted_urls"].append(retry_diagnostics["requested_url"])
+                return rows, overall_diagnostics
+            except EditionLogEndpointError as retry_error:
+                overall_diagnostics.update(retry_error.diagnostics)
+                overall_diagnostics["attempted_urls"].append(retry_error.diagnostics["requested_url"])
+                last_error = retry_error
 
-        try:
-            rows, retry_diagnostics = request_edition_log_endpoint(public_url)
-            overall_diagnostics.update(retry_diagnostics)
-            overall_diagnostics["attempted_urls"].append(retry_diagnostics["requested_url"])
-            return rows, overall_diagnostics
-        except EditionLogEndpointError as retry_error:
-            overall_diagnostics.update(retry_error.diagnostics)
-            overall_diagnostics["attempted_urls"].append(retry_error.diagnostics["requested_url"])
+        if GOOGLE_SHEET_URL:
+            overall_diagnostics["sheet_fallback_attempted"] = True
+            try:
+                rows, sheet_diagnostics = request_google_sheet_csv_export(GOOGLE_SHEET_URL)
+                overall_diagnostics.update(sheet_diagnostics)
+                overall_diagnostics["attempted_urls"].append(sheet_diagnostics["requested_url"])
+                overall_diagnostics["sheet_fallback_used"] = True
+                overall_diagnostics["data_source"] = "Google Sheet CSV fallback"
+                return rows, overall_diagnostics
+            except EditionLogEndpointError as sheet_error:
+                overall_diagnostics["attempted_urls"].append(sheet_error.diagnostics.get("requested_url"))
+                overall_diagnostics["sheet_fallback_error"] = sheet_error.user_message
+
             raise EditionLogEndpointError(
-                retry_error.user_message,
+                last_error.user_message,
                 overall_diagnostics,
-                debug_error=retry_error.debug_error,
-            ) from retry_error
+                debug_error=last_error.debug_error,
+            ) from last_error
+
+        raise EditionLogEndpointError(
+            last_error.user_message,
+            overall_diagnostics,
+            debug_error=last_error.debug_error,
+        ) from last_error
 
 
 def build_records_from_json_rows(json_rows):
@@ -1988,7 +2209,29 @@ def load_limited_editions_snapshot(json_url):
     if not json_url:
         raise ValueError("Edition Log is not connected yet. Add EDITION_LOG_JSON_URL in Render environment variables.")
 
-    json_rows, endpoint_diagnostics = fetch_edition_log_json_rows(json_url)
+    cache_payload = load_edition_log_snapshot_cache()
+    try:
+        json_rows, endpoint_diagnostics = fetch_edition_log_json_rows(json_url)
+        save_edition_log_snapshot_cache(json_rows, endpoint_diagnostics)
+        using_cached_snapshot = False
+        cache_saved_at = None
+        live_refresh_error = None
+    except EditionLogEndpointError as error:
+        if not cache_payload:
+            raise
+
+        json_rows = cache_payload["rows"]
+        endpoint_diagnostics = cache_payload.get("diagnostics") or {}
+        using_cached_snapshot = True
+        cache_saved_at = cache_payload.get("saved_at")
+        live_refresh_error = error.user_message
+        endpoint_diagnostics = {
+            **endpoint_diagnostics,
+            "live_refresh_error": live_refresh_error,
+            "using_cached_snapshot": True,
+            "cache_saved_at": cache_saved_at,
+        }
+
     edition_rows, had_date_parse_failure = build_records_from_json_rows(json_rows)
     sorted_rows = sort_edition_records(edition_rows, had_date_parse_failure=had_date_parse_failure)
 
@@ -1999,6 +2242,9 @@ def load_limited_editions_snapshot(json_url):
         "rows": sorted_rows,
         "had_date_parse_failure": had_date_parse_failure,
         "endpoint_diagnostics": endpoint_diagnostics,
+        "using_cached_snapshot": using_cached_snapshot,
+        "cache_saved_at": cache_saved_at,
+        "live_refresh_error": live_refresh_error,
     }
 
 
@@ -2097,6 +2343,8 @@ def render_limited_editions_diagnostics(diagnostics):
         return
 
     st.caption("Endpoint diagnostics")
+    if diagnostics.get("data_source"):
+        st.write(f"**Data source:** {diagnostics.get('data_source')}")
     st.write(f"**Original URL exists:** {'Yes' if diagnostics.get('original_url_exists') else 'No'}")
     st.write(f"**Requested URL:** {diagnostics.get('requested_url') or '-'}")
     st.write(f"**Final response URL:** {diagnostics.get('final_url') or '-'}")
@@ -2107,6 +2355,18 @@ def render_limited_editions_diagnostics(diagnostics):
         st.write(f"**JSON format:** {diagnostics.get('json_format')}")
     if diagnostics.get("retried_public_url_format"):
         st.info("Retried using public Apps Script URL format.")
+    if diagnostics.get("sheet_fallback_used"):
+        st.success("Loaded live edition data using the Google Sheet export fallback.")
+    if diagnostics.get("sheet_fallback_attempted") and diagnostics.get("sheet_fallback_error"):
+        st.warning(diagnostics.get("sheet_fallback_error"))
+    if diagnostics.get("using_cached_snapshot"):
+        st.warning(
+            "Showing the last successful edition snapshot because the live refresh failed."
+        )
+        if diagnostics.get("cache_saved_at"):
+            st.caption(f"Cached snapshot saved at: {diagnostics.get('cache_saved_at')}")
+    if diagnostics.get("live_refresh_error"):
+        st.caption(f"Live refresh error: {diagnostics.get('live_refresh_error')}")
     attempted_urls = diagnostics.get("attempted_urls") or []
     if attempted_urls:
         st.write(f"**Attempted URLs:** {len(attempted_urls)}")
@@ -2946,19 +3206,68 @@ def render_asset_download_controls(asset, run_dir):
         )
 
 
+def get_asset_full_resolution_path(asset):
+    for candidate in (
+        asset.get("review_path"),
+        asset.get("webp_path"),
+        asset.get("jpg_path"),
+    ):
+        if candidate and Path(candidate).exists():
+            return Path(candidate)
+
+    return None
+
+
+def render_preview_card(asset, run_dir, image_width=380, caption_text=None):
+    preview_path = asset.get("preview_path")
+    if preview_path and Path(preview_path).exists():
+        st.image(str(preview_path), caption=asset["label"], width=image_width)
+    else:
+        st.caption("Preview not available.")
+
+    if caption_text:
+        st.caption(caption_text)
+
+    full_resolution_path = get_asset_full_resolution_path(asset)
+    if not full_resolution_path:
+        return
+
+    state_key = f"show-full-resolution::{run_dir}::{asset['key']}"
+    button_key = f"toggle-full-resolution::{run_dir}::{asset['key']}"
+    action_label = "Hide Full Resolution" if st.session_state.get(state_key) else "Load Full Resolution"
+    if st.button(action_label, key=button_key, use_container_width=True):
+        st.session_state[state_key] = not st.session_state.get(state_key, False)
+        st.rerun()
+
+    if st.session_state.get(state_key):
+        st.image(
+            str(full_resolution_path),
+            caption=f"{asset['label']} - full resolution",
+            use_container_width=True,
+        )
+        st.caption(
+            "This full-resolution file only loads after you click the button. "
+            "Copy or open this version when you want the best quality for ChatGPT."
+        )
+
+
 def render_generated_previews(result):
     st.subheader("Generated Previews")
-    st.caption("These are lightweight preview files only. Full export images stay on disk until you download them.")
+    st.caption(
+        "These are lightweight preview files only. Click Load Full Resolution on any card if you want to open or copy the higher-quality file."
+    )
     preview_cols = st.columns(2)
     base_assets = [asset for asset in result["assets"] if asset["asset_group"] == "generated"]
 
     for index, asset in enumerate(base_assets):
         with preview_cols[index % 2]:
-            preview_path = asset.get("preview_path")
-            if preview_path and Path(preview_path).exists():
-                st.image(str(preview_path), caption=asset["label"], width=380)
-            else:
-                st.caption("Preview not available.")
+            render_preview_card(
+                asset,
+                result["run_dir"],
+                image_width=380,
+                caption_text="Use the preview for fast browsing. Load the full-resolution file before copying into ChatGPT.",
+            )
+            render_asset_download_controls(asset, result["run_dir"])
 
 
 def render_primary_zip_download(result, section_key):
@@ -3037,12 +3346,15 @@ def render_prompt_cards(result, prompt_paths, heading):
 
                 preview_path = saved_preview_path
                 if preview_path and Path(preview_path).exists():
-                    st.image(
-                        str(preview_path),
-                        caption=Path(preview_path).name,
-                        width=360,
+                    lifestyle_asset = build_lifestyle_asset(prompt_path, saved_lifestyle_paths)
+                    render_preview_card(
+                        lifestyle_asset,
+                        result["run_dir"],
+                        image_width=360,
+                        caption_text="Saved. This lightweight preview is shown here, but you can load the full-resolution image before copying it into ChatGPT.",
                     )
-                    st.caption("Saved. It will be included the next time you save the ZIP.")
+                    render_asset_download_controls(lifestyle_asset, result["run_dir"])
+                    st.caption("It will be included the next time you save the ZIP.")
 
             uploaded_lifestyle_image = st.file_uploader(
                 "Upload image from ChatGPT",
@@ -3485,6 +3797,15 @@ def render_limited_editions_page():
     submitted_count = sum(1 for row in rows if "submitted" in normalize_whitespace(row.get("status")).casefold())
     latest_edition_sent = normalize_whitespace(latest_row.get("edition_no")) or "-"
     latest_product_sent = normalize_whitespace(latest_row.get("edition_name")) or "Untitled Product"
+
+    if snapshot.get("using_cached_snapshot"):
+        st.warning(
+            "Live Edition Log refresh failed, so this page is showing the last successful snapshot instead."
+        )
+    elif snapshot.get("endpoint_diagnostics", {}).get("sheet_fallback_used"):
+        st.info(
+            "Apps Script is still redirecting to Google sign-in, so the page loaded live data directly from the Google Sheet export fallback."
+        )
 
     metric_cols = st.columns(4)
     metric_cols[0].metric("Total editions logged", str(len(rows)))
