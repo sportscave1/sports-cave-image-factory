@@ -3184,21 +3184,96 @@ def render_download_button(label, file_path, mime, key):
         )
 
 
-def render_copyable_prompt(title, prompt_text, key):
-    textarea_height = min(780, max(320, (prompt_text.count("\n") + 1) * 18 + 80))
-    component_height = textarea_height + 96
-    safe_title = html.escape(title)
-    safe_text = html.escape(prompt_text)
+def render_copy_prompt_button(
+    prompt_text,
+    key,
+    label="Copy Prompt",
+    background="#0B0B0D",
+    text_color="#F5F2EA",
+    border_color="#0B0B0D",
+):
+    prompt_text_json = json.dumps(prompt_text)
+    safe_label = html.escape(label)
 
     components.html(
         f"""
-        <div style="border:1px solid rgba(212,165,76,0.24);border-radius:16px;padding:16px;background:#141416;color:#F5F2EA;">
+        <div style="padding-top:2px;">
+          <button
+            id="copy-inline-button-{key}"
+            type="button"
+            style="width:100%;border:1px solid {border_color};border-radius:14px;padding:12px 14px;background:{background};color:{text_color};font-weight:700;font-size:0.95rem;cursor:pointer;box-sizing:border-box;"
+          >
+            {safe_label}
+          </button>
+        </div>
+        <script>
+        (() => {{
+          const button = document.getElementById("copy-inline-button-{key}");
+          const originalLabel = button.innerText;
+          const promptText = {prompt_text_json};
+
+          async function copyPrompt(event) {{
+            event.preventDefault();
+            try {{
+              if (navigator.clipboard && window.isSecureContext) {{
+                await navigator.clipboard.writeText(promptText);
+              }} else {{
+                const textarea = document.createElement("textarea");
+                textarea.value = promptText;
+                textarea.style.position = "fixed";
+                textarea.style.opacity = "0";
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                document.execCommand("copy");
+                document.body.removeChild(textarea);
+              }}
+            }} catch (error) {{
+              const textarea = document.createElement("textarea");
+              textarea.value = promptText;
+              textarea.style.position = "fixed";
+              textarea.style.opacity = "0";
+              document.body.appendChild(textarea);
+              textarea.focus();
+              textarea.select();
+              document.execCommand("copy");
+              document.body.removeChild(textarea);
+            }}
+
+            button.innerText = "Copied";
+            setTimeout(() => {{
+              button.innerText = originalLabel;
+            }}, 1400);
+          }}
+
+          button.addEventListener("click", copyPrompt);
+        }})();
+        </script>
+        """,
+        height=62,
+    )
+
+
+def render_copyable_prompt(title, prompt_text, key, show_title=True):
+    textarea_height = min(780, max(320, (prompt_text.count("\n") + 1) * 18 + 80))
+    component_height = textarea_height + (104 if show_title else 78)
+    safe_title = html.escape(title)
+    safe_text = html.escape(prompt_text)
+    title_markup = (
+        f'<strong style="font-size:1rem;color:#0B0B0D;">{safe_title}</strong>'
+        if show_title
+        else '<span style="display:block;width:1px;height:1px;opacity:0;">Prompt</span>'
+    )
+
+    components.html(
+        f"""
+        <div style="border:1px solid rgba(212,165,76,0.30);border-radius:16px;padding:16px;background:#FFFFFF;color:#0B0B0D;box-sizing:border-box;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;">
-            <strong style="font-size:1rem;color:#F5F2EA;">{safe_title}</strong>
+            {title_markup}
             <button
               id="copy-button-{key}"
               type="button"
-              style="border:1px solid #D4A54C;border-radius:999px;padding:10px 16px;background:#D4A54C;color:#0B0B0D;font-weight:700;cursor:pointer;"
+              style="border:1px solid #0B0B0D;border-radius:999px;padding:10px 16px;background:#FFFFFF;color:#0B0B0D;font-weight:700;cursor:pointer;"
             >
               Copy Prompt
             </button>
@@ -3206,7 +3281,7 @@ def render_copyable_prompt(title, prompt_text, key):
           <textarea
             id="prompt-text-{key}"
             readonly
-            style="width:100%;height:{textarea_height}px;border:1px solid #343238;border-radius:12px;padding:12px;background:#0B0B0D;color:#F5F2EA;font-size:0.95rem;line-height:1.45;resize:none;box-sizing:border-box;"
+            style="width:100%;height:{textarea_height}px;border:1px solid rgba(11,11,13,0.18);border-radius:12px;padding:12px;background:#FFFFFF;color:#000000;font-size:0.95rem;line-height:1.45;resize:none;box-sizing:border-box;"
           >{safe_text}</textarea>
         </div>
         <script>
@@ -3214,6 +3289,7 @@ def render_copyable_prompt(title, prompt_text, key):
           const button = document.getElementById("copy-button-{key}");
           const textarea = document.getElementById("prompt-text-{key}");
           const originalLabel = button.innerText;
+          const promptText = {json.dumps(prompt_text)};
 
           async function copyPrompt() {{
             textarea.focus();
@@ -3222,7 +3298,7 @@ def render_copyable_prompt(title, prompt_text, key):
 
             try {{
               if (navigator.clipboard && window.isSecureContext) {{
-                await navigator.clipboard.writeText(textarea.value);
+                await navigator.clipboard.writeText(promptText);
               }} else {{
                 document.execCommand("copy");
               }}
@@ -3753,10 +3829,29 @@ def render_prompt_cards(result, prompt_paths, heading):
     for index, prompt_path in enumerate(prompt_paths):
         with cols[index % 3]:
             st.markdown(f"**{get_prompt_label(prompt_path)}**")
-            with st.expander("View Prompt"):
-                st.code(prompt_path.read_text(encoding="utf-8"), language=None)
-
             prompt_name = prompt_path.name
+            prompt_text = prompt_path.read_text(encoding="utf-8")
+            prompt_key = f"{result['run_dir']}::{prompt_name}"
+
+            prompt_header_cols = st.columns([4, 1], gap="small")
+            with prompt_header_cols[0]:
+                with st.expander("View Prompt"):
+                    render_copyable_prompt(
+                        get_prompt_label(prompt_path),
+                        prompt_text,
+                        f"prompt-box::{prompt_key}",
+                        show_title=False,
+                    )
+            with prompt_header_cols[1]:
+                render_copy_prompt_button(
+                    prompt_text,
+                    f"prompt-header::{prompt_key}",
+                    label="Copy",
+                    background="#0B0B0D",
+                    text_color="#F5F2EA",
+                    border_color="#0B0B0D",
+                )
+
             saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
 
             if saved_lifestyle_paths:
