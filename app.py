@@ -1564,6 +1564,22 @@ def inject_styles():
             color: var(--sc-text);
         }
 
+        header[data-testid="stHeader"],
+        header[data-testid="stHeader"] > div,
+        [data-testid="stToolbar"],
+        [data-testid="stDecoration"] {
+            background: var(--sc-bg) !important;
+        }
+
+        header[data-testid="stHeader"] {
+            border-bottom: 1px solid rgba(212, 165, 76, 0.16);
+        }
+
+        header[data-testid="stHeader"] *,
+        [data-testid="stToolbar"] * {
+            color: var(--sc-text) !important;
+        }
+
         [data-testid="stSidebar"] {
             background: linear-gradient(180deg, #09090B 0%, #151518 100%);
             border-right: 1px solid rgba(212, 165, 76, 0.20);
@@ -1602,25 +1618,71 @@ def inject_styles():
             border-color: var(--sc-border) !important;
         }
 
-        .stButton > button, .stLinkButton > a, .stDownloadButton > button {
-            border-color: rgba(212, 165, 76, 0.55);
+        .stButton > button,
+        .stLinkButton > a,
+        .stDownloadButton > button,
+        div[data-testid="stFileUploader"] button,
+        section[data-testid="stFileUploaderDropzone"] button {
+            background: #F5F2EA !important;
+            color: #0B0B0D !important;
+            border: 1px solid rgba(212, 165, 76, 0.55) !important;
+            box-shadow: none !important;
+            text-shadow: none !important;
+        }
+
+        .stButton > button:hover,
+        .stLinkButton > a:hover,
+        .stDownloadButton > button:hover,
+        div[data-testid="stFileUploader"] button:hover,
+        section[data-testid="stFileUploaderDropzone"] button:hover {
+            background: #FFFFFF !important;
+            border-color: var(--sc-gold) !important;
+            color: #0B0B0D !important;
         }
 
         .stButton > button[kind="primary"] {
-            background: var(--sc-gold);
-            border-color: var(--sc-gold);
-            color: #0B0B0D;
+            background: var(--sc-gold) !important;
+            border-color: var(--sc-gold) !important;
+            color: #0B0B0D !important;
             font-weight: 700;
         }
 
-        .stButton > button:hover, .stLinkButton > a:hover, .stDownloadButton > button:hover {
-            border-color: var(--sc-gold);
-            color: var(--sc-gold);
+        .stButton > button:disabled,
+        .stLinkButton > a[aria-disabled="true"],
+        .stDownloadButton > button:disabled,
+        div[data-testid="stFileUploader"] button:disabled,
+        section[data-testid="stFileUploaderDropzone"] button:disabled {
+            background: #2A2A2D !important;
+            border-color: #444149 !important;
+            color: #C2BBB0 !important;
+            opacity: 1 !important;
         }
 
         .stButton > button[kind="primary"]:hover {
-            color: #0B0B0D;
-            filter: brightness(1.08);
+            background: #E2B657 !important;
+            color: #0B0B0D !important;
+            filter: none;
+        }
+
+        [data-testid="stFileUploader"] {
+            background: rgba(20, 20, 22, 0.90);
+            border: 1px solid var(--sc-border);
+            border-radius: 16px;
+            padding: 0.75rem 0.85rem 0.95rem;
+        }
+
+        [data-testid="stFileUploader"] * {
+            color: var(--sc-text) !important;
+        }
+
+        [data-testid="stFileUploader"] button {
+            font-weight: 700 !important;
+        }
+
+        [data-testid="stFileUploader"] small,
+        [data-testid="stFileUploader"] p,
+        [data-testid="stFileUploader"] span {
+            color: var(--sc-muted) !important;
         }
 
         .sc-status {
@@ -2894,13 +2956,13 @@ def render_copyable_prompt(title, prompt_text, key):
 
     components.html(
         f"""
-        <div style="border:1px solid #ddd6ca;border-radius:16px;padding:16px;background:#ffffff;">
+        <div style="border:1px solid rgba(212,165,76,0.24);border-radius:16px;padding:16px;background:#141416;color:#F5F2EA;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;">
-            <strong style="font-size:1rem;color:#243040;">{safe_title}</strong>
+            <strong style="font-size:1rem;color:#F5F2EA;">{safe_title}</strong>
             <button
               id="copy-button-{key}"
               type="button"
-              style="border:none;border-radius:999px;padding:10px 16px;background:#243040;color:#ffffff;font-weight:600;cursor:pointer;"
+              style="border:1px solid #D4A54C;border-radius:999px;padding:10px 16px;background:#D4A54C;color:#0B0B0D;font-weight:700;cursor:pointer;"
             >
               Copy Prompt
             </button>
@@ -2908,7 +2970,7 @@ def render_copyable_prompt(title, prompt_text, key):
           <textarea
             id="prompt-text-{key}"
             readonly
-            style="width:100%;height:{textarea_height}px;border:1px solid #ddd6ca;border-radius:12px;padding:12px;background:#faf8f4;color:#1f2937;font-size:0.95rem;line-height:1.45;resize:none;box-sizing:border-box;"
+            style="width:100%;height:{textarea_height}px;border:1px solid #343238;border-radius:12px;padding:12px;background:#0B0B0D;color:#F5F2EA;font-size:0.95rem;line-height:1.45;resize:none;box-sizing:border-box;"
           >{safe_text}</textarea>
         </div>
         <script>
@@ -3388,7 +3450,6 @@ def render_generated_previews(result):
                 image_width=380,
                 caption_text="Use the preview for fast browsing. Load the full-resolution file before copying into ChatGPT.",
             )
-            render_asset_download_controls(asset, result["run_dir"])
 
 
 def render_primary_zip_download(result, section_key):
