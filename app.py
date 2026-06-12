@@ -23,7 +23,9 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
+import db
 import image_factory
+import os_pages
 
 
 load_dotenv()
@@ -48,10 +50,20 @@ ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
     "ZIP_SAVE_DRIVE_FOLDER_URL",
     "https://drive.google.com/drive/folders/1FfXmTVuVGkD7PFhRjAtvPDZOn7Gpk3q_",
 ).strip()
-MENU_OPTIONS = ["Mockups", "Limited Editions", "Product Uploads", "Settings"]
-if ENABLE_GOOGLE_DRIVE:
-    MENU_OPTIONS.insert(1, "Google Drive")
-APP_VERSION = "Build 2026-06-11"
+MENU_OPTIONS = [
+    "Dashboard",
+    "Products",
+    "Mockups",
+    "Product Uploads",
+    "Limited Editions",
+    "Orders",
+    "Certificates",
+    "Files",
+    "Marketing Factory",
+    "VA Training",
+    "Settings",
+]
+APP_VERSION = "Sports Cave OS Phase 1 - 2026-06-12"
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
     "limited_editions": "Limited Editions",
@@ -1524,7 +1536,7 @@ ChatGPT should update the existing Shopify product directly, replace the old ima
 
 
 st.set_page_config(
-    page_title="Sports Cave Image Factory",
+    page_title="Sports Cave OS",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -1534,31 +1546,131 @@ def inject_styles():
     st.markdown(
         """
         <style>
+        :root {
+            --sc-bg: #0B0B0D;
+            --sc-panel: #141416;
+            --sc-panel-soft: #1B1B1E;
+            --sc-text: #F5F2EA;
+            --sc-muted: #A6A19A;
+            --sc-gold: #D4A54C;
+            --sc-border: #343238;
+            --sc-danger: #D56A4A;
+        }
+
         [data-testid="stAppViewContainer"] {
-            background: #f7f4ee;
+            background:
+                radial-gradient(circle at 82% 4%, rgba(212, 165, 76, 0.10), transparent 28rem),
+                linear-gradient(180deg, #0B0B0D 0%, #111114 100%);
+            color: var(--sc-text);
         }
 
         [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #111315 0%, #1b1d21 100%);
+            background: linear-gradient(180deg, #09090B 0%, #151518 100%);
+            border-right: 1px solid rgba(212, 165, 76, 0.20);
         }
 
         [data-testid="stSidebar"] * {
-            color: #f6f1e7;
+            color: var(--sc-text);
         }
 
         div[data-testid="stRadio"] label p {
             font-weight: 600;
         }
 
-        .sc-shell-card {
-            background: rgba(255, 252, 246, 0.94);
-            border: 1px solid #e5dbc6;
-            border-radius: 18px;
-            padding: 1rem 1.15rem;
+        h1, h2, h3, p, label, [data-testid="stCaptionContainer"] {
+            color: var(--sc-text);
         }
 
-        .sc-muted {
-            color: #6b675f;
+        [data-testid="stCaptionContainer"], .sc-muted {
+            color: var(--sc-muted) !important;
+        }
+
+        [data-testid="stMetric"] {
+            background: linear-gradient(145deg, rgba(27, 27, 30, 0.96), rgba(17, 17, 20, 0.96));
+            border: 1px solid var(--sc-border);
+            border-top: 2px solid rgba(212, 165, 76, 0.75);
+            border-radius: 14px;
+            padding: 1rem;
+        }
+
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            background: rgba(20, 20, 22, 0.86);
+            border-color: var(--sc-border) !important;
+        }
+
+        [data-testid="stDataFrame"], [data-testid="stExpander"] {
+            border-color: var(--sc-border) !important;
+        }
+
+        .stButton > button, .stLinkButton > a, .stDownloadButton > button {
+            border-color: rgba(212, 165, 76, 0.55);
+        }
+
+        .stButton > button[kind="primary"] {
+            background: var(--sc-gold);
+            border-color: var(--sc-gold);
+            color: #0B0B0D;
+            font-weight: 700;
+        }
+
+        .stButton > button:hover, .stLinkButton > a:hover, .stDownloadButton > button:hover {
+            border-color: var(--sc-gold);
+            color: var(--sc-gold);
+        }
+
+        .stButton > button[kind="primary"]:hover {
+            color: #0B0B0D;
+            filter: brightness(1.08);
+        }
+
+        .sc-status {
+            display: inline-block;
+            border: 1px solid var(--sc-border);
+            border-radius: 999px;
+            padding: 0.22rem 0.62rem;
+            background: #202024;
+            color: var(--sc-text);
+            font-size: 0.78rem;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .sc-status-live, .sc-status-available, .sc-status-mockups-ready {
+            border-color: #527A63;
+            color: #BFE3C9;
+        }
+
+        .sc-status-needs-review, .sc-status-final-editions, .sc-status-sold-out {
+            border-color: var(--sc-danger);
+            color: #F0B4A1;
+        }
+
+        .sc-status-selling-quickly, .sc-status-upload-in-progress {
+            border-color: var(--sc-gold);
+            color: #E9C980;
+        }
+
+        .sc-check {
+            margin: 0.35rem 0;
+            padding: 0.72rem 0.85rem;
+            border: 1px solid var(--sc-border);
+            border-radius: 10px;
+            background: #171719;
+        }
+
+        .sc-check-ready strong {
+            color: #8CC9A0;
+        }
+
+        .sc-check-missing strong {
+            color: #E38A6E;
+        }
+
+        .sc-shell-card {
+            background: rgba(20, 20, 22, 0.94);
+            border: 1px solid var(--sc-border);
+            border-radius: 18px;
+            padding: 1rem 1.15rem;
         }
         </style>
         """,
@@ -1568,7 +1680,16 @@ def inject_styles():
 
 def init_session_state():
     if "selected_page" not in st.session_state:
-        st.session_state.selected_page = "Mockups"
+        st.session_state.selected_page = "Dashboard"
+
+    if st.session_state.selected_page not in MENU_OPTIONS:
+        st.session_state.selected_page = "Dashboard"
+
+    if "selected_product_id" not in st.session_state:
+        st.session_state.selected_product_id = None
+
+    if "show_add_product" not in st.session_state:
+        st.session_state.show_add_product = False
 
     if "product_name" not in st.session_state:
         st.session_state.product_name = ""
@@ -3511,8 +3632,8 @@ def render_recent_runs_sidebar():
 
 
 def render_sidebar():
-    st.sidebar.title("Sports Cave")
-    st.sidebar.caption("Image Factory")
+    st.sidebar.title("Sports Cave OS")
+    st.sidebar.caption("Internal operations command centre")
     st.sidebar.caption(APP_VERSION)
     st.sidebar.radio(
         "Navigation",
@@ -3523,35 +3644,41 @@ def render_sidebar():
 
     if st.session_state.selected_page == "Mockups":
         st.sidebar.divider()
-        st.sidebar.subheader("How It Works")
+        st.sidebar.subheader("Mockup Workflow")
         st.sidebar.write("1. Upload artwork.")
         st.sidebar.write("2. Generate core Shopify images.")
         st.sidebar.write("3. Review lightweight previews.")
         st.sidebar.write("4. Download one ZIP bundle.")
         st.sidebar.write("5. Use the prompt sections below if you want ChatGPT lifestyle images.")
+    elif st.session_state.selected_page == "Products":
+        st.sidebar.divider()
+        st.sidebar.subheader("Product Command Centre")
+        st.sidebar.write("1. Find or add a product.")
+        st.sidebar.write("2. Connect product and file links.")
+        st.sidebar.write("3. Set edition values.")
+        st.sidebar.write("4. Clear the readiness checklist.")
     elif st.session_state.selected_page == "Limited Editions":
         st.sidebar.divider()
         st.sidebar.subheader("Limited Editions")
-        st.sidebar.write("1. Open the live edition dashboard.")
-        st.sidebar.write("2. Refresh the sheet when needed.")
-        st.sidebar.write("3. Check previous edition numbers by product.")
-        st.sidebar.write("4. Expand internal details only when needed.")
+        st.sidebar.write("1. Filter products by edition status.")
+        st.sidebar.write("2. Open a product to update sold numbers.")
+        st.sidebar.write("3. Let Sports Cave OS calculate remaining editions.")
+        st.sidebar.write("4. Open the dispatch log only when needed.")
+    elif st.session_state.selected_page == "Dashboard":
+        st.sidebar.divider()
+        st.sidebar.subheader("Today's Focus")
+        st.sidebar.write("Use the dashboard to find missing files, IDs, edition limits, and products not yet live.")
 
     st.sidebar.divider()
-    st.sidebar.subheader("Storage")
-    if ENABLE_GOOGLE_DRIVE:
-        st.sidebar.caption("Google Drive available on its own page.")
-        st.sidebar.caption("Drive authentication and syncing stay idle until you open Drive actions.")
-    else:
-        st.sidebar.caption("Google Drive disabled in lightweight mode.")
-        st.sidebar.caption("Local output stays isolated unless Drive is enabled explicitly.")
+    st.sidebar.subheader("Phase 1")
+    st.sidebar.caption("Product database and edition tracking are local. Shopify, certificates, and marketing automation come later.")
 
 
 def render_mockups_page():
     log_app_memory("Page load: Mockups")
-    st.title("Sports Cave Image Factory")
+    st.title("Mockups")
     st.caption(
-        "Upload one finished artwork, generate the five core Shopify images, then download one simple ZIP bundle."
+        "The existing Sports Cave Image Factory. Upload one finished artwork, generate the five core Shopify images, then download one simple ZIP bundle."
     )
     st.caption("Upload limit: 10MB. Working images are capped to 2000px and UI previews are capped to 900px.")
 
@@ -3742,9 +3869,12 @@ def render_product_uploads_page():
     )
 
 
-def render_limited_editions_page():
+def render_edition_dispatch_log(embedded=False):
     log_app_memory("Page load: Limited Editions")
-    st.title("Limited Editions")
+    if embedded:
+        st.subheader("Edition Dispatch Log")
+    else:
+        st.title("Edition Dispatch Log")
     st.caption(
         "Live edition dispatch tracking from the Sports Cave Edition Log. This page stays lightweight and only refreshes the data when you open it or press Refresh."
     )
@@ -4005,22 +4135,31 @@ def render_placeholder_page(title, body):
 
 
 def main():
+    db.init_db()
     inject_styles()
     init_session_state()
     render_sidebar()
 
     current_page = st.session_state.selected_page
     log_app_memory(f"Page load start: {current_page}")
-    if current_page == "Google Drive":
-        render_google_drive_page()
+    if current_page == "Dashboard":
+        os_pages.render_dashboard_page()
+    elif current_page == "Products":
+        os_pages.render_products_page()
+    elif current_page == "Mockups":
+        render_mockups_page()
     elif current_page == "Limited Editions":
-        render_limited_editions_page()
+        os_pages.render_limited_editions_page(dispatch_log_renderer=render_edition_dispatch_log)
     elif current_page == "Product Uploads":
         render_product_uploads_page()
     elif current_page == "Settings":
-        render_settings_page()
+        os_pages.render_settings_page(
+            app_version=APP_VERSION,
+            database_path=db.DB_PATH,
+            password_status=get_password_protection_status(),
+        )
     else:
-        render_mockups_page()
+        os_pages.render_placeholder_page(current_page)
     log_app_memory(f"Page load end: {current_page}")
 
 

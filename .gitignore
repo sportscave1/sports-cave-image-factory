@@ -6,6 +6,9 @@ credentials.json
 service-account.json
 input/
 output/
+data/*.db
+data/*.db-shm
+data/*.db-wal
 __pycache__/
 *.pyc
 .streamlit/secrets.toml

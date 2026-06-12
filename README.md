@@ -1,24 +1,42 @@
-# Sports Cave Image Factory
+# Sports Cave OS
 
-Private Streamlit app for Sports Cave staff to:
+Private Streamlit operations app for Sports Cave staff. Phase 1 combines the
+existing Image Factory with a lightweight product operations foundation:
 
-- upload one finished artwork
-- generate the base mockup assets
-- download one final ZIP with the selected WEBP and JPG assets
-- upload finished ChatGPT lifestyle mockups back into the same run
-- automatically sync each finished run to Google Drive
+- Dashboard priorities and product counts
+- Product creation, editing, readiness, links, and VA notes
+- Local limited-edition tracking and edition calculations
+- Existing mockup generation and product upload workflows
+- Placeholder areas for later Orders, Certificates, Files, and Marketing phases
 
 ## App Sections
 
-The sidebar now includes:
+The sidebar includes:
 
-1. `Mockups`
-2. `Google Drive`
-3. `Limited Editions`
+1. `Dashboard`
+2. `Products`
+3. `Mockups`
 4. `Product Uploads`
-5. `Settings`
+5. `Limited Editions`
+6. `Orders`
+7. `Certificates`
+8. `Files`
+9. `Marketing Factory`
+10. `VA Training`
+11. `Settings`
 
-Only `Mockups` and `Google Drive` are active right now. The other sections are placeholders for the wider Sports Cave backend.
+Phase 1 activates Dashboard, Products, Mockups, Product Uploads, Limited
+Editions, and Settings. The remaining sections are clearly marked placeholders.
+
+## Phase 1 Database
+
+Product and limited-edition records are stored in SQLite at
+`data/sports_cave_os.db`. Override this location with `SPORTS_CAVE_DB_PATH`.
+
+Render's normal filesystem is ephemeral. Attach a Render persistent disk and
+point `SPORTS_CAVE_DB_PATH` to that mounted path if records must survive a
+redeploy. The database layer is isolated in `db.py` so it can be replaced by a
+hosted database in a later phase.
 
 ## Local Run
 
