@@ -65,7 +65,7 @@ MENU_OPTIONS = [
     "VA Training",
     "Settings",
 ]
-APP_VERSION = "Sports Cave OS Phase 1 - 2026-06-12"
+APP_VERSION = "Sports Cave OS Phase 2 - 2026-06-12"
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
     "limited_editions": "Limited Editions",
@@ -1916,17 +1916,37 @@ def inject_styles():
             white-space: nowrap;
         }
 
-        .sc-status-live, .sc-status-available, .sc-status-mockups-ready {
+        .sc-status-live,
+        .sc-status-available,
+        .sc-status-mockups-ready,
+        .sc-status-connected,
+        .sc-status-all-files-connected,
+        .sc-status-core-files-ready,
+        .sc-status-ready-for-upload,
+        .sc-status-live-link-added,
+        .sc-status-prodigi-connected {
             border-color: #527A63;
             color: #BFE3C9;
         }
 
-        .sc-status-needs-review, .sc-status-final-editions, .sc-status-sold-out {
+        .sc-status-ready-for-review,
+        .sc-status-needs-fixing,
+        .sc-status-final-editions,
+        .sc-status-sold-out,
+        .sc-status-missing,
+        .sc-status-missing-files,
+        .sc-status-needs-files,
+        .sc-status-needs-prodigi,
+        .sc-status-needs-edition-setup,
+        .sc-status-prodigi-missing {
             border-color: var(--sc-danger);
             color: #F0B4A1;
         }
 
-        .sc-status-selling-quickly, .sc-status-upload-in-progress {
+        .sc-status-selling-quickly,
+        .sc-status-upload-in-progress,
+        .sc-status-artwork-ready,
+        .sc-status-admin-link-added {
             border-color: var(--sc-gold);
             color: #E9C980;
         }
@@ -4056,10 +4076,18 @@ def render_sidebar():
         st.sidebar.divider()
         st.sidebar.subheader("Today's Focus")
         st.sidebar.write("Use the dashboard to find missing files, IDs, edition limits, and products not yet live.")
+    elif st.session_state.selected_page == "Files":
+        st.sidebar.divider()
+        st.sidebar.subheader("File Hub")
+        st.sidebar.write("Filter missing file links, then open the master product record to fix them.")
+    elif st.session_state.selected_page == "Product Uploads":
+        st.sidebar.divider()
+        st.sidebar.subheader("Upload Workflow")
+        st.sidebar.write("Work through products by stage, then use the Shopify prompt tools when needed.")
 
     st.sidebar.divider()
-    st.sidebar.subheader("Phase 1")
-    st.sidebar.caption("Product database and edition tracking are local. Shopify, certificates, and marketing automation come later.")
+    st.sidebar.subheader("Phase 2")
+    st.sidebar.caption("Product command centre, File Hub, upload workflow, and edition tracking are active. Shopify sync comes later.")
 
 
 def render_mockups_page():
@@ -4248,7 +4276,9 @@ def render_mockups_page():
 
 def render_product_uploads_page():
     log_app_memory("Page load: Product Uploads")
-    st.title("Product Uploads")
+    os_pages.render_product_uploads_workflow()
+    st.divider()
+    st.subheader("Shopify Prompt Tools")
     st.caption(
         "Use this lightweight prompt page when you already have your Shopify upload images and HTML preview ready to drag into ChatGPT."
     )
@@ -4569,6 +4599,8 @@ def main():
         os_pages.render_limited_editions_page(dispatch_log_renderer=render_edition_dispatch_log)
     elif current_page == "Product Uploads":
         render_product_uploads_page()
+    elif current_page == "Files":
+        os_pages.render_files_page()
     elif current_page == "Settings":
         os_pages.render_settings_page(
             app_version=APP_VERSION,

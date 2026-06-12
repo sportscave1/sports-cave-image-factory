@@ -1,13 +1,16 @@
 # Sports Cave OS
 
-Private Streamlit operations app for Sports Cave staff. Phase 1 combines the
-existing Image Factory with a lightweight product operations foundation:
+Private Streamlit operations app for Sports Cave staff. Phase 2 combines the
+existing Image Factory with a practical product command centre and file workflow:
 
 - Dashboard priorities and product counts
-- Product creation, editing, readiness, links, and VA notes
+- Product creation, filtering, editing, archiving, readiness, links, and VA notes
+- File Hub for finding missing PSD, JPG, WebP, mockup, and certificate links
+- Product Upload workflow board grouped by VA stage
+- CSV product backup/export
 - Local limited-edition tracking and edition calculations
 - Existing mockup generation and product upload workflows
-- Placeholder areas for later Orders, Certificates, Files, and Marketing phases
+- Placeholder areas for later Orders, Certificates, and Marketing phases
 
 ## App Sections
 
@@ -25,10 +28,10 @@ The sidebar includes:
 10. `VA Training`
 11. `Settings`
 
-Phase 1 activates Dashboard, Products, Mockups, Product Uploads, Limited
-Editions, and Settings. The remaining sections are clearly marked placeholders.
+Phase 2 activates Dashboard, Products, Mockups, Product Uploads, Limited
+Editions, Files, and Settings. The remaining sections are clearly marked placeholders.
 
-## Phase 1 Database
+## Phase 2 Database
 
 Product and limited-edition records are stored in SQLite at
 `data/sports_cave_os.db`. Override this location with `SPORTS_CAVE_DB_PATH`.
