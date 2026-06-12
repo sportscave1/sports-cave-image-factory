@@ -1628,10 +1628,30 @@ def inject_styles():
         div[data-testid="stFileUploader"] button,
         section[data-testid="stFileUploaderDropzone"] button {
             background: #F5F2EA !important;
-            color: #0B0B0D !important;
+            color: #000000 !important;
             border: 1px solid rgba(212, 165, 76, 0.55) !important;
             box-shadow: none !important;
             text-shadow: none !important;
+        }
+
+        .stButton > button *,
+        .stLinkButton > a *,
+        .stDownloadButton > button *,
+        div[data-testid="stFileUploader"] button *,
+        section[data-testid="stFileUploaderDropzone"] button *,
+        .stButton > button p,
+        .stLinkButton > a p,
+        .stDownloadButton > button p,
+        div[data-testid="stFileUploader"] button p,
+        section[data-testid="stFileUploaderDropzone"] button p,
+        .stButton > button span,
+        .stLinkButton > a span,
+        .stDownloadButton > button span,
+        div[data-testid="stFileUploader"] button span,
+        section[data-testid="stFileUploaderDropzone"] button span {
+            color: #000000 !important;
+            fill: #000000 !important;
+            stroke: #000000 !important;
         }
 
         .stButton > button:hover,
@@ -1641,14 +1661,22 @@ def inject_styles():
         section[data-testid="stFileUploaderDropzone"] button:hover {
             background: #FFFFFF !important;
             border-color: var(--sc-gold) !important;
-            color: #0B0B0D !important;
+            color: #000000 !important;
         }
 
         .stButton > button[kind="primary"] {
             background: var(--sc-gold) !important;
             border-color: var(--sc-gold) !important;
-            color: #0B0B0D !important;
+            color: #000000 !important;
             font-weight: 700;
+        }
+
+        .stButton > button[kind="primary"] *,
+        .stButton > button[kind="primary"] p,
+        .stButton > button[kind="primary"] span {
+            color: #000000 !important;
+            fill: #000000 !important;
+            stroke: #000000 !important;
         }
 
         .stButton > button:disabled,
@@ -1662,9 +1690,19 @@ def inject_styles():
             opacity: 1 !important;
         }
 
+        .stButton > button:disabled *,
+        .stLinkButton > a[aria-disabled="true"] *,
+        .stDownloadButton > button:disabled *,
+        div[data-testid="stFileUploader"] button:disabled *,
+        section[data-testid="stFileUploaderDropzone"] button:disabled * {
+            color: #C2BBB0 !important;
+            fill: #C2BBB0 !important;
+            stroke: #C2BBB0 !important;
+        }
+
         .stButton > button[kind="primary"]:hover {
             background: #E2B657 !important;
-            color: #0B0B0D !important;
+            color: #000000 !important;
             filter: none;
         }
 
