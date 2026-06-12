@@ -1713,15 +1713,73 @@ def inject_styles():
             padding: 0.75rem 0.85rem 0.95rem;
         }
 
+        [data-testid="stFileUploader"] label,
+        [data-testid="stFileUploader"] [data-testid="stWidgetLabel"] *,
+        [data-testid="stFileUploader"] .stTooltipIcon,
+        [data-testid="stFileUploader"] .stTooltipIcon * {
+            color: #F5F2EA !important;
+            fill: #F5F2EA !important;
+            stroke: #F5F2EA !important;
+        }
+
         [data-testid="stFileUploader"] button {
             font-weight: 700 !important;
         }
 
-        [data-testid="stFileUploader"] label,
-        [data-testid="stFileUploader"] small,
-        [data-testid="stFileUploader"] p,
-        [data-testid="stFileUploader"] span {
-            color: var(--sc-muted) !important;
+        [data-testid="stFileUploader"] button[aria-label] {
+            background: #0B0B0D !important;
+            border-color: #0B0B0D !important;
+            color: #F5F2EA !important;
+            border-radius: 999px !important;
+        }
+
+        [data-testid="stFileUploader"] button[aria-label] *,
+        [data-testid="stFileUploader"] button[aria-label] svg,
+        [data-testid="stFileUploader"] button[aria-label] span {
+            color: #F5F2EA !important;
+            fill: #F5F2EA !important;
+            stroke: #F5F2EA !important;
+        }
+
+        [data-testid="stFileUploader"] [data-baseweb="tag"],
+        [data-testid="stFileUploader"] [data-baseweb="tag"] *,
+        [data-testid="stFileUploader"] [data-baseweb="tag"] span,
+        [data-testid="stFileUploader"] [data-baseweb="tag"] div {
+            color: #000000 !important;
+            fill: #000000 !important;
+            stroke: #000000 !important;
+        }
+
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button,
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button *,
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button svg,
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button span {
+            background: #0B0B0D !important;
+            border-color: #0B0B0D !important;
+            color: #F5F2EA !important;
+            fill: #F5F2EA !important;
+            stroke: #F5F2EA !important;
+        }
+
+        section[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderDropzoneInstructions"],
+        section[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderDropzoneInstructions"] *,
+        section[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderDropzoneInstructions"] span,
+        section[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderDropzoneInstructions"] p {
+            color: #000000 !important;
+            fill: #000000 !important;
+            stroke: #000000 !important;
+        }
+
+        [data-testid="stTooltipContent"],
+        .stTooltipContent {
+            background: #F5F2EA !important;
+        }
+
+        [data-testid="stTooltipContent"] *,
+        .stTooltipContent * {
+            color: #000000 !important;
+            fill: #000000 !important;
+            stroke: #000000 !important;
         }
 
         .sc-status {
