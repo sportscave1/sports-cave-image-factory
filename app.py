@@ -1622,6 +1622,46 @@ def inject_styles():
             border-color: var(--sc-border) !important;
         }
 
+        [data-testid="stExpander"] details,
+        [data-testid="stExpander"] details[open] {
+            background: rgba(20, 20, 22, 0.92) !important;
+            border: 1px solid var(--sc-border) !important;
+            border-radius: 16px !important;
+            overflow: hidden !important;
+        }
+
+        [data-testid="stExpander"] summary,
+        [data-testid="stExpander"] summary:hover,
+        [data-testid="stExpander"] details[open] summary,
+        [data-testid="stExpander"] details[open] summary:hover {
+            background: rgba(20, 20, 22, 0.96) !important;
+            color: var(--sc-text) !important;
+            border: none !important;
+            box-shadow: none !important;
+        }
+
+        [data-testid="stExpander"] summary *,
+        [data-testid="stExpander"] summary svg,
+        [data-testid="stExpander"] summary p,
+        [data-testid="stExpander"] details[open] summary *,
+        [data-testid="stExpander"] details[open] summary svg,
+        [data-testid="stExpander"] details[open] summary p {
+            color: var(--sc-text) !important;
+            fill: var(--sc-text) !important;
+            stroke: var(--sc-text) !important;
+        }
+
+        [data-testid="stExpander"] details > div,
+        [data-testid="stExpander"] details[open] > div {
+            background: rgba(20, 20, 22, 0.96) !important;
+            color: var(--sc-text) !important;
+        }
+
+        [data-testid="stExpander"] details > div * ,
+        [data-testid="stExpander"] details[open] > div * {
+            color: var(--sc-text) !important;
+        }
+
         .stButton > button,
         .stLinkButton > a,
         .stDownloadButton > button,
@@ -1764,23 +1804,72 @@ def inject_styles():
         [data-testid="stFileUploader"] [data-baseweb="tag"] button,
         [data-testid="stFileUploader"] [data-baseweb="tag"] button:hover,
         [data-testid="stFileUploader"] [data-baseweb="tag"] button:focus,
-        [data-testid="stFileUploader"] [data-baseweb="tag"] button:active {
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button:active,
+        [data-testid="stFileUploader"] button[aria-label*="Delete"],
+        [data-testid="stFileUploader"] button[aria-label*="Delete"]:hover,
+        [data-testid="stFileUploader"] button[aria-label*="Delete"]:focus,
+        [data-testid="stFileUploader"] button[aria-label*="Delete"]:active,
+        [data-testid="stFileUploader"] button[aria-label*="Remove"],
+        [data-testid="stFileUploader"] button[aria-label*="Remove"]:hover,
+        [data-testid="stFileUploader"] button[aria-label*="Remove"]:focus,
+        [data-testid="stFileUploader"] button[aria-label*="Remove"]:active,
+        [data-testid="stFileUploaderFile"] button,
+        [data-testid="stFileUploaderFile"] button:hover,
+        [data-testid="stFileUploaderFile"] button:focus,
+        [data-testid="stFileUploaderFile"] button:active {
             background: transparent !important;
             border: none !important;
+            border-radius: 0 !important;
             box-shadow: none !important;
-            width: 1.25rem !important;
-            min-width: 1.25rem !important;
-            height: 1.25rem !important;
-            min-height: 1.25rem !important;
+            width: auto !important;
+            min-width: 0 !important;
+            height: auto !important;
+            min-height: 0 !important;
             padding: 0 !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            filter: none !important;
+            transform: none !important;
         }
 
         [data-testid="stFileUploader"] [data-baseweb="tag"] button *,
         [data-testid="stFileUploader"] [data-baseweb="tag"] button svg,
-        [data-testid="stFileUploader"] [data-baseweb="tag"] button span {
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button span,
+        [data-testid="stFileUploader"] button[aria-label*="Delete"] *,
+        [data-testid="stFileUploader"] button[aria-label*="Delete"] svg,
+        [data-testid="stFileUploader"] button[aria-label*="Delete"] span,
+        [data-testid="stFileUploader"] button[aria-label*="Remove"] *,
+        [data-testid="stFileUploader"] button[aria-label*="Remove"] svg,
+        [data-testid="stFileUploader"] button[aria-label*="Remove"] span,
+        [data-testid="stFileUploaderFile"] button *,
+        [data-testid="stFileUploaderFile"] button svg,
+        [data-testid="stFileUploaderFile"] button span {
             color: #000000 !important;
             fill: #000000 !important;
             stroke: #000000 !important;
+        }
+
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button svg,
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button span,
+        [data-testid="stFileUploader"] button[aria-label*="Delete"] svg,
+        [data-testid="stFileUploader"] button[aria-label*="Delete"] span,
+        [data-testid="stFileUploader"] button[aria-label*="Remove"] svg,
+        [data-testid="stFileUploader"] button[aria-label*="Remove"] span,
+        [data-testid="stFileUploaderFile"] button svg,
+        [data-testid="stFileUploaderFile"] button span {
+            display: none !important;
+        }
+
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button::before,
+        [data-testid="stFileUploader"] button[aria-label*="Delete"]::before,
+        [data-testid="stFileUploader"] button[aria-label*="Remove"]::before,
+        [data-testid="stFileUploaderFile"] button::before {
+            content: "×";
+            color: #000000 !important;
+            font-size: 1rem !important;
+            font-weight: 700 !important;
+            line-height: 1 !important;
         }
 
         [data-testid="stFileUploader"] button[aria-label]:hover,
