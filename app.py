@@ -39,6 +39,8 @@ EDITION_LOG_CACHE_PATH = BASE_DIR / "output" / "_cache" / "edition-log-snapshot.
 EDITION_LOG_HEADER_ROW = 4
 EDITION_LOG_DATA_START_ROW = 5
 EDITION_LOG_SHEET_NAME = "Edition Log"
+UPLOAD_PREVIEW_MAX_FILE_SIZE_BYTES = 6 * 1024 * 1024
+UPLOAD_PREVIEW_MAX_SOURCE_EDGE = 4000
 ENABLE_GOOGLE_DRIVE = os.getenv("ENABLE_GOOGLE_DRIVE", "false").lower() == "true"
 GOOGLE_SHEET_URL = os.getenv(
     "GOOGLE_SHEET_URL",
@@ -1566,8 +1568,7 @@ def inject_styles():
 
         header[data-testid="stHeader"],
         header[data-testid="stHeader"] > div,
-        [data-testid="stToolbar"],
-        [data-testid="stDecoration"] {
+        [data-testid="stToolbar"] {
             background: var(--sc-bg) !important;
         }
 
@@ -1575,9 +1576,12 @@ def inject_styles():
             border-bottom: 1px solid rgba(212, 165, 76, 0.16);
         }
 
-        header[data-testid="stHeader"] *,
-        [data-testid="stToolbar"] * {
+        header[data-testid="stHeader"] button,
+        header[data-testid="stHeader"] svg,
+        [data-testid="stToolbar"] button,
+        [data-testid="stToolbar"] svg {
             color: var(--sc-text) !important;
+            fill: var(--sc-text) !important;
         }
 
         [data-testid="stSidebar"] {
@@ -1671,14 +1675,11 @@ def inject_styles():
             padding: 0.75rem 0.85rem 0.95rem;
         }
 
-        [data-testid="stFileUploader"] * {
-            color: var(--sc-text) !important;
-        }
-
         [data-testid="stFileUploader"] button {
             font-weight: 700 !important;
         }
 
+        [data-testid="stFileUploader"] label,
         [data-testid="stFileUploader"] small,
         [data-testid="stFileUploader"] p,
         [data-testid="stFileUploader"] span {
@@ -2677,9 +2678,10 @@ def create_uploaded_preview(uploaded_file):
         source_image = Image.open(uploaded_file)
         if (source_image.format or "").upper() in {"JPEG", "JPG"}:
             source_image.draft("RGB", (image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE))
-
-        preview_image = ImageOps.exif_transpose(source_image).convert("RGB")
+        preview_image = ImageOps.exif_transpose(source_image)
         preview_image.thumbnail((image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE), Image.LANCZOS)
+        if preview_image.mode != "RGB":
+            preview_image = preview_image.convert("RGB")
         preview_image.save(
             preview_path,
             format="WEBP",
@@ -2799,6 +2801,22 @@ def validate_uploaded_artwork(uploaded_file):
         "width": width,
         "height": height,
     }
+
+
+def should_defer_uploaded_preview(upload_details):
+    if not upload_details:
+        return False
+
+    file_size = upload_details.get("file_size") or 0
+    width = upload_details.get("width") or 0
+    height = upload_details.get("height") or 0
+    pixel_count = width * height
+
+    return (
+        file_size >= UPLOAD_PREVIEW_MAX_FILE_SIZE_BYTES
+        or max(width, height) >= UPLOAD_PREVIEW_MAX_SOURCE_EDGE
+        or pixel_count >= image_factory.MAX_SOURCE_PIXELS
+    )
 
 
 def get_sport_category(selected_option, custom_value):
@@ -3750,6 +3768,9 @@ def render_mockups_page():
         help="Upload the final flattened artwork that should appear in every mockup.",
     )
 
+    upload_details = None
+    upload_validation_error = None
+
     autofill_product_name = get_product_name_from_upload(uploaded_file)
 
     if uploaded_file is not None and uploaded_file.name != st.session_state.last_uploaded_file_name:
@@ -3770,6 +3791,17 @@ def render_mockups_page():
         st.session_state.last_autofilled_product_name = ""
         st.session_state.uploaded_preview_signature = None
         st.session_state.uploaded_preview_path = None
+
+    if uploaded_file is not None:
+        try:
+            upload_details = validate_uploaded_artwork(uploaded_file)
+        except ValueError as error:
+            upload_validation_error = str(error)
+            st.error(upload_validation_error)
+        except Exception as error:
+            upload_validation_error = "Could not validate the uploaded artwork."
+            st.error(upload_validation_error)
+            st.exception(error)
 
     product_name = st.text_input(
         "Product name",
@@ -3795,24 +3827,37 @@ def render_mockups_page():
 
     if uploaded_file is not None:
         st.subheader("Uploaded Artwork")
-        preview_signature = get_uploaded_file_signature(uploaded_file)
-        preview_path = st.session_state.uploaded_preview_path
-        preview_missing = not preview_path or not Path(preview_path).exists()
-        if preview_signature != st.session_state.uploaded_preview_signature or preview_missing:
-            try:
-                preview_path = create_uploaded_preview(uploaded_file)
-                st.session_state.uploaded_preview_signature = preview_signature
-                st.session_state.uploaded_preview_path = str(preview_path) if preview_path else None
-            except Exception as error:
-                st.warning(f"Could not create upload preview: {error}")
-                st.session_state.uploaded_preview_signature = preview_signature
-                st.session_state.uploaded_preview_path = None
-
-        preview_path = st.session_state.uploaded_preview_path
-        if preview_path and Path(preview_path).exists():
-            st.image(str(preview_path), caption=uploaded_file.name, width=400)
+        if upload_validation_error:
+            st.session_state.uploaded_preview_signature = None
+            st.session_state.uploaded_preview_path = None
+            st.caption("Upload preview unavailable until the file validates cleanly.")
+        elif should_defer_uploaded_preview(upload_details):
+            st.session_state.uploaded_preview_signature = None
+            st.session_state.uploaded_preview_path = None
+            st.info(
+                "Preview generation was skipped for this larger upload to keep Sports Cave OS stable. "
+                "You can still generate the mockups normally."
+            )
+            st.caption(uploaded_file.name)
         else:
-            st.caption("Lightweight preview unavailable until the upload is processed.")
+            preview_signature = get_uploaded_file_signature(uploaded_file)
+            preview_path = st.session_state.uploaded_preview_path
+            preview_missing = not preview_path or not Path(preview_path).exists()
+            if preview_signature != st.session_state.uploaded_preview_signature or preview_missing:
+                try:
+                    preview_path = create_uploaded_preview(uploaded_file)
+                    st.session_state.uploaded_preview_signature = preview_signature
+                    st.session_state.uploaded_preview_path = str(preview_path) if preview_path else None
+                except Exception as error:
+                    st.warning(f"Could not create upload preview: {error}")
+                    st.session_state.uploaded_preview_signature = preview_signature
+                    st.session_state.uploaded_preview_path = None
+
+            preview_path = st.session_state.uploaded_preview_path
+            if preview_path and Path(preview_path).exists():
+                st.image(str(preview_path), caption=uploaded_file.name, width=400)
+            else:
+                st.caption("Lightweight preview unavailable until the upload is processed.")
 
     if generate_clicked:
         sport_category = get_sport_category(sport_option, custom_sport)
@@ -3836,13 +3881,15 @@ def render_mockups_page():
         try:
             if uploaded_file is None:
                 raise ValueError("Please upload an artwork image first.")
+            if upload_validation_error:
+                raise ValueError(upload_validation_error)
             if not product_name.strip():
                 raise ValueError("Please enter a product name.")
             if not sport_category:
                 raise ValueError("Please enter a sport category.")
 
             update_status("Validating upload...", 5)
-            validate_uploaded_artwork(uploaded_file)
+            upload_details = upload_details or validate_uploaded_artwork(uploaded_file)
 
             update_status("Preparing lightweight working image...", 15)
             log_app_memory("Mockup generation start")
