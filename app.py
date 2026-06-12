@@ -1659,9 +1659,12 @@ def inject_styles():
         .stDownloadButton > button:hover,
         div[data-testid="stFileUploader"] button:hover,
         section[data-testid="stFileUploaderDropzone"] button:hover {
-            background: #FFFFFF !important;
-            border-color: var(--sc-gold) !important;
+            background: #F5F2EA !important;
+            border-color: rgba(212, 165, 76, 0.55) !important;
             color: #000000 !important;
+            box-shadow: none !important;
+            filter: none !important;
+            transform: none !important;
         }
 
         .stButton > button[kind="primary"] {
@@ -1701,9 +1704,11 @@ def inject_styles():
         }
 
         .stButton > button[kind="primary"]:hover {
-            background: #E2B657 !important;
+            background: var(--sc-gold) !important;
+            border-color: var(--sc-gold) !important;
             color: #000000 !important;
             filter: none;
+            transform: none !important;
         }
 
         [data-testid="stFileUploader"] {
@@ -1714,16 +1719,22 @@ def inject_styles():
         }
 
         [data-testid="stFileUploader"] label,
-        [data-testid="stFileUploader"] [data-testid="stWidgetLabel"] *,
-        [data-testid="stFileUploader"] .stTooltipIcon,
-        [data-testid="stFileUploader"] .stTooltipIcon * {
+        [data-testid="stFileUploader"] [data-testid="stWidgetLabel"] * {
             color: #F5F2EA !important;
             fill: #F5F2EA !important;
             stroke: #F5F2EA !important;
         }
 
+        [data-testid="stFileUploader"] .stTooltipIcon {
+            display: none !important;
+        }
+
         [data-testid="stFileUploader"] button {
             font-weight: 700 !important;
+        }
+
+        [data-testid="stFileUploader"] button[aria-label="Add files"] {
+            display: none !important;
         }
 
         [data-testid="stFileUploader"] button[aria-label] {
@@ -1751,14 +1762,36 @@ def inject_styles():
         }
 
         [data-testid="stFileUploader"] [data-baseweb="tag"] button,
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button:hover,
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button:focus,
+        [data-testid="stFileUploader"] [data-baseweb="tag"] button:active {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            width: 1.25rem !important;
+            min-width: 1.25rem !important;
+            height: 1.25rem !important;
+            min-height: 1.25rem !important;
+            padding: 0 !important;
+        }
+
         [data-testid="stFileUploader"] [data-baseweb="tag"] button *,
         [data-testid="stFileUploader"] [data-baseweb="tag"] button svg,
         [data-testid="stFileUploader"] [data-baseweb="tag"] button span {
+            color: #000000 !important;
+            fill: #000000 !important;
+            stroke: #000000 !important;
+        }
+
+        [data-testid="stFileUploader"] button[aria-label]:hover,
+        [data-testid="stFileUploader"] button[aria-label]:focus,
+        [data-testid="stFileUploader"] button[aria-label]:active {
             background: #0B0B0D !important;
             border-color: #0B0B0D !important;
             color: #F5F2EA !important;
-            fill: #F5F2EA !important;
-            stroke: #F5F2EA !important;
+            box-shadow: none !important;
+            filter: none !important;
+            transform: none !important;
         }
 
         section[data-testid="stFileUploaderDropzone"] [data-testid="stFileUploaderDropzoneInstructions"],
@@ -3656,7 +3689,6 @@ def render_prompt_cards(result, prompt_paths, heading):
                 "Upload image from ChatGPT",
                 type=["png", "jpg", "jpeg", "webp"],
                 key=f"lifestyle-upload::{result['run_dir']}::{prompt_name}",
-                help="Upload the finished ChatGPT lifestyle image here.",
             )
 
             if st.button(
@@ -3741,9 +3773,6 @@ def render_generation_result(result):
     result = ensure_primary_download_zip(result)
     st.session_state.last_generation_result = result
     st.success(result.get("status_text") or "Core Sports Cave product images are ready.")
-
-    if result["run_dir"]:
-        st.caption(f"Local run folder: `{result['run_dir']}`")
 
     if result.get("shopify_uploads_dir"):
         with suppress(FileNotFoundError):
@@ -3861,7 +3890,6 @@ def render_mockups_page():
     uploaded_file = st.file_uploader(
         "Upload finished Sports Cave artwork",
         type=["jpg", "jpeg", "png", "webp"],
-        help="Upload the final flattened artwork that should appear in every mockup.",
     )
 
     upload_details = None
@@ -4013,7 +4041,8 @@ def render_mockups_page():
             )
             result["status_text"] = "Done"
             image_factory.log_memory("Completion")
-            update_status("Done", 100, level="success")
+            status_container.empty()
+            progress_bar.empty()
             st.session_state.last_generation_result = result
         except image_factory.MemoryLimitExceededError as error:
             logging.exception("Generation stopped by memory limit")
