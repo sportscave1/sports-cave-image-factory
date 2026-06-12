@@ -11,20 +11,8 @@ import db
 QUICK_LINKS = (
     ("shopify_admin_url", "Open Shopify Admin"),
     ("live_product_url", "Open Live Product Page"),
-    ("psd_file_url", "Open PSD File"),
-    ("jpg_file_url", "Open JPG File"),
-    ("webp_folder_url", "Open WebP Folder"),
-    ("mockup_folder_url", "Open Mockup Folder"),
-    ("certificate_folder_url", "Open Certificate Folder"),
     ("prodigi_product_url", "Open Prodigi Product"),
-)
-
-FILE_STATUS_FIELDS = (
-    ("psd_file_url", "PSD"),
-    ("jpg_file_url", "JPG"),
-    ("webp_folder_url", "WebP folder"),
-    ("mockup_folder_url", "Mockup folder"),
-    ("certificate_folder_url", "Certificate folder"),
+    ("google_drive_root_folder_url", "Open Root Drive Folder"),
 )
 
 PRODUCT_EXPORT_FIELDS = (
@@ -41,11 +29,10 @@ PRODUCT_EXPORT_FIELDS = (
     "prodigi_product_id",
     "prodigi_product_url",
     "prodigi_notes",
-    "psd_file_url",
-    "jpg_file_url",
-    "webp_folder_url",
-    "mockup_folder_url",
-    "certificate_folder_url",
+    *(asset["url_field"] for asset in db.ASSET_DEFINITIONS),
+    "google_drive_root_folder_url",
+    *(f"{asset['key']}_status" for asset in db.ASSET_DEFINITIONS),
+    "overall_asset_readiness",
     "edition_limit",
     "editions_sold",
     "editions_remaining",
@@ -107,7 +94,7 @@ def select_index(options, value, default=0):
 def go_to_product(product_id, edit=False):
     st.session_state.selected_product_id = int(product_id)
     st.session_state.editing_product_id = int(product_id) if edit else None
-    st.session_state.selected_page = "Products"
+    st.session_state.pending_page = "Products"
     st.rerun()
 
 
@@ -142,13 +129,14 @@ def render_dashboard_page():
     metric_specs = (
         ("Total products", metrics["total_products"]),
         ("Live products", metrics["live_products"]),
-        ("Products needing review", metrics["needs_review"]),
-        ("Missing PSD links", metrics["missing_psd"]),
-        ("Missing Prodigi IDs", metrics["missing_prodigi"]),
+        ("Products missing core assets", metrics["missing_core_assets"]),
+        ("Assets needing review", metrics["assets_needing_review"]),
+        ("Approved asset packs", metrics["approved_asset_packs"]),
+        ("Live products missing files", metrics["live_missing_files"]),
+        ("Missing Drive root folder", metrics["missing_drive_root"]),
         ("Missing edition limits", metrics["missing_edition_limits"]),
         ("Ready for upload", metrics["ready_for_upload"]),
         ("Final editions", metrics["final_editions"]),
-        ("Sold out products", metrics["sold_out"]),
     )
     metric_columns = st.columns(3)
     for index, (label, value) in enumerate(metric_specs):
@@ -158,15 +146,14 @@ def render_dashboard_page():
     st.caption("These lists are generated from the product database, so the next useful task is always visible.")
     focus_columns = st.columns(3)
     with focus_columns[0]:
-        render_focus_list("Missing PSD links", focus["missing_psd"], "Every product has a PSD link.")
-        render_focus_list("Missing mockup folders", focus["missing_mockup"], "Every product has a mockup folder.")
-        render_focus_list("Missing edition limits", focus["missing_edition_limit"], "Every product has an edition limit.")
+        render_focus_list("Missing PSD", focus["missing_psd"], "Every product has a PSD link.")
+        render_focus_list("Missing final JPG", focus["missing_final_jpg"], "Every product has a final JPG link.")
     with focus_columns[1]:
-        render_focus_list("Missing Prodigi IDs", focus["missing_prodigi"], "Every product has a Prodigi ID.")
-        render_focus_list("Ready for review", focus["ready_for_review"], "No products are waiting for review.")
+        render_focus_list("Missing WebP folder", focus["missing_webp"], "Every product has a WebP folder.")
+        render_focus_list("Missing mockups", focus["missing_mockup"], "Every product has a mockup folder.")
     with focus_columns[2]:
-        render_focus_list("Ready for upload", focus["ready_for_upload"], "No products are ready for upload yet.")
-        render_focus_list("Final editions", focus["final_editions"], "No products are in their final editions.")
+        render_focus_list("Needs asset review", focus["assets_needing_review"], "No asset packs need review.")
+        render_focus_list("Live but missing files", focus["live_missing_files"], "No live products are missing core files.")
 
 
 def product_form_fields(prefix, product=None):
@@ -220,17 +207,39 @@ def product_form_fields(prefix, product=None):
             key=f"{prefix}-live-url",
         )
         psd_file_url = st.text_input("PSD file URL", value=product.get("psd_file_url", ""), key=f"{prefix}-psd")
-        jpg_file_url = st.text_input("JPG file URL", value=product.get("jpg_file_url", ""), key=f"{prefix}-jpg")
+        final_jpg_url = st.text_input(
+            "Final JPG URL", value=product.get("final_jpg_url") or product.get("jpg_file_url", ""), key=f"{prefix}-jpg"
+        )
         webp_folder_url = st.text_input(
             "WebP folder URL", value=product.get("webp_folder_url", ""), key=f"{prefix}-webp"
         )
         mockup_folder_url = st.text_input(
             "Mockup folder URL", value=product.get("mockup_folder_url", ""), key=f"{prefix}-mockup"
         )
+        size_guide_url = st.text_input(
+            "Size guide URL", value=product.get("size_guide_url", ""), key=f"{prefix}-size-guide"
+        )
+        lifestyle_folder_url = st.text_input(
+            "Lifestyle folder URL", value=product.get("lifestyle_folder_url", ""), key=f"{prefix}-lifestyle"
+        )
+        prompt_pack_url = st.text_input(
+            "Prompt pack URL", value=product.get("prompt_pack_url", ""), key=f"{prefix}-prompt-pack"
+        )
+        product_upload_zip_url = st.text_input(
+            "Product upload ZIP URL", value=product.get("product_upload_zip_url", ""), key=f"{prefix}-upload-zip"
+        )
         certificate_folder_url = st.text_input(
             "Certificate folder URL",
             value=product.get("certificate_folder_url", ""),
             key=f"{prefix}-certificate",
+        )
+        ads_social_folder_url = st.text_input(
+            "Ads/social folder URL", value=product.get("ads_social_folder_url", ""), key=f"{prefix}-ads-social"
+        )
+        google_drive_root_folder_url = st.text_input(
+            "Google Drive root product folder URL",
+            value=product.get("google_drive_root_folder_url", ""),
+            key=f"{prefix}-drive-root",
         )
         prodigi_notes = st.text_area(
             "Prodigi notes",
@@ -252,10 +261,17 @@ def product_form_fields(prefix, product=None):
         "prodigi_product_url": prodigi_product_url,
         "prodigi_notes": prodigi_notes,
         "psd_file_url": psd_file_url,
-        "jpg_file_url": jpg_file_url,
+        "jpg_file_url": final_jpg_url,
+        "final_jpg_url": final_jpg_url,
         "webp_folder_url": webp_folder_url,
         "mockup_folder_url": mockup_folder_url,
+        "size_guide_url": size_guide_url,
+        "lifestyle_folder_url": lifestyle_folder_url,
+        "prompt_pack_url": prompt_pack_url,
+        "product_upload_zip_url": product_upload_zip_url,
         "certificate_folder_url": certificate_folder_url,
+        "ads_social_folder_url": ads_social_folder_url,
+        "google_drive_root_folder_url": google_drive_root_folder_url,
         "notes": notes,
     }
 
@@ -296,7 +312,7 @@ def render_product_row(product):
                 status_badge(value)
                 for value in (
                     product.get("readiness_status"),
-                    product.get("file_readiness_status"),
+                    product.get("overall_asset_readiness"),
                     f"Prodigi {product.get('prodigi_status')}",
                     product.get("shopify_link_status"),
                 )
@@ -394,14 +410,22 @@ def render_products_page():
 
 def render_product_overview(product):
     st.subheader("Product Overview")
-    overview_columns = st.columns(5)
-    overview_columns[0].metric("Handle", product.get("handle") or "Missing")
-    overview_columns[1].metric("Sport", product.get("sport_category") or "Other")
-    overview_columns[2].metric("Country", product.get("country_focus") or "Global")
+    overview_columns = st.columns(6)
+    overview_columns[0].markdown("**Handle**")
+    overview_columns[0].write(product.get("handle") or "Missing")
+    overview_columns[1].markdown("**Sport**")
+    overview_columns[1].write(product.get("sport_category") or "Other")
+    overview_columns[2].markdown("**Country**")
+    overview_columns[2].write(product.get("country_focus") or "Global")
     overview_columns[3].markdown("**Product status**")
     overview_columns[3].markdown(status_badge(product.get("status")), unsafe_allow_html=True)
     overview_columns[4].markdown("**Readiness**")
     overview_columns[4].markdown(status_badge(product.get("readiness_status")), unsafe_allow_html=True)
+    overview_columns[5].markdown("**Asset readiness**")
+    overview_columns[5].markdown(
+        status_badge(product.get("overall_asset_readiness")),
+        unsafe_allow_html=True,
+    )
 
     edit_requested = st.session_state.get("editing_product_id") == product["id"]
     with st.expander("Edit Product Overview", expanded=edit_requested):
@@ -468,49 +492,126 @@ def render_product_overview(product):
 def render_quick_links(product):
     st.subheader("Quick Links")
     columns = st.columns(3)
-    for index, (field, label) in enumerate(QUICK_LINKS):
+    links = [
+        (asset["url_field"], asset["open_label"], product["asset_statuses"][asset["key"]])
+        for asset in db.ASSET_DEFINITIONS
+    ]
+    links.extend((field, label, "Connected" if product.get(field) else "Missing") for field, label in QUICK_LINKS)
+    for index, (field, label, link_status) in enumerate(links):
         with columns[index % 3]:
             with st.container(border=True):
                 st.markdown(f"**{label.replace('Open ', '')}**")
                 if product.get(field):
-                    st.markdown(status_badge("Connected"), unsafe_allow_html=True)
+                    st.markdown(status_badge(link_status), unsafe_allow_html=True)
                     st.link_button(label, product[field], use_container_width=True)
                 else:
                     st.markdown(status_badge("Missing"), unsafe_allow_html=True)
 
 
-def render_file_hub(product):
-    st.subheader("File Hub")
-    status_columns = st.columns(len(FILE_STATUS_FIELDS))
-    for index, (field, label) in enumerate(FILE_STATUS_FIELDS):
-        status_columns[index].markdown(f"**{label}**")
-        status_columns[index].markdown(
-            status_badge("Connected" if product.get(field) else "Missing"),
-            unsafe_allow_html=True,
+def render_asset_card(product, asset):
+    asset_key = asset["key"]
+    status = product["asset_statuses"][asset_key]
+    with st.container(border=True):
+        header = st.columns([2.2, 1.2])
+        header[0].markdown(f"**{asset['label']}**")
+        header[1].markdown(status_badge(status), unsafe_allow_html=True)
+        updated_at = product["asset_updated_at"].get(asset_key)
+        st.caption(f"Updated {format_updated_at(updated_at)}")
+        if product.get(asset["url_field"]):
+            st.link_button(asset["open_label"], product[asset["url_field"]], use_container_width=True)
+        else:
+            st.caption("Missing")
+
+
+def render_asset_group_editor(product, group_name, assets):
+    with st.expander(f"Edit {group_name}"):
+        with st.form(f"asset-group-{product['id']}-{group_name}"):
+            updates = {}
+            for asset in assets:
+                fields = st.columns([2.2, 1])
+                url = fields[0].text_input(
+                    f"{asset['label']} URL",
+                    value=product.get(asset["url_field"]) or "",
+                    key=f"asset-url-{product['id']}-{asset['key']}",
+                )
+                manual_status = product["asset_manual_statuses"].get(asset["key"], "Automatic")
+                automatic_status = "Connected" if product.get(asset["url_field"]) else "Missing"
+                status_options = (automatic_status, "Needs Review", "Approved")
+                selected_status = manual_status if manual_status in {"Needs Review", "Approved"} else automatic_status
+                status = fields[1].selectbox(
+                    f"{asset['label']} status",
+                    status_options,
+                    index=select_index(status_options, selected_status),
+                    key=f"asset-status-{product['id']}-{asset['key']}",
+                    help="Missing and Connected follow the URL automatically. Needs Review and Approved are manual.",
+                )
+                updates[asset["key"]] = {"url": url, "manual_status": status}
+            submitted = st.form_submit_button(
+                f"Save {group_name}",
+                type="primary",
+                use_container_width=True,
+            )
+        if submitted:
+            db.update_product_assets(product["id"], updates)
+            st.success(f"{group_name} updated.")
+            st.rerun()
+
+
+def recommended_drive_structure(product_name):
+    return "\n".join(
+        (
+            "Sports Cave Products",
+            f"└── {product_name or '[Product Name]'}",
+            "    ├── 01 PSD",
+            "    ├── 02 Final JPG",
+            "    ├── 03 Shopify Images WebP",
+            "    ├── 04 Mockups",
+            "    ├── 05 Lifestyle ChatGPT",
+            "    ├── 06 Prompt Pack",
+            "    ├── 07 Certificates",
+            "    └── 08 Ads Social",
+        )
+    )
+
+
+def render_drive_folder_helper(product):
+    st.subheader("Recommended Google Drive Folder Structure")
+    st.caption("Use this standard structure so every VA can find the correct product assets quickly.")
+    st.code(recommended_drive_structure(product.get("product_name")), language=None)
+
+    with st.form(f"drive-root-{product['id']}"):
+        root_url = st.text_input(
+            "Google Drive Root Product Folder URL",
+            value=product.get("google_drive_root_folder_url") or "",
+        )
+        submitted = st.form_submit_button("Save Root Drive Folder", type="primary")
+    if submitted:
+        db.update_product_fields(product["id"], google_drive_root_folder_url=root_url)
+        st.rerun()
+    if product.get("google_drive_root_folder_url"):
+        st.link_button(
+            "Open Product Drive Folder",
+            product["google_drive_root_folder_url"],
         )
 
-    with st.expander("Edit File Links"):
-        with st.form(f"file-hub-form-{product['id']}"):
-            left, right = st.columns(2)
-            psd_file_url = left.text_input("PSD file link", value=product.get("psd_file_url") or "")
-            jpg_file_url = left.text_input("Final JPG link", value=product.get("jpg_file_url") or "")
-            webp_folder_url = left.text_input("WebP folder link", value=product.get("webp_folder_url") or "")
-            mockup_folder_url = right.text_input("Mockup folder link", value=product.get("mockup_folder_url") or "")
-            certificate_folder_url = right.text_input(
-                "Certificate folder link",
-                value=product.get("certificate_folder_url") or "",
-            )
-            submitted = st.form_submit_button("Save File Links", type="primary", use_container_width=True)
-        if submitted:
-            db.update_product_fields(
-                product["id"],
-                psd_file_url=psd_file_url,
-                jpg_file_url=jpg_file_url,
-                webp_folder_url=webp_folder_url,
-                mockup_folder_url=mockup_folder_url,
-                certificate_folder_url=certificate_folder_url,
-            )
-            st.rerun()
+
+def render_file_hub(product):
+    st.subheader("File Hub")
+    st.markdown("**Overall asset readiness**")
+    st.markdown(status_badge(product.get("overall_asset_readiness")), unsafe_allow_html=True)
+    st.caption("Automatic statuses stay Connected while a URL exists. Use Needs Review or Approved for manual control.")
+
+    for group_name in db.ASSET_GROUP_NAMES:
+        assets = [asset for asset in db.ASSET_DEFINITIONS if asset["group"] == group_name]
+        st.markdown(f"### {group_name}")
+        columns = st.columns(2)
+        for index, asset in enumerate(assets):
+            with columns[index % 2]:
+                render_asset_card(product, asset)
+        render_asset_group_editor(product, group_name, assets)
+
+    st.divider()
+    render_drive_folder_helper(product)
 
 
 def render_prodigi_mapping(product):
@@ -581,20 +682,32 @@ def readiness_items(product):
     return db.get_readiness_items(product)
 
 
-def render_readiness_checklist(product):
-    st.subheader("Product Readiness Checklist")
-    items = readiness_items(product)
-    completed = sum(is_ready for _, is_ready in items)
-    st.markdown("**Overall readiness**")
-    st.markdown(status_badge(product.get("readiness_status")), unsafe_allow_html=True)
-    st.progress(completed / len(items), text=f"{completed} of {len(items)} readiness checks complete")
+def render_check_items(items, key_prefix):
     columns = st.columns(2)
     for index, (label, is_ready) in enumerate(items):
         marker = "COMPLETE" if is_ready else "MISSING"
         columns[index % 2].markdown(
-            f'<div class="sc-check sc-check-{"ready" if is_ready else "missing"}"><strong>{marker}</strong> {label}</div>',
+            f'<div class="sc-check sc-check-{"ready" if is_ready else "missing"}" '
+            f'data-check="{key_prefix}-{index}"><strong>{marker}</strong> {label}</div>',
             unsafe_allow_html=True,
         )
+
+
+def render_readiness_checklist(product):
+    st.subheader("Product Readiness Checklist")
+    required_items = db.get_required_readiness_items(product)
+    optional_items = db.get_optional_readiness_items(product)
+    completed = sum(is_ready for _, is_ready in required_items)
+    st.markdown("**Overall readiness**")
+    st.markdown(status_badge(product.get("readiness_status")), unsafe_allow_html=True)
+    st.progress(
+        completed / len(required_items),
+        text=f"{completed} of {len(required_items)} required upload checks complete",
+    )
+    st.markdown("**Required for Ready for Upload**")
+    render_check_items(required_items, "required")
+    st.markdown("**Optional but visible**")
+    render_check_items(optional_items, "optional")
 
 
 def render_product_detail_page(product_id):
@@ -666,10 +779,17 @@ def render_files_page():
             "All products",
             "Missing PSD",
             "Missing JPG",
-            "Missing WebP folder",
-            "Missing mockup folder",
-            "Missing certificate folder",
-            "All connected",
+            "Missing WebP",
+            "Missing Mockups",
+            "Missing Size Guide",
+            "Missing Lifestyle",
+            "Missing Prompt Pack",
+            "Missing ZIP",
+            "Missing Certificate Folder",
+            "Missing Ads/Social Folder",
+            "Needs Review",
+            "Approved",
+            "All Connected",
         ),
     )
     products = db.list_file_hub_products(file_filter)
@@ -678,26 +798,50 @@ def render_files_page():
         st.success("No products match this file filter.")
         return
 
-    header = st.columns([2.8, 1, 1, 1.2, 1.2, 1.3, 0.9])
-    for column, label in zip(
-        header,
-        ("Product", "PSD", "JPG", "WebP", "Mockups", "Certificates", "Detail"),
-    ):
-        column.caption(label)
-
     for product in products:
         with st.container(border=True):
-            columns = st.columns([2.8, 1, 1, 1.2, 1.2, 1.3, 0.9])
-            columns[0].markdown(f"**{product['product_name']}**")
-            columns[0].caption(product.get("handle") or "Handle missing")
-            for index, (field, _) in enumerate(FILE_STATUS_FIELDS, start=1):
-                columns[index].markdown(
-                    status_badge("Connected" if product.get(field) else "Missing"),
-                    unsafe_allow_html=True,
-                )
-            with columns[6]:
+            summary = st.columns([3, 1.3, 2, 0.9])
+            summary[0].markdown(f"**{product['product_name']}**")
+            summary[0].caption(product.get("handle") or "Handle missing")
+            summary[1].markdown(status_badge(product.get("status")), unsafe_allow_html=True)
+            summary[2].markdown(
+                status_badge(product.get("overall_asset_readiness")),
+                unsafe_allow_html=True,
+            )
+            with summary[3]:
                 if st.button("Open", key=f"file-open-{product['id']}", use_container_width=True):
                     go_to_product(product["id"])
+
+            asset_columns = st.columns(5)
+            for index, asset in enumerate(db.ASSET_DEFINITIONS):
+                with asset_columns[index % 5]:
+                    st.caption(asset["short_label"])
+                    st.markdown(
+                        status_badge(product["asset_statuses"][asset["key"]]),
+                        unsafe_allow_html=True,
+                    )
+
+            connected_assets = [
+                asset for asset in db.ASSET_DEFINITIONS if product.get(asset["url_field"])
+            ]
+            if product.get("google_drive_root_folder_url"):
+                connected_assets.append(
+                    {
+                        "key": "drive-root",
+                        "url_field": "google_drive_root_folder_url",
+                        "open_label": "Open Root Drive Folder",
+                    }
+                )
+            if connected_assets:
+                with st.expander("Open connected assets"):
+                    link_columns = st.columns(4)
+                    for index, asset in enumerate(connected_assets):
+                        with link_columns[index % 4]:
+                            st.link_button(
+                                asset["open_label"],
+                                product[asset["url_field"]],
+                                use_container_width=True,
+                            )
 
 
 def render_upload_workflow_card(product, stage):
@@ -811,12 +955,14 @@ def render_limited_editions_page(dispatch_log_renderer=None):
 def render_settings_page(app_version, database_path, password_status):
     render_page_intro(
         "Settings",
-        "Connection status and future system settings for Sports Cave OS.",
-        "No external service connection is required for the Phase 2 product workflows.",
+        "Connection status and file workflow settings for Sports Cave OS.",
+        "Use product records to store Drive links; no Drive account connection is required in Phase 3.",
     )
     settings = (
         ("Shopify connection", "Not connected yet"),
-        ("Google Drive / file storage", "Not connected yet"),
+        ("Google Drive mode", "Link-based file hub"),
+        ("Full Google Drive API sync", "Coming later"),
+        ("OAuth / Drive Picker", "Coming later"),
         ("Certificate system", "Not active yet"),
         ("Marketing Factory", "Not active yet"),
     )
@@ -828,8 +974,8 @@ def render_settings_page(app_version, database_path, password_status):
                 st.caption(value)
 
     st.info(
-        "These systems will be connected in later phases. Phase 2 focuses on the product command centre, "
-        "file shortcuts, upload readiness, and limited edition structure."
+        "In this phase, Sports Cave OS stores Google Drive links and folder shortcuts only. "
+        "Full Google Drive sync will be added later after the file workflow is stable."
     )
     st.write(f"**Local database:** `{database_path}`")
     st.write(f"**Password protection:** {password_status}")
@@ -840,5 +986,5 @@ def render_placeholder_page(title):
     render_page_intro(
         title,
         "Coming in a later phase.",
-        "Use Dashboard, Products, Files, Product Uploads, Mockups, or Limited Editions for the current Phase 2 workflows.",
+        "Use Dashboard, Products, Files, Product Uploads, Mockups, or Limited Editions for the current Phase 3 workflows.",
     )

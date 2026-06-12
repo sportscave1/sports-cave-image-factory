@@ -69,22 +69,133 @@ PRODUCT_FIELDS = (
     "prodigi_notes",
     "psd_file_url",
     "jpg_file_url",
+    "final_jpg_url",
     "webp_folder_url",
     "mockup_folder_url",
+    "size_guide_url",
+    "lifestyle_folder_url",
+    "prompt_pack_url",
+    "product_upload_zip_url",
     "certificate_folder_url",
+    "ads_social_folder_url",
+    "google_drive_root_folder_url",
     "notes",
 )
 
+ASSET_STATUS_OPTIONS = (
+    "Missing",
+    "Connected",
+    "Needs Review",
+    "Approved",
+)
+
+ASSET_DEFINITIONS = (
+    {
+        "key": "psd",
+        "url_field": "psd_file_url",
+        "label": "PSD File",
+        "short_label": "PSD",
+        "open_label": "Open PSD",
+        "group": "Source Files",
+        "core": True,
+    },
+    {
+        "key": "final_jpg",
+        "url_field": "final_jpg_url",
+        "label": "Final JPG",
+        "short_label": "JPG",
+        "open_label": "Open JPG",
+        "group": "Source Files",
+        "core": True,
+    },
+    {
+        "key": "webp",
+        "url_field": "webp_folder_url",
+        "label": "WebP Folder",
+        "short_label": "WebP",
+        "open_label": "Open WebP Folder",
+        "group": "Shopify Upload Assets",
+        "core": True,
+    },
+    {
+        "key": "mockups",
+        "url_field": "mockup_folder_url",
+        "label": "Mockup Folder",
+        "short_label": "Mockups",
+        "open_label": "Open Mockups",
+        "group": "Shopify Upload Assets",
+        "core": True,
+    },
+    {
+        "key": "size_guide",
+        "url_field": "size_guide_url",
+        "label": "Size Guide",
+        "short_label": "Size Guide",
+        "open_label": "Open Size Guide",
+        "group": "Shopify Upload Assets",
+        "core": False,
+    },
+    {
+        "key": "product_upload_zip",
+        "url_field": "product_upload_zip_url",
+        "label": "Product Upload ZIP",
+        "short_label": "ZIP",
+        "open_label": "Open ZIP",
+        "group": "Shopify Upload Assets",
+        "core": False,
+    },
+    {
+        "key": "lifestyle",
+        "url_field": "lifestyle_folder_url",
+        "label": "Lifestyle Folder",
+        "short_label": "Lifestyle",
+        "open_label": "Open Lifestyle",
+        "group": "Lifestyle & Marketing Assets",
+        "core": False,
+    },
+    {
+        "key": "prompt_pack",
+        "url_field": "prompt_pack_url",
+        "label": "Prompt Pack",
+        "short_label": "Prompt Pack",
+        "open_label": "Open Prompt Pack",
+        "group": "Lifestyle & Marketing Assets",
+        "core": False,
+    },
+    {
+        "key": "ads_social",
+        "url_field": "ads_social_folder_url",
+        "label": "Ads/Social Folder",
+        "short_label": "Ads/Social",
+        "open_label": "Open Ads/Social",
+        "group": "Lifestyle & Marketing Assets",
+        "core": False,
+    },
+    {
+        "key": "certificates",
+        "url_field": "certificate_folder_url",
+        "label": "Certificate Folder",
+        "short_label": "Certificates",
+        "open_label": "Open Certificates",
+        "group": "Collector / Certificate Assets",
+        "core": False,
+    },
+)
+
+ASSET_BY_KEY = {asset["key"]: asset for asset in ASSET_DEFINITIONS}
+ASSET_GROUP_NAMES = tuple(dict.fromkeys(asset["group"] for asset in ASSET_DEFINITIONS))
+CORE_ASSET_KEYS = tuple(asset["key"] for asset in ASSET_DEFINITIONS if asset["core"])
+
 CORE_FILE_FIELDS = (
     ("psd_file_url", "PSD link"),
-    ("jpg_file_url", "JPG link"),
+    ("final_jpg_url", "Final JPG link"),
     ("webp_folder_url", "WebP folder"),
     ("mockup_folder_url", "Mockup folder"),
 )
 
-FILE_HUB_FIELDS = (
-    *CORE_FILE_FIELDS,
-    ("certificate_folder_url", "Certificate folder"),
+FILE_HUB_FIELDS = tuple(
+    (asset["url_field"], asset["label"])
+    for asset in ASSET_DEFINITIONS
 )
 
 
@@ -141,9 +252,16 @@ def init_db():
                 prodigi_notes TEXT,
                 psd_file_url TEXT,
                 jpg_file_url TEXT,
+                final_jpg_url TEXT,
                 webp_folder_url TEXT,
                 mockup_folder_url TEXT,
+                size_guide_url TEXT,
+                lifestyle_folder_url TEXT,
+                prompt_pack_url TEXT,
+                product_upload_zip_url TEXT,
                 certificate_folder_url TEXT,
+                ads_social_folder_url TEXT,
+                google_drive_root_folder_url TEXT,
                 notes TEXT,
                 archived_at TEXT,
                 created_at TEXT NOT NULL,
@@ -164,15 +282,49 @@ def init_db():
                 FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS product_assets (
+                product_id INTEGER NOT NULL,
+                asset_key TEXT NOT NULL,
+                manual_status TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (product_id, asset_key),
+                FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_products_name ON products(product_name);
             CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
             CREATE INDEX IF NOT EXISTS idx_products_sport ON products(sport_category);
             CREATE INDEX IF NOT EXISTS idx_editions_status ON limited_editions(edition_status);
+            CREATE INDEX IF NOT EXISTS idx_product_assets_status ON product_assets(manual_status);
             """
         )
         ensure_column(connection, "products", "prodigi_product_url", "TEXT")
         ensure_column(connection, "products", "prodigi_notes", "TEXT")
         ensure_column(connection, "products", "archived_at", "TEXT")
+        for field in (
+            "final_jpg_url",
+            "size_guide_url",
+            "lifestyle_folder_url",
+            "prompt_pack_url",
+            "product_upload_zip_url",
+            "ads_social_folder_url",
+            "google_drive_root_folder_url",
+        ):
+            ensure_column(connection, "products", field, "TEXT")
+        connection.execute(
+            """
+            UPDATE products
+            SET final_jpg_url = jpg_file_url
+            WHERE COALESCE(final_jpg_url, '') = '' AND COALESCE(jpg_file_url, '') != ''
+            """
+        )
+        connection.execute(
+            """
+            UPDATE products
+            SET jpg_file_url = final_jpg_url
+            WHERE COALESCE(jpg_file_url, '') = '' AND COALESCE(final_jpg_url, '') != ''
+            """
+        )
         connection.execute("UPDATE products SET status = 'Idea' WHERE status = 'Draft'")
         connection.execute("UPDATE products SET status = 'Ready for Review' WHERE status = 'Needs Review'")
 
@@ -190,6 +342,10 @@ def clean_product_payload(payload):
         cleaned["sport_category"] = "Other"
     if cleaned["country_focus"] not in COUNTRY_FOCUS_OPTIONS:
         cleaned["country_focus"] = "Global"
+    if not cleaned["final_jpg_url"] and cleaned["jpg_file_url"]:
+        cleaned["final_jpg_url"] = cleaned["jpg_file_url"]
+    if not cleaned["jpg_file_url"] and cleaned["final_jpg_url"]:
+        cleaned["jpg_file_url"] = cleaned["final_jpg_url"]
     return cleaned
 
 
@@ -239,6 +395,10 @@ def update_product(product_id, payload):
 
 def update_product_fields(product_id, **fields):
     allowed_fields = {field: value for field, value in fields.items() if field in PRODUCT_FIELDS}
+    if "final_jpg_url" in allowed_fields and "jpg_file_url" not in allowed_fields:
+        allowed_fields["jpg_file_url"] = allowed_fields["final_jpg_url"]
+    if "jpg_file_url" in allowed_fields and "final_jpg_url" not in allowed_fields:
+        allowed_fields["final_jpg_url"] = allowed_fields["jpg_file_url"]
     if not allowed_fields:
         return
 
@@ -278,7 +438,11 @@ def get_product(product_id):
             """,
             (product_id,),
         ).fetchone()
-    return enrich_product(dict(row)) if row else None
+    if not row:
+        return None
+    product = dict(row)
+    records = get_asset_record_map((product["id"],)).get(product["id"], {})
+    return enrich_product(product, records)
 
 
 def list_products(
@@ -323,29 +487,107 @@ def list_products(
             """,
             values,
         ).fetchall()
-    return [enrich_product(dict(row)) for row in rows]
+    products = [dict(row) for row in rows]
+    records = get_asset_record_map(product["id"] for product in products)
+    return [enrich_product(product, records.get(product["id"], {})) for product in products]
 
 
-def get_readiness_items(product):
+def get_asset_record_map(product_ids):
+    product_ids = tuple(dict.fromkeys(int(product_id) for product_id in product_ids))
+    if not product_ids:
+        return {}
+
+    placeholders = ", ".join("?" for _ in product_ids)
+    with get_connection() as connection:
+        rows = connection.execute(
+            f"SELECT product_id, asset_key, manual_status, updated_at "
+            f"FROM product_assets WHERE product_id IN ({placeholders})",
+            product_ids,
+        ).fetchall()
+
+    records = {product_id: {} for product_id in product_ids}
+    for row in rows:
+        records[row["product_id"]][row["asset_key"]] = dict(row)
+    return records
+
+
+def effective_asset_status(product, asset, record=None):
+    if not product.get(asset["url_field"]):
+        return "Missing"
+    manual_status = (record or {}).get("manual_status")
+    if manual_status in {"Needs Review", "Approved"}:
+        return manual_status
+    return "Connected"
+
+
+def update_product_assets(product_id, asset_updates):
+    timestamp = utc_now()
+    with get_connection() as connection:
+        for asset_key, update in asset_updates.items():
+            asset = ASSET_BY_KEY.get(asset_key)
+            if not asset:
+                continue
+
+            url = str(update.get("url") or "").strip()
+            manual_status = update.get("manual_status")
+            if manual_status not in {"Needs Review", "Approved"}:
+                manual_status = None
+
+            connection.execute(
+                f"UPDATE products SET {asset['url_field']} = ?, updated_at = ? WHERE id = ?",
+                (url, timestamp, product_id),
+            )
+            if asset["url_field"] == "final_jpg_url":
+                connection.execute(
+                    "UPDATE products SET jpg_file_url = ? WHERE id = ?",
+                    (url, product_id),
+                )
+            connection.execute(
+                """
+                INSERT INTO product_assets (product_id, asset_key, manual_status, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(product_id, asset_key) DO UPDATE SET
+                    manual_status = excluded.manual_status,
+                    updated_at = excluded.updated_at
+                """,
+                (product_id, asset_key, manual_status, timestamp),
+            )
+
+
+def get_required_readiness_items(product):
     return (
         ("Product name added", bool(product.get("product_name"))),
         ("Handle added", bool(product.get("handle"))),
         ("Sport category selected", bool(product.get("sport_category"))),
         ("Country focus selected", bool(product.get("country_focus"))),
-        ("PSD link added", bool(product.get("psd_file_url"))),
-        ("JPG link added", bool(product.get("jpg_file_url"))),
-        ("WebP folder added", bool(product.get("webp_folder_url"))),
-        ("Mockup folder added", bool(product.get("mockup_folder_url"))),
-        ("Prodigi ID added", bool(product.get("prodigi_product_id"))),
+        ("PSD file URL added", bool(product.get("psd_file_url"))),
+        ("Final JPG URL added", bool(product.get("final_jpg_url"))),
+        ("WebP folder URL added", bool(product.get("webp_folder_url"))),
+        ("Mockup folder URL added", bool(product.get("mockup_folder_url"))),
         ("Edition limit set", product.get("edition_limit") is not None),
-        ("Shopify admin URL added", bool(product.get("shopify_admin_url"))),
-        ("Live product URL added", bool(product.get("live_product_url"))),
-        ("Notes added", bool(product.get("notes"))),
     )
 
 
+def get_optional_readiness_items(product):
+    return (
+        ("Size guide URL added", bool(product.get("size_guide_url"))),
+        ("Lifestyle folder URL added", bool(product.get("lifestyle_folder_url"))),
+        ("Prompt pack URL added", bool(product.get("prompt_pack_url"))),
+        ("Product upload ZIP URL added", bool(product.get("product_upload_zip_url"))),
+        ("Certificate folder URL added", bool(product.get("certificate_folder_url"))),
+        ("Ads/social folder URL added", bool(product.get("ads_social_folder_url"))),
+        ("Prodigi ID added", bool(product.get("prodigi_product_id"))),
+        ("Shopify admin URL added", bool(product.get("shopify_admin_url"))),
+        ("Live product URL added", bool(product.get("live_product_url"))),
+    )
+
+
+def get_readiness_items(product):
+    return (*get_required_readiness_items(product), *get_optional_readiness_items(product))
+
+
 def get_missing_items(product):
-    return [label for label, complete in get_readiness_items(product) if not complete]
+    return [label for label, complete in get_required_readiness_items(product) if not complete]
 
 
 def get_readiness_status(product):
@@ -353,24 +595,36 @@ def get_readiness_status(product):
         return "Archived"
     if product.get("status") == "Live":
         return "Live"
-    if not product.get("product_name") or not product.get("handle"):
+    if any(not complete for _, complete in get_required_readiness_items(product)[:4]):
         return "Not Ready"
     if any(not product.get(field) for field, _ in CORE_FILE_FIELDS):
         return "Needs Files"
-    if not product.get("prodigi_product_id"):
-        return "Needs Prodigi"
     if product.get("edition_limit") is None:
         return "Needs Edition Setup"
     return "Ready for Upload"
 
 
 def get_file_readiness_status(product):
-    missing_count = sum(not product.get(field) for field, _ in FILE_HUB_FIELDS)
-    if missing_count == 0:
-        return "All Files Connected"
-    if all(product.get(field) for field, _ in CORE_FILE_FIELDS):
-        return "Core Files Ready"
-    return "Missing Files"
+    return get_overall_asset_readiness(product)
+
+
+def get_overall_asset_readiness(product):
+    statuses = product.get("asset_statuses") or {
+        asset["key"]: effective_asset_status(product, asset)
+        for asset in ASSET_DEFINITIONS
+    }
+    core_statuses = [statuses[key] for key in CORE_ASSET_KEYS]
+    all_statuses = list(statuses.values())
+
+    if product.get("status") == "Live" and "Missing" in core_statuses:
+        return "Live Product Missing Files"
+    if "Needs Review" in all_statuses:
+        return "Needs Review"
+    if all(status == "Approved" for status in all_statuses):
+        return "Asset Pack Approved"
+    if "Missing" in core_statuses:
+        return "Core Assets Missing"
+    return "Core Assets Connected"
 
 
 def get_shopify_link_status(product):
@@ -381,7 +635,26 @@ def get_shopify_link_status(product):
     return "Missing"
 
 
-def enrich_product(product):
+def enrich_product(product, asset_records=None):
+    if not product.get("final_jpg_url") and product.get("jpg_file_url"):
+        product["final_jpg_url"] = product["jpg_file_url"]
+    if not product.get("jpg_file_url") and product.get("final_jpg_url"):
+        product["jpg_file_url"] = product["final_jpg_url"]
+
+    asset_records = asset_records or {}
+    product["asset_statuses"] = {}
+    product["asset_manual_statuses"] = {}
+    product["asset_updated_at"] = {}
+    for asset in ASSET_DEFINITIONS:
+        record = asset_records.get(asset["key"], {})
+        status = effective_asset_status(product, asset, record)
+        product["asset_statuses"][asset["key"]] = status
+        product["asset_manual_statuses"][asset["key"]] = record.get("manual_status") or "Automatic"
+        product["asset_updated_at"][asset["key"]] = record.get("updated_at") or product.get("updated_at")
+        product[f"{asset['key']}_status"] = status
+        product[f"{asset['key']}_updated_at"] = product["asset_updated_at"][asset["key"]]
+
+    product["overall_asset_readiness"] = get_overall_asset_readiness(product)
     product["readiness_status"] = get_readiness_status(product)
     product["file_readiness_status"] = get_file_readiness_status(product)
     product["prodigi_status"] = "Connected" if product.get("prodigi_product_id") else "Missing"
@@ -501,6 +774,20 @@ def get_dashboard_data():
         "ready_for_upload": sum(product["readiness_status"] == "Ready for Upload" for product in products),
         "final_editions": sum(product.get("edition_status") == "Final Editions" for product in products),
         "sold_out": sum(product.get("edition_status") == "Sold Out" for product in products),
+        "missing_core_assets": sum(
+            product["overall_asset_readiness"] in {"Core Assets Missing", "Live Product Missing Files"}
+            for product in products
+        ),
+        "assets_needing_review": sum(
+            "Needs Review" in product["asset_statuses"].values() for product in products
+        ),
+        "approved_asset_packs": sum(
+            product["overall_asset_readiness"] == "Asset Pack Approved" for product in products
+        ),
+        "live_missing_files": sum(
+            product["overall_asset_readiness"] == "Live Product Missing Files" for product in products
+        ),
+        "missing_drive_root": sum(not product.get("google_drive_root_folder_url") for product in products),
     }
     focus = {
         "missing_psd": [product for product in products if not product.get("psd_file_url")],
@@ -510,27 +797,44 @@ def get_dashboard_data():
         "ready_for_review": [product for product in products if product.get("status") == "Ready for Review"],
         "ready_for_upload": [product for product in products if product["readiness_status"] == "Ready for Upload"],
         "final_editions": [product for product in products if product.get("edition_status") == "Final Editions"],
+        "missing_final_jpg": [product for product in products if not product.get("final_jpg_url")],
+        "missing_webp": [product for product in products if not product.get("webp_folder_url")],
+        "assets_needing_review": [
+            product for product in products if "Needs Review" in product["asset_statuses"].values()
+        ],
+        "live_missing_files": [
+            product for product in products if product["overall_asset_readiness"] == "Live Product Missing Files"
+        ],
     }
     return metrics, focus
 
 
 def list_file_hub_products(file_filter="All products"):
     products = list_products(include_archived=False)
-    filter_fields = {
-        "Missing PSD": "psd_file_url",
-        "Missing JPG": "jpg_file_url",
-        "Missing WebP folder": "webp_folder_url",
-        "Missing mockup folder": "mockup_folder_url",
-        "Missing certificate folder": "certificate_folder_url",
+    filter_assets = {
+        "Missing PSD": "psd",
+        "Missing JPG": "final_jpg",
+        "Missing WebP": "webp",
+        "Missing Mockups": "mockups",
+        "Missing Size Guide": "size_guide",
+        "Missing Lifestyle": "lifestyle",
+        "Missing Prompt Pack": "prompt_pack",
+        "Missing ZIP": "product_upload_zip",
+        "Missing Certificate Folder": "certificates",
+        "Missing Ads/Social Folder": "ads_social",
     }
-    if file_filter in filter_fields:
-        field = filter_fields[file_filter]
-        return [product for product in products if not product.get(field)]
-    if file_filter == "All connected":
+    if file_filter in filter_assets:
+        asset_key = filter_assets[file_filter]
+        return [product for product in products if product["asset_statuses"][asset_key] == "Missing"]
+    if file_filter == "Needs Review":
+        return [product for product in products if "Needs Review" in product["asset_statuses"].values()]
+    if file_filter == "Approved":
+        return [product for product in products if product["overall_asset_readiness"] == "Asset Pack Approved"]
+    if file_filter in {"All Connected", "All connected"}:
         return [
             product
             for product in products
-            if all(product.get(field) for field, _ in FILE_HUB_FIELDS)
+            if all(status in {"Connected", "Approved"} for status in product["asset_statuses"].values())
         ]
     return products
 

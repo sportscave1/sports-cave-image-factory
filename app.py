@@ -65,7 +65,7 @@ MENU_OPTIONS = [
     "VA Training",
     "Settings",
 ]
-APP_VERSION = "Sports Cave OS Phase 2 - 2026-06-12"
+APP_VERSION = "Sports Cave OS Phase 3 - 2026-06-12"
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
     "limited_editions": "Limited Editions",
@@ -1929,6 +1929,13 @@ def inject_styles():
             color: #BFE3C9;
         }
 
+        .sc-status-approved,
+        .sc-status-asset-pack-approved,
+        .sc-status-core-assets-connected {
+            border-color: #527A63;
+            color: #BFE3C9;
+        }
+
         .sc-status-ready-for-review,
         .sc-status-needs-fixing,
         .sc-status-final-editions,
@@ -1939,6 +1946,13 @@ def inject_styles():
         .sc-status-needs-prodigi,
         .sc-status-needs-edition-setup,
         .sc-status-prodigi-missing {
+            border-color: var(--sc-danger);
+            color: #F0B4A1;
+        }
+
+        .sc-status-needs-review,
+        .sc-status-core-assets-missing,
+        .sc-status-live-product-missing-files {
             border-color: var(--sc-danger);
             color: #F0B4A1;
         }
@@ -1982,6 +1996,10 @@ def inject_styles():
 def init_session_state():
     if "selected_page" not in st.session_state:
         st.session_state.selected_page = "Dashboard"
+
+    pending_page = st.session_state.pop("pending_page", None)
+    if pending_page in MENU_OPTIONS:
+        st.session_state.selected_page = pending_page
 
     if st.session_state.selected_page not in MENU_OPTIONS:
         st.session_state.selected_page = "Dashboard"
@@ -3999,6 +4017,13 @@ def render_generation_result(result):
             f"{result['drive_sync_error']}"
         )
 
+    with st.expander("Local output and Google Drive reminder"):
+        st.caption(f"Local output folder: {result['run_dir']}")
+        st.info(
+            "Upload or save the completed ZIP into the matching product's Google Drive root folder, "
+            "then add that folder or ZIP link to the product File Hub. Automatic Drive upload is not used in Phase 3."
+        )
+
     render_primary_zip_download(result, "top")
     render_generated_previews(result)
 
@@ -4075,19 +4100,21 @@ def render_sidebar():
     elif st.session_state.selected_page == "Dashboard":
         st.sidebar.divider()
         st.sidebar.subheader("Today's Focus")
-        st.sidebar.write("Use the dashboard to find missing files, IDs, edition limits, and products not yet live.")
+        st.sidebar.write("Use the dashboard to find missing assets, review work, edition limits, and live products missing files.")
     elif st.session_state.selected_page == "Files":
         st.sidebar.divider()
-        st.sidebar.subheader("File Hub")
-        st.sidebar.write("Filter missing file links, then open the master product record to fix them.")
+        st.sidebar.subheader("Asset Control")
+        st.sidebar.write("Filter missing or review assets, then open the master product record to update them.")
     elif st.session_state.selected_page == "Product Uploads":
         st.sidebar.divider()
         st.sidebar.subheader("Upload Workflow")
         st.sidebar.write("Work through products by stage, then use the Shopify prompt tools when needed.")
 
     st.sidebar.divider()
-    st.sidebar.subheader("Phase 2")
-    st.sidebar.caption("Product command centre, File Hub, upload workflow, and edition tracking are active. Shopify sync comes later.")
+    st.sidebar.subheader("Phase 3")
+    st.sidebar.caption(
+        "Link-based Google Drive asset control is active. Full Drive API and Shopify sync come later."
+    )
 
 
 def render_mockups_page():
