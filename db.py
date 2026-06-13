@@ -791,6 +791,25 @@ def list_shopify_products(search="", status="All", match_filter="All"):
     return [hydrate_shopify_summary(row) for row in rows]
 
 
+def mark_missing_shopify_products(fetched_product_ids):
+    fetched_ids = {str(product_id or "").strip() for product_id in fetched_product_ids if product_id}
+    if not fetched_ids:
+        return 0
+    placeholders = ", ".join("?" for _ in fetched_ids)
+    timestamp = utc_now()
+    with get_connection() as connection:
+        cursor = connection.execute(
+            f"""
+            UPDATE shopify_products
+            SET status = 'MISSING', updated_at = ?
+            WHERE shopify_product_id NOT IN ({placeholders})
+              AND status != 'MISSING'
+            """,
+            (timestamp, *fetched_ids),
+        )
+    return cursor.rowcount
+
+
 def get_shopify_product(shopify_product_id):
     with get_connection() as connection:
         row = connection.execute(
@@ -1035,6 +1054,9 @@ def hydrate_shopify_edition_product(row):
     product["prodigi_status"] = "Connected" if product.get("prodigi_url") else "Missing"
     product["psd_status"] = "Connected" if product.get("psd_file_url") else "Missing"
     product["last_shopify_sync_at"] = product.get("synced_at")
+    last_sync = product.get("last_edition_sync_at") or ""
+    local_update = product.get("edition_updated_at") or product.get("updated_at") or ""
+    product["widget_sync_status"] = "Synced" if last_sync and last_sync >= local_update else "Needs Sync"
     return product
 
 
@@ -1048,14 +1070,34 @@ def list_shopify_edition_products(
     values = []
     if search.strip():
         search_value = f"%{search.strip().lower()}%"
-        clauses.append("(LOWER(sp.title) LIKE ? OR LOWER(sp.handle) LIKE ?)")
-        values.extend((search_value, search_value))
+        clauses.append(
+            """
+            (
+                LOWER(sp.title) LIKE ?
+                OR LOWER(sp.handle) LIKE ?
+                OR LOWER(sp.variants_json) LIKE ?
+                OR EXISTS (
+                    SELECT 1
+                    FROM order_line_items li
+                    WHERE li.shopify_product_id = sp.shopify_product_id
+                      AND (
+                          LOWER(li.product_title) LIKE ?
+                          OR LOWER(li.variant_title) LIKE ?
+                      )
+                )
+            )
+            """
+        )
+        values.extend((search_value, search_value, search_value, search_value, search_value))
     if shopify_status != "All":
         clauses.append("sp.status = ?")
         values.append(shopify_status.upper())
     filter_clauses = {
-        "Edition Not Set": "sp.edition_limit IS NULL",
+        "Edition Not Set": "(sp.edition_limit IS NULL OR sp.edition_status = 'Not Set')",
+        "Not Set": "(sp.edition_limit IS NULL OR sp.edition_status = 'Not Set')",
         "Available": "sp.edition_status IN ('Available', 'Count', 'Low')",
+        "Count": "sp.edition_status = 'Count'",
+        "Low": "sp.edition_status = 'Low'",
         "Final Editions": "sp.edition_status = 'Final Editions'",
         "Sold Out": "sp.edition_status = 'Sold Out'",
         "Missing PSD": "COALESCE(NULLIF(sp.psd_file_url, ''), NULLIF(p.psd_file_url, '')) IS NULL",
@@ -1076,7 +1118,7 @@ def list_shopify_edition_products(
                    COALESCE(NULLIF(sp.prodigi_url, ''), p.prodigi_product_url, '') AS prodigi_url,
                    COALESCE(NULLIF(sp.prodigi_product_id, ''), p.prodigi_product_id, '') AS prodigi_product_id,
                    sp.edition_notes, sp.last_edition_sync_at, sp.edition_updated_at,
-                   sp.matched_product_id
+                   sp.updated_at, sp.matched_product_id
             FROM shopify_products sp
             LEFT JOIN products p ON p.id = sp.matched_product_id
             {where_clause}
@@ -1086,6 +1128,69 @@ def list_shopify_edition_products(
             (*values, display_limit),
         ).fetchall()
     return [hydrate_shopify_edition_product(row) for row in rows]
+
+
+def list_all_shopify_edition_products():
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT sp.shopify_product_id, sp.legacy_resource_id, sp.title, sp.handle,
+                   sp.status, sp.online_store_url, sp.admin_url, sp.synced_at,
+                   sp.edition_limit, sp.next_available_edition, sp.editions_sold,
+                   sp.editions_remaining, sp.edition_status,
+                   COALESCE(NULLIF(sp.psd_file_url, ''), p.psd_file_url, '') AS psd_file_url,
+                   COALESCE(NULLIF(sp.prodigi_url, ''), p.prodigi_product_url, '') AS prodigi_url,
+                   COALESCE(NULLIF(sp.prodigi_product_id, ''), p.prodigi_product_id, '') AS prodigi_product_id,
+                   sp.edition_notes, sp.last_edition_sync_at, sp.edition_updated_at,
+                   sp.updated_at, sp.matched_product_id
+            FROM shopify_products sp
+            LEFT JOIN products p ON p.id = sp.matched_product_id
+            ORDER BY sp.title COLLATE NOCASE
+            """
+        ).fetchall()
+    return [hydrate_shopify_edition_product(row) for row in rows]
+
+
+def list_shopify_products_needing_widget_sync(limit=500):
+    products = list_all_shopify_edition_products()
+    return [
+        product
+        for product in products
+        if product.get("widget_sync_status") == "Needs Sync"
+    ][: min(max(int(limit), 1), 500)]
+
+
+def find_shopify_edition_product_for_import(shopify_product_id="", handle="", title=""):
+    clauses = []
+    values = []
+    if str(shopify_product_id or "").strip():
+        clauses.append("shopify_product_id = ?")
+        values.append(str(shopify_product_id).strip())
+    if str(handle or "").strip():
+        clauses.append("LOWER(TRIM(handle)) = LOWER(TRIM(?))")
+        values.append(str(handle).strip())
+    if str(title or "").strip():
+        clauses.append("LOWER(TRIM(title)) = LOWER(TRIM(?))")
+        values.append(str(title).strip())
+    if not clauses:
+        return None
+    with get_connection() as connection:
+        row = connection.execute(
+            f"""
+            SELECT shopify_product_id
+            FROM shopify_products
+            WHERE {' OR '.join(clauses)}
+            ORDER BY
+                CASE
+                    WHEN shopify_product_id = ? THEN 1
+                    WHEN LOWER(TRIM(handle)) = LOWER(TRIM(?)) THEN 2
+                    ELSE 3
+                END
+            LIMIT 1
+            """,
+            (*values, str(shopify_product_id or "").strip(), str(handle or "").strip()),
+        ).fetchone()
+    return row["shopify_product_id"] if row else None
 
 
 def get_shopify_edition_product(shopify_product_id):
@@ -1100,7 +1205,7 @@ def get_shopify_edition_product(shopify_product_id):
                    COALESCE(NULLIF(sp.prodigi_url, ''), p.prodigi_product_url, '') AS prodigi_url,
                    COALESCE(NULLIF(sp.prodigi_product_id, ''), p.prodigi_product_id, '') AS prodigi_product_id,
                    sp.edition_notes, sp.last_edition_sync_at, sp.edition_updated_at,
-                   sp.matched_product_id
+                   sp.updated_at, sp.matched_product_id
             FROM shopify_products sp
             LEFT JOIN products p ON p.id = sp.matched_product_id
             WHERE sp.shopify_product_id = ?
@@ -1579,7 +1684,10 @@ def get_shopify_edition_summary():
                    SUM(CASE WHEN COALESCE(psd_file_url, '') = '' THEN 1 ELSE 0 END) AS missing_psd,
                    SUM(CASE WHEN COALESCE(prodigi_url, '') = '' THEN 1 ELSE 0 END) AS missing_prodigi,
                    SUM(CASE WHEN edition_status = 'Final Editions' THEN 1 ELSE 0 END) AS final_editions,
-                   SUM(CASE WHEN edition_status = 'Sold Out' THEN 1 ELSE 0 END) AS sold_out
+                   SUM(CASE WHEN edition_status = 'Sold Out' THEN 1 ELSE 0 END) AS sold_out,
+                   SUM(CASE WHEN last_edition_sync_at IS NULL
+                         OR COALESCE(last_edition_sync_at, '') < COALESCE(edition_updated_at, updated_at, '')
+                       THEN 1 ELSE 0 END) AS needs_widget_sync
             FROM shopify_products
             """
         ).fetchone()
@@ -2204,6 +2312,7 @@ def get_dashboard_data():
         "shopify_missing_edition_setup": shopify_editions["missing_setup"],
         "shopify_missing_psd": shopify_editions["missing_psd"],
         "shopify_missing_prodigi": shopify_editions["missing_prodigi"],
+        "shopify_needs_widget_sync": shopify_editions["needs_widget_sync"],
         "shopify_final_editions": shopify_editions["final_editions"],
         "shopify_sold_out": shopify_editions["sold_out"],
     }
