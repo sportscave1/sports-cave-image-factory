@@ -1,9 +1,12 @@
 import csv
+import html
 import io
+import json
 import re
 from datetime import datetime
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 import db
 
@@ -42,6 +45,52 @@ PRODUCT_EXPORT_FIELDS = (
     "created_at",
     "updated_at",
     "archived_at",
+)
+
+PRODIGI_DASHBOARD_URL = "https://dashboard.prodigi.com/dashboard"
+PRODIGI_SIZE_OPTIONS = (
+    {
+        "shopify_size": "XL",
+        "prodigi_size": "A1",
+        "dimensions": "62 × 87 cm (24.4 × 34.3 in)",
+        "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 59.4x84.1cm / 23.4x33.1" (A1)',
+        "framed_code": "GLOBAL-CFP-A1",
+        "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 59.4x84.1cm / 23.4x33.1" (A1)',
+        "unframed_code": "GLOBAL-FAP-A1",
+    },
+    {
+        "shopify_size": "L",
+        "prodigi_size": "A2",
+        "dimensions": "45 × 62 cm (17.7 × 24.4 in)",
+        "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 42x59.4cm / 16.5x23.4" (A2)',
+        "framed_code": "GLOBAL-CFP-A2",
+        "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 42x59.4cm / 16.5x23.4" (A2)',
+        "unframed_code": "GLOBAL-FAP-A2",
+    },
+    {
+        "shopify_size": "M",
+        "prodigi_size": "A3",
+        "dimensions": "30 × 45 cm (11.8 × 17.7 in)",
+        "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 29.7x42cm / 11.7x16.5" (A3)',
+        "framed_code": "GLOBAL-CFP-A3",
+        "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 29.7x42cm / 11.7x16.5" (A3)',
+        "unframed_code": "GLOBAL-FAP-A3",
+    },
+    {
+        "shopify_size": "S",
+        "prodigi_size": "A4",
+        "dimensions": "21 × 30 cm (8.3 × 11.8 in)",
+        "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 21x29.7cm / 8.3x11.7" (A4)',
+        "framed_code": "GLOBAL-CFP-A4",
+        "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 21x29.7cm / 8.3x11.7" (A4)',
+        "unframed_code": "GLOBAL-FAP-A4",
+    },
+)
+PRODIGI_FRAME_OPTIONS = (
+    ("Black", "Black", "Sports Cave Black Frame"),
+    ("Oak", "Natural", "Sports Cave Oak Frame"),
+    ("White", "White", "Sports Cave White Frame"),
+    ("Unframed", "No frame / Fine Art Paper", "Sports Cave Unframed"),
 )
 
 
@@ -930,6 +979,148 @@ def render_local_limited_editions():
             with columns[7]:
                 if st.button("Open", key=f"edition-open-{item['product_id']}", use_container_width=True):
                     go_to_product(item["product_id"])
+
+
+def render_copy_text_button(text, key, label):
+    safe_label = html.escape(label)
+    text_json = json.dumps(text)
+
+    components.html(
+        f"""
+        <div style="padding-top:2px;">
+          <button
+            id="copy-prodigi-button-{key}"
+            type="button"
+            style="width:100%;border:1px solid #D4A54C;border-radius:14px;padding:10px 14px;background:#F5F2EA;color:#0B0B0D;font-weight:700;font-size:0.95rem;cursor:pointer;box-sizing:border-box;"
+          >
+            {safe_label}
+          </button>
+        </div>
+        <script>
+        (() => {{
+          const button = document.getElementById("copy-prodigi-button-{key}");
+          const originalLabel = button.innerText;
+          const copyText = {text_json};
+
+          async function copyValue(event) {{
+            event.preventDefault();
+            try {{
+              if (navigator.clipboard && window.isSecureContext) {{
+                await navigator.clipboard.writeText(copyText);
+              }} else {{
+                const textarea = document.createElement("textarea");
+                textarea.value = copyText;
+                textarea.style.position = "fixed";
+                textarea.style.opacity = "0";
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                document.execCommand("copy");
+                document.body.removeChild(textarea);
+              }}
+            }} catch (error) {{
+              const textarea = document.createElement("textarea");
+              textarea.value = copyText;
+              textarea.style.position = "fixed";
+              textarea.style.opacity = "0";
+              document.body.appendChild(textarea);
+              textarea.focus();
+              textarea.select();
+              document.execCommand("copy");
+              document.body.removeChild(textarea);
+            }}
+
+            button.innerText = "Copied";
+            setTimeout(() => {{
+              button.innerText = originalLabel;
+            }}, 1400);
+          }}
+
+          button.addEventListener("click", copyValue);
+        }})();
+        </script>
+        """,
+        height=56,
+    )
+def render_prodigi_option_card(frame_label, frame_colour, size_option, is_unframed=False):
+    shopify_variant = f"{frame_label} / {size_option['shopify_size']}"
+    product_name = size_option["unframed_name"] if is_unframed else size_option["framed_name"]
+    product_code = size_option["unframed_code"] if is_unframed else size_option["framed_code"]
+    frame_note = "No frame / Fine Art Paper" if is_unframed else frame_colour
+
+    with st.container(border=True):
+        st.markdown(f"**{shopify_variant}**")
+        st.caption(f"Shopify size {size_option['shopify_size']} = Prodigi size {size_option['prodigi_size']} • {size_option['dimensions']}")
+        st.markdown("**Prodigi product name**")
+        st.write(product_name)
+        st.markdown("**Prodigi product code**")
+        st.code(product_code, language=None)
+        st.markdown("**Frame colour to select**")
+        st.write(frame_note)
+
+        button_columns = st.columns(2)
+        with button_columns[0]:
+            render_copy_text_button(product_name, f"{frame_label.lower()}-{size_option['shopify_size'].lower()}-name", "Copy Product Name")
+        with button_columns[1]:
+            render_copy_text_button(product_code, f"{frame_label.lower()}-{size_option['shopify_size'].lower()}-code", "Copy Product Code")
+
+
+def render_prodigi_page():
+    st.title("Prodigi")
+    st.caption(
+        "Simple Sports Cave-to-Prodigi matching. Copy the exact product name and product code, then double-check the frame and size before sending the order to production."
+    )
+
+    st.link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
+
+    st.info(
+        "Quick check: XL = A1, L = A2, M = A3, S = A4. Oak on Sports Cave = Natural in Prodigi. "
+        "Framed orders use Classic Frame. Unframed orders use Fine Art Paper."
+    )
+
+    st.subheader("1. Size map")
+    size_columns = st.columns(4)
+    for column, size_option in zip(size_columns, PRODIGI_SIZE_OPTIONS):
+        with column:
+            with st.container(border=True):
+                st.markdown(f"### {size_option['shopify_size']}")
+                st.caption(f"Prodigi size {size_option['prodigi_size']}")
+                st.write(size_option["dimensions"])
+
+    st.subheader("2. Frame map")
+    frame_columns = st.columns(4)
+    for column, (shopify_frame, prodigi_frame, prodigi_note) in zip(frame_columns, PRODIGI_FRAME_OPTIONS):
+        with column:
+            with st.container(border=True):
+                st.markdown(f"### {shopify_frame}")
+                st.caption(f"Prodigi frame colour: {prodigi_frame}")
+                st.write(prodigi_note)
+
+    st.subheader("3. Exact Prodigi options")
+    tabs = st.tabs(["Black", "Oak", "White", "Unframed"])
+    frame_tabs = (
+        ("Black", "Black", False),
+        ("Oak", "Natural", False),
+        ("White", "White", False),
+        ("Unframed", "No frame / Fine Art Paper", True),
+    )
+    for tab, (frame_label, frame_colour, is_unframed) in zip(tabs, frame_tabs):
+        with tab:
+            st.caption(
+                "Copy the product name or product code, then match the frame colour exactly before submitting the order."
+            )
+            for row_start in range(0, len(PRODIGI_SIZE_OPTIONS), 2):
+                row_columns = st.columns(2)
+                for column, size_option in zip(row_columns, PRODIGI_SIZE_OPTIONS[row_start:row_start + 2]):
+                    with column:
+                        render_prodigi_option_card(frame_label, frame_colour, size_option, is_unframed=is_unframed)
+
+    with st.container(border=True):
+        st.markdown("**Final check before production**")
+        st.write("1. Match the Shopify size to the Prodigi size: XL=A1, L=A2, M=A3, S=A4.")
+        st.write("2. Match the frame colour: Black, Natural, White, or Unframed.")
+        st.write("3. Copy the exact product name or code from the matching card.")
+        st.write("4. Check the order one more time before sending it to production.")
 
 
 def render_limited_editions_page(dispatch_log_renderer=None):

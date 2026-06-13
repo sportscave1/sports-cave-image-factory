@@ -58,6 +58,7 @@ MENU_OPTIONS = [
     "Mockups",
     "Product Uploads",
     "Limited Editions",
+    "Prodigi",
     "Orders",
     "Certificates",
     "Files",
@@ -4097,6 +4098,13 @@ def render_sidebar():
         st.sidebar.write("2. Open a product to update sold numbers.")
         st.sidebar.write("3. Let Sports Cave OS calculate remaining editions.")
         st.sidebar.write("4. Open the dispatch log only when needed.")
+    elif st.session_state.selected_page == "Prodigi":
+        st.sidebar.divider()
+        st.sidebar.subheader("Prodigi")
+        st.sidebar.write("1. Open the Prodigi dashboard and search the order.")
+        st.sidebar.write("2. Match Shopify size to Prodigi size: XL=A1, L=A2, M=A3, S=A4.")
+        st.sidebar.write("3. Copy the exact Prodigi name or code.")
+        st.sidebar.write("4. Check the frame colour before sending to production.")
     elif st.session_state.selected_page == "Dashboard":
         st.sidebar.divider()
         st.sidebar.subheader("Today's Focus")
@@ -4624,6 +4632,8 @@ def main():
         render_mockups_page()
     elif current_page == "Limited Editions":
         os_pages.render_limited_editions_page(dispatch_log_renderer=render_edition_dispatch_log)
+    elif current_page == "Prodigi":
+        os_pages.render_prodigi_page()
     elif current_page == "Product Uploads":
         render_product_uploads_page()
     elif current_page == "Files":
