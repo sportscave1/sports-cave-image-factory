@@ -32,6 +32,17 @@ point `SPORTS_CAVE_DB_PATH` to that mounted path if records must survive a
 redeploy. Database migrations only add missing tables and columns; they do not
 delete existing products, edition records, or output folders.
 
+Recommended Render production value:
+
+```text
+SPORTS_CAVE_DB_PATH=/var/data/sports_cave_os.db
+```
+
+Without a persistent disk mounted at `/var/data`, Render redeploys can wipe the
+local SQLite file. Sports Cave OS protects edition numbers and assignments in
+code, but the database file itself must live on persistent storage to survive
+infrastructure resets.
+
 ## Local Run
 
 1. Create and activate a virtual environment.
@@ -114,6 +125,16 @@ be based on Shopify inventory, stock, or variant inventory.
 The storefront snippet lives at
 `shopify_theme/snippets/sports-cave-edition-pill.liquid` and reads only the
 `sports_cave` product metafields synced from Sports Cave OS.
+
+Install on Shopify product templates with:
+
+```liquid
+{% render 'sports-cave-edition-pill' %}
+```
+
+After changing edition numbers in Sports Cave OS, click `Sync Edition Display`
+on Limited Editions to refresh the storefront mirror. Do not use Shopify stock
+or inventory-based scarcity widgets for limited edition availability.
 
 Matching rules:
 

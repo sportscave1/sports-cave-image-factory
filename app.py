@@ -4131,7 +4131,7 @@ def render_sidebar():
     elif st.session_state.selected_page == "Product Uploads":
         st.sidebar.divider()
         st.sidebar.subheader("Upload Workflow")
-        st.sidebar.write("Work through products by stage, then use the Shopify prompt tools when needed.")
+        st.sidebar.write("Use the compact checklist and copyable prompts to prepare Shopify uploads.")
 
     st.sidebar.divider()
     st.sidebar.subheader("Phase 5B")
@@ -4326,44 +4326,99 @@ def render_mockups_page():
 
 def render_product_uploads_page():
     log_app_memory("Page load: Product Uploads")
-    os_pages.render_product_uploads_workflow()
-    st.divider()
-    st.subheader("Shopify Prompt Tools")
+    st.title("Product Uploads")
     st.caption(
-        "Use this lightweight prompt page when you already have your Shopify upload images and HTML preview ready to drag into ChatGPT."
+        "Follow the upload steps and use the prompts below to prepare products correctly."
     )
 
-    st.info(
-        "This page does not scan local runs. Attach your own `shopify-uploads` WEBP files and HTML preview in ChatGPT, then copy one of the prompts below."
+    st.subheader("1. Upload Steps")
+    step_columns = st.columns(2)
+    upload_steps = (
+        "Generate mockups",
+        "Upload images to Shopify",
+        "Add product title",
+        "Add product description",
+        "Add variants and prices",
+        "Add SEO title and meta description",
+        "Add image alt text",
+        "Add collections/tags",
+        "Set edition limit in Limited Editions",
+        "Review live product",
     )
+    for index, step in enumerate(upload_steps):
+        step_columns[index % 2].checkbox(step, key=f"product-upload-step-{index}")
 
-    st.markdown(
-        "1. Drag every WEBP file from your `shopify-uploads` folder into ChatGPT.\n"
-        "2. Drag the matching HTML preview into ChatGPT if you have it.\n"
-        "3. Click the copy button on the prompt you need, then paste it into ChatGPT.\n"
-        "4. Review the draft Shopify product carefully before publishing.\n"
-        "\n"
-        "- `New Shopify product` will generate a prompt for creating a brand new product in Shopify.\n"
-        "- `Update existing product` will generate a prompt for replacing the images on an existing Shopify product.\n"
-        "- This page stays manual on purpose so it remains fast and lightweight on Render."
-    )
+    st.info("Manual and lightweight: drag your Shopify upload images into ChatGPT, copy the right prompt, then review before publishing.")
 
-    st.divider()
-    st.write("Both prompts are ready below. Copy the one you need and paste it into ChatGPT under your uploaded files.")
+    product_upload_prompt = get_product_upload_prompt({}, update_existing=False)
+    image_alt_prompt = """
+You are creating Shopify image alt text for Sports Cave.
 
+Use the uploaded product images and product context.
+
+Write concise, useful alt text for each image.
+
+Rules:
+- Describe the artwork/product clearly.
+- Include the sport, athlete/team/moment if obvious.
+- Mention Sports Cave wall art naturally where appropriate.
+- Do not keyword stuff.
+- Do not invent names or claims not visible/provided.
+- Keep each alt text under 125 characters where possible.
+
+Output as a table:
+Image number | Suggested alt text
+"""
+    meta_prompt = """
+You are writing Shopify SEO metadata for a Sports Cave product.
+
+Use the uploaded product images and product context.
+
+Create:
+1. SEO title, max 60 characters where possible
+2. Meta description, max 155 characters where possible
+3. Clean product tags
+4. Suggested collection/category
+
+Tone:
+premium, collector-focused, sport-specific, clear, and not generic.
+
+Do not use discount language.
+Do not overstuff keywords.
+Do not invent facts.
+"""
+
+    st.subheader("2. Product Upload Prompt")
+    render_copyable_prompt("Product Upload Prompt", product_upload_prompt, "product-upload-main-prompt")
+
+    st.subheader("3. Image Alt Text Prompt")
     render_copyable_prompt(
-        "New Shopify Product Prompt",
-        get_product_upload_prompt({}, update_existing=False),
-        "new-shopify-product-prompt",
+        "Image Alt Text Prompt",
+        image_alt_prompt.strip(),
+        "product-upload-alt-text-prompt",
     )
 
-    st.divider()
-
+    st.subheader("4. Meta Title and Description Prompt")
     render_copyable_prompt(
-        "Update Existing Product Prompt",
-        get_product_upload_prompt({}, update_existing=True),
-        "update-existing-shopify-product-prompt",
+        "Meta Title and Description Prompt",
+        meta_prompt.strip(),
+        "product-upload-meta-prompt",
     )
+
+    st.subheader("5. Final QA Checklist")
+    qa_columns = st.columns(2)
+    qa_items = (
+        "Images correct",
+        "Sizes correct",
+        "Frame variants correct",
+        "Prices correct",
+        "Product description clean",
+        "SEO added",
+        "Edition limit set",
+        "Live page checked",
+    )
+    for index, item in enumerate(qa_items):
+        qa_columns[index % 2].checkbox(item, key=f"product-upload-qa-{index}")
 
 
 def render_edition_dispatch_log(embedded=False):
