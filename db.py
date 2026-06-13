@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+import json
 import os
 import sqlite3
 
@@ -198,7 +199,6 @@ FILE_HUB_FIELDS = tuple(
     for asset in ASSET_DEFINITIONS
 )
 
-
 def utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -291,11 +291,50 @@ def init_db():
                 FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS shopify_products (
+                shopify_product_id TEXT PRIMARY KEY,
+                legacy_resource_id TEXT,
+                title TEXT NOT NULL,
+                handle TEXT,
+                status TEXT,
+                vendor TEXT,
+                product_type TEXT,
+                variant_count INTEGER NOT NULL DEFAULT 0,
+                image_count INTEGER NOT NULL DEFAULT 0,
+                tags_json TEXT NOT NULL DEFAULT '[]',
+                collections_json TEXT NOT NULL DEFAULT '[]',
+                variants_json TEXT NOT NULL DEFAULT '[]',
+                images_json TEXT NOT NULL DEFAULT '[]',
+                metafields_json TEXT NOT NULL DEFAULT '[]',
+                online_store_url TEXT,
+                admin_url TEXT,
+                remote_updated_at TEXT,
+                synced_at TEXT NOT NULL,
+                matched_product_id INTEGER UNIQUE,
+                match_source TEXT,
+                FOREIGN KEY (matched_product_id) REFERENCES products(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS shopify_sync_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                status TEXT NOT NULL,
+                products_seen INTEGER NOT NULL DEFAULT 0,
+                pages_synced INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                api_version TEXT,
+                store_domain TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_products_name ON products(product_name);
             CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
             CREATE INDEX IF NOT EXISTS idx_products_sport ON products(sport_category);
             CREATE INDEX IF NOT EXISTS idx_editions_status ON limited_editions(edition_status);
             CREATE INDEX IF NOT EXISTS idx_product_assets_status ON product_assets(manual_status);
+            CREATE INDEX IF NOT EXISTS idx_shopify_products_handle ON shopify_products(handle);
+            CREATE INDEX IF NOT EXISTS idx_shopify_products_status ON shopify_products(status);
+            CREATE INDEX IF NOT EXISTS idx_shopify_products_match ON shopify_products(matched_product_id);
             """
         )
         ensure_column(connection, "products", "prodigi_product_url", "TEXT")
@@ -311,6 +350,8 @@ def init_db():
             "google_drive_root_folder_url",
         ):
             ensure_column(connection, "products", field, "TEXT")
+        ensure_column(connection, "shopify_products", "variant_count", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(connection, "shopify_products", "image_count", "INTEGER NOT NULL DEFAULT 0")
         connection.execute(
             """
             UPDATE products
@@ -327,6 +368,429 @@ def init_db():
         )
         connection.execute("UPDATE products SET status = 'Idea' WHERE status = 'Draft'")
         connection.execute("UPDATE products SET status = 'Ready for Review' WHERE status = 'Needs Review'")
+
+
+def parse_json_list(value):
+    try:
+        parsed = json.loads(value or "[]")
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def normalize_match_value(value):
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def start_shopify_sync(store_domain, api_version):
+    timestamp = utc_now()
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO shopify_sync_runs (
+                started_at, status, products_seen, pages_synced, api_version, store_domain
+            ) VALUES (?, 'Running', 0, 0, ?, ?)
+            """,
+            (timestamp, api_version, store_domain),
+        )
+    return cursor.lastrowid
+
+
+def update_shopify_sync_run(
+    run_id,
+    *,
+    status=None,
+    products_seen=None,
+    pages_synced=None,
+    error_message=None,
+    api_version=None,
+):
+    fields = {}
+    if status is not None:
+        fields["status"] = status
+    if products_seen is not None:
+        fields["products_seen"] = int(products_seen)
+    if pages_synced is not None:
+        fields["pages_synced"] = int(pages_synced)
+    if error_message is not None:
+        fields["error_message"] = str(error_message)[:2000]
+    if api_version is not None:
+        fields["api_version"] = str(api_version)
+    if status in {"Complete", "Failed"}:
+        fields["completed_at"] = utc_now()
+    if not fields:
+        return
+
+    assignments = ", ".join(f"{field} = ?" for field in fields)
+    with get_connection() as connection:
+        connection.execute(
+            f"UPDATE shopify_sync_runs SET {assignments} WHERE id = ?",
+            (*fields.values(), run_id),
+        )
+
+
+def get_latest_shopify_sync_run():
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM shopify_sync_runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def upsert_shopify_products(products):
+    timestamp = utc_now()
+    with get_connection() as connection:
+        for product in products:
+            connection.execute(
+                """
+                INSERT INTO shopify_products (
+                    shopify_product_id, legacy_resource_id, title, handle, status,
+                    vendor, product_type, variant_count, image_count,
+                    tags_json, collections_json, variants_json,
+                    images_json, metafields_json, online_store_url, admin_url,
+                    remote_updated_at, synced_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(shopify_product_id) DO UPDATE SET
+                    legacy_resource_id = excluded.legacy_resource_id,
+                    title = excluded.title,
+                    handle = excluded.handle,
+                    status = excluded.status,
+                    vendor = excluded.vendor,
+                    product_type = excluded.product_type,
+                    variant_count = excluded.variant_count,
+                    image_count = excluded.image_count,
+                    tags_json = excluded.tags_json,
+                    collections_json = excluded.collections_json,
+                    variants_json = excluded.variants_json,
+                    images_json = excluded.images_json,
+                    metafields_json = excluded.metafields_json,
+                    online_store_url = excluded.online_store_url,
+                    admin_url = excluded.admin_url,
+                    remote_updated_at = excluded.remote_updated_at,
+                    synced_at = excluded.synced_at
+                """,
+                (
+                    product["shopify_product_id"],
+                    product.get("legacy_resource_id") or "",
+                    product.get("title") or "Untitled Shopify Product",
+                    product.get("handle") or "",
+                    product.get("status") or "UNKNOWN",
+                    product.get("vendor") or "",
+                    product.get("product_type") or "",
+                    len(product.get("variants") or []),
+                    len(product.get("images") or []),
+                    json.dumps(product.get("tags") or []),
+                    json.dumps(product.get("collections") or []),
+                    json.dumps(product.get("variants") or []),
+                    json.dumps(product.get("images") or []),
+                    json.dumps(product.get("metafields") or []),
+                    product.get("online_store_url") or "",
+                    product.get("admin_url") or "",
+                    product.get("remote_updated_at") or "",
+                    timestamp,
+                ),
+            )
+
+
+def auto_match_shopify_products():
+    matched_count = 0
+    with get_connection() as connection:
+        remote_rows = connection.execute(
+            """
+            SELECT shopify_product_id, handle
+            FROM shopify_products
+            WHERE matched_product_id IS NULL
+            """
+        ).fetchall()
+        for remote in remote_rows:
+            internal = connection.execute(
+                """
+                SELECT id
+                FROM products
+                WHERE shopify_product_id = ? AND status != 'Archived'
+                ORDER BY id
+                LIMIT 1
+                """,
+                (remote["shopify_product_id"],),
+            ).fetchone()
+            source = "Existing ID"
+            if not internal and remote["handle"]:
+                handle_matches = connection.execute(
+                    """
+                    SELECT id
+                    FROM products
+                    WHERE LOWER(TRIM(handle)) = LOWER(TRIM(?)) AND status != 'Archived'
+                    ORDER BY id
+                    """,
+                    (remote["handle"],),
+                ).fetchall()
+                if len(handle_matches) == 1:
+                    internal = handle_matches[0]
+                    source = "Exact Handle"
+            if not internal:
+                continue
+            existing_match = connection.execute(
+                "SELECT shopify_product_id FROM shopify_products WHERE matched_product_id = ?",
+                (internal["id"],),
+            ).fetchone()
+            if existing_match:
+                continue
+            connection.execute(
+                """
+                UPDATE shopify_products
+                SET matched_product_id = ?, match_source = ?
+                WHERE shopify_product_id = ?
+                """,
+                (internal["id"], source, remote["shopify_product_id"]),
+            )
+            matched_count += 1
+        matched_rows = connection.execute(
+            """
+            SELECT sp.*, p.handle AS internal_handle
+            FROM shopify_products sp
+            JOIN products p ON p.id = sp.matched_product_id
+            """
+        ).fetchall()
+        for row in matched_rows:
+            connection.execute(
+                """
+                UPDATE products
+                SET shopify_product_id = ?,
+                    handle = CASE WHEN COALESCE(TRIM(handle), '') = '' THEN ? ELSE handle END,
+                    shopify_admin_url = ?,
+                    live_product_url = CASE
+                        WHEN COALESCE(?, '') != '' THEN ? ELSE live_product_url END,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    row["shopify_product_id"],
+                    row["handle"],
+                    row["admin_url"],
+                    row["online_store_url"],
+                    row["online_store_url"],
+                    utc_now(),
+                    row["matched_product_id"],
+                ),
+            )
+    return matched_count
+
+
+def hydrate_shopify_product(row):
+    if not row:
+        return None
+    product = dict(row)
+    for field in ("tags", "collections", "variants", "images", "metafields"):
+        product[field] = parse_json_list(product.pop(f"{field}_json", "[]"))
+    product["variant_count"] = int(product.get("variant_count") or len(product["variants"]))
+    product["image_count"] = int(product.get("image_count") or len(product["images"]))
+    return product
+
+
+def hydrate_shopify_summary(row):
+    if not row:
+        return None
+    product = dict(row)
+    product["variant_count"] = int(product.get("variant_count") or 0)
+    product["image_count"] = int(product.get("image_count") or 0)
+    return product
+
+
+def list_shopify_products(search="", status="All", match_filter="All"):
+    clauses = []
+    values = []
+    if search.strip():
+        clauses.append("(LOWER(sp.title) LIKE ? OR LOWER(sp.handle) LIKE ?)")
+        value = f"%{search.strip().lower()}%"
+        values.extend((value, value))
+    if status != "All":
+        clauses.append("sp.status = ?")
+        values.append(status)
+    if match_filter == "Matched":
+        clauses.append("sp.matched_product_id IS NOT NULL")
+    elif match_filter == "Unmatched":
+        clauses.append("sp.matched_product_id IS NULL")
+    where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with get_connection() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT sp.shopify_product_id, sp.legacy_resource_id, sp.title, sp.handle,
+                   sp.status, sp.vendor, sp.product_type, sp.variant_count, sp.image_count,
+                   sp.online_store_url, sp.admin_url, sp.remote_updated_at, sp.synced_at,
+                   sp.matched_product_id, sp.match_source,
+                   p.product_name AS matched_product_name
+            FROM shopify_products sp
+            LEFT JOIN products p ON p.id = sp.matched_product_id
+            {where_clause}
+            ORDER BY sp.remote_updated_at DESC, sp.title COLLATE NOCASE
+            """,
+            values,
+        ).fetchall()
+    return [hydrate_shopify_summary(row) for row in rows]
+
+
+def get_shopify_product(shopify_product_id):
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT sp.*, p.product_name AS matched_product_name
+            FROM shopify_products sp
+            LEFT JOIN products p ON p.id = sp.matched_product_id
+            WHERE sp.shopify_product_id = ?
+            """,
+            (shopify_product_id,),
+        ).fetchone()
+    return hydrate_shopify_product(row)
+
+
+def match_shopify_product(shopify_product_id, product_id, source="Manual"):
+    timestamp = utc_now()
+    with get_connection() as connection:
+        remote = connection.execute(
+            "SELECT * FROM shopify_products WHERE shopify_product_id = ?",
+            (shopify_product_id,),
+        ).fetchone()
+        internal = connection.execute(
+            "SELECT id, handle FROM products WHERE id = ?",
+            (product_id,),
+        ).fetchone()
+        if not remote or not internal:
+            raise ValueError("The Shopify or internal product record could not be found.")
+
+        previous_product_id = remote["matched_product_id"]
+        if previous_product_id and previous_product_id != product_id:
+            connection.execute(
+                """
+                UPDATE products
+                SET shopify_product_id = '', updated_at = ?
+                WHERE id = ? AND shopify_product_id = ?
+                """,
+                (timestamp, previous_product_id, shopify_product_id),
+            )
+
+        connection.execute(
+            "UPDATE shopify_products SET matched_product_id = NULL, match_source = NULL WHERE matched_product_id = ?",
+            (product_id,),
+        )
+        connection.execute(
+            """
+            UPDATE shopify_products
+            SET matched_product_id = ?, match_source = ?
+            WHERE shopify_product_id = ?
+            """,
+            (product_id, source, shopify_product_id),
+        )
+        connection.execute(
+            """
+            UPDATE products
+            SET shopify_product_id = ?,
+                handle = CASE WHEN COALESCE(TRIM(handle), '') = '' THEN ? ELSE handle END,
+                shopify_admin_url = ?,
+                live_product_url = CASE WHEN COALESCE(?, '') != '' THEN ? ELSE live_product_url END,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                shopify_product_id,
+                remote["handle"],
+                remote["admin_url"],
+                remote["online_store_url"],
+                remote["online_store_url"],
+                timestamp,
+                product_id,
+            ),
+        )
+
+
+def unmatch_shopify_product(shopify_product_id):
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT matched_product_id FROM shopify_products WHERE shopify_product_id = ?",
+            (shopify_product_id,),
+        ).fetchone()
+        if not row:
+            return
+        matched_product_id = row["matched_product_id"]
+        connection.execute(
+            """
+            UPDATE shopify_products
+            SET matched_product_id = NULL, match_source = NULL
+            WHERE shopify_product_id = ?
+            """,
+            (shopify_product_id,),
+        )
+        if matched_product_id:
+            connection.execute(
+                """
+                UPDATE products
+                SET shopify_product_id = '', updated_at = ?
+                WHERE id = ? AND shopify_product_id = ?
+                """,
+                (utc_now(), matched_product_id, shopify_product_id),
+            )
+
+
+def create_product_from_shopify(shopify_product_id):
+    remote = get_shopify_product(shopify_product_id)
+    if not remote:
+        raise ValueError("The Shopify product could not be found in the local sync cache.")
+    if remote.get("matched_product_id"):
+        return remote["matched_product_id"]
+
+    status_map = {"ACTIVE": "Live", "ARCHIVED": "Archived", "DRAFT": "Idea"}
+    product_id = create_product(
+        {
+            "shopify_product_id": remote["shopify_product_id"],
+            "product_name": remote["title"],
+            "handle": remote["handle"],
+            "sport_category": "Other",
+            "country_focus": "Global",
+            "status": status_map.get(remote["status"], "Idea"),
+            "shopify_admin_url": remote["admin_url"],
+            "live_product_url": remote["online_store_url"],
+        }
+    )
+    match_shopify_product(shopify_product_id, product_id, source="Created from Shopify")
+    return product_id
+
+
+def get_shopify_match_map(product_ids):
+    product_ids = tuple(dict.fromkeys(int(product_id) for product_id in product_ids))
+    if not product_ids:
+        return {}
+    placeholders = ", ".join("?" for _ in product_ids)
+    with get_connection() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT shopify_product_id, legacy_resource_id, title, handle, status,
+                   vendor, product_type, variant_count, image_count,
+                   online_store_url, admin_url, remote_updated_at, synced_at,
+                   matched_product_id, match_source
+            FROM shopify_products
+            WHERE matched_product_id IN ({placeholders})
+            """,
+            product_ids,
+        ).fetchall()
+    return {row["matched_product_id"]: hydrate_shopify_summary(row) for row in rows}
+
+
+def get_shopify_summary():
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN matched_product_id IS NOT NULL THEN 1 ELSE 0 END) AS matched,
+                   SUM(CASE WHEN matched_product_id IS NULL THEN 1 ELSE 0 END) AS unmatched,
+                   MAX(synced_at) AS last_synced_at
+            FROM shopify_products
+            """
+        ).fetchone()
+    return {
+        "total": int(row["total"] or 0),
+        "matched": int(row["matched"] or 0),
+        "unmatched": int(row["unmatched"] or 0),
+        "last_synced_at": row["last_synced_at"],
+    }
 
 
 def clean_product_payload(payload):
@@ -442,7 +906,8 @@ def get_product(product_id):
         return None
     product = dict(row)
     records = get_asset_record_map((product["id"],)).get(product["id"], {})
-    return enrich_product(product, records)
+    shopify_match = get_shopify_match_map((product["id"],)).get(product["id"])
+    return enrich_product(product, records, shopify_match)
 
 
 def list_products(
@@ -489,7 +954,15 @@ def list_products(
         ).fetchall()
     products = [dict(row) for row in rows]
     records = get_asset_record_map(product["id"] for product in products)
-    return [enrich_product(product, records.get(product["id"], {})) for product in products]
+    shopify_matches = get_shopify_match_map(product["id"] for product in products)
+    return [
+        enrich_product(
+            product,
+            records.get(product["id"], {}),
+            shopify_matches.get(product["id"]),
+        )
+        for product in products
+    ]
 
 
 def get_asset_record_map(product_ids):
@@ -635,7 +1108,7 @@ def get_shopify_link_status(product):
     return "Missing"
 
 
-def enrich_product(product, asset_records=None):
+def enrich_product(product, asset_records=None, shopify_match=None):
     if not product.get("final_jpg_url") and product.get("jpg_file_url"):
         product["final_jpg_url"] = product["jpg_file_url"]
     if not product.get("jpg_file_url") and product.get("final_jpg_url"):
@@ -659,6 +1132,16 @@ def enrich_product(product, asset_records=None):
     product["file_readiness_status"] = get_file_readiness_status(product)
     product["prodigi_status"] = "Connected" if product.get("prodigi_product_id") else "Missing"
     product["shopify_link_status"] = get_shopify_link_status(product)
+    product["shopify_match"] = shopify_match
+    product["shopify_sync_status"] = (
+        f"Shopify {(shopify_match.get('status') or 'Synced').title()}"
+        if shopify_match
+        else ("ID Not Synced" if product.get("shopify_product_id") else "Not Matched")
+    )
+    product["shopify_last_synced_at"] = shopify_match.get("synced_at") if shopify_match else None
+    product["shopify_remote_updated_at"] = shopify_match.get("remote_updated_at") if shopify_match else None
+    product["shopify_variant_count"] = shopify_match.get("variant_count", 0) if shopify_match else 0
+    product["shopify_image_count"] = shopify_match.get("image_count", 0) if shopify_match else 0
     product["missing_items"] = get_missing_items(product)
     return product
 
@@ -788,6 +1271,8 @@ def get_dashboard_data():
             product["overall_asset_readiness"] == "Live Product Missing Files" for product in products
         ),
         "missing_drive_root": sum(not product.get("google_drive_root_folder_url") for product in products),
+        "shopify_matched": sum(bool(product.get("shopify_match")) for product in products),
+        "shopify_needs_match": sum(not product.get("shopify_match") for product in products),
     }
     focus = {
         "missing_psd": [product for product in products if not product.get("psd_file_url")],
@@ -805,6 +1290,7 @@ def get_dashboard_data():
         "live_missing_files": [
             product for product in products if product["overall_asset_readiness"] == "Live Product Missing Files"
         ],
+        "shopify_needs_match": [product for product in products if not product.get("shopify_match")],
     }
     return metrics, focus
 

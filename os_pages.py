@@ -1,4 +1,5 @@
 import csv
+import gc
 import html
 import io
 import json
@@ -9,6 +10,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import db
+import shopify_sync
 
 
 QUICK_LINKS = (
@@ -29,6 +31,11 @@ PRODUCT_EXPORT_FIELDS = (
     "shopify_product_id",
     "shopify_admin_url",
     "live_product_url",
+    "shopify_sync_status",
+    "shopify_last_synced_at",
+    "shopify_remote_updated_at",
+    "shopify_variant_count",
+    "shopify_image_count",
     "prodigi_product_id",
     "prodigi_product_url",
     "prodigi_notes",
@@ -186,6 +193,8 @@ def render_dashboard_page():
         ("Missing edition limits", metrics["missing_edition_limits"]),
         ("Ready for upload", metrics["ready_for_upload"]),
         ("Final editions", metrics["final_editions"]),
+        ("Shopify products matched", metrics["shopify_matched"]),
+        ("Products needing Shopify match", metrics["shopify_needs_match"]),
     )
     metric_columns = st.columns(3)
     for index, (label, value) in enumerate(metric_specs):
@@ -193,7 +202,7 @@ def render_dashboard_page():
 
     st.subheader("Today's Focus")
     st.caption("These lists are generated from the product database, so the next useful task is always visible.")
-    focus_columns = st.columns(3)
+    focus_columns = st.columns(4)
     with focus_columns[0]:
         render_focus_list("Missing PSD", focus["missing_psd"], "Every product has a PSD link.")
         render_focus_list("Missing final JPG", focus["missing_final_jpg"], "Every product has a final JPG link.")
@@ -203,6 +212,255 @@ def render_dashboard_page():
     with focus_columns[2]:
         render_focus_list("Needs asset review", focus["assets_needing_review"], "No asset packs need review.")
         render_focus_list("Live but missing files", focus["live_missing_files"], "No live products are missing core files.")
+    with focus_columns[3]:
+        render_focus_list("Needs Shopify match", focus["shopify_needs_match"], "Every product is matched to Shopify.")
+
+
+def shopify_match_suggestion(remote_product, internal_products):
+    remote_title = db.normalize_match_value(remote_product.get("title"))
+    if not remote_title:
+        return None
+    matches = [
+        product["id"]
+        for product in internal_products
+        if db.normalize_match_value(product.get("product_name")) == remote_title
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def render_shopify_remote_details(remote_product, item_key):
+    detail_is_open = st.session_state.get("shopify_detail_id") == remote_product["shopify_product_id"]
+    if st.button(
+        "Hide Synced Details" if detail_is_open else "Load Synced Details",
+        key=f"shopify-details-{item_key}",
+    ):
+        st.session_state.shopify_detail_id = None if detail_is_open else remote_product["shopify_product_id"]
+        st.rerun()
+    if not detail_is_open:
+        return
+
+    full_product = db.get_shopify_product(remote_product["shopify_product_id"])
+    if not full_product:
+        st.warning("The cached Shopify details could not be found.")
+        return
+    tags = full_product.get("tags") or []
+    collections = full_product.get("collections") or []
+    variants = full_product.get("variants") or []
+    metafields = full_product.get("metafields") or []
+    with st.container(border=True):
+        st.write(f"**Vendor:** {full_product.get('vendor') or 'Not set'}")
+        st.write(f"**Product type:** {full_product.get('product_type') or 'Not set'}")
+        st.write(f"**Tags:** {', '.join(tags) if tags else 'None'}")
+        st.write(
+            "**Collections:** "
+            + (", ".join(item.get("title") or "Untitled" for item in collections) if collections else "None")
+        )
+        if variants:
+            st.markdown("**Variants**")
+            variant_rows = []
+            for variant in variants:
+                option_text = ", ".join(
+                    f"{option.get('name')}: {option.get('value')}"
+                    for option in variant.get("selected_options") or []
+                )
+                variant_rows.append(
+                    {
+                        "Variant": variant.get("title") or "Default",
+                        "Options": option_text,
+                        "SKU": variant.get("sku") or "",
+                        "Price": variant.get("price") or "",
+                        "Inventory": variant.get("inventory_quantity"),
+                    }
+                )
+            st.dataframe(variant_rows, use_container_width=True, hide_index=True)
+        if metafields:
+            st.caption(f"{len(metafields)} metafield values cached. Values are not edited from Sports Cave OS in Phase 4.")
+
+
+def render_shopify_sync_page():
+    render_page_intro(
+        "Shopify Sync",
+        "A manual, lightweight Shopify catalog sync for matching live store products to Sports Cave master records.",
+        "Test the connection, sync the catalog, then resolve any unmatched products.",
+        "Check the handle and product title before confirming a manual match.",
+    )
+    config = shopify_sync.get_config()
+    summary = db.get_shopify_summary()
+    latest_run = db.get_latest_shopify_sync_run()
+
+    notice = st.session_state.pop("shopify_sync_notice", None)
+    if notice:
+        st.success(notice)
+
+    status_columns = st.columns(4)
+    status_columns[0].metric("Connection", "Configured" if config["configured"] else "Not configured")
+    status_columns[1].metric("Shopify products cached", summary["total"])
+    status_columns[2].metric("Matched", summary["matched"])
+    status_columns[3].metric("Needs matching", summary["unmatched"])
+
+    st.caption(
+        f"Store domain: {config['store_domain'] or 'Missing'} | API version: {config['api_version']} | "
+        f"Last catalog sync: {format_updated_at(summary['last_synced_at']) if summary['last_synced_at'] else 'Never'}"
+    )
+    if latest_run:
+        st.caption(
+            f"Latest run: {latest_run['status']} | {latest_run['products_seen']} products | "
+            f"{latest_run['pages_synced']} pages"
+        )
+
+    if not config["configured"]:
+        st.warning(
+            "Shopify is not connected yet. Add SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_ACCESS_TOKEN "
+            "in Render environment variables. The store domain must be the .myshopify.com domain."
+        )
+
+    action_columns = st.columns([1, 1, 2])
+    test_clicked = action_columns[0].button(
+        "Test Shopify Connection",
+        disabled=not config["configured"],
+        use_container_width=True,
+    )
+    sync_clicked = action_columns[1].button(
+        "Sync Shopify Products",
+        type="primary",
+        disabled=not config["configured"],
+        use_container_width=True,
+    )
+    action_columns[2].caption(
+        "Sync runs only when this button is clicked. It does not run during mockup generation or normal page loads."
+    )
+
+    if test_clicked:
+        try:
+            with st.spinner("Testing Shopify connection..."):
+                shop = shopify_sync.test_connection(config=config)
+            st.success(
+                f"Connected to {shop['name']} ({shop['myshopify_domain']}). "
+                f"Shopify served API version {shop['api_version']}."
+            )
+        except Exception as error:
+            st.error("Could not connect to Shopify.")
+            st.exception(error)
+
+    if sync_clicked:
+        run_id = db.start_shopify_sync(config["store_domain"], config["api_version"])
+        progress = st.progress(0, text="Starting Shopify catalog sync...")
+        products_seen = 0
+        pages_synced = 0
+        try:
+            for page in shopify_sync.iter_catalog_pages(config=config):
+                db.upsert_shopify_products(page["products"])
+                products_seen += len(page["products"])
+                pages_synced += 1
+                db.update_shopify_sync_run(
+                    run_id,
+                    products_seen=products_seen,
+                    pages_synced=pages_synced,
+                    api_version=page.get("api_version"),
+                )
+                percent = min(int(products_seen / config["max_products"] * 100), 99)
+                progress.progress(percent, text=f"Synced {products_seen} Shopify products...")
+                del page
+                gc.collect()
+            matched_count = db.auto_match_shopify_products()
+            db.update_shopify_sync_run(
+                run_id,
+                status="Complete",
+                products_seen=products_seen,
+                pages_synced=pages_synced,
+            )
+            progress.progress(100, text="Shopify catalog sync complete.")
+            st.session_state.shopify_sync_notice = (
+                f"Synced {products_seen} Shopify products. {matched_count} new exact matches were connected."
+            )
+            st.rerun()
+        except Exception as error:
+            db.update_shopify_sync_run(
+                run_id,
+                status="Failed",
+                products_seen=products_seen,
+                pages_synced=pages_synced,
+                error_message=str(error),
+            )
+            progress.empty()
+            st.error("Shopify sync failed. Existing cached products were kept.")
+            st.exception(error)
+
+    st.subheader("Shopify Product Matching")
+    filter_columns = st.columns([2, 1, 1, 1])
+    search = filter_columns[0].text_input("Search Shopify products", placeholder="Title or handle")
+    status_filter = filter_columns[1].selectbox("Shopify status", ["All", "ACTIVE", "DRAFT", "ARCHIVED"])
+    match_filter = filter_columns[2].selectbox("Match status", ["All", "Unmatched", "Matched"])
+    display_limit = filter_columns[3].selectbox("Show", [25, 50, 100], index=0)
+
+    remote_products = db.list_shopify_products(search, status_filter, match_filter)
+    internal_products = db.list_products(include_archived=False)
+    internal_by_id = {product["id"]: product for product in internal_products}
+    st.caption(f"Showing {min(len(remote_products), display_limit)} of {len(remote_products)} cached Shopify products")
+    if not remote_products:
+        st.info("No cached Shopify products match these filters. Connect Shopify and run a manual sync first.")
+        return
+
+    for remote in remote_products[:display_limit]:
+        item_key = remote.get("legacy_resource_id") or str(abs(hash(remote["shopify_product_id"])))
+        with st.container(border=True):
+            summary_columns = st.columns([3, 1, 1, 1.3])
+            summary_columns[0].markdown(f"**{remote['title']}**")
+            summary_columns[0].caption(remote.get("handle") or "Handle missing")
+            summary_columns[1].markdown(status_badge(f"Shopify {remote['status'].title()}"), unsafe_allow_html=True)
+            summary_columns[2].write(f"{remote['variant_count']} variants")
+            summary_columns[2].caption(f"{remote['image_count']} images")
+            summary_columns[3].caption("Shopify updated")
+            summary_columns[3].write(format_updated_at(remote.get("remote_updated_at")))
+
+            link_columns = st.columns([1, 1, 3])
+            if remote.get("admin_url"):
+                link_columns[0].link_button("Open Shopify Admin", remote["admin_url"], use_container_width=True)
+            if remote.get("online_store_url"):
+                link_columns[1].link_button("Open Live Product", remote["online_store_url"], use_container_width=True)
+
+            if remote.get("matched_product_id"):
+                st.success(
+                    f"Matched to {remote.get('matched_product_name') or 'internal product'} "
+                    f"via {remote.get('match_source') or 'manual match'}."
+                )
+                match_actions = st.columns([1, 1, 3])
+                if match_actions[0].button("Open Product", key=f"shopify-open-{item_key}", use_container_width=True):
+                    go_to_product(remote["matched_product_id"])
+                if match_actions[1].button("Unmatch", key=f"shopify-unmatch-{item_key}", use_container_width=True):
+                    db.unmatch_shopify_product(remote["shopify_product_id"])
+                    st.rerun()
+            else:
+                suggestion = shopify_match_suggestion(remote, internal_products)
+                if suggestion:
+                    st.info(f"Suggested internal match: {internal_by_id[suggestion]['product_name']}")
+                match_columns = st.columns([3, 1, 1])
+                product_options = [None, *internal_by_id.keys()]
+                default_index = product_options.index(suggestion) if suggestion in product_options else 0
+                selected_product_id = match_columns[0].selectbox(
+                    "Match to internal product",
+                    product_options,
+                    index=default_index,
+                    format_func=lambda value: "Choose a product" if value is None else internal_by_id[value]["product_name"],
+                    key=f"shopify-match-select-{item_key}",
+                )
+                if match_columns[1].button(
+                    "Confirm Match",
+                    key=f"shopify-match-{item_key}",
+                    disabled=selected_product_id is None,
+                    use_container_width=True,
+                ):
+                    db.match_shopify_product(remote["shopify_product_id"], selected_product_id)
+                    st.rerun()
+                if match_columns[2].button(
+                    "Create Product",
+                    key=f"shopify-create-{item_key}",
+                    use_container_width=True,
+                ):
+                    product_id = db.create_product_from_shopify(remote["shopify_product_id"])
+                    go_to_product(product_id)
+
+            render_shopify_remote_details(remote, item_key)
 
 
 def product_form_fields(prefix, product=None):
@@ -363,7 +621,7 @@ def render_product_row(product):
                     product.get("readiness_status"),
                     product.get("overall_asset_readiness"),
                     f"Prodigi {product.get('prodigi_status')}",
-                    product.get("shopify_link_status"),
+                    product.get("shopify_sync_status"),
                 )
             ),
             unsafe_allow_html=True,
@@ -411,7 +669,7 @@ def render_products_page():
         "Check for an existing product before adding another one.",
     )
 
-    actions = st.columns([1.2, 1.2, 2.6])
+    actions = st.columns([1.2, 1.2, 1.2, 1.4])
     with actions[0]:
         if st.button("Add New Product", type="primary", use_container_width=True):
             st.session_state.show_add_product = not st.session_state.get("show_add_product", False)
@@ -424,6 +682,10 @@ def render_products_page():
             mime="text/csv",
             use_container_width=True,
         )
+    with actions[2]:
+        if st.button("Open Shopify Sync", use_container_width=True):
+            st.session_state.pending_page = "Shopify Sync"
+            st.rerun()
     if st.session_state.get("show_add_product"):
         render_add_product_form()
 
@@ -684,6 +946,37 @@ def render_prodigi_mapping(product):
         st.rerun()
 
 
+def render_shopify_product_sync(product):
+    st.subheader("Shopify Sync")
+    remote = product.get("shopify_match")
+    st.markdown(status_badge(product.get("shopify_sync_status")), unsafe_allow_html=True)
+    if not remote:
+        st.caption("This product is not matched to a cached Shopify product yet.")
+        if st.button("Open Shopify Sync", key=f"product-shopify-sync-{product['id']}"):
+            st.session_state.pending_page = "Shopify Sync"
+            st.rerun()
+        return
+
+    st.write(f"**Shopify title:** {remote.get('title') or 'Missing'}")
+    st.write(f"**Shopify handle:** {remote.get('handle') or 'Missing'}")
+    detail_columns = st.columns(3)
+    detail_columns[0].metric("Variants", remote.get("variant_count", 0))
+    detail_columns[1].metric("Images", remote.get("image_count", 0))
+    detail_columns[2].metric("Status", (remote.get("status") or "Unknown").title())
+    st.caption(
+        f"Last synced {format_updated_at(remote.get('synced_at'))}. "
+        f"Shopify updated {format_updated_at(remote.get('remote_updated_at'))}."
+    )
+    action_columns = st.columns(3)
+    if remote.get("admin_url"):
+        action_columns[0].link_button("Open Shopify Admin", remote["admin_url"], use_container_width=True)
+    if remote.get("online_store_url"):
+        action_columns[1].link_button("Open Live Product", remote["online_store_url"], use_container_width=True)
+    if action_columns[2].button("Review Shopify Match", key=f"review-shopify-{product['id']}", use_container_width=True):
+        st.session_state.pending_page = "Shopify Sync"
+        st.rerun()
+
+
 def render_edition_tracking(product):
     st.subheader("Limited Edition Tracking")
     edition_columns = st.columns(5)
@@ -805,9 +1098,11 @@ def render_product_detail_page(product_id):
     st.divider()
     detail_columns = st.columns(2)
     with detail_columns[0]:
-        render_prodigi_mapping(product)
+        render_shopify_product_sync(product)
     with detail_columns[1]:
-        render_va_notes(product)
+        render_prodigi_mapping(product)
+    st.divider()
+    render_va_notes(product)
     st.divider()
     render_edition_tracking(product)
     st.divider()
@@ -1147,10 +1442,15 @@ def render_settings_page(app_version, database_path, password_status):
     render_page_intro(
         "Settings",
         "Connection status and file workflow settings for Sports Cave OS.",
-        "Use product records to store Drive links; no Drive account connection is required in Phase 3.",
+        "Check connection status for the Phase 4 Shopify catalog sync and the link-based Drive file hub.",
     )
+    shopify_config = shopify_sync.get_config()
+    shopify_summary = db.get_shopify_summary()
     settings = (
-        ("Shopify connection", "Not connected yet"),
+        ("Shopify connection", "Configured" if shopify_config["configured"] else "Not configured"),
+        ("Shopify API version", shopify_config["api_version"]),
+        ("Shopify products cached", str(shopify_summary["total"])),
+        ("Shopify products matched", str(shopify_summary["matched"])),
         ("Google Drive mode", "Link-based file hub"),
         ("Full Google Drive API sync", "Coming later"),
         ("OAuth / Drive Picker", "Coming later"),
@@ -1165,8 +1465,8 @@ def render_settings_page(app_version, database_path, password_status):
                 st.caption(value)
 
     st.info(
-        "In this phase, Sports Cave OS stores Google Drive links and folder shortcuts only. "
-        "Full Google Drive sync will be added later after the file workflow is stable."
+        "Phase 4 reads Shopify product data only when Test or Sync is clicked on the Shopify Sync page. "
+        "It does not call Shopify during mockup generation. Google Drive remains link-based only."
     )
     st.write(f"**Local database:** `{database_path}`")
     st.write(f"**Password protection:** {password_status}")

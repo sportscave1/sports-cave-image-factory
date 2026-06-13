@@ -1,8 +1,8 @@
 # Sports Cave OS
 
-Private Streamlit operations app for Sports Cave staff. Phase 3 combines the
-existing Image Factory with a practical Product Command Centre and a link-based
-Google Drive asset workflow.
+Private Streamlit operations app for Sports Cave staff. Phase 4 combines the
+existing Image Factory, Product Command Centre, link-based Google Drive asset
+workflow, and a manual Shopify product sync.
 
 ## Active Workflows
 
@@ -13,10 +13,13 @@ Google Drive asset workflow.
 - Product Upload workflow board grouped by VA stage
 - CSV product backup/export including file links and asset statuses
 - Local limited-edition tracking and edition calculations
+- Manual Shopify Admin GraphQL catalog sync and product matching
+- Cached Shopify variants, image links, tags, collections, and metafields
 - Existing mockup generation, previews, prompts, and ZIP downloads
 
 The sidebar also includes placeholders for Orders, Certificates, Marketing
-Factory, and VA Training. Those systems are intentionally deferred.
+Factory, and VA Training. Those systems remain intentionally deferred until
+the Shopify product connection and limited-edition foundation are stable.
 
 ## Database
 
@@ -69,6 +72,32 @@ Sports Cave Products
 
 Full Drive API sync, OAuth, and a Drive Picker are intentionally deferred until
 the link-based file workflow is stable.
+
+## Shopify Product Sync
+
+Phase 4 uses Shopify's Admin GraphQL API only when a staff member opens
+`Shopify Sync` and clicks `Test Shopify Connection` or `Sync Shopify Products`.
+No Shopify request runs during mockup generation or normal page loads.
+
+Add these environment variables locally or in Render:
+
+```text
+SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
+SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_...
+SHOPIFY_API_VERSION=2026-04
+SHOPIFY_SYNC_MAX_PRODUCTS=250
+```
+
+The custom app token needs read access to products. Keep the token in Render
+environment variables and never commit it. Product metadata is cached in the
+local SQLite database; image URLs are stored, but image files are not downloaded.
+
+Matching rules:
+
+1. Existing Shopify product IDs are matched first.
+2. A unique exact handle match is connected automatically.
+3. Title-only matches are suggestions and require manual confirmation.
+4. Unmatched Shopify products can create a new internal master record.
 
 ## Mockup Workflow
 

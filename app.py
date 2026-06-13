@@ -55,6 +55,7 @@ ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
 MENU_OPTIONS = [
     "Dashboard",
     "Products",
+    "Shopify Sync",
     "Mockups",
     "Product Uploads",
     "Limited Editions",
@@ -66,7 +67,7 @@ MENU_OPTIONS = [
     "VA Training",
     "Settings",
 ]
-APP_VERSION = "Sports Cave OS Phase 3 - 2026-06-12"
+APP_VERSION = "Sports Cave OS Phase 4 - 2026-06-13"
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
     "limited_editions": "Limited Editions",
@@ -1930,6 +1931,11 @@ def inject_styles():
             color: #BFE3C9;
         }
 
+        .sc-status-shopify-active {
+            border-color: #527A63;
+            color: #BFE3C9;
+        }
+
         .sc-status-approved,
         .sc-status-asset-pack-approved,
         .sc-status-core-assets-connected {
@@ -1951,6 +1957,11 @@ def inject_styles():
             color: #F0B4A1;
         }
 
+        .sc-status-not-matched {
+            border-color: var(--sc-danger);
+            color: #F0B4A1;
+        }
+
         .sc-status-needs-review,
         .sc-status-core-assets-missing,
         .sc-status-live-product-missing-files {
@@ -1962,6 +1973,12 @@ def inject_styles():
         .sc-status-upload-in-progress,
         .sc-status-artwork-ready,
         .sc-status-admin-link-added {
+            border-color: var(--sc-gold);
+            color: #E9C980;
+        }
+
+        .sc-status-shopify-draft,
+        .sc-status-id-not-synced {
             border-color: var(--sc-gold);
             color: #E9C980;
         }
@@ -4091,6 +4108,13 @@ def render_sidebar():
         st.sidebar.write("2. Connect product and file links.")
         st.sidebar.write("3. Set edition values.")
         st.sidebar.write("4. Clear the readiness checklist.")
+    elif st.session_state.selected_page == "Shopify Sync":
+        st.sidebar.divider()
+        st.sidebar.subheader("Shopify Sync")
+        st.sidebar.write("1. Test the Shopify connection.")
+        st.sidebar.write("2. Run a manual product sync.")
+        st.sidebar.write("3. Review unmatched products.")
+        st.sidebar.write("4. Confirm the correct internal product before matching.")
     elif st.session_state.selected_page == "Limited Editions":
         st.sidebar.divider()
         st.sidebar.subheader("Limited Editions")
@@ -4119,9 +4143,9 @@ def render_sidebar():
         st.sidebar.write("Work through products by stage, then use the Shopify prompt tools when needed.")
 
     st.sidebar.divider()
-    st.sidebar.subheader("Phase 3")
+    st.sidebar.subheader("Phase 4")
     st.sidebar.caption(
-        "Link-based Google Drive asset control is active. Full Drive API and Shopify sync come later."
+        "Manual Shopify product sync and matching are active. Drive remains link-based and lightweight."
     )
 
 
@@ -4628,6 +4652,8 @@ def main():
         os_pages.render_dashboard_page()
     elif current_page == "Products":
         os_pages.render_products_page()
+    elif current_page == "Shopify Sync":
+        os_pages.render_shopify_sync_page()
     elif current_page == "Mockups":
         render_mockups_page()
     elif current_page == "Limited Editions":
