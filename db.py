@@ -347,11 +347,14 @@ def init_db():
                 order_number TEXT,
                 admin_url TEXT,
                 created_at TEXT,
+                processed_at TEXT,
                 paid_at TEXT,
                 financial_status TEXT,
                 fulfillment_status TEXT,
                 customer_name TEXT,
                 customer_email TEXT,
+                total_price TEXT,
+                currency TEXT,
                 cancelled_at TEXT,
                 last_synced_at TEXT NOT NULL,
                 notes TEXT
@@ -365,6 +368,7 @@ def init_db():
                 product_title TEXT,
                 product_handle TEXT,
                 variant_title TEXT,
+                sku TEXT,
                 quantity INTEGER NOT NULL DEFAULT 1,
                 assignment_status TEXT NOT NULL DEFAULT 'Needs Edition',
                 created_at TEXT NOT NULL,
@@ -385,6 +389,9 @@ def init_db():
                 assignment_status TEXT NOT NULL DEFAULT 'Assigned',
                 assigned_at TEXT NOT NULL,
                 voided_at TEXT,
+                certificate_pdf_path TEXT,
+                certificate_id TEXT,
+                certificate_generated_at TEXT,
                 notes TEXT,
                 FOREIGN KEY (order_id) REFERENCES shopify_orders(id) ON DELETE CASCADE,
                 FOREIGN KEY (line_item_id) REFERENCES order_line_items(id) ON DELETE CASCADE,
@@ -449,6 +456,19 @@ def init_db():
             ensure_column(connection, "products", field, "TEXT")
         ensure_column(connection, "shopify_products", "variant_count", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(connection, "shopify_products", "image_count", "INTEGER NOT NULL DEFAULT 0")
+        for column_name, definition in (
+            ("processed_at", "TEXT"),
+            ("total_price", "TEXT"),
+            ("currency", "TEXT"),
+        ):
+            ensure_column(connection, "shopify_orders", column_name, definition)
+        ensure_column(connection, "order_line_items", "sku", "TEXT")
+        for column_name, definition in (
+            ("certificate_pdf_path", "TEXT"),
+            ("certificate_id", "TEXT"),
+            ("certificate_generated_at", "TEXT"),
+        ):
+            ensure_column(connection, "edition_assignments", column_name, definition)
         for column_name, definition in (
             ("edition_limit", "INTEGER DEFAULT 100"),
             ("next_available_edition", "INTEGER DEFAULT 1"),
@@ -1359,21 +1379,25 @@ def process_shopify_order_for_editions(order):
             """
             INSERT INTO shopify_orders (
                 shopify_order_id, legacy_resource_id, order_name, order_number,
-                admin_url, created_at, paid_at, financial_status,
-                fulfillment_status, customer_name, customer_email, cancelled_at,
+                admin_url, created_at, processed_at, paid_at, financial_status,
+                fulfillment_status, customer_name, customer_email, total_price,
+                currency, cancelled_at,
                 last_synced_at, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(shopify_order_id) DO UPDATE SET
                 legacy_resource_id = excluded.legacy_resource_id,
                 order_name = excluded.order_name,
                 order_number = excluded.order_number,
                 admin_url = excluded.admin_url,
                 created_at = excluded.created_at,
+                processed_at = excluded.processed_at,
                 paid_at = excluded.paid_at,
                 financial_status = excluded.financial_status,
                 fulfillment_status = excluded.fulfillment_status,
                 customer_name = excluded.customer_name,
                 customer_email = excluded.customer_email,
+                total_price = excluded.total_price,
+                currency = excluded.currency,
                 cancelled_at = excluded.cancelled_at,
                 last_synced_at = excluded.last_synced_at
             """,
@@ -1384,11 +1408,14 @@ def process_shopify_order_for_editions(order):
                 order.get("order_number") or "",
                 order.get("admin_url") or "",
                 order.get("created_at") or timestamp,
+                order.get("processed_at") or "",
                 order.get("paid_at") or "",
                 order.get("financial_status") or "",
                 order.get("fulfillment_status") or "",
                 order.get("customer_name") or "",
                 order.get("customer_email") or "",
+                order.get("total_price") or "",
+                order.get("currency") or "",
                 order.get("cancelled_at") or "",
                 timestamp,
                 order.get("notes") or "",
@@ -1412,15 +1439,16 @@ def process_shopify_order_for_editions(order):
                 """
                 INSERT INTO order_line_items (
                     order_id, shopify_line_item_id, shopify_product_id,
-                    product_title, product_handle, variant_title, quantity,
+                    product_title, product_handle, variant_title, sku, quantity,
                     assignment_status, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Needs Edition', ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Needs Edition', ?, ?)
                 ON CONFLICT(shopify_line_item_id) DO UPDATE SET
                     order_id = excluded.order_id,
                     shopify_product_id = excluded.shopify_product_id,
                     product_title = excluded.product_title,
                     product_handle = excluded.product_handle,
                     variant_title = excluded.variant_title,
+                    sku = excluded.sku,
                     quantity = excluded.quantity,
                     updated_at = excluded.updated_at
                 """,
@@ -1431,6 +1459,7 @@ def process_shopify_order_for_editions(order):
                     item.get("product_title") or "",
                     item.get("product_handle") or "",
                     item.get("variant_title") or "",
+                    item.get("sku") or "",
                     quantity,
                     timestamp,
                     timestamp,
@@ -1580,10 +1609,25 @@ def list_shopify_orders(search="", status_filter="All", limit=100):
         search_value = f"%{search.strip().lower()}%"
         clauses.append(
             "(LOWER(o.order_name) LIKE ? OR LOWER(o.order_number) LIKE ? OR "
-            "LOWER(o.customer_name) LIKE ? OR EXISTS (SELECT 1 FROM order_line_items li "
-            "WHERE li.order_id = o.id AND LOWER(li.product_title) LIKE ?))"
+            "LOWER(o.customer_name) LIKE ? OR LOWER(o.customer_email) LIKE ? OR "
+            "EXISTS (SELECT 1 FROM order_line_items li "
+            "WHERE li.order_id = o.id AND (LOWER(li.product_title) LIKE ? "
+            "OR LOWER(li.variant_title) LIKE ? OR LOWER(li.sku) LIKE ?)) OR "
+            "EXISTS (SELECT 1 FROM edition_assignments ea "
+            "WHERE ea.order_id = o.id AND CAST(ea.edition_number AS TEXT) LIKE ?))"
         )
-        values.extend((search_value, search_value, search_value, search_value))
+        values.extend(
+            (
+                search_value,
+                search_value,
+                search_value,
+                search_value,
+                search_value,
+                search_value,
+                search_value,
+                search_value,
+            )
+        )
     status_clauses = {
         "Needs Edition": "EXISTS (SELECT 1 FROM order_line_items li WHERE li.order_id = o.id AND li.assignment_status = 'Needs Edition')",
         "Assigned": "EXISTS (SELECT 1 FROM edition_assignments ea WHERE ea.order_id = o.id AND ea.assignment_status IN ('Assigned', 'Manual Override'))",
@@ -1647,6 +1691,67 @@ def list_shopify_orders(search="", status_filter="All", limit=100):
         order["line_items"] = lines_by_order.get(order["id"], [])
         orders.append(order)
     return orders
+
+
+def save_assignment_certificate(assignment_id, pdf_path, certificate_id):
+    timestamp = utc_now()
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE edition_assignments
+            SET certificate_pdf_path = ?, certificate_id = ?, certificate_generated_at = ?
+            WHERE id = ?
+            """,
+            (str(pdf_path or ""), str(certificate_id or ""), timestamp, int(assignment_id)),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError("Certificate assignment could not be found.")
+
+
+def get_assignment_certificate_details(assignment_id):
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT ea.*, o.order_name, o.order_number, o.customer_name, o.created_at,
+                   o.processed_at, li.product_handle, li.variant_title, li.quantity
+            FROM edition_assignments ea
+            JOIN shopify_orders o ON o.id = ea.order_id
+            JOIN order_line_items li ON li.id = ea.line_item_id
+            WHERE ea.id = ?
+            """,
+            (int(assignment_id),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_generated_certificates(limit=100):
+    with get_connection() as connection:
+        rows = connection.execute(
+            """
+            SELECT ea.id, ea.certificate_id, ea.certificate_pdf_path, ea.certificate_generated_at,
+                   ea.product_title, ea.edition_number, ea.edition_limit,
+                   o.order_name, o.customer_name
+            FROM edition_assignments ea
+            JOIN shopify_orders o ON o.id = ea.order_id
+            WHERE COALESCE(ea.certificate_pdf_path, '') != ''
+            ORDER BY ea.certificate_generated_at DESC, ea.id DESC
+            LIMIT ?
+            """,
+            (min(max(int(limit), 1), 500),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_certificate_summary():
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS generated
+            FROM edition_assignments
+            WHERE COALESCE(certificate_pdf_path, '') != ''
+            """
+        ).fetchone()
+    return {"generated": int(row["generated"] or 0)}
 
 
 def get_shopify_order_summary():
@@ -2279,6 +2384,7 @@ def get_dashboard_data():
     products = list_products(include_archived=False)
     shopify_editions = get_shopify_edition_summary()
     orders = get_shopify_order_summary()
+    certificates = get_certificate_summary()
     metrics = {
         "total_products": len(products),
         "live_products": sum(product["status"] == "Live" for product in products),
@@ -2309,6 +2415,7 @@ def get_dashboard_data():
         "orders_synced": orders["total"],
         "orders_needing_assignment": orders["needs_assignment"],
         "orders_assigned_today": orders["assigned_today"],
+        "certificate_pdfs_generated": certificates["generated"],
         "shopify_missing_edition_setup": shopify_editions["missing_setup"],
         "shopify_missing_psd": shopify_editions["missing_psd"],
         "shopify_missing_prodigi": shopify_editions["missing_prodigi"],

@@ -431,10 +431,51 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
       displayFinancialStatus
       displayFulfillmentStatus
       email
+      totalPriceSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
       customer {
         displayName
         email
       }
+      lineItems(first: 100) {
+        nodes {
+          id
+          title
+          quantity
+          variantTitle
+          sku
+          product {
+            id
+            title
+            handle
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+ORDERS_SAFE_QUERY = """
+query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
+  orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      id
+      legacyResourceId
+      name
+      createdAt
+      processedAt
+      cancelledAt
+      displayFinancialStatus
+      displayFulfillmentStatus
       lineItems(first: 100) {
         nodes {
           id
@@ -568,6 +609,7 @@ def build_order_admin_url(store_domain, legacy_resource_id):
 
 def normalize_order(node, store_domain):
     customer = node.get("customer") or {}
+    total_price = ((node.get("totalPriceSet") or {}).get("shopMoney") or {})
     line_items = []
     for item in (node.get("lineItems") or {}).get("nodes") or []:
         product = item.get("product") or {}
@@ -578,6 +620,7 @@ def normalize_order(node, store_domain):
                 "product_title": product.get("title") or item.get("title") or "",
                 "product_handle": product.get("handle") or "",
                 "variant_title": item.get("variantTitle") or "",
+                "sku": item.get("sku") or "",
                 "quantity": int(item.get("quantity") or 1),
             }
         )
@@ -590,11 +633,14 @@ def normalize_order(node, store_domain):
         "order_number": (node.get("name") or "").lstrip("#"),
         "admin_url": build_order_admin_url(store_domain, legacy_resource_id),
         "created_at": node.get("createdAt") or "",
+        "processed_at": node.get("processedAt") or "",
         "paid_at": node.get("processedAt") if financial_status == "PAID" else "",
         "financial_status": financial_status,
         "fulfillment_status": node.get("displayFulfillmentStatus") or "",
         "customer_name": customer.get("displayName") or "",
         "customer_email": customer.get("email") or node.get("email") or "",
+        "total_price": str(total_price.get("amount") or ""),
+        "currency": total_price.get("currencyCode") or "",
         "cancelled_at": node.get("cancelledAt") or "",
         "line_items": line_items,
     }
@@ -605,12 +651,21 @@ def fetch_orders_page(after=None, days=60, page_size=DEFAULT_PAGE_SIZE, config=N
     first = min(max(int(page_size), 1), 25)
     created_after = (datetime.now(timezone.utc) - timedelta(days=max(int(days), 1))).date().isoformat()
     query = f"created_at:>={created_after}"
-    data, served_version = graphql_request(
-        ORDERS_QUERY,
-        variables={"first": first, "after": after, "query": query},
-        config=config,
-        request_post=request_post,
-    )
+    variables = {"first": first, "after": after, "query": query}
+    try:
+        data, served_version = graphql_request(
+            ORDERS_QUERY,
+            variables=variables,
+            config=config,
+            request_post=request_post,
+        )
+    except ShopifyAPIError:
+        data, served_version = graphql_request(
+            ORDERS_SAFE_QUERY,
+            variables=variables,
+            config=config,
+            request_post=request_post,
+        )
     connection = data.get("orders") or {}
     nodes = connection.get("nodes") or []
     orders = [normalize_order(node, config["store_domain"]) for node in nodes]

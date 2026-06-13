@@ -4117,7 +4117,7 @@ def render_sidebar():
     elif st.session_state.selected_page == "Orders":
         st.sidebar.divider()
         st.sidebar.subheader("Orders")
-        st.sidebar.write("1. Sync recent Shopify orders manually.")
+        st.sidebar.write("1. Fetch recent Shopify orders manually.")
         st.sidebar.write("2. Sports Cave OS assigns paid order editions.")
         st.sidebar.write("3. Open PSD and Prodigi links from each line.")
         st.sidebar.write("4. Review any missing or sold-out issues.")
@@ -4144,7 +4144,7 @@ def render_sidebar():
     st.sidebar.divider()
     st.sidebar.subheader("Phase 5B")
     st.sidebar.caption(
-        "Backend-led edition numbers and manual Shopify order sync are active. Drive remains link-based and lightweight."
+        "Backend-led edition numbers and manual Shopify order fetches are active. Drive remains link-based and lightweight."
     )
 
 
@@ -4659,10 +4659,14 @@ def main():
         os_pages.render_orders_page()
     elif current_page == "Prodigi":
         os_pages.render_prodigi_page()
+    elif current_page == "Certificates":
+        os_pages.render_certificates_page()
     elif current_page == "Product Uploads":
         render_product_uploads_page()
     elif current_page == "Files":
         os_pages.render_files_page()
+    elif current_page == "Marketing Factory":
+        os_pages.render_marketing_factory_page()
     elif current_page == "Settings":
         os_pages.render_settings_page(
             app_version=APP_VERSION,

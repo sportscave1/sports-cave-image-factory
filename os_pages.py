@@ -6,6 +6,7 @@ import json
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -13,6 +14,12 @@ import streamlit.components.v1 as components
 import db
 import shopify_sync
 
+
+CERTIFICATE_OUTPUT_DIR = db.BASE_DIR / "output" / "certificates"
+ORDER_FETCH_ERROR_MESSAGE = (
+    "Orders require the read_orders scope. Add read_orders in Shopify Dev Dashboard, "
+    "release a new app version, update/reinstall the app, then redeploy Render."
+)
 
 QUICK_LINKS = (
     ("shopify_admin_url", "Open Shopify Admin"),
@@ -78,7 +85,7 @@ PRODIGI_SIZE_OPTIONS = (
     {
         "shopify_size": "XL",
         "prodigi_size": "A1",
-        "dimensions": "62 × 87 cm (24.4 × 34.3 in)",
+        "dimensions": "62 x 87 cm (24.4 x 34.3 in)",
         "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 59.4x84.1cm / 23.4x33.1" (A1)',
         "framed_code": "GLOBAL-CFP-A1",
         "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 59.4x84.1cm / 23.4x33.1" (A1)',
@@ -87,7 +94,7 @@ PRODIGI_SIZE_OPTIONS = (
     {
         "shopify_size": "L",
         "prodigi_size": "A2",
-        "dimensions": "45 × 62 cm (17.7 × 24.4 in)",
+        "dimensions": "45 x 62 cm (17.7 x 24.4 in)",
         "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 42x59.4cm / 16.5x23.4" (A2)',
         "framed_code": "GLOBAL-CFP-A2",
         "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 42x59.4cm / 16.5x23.4" (A2)',
@@ -96,7 +103,7 @@ PRODIGI_SIZE_OPTIONS = (
     {
         "shopify_size": "M",
         "prodigi_size": "A3",
-        "dimensions": "30 × 45 cm (11.8 × 17.7 in)",
+        "dimensions": "30 x 45 cm (11.8 x 17.7 in)",
         "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 29.7x42cm / 11.7x16.5" (A3)',
         "framed_code": "GLOBAL-CFP-A3",
         "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 29.7x42cm / 11.7x16.5" (A3)',
@@ -105,7 +112,7 @@ PRODIGI_SIZE_OPTIONS = (
     {
         "shopify_size": "S",
         "prodigi_size": "A4",
-        "dimensions": "21 × 30 cm (8.3 × 11.8 in)",
+        "dimensions": "21 x 30 cm (8.3 x 11.8 in)",
         "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 21x29.7cm / 8.3x11.7" (A4)',
         "framed_code": "GLOBAL-CFP-A4",
         "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 21x29.7cm / 8.3x11.7" (A4)',
@@ -148,6 +155,106 @@ def format_updated_at(value):
         return parsed.strftime("%d %b %Y, %H:%M")
     except (TypeError, ValueError):
         return str(value)
+
+
+def safe_filename_part(value):
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "").strip().lower())
+    return cleaned.strip("-") or "sports-cave"
+
+
+def escape_pdf_text(value):
+    return str(value or "").replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def write_simple_certificate_pdf(path, lines):
+    width = 841.89
+    height = 595.28
+    content = [
+        "0.043 0.043 0.051 rg",
+        f"0 0 {width:.2f} {height:.2f} re f",
+        "0.831 0.647 0.298 RG",
+        "3 w",
+        "42 42 758 512 re S",
+        "0.831 0.647 0.298 rg",
+        "72 470 698 2 re f",
+        "0.961 0.949 0.918 rg",
+    ]
+    for text, x, y, size, color in lines:
+        if color == "gold":
+            content.append("0.831 0.647 0.298 rg")
+        else:
+            content.append("0.961 0.949 0.918 rg")
+        content.append(f"BT /F1 {size} Tf {x} {y} Td ({escape_pdf_text(text)}) Tj ET")
+    stream = "\n".join(content).encode("latin-1", "replace")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 841.89 595.28] "
+            b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+        ),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{index} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+    xref_offset = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    pdf.extend(b"0000000000 65535 f \n")
+    for offset in offsets:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(
+        (
+            f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+            f"startxref\n{xref_offset}\n%%EOF\n"
+        ).encode("ascii")
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(pdf))
+
+
+def generate_certificate_pdf(assignment_id):
+    details = db.get_assignment_certificate_details(assignment_id)
+    if not details:
+        raise ValueError("The edition assignment could not be found.")
+    order_name = details.get("order_name") or details.get("order_number") or "order"
+    product_name = details.get("product_title") or "Sports Cave Artwork"
+    edition_number = int(details.get("edition_number") or 0)
+    edition_limit = int(details.get("edition_limit") or 0)
+    handle = details.get("product_handle") or safe_filename_part(product_name)
+    certificate_id = f"SC-{safe_filename_part(order_name).upper()}-{edition_number:04d}"
+    purchase_date = format_updated_at(details.get("processed_at") or details.get("created_at"))
+    filename = (
+        f"certificate_{safe_filename_part(order_name)}_{safe_filename_part(handle)}"
+        f"_edition_{edition_number}.pdf"
+    )
+    pdf_path = CERTIFICATE_OUTPUT_DIR / filename
+    lines = [
+        ("SPORTS CAVE", 72, 505, 40, "gold"),
+        ("CERTIFICATE OF AUTHENTICITY", 72, 455, 24, "white"),
+        (product_name[:72], 72, 365, 26, "white"),
+        (f"Edition #{edition_number} of {edition_limit}", 72, 315, 30, "gold"),
+        (f"Order: {order_name}", 72, 250, 17, "white"),
+        (f"Collector: {details.get('customer_name') or 'Sports Cave Collector'}", 72, 220, 17, "white"),
+        (f"Date: {purchase_date}", 72, 190, 17, "white"),
+        (f"Certificate ID: {certificate_id}", 72, 160, 15, "white"),
+        (
+            "This certifies this Sports Cave artwork as part of a limited edition collector release.",
+            72,
+            105,
+            15,
+            "white",
+        ),
+        ("Sports Cave Limited Edition Certificate", 72, 72, 13, "gold"),
+    ]
+    write_simple_certificate_pdf(pdf_path, lines)
+    db.save_assignment_certificate(assignment_id, pdf_path, certificate_id)
+    return str(pdf_path)
 
 
 def build_products_csv(products):
@@ -333,6 +440,7 @@ def render_dashboard_page():
         ("Orders synced", metrics["orders_synced"]),
         ("Orders needing editions", metrics["orders_needing_assignment"]),
         ("Orders assigned today", metrics["orders_assigned_today"]),
+        ("Certificate PDFs generated", metrics["certificate_pdfs_generated"]),
         ("Products missing edition setup", metrics["shopify_missing_edition_setup"]),
         ("Products missing PSD", metrics["shopify_missing_psd"]),
         ("Products missing Prodigi", metrics["shopify_missing_prodigi"]),
@@ -1707,7 +1815,7 @@ def render_prodigi_option_card(frame_label, frame_colour, size_option, is_unfram
             render_copy_text_button(product_code, f"{frame_label.lower()}-{size_option['shopify_size'].lower()}-code", "Copy Product Code")
 
 
-def render_prodigi_page():
+def render_prodigi_page_legacy():
     st.title("Prodigi")
     st.caption(
         "Simple Sports Cave-to-Prodigi matching. Copy the exact product name and product code, then double-check the frame and size before sending the order to production."
@@ -1763,6 +1871,58 @@ def render_prodigi_page():
         st.write("2. Match the frame colour: Black, Natural, White, or Unframed.")
         st.write("3. Copy the exact product name or code from the matching card.")
         st.write("4. Check the order one more time before sending it to production.")
+
+
+def render_prodigi_page():
+    st.title("Prodigi")
+    st.caption("Compact Prodigi matching for Shopify order variants.")
+    st.link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
+    st.info("XL=A1 - L=A2 - M=A3 - S=A4. Oak in Sports Cave = Natural in Prodigi. Framed = Classic Frame. Unframed = Fine Art Paper.")
+
+    st.subheader("Size map")
+    size_columns = st.columns(4)
+    for column, size_option in zip(size_columns, PRODIGI_SIZE_OPTIONS):
+        with column:
+            st.markdown(f"**{size_option['shopify_size']} = {size_option['prodigi_size']}**")
+            st.caption(size_option["dimensions"])
+
+    st.subheader("Frame map")
+    frame_columns = st.columns(4)
+    for column, (shopify_frame, prodigi_frame, prodigi_note) in zip(frame_columns, PRODIGI_FRAME_OPTIONS):
+        with column:
+            st.markdown(f"**{shopify_frame}**")
+            st.caption(f"Select: {prodigi_frame}")
+            st.caption(prodigi_note)
+
+    st.subheader("Product codes")
+    header = st.columns([0.8, 0.55, 0.7, 2.9, 0.9, 0.9])
+    for column, label in zip(header, ("Frame", "Size", "Prodigi", "Product name / code", "Copy name", "Copy code")):
+        column.markdown(f"**{label}**")
+
+    frame_rows = (
+        ("Black", "Black", False),
+        ("Oak", "Natural", False),
+        ("White", "White", False),
+        ("Unframed", "No frame", True),
+    )
+    for frame_label, frame_colour, is_unframed in frame_rows:
+        for size_option in PRODIGI_SIZE_OPTIONS:
+            product_name = size_option["unframed_name"] if is_unframed else size_option["framed_name"]
+            product_code = size_option["unframed_code"] if is_unframed else size_option["framed_code"]
+            columns = st.columns([0.8, 0.55, 0.7, 2.9, 0.9, 0.9])
+            columns[0].write(frame_label)
+            columns[0].caption(f"Select {frame_colour}")
+            columns[1].write(size_option["shopify_size"])
+            columns[2].write(size_option["prodigi_size"])
+            columns[3].write(product_name)
+            columns[3].code(product_code, language=None)
+            key_base = f"prodigi-{frame_label.lower()}-{size_option['shopify_size'].lower()}"
+            with columns[4]:
+                render_copy_text_button(product_name, f"{key_base}-name", "Copy Name")
+            with columns[5]:
+                render_copy_text_button(product_code, f"{key_base}-code", "Copy Code")
+
+    st.warning("Before sending to production: confirm XL=A1, L=A2, M=A3, S=A4, Classic Frame or Fine Art Paper, and the exact frame colour.")
 
 
 def fetch_latest_shopify_products(config):
@@ -2164,13 +2324,145 @@ def render_limited_editions_page(dispatch_log_renderer=None):
 
 
 def _assignment_text(assignments):
-    if not assignments:
-        return "No edition assigned"
-    return ", ".join(
-        f"#{item['edition_number']}/{item['edition_limit']}"
+    active = [
+        item
         for item in assignments
         if item.get("assignment_status") not in {"Voided", "Refunded"}
-    ) or "Edition locked but voided/refunded"
+    ]
+    if not active:
+        return "Needs Edition"
+    numbers = sorted(int(item["edition_number"]) for item in active)
+    limit = active[0].get("edition_limit")
+    if len(numbers) > 1 and numbers == list(range(numbers[0], numbers[-1] + 1)):
+        return f"#{numbers[0]}-{numbers[-1]}/{limit}"
+    return ", ".join(f"#{number}/{limit}" for number in numbers)
+
+
+def fetch_latest_orders(config):
+    run_id = db.start_shopify_order_sync(config["store_domain"], config["api_version"])
+    progress = st.progress(0, text="Fetching latest Shopify orders...")
+    orders_seen = 0
+    pages_synced = 0
+    assignments_created = 0
+    changed_product_ids = set()
+    sync_warning = ""
+    try:
+        for page in shopify_sync.iter_order_pages(config=config):
+            for order in page["orders"]:
+                result = db.process_shopify_order_for_editions(order)
+                assignments_created += result["assignments_created"]
+                changed_product_ids.update(result["changed_product_ids"])
+            orders_seen += len(page["orders"])
+            pages_synced += 1
+            db.update_shopify_order_sync_run(
+                run_id,
+                orders_seen=orders_seen,
+                assignments_created=assignments_created,
+                pages_synced=pages_synced,
+                api_version=page.get("api_version"),
+            )
+            progress.progress(
+                min(int(orders_seen / max(config["max_orders"], 1) * 100), 99),
+                text=f"Fetched {orders_seen} Shopify orders...",
+            )
+            del page
+            gc.collect()
+
+        if os.getenv("SHOPIFY_AUTO_SYNC_EDITION_WIDGET", "true").lower() == "true":
+            for product_id in changed_product_ids:
+                try:
+                    product = db.get_shopify_edition_product(product_id)
+                    if product:
+                        shopify_sync.sync_edition_metafields(product, config=config)
+                        db.mark_shopify_edition_synced(product_id)
+                except Exception:
+                    sync_warning = "Edition assigned locally, but storefront display sync failed."
+
+        db.update_shopify_order_sync_run(
+            run_id,
+            status="Complete",
+            orders_seen=orders_seen,
+            assignments_created=assignments_created,
+            pages_synced=pages_synced,
+        )
+        progress.progress(100, text="Shopify order fetch complete.")
+        return {
+            "orders_seen": orders_seen,
+            "assignments_created": assignments_created,
+            "sync_warning": sync_warning,
+        }
+    except Exception as error:
+        db.update_shopify_order_sync_run(
+            run_id,
+            status="Failed",
+            orders_seen=orders_seen,
+            assignments_created=assignments_created,
+            pages_synced=pages_synced,
+            error_message="Shopify order sync failed. Check read_orders scope and API version.",
+        )
+        progress.empty()
+        raise error
+
+
+def active_assignments(assignments):
+    return [
+        item
+        for item in assignments
+        if item.get("assignment_status") not in {"Voided", "Refunded"}
+    ]
+
+
+def certificate_path_exists(assignment):
+    certificate_path = assignment.get("certificate_pdf_path")
+    return bool(certificate_path and Path(certificate_path).exists())
+
+
+def render_certificate_actions(assignments, key_prefix):
+    active = active_assignments(assignments)
+    if not active:
+        st.button("Needs Edition", disabled=True, use_container_width=True, key=f"{key_prefix}-needs")
+        return
+
+    missing = [assignment for assignment in active if not certificate_path_exists(assignment)]
+    if missing:
+        if st.button("Generate PDF", key=f"{key_prefix}-generate", use_container_width=True):
+            try:
+                for assignment in missing:
+                    generate_certificate_pdf(assignment["id"])
+                st.session_state.orders_notice = (
+                    f"Generated {len(missing)} certificate PDF"
+                    f"{'s' if len(missing) != 1 else ''}."
+                )
+                st.rerun()
+            except Exception as error:
+                st.error("Could not generate the certificate PDF.")
+                st.error(str(error))
+        return
+
+    if len(active) == 1:
+        assignment = active[0]
+        path = Path(assignment["certificate_pdf_path"])
+        st.download_button(
+            "Download PDF",
+            data=path.read_bytes(),
+            file_name=path.name,
+            mime="application/pdf",
+            key=f"{key_prefix}-download-{assignment['id']}",
+            use_container_width=True,
+        )
+        return
+
+    with st.expander("PDFs"):
+        for assignment in active:
+            path = Path(assignment["certificate_pdf_path"])
+            st.download_button(
+                f"#{assignment['edition_number']}",
+                data=path.read_bytes(),
+                file_name=path.name,
+                mime="application/pdf",
+                key=f"{key_prefix}-download-{assignment['id']}",
+                use_container_width=True,
+            )
 
 
 def render_orders_page():
@@ -2185,151 +2477,861 @@ def render_orders_page():
     if warning:
         st.warning(warning)
 
-    toolbar = st.columns([2.4, 1, 1, 1])
-    search = toolbar[0].text_input("Search order/customer/product", placeholder="Order, customer, product")
-    sync_clicked = toolbar[1].button(
-        "Sync Shopify Orders",
+    search = st.text_input(
+        "Search orders",
+        placeholder="Search order, customer, product, SKU, or edition number",
+        key="orders-search",
+        label_visibility="collapsed",
+    )
+
+    toolbar = st.columns([1, 1.2, 3])
+    fetch_clicked = toolbar[0].button(
+        "Fetch Latest Orders",
         type="primary",
         disabled=not config["configured"],
         use_container_width=True,
     )
-    status_filter = toolbar[2].selectbox(
+    status_filter = toolbar[1].selectbox(
         "Filter",
         ["All", "Needs Edition", "Assigned", "Paid", "Unfulfilled", "Error", "Sold Out Issue"],
     )
-    show_limit = toolbar[3].selectbox("Show", [25, 50, 100, 500], index=1)
-
-    if not config["configured"]:
-        st.warning("Shopify is not connected yet. Configure Shopify credentials in Render environment variables.")
-
-    if sync_clicked:
-        run_id = db.start_shopify_order_sync(config["store_domain"], config["api_version"])
-        progress = st.progress(0, text="Starting Shopify order sync...")
-        orders_seen = 0
-        pages_synced = 0
-        assignments_created = 0
-        changed_product_ids = set()
-        sync_warning = ""
-        try:
-            for page in shopify_sync.iter_order_pages(config=config):
-                for order in page["orders"]:
-                    result = db.process_shopify_order_for_editions(order)
-                    assignments_created += result["assignments_created"]
-                    changed_product_ids.update(result["changed_product_ids"])
-                orders_seen += len(page["orders"])
-                pages_synced += 1
-                db.update_shopify_order_sync_run(
-                    run_id,
-                    orders_seen=orders_seen,
-                    assignments_created=assignments_created,
-                    pages_synced=pages_synced,
-                )
-                progress.progress(
-                    min(int(orders_seen / config["max_orders"] * 100), 99),
-                    text=f"Synced {orders_seen} Shopify orders...",
-                )
-                del page
-                gc.collect()
-
-            if os.getenv("SHOPIFY_AUTO_SYNC_EDITION_WIDGET", "true").lower() == "true":
-                for product_id in changed_product_ids:
-                    try:
-                        product = db.get_shopify_edition_product(product_id)
-                        if product:
-                            shopify_sync.sync_edition_metafields(product, config=config)
-                            db.mark_shopify_edition_synced(product_id)
-                    except Exception:
-                        sync_warning = "Edition assigned locally, but storefront display sync failed."
-
-            db.update_shopify_order_sync_run(
-                run_id,
-                status="Complete",
-                orders_seen=orders_seen,
-                assignments_created=assignments_created,
-                pages_synced=pages_synced,
-            )
-            progress.progress(100, text="Shopify order sync complete.")
-            st.session_state.orders_notice = (
-                f"Synced {orders_seen} Shopify orders. Assigned {assignments_created} edition number"
-                f"{'s' if assignments_created != 1 else ''}."
-            )
-            if sync_warning:
-                st.session_state.orders_warning = sync_warning
-            st.rerun()
-        except Exception as error:
-            db.update_shopify_order_sync_run(
-                run_id,
-                status="Failed",
-                orders_seen=orders_seen,
-                assignments_created=assignments_created,
-                pages_synced=pages_synced,
-                error_message="Shopify order sync failed. Check read_orders scope and API version.",
-            )
-            progress.empty()
-            st.error("Shopify order sync failed. Check read_orders scope and API version.")
-            st.error(str(error))
-
-    metrics = st.columns(3)
-    metrics[0].metric("Orders synced", order_summary["total"])
-    metrics[1].metric("Needs edition", order_summary["needs_assignment"])
-    metrics[2].metric("Assigned today", order_summary["assigned_today"])
-    st.caption(
-        "Last order sync: "
+    toolbar[2].caption(
+        "Last fetched: "
         + (format_updated_at(order_summary["last_synced_at"]) if order_summary["last_synced_at"] else "Never")
+        + f" - {order_summary['total']} orders cached"
     )
 
-    orders = db.list_shopify_orders(search=search, status_filter=status_filter, limit=show_limit)
+    if not config["configured"]:
+        st.caption("Shopify connection is not configured. Cached orders still remain visible from Sports Cave OS.")
+
+    if fetch_clicked:
+        try:
+            result = fetch_latest_orders(config)
+            st.session_state.orders_notice = (
+                f"Fetched {result['orders_seen']} Shopify orders. Assigned "
+                f"{result['assignments_created']} edition number"
+                f"{'s' if result['assignments_created'] != 1 else ''}."
+            )
+            if result["sync_warning"]:
+                st.session_state.orders_warning = result["sync_warning"]
+            st.rerun()
+        except Exception:
+            st.error("Shopify order sync failed. Check read_orders scope and API version.")
+            st.warning(ORDER_FETCH_ERROR_MESSAGE)
+
+    metrics = st.columns(3)
+    metrics[0].metric("Orders cached", order_summary["total"])
+    metrics[1].metric("Needs edition", order_summary["needs_assignment"])
+    metrics[2].metric("Assigned today", order_summary["assigned_today"])
+
+    if "orders_visible_count" not in st.session_state:
+        st.session_state.orders_visible_count = 50
+    orders = db.list_shopify_orders(
+        search=search,
+        status_filter=status_filter,
+        limit=st.session_state.orders_visible_count,
+    )
     if not orders:
-        st.info("No synced Shopify orders match these filters. Run Sync Shopify Orders when you are ready.")
+        st.info("No cached Shopify orders match these filters. Use Fetch Latest Orders when you are ready.")
         return
 
-    for order in orders:
-        with st.container(border=True):
-            header = st.columns([1.3, 1.8, 1.2, 1.1, 1.2, 1])
-            header[0].markdown(f"**{order.get('order_name') or order.get('order_number') or 'Order'}**")
-            header[1].write(order.get("customer_name") or "Customer not shown")
-            header[2].write(format_updated_at(order.get("created_at")))
-            header[3].markdown(status_badge(order.get("financial_status") or "Unknown"), unsafe_allow_html=True)
-            header[4].markdown(status_badge(order.get("fulfillment_status") or "Unknown"), unsafe_allow_html=True)
-            if order.get("admin_url"):
-                header[5].link_button("Open Shopify Order", order["admin_url"], use_container_width=True)
+    header = st.columns([0.9, 0.9, 1.25, 0.9, 0.95, 2.1, 1.05, 1.1, 0.85, 0.95])
+    for column, label in zip(
+        header,
+        ("Order", "Date", "Customer", "Payment", "Fulfillment", "Product", "Edition", "Certificate", "PSD", "Prodigi"),
+    ):
+        column.markdown(f"**{label}**")
 
-            for line in order["line_items"]:
-                line_columns = st.columns([2.6, 1.2, 1.6, 1.2, 1, 1, 1.4])
-                product_label = line.get("product_title") or "Unknown product"
-                if line_columns[0].button(product_label, key=f"order-track-product-{line['id']}", use_container_width=True):
-                    st.session_state["limited-edition-search"] = line.get("product_handle") or product_label
-                    st.session_state.pending_page = "Limited Editions"
-                    st.rerun()
-                line_columns[0].caption(line.get("variant_title") or "Variant not shown")
-                line_columns[1].write(f"Qty {line.get('quantity') or 1}")
-                line_columns[2].write(_assignment_text(line.get("assignments") or []))
-                line_columns[3].markdown(status_badge(line.get("assignment_status")), unsafe_allow_html=True)
-                if line.get("psd_file_url"):
-                    line_columns[4].link_button("Open PSD", line["psd_file_url"], use_container_width=True)
-                if line.get("prodigi_url"):
-                    line_columns[5].link_button("Open Prodigi", line["prodigi_url"], use_container_width=True)
-                with line_columns[6].expander("Manual override"):
-                    st.warning("Manual edition changes can affect collector records.")
-                    override_number = st.number_input(
-                        "Edition number",
-                        min_value=1,
-                        step=1,
-                        key=f"override-number-{line['id']}",
+    for order in orders:
+        for line_index, line in enumerate(order["line_items"]):
+            columns = st.columns([0.9, 0.9, 1.25, 0.9, 0.95, 2.1, 1.05, 1.1, 0.85, 0.95])
+            order_name = order.get("order_name") or order.get("order_number") or "Order"
+            if line_index == 0:
+                if order.get("admin_url"):
+                    safe_url = html.escape(order["admin_url"], quote=True)
+                    columns[0].markdown(
+                        f'<a href="{safe_url}" target="_blank" style="color:#F5F2EA;font-weight:700;text-decoration:none;">{html.escape(order_name)}</a>',
+                        unsafe_allow_html=True,
                     )
-                    override_notes = st.text_input("Notes", key=f"override-notes-{line['id']}")
-                    if st.button("Save Override", key=f"override-save-{line['id']}", use_container_width=True):
-                        try:
-                            db.manual_override_edition_assignment(
-                                line["id"],
-                                override_number,
-                                notes=override_notes,
-                                force=False,
-                            )
-                            st.session_state.orders_notice = "Manual edition override saved."
-                            st.rerun()
-                        except Exception as error:
-                            st.error(str(error))
+                else:
+                    columns[0].markdown(f"**{order_name}**")
+                columns[1].caption(format_updated_at(order.get("created_at")))
+                columns[2].write(order.get("customer_name") or "Customer not shown")
+                if order.get("customer_email"):
+                    columns[2].caption(order["customer_email"])
+                columns[3].markdown(status_badge(order.get("financial_status") or "Unknown"), unsafe_allow_html=True)
+                columns[4].markdown(status_badge(order.get("fulfillment_status") or "Unknown"), unsafe_allow_html=True)
+            else:
+                columns[0].caption(order_name)
+
+            product_label = line.get("product_title") or "Unknown product"
+            if columns[5].button(product_label, key=f"order-track-product-{line['id']}", use_container_width=True):
+                st.session_state["limited-edition-search"] = line.get("product_handle") or product_label
+                st.session_state.pending_page = "Limited Editions"
+                st.rerun()
+            details = []
+            if line.get("variant_title"):
+                details.append(line["variant_title"])
+            if line.get("sku"):
+                details.append(f"SKU {line['sku']}")
+            if int(line.get("quantity") or 1) > 1:
+                details.append(f"Qty {line['quantity']}")
+            columns[5].caption(" - ".join(details) if details else "Variant not shown")
+            columns[6].write(_assignment_text(line.get("assignments") or []))
+            columns[6].markdown(status_badge(line.get("assignment_status")), unsafe_allow_html=True)
+            with columns[7]:
+                render_certificate_actions(line.get("assignments") or [], f"cert-line-{line['id']}")
+            if line.get("psd_file_url"):
+                columns[8].link_button("Open PSD", line["psd_file_url"], use_container_width=True)
+            else:
+                columns[8].caption("Missing")
+            if line.get("prodigi_url"):
+                columns[9].link_button("Open Prodigi", line["prodigi_url"], use_container_width=True)
+            else:
+                columns[9].caption("Missing")
+            st.divider()
+
+    if len(orders) >= st.session_state.orders_visible_count:
+        if st.button("Load 50 More", use_container_width=True):
+            st.session_state.orders_visible_count = min(st.session_state.orders_visible_count + 50, 500)
+            st.rerun()
+
+
+def render_certificates_page():
+    st.title("Certificates")
+    st.caption("Rough generated Sports Cave limited edition PDFs. Customer vault and emails come later.")
+    certificates = db.list_generated_certificates(limit=100)
+    summary = db.get_certificate_summary()
+    st.metric("Certificate PDFs generated", summary["generated"])
+    if not certificates:
+        st.info("No certificate PDFs have been generated yet. Generate them from the Orders page after editions are assigned.")
+        return
+
+    header = st.columns([1.1, 2.2, 0.9, 1.1, 1.4, 1])
+    for column, label in zip(header, ("Order", "Product", "Edition", "Collector", "Generated", "PDF")):
+        column.markdown(f"**{label}**")
+    for certificate in certificates:
+        columns = st.columns([1.1, 2.2, 0.9, 1.1, 1.4, 1])
+        columns[0].write(certificate.get("order_name") or "Order")
+        columns[1].write(certificate.get("product_title") or "Sports Cave Artwork")
+        columns[2].write(f"#{certificate['edition_number']}/{certificate['edition_limit']}")
+        columns[3].caption(certificate.get("customer_name") or "Collector")
+        columns[4].caption(format_updated_at(certificate.get("certificate_generated_at")))
+        path = Path(certificate.get("certificate_pdf_path") or "")
+        if path.exists():
+            columns[5].download_button(
+                "Download PDF",
+                data=path.read_bytes(),
+                file_name=path.name,
+                mime="application/pdf",
+                key=f"certificate-download-{certificate['id']}",
+                use_container_width=True,
+            )
+        else:
+            columns[5].caption("Missing file")
+
+
+def render_prompt_block(title, prompt, key, when_to_use=None, height=220):
+    with st.expander(title, expanded=False):
+        if when_to_use:
+            st.caption(f"When to use this: {when_to_use}")
+        st.text_area(
+            f"{title} prompt",
+            value=prompt.strip(),
+            height=height,
+            key=f"prompt-text-{key}",
+            label_visibility="collapsed",
+        )
+        render_copy_text_button(prompt.strip(), f"marketing-{key}", "Copy Prompt")
+
+
+META_PROMPTS = {
+    "au_carousel": """
+You are my Sports Cave Australian Meta Ads copywriter.
+
+I will upload:
+- A screenshot of the product artwork
+- The carousel images being used
+- The product/theme/fan base
+- Any context such as athlete, rivalry, team, moment, championship, location or historical meaning
+
+Write the best possible Meta carousel card text for an Australian audience.
+
+Use the Sports Cave Australian carousel style:
+- premium
+- nostalgic
+- collector-focused
+- man cave ready
+- Australian
+- emotionally driven
+- scarcity based
+- simple and punchy
+
+Do not write long headlines. Do not use generic sales copy. Do not over-explain the product.
+Do not sound like a normal poster ad. Do not use cheap discount language. Do not use emojis.
+
+Each carousel card:
+Headline: 1-2 words preferred, maximum 3 short words
+Description: 1-2 words preferred, maximum 3 short words
+
+Structure:
+Card 1: Main emotional hook
+Card 2: Fan identity
+Card 3: Wall/display desire
+Card 4: Collector/premium quality
+Card 5: Scarcity/FOMO
+
+For each card, write 3 options, choose the strongest final version, then give final clean version only in a table.
+""",
+    "au_primary": """
+You are my Sports Cave Australian Meta ads copywriter.
+
+Write 3 primary text variations for this product.
+
+Audience:
+Australian sports fans, men 25-55, collectors, man cave owners, gift buyers.
+
+Tone:
+Nostalgic, direct, masculine, emotional, collector-driven, and urgent.
+
+Use memory, rivalry, old-school greatness, Aussie sporting pride, man cave ownership, and numbered scarcity.
+
+Avoid generic poster language, over-explaining, discount language, polished AI phrasing, elevate, transform, and ultimate.
+
+Structure:
+Hook
+Short emotional setup
+Collector/scarcity line
+Clear CTA
+
+Write 3 variants. Each variant should be 3-5 short sentences.
+End with one of:
+Secure yours.
+Own the moment.
+Do not miss this drop.
+
+Also provide:
+- 5 headline options, max 4 words
+- 5 description options, max 6 words
+""",
+    "au_motorsport": """
+You are my Sports Cave Australian motorsport Meta ads copywriter.
+
+Write ad copy for a limited-edition motorsport wall art drop.
+
+Audience:
+Australian men 25-55 who grew up on V8s, Bathurst, Holden vs Ford rivalry, old-school touring cars, and garage/man cave culture.
+
+Tone:
+Raw, nostalgic, gritty, collector-driven, proudly Australian.
+
+Use themes:
+- when racing was raw
+- roaring engines
+- mountain memories
+- true rivalry
+- Holden/Ford tribal identity
+- old-school Bathurst energy
+- man cave ownership
+- limited numbered release
+
+Do not name specific drivers unless I provide the name. Do not sound polished or corporate. Do not write long paragraphs.
+
+Write:
+1. Three primary text variants
+2. Five short headlines
+3. Five description lines
+4. Five carousel card headline/description pairs
+""",
+    "usa_carousel": """
+You are my Sports Cave USA Meta Ads copywriter.
+
+I will upload product artwork, carousel images, the product name, sport, fan base, and any story/context.
+
+Write Meta carousel card copy for a USA audience.
+
+The copy must feel:
+- identity-based
+- legacy-driven
+- greatness-focused
+- collector exclusive
+- fan cave ready
+- gift friendly
+- short, human, and urgent
+
+Use angles like legacy debate, greatest era, rivalry, championship memory, fan cave ownership, numbered collector drop, only 100 made, no reprints, final editions.
+
+Avoid Australian slang, generic poster wording, long card text, cheap discounts, and corporate phrasing.
+
+USA carousel formula:
+Card 1: Greatness hook
+Card 2: Fan identity or legacy
+Card 3: Wall ownership or fan cave
+Card 4: Collector value
+Card 5: Scarcity or final chance
+
+For each card provide 3 options, then the strongest final version in a table.
+""",
+    "usa_primary": """
+You are my Sports Cave USA Meta Ads copywriter.
+
+Write 3 primary text variations for this limited-edition sports wall art product.
+
+Audience:
+USA sports fans, collectors, fan cave owners, nostalgia buyers, and gift buyers.
+
+Tone:
+Sharp, emotional, legacy-driven, collector-focused, and urgent.
+
+Structure:
+Hook
+Short emotional setup
+Collector/scarcity line
+CTA
+
+Each variant should be 3-5 short sentences.
+
+Then provide:
+- 6 headlines, max 4 words
+- 6 descriptions, max 6 words
+""",
+    "usa_nba": """
+You are my Sports Cave USA NBA Meta Ads copywriter.
+
+Write ad copy for a limited-edition NBA wall art product built around rivalry, greatness, mentality, or legacy.
+
+Audience:
+USA NBA fans, collectors, Lakers/Bulls/Warriors/Knicks/Celtics-type fan bases, basketball nostalgia fans, fan cave owners, gift buyers.
+
+Tone:
+Sharp, emotional, legacy-driven, intense, collector-focused.
+
+Use:
+- built different
+- no debate
+- greatness recognizes greatness
+- mentality
+- the era fans still talk about
+- legacy on the wall
+- numbered collector drop
+- only 100 made
+- once gone, gone
+
+Do not write like a normal poster ad. Do not over-explain. Do not sound corporate. Do not use emojis.
+
+Write:
+1. Three primary text variants
+2. Five headlines
+3. Five descriptions
+4. Five carousel card headline/description pairs
+""",
+    "full_meta": """
+You are my Sports Cave Meta Ads strategist and copywriter.
+
+I will upload:
+- Product artwork
+- Product name
+- Sport
+- Country target
+- Fan base
+- Any story/context behind the piece
+
+Create a full Meta ad copy pack.
+
+Use Sports Cave tone:
+- nostalgic
+- collector-driven
+- emotional
+- premium
+- urgent
+- short and human
+- not corporate
+- not over-explained
+
+Output:
+1. Campaign angle
+2. Target audience
+3. Primary text - 3 variants
+4. Headlines - 8 options, max 4 words
+5. Descriptions - 8 options, max 6 words
+6. Carousel card copy - 5 cards
+7. Retargeting version - 2 variants
+8. Final scarcity version - 2 variants
+
+Rules:
+- no generic poster language
+- no cheap discount language
+- no elevate
+- no transform
+- no ultimate
+- short lines
+- collector urgency
+- clear CTA
+""",
+}
+
+SEO_PROMPTS = {
+    "site_qualification": """
+You are an SEO editor reviewing a website for brand-safe backlinks.
+
+Website: [PASTE URL]
+
+Assess:
+- Content quality
+- Brand safety
+- Whether a premium sports wall art brand belongs here
+
+Return:
+1. Approve or Reject
+2. Short reason
+3. Any red flags
+
+If rejected, do not proceed.
+""",
+    "outreach": """
+Hi [Name],
+
+I came across your article on [topic] and really enjoyed it - especially the section on [specific part].
+
+I am with Sports Cave, a sports wall art brand used by collectors and man cave owners globally.
+
+I noticed you mention sports decor in the article and thought our framed sports art could be a useful example for readers looking for real products.
+
+If helpful, I am happy to suggest a short line that fits naturally into the post.
+
+Either way, great article.
+
+Best,
+[Your Name]
+""",
+    "keyword_mapping": """
+You are an expert SEO strategist for a premium sports wall art brand called Sports Cave.
+
+Analyse Google Search Console keyword data and extract ONLY high-intent buyer keywords.
+
+IMPORTANT RULES:
+- We ONLY want keywords that indicate someone is looking to BUY wall art
+- DO NOT include informational or research-based keywords
+- DO NOT include irrelevant or low-intent keywords
+
+BUYER INTENT KEYWORDS MUST:
+- Include wall art, poster, print, framed, decor
+OR
+- Include player name plus wall art intent
+OR
+- Include man cave or best buyer intent modifiers
+
+REJECT:
+- who is michael jordan
+- jordan stats
+- nba history
+- anything informational
+
+TASK:
+1. Analyse keyword data
+2. Filter low-intent keywords
+3. Select only best keywords for Sports Cave
+4. Categorise into Product, Collection, Blog
+
+OUTPUT:
+Category | Keyword | Type | Priority | Notes
+
+Only include keywords that could realistically lead to purchase. Do not explain. Only return the table.
+""",
+    "product_meta": """
+Rewrite the following product meta title and meta description for SEO.
+
+Requirements:
+- Include this keyword naturally: [PASTE KEYWORD]
+- Keep it premium, emotional, and nostalgic
+- Do NOT sound robotic or keyword stuffed
+- Make it feel like a collector piece
+- Focus on curiosity and desire
+
+Current Meta Title:
+[PASTE]
+
+Current Meta Description:
+[PASTE]
+""",
+    "product_description": """
+Take the product description below and subtly integrate the following keyword:
+
+Keyword: [PASTE KEYWORD]
+
+Rules:
+- Keep original emotional tone and storytelling exactly the same
+- Do NOT rewrite or change structure
+- Only add keyword naturally where it fits
+- Do NOT force it
+- Maintain nostalgic, premium collector feel
+- Still sound human
+
+Product Description:
+[PASTE]
+""",
+    "collection_description": """
+Rewrite the following collection description to include this keyword:
+
+Keyword: [PASTE]
+
+Rules:
+- Keep premium and minimal
+- Maintain emotional and collector tone
+- Do NOT keyword stuff
+- Make it flow naturally
+- Keep it clean and high-end
+
+Current Collection Description:
+[PASTE]
+""",
+    "blog_optimisation": """
+Rewrite the blog post below to naturally include the following keyword:
+
+Keyword: [PASTE]
+
+Rules:
+- Maintain storytelling tone like a sports documentary
+- Do NOT make it sound SEO-focused
+- Keep emotional and engaging
+- Add keyword naturally 2-3 times max
+- Do NOT force placement
+- Keep readability and flow perfect
+
+Blog Post:
+[PASTE]
+""",
+    "blog_topic": """
+You are a senior SEO strategist for Sports Cave.
+
+Given this product or collection, suggest 10 blog topics that could attract sports fans and lead them naturally toward Sports Cave products.
+
+Product or collection:
+[PASTE]
+
+Rules:
+- Prioritise buyer intent
+- Use nostalgia, legacy, rivalry, greatness, and man cave culture
+- Avoid generic thin topics
+- Include the recommended primary keyword
+
+Output:
+Topic | Primary keyword | Search intent | Why it fits Sports Cave
+""",
+    "blog_writing": """
+You are a senior sports journalist writing for Sports Cave.
+
+Write a premium SEO blog article that feels like Sports Illustrated, ESPN, or The Athletic - not generic AI content.
+
+Topic:
+[PASTE]
+
+Primary keyword:
+[PASTE]
+
+Requirements:
+- 1100-1700 words
+- H1 title
+- Strong intro
+- 5-7 H2 sections
+- Optional H3s
+- One useful bullet list
+- Natural internal reference to Sports Cave near the final third
+- Final conclusion on legacy and why the moment matters
+- Emotional, nostalgic, human, and collector-aware
+- No keyword stuffing
+""",
+    "blog_html": """
+Convert this blog post into Shopify-ready HTML.
+
+Rules:
+- Preserve the tone and meaning
+- Use clean H1, H2, H3, p, ul, li tags
+- Add internal links only inside the blog body
+- Do not add links to product pages unless clearly relevant
+- Add image placeholders where useful
+- Keep the article premium and easy to read
+
+Internal link options:
+Homepage: https://www.sportscaveshop.com
+Soccer: https://www.sportscaveshop.com/collections/soccer
+NBA: https://www.sportscaveshop.com/collections/nba
+Cricket: https://www.sportscaveshop.com/collections/cricket
+Motor Racing: https://www.sportscaveshop.com/collections/motor-racing-wall-art
+Combat Sports: https://www.sportscaveshop.com/collections/combat-art
+Horse Racing: https://www.sportscaveshop.com/collections/horse-racing-wall-art
+Tennis: https://www.sportscaveshop.com/collections/tennis-wall-art
+
+Blog:
+[PASTE]
+""",
+    "image_optimisation": """
+Create SEO image file names and alt text for this Sports Cave blog.
+
+Blog topic:
+[PASTE]
+
+Images:
+[PASTE IMAGE DESCRIPTIONS]
+
+Output:
+Image number | File name | Alt text
+
+Rules:
+- File names lowercase with hyphens
+- Alt text natural and descriptive
+- Include keyword only if natural
+- No stuffing
+""",
+    "blog_meta": """
+Create SEO meta tags for this Sports Cave blog.
+
+Blog title:
+[PASTE]
+
+Primary keyword:
+[PASTE]
+
+Requirements:
+- Meta title under 60 characters where possible
+- Meta description under 155 characters where possible
+- Premium, emotional, click-worthy
+- Natural keyword use
+- No clickbait
+
+Output:
+Meta title:
+Meta description:
+URL handle:
+""",
+    "blog_tags": """
+Generate Shopify blog tags for this Sports Cave article.
+
+Blog topic:
+[PASTE]
+
+Rules:
+- 8-12 tags
+- Include sport, athlete/team if provided, country focus, content type, and theme
+- Keep tags clean and useful
+
+Output a comma-separated list only.
+""",
+}
+
+
+def render_meta_ads_section():
+    st.subheader("Meta Ads")
+    st.caption("Copy/paste prompt library only. No live AI calls.")
+    au_tab, usa_tab, universal_tab, checklist_tab = st.tabs(
+        ["Australia", "USA", "Universal Ad Copy", "Quality Checklist"]
+    )
+
+    with au_tab:
+        st.markdown("### Australian Meta Ads SOP")
+        st.caption("Nostalgia, rivalry, man cave, Aussie pride, and numbered collector drops.")
+        st.write("Goal: make the fan feel, 'That belongs on my wall.'")
+        with st.expander("Winning AU themes", expanded=True):
+            st.write("Nostalgia: History, Framed; Captured Forever; Final Bow; Centre Court Silence.")
+            st.write("Identity: Gooner Pride; Built for Real Man Caves; For The Fans; Real Fans Remember.")
+            st.write("Collector value: Limited Edition; 100 Numbered Editions; Numbered Run; Collector Piece.")
+            st.write("Australian/man cave: Man Cave Ready; Clubroom Ready; Aussie Icon; Aussie-Made; Built Proper.")
+            st.write("Scarcity: Once They're Gone; Only 100 Made; Strictly Limited; Final Editions.")
+            st.warning("Avoid Premium Display, High Quality Art, Best Poster, Shop Now, Great Gift, too clever, too American, or too polished.")
+        render_prompt_block("AU Carousel Card Copy Prompt", META_PROMPTS["au_carousel"], "au-carousel")
+        render_prompt_block("AU Primary Text Prompt", META_PROMPTS["au_primary"], "au-primary")
+        render_prompt_block("AU Motorsport Nostalgia Prompt", META_PROMPTS["au_motorsport"], "au-motorsport")
+
+    with usa_tab:
+        st.markdown("### USA Meta Ads SOP")
+        st.caption("Identity, legacy debates, collector exclusivity, fan cave culture, and sports hero obsession.")
+        with st.expander("Best USA angles", expanded=True):
+            st.write("Gift for Sports Fans Who Have Everything")
+            st.write("Limited Edition Collector Series")
+            st.write("Man Cave Upgrade / Fan Cave Ready")
+            st.write("Legacy Debate / Mentality / Rivalry / Greatest Era")
+            st.write("Championship Memory / Numbered Collector Drop")
+            st.warning("Avoid Australian slang, generic sports poster wording, long card text, and corporate phrasing.")
+        render_prompt_block("USA Carousel Card Copy Prompt", META_PROMPTS["usa_carousel"], "usa-carousel")
+        render_prompt_block("USA Primary Text Prompt", META_PROMPTS["usa_primary"], "usa-primary")
+        render_prompt_block("USA NBA Rivalry / Mentality Prompt", META_PROMPTS["usa_nba"], "usa-nba")
+
+    with universal_tab:
+        render_prompt_block("Full Meta Ad Pack Prompt", META_PROMPTS["full_meta"], "full-meta", height=260)
+
+    with checklist_tab:
+        st.markdown("### Meta Ads Quality Checklist")
+        checks = (
+            "Does every carousel headline fit on mobile?",
+            "Does every description fit on mobile?",
+            "Does each card create a different buying reason?",
+            "Does copy feel like collector art, not a poster?",
+            "Is nostalgia or identity clear early?",
+            "Is scarcity clear by final card?",
+            "Would the target country understand the tone?",
+            "Is anything too generic, too long, too polished, or AI-sounding?",
+            "Is there a clear CTA?",
+            "Does it match the true fan base?",
+        )
+        for item in checks:
+            st.checkbox(item, key=f"meta-check-{safe_filename_part(item)}")
+        st.info("Carousel cards are micro-hooks. Primary text and landing pages do the deeper selling.")
+
+
+def render_seo_section():
+    st.subheader("SEO")
+    st.caption("Practical operating manual for commercial intent, authority, and long-term organic sales.")
+    tabs = st.tabs(
+        [
+            "SEO Overview",
+            "Citations",
+            "Backlinks",
+            "Keyword Mapping",
+            "SEO Execution",
+            "Blog Creation",
+            "Blog Editing",
+            "Prompt Library",
+            "Daily / Weekly Checklist",
+        ]
+    )
+
+    with tabs[0]:
+        st.markdown("### SEO Overview")
+        st.write("Primary goal: drive organic sales to Sports Cave products and collections.")
+        st.write("Secondary goals: build authority, support paid ads with trust, and rank for high-intent sports keywords globally.")
+        st.info("Primary markets: Australia, United States, United Kingdom. Secondary: Canada and New Zealand.")
+        with st.expander("Non-negotiables", expanded=True):
+            for item in (
+                "Quality beats quantity",
+                "Relevance beats volume",
+                "Consistency beats speed",
+                "Structure beats creativity",
+                "Authority compounds over time",
+                "No vanity traffic",
+                "One primary keyword per page",
+                "No keyword stuffing",
+                "Write for sports fans, not Google",
+                "Human edit is mandatory",
+            ):
+                st.write(f"- {item}")
+        st.warning("If the task is not covered by the SEO SOP, stop and ask.")
+
+    with tabs[1]:
+        st.markdown("### Citations and Business Listings")
+        st.caption("Build trust by getting Sports Cave listed on reputable platforms with the website URL visible.")
+        st.code(
+            "Business name: Sports Cave\nWebsite: https://www.sportscaveshop.com\n"
+            "Description: Sports Cave creates premium sports wall art for fans, collectors, and man caves world-wide. "
+            "Featuring iconic sporting moments from basketball, cricket, motorsports, and more.",
+            language=None,
+        )
+        with st.expander("Workflow", expanded=True):
+            st.write("1. Open SEO Citation Tracker")
+            st.write("2. Go to Citations TO DO")
+            st.write("3. Pick next platform")
+            st.write("4. Create profile/listing")
+            st.write("5. Add website URL")
+            st.write("6. Upload logo if available")
+            st.write("7. Update tracker")
+            st.write("8. Move completed row to Completed Citations")
+        st.warning("No shortened links, paid links, spam directories, or unsafe platforms. If not logged, it does not count.")
+        st.write("Weekly target: 10-15 citations per week.")
+
+    with tabs[2]:
+        st.markdown("### Backlink Acquisition")
+        st.caption("Authority-only link building for Sports Cave.")
+        st.info("One strong link is better than fifty weak ones.")
+        with st.expander("Allowed and banned opportunities", expanded=True):
+            st.write("Allowed: sports blogs, motorsport blogs, cricket blogs, soccer blogs, NBA fan blogs, man cave blogs, home decor blogs, gift guides, collectibles and memorabilia blogs.")
+            st.write("Secondary: relevant forums and communities where links are allowed and natural.")
+            st.warning("Hard ban: PBNs, Fiverr links, paid marketplaces, blog comment spam, signatures, auto-generated sites, and SEO-only sites.")
+        st.write("Anchor mix: 70% brand/naked, 20% descriptive, max 10% exact keyword.")
+        render_prompt_block("Site Qualification Prompt", SEO_PROMPTS["site_qualification"], "seo-site-qualification")
+        render_prompt_block("Backlink Outreach Template", SEO_PROMPTS["outreach"], "seo-outreach")
+
+    with tabs[3]:
+        st.markdown("### Keyword Extraction and Mapping")
+        st.caption("Use GSC exports to find buyer-intent keywords and map them to products, collections, or blogs.")
+        st.warning("We are not brainstorming keywords. We extract real data and reject informational searches.")
+        render_prompt_block("Keyword Mapping Prompt", SEO_PROMPTS["keyword_mapping"], "seo-keyword-mapping", height=260)
+
+    with tabs[4]:
+        st.markdown("### SEO Execution System")
+        st.caption("Apply selected keywords without ruining Sports Cave's emotional premium tone.")
+        st.info("Weekly flow: 3 product optimisations, 2 collection optimisations, 2 blog optimisations/creations, 3 distribution actions.")
+        render_prompt_block("Product Meta Tags Prompt", SEO_PROMPTS["product_meta"], "seo-product-meta")
+        render_prompt_block("Product Description Keyword Prompt", SEO_PROMPTS["product_description"], "seo-product-description")
+        render_prompt_block("Collection Description Prompt", SEO_PROMPTS["collection_description"], "seo-collection-description")
+        render_prompt_block("Blog Optimisation Prompt", SEO_PROMPTS["blog_optimisation"], "seo-blog-optimisation")
+        st.caption("Distribution: Pinterest title uses the keyword; Reddit/forums should read like a fan; YouTube Shorts title includes the keyword.")
+
+    with tabs[5]:
+        st.markdown("### Blog Content Creation")
+        st.caption("Create premium sports journal-style articles that attract traffic and funnel readers to Sports Cave.")
+        with st.expander("Workflow", expanded=True):
+            st.write("1. Select product or collection")
+            st.write("2. Find best blog topic using ChatGPT")
+            st.write("3. Generate SEO blog article")
+            st.write("4. Human quality check")
+            st.write("5. Embed video if available")
+            st.write("6. Send to Blog Editing SOP")
+        render_prompt_block("Blog Topic Research Prompt", SEO_PROMPTS["blog_topic"], "seo-blog-topic")
+        render_prompt_block("SEO Blog Writing Prompt", SEO_PROMPTS["blog_writing"], "seo-blog-writing", height=280)
+
+    with tabs[6]:
+        st.markdown("### Blog Editing and Internal Linking")
+        st.caption("Upgrade blog posts into Shopify-ready HTML with internal links, image placeholders, and meta tags.")
+        st.warning("Internal linking is only done inside blog posts unless Nathan instructs otherwise.")
+        render_prompt_block("Blog Editing HTML Master Prompt", SEO_PROMPTS["blog_html"], "seo-blog-html", height=300)
+        render_prompt_block("Blog Image Optimisation Prompt", SEO_PROMPTS["image_optimisation"], "seo-image-optimisation")
+        render_prompt_block("Blog Meta Tag Prompt", SEO_PROMPTS["blog_meta"], "seo-blog-meta")
+        render_prompt_block("Blog Tag Generation Prompt", SEO_PROMPTS["blog_tags"], "seo-blog-tags")
+
+    with tabs[7]:
+        st.markdown("### SEO Prompt Library")
+        groups = (
+            ("Keyword Research", (("Keyword Mapping", "keyword_mapping"),)),
+            ("Product SEO", (("Product Meta Tags", "product_meta"), ("Product Description Keyword", "product_description"))),
+            ("Collection SEO", (("Collection Description", "collection_description"),)),
+            ("Blog Creation", (("Blog Topic Research", "blog_topic"), ("SEO Blog Writing", "blog_writing"))),
+            ("Blog Editing", (("Blog Editing HTML", "blog_html"), ("Image Optimisation", "image_optimisation"), ("Meta Tags", "blog_meta"), ("Blog Tags", "blog_tags"))),
+            ("Backlinks", (("Site Qualification", "site_qualification"), ("Outreach", "outreach"))),
+        )
+        for group_name, prompts in groups:
+            with st.expander(group_name, expanded=False):
+                for prompt_title, prompt_key in prompts:
+                    render_prompt_block(prompt_title, SEO_PROMPTS[prompt_key], f"library-{prompt_key}")
+
+    with tabs[8]:
+        st.markdown("### Daily / Weekly Checklist")
+        checklist_columns = st.columns(3)
+        daily = ("Citation work", "Backlink prospecting", "Outreach", "Pinterest/Reddit/YouTube distribution", "Tracker updates")
+        weekly = ("Export GSC keywords", "Run keyword mapping", "Optimise 3 products", "Optimise 2 collections", "Create/improve 2 blogs", "Complete 10-15 outreach emails", "Publish/report progress")
+        monthly = ("Technical SEO check", "Page speed review", "Blog/internal link review", "Reporting")
+        for item in daily:
+            checklist_columns[0].checkbox(item, key=f"seo-daily-{safe_filename_part(item)}")
+        for item in weekly:
+            checklist_columns[1].checkbox(item, key=f"seo-weekly-{safe_filename_part(item)}")
+        for item in monthly:
+            checklist_columns[2].checkbox(item, key=f"seo-monthly-{safe_filename_part(item)}")
+        st.info("End-of-day report: work completed, links updated, citations completed, outreach sent, live links earned, blockers.")
+        st.warning("If not tracked, it does not count.")
+
+
+def render_marketing_factory_page():
+    st.title("Marketing Factory")
+    st.caption("Meta Ads and SEO SOP hub for Sports Cave operators. No live AI generation.")
+    meta_tab, seo_tab, social_tab, email_tab = st.tabs(
+        ["Meta Ads", "SEO", "Social Media", "Email Marketing"]
+    )
+    with meta_tab:
+        render_meta_ads_section()
+    with seo_tab:
+        render_seo_section()
+    with social_tab:
+        st.info("Social Media workflows are coming soon.")
+    with email_tab:
+        st.info("Email Marketing workflows are coming soon.")
 
 
 def render_settings_page(app_version, database_path, password_status):
@@ -2339,6 +3341,7 @@ def render_settings_page(app_version, database_path, password_status):
     shopify_token_status = shopify_sync.get_token_status(shopify_config)
     shopify_summary = db.get_shopify_summary()
     order_summary = db.get_shopify_order_summary()
+    certificate_summary = db.get_certificate_summary()
     latest_shopify_run = db.get_latest_shopify_sync_run()
     latest_order_run = db.get_latest_shopify_order_sync_run()
     last_sync_status = "Never"
@@ -2357,11 +3360,12 @@ def render_settings_page(app_version, database_path, password_status):
         ("Shopify API version", "Configured" if shopify_config["api_version"] else "Missing"),
         ("Shopify auth mode", shopify_config["auth_mode"]),
         ("Products cached", str(shopify_summary["total"])),
-        ("Order sync count", str(order_summary["total"])),
+        ("Orders cached", str(order_summary["total"])),
         ("Last product sync status", last_sync_status),
         ("Last order sync status", order_sync_status),
         ("Last product fetch", format_updated_at(shopify_summary["last_synced_at"]) if shopify_summary["last_synced_at"] else "Never"),
         ("Last order fetch", format_updated_at(order_summary["last_synced_at"]) if order_summary["last_synced_at"] else "Never"),
+        ("Certificate PDFs generated", str(certificate_summary["generated"])),
         (
             "Last token refresh",
             format_updated_at(shopify_token_status["last_refresh"])
@@ -2371,7 +3375,7 @@ def render_settings_page(app_version, database_path, password_status):
         ("Google Drive mode", "Link-based file hub"),
         ("Full Google Drive API sync", "Coming later"),
         ("Drive Picker", "Coming later"),
-        ("Certificate system", "Not active yet"),
+        ("Certificate system", "Rough local PDF generation active"),
     )
     columns = st.columns(2)
     for index, (label, value) in enumerate(settings):
@@ -2381,9 +3385,9 @@ def render_settings_page(app_version, database_path, password_status):
                 st.caption(value)
 
     st.info(
-        "Phase 5B reads Shopify products and orders only when a worker clicks Sync. "
+        "Sports Cave OS reads Shopify products and orders only when a worker clicks Fetch. "
         "Client credentials are exchanged for a temporary in-memory token only at that time. "
-        "Edition numbers come from Sports Cave OS; Shopify metafields are display only."
+        "Edition numbers and certificates come from Sports Cave OS; Shopify metafields are display only."
     )
     st.write(f"**Local database:** `{database_path}`")
     st.write(f"**Password protection:** {password_status}")
