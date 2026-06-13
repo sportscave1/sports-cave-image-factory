@@ -54,7 +54,6 @@ ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
 ).strip()
 MENU_OPTIONS = [
     "Dashboard",
-    "Products",
     "Mockups",
     "Product Uploads",
     "Limited Editions",
@@ -4100,13 +4099,6 @@ def render_sidebar():
         st.sidebar.write("3. Review lightweight previews.")
         st.sidebar.write("4. Download one ZIP bundle.")
         st.sidebar.write("5. Use the prompt sections below if you want ChatGPT lifestyle images.")
-    elif st.session_state.selected_page == "Products":
-        st.sidebar.divider()
-        st.sidebar.subheader("Product Command Centre")
-        st.sidebar.write("1. Find or add a product.")
-        st.sidebar.write("2. Connect product and file links.")
-        st.sidebar.write("3. Set edition values.")
-        st.sidebar.write("4. Clear the readiness checklist.")
     elif st.session_state.selected_page == "Limited Editions":
         st.sidebar.divider()
         st.sidebar.subheader("Limited Editions")

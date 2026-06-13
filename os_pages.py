@@ -1509,16 +1509,18 @@ def render_product_detail_page(product_id):
     product = db.get_product(product_id)
     if not product:
         st.error("This product record could not be found.")
-        if st.button("Back to Products"):
+        if st.button("Back to Limited Editions"):
             st.session_state.selected_product_id = None
+            st.session_state.pending_page = "Limited Editions"
             st.rerun()
         return
 
     detail_actions = st.columns([1, 1, 1, 3])
     with detail_actions[0]:
-        if st.button("Back to Products", use_container_width=True):
+        if st.button("Back to Limited Editions", use_container_width=True):
             st.session_state.selected_product_id = None
             st.session_state.editing_product_id = None
+            st.session_state.pending_page = "Limited Editions"
             st.rerun()
     with detail_actions[1]:
         if st.button("Edit Product", key=f"detail-edit-{product['id']}", use_container_width=True):
@@ -2162,7 +2164,7 @@ def render_limited_editions_page(dispatch_log_renderer=None):
                 st.error("Could not import the CSV.")
                 st.error(str(error))
 
-    filters = st.columns([1, 1.1, 0.8, 0.9, 0.75])
+    filters = st.columns([1, 1.1, 0.8, 0.9])
     shopify_status = filters[0].selectbox(
         "Shopify status",
         ["All", "Active", "Draft", "Archived", "Missing"],
@@ -2175,23 +2177,24 @@ def render_limited_editions_page(dispatch_log_renderer=None):
     )
     missing_psd_only = filters[2].checkbox("Missing PSD", key="le-missing-psd")
     missing_prodigi_only = filters[3].checkbox("Missing Prodigi", key="le-missing-prodigi")
-    show_limit = filters[4].selectbox("Show", [25, 50, 100, 500], index=0, key="le-show-limit")
 
     st.caption(
         f"Last fetched: {format_updated_at(summary['last_synced_at']) if summary['last_synced_at'] else 'Never'} - "
         f"{summary['total']} products cached - {edition_summary['needs_widget_sync']} needing widget sync"
     )
 
+    if "limited_editions_visible_count" not in st.session_state:
+        st.session_state.limited_editions_visible_count = 50
+    visible_count = int(st.session_state.limited_editions_visible_count)
+
     products = db.list_shopify_edition_products(
         search=search,
         shopify_status=shopify_status,
         edition_filter=edition_filter,
-        limit=show_limit,
+        limit=visible_count,
+        missing_psd_only=missing_psd_only,
+        missing_prodigi_only=missing_prodigi_only,
     )
-    if missing_psd_only:
-        products = [product for product in products if not product.get("psd_file_url")]
-    if missing_prodigi_only:
-        products = [product for product in products if not product.get("prodigi_url")]
 
     if apply_clicked:
         result = apply_limited_edition_table_changes(products)
@@ -2205,7 +2208,7 @@ def render_limited_editions_page(dispatch_log_renderer=None):
             )
         st.rerun()
 
-    st.caption(f"{len(products)} product{'s' if len(products) != 1 else ''} shown")
+    st.caption(f"Showing {len(products)} product{'s' if len(products) != 1 else ''}. Scroll to the bottom to load 50 more.")
     if not products:
         st.info("No cached Shopify products match these filters. Use Fetch Latest Shopify Products if the cache is empty.")
         return
@@ -2321,6 +2324,11 @@ def render_limited_editions_page(dispatch_log_renderer=None):
                 key=f"le-notes-{item_key}",
             )
         st.divider()
+
+    if len(products) >= visible_count:
+        if st.button("Load 50 More", key="limited-editions-load-more", use_container_width=True):
+            st.session_state.limited_editions_visible_count = min(visible_count + 50, 5000)
+            st.rerun()
 
 
 def _assignment_text(assignments):
@@ -2508,7 +2516,7 @@ def render_orders_page():
         try:
             result = fetch_latest_orders(config)
             st.session_state.orders_notice = (
-                f"Fetched {result['orders_seen']} Shopify orders. Assigned "
+                f"Fetched {result['orders_seen']} Shopify orders. Cached orders remain available offline. Assigned "
                 f"{result['assignments_created']} edition number"
                 f"{'s' if result['assignments_created'] != 1 else ''}."
             )
@@ -2516,8 +2524,11 @@ def render_orders_page():
                 st.session_state.orders_warning = result["sync_warning"]
             st.rerun()
         except Exception:
-            st.error("Shopify order sync failed. Check read_orders scope and API version.")
-            st.warning(ORDER_FETCH_ERROR_MESSAGE)
+            if order_summary["total"]:
+                st.warning("Latest Shopify fetch failed. Showing cached orders.")
+            else:
+                st.warning("Shopify order sync failed. Check read_orders scope and API version.")
+            st.caption(ORDER_FETCH_ERROR_MESSAGE)
 
     metrics = st.columns(3)
     metrics[0].metric("Orders cached", order_summary["total"])
@@ -2532,7 +2543,10 @@ def render_orders_page():
         limit=st.session_state.orders_visible_count,
     )
     if not orders:
-        st.info("No cached Shopify orders match these filters. Use Fetch Latest Orders when you are ready.")
+        if not order_summary["last_synced_at"]:
+            st.info("No orders fetched yet. Click Fetch Latest Orders to import recent Shopify orders.")
+        else:
+            st.info("No cached Shopify orders match these filters. Use Fetch Latest Orders when you are ready.")
         return
 
     header = st.columns([0.9, 0.9, 1.25, 0.9, 0.95, 2.1, 1.05, 1.1, 0.85, 0.95])
@@ -2576,6 +2590,8 @@ def render_orders_page():
                 details.append(f"SKU {line['sku']}")
             if int(line.get("quantity") or 1) > 1:
                 details.append(f"Qty {line['quantity']}")
+            if line.get("assignment_status") == "Product Not Found":
+                details.append("Fetch Latest Shopify Products or check product ID")
             columns[5].caption(" - ".join(details) if details else "Variant not shown")
             columns[6].write(_assignment_text(line.get("assignments") or []))
             columns[6].markdown(status_badge(line.get("assignment_status")), unsafe_allow_html=True)
@@ -2635,6 +2651,7 @@ def render_prompt_block(title, prompt, key, when_to_use=None, height=220):
     with st.expander(title, expanded=False):
         if when_to_use:
             st.caption(f"When to use this: {when_to_use}")
+        st.caption("Copy this prompt into ChatGPT.")
         st.text_area(
             f"{title} prompt",
             value=prompt.strip(),
@@ -2643,6 +2660,78 @@ def render_prompt_block(title, prompt, key, when_to_use=None, height=220):
             label_visibility="collapsed",
         )
         render_copy_text_button(prompt.strip(), f"marketing-{key}", "Copy Prompt")
+
+
+def inject_marketing_factory_styles():
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stTextArea"] textarea {
+            background: #F5F2EA !important;
+            color: #0B0B0D !important;
+            border: 1px solid rgba(212, 165, 76, 0.55) !important;
+            border-radius: 10px !important;
+            padding: 14px 16px !important;
+            font-size: 0.95rem !important;
+            line-height: 1.45 !important;
+            caret-color: #0B0B0D !important;
+        }
+        div[data-testid="stTextArea"] textarea::placeholder {
+            color: #4B4B4D !important;
+            opacity: 1 !important;
+        }
+        div[data-testid="stExpander"] {
+            background: rgba(17, 17, 17, 0.98) !important;
+            border: 1px solid rgba(212, 165, 76, 0.18) !important;
+            border-radius: 12px !important;
+        }
+        div[data-testid="stExpander"] summary,
+        div[data-testid="stExpander"] summary:hover,
+        div[data-testid="stExpander"] summary:focus,
+        div[data-testid="stExpander"] summary p,
+        div[data-testid="stExpander"] summary span {
+            background: #111111 !important;
+            color: #F5F2EA !important;
+        }
+        div[data-testid="stExpander"] p,
+        div[data-testid="stExpander"] li,
+        div[data-testid="stExpander"] label,
+        div[data-testid="stExpander"] span {
+            color: #F5F2EA !important;
+        }
+        div[data-testid="stTabs"] button,
+        div[data-testid="stTabs"] button:hover,
+        div[data-testid="stTabs"] button:focus {
+            color: #F5F2EA !important;
+            background: #111111 !important;
+            border-color: rgba(212, 165, 76, 0.25) !important;
+        }
+        div[data-testid="stTabs"] button[aria-selected="true"],
+        div[data-testid="stTabs"] button[aria-selected="true"]:hover,
+        div[data-testid="stTabs"] button[aria-selected="true"]:focus {
+            background: #D4A54C !important;
+            color: #0B0B0D !important;
+        }
+        div[data-testid="stButton"] button,
+        div[data-testid="stDownloadButton"] button,
+        a[data-testid="stLinkButton"] {
+            transition: none !important;
+        }
+        div[data-testid="stButton"] button:hover,
+        div[data-testid="stDownloadButton"] button:hover,
+        a[data-testid="stLinkButton"]:hover {
+            color: inherit !important;
+            filter: none !important;
+        }
+        pre, code {
+            background: #F5F2EA !important;
+            color: #0B0B0D !important;
+            border-color: rgba(212, 165, 76, 0.45) !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 META_PROMPTS = {
@@ -3319,6 +3408,7 @@ def render_seo_section():
 
 
 def render_marketing_factory_page():
+    inject_marketing_factory_styles()
     st.title("Marketing Factory")
     st.caption("Meta Ads and SEO SOP hub for Sports Cave operators. No live AI generation.")
     meta_tab, seo_tab, social_tab, email_tab = st.tabs(
@@ -3398,5 +3488,5 @@ def render_placeholder_page(title):
     render_page_intro(
         title,
         "Coming in a later phase.",
-        "Use Dashboard, Products, Files, Product Uploads, Mockups, or Limited Editions for the current Phase 3 workflows.",
+        "Use Dashboard, Files, Product Uploads, Mockups, Orders, or Limited Editions for current workflows.",
     )

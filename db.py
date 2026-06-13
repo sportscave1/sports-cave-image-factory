@@ -1,8 +1,10 @@
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from difflib import SequenceMatcher
 import json
 import os
+import re
 import sqlite3
 
 
@@ -62,6 +64,7 @@ ORDER_ASSIGNMENT_STATUSES = (
     "Assigned",
     "Already Assigned",
     "Product Not Found",
+    "Needs Edition Setup",
     "Sold Out",
     "Error",
     "Voided",
@@ -1085,6 +1088,8 @@ def list_shopify_edition_products(
     shopify_status="All",
     edition_filter="All",
     limit=25,
+    missing_psd_only=False,
+    missing_prodigi_only=False,
 ):
     clauses = []
     values = []
@@ -1125,8 +1130,12 @@ def list_shopify_edition_products(
     }
     if edition_filter in filter_clauses:
         clauses.append(filter_clauses[edition_filter])
+    if missing_psd_only:
+        clauses.append("COALESCE(NULLIF(sp.psd_file_url, ''), NULLIF(p.psd_file_url, '')) IS NULL")
+    if missing_prodigi_only:
+        clauses.append("COALESCE(NULLIF(sp.prodigi_url, ''), NULLIF(p.prodigi_product_url, '')) IS NULL")
     where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    display_limit = min(max(int(limit), 1), 500)
+    display_limit = min(max(int(limit), 1), 5000)
     with get_connection() as connection:
         rows = connection.execute(
             f"""
@@ -1357,6 +1366,74 @@ def _assignment_state_for_order(order):
     return None
 
 
+def normalize_product_match_text(value):
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def find_cached_shopify_product_for_order_line(connection, product_id="", handle="", title=""):
+    product_id = str(product_id or "").strip()
+    handle = str(handle or "").strip()
+    title = str(title or "").strip()
+    if product_id:
+        product = connection.execute(
+            """
+            SELECT shopify_product_id, title, handle, edition_limit,
+                   next_available_edition, editions_sold
+            FROM shopify_products
+            WHERE shopify_product_id = ?
+            """,
+            (product_id,),
+        ).fetchone()
+        if product:
+            return product
+
+    if handle:
+        matches = connection.execute(
+            """
+            SELECT shopify_product_id, title, handle, edition_limit,
+                   next_available_edition, editions_sold
+            FROM shopify_products
+            WHERE LOWER(TRIM(handle)) = LOWER(TRIM(?))
+            ORDER BY shopify_product_id
+            """,
+            (handle,),
+        ).fetchall()
+        if len(matches) == 1:
+            return matches[0]
+
+    normalized_title = normalize_product_match_text(title)
+    if not normalized_title:
+        return None
+
+    candidates = connection.execute(
+        """
+        SELECT shopify_product_id, title, handle, edition_limit,
+               next_available_edition, editions_sold
+        FROM shopify_products
+        WHERE COALESCE(TRIM(title), '') != ''
+        """
+    ).fetchall()
+    exact_matches = [
+        row for row in candidates
+        if normalize_product_match_text(row["title"]) == normalized_title
+    ]
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+
+    scored = [
+        (SequenceMatcher(None, normalized_title, normalize_product_match_text(row["title"])).ratio(), row)
+        for row in candidates
+    ]
+    scored.sort(key=lambda item: item[0], reverse=True)
+    if not scored:
+        return None
+    best_score, best_row = scored[0]
+    second_score = scored[1][0] if len(scored) > 1 else 0
+    if best_score >= 0.96 and best_score - second_score >= 0.03:
+        return best_row
+    return None
+
+
 def process_shopify_order_for_editions(order):
     """Idempotently cache one order and assign editions inside one write lock.
 
@@ -1505,23 +1582,38 @@ def process_shopify_order_for_editions(order):
                 )
                 continue
 
-            product_id = str(line_row["shopify_product_id"] or "")
-            product = connection.execute(
-                """
-                SELECT shopify_product_id, title, edition_limit,
-                       next_available_edition, editions_sold
-                FROM shopify_products WHERE shopify_product_id = ?
-                """,
-                (product_id,),
-            ).fetchone()
+            product = find_cached_shopify_product_for_order_line(
+                connection,
+                product_id=line_row["shopify_product_id"],
+                handle=item.get("product_handle") or "",
+                title=item.get("product_title") or "",
+            )
             if not product:
                 connection.execute(
                     "UPDATE order_line_items SET assignment_status = 'Product Not Found', updated_at = ? WHERE id = ?",
                     (timestamp, local_line_id),
                 )
                 continue
+            product_id = product["shopify_product_id"]
+            connection.execute(
+                """
+                UPDATE order_line_items
+                SET shopify_product_id = ?,
+                    product_handle = CASE
+                        WHEN COALESCE(TRIM(product_handle), '') = '' THEN ? ELSE product_handle END,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (product_id, product["handle"] or "", timestamp, local_line_id),
+            )
 
             needed = quantity - existing_count
+            if product["edition_limit"] is None:
+                connection.execute(
+                    "UPDATE order_line_items SET assignment_status = 'Needs Edition Setup', updated_at = ? WHERE id = ?",
+                    (timestamp, local_line_id),
+                )
+                continue
             edition_values = calculate_shopify_edition_values(
                 product["edition_limit"],
                 product["next_available_edition"],
@@ -1633,7 +1725,7 @@ def list_shopify_orders(search="", status_filter="All", limit=100):
         "Assigned": "EXISTS (SELECT 1 FROM edition_assignments ea WHERE ea.order_id = o.id AND ea.assignment_status IN ('Assigned', 'Manual Override'))",
         "Paid": "o.financial_status = 'PAID'",
         "Unfulfilled": "o.fulfillment_status IN ('UNFULFILLED', '')",
-        "Error": "EXISTS (SELECT 1 FROM order_line_items li WHERE li.order_id = o.id AND li.assignment_status IN ('Error', 'Product Not Found'))",
+        "Error": "EXISTS (SELECT 1 FROM order_line_items li WHERE li.order_id = o.id AND li.assignment_status IN ('Error', 'Product Not Found', 'Needs Edition Setup'))",
         "Sold Out Issue": "EXISTS (SELECT 1 FROM order_line_items li WHERE li.order_id = o.id AND li.assignment_status = 'Sold Out')",
     }
     if status_filter in status_clauses:
@@ -1762,7 +1854,7 @@ def get_shopify_order_summary():
             SELECT COUNT(*) AS total,
                    SUM(CASE WHEN EXISTS (
                        SELECT 1 FROM order_line_items li
-                       WHERE li.order_id = o.id AND li.assignment_status IN ('Needs Edition', 'Product Not Found', 'Sold Out', 'Error')
+                       WHERE li.order_id = o.id AND li.assignment_status IN ('Needs Edition', 'Product Not Found', 'Needs Edition Setup', 'Sold Out', 'Error')
                    ) THEN 1 ELSE 0 END) AS needs_assignment,
                    MAX(last_synced_at) AS last_synced_at
             FROM shopify_orders o

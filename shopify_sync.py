@@ -439,7 +439,19 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
       }
       customer {
         displayName
+        firstName
+        lastName
         email
+      }
+      shippingAddress {
+        name
+        firstName
+        lastName
+      }
+      billingAddress {
+        name
+        firstName
+        lastName
       }
       lineItems(first: 100) {
         nodes {
@@ -609,7 +621,29 @@ def build_order_admin_url(store_domain, legacy_resource_id):
 
 def normalize_order(node, store_domain):
     customer = node.get("customer") or {}
+    shipping_address = node.get("shippingAddress") or {}
+    billing_address = node.get("billingAddress") or {}
     total_price = ((node.get("totalPriceSet") or {}).get("shopMoney") or {})
+    customer_full_name = " ".join(
+        part for part in (customer.get("firstName"), customer.get("lastName")) if part
+    ).strip()
+    shipping_full_name = " ".join(
+        part for part in (shipping_address.get("firstName"), shipping_address.get("lastName")) if part
+    ).strip()
+    billing_full_name = " ".join(
+        part for part in (billing_address.get("firstName"), billing_address.get("lastName")) if part
+    ).strip()
+    customer_email = customer.get("email") or node.get("email") or ""
+    customer_name = (
+        customer.get("displayName")
+        or customer_full_name
+        or shipping_address.get("name")
+        or shipping_full_name
+        or billing_address.get("name")
+        or billing_full_name
+        or customer_email
+        or ""
+    )
     line_items = []
     for item in (node.get("lineItems") or {}).get("nodes") or []:
         product = item.get("product") or {}
@@ -637,8 +671,8 @@ def normalize_order(node, store_domain):
         "paid_at": node.get("processedAt") if financial_status == "PAID" else "",
         "financial_status": financial_status,
         "fulfillment_status": node.get("displayFulfillmentStatus") or "",
-        "customer_name": customer.get("displayName") or "",
-        "customer_email": customer.get("email") or node.get("email") or "",
+        "customer_name": customer_name,
+        "customer_email": customer_email,
         "total_price": str(total_price.get("amount") or ""),
         "currency": total_price.get("currencyCode") or "",
         "cancelled_at": node.get("cancelledAt") or "",

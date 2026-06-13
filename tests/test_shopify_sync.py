@@ -256,6 +256,28 @@ class ShopifySyncClientTests(unittest.TestCase):
             "https://admin.shopify.com/store/sports-cave/products/123",
         )
 
+    def test_normalize_order_uses_customer_fallbacks(self):
+        order = shopify_sync.normalize_order(
+            {
+                "id": "gid://shopify/Order/1",
+                "legacyResourceId": "1",
+                "name": "#1001",
+                "createdAt": "2026-06-13T00:00:00Z",
+                "processedAt": "2026-06-13T00:01:00Z",
+                "displayFinancialStatus": "PAID",
+                "displayFulfillmentStatus": "UNFULFILLED",
+                "email": "fallback@example.com",
+                "customer": {"displayName": "", "firstName": "", "lastName": "", "email": ""},
+                "shippingAddress": {"name": "Shipping Collector", "firstName": "", "lastName": ""},
+                "billingAddress": {"name": "Billing Collector", "firstName": "", "lastName": ""},
+                "lineItems": {"nodes": []},
+            },
+            "sports-cave.myshopify.com",
+        )
+
+        self.assertEqual(order["customer_name"], "Shipping Collector")
+        self.assertEqual(order["customer_email"], "fallback@example.com")
+
 
 class ShopifyDatabaseTests(unittest.TestCase):
     def setUp(self):
@@ -408,6 +430,18 @@ class LimitedEditionEngineTests(unittest.TestCase):
         product_after_resync = db.get_shopify_edition_product("gid://shopify/Product/999")
         self.assertEqual(second_result["assignments_created"], 0)
         self.assertEqual(product_after_resync["next_available_edition"], 39)
+
+    def test_paid_order_matches_cached_product_by_handle(self):
+        self.seed_edition_product()
+        order = self.paid_order()
+        order["line_items"][0]["shopify_product_id"] = "gid://shopify/Product/missing-from-order"
+
+        result = db.process_shopify_order_for_editions(order)
+        line = db.list_shopify_orders()[0]["line_items"][0]
+
+        self.assertEqual(result["assignments_created"], 1)
+        self.assertEqual(line["shopify_product_id"], "gid://shopify/Product/999")
+        self.assertEqual(line["assignments"][0]["edition_number"], 37)
 
     def test_sold_out_line_does_not_assign_duplicate_or_over_limit(self):
         self.seed_edition_product(limit=1, next_number=2, sold=1)
