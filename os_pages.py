@@ -73,10 +73,6 @@ LIMITED_EDITION_EXPORT_FIELDS = (
     "editions_remaining",
     "edition_status",
     "psd_file_url",
-    "prodigi_url",
-    "prodigi_product_id",
-    "notes",
-    "last_shopify_sync_at",
     "updated_at",
 )
 
@@ -288,10 +284,6 @@ def build_limited_editions_csv(products):
                 "editions_remaining": product.get("editions_remaining") if product.get("editions_remaining") is not None else "",
                 "edition_status": product.get("edition_status") or "",
                 "psd_file_url": product.get("psd_file_url") or "",
-                "prodigi_url": product.get("prodigi_url") or "",
-                "prodigi_product_id": product.get("prodigi_product_id") or "",
-                "notes": product.get("edition_notes") or "",
-                "last_shopify_sync_at": product.get("last_shopify_sync_at") or "",
                 "updated_at": product.get("edition_updated_at") or product.get("updated_at") or "",
             }
         )
@@ -371,13 +363,9 @@ def import_limited_editions_csv(uploaded_file):
                 next_available_edition=next_available,
                 editions_sold=editions_sold,
                 psd_file_url=csv_value(row, "psd_file_url", current.get("psd_file_url") or ""),
-                prodigi_url=csv_value(row, "prodigi_url", current.get("prodigi_url") or ""),
-                prodigi_product_id=csv_value(
-                    row,
-                    "prodigi_product_id",
-                    current.get("prodigi_product_id") or "",
-                ),
-                notes=csv_value(row, "notes", current.get("edition_notes") or ""),
+                prodigi_url=current.get("prodigi_url") or "",
+                prodigi_product_id=current.get("prodigi_product_id") or "",
+                notes=current.get("edition_notes") or "",
                 allow_oversold=False,
             )
             updated_rows += 1
@@ -1991,31 +1979,18 @@ def apply_limited_edition_table_changes(products):
         )
         editions_sold = int(st.session_state.get(f"le-sold-{item_key}", product.get("editions_sold") or 0))
         psd_file_url = str(st.session_state.get(f"le-psd-{item_key}", product.get("psd_file_url") or "") or "").strip()
-        prodigi_url = str(
-            st.session_state.get(f"le-prodigi-url-{item_key}", product.get("prodigi_url") or "") or ""
-        ).strip()
-        prodigi_product_id = str(
-            st.session_state.get(f"le-prodigi-id-{item_key}", product.get("prodigi_product_id") or "") or ""
-        ).strip()
-        notes = str(st.session_state.get(f"le-notes-{item_key}", product.get("edition_notes") or "") or "").strip()
 
         current_values = (
             int(product.get("edition_limit") or 100),
             int(product.get("next_available_edition") or 1),
             int(product.get("editions_sold") or 0),
             product.get("psd_file_url") or "",
-            product.get("prodigi_url") or "",
-            product.get("prodigi_product_id") or "",
-            product.get("edition_notes") or "",
         )
         new_values = (
             edition_limit,
             next_available,
             editions_sold,
             psd_file_url,
-            prodigi_url,
-            prodigi_product_id,
-            notes,
         )
         if current_values == new_values:
             unchanged_count += 1
@@ -2027,9 +2002,9 @@ def apply_limited_edition_table_changes(products):
                 next_available_edition=next_available,
                 editions_sold=editions_sold,
                 psd_file_url=psd_file_url,
-                prodigi_url=prodigi_url,
-                prodigi_product_id=prodigi_product_id,
-                notes=notes,
+                prodigi_url=product.get("prodigi_url") or "",
+                prodigi_product_id=product.get("prodigi_product_id") or "",
+                notes=product.get("edition_notes") or "",
                 allow_oversold=False,
             )
             updated_count += 1
@@ -2055,7 +2030,60 @@ def sync_changed_edition_widgets(config):
 
 def render_limited_editions_page(dispatch_log_renderer=None):
     st.title("Limited Editions")
-    st.caption("Track edition numbers, PSD files, Prodigi links, and storefront edition display.")
+    st.caption("Track edition numbers and PSD files from the local product cache.")
+    st.markdown(
+        """
+        <style>
+        .le-product-cell {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            min-height: 44px;
+        }
+        .le-thumb {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+            object-fit: cover;
+            background: #141416;
+            border: 1px solid rgba(212, 165, 76, 0.28);
+            flex: 0 0 auto;
+        }
+        .le-thumb-empty {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #D4A54C;
+            font-size: 0.75rem;
+        }
+        .le-title {
+            color: #F5F2EA !important;
+            font-weight: 700;
+            text-decoration: none;
+            line-height: 1.15;
+        }
+        .le-handle {
+            color: #A6A19A;
+            font-size: 0.78rem;
+            margin-top: 0.18rem;
+        }
+        .le-row-rule {
+            border-bottom: 1px solid rgba(245, 242, 234, 0.08);
+            margin: 0.35rem 0 0.55rem;
+        }
+        .le-range {
+            color: #A6A19A;
+            text-align: center;
+            padding-top: 0.35rem;
+        }
+        div[data-testid="stNumberInput"] input,
+        div[data-testid="stTextInput"] input {
+            min-height: 36px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     config = shopify_sync.get_config()
     summary = db.get_shopify_summary()
@@ -2068,42 +2096,49 @@ def render_limited_editions_page(dispatch_log_renderer=None):
         st.warning(warning)
 
     search = st.text_input(
-        "Search limited editions",
-        placeholder="Search by product name, handle, order product, or SKU",
+        "Search products",
+        placeholder="Search products by title, handle, sport, SKU, or keyword",
         key="limited-edition-search",
         label_visibility="collapsed",
     )
 
-    actions = st.columns([1.25, 0.9, 1.05, 1.35, 1.15])
+    actions = st.columns([1.25, 0.8, 0.8, 0.95, 1.05, 1.05])
     fetch_clicked = actions[0].button(
         "Fetch Latest Shopify Products",
         type="primary",
         disabled=not config["configured"],
         use_container_width=True,
     )
-    actions[1].download_button(
+    import_toggle_clicked = actions[1].button("Import CSV", use_container_width=True)
+    actions[2].download_button(
         "Export CSV",
         data=build_limited_editions_csv(db.list_all_shopify_edition_products()),
         file_name="sports-cave-limited-editions.csv",
         mime="text/csv",
         use_container_width=True,
     )
-    actions[2].download_button(
-        "CSV Template",
+    actions[3].download_button(
+        "Download Template",
         data=build_limited_editions_template_csv(),
         file_name="sports-cave-limited-editions-template.csv",
         mime="text/csv",
         use_container_width=True,
     )
-    sync_widget_clicked = actions[3].button(
-        "Sync Edition Display to Shopify",
+    sync_widget_clicked = actions[4].button(
+        "Sync Edition Display",
         disabled=not config["configured"],
         use_container_width=True,
     )
-    apply_clicked = actions[4].button("Apply Table Changes", use_container_width=True)
+    apply_clicked = actions[5].button("Apply Table Changes", use_container_width=True)
+
+    if import_toggle_clicked:
+        st.session_state.limited_edition_import_open = not st.session_state.get(
+            "limited_edition_import_open",
+            False,
+        )
 
     if not config["configured"]:
-        st.caption("Shopify connection is not configured. Cached products still remain visible from Sports Cave OS.")
+        st.caption("Connection is not configured. Cached products still remain visible from Sports Cave OS.")
 
     if fetch_clicked:
         try:
@@ -2127,12 +2162,12 @@ def render_limited_editions_page(dispatch_log_renderer=None):
             result = sync_changed_edition_widgets(config)
             if result["errors"]:
                 st.session_state.limited_edition_warning = (
-                    f"Synced {result['synced']} of {result['attempted']} widget records. "
+                    f"Updated {result['synced']} of {result['attempted']} edition display records. "
                     f"First issue: {result['errors'][0]}"
                 )
             else:
                 st.session_state.limited_edition_notice = (
-                    f"Synced {result['synced']} storefront edition display record"
+                    f"Updated {result['synced']} edition display record"
                     f"{'s' if result['synced'] != 1 else ''}."
                 )
             st.rerun()
@@ -2140,60 +2175,65 @@ def render_limited_editions_page(dispatch_log_renderer=None):
             st.error("Could not sync edition display to Shopify.")
             st.error(str(error))
 
-    with st.expander("Import CSV", expanded=False):
-        st.caption("Updates existing cached products only. Match order: Shopify product ID, handle, then product title.")
-        import_columns = st.columns([2.5, 1])
-        uploaded_csv = import_columns[0].file_uploader(
-            "Limited Edition CSV",
-            type=["csv"],
-            key="limited-edition-import-csv",
-            label_visibility="collapsed",
-        )
-        import_clicked = import_columns[1].button("Import CSV", disabled=uploaded_csv is None, use_container_width=True)
-        if import_clicked and uploaded_csv is not None:
-            try:
-                result = import_limited_editions_csv(uploaded_csv)
-                st.session_state.limited_edition_notice = (
-                    f"Imported {result['imported_rows']} rows. Updated {result['updated_rows']} products. "
-                    f"Skipped {result['skipped_rows']} rows."
-                )
-                if result["errors"]:
-                    st.session_state.limited_edition_warning = "First import issue: " + result["errors"][0]
-                st.rerun()
-            except Exception as error:
-                st.error("Could not import the CSV.")
-                st.error(str(error))
+    if st.session_state.get("limited_edition_import_open", False):
+        with st.container(border=True):
+            st.caption("Updates existing cached products only. Match order: Shopify product ID, handle, then product title.")
+            import_columns = st.columns([2.5, 1])
+            uploaded_csv = import_columns[0].file_uploader(
+                "Limited Edition CSV",
+                type=["csv"],
+                key="limited-edition-import-csv",
+                label_visibility="collapsed",
+            )
+            import_clicked = import_columns[1].button(
+                "Import",
+                disabled=uploaded_csv is None,
+                use_container_width=True,
+            )
+            if import_clicked and uploaded_csv is not None:
+                try:
+                    result = import_limited_editions_csv(uploaded_csv)
+                    st.session_state.limited_edition_notice = (
+                        f"Imported {result['imported_rows']} rows. Updated {result['updated_rows']} products. "
+                        f"Skipped {result['skipped_rows']} rows."
+                    )
+                    if result["errors"]:
+                        st.session_state.limited_edition_warning = "First import issue: " + result["errors"][0]
+                    st.session_state.limited_edition_import_open = False
+                    st.rerun()
+                except Exception as error:
+                    st.error("Could not import the CSV.")
+                    st.error(str(error))
 
-    filters = st.columns([1, 1.1, 0.8, 0.9])
-    shopify_status = filters[0].selectbox(
-        "Shopify status",
-        ["All", "Active", "Draft", "Archived", "Missing"],
-        key="le-shopify-status",
+    tracker_filter = st.selectbox(
+        "Filter",
+        ["All", "Active", "Draft", "Archived", "Missing Edition Setup", "Missing PSD", "Final Editions", "Sold Out"],
+        key="le-tracker-filter",
     )
-    edition_filter = filters[1].selectbox(
-        "Edition status",
-        ["All", "Not Set", "Available", "Count", "Low", "Final Editions", "Sold Out"],
-        key="le-edition-status",
-    )
-    missing_psd_only = filters[2].checkbox("Missing PSD", key="le-missing-psd")
-    missing_prodigi_only = filters[3].checkbox("Missing Prodigi", key="le-missing-prodigi")
 
     st.caption(
         f"Last fetched: {format_updated_at(summary['last_synced_at']) if summary['last_synced_at'] else 'Never'} - "
-        f"{summary['total']} products cached - {edition_summary['needs_widget_sync']} needing widget sync"
+        f"{summary['total']} products cached - {edition_summary['needs_widget_sync']} needing display update"
     )
 
-    if "limited_editions_visible_count" not in st.session_state:
-        st.session_state.limited_editions_visible_count = 50
-    visible_count = int(st.session_state.limited_editions_visible_count)
+    filter_signature = f"{search}|{tracker_filter}"
+    if st.session_state.get("limited_editions_filter_signature") != filter_signature:
+        st.session_state.limited_editions_filter_signature = filter_signature
+        st.session_state.limited_editions_page = 1
+
+    page_size = 50
+    total_products = db.count_shopify_edition_products(search=search, tracker_filter=tracker_filter)
+    max_page = max((total_products + page_size - 1) // page_size, 1)
+    current_page = int(st.session_state.get("limited_editions_page", 1) or 1)
+    current_page = min(max(current_page, 1), max_page)
+    st.session_state.limited_editions_page = current_page
+    offset = (current_page - 1) * page_size
 
     products = db.list_shopify_edition_products(
         search=search,
-        shopify_status=shopify_status,
-        edition_filter=edition_filter,
-        limit=visible_count,
-        missing_psd_only=missing_psd_only,
-        missing_prodigi_only=missing_prodigi_only,
+        tracker_filter=tracker_filter,
+        limit=page_size,
+        offset=offset,
     )
 
     if apply_clicked:
@@ -2208,12 +2248,14 @@ def render_limited_editions_page(dispatch_log_renderer=None):
             )
         st.rerun()
 
-    st.caption(f"Showing {len(products)} product{'s' if len(products) != 1 else ''}. Scroll to the bottom to load 50 more.")
+    range_start = offset + 1 if total_products else 0
+    range_end = min(offset + len(products), total_products)
+    st.caption(f"{range_start}-{range_end} of {total_products} products")
     if not products:
-        st.info("No cached Shopify products match these filters. Use Fetch Latest Shopify Products if the cache is empty.")
+        st.info("No cached products match this search or filter. Use Fetch Latest Shopify Products if the cache is empty.")
         return
 
-    header = st.columns([2.5, 0.75, 0.8, 0.8, 0.7, 0.75, 1.05, 0.75, 0.85, 1.05])
+    header = st.columns([3.0, 0.75, 0.75, 0.75, 0.6, 0.7, 0.95, 1.65, 0.85])
     for column, label in zip(
         header,
         (
@@ -2225,26 +2267,39 @@ def render_limited_editions_page(dispatch_log_renderer=None):
             "Remaining",
             "Edition Status",
             "PSD",
-            "Prodigi",
-            "Last Updated",
+            "Updated",
         ),
     ):
         column.markdown(f"**{label}**")
 
     for product in products:
         item_key = limited_edition_item_key(product)
-        row = st.columns([2.5, 0.75, 0.8, 0.8, 0.7, 0.75, 1.05, 0.75, 0.85, 1.05])
+        row = st.columns([3.0, 0.75, 0.75, 0.75, 0.6, 0.7, 0.95, 1.65, 0.85])
         product_title = product.get("product_title") or "Untitled Shopify Product"
-        if product.get("online_store_url"):
-            safe_title = html.escape(product_title)
-            safe_url = html.escape(product["online_store_url"], quote=True)
-            row[0].markdown(
-                f'<a href="{safe_url}" target="_blank" style="color:#F5F2EA;font-weight:700;text-decoration:none;">{safe_title}</a>',
-                unsafe_allow_html=True,
-            )
+        safe_title = html.escape(product_title)
+        safe_handle = html.escape(product.get("shopify_handle") or "Handle missing")
+        thumbnail_url = product.get("thumbnail_url") or ""
+        if thumbnail_url:
+            thumb_html = f'<img class="le-thumb" src="{html.escape(thumbnail_url, quote=True)}" alt="">'
         else:
-            row[0].markdown(f"**{product_title}**")
-        row[0].caption(product.get("shopify_handle") or "Handle missing")
+            thumb_html = '<span class="le-thumb le-thumb-empty">SC</span>'
+        if product.get("online_store_url"):
+            safe_url = html.escape(product["online_store_url"], quote=True)
+            title_html = f'<a class="le-title" href="{safe_url}" target="_blank">{safe_title}</a>'
+        else:
+            title_html = f'<span class="le-title">{safe_title}</span>'
+        row[0].markdown(
+            f"""
+            <div class="le-product-cell">
+                {thumb_html}
+                <div>
+                    {title_html}
+                    <div class="le-handle">{safe_handle}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         shopify_status_label = str(product.get("status") or "Missing").replace("_", " ").title()
         row[1].markdown(status_badge(shopify_status_label), unsafe_allow_html=True)
@@ -2283,52 +2338,34 @@ def render_limited_editions_page(dispatch_log_renderer=None):
         )
         row[5].write(format_optional_number(display_values["editions_remaining"]))
         row[6].markdown(status_badge(display_values["edition_status"]), unsafe_allow_html=True)
-        if product.get("psd_file_url"):
-            row[7].link_button("Open PSD", product["psd_file_url"], use_container_width=True)
+        psd_value = row[7].text_input(
+            "PSD URL",
+            value=product.get("psd_file_url") or "",
+            key=f"le-psd-{item_key}",
+            placeholder="PSD URL",
+            label_visibility="collapsed",
+        ).strip()
+        if psd_value:
+            row[7].link_button("Open PSD", psd_value, use_container_width=True)
         else:
             row[7].caption("Missing")
-        if product.get("prodigi_url"):
-            row[8].link_button("Open Prodigi", product["prodigi_url"], use_container_width=True)
-        else:
-            row[8].caption("Missing")
         last_updated = product.get("edition_updated_at") or product.get("updated_at") or product.get("last_shopify_sync_at")
-        row[9].caption(format_updated_at(last_updated))
+        row[8].caption(format_updated_at(last_updated))
         if product.get("widget_sync_status") == "Needs Sync":
-            row[9].markdown(status_badge("Needs Sync"), unsafe_allow_html=True)
+            row[8].markdown(status_badge("Needs Sync"), unsafe_allow_html=True)
+        st.markdown('<div class="le-row-rule"></div>', unsafe_allow_html=True)
 
-        with st.expander(f"Edit links and notes - {product.get('shopify_handle') or product_title}", expanded=False):
-            detail_columns = st.columns([1.6, 1.6, 1, 1.2])
-            detail_columns[0].text_input(
-                "PSD file URL",
-                value=product.get("psd_file_url") or "",
-                key=f"le-psd-{item_key}",
-            )
-            detail_columns[1].text_input(
-                "Prodigi URL",
-                value=product.get("prodigi_url") or "",
-                key=f"le-prodigi-url-{item_key}",
-            )
-            detail_columns[2].text_input(
-                "Prodigi Product ID",
-                value=product.get("prodigi_product_id") or "",
-                key=f"le-prodigi-id-{item_key}",
-            )
-            detail_columns[3].caption(f"Shopify ID: {product.get('shopify_product_id') or 'Missing'}")
-            detail_columns[3].caption(
-                f"Metafield sync: {format_updated_at(product.get('last_edition_sync_at')) if product.get('last_edition_sync_at') else 'Never'}"
-            )
-            st.text_area(
-                "Notes",
-                value=product.get("edition_notes") or "",
-                height=72,
-                key=f"le-notes-{item_key}",
-            )
-        st.divider()
-
-    if len(products) >= visible_count:
-        if st.button("Load 50 More", key="limited-editions-load-more", use_container_width=True):
-            st.session_state.limited_editions_visible_count = min(visible_count + 50, 5000)
-            st.rerun()
+    pagination = st.columns([1, 2, 1])
+    if pagination[0].button("Previous", disabled=current_page <= 1, use_container_width=True):
+        st.session_state.limited_editions_page = max(current_page - 1, 1)
+        st.rerun()
+    pagination[1].markdown(
+        f'<div class="le-range">Page {current_page} of {max_page} - {range_start}-{range_end} of {total_products}</div>',
+        unsafe_allow_html=True,
+    )
+    if pagination[2].button("Next", disabled=current_page >= max_page, use_container_width=True):
+        st.session_state.limited_editions_page = min(current_page + 1, max_page)
+        st.rerun()
 
 
 def _assignment_text(assignments):

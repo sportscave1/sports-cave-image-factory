@@ -558,6 +558,15 @@ def parse_json_list(value):
     return parsed if isinstance(parsed, list) else []
 
 
+def first_shopify_image_url(value):
+    for image in parse_json_list(value):
+        if isinstance(image, dict):
+            url = image.get("url") or image.get("src") or image.get("originalSrc")
+            if url:
+                return str(url)
+    return ""
+
+
 def normalize_match_value(value):
     return " ".join(str(value or "").strip().lower().split())
 
@@ -1076,6 +1085,7 @@ def hydrate_shopify_edition_product(row):
     product["product_title"] = product.get("title") or "Untitled Shopify Product"
     product["prodigi_status"] = "Connected" if product.get("prodigi_url") else "Missing"
     product["psd_status"] = "Connected" if product.get("psd_file_url") else "Missing"
+    product["thumbnail_url"] = first_shopify_image_url(product.get("images_json"))
     product["last_shopify_sync_at"] = product.get("synced_at")
     last_sync = product.get("last_edition_sync_at") or ""
     local_update = product.get("edition_updated_at") or product.get("updated_at") or ""
@@ -1083,41 +1093,59 @@ def hydrate_shopify_edition_product(row):
     return product
 
 
-def list_shopify_edition_products(
+def build_shopify_edition_filters(
     search="",
     shopify_status="All",
     edition_filter="All",
-    limit=25,
     missing_psd_only=False,
     missing_prodigi_only=False,
+    tracker_filter="All",
 ):
     clauses = []
     values = []
-    if search.strip():
-        search_value = f"%{search.strip().lower()}%"
+    search_terms = normalize_product_match_text(search).split()
+    for term in search_terms:
+        search_value = f"%{term}%"
         clauses.append(
             """
             (
-                LOWER(sp.title) LIKE ?
-                OR LOWER(sp.handle) LIKE ?
-                OR LOWER(sp.variants_json) LIKE ?
+                LOWER(COALESCE(sp.title, '')) LIKE ?
+                OR LOWER(COALESCE(sp.handle, '')) LIKE ?
+                OR LOWER(COALESCE(sp.variants_json, '')) LIKE ?
+                OR LOWER(COALESCE(sp.tags_json, '')) LIKE ?
+                OR LOWER(COALESCE(sp.collections_json, '')) LIKE ?
+                OR LOWER(COALESCE(sp.product_type, '')) LIKE ?
                 OR EXISTS (
                     SELECT 1
                     FROM order_line_items li
                     WHERE li.shopify_product_id = sp.shopify_product_id
                       AND (
-                          LOWER(li.product_title) LIKE ?
-                          OR LOWER(li.variant_title) LIKE ?
+                          LOWER(COALESCE(li.product_title, '')) LIKE ?
+                          OR LOWER(COALESCE(li.variant_title, '')) LIKE ?
                       )
                 )
             )
             """
         )
-        values.extend((search_value, search_value, search_value, search_value, search_value))
+        values.extend((search_value,) * 8)
+
     if shopify_status != "All":
         clauses.append("sp.status = ?")
-        values.append(shopify_status.upper())
-    filter_clauses = {
+        values.append(str(shopify_status).upper())
+
+    tracker_filters = {
+        "Active": "sp.status = 'ACTIVE'",
+        "Draft": "sp.status = 'DRAFT'",
+        "Archived": "sp.status = 'ARCHIVED'",
+        "Missing Edition Setup": "(sp.edition_limit IS NULL OR sp.edition_status = 'Not Set')",
+        "Missing PSD": "COALESCE(NULLIF(sp.psd_file_url, ''), NULLIF(p.psd_file_url, '')) IS NULL",
+        "Final Editions": "sp.edition_status = 'Final Editions'",
+        "Sold Out": "sp.edition_status = 'Sold Out'",
+    }
+    if tracker_filter in tracker_filters:
+        clauses.append(tracker_filters[tracker_filter])
+
+    edition_filters = {
         "Edition Not Set": "(sp.edition_limit IS NULL OR sp.edition_status = 'Not Set')",
         "Not Set": "(sp.edition_limit IS NULL OR sp.edition_status = 'Not Set')",
         "Available": "sp.edition_status IN ('Available', 'Count', 'Low')",
@@ -1128,33 +1156,85 @@ def list_shopify_edition_products(
         "Missing PSD": "COALESCE(NULLIF(sp.psd_file_url, ''), NULLIF(p.psd_file_url, '')) IS NULL",
         "Missing Prodigi": "COALESCE(NULLIF(sp.prodigi_url, ''), NULLIF(p.prodigi_product_url, '')) IS NULL",
     }
-    if edition_filter in filter_clauses:
-        clauses.append(filter_clauses[edition_filter])
+    if edition_filter in edition_filters:
+        clauses.append(edition_filters[edition_filter])
     if missing_psd_only:
         clauses.append("COALESCE(NULLIF(sp.psd_file_url, ''), NULLIF(p.psd_file_url, '')) IS NULL")
     if missing_prodigi_only:
         clauses.append("COALESCE(NULLIF(sp.prodigi_url, ''), NULLIF(p.prodigi_product_url, '')) IS NULL")
+    return clauses, values
+
+
+def count_shopify_edition_products(
+    search="",
+    shopify_status="All",
+    edition_filter="All",
+    missing_psd_only=False,
+    missing_prodigi_only=False,
+    tracker_filter="All",
+):
+    clauses, values = build_shopify_edition_filters(
+        search=search,
+        shopify_status=shopify_status,
+        edition_filter=edition_filter,
+        missing_psd_only=missing_psd_only,
+        missing_prodigi_only=missing_prodigi_only,
+        tracker_filter=tracker_filter,
+    )
+    where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with get_connection() as connection:
+        row = connection.execute(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM shopify_products sp
+            LEFT JOIN products p ON p.id = sp.matched_product_id
+            {where_clause}
+            """,
+            values,
+        ).fetchone()
+    return int(row["total"] if row else 0)
+
+
+def list_shopify_edition_products(
+    search="",
+    shopify_status="All",
+    edition_filter="All",
+    limit=25,
+    offset=0,
+    missing_psd_only=False,
+    missing_prodigi_only=False,
+    tracker_filter="All",
+):
+    clauses, values = build_shopify_edition_filters(
+        search=search,
+        shopify_status=shopify_status,
+        edition_filter=edition_filter,
+        missing_psd_only=missing_psd_only,
+        missing_prodigi_only=missing_prodigi_only,
+        tracker_filter=tracker_filter,
+    )
     where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     display_limit = min(max(int(limit), 1), 5000)
+    display_offset = max(int(offset), 0)
     with get_connection() as connection:
         rows = connection.execute(
             f"""
             SELECT sp.shopify_product_id, sp.legacy_resource_id, sp.title, sp.handle,
-                   sp.status, sp.online_store_url, sp.admin_url, sp.synced_at,
+                   sp.status, sp.product_type, sp.online_store_url, sp.admin_url, sp.synced_at,
                    sp.edition_limit, sp.next_available_edition, sp.editions_sold,
                    sp.editions_remaining, sp.edition_status,
                    COALESCE(NULLIF(sp.psd_file_url, ''), p.psd_file_url, '') AS psd_file_url,
                    COALESCE(NULLIF(sp.prodigi_url, ''), p.prodigi_product_url, '') AS prodigi_url,
                    COALESCE(NULLIF(sp.prodigi_product_id, ''), p.prodigi_product_id, '') AS prodigi_product_id,
                    sp.edition_notes, sp.last_edition_sync_at, sp.edition_updated_at,
-                   sp.updated_at, sp.matched_product_id
+                   sp.updated_at, sp.matched_product_id, sp.images_json
             FROM shopify_products sp
             LEFT JOIN products p ON p.id = sp.matched_product_id
             {where_clause}
             ORDER BY sp.title COLLATE NOCASE
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            (*values, display_limit),
+            (*values, display_limit, display_offset),
         ).fetchall()
     return [hydrate_shopify_edition_product(row) for row in rows]
 
