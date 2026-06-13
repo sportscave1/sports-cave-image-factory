@@ -1,7 +1,7 @@
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import requests
@@ -9,7 +9,8 @@ import requests
 
 DEFAULT_API_VERSION = "2026-04"
 DEFAULT_PAGE_SIZE = 10
-DEFAULT_MAX_PRODUCTS = 250
+DEFAULT_MAX_PRODUCTS = 500
+DEFAULT_MAX_ORDERS = 250
 TOKEN_REFRESH_BUFFER_SECONDS = 300
 
 
@@ -48,10 +49,15 @@ def get_config():
     client_secret = os.getenv("SHOPIFY_CLIENT_SECRET", "").strip()
     api_version = os.getenv("SHOPIFY_API_VERSION", "").strip()
     max_products_raw = os.getenv("SHOPIFY_SYNC_MAX_PRODUCTS", str(DEFAULT_MAX_PRODUCTS)).strip()
+    max_orders_raw = os.getenv("SHOPIFY_SYNC_MAX_ORDERS", str(DEFAULT_MAX_ORDERS)).strip()
     try:
         max_products = max(1, int(max_products_raw))
     except ValueError:
         max_products = DEFAULT_MAX_PRODUCTS
+    try:
+        max_orders = max(1, int(max_orders_raw))
+    except ValueError:
+        max_orders = DEFAULT_MAX_ORDERS
 
     if access_token:
         auth_mode = "Admin access token mode"
@@ -67,6 +73,7 @@ def get_config():
         "client_secret": client_secret,
         "api_version": api_version,
         "max_products": max_products,
+        "max_orders": max_orders,
         "auth_mode": auth_mode,
         "configured": bool(store_domain and api_version and auth_mode != "Missing credentials"),
     }
@@ -388,6 +395,253 @@ def normalize_product(node, store_domain):
         "admin_url": build_admin_url(store_domain, legacy_resource_id),
         "remote_updated_at": node.get("updatedAt") or "",
     }
+
+
+METAFIELDS_SET_MUTATION = """
+mutation SportsCaveSetEditionMetafields($metafields: [MetafieldsSetInput!]!) {
+  metafieldsSet(metafields: $metafields) {
+    metafields {
+      id
+      namespace
+      key
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+"""
+
+
+ORDERS_QUERY = """
+query SportsCaveOrders($first: Int!, $after: String, $query: String) {
+  orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      id
+      legacyResourceId
+      name
+      createdAt
+      processedAt
+      cancelledAt
+      displayFinancialStatus
+      displayFulfillmentStatus
+      email
+      customer {
+        displayName
+        email
+      }
+      lineItems(first: 100) {
+        nodes {
+          id
+          title
+          quantity
+          variantTitle
+          product {
+            id
+            title
+            handle
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def edition_metafield_inputs(product):
+    owner_id = product["shopify_product_id"]
+    display_text = product.get("edition_display_text") or build_edition_display_text(product)
+    metafields = [
+        {
+            "ownerId": owner_id,
+            "namespace": "sports_cave",
+            "key": "edition_limit",
+            "type": "number_integer",
+            "value": str(product.get("edition_limit") or 100),
+        },
+        {
+            "ownerId": owner_id,
+            "namespace": "sports_cave",
+            "key": "next_available_edition",
+            "type": "number_integer",
+            "value": str(product.get("next_available_edition") or 1),
+        },
+        {
+            "ownerId": owner_id,
+            "namespace": "sports_cave",
+            "key": "editions_sold",
+            "type": "number_integer",
+            "value": str(product.get("editions_sold") or 0),
+        },
+        {
+            "ownerId": owner_id,
+            "namespace": "sports_cave",
+            "key": "editions_remaining",
+            "type": "number_integer",
+            "value": str(product.get("editions_remaining") or 0),
+        },
+        {
+            "ownerId": owner_id,
+            "namespace": "sports_cave",
+            "key": "edition_status",
+            "type": "single_line_text_field",
+            "value": product.get("edition_status") or "Available",
+        },
+        {
+            "ownerId": owner_id,
+            "namespace": "sports_cave",
+            "key": "edition_display_text",
+            "type": "single_line_text_field",
+            "value": display_text,
+        },
+    ]
+    if product.get("psd_file_url"):
+        metafields.append(
+            {
+                "ownerId": owner_id,
+                "namespace": "sports_cave",
+                "key": "psd_file_url",
+                "type": "url",
+                "value": product["psd_file_url"],
+            }
+        )
+    if product.get("prodigi_url"):
+        metafields.append(
+            {
+                "ownerId": owner_id,
+                "namespace": "sports_cave",
+                "key": "prodigi_url",
+                "type": "url",
+                "value": product["prodigi_url"],
+            }
+        )
+    return metafields
+
+
+def build_edition_display_text(product):
+    limit = int(product.get("edition_limit") or 100)
+    next_number = int(product.get("next_available_edition") or 1)
+    remaining = int(product.get("editions_remaining") or max(limit - int(product.get("editions_sold") or 0), 0))
+    status = product.get("edition_status") or "Available"
+    if status == "Sold Out" or remaining <= 0 or next_number > limit:
+        return "SOLD OUT EDITION"
+    if remaining <= 3:
+        return f"FINAL EDITION #{next_number} OF {limit} AVAILABLE"
+    return f"EDITION #{next_number} OF {limit} AVAILABLE"
+
+
+def sync_edition_metafields(product, config=None, request_post=None):
+    try:
+        data, served_version = graphql_request(
+            METAFIELDS_SET_MUTATION,
+            variables={"metafields": edition_metafield_inputs(product)},
+            config=config,
+            request_post=request_post,
+        )
+        result = data.get("metafieldsSet") or {}
+        if result.get("userErrors"):
+            raise ShopifyAPIError(
+                "Could not sync storefront edition display. Check Shopify scopes and product metafields."
+            )
+        return {
+            "count": len(result.get("metafields") or []),
+            "api_version": served_version or (config or get_config()).get("api_version"),
+        }
+    except ShopifyAPIError:
+        raise ShopifyAPIError(
+            "Could not sync storefront edition display. Check Shopify scopes and product metafields."
+        )
+
+
+def build_order_admin_url(store_domain, legacy_resource_id):
+    if not store_domain or not legacy_resource_id:
+        return ""
+    store_slug = store_domain.split(".", 1)[0]
+    return f"https://admin.shopify.com/store/{store_slug}/orders/{legacy_resource_id}"
+
+
+def normalize_order(node, store_domain):
+    customer = node.get("customer") or {}
+    line_items = []
+    for item in (node.get("lineItems") or {}).get("nodes") or []:
+        product = item.get("product") or {}
+        line_items.append(
+            {
+                "shopify_line_item_id": item.get("id") or "",
+                "shopify_product_id": product.get("id") or "",
+                "product_title": product.get("title") or item.get("title") or "",
+                "product_handle": product.get("handle") or "",
+                "variant_title": item.get("variantTitle") or "",
+                "quantity": int(item.get("quantity") or 1),
+            }
+        )
+    legacy_resource_id = str(node.get("legacyResourceId") or "")
+    financial_status = node.get("displayFinancialStatus") or ""
+    return {
+        "shopify_order_id": node.get("id") or "",
+        "legacy_resource_id": legacy_resource_id,
+        "order_name": node.get("name") or "",
+        "order_number": (node.get("name") or "").lstrip("#"),
+        "admin_url": build_order_admin_url(store_domain, legacy_resource_id),
+        "created_at": node.get("createdAt") or "",
+        "paid_at": node.get("processedAt") if financial_status == "PAID" else "",
+        "financial_status": financial_status,
+        "fulfillment_status": node.get("displayFulfillmentStatus") or "",
+        "customer_name": customer.get("displayName") or "",
+        "customer_email": customer.get("email") or node.get("email") or "",
+        "cancelled_at": node.get("cancelledAt") or "",
+        "line_items": line_items,
+    }
+
+
+def fetch_orders_page(after=None, days=60, page_size=DEFAULT_PAGE_SIZE, config=None, request_post=None):
+    config = config or get_config()
+    first = min(max(int(page_size), 1), 25)
+    created_after = (datetime.now(timezone.utc) - timedelta(days=max(int(days), 1))).date().isoformat()
+    query = f"created_at:>={created_after}"
+    data, served_version = graphql_request(
+        ORDERS_QUERY,
+        variables={"first": first, "after": after, "query": query},
+        config=config,
+        request_post=request_post,
+    )
+    connection = data.get("orders") or {}
+    nodes = connection.get("nodes") or []
+    orders = [normalize_order(node, config["store_domain"]) for node in nodes]
+    page_info = connection.get("pageInfo") or {}
+    return {
+        "orders": orders,
+        "has_next_page": bool(page_info.get("hasNextPage")),
+        "end_cursor": page_info.get("endCursor"),
+        "api_version": served_version or config.get("api_version"),
+    }
+
+
+def iter_order_pages(days=60, page_size=DEFAULT_PAGE_SIZE, config=None, request_post=None):
+    config = config or get_config()
+    after = None
+    orders_seen = 0
+    while orders_seen < config["max_orders"]:
+        page = fetch_orders_page(
+            after=after,
+            days=days,
+            page_size=min(page_size, config["max_orders"] - orders_seen),
+            config=config,
+            request_post=request_post,
+        )
+        if not page["orders"]:
+            break
+        orders_seen += len(page["orders"])
+        yield page
+        if not page["has_next_page"] or not page["end_cursor"]:
+            break
+        after = page["end_cursor"]
 
 
 def fetch_catalog_page(after=None, search="", page_size=DEFAULT_PAGE_SIZE, config=None, request_post=None):

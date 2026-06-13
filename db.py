@@ -50,10 +50,22 @@ COUNTRY_FOCUS_OPTIONS = (
 EDITION_STATUSES = (
     "Not Set",
     "Available",
-    "Selling Quickly",
+    "Count",
+    "Low",
     "Final Editions",
     "Sold Out",
     "Archived",
+)
+
+ORDER_ASSIGNMENT_STATUSES = (
+    "Needs Edition",
+    "Assigned",
+    "Already Assigned",
+    "Product Not Found",
+    "Sold Out",
+    "Error",
+    "Voided",
+    "Refunded",
 )
 
 PRODUCT_FIELDS = (
@@ -327,6 +339,86 @@ def init_db():
                 store_domain TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS shopify_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shopify_order_id TEXT NOT NULL UNIQUE,
+                legacy_resource_id TEXT,
+                order_name TEXT,
+                order_number TEXT,
+                admin_url TEXT,
+                created_at TEXT,
+                paid_at TEXT,
+                financial_status TEXT,
+                fulfillment_status TEXT,
+                customer_name TEXT,
+                customer_email TEXT,
+                cancelled_at TEXT,
+                last_synced_at TEXT NOT NULL,
+                notes TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS order_line_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                shopify_line_item_id TEXT NOT NULL UNIQUE,
+                shopify_product_id TEXT,
+                product_title TEXT,
+                product_handle TEXT,
+                variant_title TEXT,
+                quantity INTEGER NOT NULL DEFAULT 1,
+                assignment_status TEXT NOT NULL DEFAULT 'Needs Edition',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (order_id) REFERENCES shopify_orders(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS edition_assignments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id INTEGER NOT NULL,
+                line_item_id INTEGER NOT NULL,
+                shopify_order_id TEXT NOT NULL,
+                shopify_line_item_id TEXT NOT NULL,
+                shopify_product_id TEXT NOT NULL,
+                product_title TEXT,
+                edition_number INTEGER NOT NULL,
+                edition_limit INTEGER NOT NULL,
+                assignment_status TEXT NOT NULL DEFAULT 'Assigned',
+                assigned_at TEXT NOT NULL,
+                voided_at TEXT,
+                notes TEXT,
+                FOREIGN KEY (order_id) REFERENCES shopify_orders(id) ON DELETE CASCADE,
+                FOREIGN KEY (line_item_id) REFERENCES order_line_items(id) ON DELETE CASCADE,
+                UNIQUE (shopify_product_id, edition_number),
+                UNIQUE (shopify_line_item_id, edition_number)
+            );
+
+            CREATE TABLE IF NOT EXISTS edition_assignment_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                assignment_id INTEGER,
+                shopify_order_id TEXT,
+                shopify_line_item_id TEXT,
+                shopify_product_id TEXT,
+                old_edition_number INTEGER,
+                new_edition_number INTEGER,
+                action TEXT NOT NULL,
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (assignment_id) REFERENCES edition_assignments(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS shopify_order_sync_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                status TEXT NOT NULL,
+                orders_seen INTEGER NOT NULL DEFAULT 0,
+                assignments_created INTEGER NOT NULL DEFAULT 0,
+                pages_synced INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                api_version TEXT,
+                store_domain TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_products_name ON products(product_name);
             CREATE INDEX IF NOT EXISTS idx_products_status ON products(status);
             CREATE INDEX IF NOT EXISTS idx_products_sport ON products(sport_category);
@@ -335,6 +427,11 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_shopify_products_handle ON shopify_products(handle);
             CREATE INDEX IF NOT EXISTS idx_shopify_products_status ON shopify_products(status);
             CREATE INDEX IF NOT EXISTS idx_shopify_products_match ON shopify_products(matched_product_id);
+            CREATE INDEX IF NOT EXISTS idx_shopify_orders_created ON shopify_orders(created_at);
+            CREATE INDEX IF NOT EXISTS idx_order_line_items_order ON order_line_items(order_id);
+            CREATE INDEX IF NOT EXISTS idx_order_line_items_product ON order_line_items(shopify_product_id);
+            CREATE INDEX IF NOT EXISTS idx_assignments_order ON edition_assignments(order_id);
+            CREATE INDEX IF NOT EXISTS idx_assignments_line ON edition_assignments(line_item_id);
             """
         )
         ensure_column(connection, "products", "prodigi_product_url", "TEXT")
@@ -352,6 +449,22 @@ def init_db():
             ensure_column(connection, "products", field, "TEXT")
         ensure_column(connection, "shopify_products", "variant_count", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(connection, "shopify_products", "image_count", "INTEGER NOT NULL DEFAULT 0")
+        for column_name, definition in (
+            ("edition_limit", "INTEGER DEFAULT 100"),
+            ("next_available_edition", "INTEGER DEFAULT 1"),
+            ("editions_sold", "INTEGER DEFAULT 0"),
+            ("editions_remaining", "INTEGER DEFAULT 100"),
+            ("edition_status", "TEXT DEFAULT 'Available'"),
+            ("psd_file_url", "TEXT"),
+            ("prodigi_url", "TEXT"),
+            ("prodigi_product_id", "TEXT"),
+            ("edition_notes", "TEXT"),
+            ("last_edition_sync_at", "TEXT"),
+            ("edition_updated_at", "TEXT"),
+            ("created_at", "TEXT"),
+            ("updated_at", "TEXT"),
+        ):
+            ensure_column(connection, "shopify_products", column_name, definition)
         connection.execute(
             """
             UPDATE products
@@ -368,6 +481,50 @@ def init_db():
         )
         connection.execute("UPDATE products SET status = 'Idea' WHERE status = 'Draft'")
         connection.execute("UPDATE products SET status = 'Ready for Review' WHERE status = 'Needs Review'")
+        timestamp = utc_now()
+        connection.execute(
+            """
+            UPDATE shopify_products
+            SET edition_limit = COALESCE(edition_limit, 100),
+                next_available_edition = COALESCE(next_available_edition, 1),
+                editions_sold = COALESCE(editions_sold, 0),
+                editions_remaining = COALESCE(editions_remaining, 100),
+                edition_status = COALESCE(NULLIF(edition_status, ''), 'Available'),
+                created_at = COALESCE(created_at, synced_at, ?),
+                updated_at = COALESCE(updated_at, synced_at, ?)
+            """,
+            (timestamp, timestamp),
+        )
+        connection.execute(
+            """
+            UPDATE shopify_products
+            SET edition_limit = COALESCE(
+                    (SELECT le.edition_limit FROM limited_editions le
+                     WHERE le.product_id = shopify_products.matched_product_id), edition_limit),
+                next_available_edition = COALESCE(
+                    (SELECT le.next_edition_number FROM limited_editions le
+                     WHERE le.product_id = shopify_products.matched_product_id), next_available_edition),
+                editions_sold = COALESCE(
+                    (SELECT le.editions_sold FROM limited_editions le
+                     WHERE le.product_id = shopify_products.matched_product_id), editions_sold),
+                editions_remaining = COALESCE(
+                    (SELECT le.editions_remaining FROM limited_editions le
+                     WHERE le.product_id = shopify_products.matched_product_id), editions_remaining),
+                edition_status = COALESCE(
+                    (SELECT le.edition_status FROM limited_editions le
+                     WHERE le.product_id = shopify_products.matched_product_id), edition_status),
+                psd_file_url = COALESCE(NULLIF(psd_file_url, ''),
+                    (SELECT p.psd_file_url FROM products p
+                     WHERE p.id = shopify_products.matched_product_id), ''),
+                prodigi_url = COALESCE(NULLIF(prodigi_url, ''),
+                    (SELECT p.prodigi_product_url FROM products p
+                     WHERE p.id = shopify_products.matched_product_id), ''),
+                prodigi_product_id = COALESCE(NULLIF(prodigi_product_id, ''),
+                    (SELECT p.prodigi_product_id FROM products p
+                     WHERE p.id = shopify_products.matched_product_id), '')
+            WHERE matched_product_id IS NOT NULL
+            """
+        )
 
 
 def parse_json_list(value):
@@ -448,8 +605,10 @@ def upsert_shopify_products(products):
                     vendor, product_type, variant_count, image_count,
                     tags_json, collections_json, variants_json,
                     images_json, metafields_json, online_store_url, admin_url,
-                    remote_updated_at, synced_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    remote_updated_at, synced_at, edition_limit,
+                    next_available_edition, editions_sold, editions_remaining,
+                    edition_status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 100, 1, 0, 100, 'Available', ?, ?)
                 ON CONFLICT(shopify_product_id) DO UPDATE SET
                     legacy_resource_id = excluded.legacy_resource_id,
                     title = excluded.title,
@@ -467,7 +626,8 @@ def upsert_shopify_products(products):
                     online_store_url = excluded.online_store_url,
                     admin_url = excluded.admin_url,
                     remote_updated_at = excluded.remote_updated_at,
-                    synced_at = excluded.synced_at
+                    synced_at = excluded.synced_at,
+                    updated_at = excluded.updated_at
                 """,
                 (
                     product["shopify_product_id"],
@@ -487,6 +647,8 @@ def upsert_shopify_products(products):
                     product.get("online_store_url") or "",
                     product.get("admin_url") or "",
                     product.get("remote_updated_at") or "",
+                    timestamp,
+                    timestamp,
                     timestamp,
                 ),
             )
@@ -791,6 +953,764 @@ def get_shopify_summary():
         "unmatched": int(row["unmatched"] or 0),
         "last_synced_at": row["last_synced_at"],
     }
+
+
+def calculate_shopify_edition_values(
+    edition_limit,
+    next_available_edition,
+    editions_sold,
+    *,
+    allow_oversold=False,
+):
+    if edition_limit in (None, ""):
+        return {
+            "edition_limit": None,
+            "next_available_edition": None,
+            "editions_sold": max(int(editions_sold or 0), 0),
+            "editions_remaining": None,
+            "edition_status": "Not Set",
+            "edition_display_text": "EDITION DETAILS COMING SOON",
+        }
+
+    limit_value = int(edition_limit)
+    next_value = int(next_available_edition or 1)
+    sold_value = int(editions_sold or 0)
+    if limit_value < 1:
+        raise ValueError("Edition limit must be at least 1.")
+    if next_value < 1 or next_value > limit_value + 1:
+        raise ValueError("Next available edition must be between 1 and edition limit + 1.")
+    if sold_value < 0:
+        raise ValueError("Editions sold cannot be negative.")
+    if sold_value > limit_value and not allow_oversold:
+        raise ValueError("Editions sold cannot exceed the edition limit without confirmation.")
+
+    remaining = max(limit_value - sold_value, 0)
+    if remaining <= 0 or next_value > limit_value:
+        status = "Sold Out"
+        display_text = "SOLD OUT EDITION"
+    elif remaining <= 3:
+        status = "Final Editions"
+        display_text = f"FINAL EDITION #{next_value} OF {limit_value} AVAILABLE"
+    elif remaining <= 6:
+        status = "Low"
+        display_text = f"EDITION #{next_value} OF {limit_value} AVAILABLE"
+    elif remaining <= 12:
+        status = "Count"
+        display_text = f"EDITION #{next_value} OF {limit_value} AVAILABLE"
+    else:
+        status = "Available"
+        display_text = f"EDITION #{next_value} OF {limit_value} AVAILABLE"
+
+    return {
+        "edition_limit": limit_value,
+        "next_available_edition": next_value,
+        "editions_sold": sold_value,
+        "editions_remaining": remaining,
+        "edition_status": status,
+        "edition_display_text": display_text,
+    }
+
+
+def hydrate_shopify_edition_product(row):
+    if not row:
+        return None
+    product = dict(row)
+    for field in (
+        "edition_limit",
+        "next_available_edition",
+        "editions_sold",
+        "editions_remaining",
+    ):
+        if product.get(field) is not None:
+            product[field] = int(product[field])
+    values = calculate_shopify_edition_values(
+        product.get("edition_limit"),
+        product.get("next_available_edition"),
+        product.get("editions_sold"),
+        allow_oversold=True,
+    )
+    product.update(values)
+    product["shopify_handle"] = product.get("handle") or ""
+    product["product_title"] = product.get("title") or "Untitled Shopify Product"
+    product["prodigi_status"] = "Connected" if product.get("prodigi_url") else "Missing"
+    product["psd_status"] = "Connected" if product.get("psd_file_url") else "Missing"
+    product["last_shopify_sync_at"] = product.get("synced_at")
+    return product
+
+
+def list_shopify_edition_products(
+    search="",
+    shopify_status="All",
+    edition_filter="All",
+    limit=25,
+):
+    clauses = []
+    values = []
+    if search.strip():
+        search_value = f"%{search.strip().lower()}%"
+        clauses.append("(LOWER(sp.title) LIKE ? OR LOWER(sp.handle) LIKE ?)")
+        values.extend((search_value, search_value))
+    if shopify_status != "All":
+        clauses.append("sp.status = ?")
+        values.append(shopify_status.upper())
+    filter_clauses = {
+        "Edition Not Set": "sp.edition_limit IS NULL",
+        "Available": "sp.edition_status IN ('Available', 'Count', 'Low')",
+        "Final Editions": "sp.edition_status = 'Final Editions'",
+        "Sold Out": "sp.edition_status = 'Sold Out'",
+        "Missing PSD": "COALESCE(NULLIF(sp.psd_file_url, ''), NULLIF(p.psd_file_url, '')) IS NULL",
+        "Missing Prodigi": "COALESCE(NULLIF(sp.prodigi_url, ''), NULLIF(p.prodigi_product_url, '')) IS NULL",
+    }
+    if edition_filter in filter_clauses:
+        clauses.append(filter_clauses[edition_filter])
+    where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    display_limit = min(max(int(limit), 1), 500)
+    with get_connection() as connection:
+        rows = connection.execute(
+            f"""
+            SELECT sp.shopify_product_id, sp.legacy_resource_id, sp.title, sp.handle,
+                   sp.status, sp.online_store_url, sp.admin_url, sp.synced_at,
+                   sp.edition_limit, sp.next_available_edition, sp.editions_sold,
+                   sp.editions_remaining, sp.edition_status,
+                   COALESCE(NULLIF(sp.psd_file_url, ''), p.psd_file_url, '') AS psd_file_url,
+                   COALESCE(NULLIF(sp.prodigi_url, ''), p.prodigi_product_url, '') AS prodigi_url,
+                   COALESCE(NULLIF(sp.prodigi_product_id, ''), p.prodigi_product_id, '') AS prodigi_product_id,
+                   sp.edition_notes, sp.last_edition_sync_at, sp.edition_updated_at,
+                   sp.matched_product_id
+            FROM shopify_products sp
+            LEFT JOIN products p ON p.id = sp.matched_product_id
+            {where_clause}
+            ORDER BY sp.title COLLATE NOCASE
+            LIMIT ?
+            """,
+            (*values, display_limit),
+        ).fetchall()
+    return [hydrate_shopify_edition_product(row) for row in rows]
+
+
+def get_shopify_edition_product(shopify_product_id):
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT sp.shopify_product_id, sp.legacy_resource_id, sp.title, sp.handle,
+                   sp.status, sp.online_store_url, sp.admin_url, sp.synced_at,
+                   sp.edition_limit, sp.next_available_edition, sp.editions_sold,
+                   sp.editions_remaining, sp.edition_status,
+                   COALESCE(NULLIF(sp.psd_file_url, ''), p.psd_file_url, '') AS psd_file_url,
+                   COALESCE(NULLIF(sp.prodigi_url, ''), p.prodigi_product_url, '') AS prodigi_url,
+                   COALESCE(NULLIF(sp.prodigi_product_id, ''), p.prodigi_product_id, '') AS prodigi_product_id,
+                   sp.edition_notes, sp.last_edition_sync_at, sp.edition_updated_at,
+                   sp.matched_product_id
+            FROM shopify_products sp
+            LEFT JOIN products p ON p.id = sp.matched_product_id
+            WHERE sp.shopify_product_id = ?
+            """,
+            (shopify_product_id,),
+        ).fetchone()
+    return hydrate_shopify_edition_product(row)
+
+
+def update_shopify_edition_product(
+    shopify_product_id,
+    *,
+    edition_limit,
+    next_available_edition,
+    editions_sold,
+    psd_file_url="",
+    prodigi_url="",
+    prodigi_product_id="",
+    notes="",
+    allow_oversold=False,
+):
+    values = calculate_shopify_edition_values(
+        edition_limit,
+        next_available_edition,
+        editions_sold,
+        allow_oversold=allow_oversold,
+    )
+    timestamp = utc_now()
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE shopify_products
+            SET edition_limit = ?, next_available_edition = ?, editions_sold = ?,
+                editions_remaining = ?, edition_status = ?, psd_file_url = ?,
+                prodigi_url = ?, prodigi_product_id = ?, edition_notes = ?,
+                edition_updated_at = ?, updated_at = ?
+            WHERE shopify_product_id = ?
+            """,
+            (
+                values["edition_limit"],
+                values["next_available_edition"],
+                values["editions_sold"],
+                values["editions_remaining"],
+                values["edition_status"],
+                str(psd_file_url or "").strip(),
+                str(prodigi_url or "").strip(),
+                str(prodigi_product_id or "").strip(),
+                str(notes or "").strip(),
+                timestamp,
+                timestamp,
+                shopify_product_id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ValueError("The Shopify product could not be found in the local cache.")
+    return get_shopify_edition_product(shopify_product_id)
+
+
+def mark_shopify_edition_synced(shopify_product_id):
+    timestamp = utc_now()
+    with get_connection() as connection:
+        connection.execute(
+            "UPDATE shopify_products SET last_edition_sync_at = ?, updated_at = ? WHERE shopify_product_id = ?",
+            (timestamp, timestamp, shopify_product_id),
+        )
+
+
+def start_shopify_order_sync(store_domain, api_version):
+    timestamp = utc_now()
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO shopify_order_sync_runs (
+                started_at, status, orders_seen, assignments_created,
+                pages_synced, api_version, store_domain
+            ) VALUES (?, 'Running', 0, 0, 0, ?, ?)
+            """,
+            (timestamp, api_version, store_domain),
+        )
+    return cursor.lastrowid
+
+
+def update_shopify_order_sync_run(
+    run_id,
+    *,
+    status=None,
+    orders_seen=None,
+    assignments_created=None,
+    pages_synced=None,
+    error_message=None,
+):
+    fields = {}
+    if status is not None:
+        fields["status"] = status
+    if orders_seen is not None:
+        fields["orders_seen"] = int(orders_seen)
+    if assignments_created is not None:
+        fields["assignments_created"] = int(assignments_created)
+    if pages_synced is not None:
+        fields["pages_synced"] = int(pages_synced)
+    if error_message is not None:
+        fields["error_message"] = str(error_message)[:500]
+    if status in {"Complete", "Failed"}:
+        fields["completed_at"] = utc_now()
+    if not fields:
+        return
+    assignments = ", ".join(f"{field} = ?" for field in fields)
+    with get_connection() as connection:
+        connection.execute(
+            f"UPDATE shopify_order_sync_runs SET {assignments} WHERE id = ?",
+            (*fields.values(), run_id),
+        )
+
+
+def get_latest_shopify_order_sync_run():
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT * FROM shopify_order_sync_runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def _assignment_state_for_order(order):
+    financial_status = str(order.get("financial_status") or "").upper()
+    if order.get("cancelled_at"):
+        return "Voided"
+    if financial_status in {"REFUNDED", "PARTIALLY_REFUNDED"}:
+        return "Refunded"
+    return None
+
+
+def process_shopify_order_for_editions(order):
+    """Idempotently cache one order and assign editions inside one write lock.
+
+    Future webhook endpoint should call this function.
+    """
+    timestamp = utc_now()
+    shopify_order_id = str(order.get("shopify_order_id") or "").strip()
+    if not shopify_order_id:
+        raise ValueError("Shopify order ID is required.")
+
+    result = {
+        "order_id": None,
+        "assignments_created": 0,
+        "changed_product_ids": set(),
+        "warnings": [],
+    }
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute(
+            """
+            INSERT INTO shopify_orders (
+                shopify_order_id, legacy_resource_id, order_name, order_number,
+                admin_url, created_at, paid_at, financial_status,
+                fulfillment_status, customer_name, customer_email, cancelled_at,
+                last_synced_at, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(shopify_order_id) DO UPDATE SET
+                legacy_resource_id = excluded.legacy_resource_id,
+                order_name = excluded.order_name,
+                order_number = excluded.order_number,
+                admin_url = excluded.admin_url,
+                created_at = excluded.created_at,
+                paid_at = excluded.paid_at,
+                financial_status = excluded.financial_status,
+                fulfillment_status = excluded.fulfillment_status,
+                customer_name = excluded.customer_name,
+                customer_email = excluded.customer_email,
+                cancelled_at = excluded.cancelled_at,
+                last_synced_at = excluded.last_synced_at
+            """,
+            (
+                shopify_order_id,
+                order.get("legacy_resource_id") or "",
+                order.get("order_name") or "",
+                order.get("order_number") or "",
+                order.get("admin_url") or "",
+                order.get("created_at") or timestamp,
+                order.get("paid_at") or "",
+                order.get("financial_status") or "",
+                order.get("fulfillment_status") or "",
+                order.get("customer_name") or "",
+                order.get("customer_email") or "",
+                order.get("cancelled_at") or "",
+                timestamp,
+                order.get("notes") or "",
+            ),
+        )
+        order_row = connection.execute(
+            "SELECT id FROM shopify_orders WHERE shopify_order_id = ?",
+            (shopify_order_id,),
+        ).fetchone()
+        order_id = int(order_row["id"])
+        result["order_id"] = order_id
+        terminal_state = _assignment_state_for_order(order)
+        financial_status = str(order.get("financial_status") or "").upper()
+
+        for item in order.get("line_items") or []:
+            line_item_id = str(item.get("shopify_line_item_id") or "").strip()
+            if not line_item_id:
+                continue
+            quantity = max(int(item.get("quantity") or 1), 1)
+            connection.execute(
+                """
+                INSERT INTO order_line_items (
+                    order_id, shopify_line_item_id, shopify_product_id,
+                    product_title, product_handle, variant_title, quantity,
+                    assignment_status, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'Needs Edition', ?, ?)
+                ON CONFLICT(shopify_line_item_id) DO UPDATE SET
+                    order_id = excluded.order_id,
+                    shopify_product_id = excluded.shopify_product_id,
+                    product_title = excluded.product_title,
+                    product_handle = excluded.product_handle,
+                    variant_title = excluded.variant_title,
+                    quantity = excluded.quantity,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    order_id,
+                    line_item_id,
+                    item.get("shopify_product_id") or "",
+                    item.get("product_title") or "",
+                    item.get("product_handle") or "",
+                    item.get("variant_title") or "",
+                    quantity,
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            line_row = connection.execute(
+                "SELECT id, shopify_product_id FROM order_line_items WHERE shopify_line_item_id = ?",
+                (line_item_id,),
+            ).fetchone()
+            local_line_id = int(line_row["id"])
+
+            if terminal_state:
+                connection.execute(
+                    """
+                    UPDATE edition_assignments
+                    SET assignment_status = ?, voided_at = COALESCE(voided_at, ?)
+                    WHERE line_item_id = ? AND assignment_status NOT IN ('Voided', 'Refunded')
+                    """,
+                    (terminal_state, timestamp, local_line_id),
+                )
+                connection.execute(
+                    "UPDATE order_line_items SET assignment_status = ?, updated_at = ? WHERE id = ?",
+                    (terminal_state, timestamp, local_line_id),
+                )
+                continue
+
+            existing_count = int(
+                connection.execute(
+                    "SELECT COUNT(*) AS count FROM edition_assignments WHERE line_item_id = ?",
+                    (local_line_id,),
+                ).fetchone()["count"]
+            )
+            if existing_count >= quantity:
+                connection.execute(
+                    "UPDATE order_line_items SET assignment_status = 'Already Assigned', updated_at = ? WHERE id = ?",
+                    (timestamp, local_line_id),
+                )
+                continue
+            if financial_status != "PAID":
+                connection.execute(
+                    "UPDATE order_line_items SET assignment_status = 'Needs Edition', updated_at = ? WHERE id = ?",
+                    (timestamp, local_line_id),
+                )
+                continue
+
+            product_id = str(line_row["shopify_product_id"] or "")
+            product = connection.execute(
+                """
+                SELECT shopify_product_id, title, edition_limit,
+                       next_available_edition, editions_sold
+                FROM shopify_products WHERE shopify_product_id = ?
+                """,
+                (product_id,),
+            ).fetchone()
+            if not product:
+                connection.execute(
+                    "UPDATE order_line_items SET assignment_status = 'Product Not Found', updated_at = ? WHERE id = ?",
+                    (timestamp, local_line_id),
+                )
+                continue
+
+            needed = quantity - existing_count
+            edition_values = calculate_shopify_edition_values(
+                product["edition_limit"],
+                product["next_available_edition"],
+                product["editions_sold"],
+                allow_oversold=True,
+            )
+            next_number = edition_values["next_available_edition"]
+            edition_limit = edition_values["edition_limit"]
+            if (
+                edition_limit is None
+                or next_number is None
+                or next_number + needed - 1 > edition_limit
+                or edition_values["editions_remaining"] < needed
+            ):
+                connection.execute(
+                    "UPDATE order_line_items SET assignment_status = 'Sold Out', updated_at = ? WHERE id = ?",
+                    (timestamp, local_line_id),
+                )
+                result["warnings"].append(
+                    f"{item.get('product_title') or 'Product'} does not have enough edition numbers available."
+                )
+                continue
+
+            for offset in range(needed):
+                edition_number = next_number + offset
+                connection.execute(
+                    """
+                    INSERT INTO edition_assignments (
+                        order_id, line_item_id, shopify_order_id,
+                        shopify_line_item_id, shopify_product_id, product_title,
+                        edition_number, edition_limit, assignment_status,
+                        assigned_at, notes
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Assigned', ?, '')
+                    """,
+                    (
+                        order_id,
+                        local_line_id,
+                        shopify_order_id,
+                        line_item_id,
+                        product_id,
+                        item.get("product_title") or product["title"] or "",
+                        edition_number,
+                        edition_limit,
+                        timestamp,
+                    ),
+                )
+            new_values = calculate_shopify_edition_values(
+                edition_limit,
+                next_number + needed,
+                edition_values["editions_sold"] + needed,
+                allow_oversold=True,
+            )
+            connection.execute(
+                """
+                UPDATE shopify_products
+                SET next_available_edition = ?, editions_sold = ?,
+                    editions_remaining = ?, edition_status = ?,
+                    edition_updated_at = ?, updated_at = ?
+                WHERE shopify_product_id = ?
+                """,
+                (
+                    new_values["next_available_edition"],
+                    new_values["editions_sold"],
+                    new_values["editions_remaining"],
+                    new_values["edition_status"],
+                    timestamp,
+                    timestamp,
+                    product_id,
+                ),
+            )
+            connection.execute(
+                "UPDATE order_line_items SET assignment_status = 'Assigned', updated_at = ? WHERE id = ?",
+                (timestamp, local_line_id),
+            )
+            result["assignments_created"] += needed
+            result["changed_product_ids"].add(product_id)
+    result["changed_product_ids"] = sorted(result["changed_product_ids"])
+    return result
+
+
+def list_shopify_orders(search="", status_filter="All", limit=100):
+    clauses = []
+    values = []
+    if search.strip():
+        search_value = f"%{search.strip().lower()}%"
+        clauses.append(
+            "(LOWER(o.order_name) LIKE ? OR LOWER(o.order_number) LIKE ? OR "
+            "LOWER(o.customer_name) LIKE ? OR EXISTS (SELECT 1 FROM order_line_items li "
+            "WHERE li.order_id = o.id AND LOWER(li.product_title) LIKE ?))"
+        )
+        values.extend((search_value, search_value, search_value, search_value))
+    status_clauses = {
+        "Needs Edition": "EXISTS (SELECT 1 FROM order_line_items li WHERE li.order_id = o.id AND li.assignment_status = 'Needs Edition')",
+        "Assigned": "EXISTS (SELECT 1 FROM edition_assignments ea WHERE ea.order_id = o.id AND ea.assignment_status IN ('Assigned', 'Manual Override'))",
+        "Paid": "o.financial_status = 'PAID'",
+        "Unfulfilled": "o.fulfillment_status IN ('UNFULFILLED', '')",
+        "Error": "EXISTS (SELECT 1 FROM order_line_items li WHERE li.order_id = o.id AND li.assignment_status IN ('Error', 'Product Not Found'))",
+        "Sold Out Issue": "EXISTS (SELECT 1 FROM order_line_items li WHERE li.order_id = o.id AND li.assignment_status = 'Sold Out')",
+    }
+    if status_filter in status_clauses:
+        clauses.append(status_clauses[status_filter])
+    where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with get_connection() as connection:
+        order_rows = connection.execute(
+            f"""
+            SELECT o.* FROM shopify_orders o
+            {where_clause}
+            ORDER BY o.created_at DESC, o.id DESC
+            LIMIT ?
+            """,
+            (*values, min(max(int(limit), 1), 500)),
+        ).fetchall()
+        order_ids = [row["id"] for row in order_rows]
+        if not order_ids:
+            return []
+        placeholders = ", ".join("?" for _ in order_ids)
+        line_rows = connection.execute(
+            f"""
+            SELECT li.*, sp.psd_file_url,
+                   sp.prodigi_url, sp.prodigi_product_id
+            FROM order_line_items li
+            LEFT JOIN shopify_products sp ON sp.shopify_product_id = li.shopify_product_id
+            WHERE li.order_id IN ({placeholders})
+            ORDER BY li.id
+            """,
+            order_ids,
+        ).fetchall()
+        line_ids = [row["id"] for row in line_rows]
+        assignment_rows = []
+        if line_ids:
+            line_placeholders = ", ".join("?" for _ in line_ids)
+            assignment_rows = connection.execute(
+                f"""
+                SELECT * FROM edition_assignments
+                WHERE line_item_id IN ({line_placeholders})
+                ORDER BY edition_number
+                """,
+                line_ids,
+            ).fetchall()
+
+    assignments_by_line = {}
+    for row in assignment_rows:
+        assignments_by_line.setdefault(row["line_item_id"], []).append(dict(row))
+    lines_by_order = {}
+    for row in line_rows:
+        line = dict(row)
+        line["assignments"] = assignments_by_line.get(line["id"], [])
+        lines_by_order.setdefault(line["order_id"], []).append(line)
+    orders = []
+    for row in order_rows:
+        order = dict(row)
+        order["line_items"] = lines_by_order.get(order["id"], [])
+        orders.append(order)
+    return orders
+
+
+def get_shopify_order_summary():
+    today_prefix = datetime.now(timezone.utc).date().isoformat()
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN EXISTS (
+                       SELECT 1 FROM order_line_items li
+                       WHERE li.order_id = o.id AND li.assignment_status IN ('Needs Edition', 'Product Not Found', 'Sold Out', 'Error')
+                   ) THEN 1 ELSE 0 END) AS needs_assignment,
+                   MAX(last_synced_at) AS last_synced_at
+            FROM shopify_orders o
+            """
+        ).fetchone()
+        assigned_today = connection.execute(
+            "SELECT COUNT(*) AS count FROM edition_assignments WHERE assigned_at LIKE ?",
+            (f"{today_prefix}%",),
+        ).fetchone()["count"]
+    return {
+        "total": int(row["total"] or 0),
+        "needs_assignment": int(row["needs_assignment"] or 0),
+        "assigned_today": int(assigned_today or 0),
+        "last_synced_at": row["last_synced_at"],
+    }
+
+
+def get_shopify_edition_summary():
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   SUM(CASE WHEN edition_limit IS NULL THEN 1 ELSE 0 END) AS missing_setup,
+                   SUM(CASE WHEN COALESCE(psd_file_url, '') = '' THEN 1 ELSE 0 END) AS missing_psd,
+                   SUM(CASE WHEN COALESCE(prodigi_url, '') = '' THEN 1 ELSE 0 END) AS missing_prodigi,
+                   SUM(CASE WHEN edition_status = 'Final Editions' THEN 1 ELSE 0 END) AS final_editions,
+                   SUM(CASE WHEN edition_status = 'Sold Out' THEN 1 ELSE 0 END) AS sold_out
+            FROM shopify_products
+            """
+        ).fetchone()
+    return {key: int(row[key] or 0) for key in row.keys()}
+
+
+def manual_override_edition_assignment(line_item_id, edition_number, notes="", force=False):
+    edition_number = int(edition_number)
+    if edition_number < 1:
+        raise ValueError("Edition number must be at least 1.")
+    timestamp = utc_now()
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        line = connection.execute(
+            """
+            SELECT li.*, o.shopify_order_id
+            FROM order_line_items li
+            JOIN shopify_orders o ON o.id = li.order_id
+            WHERE li.id = ?
+            """,
+            (line_item_id,),
+        ).fetchone()
+        if not line or not line["shopify_product_id"]:
+            raise ValueError("This order line is not connected to a Shopify product.")
+        product = connection.execute(
+            "SELECT * FROM shopify_products WHERE shopify_product_id = ?",
+            (line["shopify_product_id"],),
+        ).fetchone()
+        if not product or product["edition_limit"] is None:
+            raise ValueError("Set the product edition limit before assigning an edition.")
+        if edition_number > int(product["edition_limit"]):
+            raise ValueError("Edition number cannot exceed the edition limit.")
+        duplicate = connection.execute(
+            """
+            SELECT id FROM edition_assignments
+            WHERE shopify_product_id = ? AND edition_number = ? AND line_item_id != ?
+            """,
+            (line["shopify_product_id"], edition_number, line_item_id),
+        ).fetchone()
+        if duplicate and not force:
+            raise ValueError("That edition number is already assigned to this product.")
+        if duplicate and force:
+            raise ValueError("Duplicate collector edition numbers cannot be forced.")
+
+        existing = connection.execute(
+            "SELECT * FROM edition_assignments WHERE line_item_id = ? ORDER BY id LIMIT 1",
+            (line_item_id,),
+        ).fetchone()
+        if existing:
+            old_number = int(existing["edition_number"])
+            connection.execute(
+                """
+                UPDATE edition_assignments
+                SET edition_number = ?, assignment_status = 'Manual Override', notes = ?
+                WHERE id = ?
+                """,
+                (edition_number, str(notes or "").strip(), existing["id"]),
+            )
+            assignment_id = existing["id"]
+        else:
+            old_number = None
+            cursor = connection.execute(
+                """
+                INSERT INTO edition_assignments (
+                    order_id, line_item_id, shopify_order_id, shopify_line_item_id,
+                    shopify_product_id, product_title, edition_number, edition_limit,
+                    assignment_status, assigned_at, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Manual Override', ?, ?)
+                """,
+                (
+                    line["order_id"],
+                    line_item_id,
+                    line["shopify_order_id"],
+                    line["shopify_line_item_id"],
+                    line["shopify_product_id"],
+                    line["product_title"],
+                    edition_number,
+                    product["edition_limit"],
+                    timestamp,
+                    str(notes or "").strip(),
+                ),
+            )
+            assignment_id = cursor.lastrowid
+            next_number = max(int(product["next_available_edition"] or 1), edition_number + 1)
+            new_values = calculate_shopify_edition_values(
+                product["edition_limit"],
+                next_number,
+                int(product["editions_sold"] or 0) + 1,
+                allow_oversold=True,
+            )
+            connection.execute(
+                """
+                UPDATE shopify_products
+                SET next_available_edition = ?, editions_sold = ?, editions_remaining = ?,
+                    edition_status = ?, edition_updated_at = ?, updated_at = ?
+                WHERE shopify_product_id = ?
+                """,
+                (
+                    new_values["next_available_edition"],
+                    new_values["editions_sold"],
+                    new_values["editions_remaining"],
+                    new_values["edition_status"],
+                    timestamp,
+                    timestamp,
+                    line["shopify_product_id"],
+                ),
+            )
+        connection.execute(
+            "UPDATE order_line_items SET assignment_status = 'Assigned', updated_at = ? WHERE id = ?",
+            (timestamp, line_item_id),
+        )
+        connection.execute(
+            """
+            INSERT INTO edition_assignment_audit (
+                assignment_id, shopify_order_id, shopify_line_item_id,
+                shopify_product_id, old_edition_number, new_edition_number,
+                action, notes, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, 'Manual Override', ?, ?)
+            """,
+            (
+                assignment_id,
+                line["shopify_order_id"],
+                line["shopify_line_item_id"],
+                line["shopify_product_id"],
+                old_number,
+                edition_number,
+                str(notes or "").strip(),
+                timestamp,
+            ),
+        )
+    return get_shopify_edition_product(line["shopify_product_id"])
 
 
 def clean_product_payload(payload):
@@ -1163,10 +2083,12 @@ def calculate_edition_values(edition_limit, editions_sold):
 
     if remaining == 0:
         status = "Sold Out"
-    elif remaining <= 5:
+    elif remaining <= 3:
         status = "Final Editions"
-    elif remaining <= 15:
-        status = "Selling Quickly"
+    elif remaining <= 6:
+        status = "Low"
+    elif remaining <= 12:
+        status = "Count"
     else:
         status = "Available"
 
@@ -1247,6 +2169,8 @@ def list_limited_editions(status="All"):
 
 def get_dashboard_data():
     products = list_products(include_archived=False)
+    shopify_editions = get_shopify_edition_summary()
+    orders = get_shopify_order_summary()
     metrics = {
         "total_products": len(products),
         "live_products": sum(product["status"] == "Live" for product in products),
@@ -1273,6 +2197,15 @@ def get_dashboard_data():
         "missing_drive_root": sum(not product.get("google_drive_root_folder_url") for product in products),
         "shopify_matched": sum(bool(product.get("shopify_match")) for product in products),
         "shopify_needs_match": sum(not product.get("shopify_match") for product in products),
+        "shopify_products_synced": shopify_editions["total"],
+        "orders_synced": orders["total"],
+        "orders_needing_assignment": orders["needs_assignment"],
+        "orders_assigned_today": orders["assigned_today"],
+        "shopify_missing_edition_setup": shopify_editions["missing_setup"],
+        "shopify_missing_psd": shopify_editions["missing_psd"],
+        "shopify_missing_prodigi": shopify_editions["missing_prodigi"],
+        "shopify_final_editions": shopify_editions["final_editions"],
+        "shopify_sold_out": shopify_editions["sold_out"],
     }
     focus = {
         "missing_psd": [product for product in products if not product.get("psd_file_url")],

@@ -3,6 +3,7 @@ import gc
 import html
 import io
 import json
+import os
 import re
 from datetime import datetime
 
@@ -183,18 +184,18 @@ def render_dashboard_page():
     st.caption("The daily command screen for product readiness, missing files, and edition priorities.")
     metrics, focus = db.get_dashboard_data()
     metric_specs = (
-        ("Total products", metrics["total_products"]),
-        ("Live products", metrics["live_products"]),
-        ("Products missing core assets", metrics["missing_core_assets"]),
-        ("Assets needing review", metrics["assets_needing_review"]),
-        ("Approved asset packs", metrics["approved_asset_packs"]),
-        ("Live products missing files", metrics["live_missing_files"]),
-        ("Missing Drive root folder", metrics["missing_drive_root"]),
-        ("Missing edition limits", metrics["missing_edition_limits"]),
+        ("Shopify products synced", metrics["shopify_products_synced"]),
+        ("Orders synced", metrics["orders_synced"]),
+        ("Orders needing editions", metrics["orders_needing_assignment"]),
+        ("Orders assigned today", metrics["orders_assigned_today"]),
+        ("Products missing edition setup", metrics["shopify_missing_edition_setup"]),
+        ("Products missing PSD", metrics["shopify_missing_psd"]),
+        ("Products missing Prodigi", metrics["shopify_missing_prodigi"]),
+        ("Final editions", metrics["shopify_final_editions"]),
+        ("Sold out editions", metrics["shopify_sold_out"]),
+        ("Internal products", metrics["total_products"]),
         ("Ready for upload", metrics["ready_for_upload"]),
-        ("Final editions", metrics["final_editions"]),
-        ("Shopify products matched", metrics["shopify_matched"]),
-        ("Products needing Shopify match", metrics["shopify_needs_match"]),
+        ("Live products missing files", metrics["live_missing_files"]),
     )
     metric_columns = st.columns(3)
     for index, (label, value) in enumerate(metric_specs):
@@ -213,7 +214,8 @@ def render_dashboard_page():
         render_focus_list("Needs asset review", focus["assets_needing_review"], "No asset packs need review.")
         render_focus_list("Live but missing files", focus["live_missing_files"], "No live products are missing core files.")
     with focus_columns[3]:
-        render_focus_list("Needs Shopify match", focus["shopify_needs_match"], "Every product is matched to Shopify.")
+        render_focus_list("Missing Prodigi", focus["missing_prodigi"], "Every product has Prodigi details.")
+        render_focus_list("Missing edition limit", focus["missing_edition_limit"], "Every internal product has an edition limit.")
 
 
 def shopify_match_suggestion(remote_product, internal_products):
@@ -277,6 +279,199 @@ def render_shopify_remote_details(remote_product, item_key):
             st.caption(f"{len(metafields)} metafield values cached. Values are not edited from Sports Cave OS in Phase 4.")
 
 
+def render_shopify_sync_panel():
+    config = shopify_sync.get_config()
+    token_status = shopify_sync.get_token_status(config)
+    summary = db.get_shopify_summary()
+    latest_run = db.get_latest_shopify_sync_run()
+
+    st.subheader("Shopify edition sync")
+    st.caption(
+        "Manual Shopify metadata sync for product matching, edition workflows, and storefront metafield foundations. "
+        "This does not run automatically during mockup generation."
+    )
+
+    notice = st.session_state.pop("shopify_sync_notice", None)
+    if notice:
+        st.success(notice)
+
+    status_columns = st.columns(4)
+    status_columns[0].metric("Connection", "Configured" if config["configured"] else "Not configured")
+    status_columns[1].metric("Cached Shopify products", summary["total"])
+    status_columns[2].metric("Matched", summary["matched"])
+    status_columns[3].metric("Needs matching", summary["unmatched"])
+
+    st.caption(
+        f"Store domain: {config['store_domain'] or 'Missing'} | "
+        f"API version: {config['api_version'] or 'Missing'} | Auth: {config['auth_mode']} | "
+        f"Last catalog sync: {format_updated_at(summary['last_synced_at']) if summary['last_synced_at'] else 'Never'}"
+    )
+    if latest_run:
+        st.caption(
+            f"Latest run: {latest_run['status']} | {latest_run['products_seen']} products | "
+            f"{latest_run['pages_synced']} pages"
+        )
+
+    if not config["configured"]:
+        st.warning(
+            "Shopify is not connected yet. Configure SHOPIFY_STORE_DOMAIN, SHOPIFY_API_VERSION, "
+            "and either SHOPIFY_ADMIN_ACCESS_TOKEN or SHOPIFY_CLIENT_ID plus SHOPIFY_CLIENT_SECRET "
+            "in Render environment variables."
+        )
+    elif token_status["auth_mode"] == "Client credentials mode":
+        st.caption(
+            "Client credentials are configured. A temporary access token is requested only when Test or Sync is clicked."
+        )
+
+    action_columns = st.columns([1, 1, 2])
+    test_clicked = action_columns[0].button(
+        "Test Shopify Connection",
+        disabled=not config["configured"],
+        use_container_width=True,
+    )
+    sync_clicked = action_columns[1].button(
+        "Sync Shopify Products",
+        type="primary",
+        disabled=not config["configured"],
+        use_container_width=True,
+    )
+    action_columns[2].caption(
+        "Sync runs only when this button is clicked. It does not run during mockup generation or normal page loads."
+    )
+
+    if test_clicked:
+        try:
+            with st.spinner("Testing Shopify connection..."):
+                shop = shopify_sync.test_connection(config=config)
+            st.success(
+                f"Connected to {shop['name']} ({shop['myshopify_domain']}). "
+                f"Shopify served API version {shop['api_version']}."
+            )
+        except Exception as error:
+            st.error("Could not connect to Shopify.")
+            st.error(str(error))
+
+    if sync_clicked:
+        run_id = db.start_shopify_sync(config["store_domain"], config["api_version"])
+        progress = st.progress(0, text="Starting Shopify catalog sync...")
+        products_seen = 0
+        pages_synced = 0
+        try:
+            for page in shopify_sync.iter_catalog_pages(config=config):
+                db.upsert_shopify_products(page["products"])
+                products_seen += len(page["products"])
+                pages_synced += 1
+                db.update_shopify_sync_run(
+                    run_id,
+                    products_seen=products_seen,
+                    pages_synced=pages_synced,
+                    api_version=page.get("api_version"),
+                )
+                percent = min(int(products_seen / config["max_products"] * 100), 99)
+                progress.progress(percent, text=f"Synced {products_seen} Shopify products...")
+                del page
+                gc.collect()
+            matched_count = db.auto_match_shopify_products()
+            db.update_shopify_sync_run(
+                run_id,
+                status="Complete",
+                products_seen=products_seen,
+                pages_synced=pages_synced,
+            )
+            progress.progress(100, text="Shopify catalog sync complete.")
+            st.session_state.shopify_sync_notice = (
+                f"Synced {products_seen} Shopify products. {matched_count} new exact matches were connected."
+            )
+            st.rerun()
+        except Exception as error:
+            db.update_shopify_sync_run(
+                run_id,
+                status="Failed",
+                products_seen=products_seen,
+                pages_synced=pages_synced,
+                error_message=str(error),
+            )
+            progress.empty()
+            st.error("Shopify sync failed. Existing cached products were kept.")
+            st.error(str(error))
+
+    st.subheader("Cached Shopify products")
+    filter_columns = st.columns([2, 1, 1, 1])
+    search = filter_columns[0].text_input("Search Shopify products", placeholder="Title or handle")
+    status_filter = filter_columns[1].selectbox("Shopify status", ["All", "ACTIVE", "DRAFT", "ARCHIVED"])
+    match_filter = filter_columns[2].selectbox("Match status", ["All", "Unmatched", "Matched"])
+    display_limit = filter_columns[3].selectbox("Show", [25, 50, 100], index=0)
+
+    remote_products = db.list_shopify_products(search, status_filter, match_filter)
+    internal_products = db.list_products(include_archived=False)
+    internal_by_id = {product["id"]: product for product in internal_products}
+    st.caption(f"Showing {min(len(remote_products), display_limit)} of {len(remote_products)} cached Shopify products")
+    if not remote_products:
+        st.info("No cached Shopify products match these filters. Connect Shopify and run a manual sync first.")
+        return
+
+    for remote in remote_products[:display_limit]:
+        item_key = remote.get("legacy_resource_id") or str(abs(hash(remote["shopify_product_id"])))
+        with st.container(border=True):
+            summary_columns = st.columns([3, 1, 1, 1.3])
+            summary_columns[0].markdown(f"**{remote['title']}**")
+            summary_columns[0].caption(remote.get("handle") or "Handle missing")
+            summary_columns[1].markdown(status_badge(f"Shopify {remote['status'].title()}"), unsafe_allow_html=True)
+            summary_columns[2].write(f"{remote['variant_count']} variants")
+            summary_columns[2].caption(f"{remote.get('image_count')} images")
+            summary_columns[3].caption("Shopify updated")
+            summary_columns[3].write(format_updated_at(remote.get("remote_updated_at")))
+
+            link_columns = st.columns([1, 1, 3])
+            if remote.get("admin_url"):
+                link_columns[0].link_button("Open Shopify Admin", remote["admin_url"], use_container_width=True)
+            if remote.get("online_store_url"):
+                link_columns[1].link_button("Open Live Product", remote["online_store_url"], use_container_width=True)
+
+            if remote.get("matched_product_id"):
+                st.success(
+                    f"Matched to {remote.get('matched_product_name') or 'internal product'} "
+                    f"via {remote.get('match_source') or 'manual match'}."
+                )
+                match_actions = st.columns([1, 1, 3])
+                if match_actions[0].button("Open Product", key=f"shopify-open-{item_key}", use_container_width=True):
+                    go_to_product(remote["matched_product_id"])
+                if match_actions[1].button("Unmatch", key=f"shopify-unmatch-{item_key}", use_container_width=True):
+                    db.unmatch_shopify_product(remote["shopify_product_id"])
+                    st.rerun()
+            else:
+                suggestion = shopify_match_suggestion(remote, internal_products)
+                if suggestion:
+                    st.info(f"Suggested internal match: {internal_by_id[suggestion]['product_name']}")
+                match_columns = st.columns([3, 1, 1])
+                product_options = [None, *internal_by_id.keys()]
+                default_index = product_options.index(suggestion) if suggestion in product_options else 0
+                selected_product_id = match_columns[0].selectbox(
+                    "Match to internal product",
+                    product_options,
+                    index=default_index,
+                    format_func=lambda value: "Choose a product" if value is None else internal_by_id[value]["product_name"],
+                    key=f"shopify-match-select-{item_key}",
+                )
+                if match_columns[1].button(
+                    "Confirm Match",
+                    key=f"shopify-match-{item_key}",
+                    disabled=selected_product_id is None,
+                    use_container_width=True,
+                ):
+                    db.match_shopify_product(remote["shopify_product_id"], selected_product_id)
+                    st.rerun()
+                if match_columns[2].button(
+                    "Create Product",
+                    key=f"shopify-create-{item_key}",
+                    use_container_width=True,
+                ):
+                    product_id = db.create_product_from_shopify(remote["shopify_product_id"])
+                    go_to_product(product_id)
+
+            render_shopify_remote_details(remote, item_key)
+
+
 def render_shopify_sync_page():
     render_page_intro(
         "Shopify Sync",
@@ -284,10 +479,7 @@ def render_shopify_sync_page():
         "Test the connection, sync the catalog, then resolve any unmatched products.",
         "Check the handle and product title before confirming a manual match.",
     )
-    config = shopify_sync.get_config()
-    token_status = shopify_sync.get_token_status(config)
-    summary = db.get_shopify_summary()
-    latest_run = db.get_latest_shopify_sync_run()
+    render_shopify_sync_panel()
 
     notice = st.session_state.pop("shopify_sync_notice", None)
     if notice:
@@ -690,8 +882,8 @@ def render_products_page():
             use_container_width=True,
         )
     with actions[2]:
-        if st.button("Open Shopify Sync", use_container_width=True):
-            st.session_state.pending_page = "Shopify Sync"
+        if st.button("Open Limited Editions", use_container_width=True):
+            st.session_state.pending_page = "Limited Editions"
             st.rerun()
     if st.session_state.get("show_add_product"):
         render_add_product_form()
@@ -954,13 +1146,13 @@ def render_prodigi_mapping(product):
 
 
 def render_shopify_product_sync(product):
-    st.subheader("Shopify Sync")
+    st.subheader("Shopify Connection")
     remote = product.get("shopify_match")
     st.markdown(status_badge(product.get("shopify_sync_status")), unsafe_allow_html=True)
     if not remote:
         st.caption("This product is not matched to a cached Shopify product yet.")
-        if st.button("Open Shopify Sync", key=f"product-shopify-sync-{product['id']}"):
-            st.session_state.pending_page = "Shopify Sync"
+        if st.button("Open Limited Editions", key=f"product-shopify-sync-{product['id']}"):
+            st.session_state.pending_page = "Limited Editions"
             st.rerun()
         return
 
@@ -979,8 +1171,8 @@ def render_shopify_product_sync(product):
         action_columns[0].link_button("Open Shopify Admin", remote["admin_url"], use_container_width=True)
     if remote.get("online_store_url"):
         action_columns[1].link_button("Open Live Product", remote["online_store_url"], use_container_width=True)
-    if action_columns[2].button("Review Shopify Match", key=f"review-shopify-{product['id']}", use_container_width=True):
-        st.session_state.pending_page = "Shopify Sync"
+    if action_columns[2].button("Review in Limited Editions", key=f"review-shopify-{product['id']}", use_container_width=True):
+        st.session_state.pending_page = "Limited Editions"
         st.rerun()
 
 
@@ -1252,33 +1444,35 @@ def render_product_uploads_workflow():
 
 
 def render_local_limited_editions():
+    search = st.text_input("Find product", placeholder="Product name or handle")
     status_filter = st.selectbox("Edition status", ["All", *db.EDITION_STATUSES[:-1]])
-    editions = db.list_limited_editions(status_filter)
+    editions = db.list_limited_editions(status_filter, search=search)
     st.caption(f"{len(editions)} product{'s' if len(editions) != 1 else ''} shown")
 
     if not editions:
         st.info("No products match this edition status yet.")
         return
 
-    header = st.columns([3, 1, 1, 1, 1, 1.4, 1.3, 0.8])
+    header = st.columns([2.5, 1, 1, 1, 1, 1, 1.4, 1.3, 0.8])
     for column, label in zip(
         header,
-        ("Product", "Limit", "Sold", "Remaining", "Next", "Edition status", "Last synced", "Detail"),
+        ("Product", "Shopify", "Limit", "Sold", "Remaining", "Next", "Edition status", "Last synced", "Detail"),
     ):
         column.caption(label)
 
     for item in editions:
         with st.container(border=True):
-            columns = st.columns([3, 1, 1, 1, 1, 1.4, 1.3, 0.8])
+            columns = st.columns([2.5, 1, 1, 1, 1, 1, 1.4, 1.3, 0.8])
             columns[0].markdown(f"**{item['product_name']}**")
             columns[0].caption(item.get("sport_category") or "Other")
-            columns[1].write(format_optional_number(item.get("edition_limit")))
-            columns[2].write(item.get("editions_sold") or 0)
-            columns[3].write(format_optional_number(item.get("editions_remaining")))
-            columns[4].write(format_optional_number(item.get("next_edition_number")))
-            columns[5].markdown(status_badge(item.get("edition_status")), unsafe_allow_html=True)
-            columns[6].write(item.get("last_synced_at") or "Local only")
-            with columns[7]:
+            columns[1].write("Matched" if item.get("shopify_product_id") else "None")
+            columns[2].write(format_optional_number(item.get("edition_limit")))
+            columns[3].write(item.get("editions_sold") or 0)
+            columns[4].write(format_optional_number(item.get("editions_remaining")))
+            columns[5].write(format_optional_number(item.get("next_edition_number")))
+            columns[6].markdown(status_badge(item.get("edition_status")), unsafe_allow_html=True)
+            columns[7].write(item.get("last_synced_at") or "Local only")
+            with columns[8]:
                 if st.button("Open", key=f"edition-open-{item['product_id']}", use_container_width=True):
                     go_to_product(item["product_id"])
 
@@ -1426,68 +1620,438 @@ def render_prodigi_page():
 
 
 def render_limited_editions_page(dispatch_log_renderer=None):
-    render_page_intro(
-        "Limited Editions",
-        "Local edition limits and remaining numbers for every product in Sports Cave OS.",
-        "Open a product to set its edition limit and editions sold.",
-        "Edition status is calculated automatically; do not type it manually.",
+    st.title("Limited Editions")
+    st.caption(
+        "Backend source of truth for edition numbers, PSD links, Prodigi links, and storefront edition display."
     )
-    render_local_limited_editions()
+    st.caption("Backend source of truth. Shopify metafields are display only.")
 
-    if dispatch_log_renderer:
-        st.divider()
-        show_dispatch_log = st.toggle(
-            "Show Edition Dispatch Log",
-            value=False,
-            help="Loads the existing Google Sheet dispatch view only when you choose to open it.",
+    config = shopify_sync.get_config()
+    summary = db.get_shopify_summary()
+    notice = st.session_state.pop("limited_edition_notice", None)
+    warning = st.session_state.pop("limited_edition_warning", None)
+    if notice:
+        st.success(notice)
+    if warning:
+        st.warning(warning)
+
+    toolbar = st.columns([2.4, 1, 1, 1, 1.2, 0.8])
+    search = toolbar[0].text_input("Search product title or handle", placeholder="Product title or handle")
+    test_clicked = toolbar[1].button(
+        "Test Shopify Connection",
+        disabled=not config["configured"],
+        use_container_width=True,
+    )
+    sync_clicked = toolbar[2].button(
+        "Sync Shopify Products",
+        type="primary",
+        disabled=not config["configured"],
+        use_container_width=True,
+    )
+    shopify_status = toolbar[3].selectbox("Shopify status", ["All", "Active", "Draft", "Archived"])
+    edition_filter = toolbar[4].selectbox(
+        "Edition filter",
+        ["All", "Edition Not Set", "Available", "Final Editions", "Sold Out", "Missing PSD", "Missing Prodigi"],
+    )
+    show_limit = toolbar[5].selectbox("Show", [25, 50, 100, 500], index=0)
+
+    if not config["configured"]:
+        st.warning(
+            "Shopify is not connected yet. Configure SHOPIFY_STORE_DOMAIN, SHOPIFY_API_VERSION, "
+            "and either SHOPIFY_ADMIN_ACCESS_TOKEN or SHOPIFY_CLIENT_ID plus SHOPIFY_CLIENT_SECRET."
         )
-        if show_dispatch_log:
-            dispatch_log_renderer(embedded=True)
+
+    if test_clicked:
+        try:
+            with st.spinner("Testing Shopify connection..."):
+                shop = shopify_sync.test_connection(config=config)
+            st.success(f"Connected to {shop['name']} ({shop['myshopify_domain']}).")
+        except Exception as error:
+            st.error("Could not connect to Shopify.")
+            st.error(str(error))
+
+    if sync_clicked:
+        run_id = db.start_shopify_sync(config["store_domain"], config["api_version"])
+        progress = st.progress(0, text="Starting Shopify product sync...")
+        products_seen = 0
+        pages_synced = 0
+        try:
+            for page in shopify_sync.iter_catalog_pages(config=config):
+                db.upsert_shopify_products(page["products"])
+                products_seen += len(page["products"])
+                pages_synced += 1
+                db.update_shopify_sync_run(
+                    run_id,
+                    products_seen=products_seen,
+                    pages_synced=pages_synced,
+                    api_version=page.get("api_version"),
+                )
+                percent = min(int(products_seen / config["max_products"] * 100), 99)
+                progress.progress(percent, text=f"Synced {products_seen} Shopify products...")
+                del page
+                gc.collect()
+            db.auto_match_shopify_products()
+            db.update_shopify_sync_run(
+                run_id,
+                status="Complete",
+                products_seen=products_seen,
+                pages_synced=pages_synced,
+            )
+            progress.progress(100, text="Shopify product sync complete.")
+            st.session_state.limited_edition_notice = f"Synced {products_seen} Shopify products."
+            st.rerun()
+        except Exception as error:
+            db.update_shopify_sync_run(
+                run_id,
+                status="Failed",
+                products_seen=products_seen,
+                pages_synced=pages_synced,
+                error_message="Shopify product sync failed. Check authentication, scopes, and API version.",
+            )
+            progress.empty()
+            st.error("Shopify product sync failed. Check Shopify scopes and API version.")
+            st.error(str(error))
+
+    st.caption(
+        f"{summary['total']} Shopify products cached. Last sync: "
+        f"{format_updated_at(summary['last_synced_at']) if summary['last_synced_at'] else 'Never'}"
+    )
+    products = db.list_shopify_edition_products(
+        search=search,
+        shopify_status=shopify_status,
+        edition_filter=edition_filter,
+        limit=show_limit,
+    )
+    st.caption(f"{len(products)} product{'s' if len(products) != 1 else ''} shown")
+    if not products:
+        st.info("No synced Shopify products match these filters. Run Sync Shopify Products if the cache is empty.")
+        return
+
+    for product in products:
+        item_key = product.get("legacy_resource_id") or str(abs(hash(product["shopify_product_id"])))
+        with st.container(border=True):
+            top = st.columns([3.2, 1, 1, 1, 1, 1, 1.1])
+            top[0].markdown(f"**{product['product_title']}**")
+            top[0].caption(product.get("shopify_handle") or "Handle missing")
+            top[1].markdown(status_badge(product.get("status") or "Synced"), unsafe_allow_html=True)
+            top[2].metric("Limit", format_optional_number(product.get("edition_limit")))
+            top[3].metric("Next", format_optional_number(product.get("next_available_edition")))
+            top[4].metric("Sold", product.get("editions_sold") or 0)
+            top[5].metric("Remaining", format_optional_number(product.get("editions_remaining")))
+            top[6].markdown(status_badge(product.get("edition_status")), unsafe_allow_html=True)
+            st.caption(
+                f"PSD: {product['psd_status']} | Prodigi: {product['prodigi_status']} | "
+                f"Last Shopify sync: {format_updated_at(product.get('last_shopify_sync_at'))} | "
+                f"Widget sync: {format_updated_at(product.get('last_edition_sync_at')) if product.get('last_edition_sync_at') else 'Never'}"
+            )
+
+            with st.form(f"edition-product-{item_key}"):
+                fields = st.columns([0.8, 0.9, 0.8, 1.8, 1.8, 1.2])
+                edition_limit = fields[0].number_input(
+                    "Edition limit",
+                    min_value=1,
+                    max_value=100000,
+                    value=int(product.get("edition_limit") or 100),
+                    step=1,
+                    key=f"edition-limit-{item_key}",
+                )
+                next_available = fields[1].number_input(
+                    "Next available",
+                    min_value=1,
+                    max_value=max(int(edition_limit) + 1, 2),
+                    value=min(int(product.get("next_available_edition") or 1), int(edition_limit) + 1),
+                    step=1,
+                    key=f"edition-next-{item_key}",
+                )
+                editions_sold = fields[2].number_input(
+                    "Sold",
+                    min_value=0,
+                    max_value=100000,
+                    value=int(product.get("editions_sold") or 0),
+                    step=1,
+                    key=f"edition-sold-{item_key}",
+                )
+                psd_file_url = fields[3].text_input(
+                    "PSD file URL",
+                    value=product.get("psd_file_url") or "",
+                    key=f"edition-psd-{item_key}",
+                )
+                prodigi_url = fields[4].text_input(
+                    "Prodigi URL",
+                    value=product.get("prodigi_url") or "",
+                    key=f"edition-prodigi-url-{item_key}",
+                )
+                prodigi_product_id = fields[5].text_input(
+                    "Prodigi ID",
+                    value=product.get("prodigi_product_id") or "",
+                    key=f"edition-prodigi-id-{item_key}",
+                )
+                notes = st.text_area(
+                    "Notes",
+                    value=product.get("edition_notes") or "",
+                    height=68,
+                    key=f"edition-notes-{item_key}",
+                )
+                allow_oversold = st.checkbox(
+                    "Allow sold count over limit for manual correction",
+                    value=False,
+                    key=f"edition-allow-oversold-{item_key}",
+                )
+                action_columns = st.columns([1, 1.4, 4])
+                save_clicked = action_columns[0].form_submit_button("Save", use_container_width=True)
+                sync_widget_clicked = action_columns[1].form_submit_button(
+                    "Save + Sync Widget Data",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if save_clicked or sync_widget_clicked:
+                try:
+                    updated = db.update_shopify_edition_product(
+                        product["shopify_product_id"],
+                        edition_limit=edition_limit,
+                        next_available_edition=next_available,
+                        editions_sold=editions_sold,
+                        psd_file_url=psd_file_url,
+                        prodigi_url=prodigi_url,
+                        prodigi_product_id=prodigi_product_id,
+                        notes=notes,
+                        allow_oversold=allow_oversold,
+                    )
+                    if sync_widget_clicked:
+                        shopify_sync.sync_edition_metafields(updated, config=config)
+                        db.mark_shopify_edition_synced(product["shopify_product_id"])
+                        st.session_state.limited_edition_notice = "Storefront edition display synced."
+                    else:
+                        st.session_state.limited_edition_notice = "Edition values saved."
+                    st.rerun()
+                except Exception as error:
+                    if sync_widget_clicked:
+                        st.error("Could not sync storefront edition display. Check Shopify scopes and product metafields.")
+                    else:
+                        st.error("Could not save edition values.")
+                    st.error(str(error))
+
+            links = st.columns([1, 1, 1, 1, 3])
+            if product.get("admin_url"):
+                links[0].link_button("Open Shopify Admin", product["admin_url"], use_container_width=True)
+            if product.get("online_store_url"):
+                links[1].link_button("Open Live Product", product["online_store_url"], use_container_width=True)
+            if product.get("psd_file_url"):
+                links[2].link_button("Open PSD", product["psd_file_url"], use_container_width=True)
+            else:
+                links[2].caption("Missing PSD")
+            if product.get("prodigi_url"):
+                links[3].link_button("Open Prodigi", product["prodigi_url"], use_container_width=True)
+            else:
+                links[3].caption("Missing Prodigi")
+
+
+def _assignment_text(assignments):
+    if not assignments:
+        return "No edition assigned"
+    return ", ".join(
+        f"#{item['edition_number']}/{item['edition_limit']}"
+        for item in assignments
+        if item.get("assignment_status") not in {"Voided", "Refunded"}
+    ) or "Edition locked but voided/refunded"
+
+
+def render_orders_page():
+    st.title("Orders")
+    st.caption("Edition numbers are assigned from Sports Cave OS, not Shopify stock.")
+    config = shopify_sync.get_config()
+    order_summary = db.get_shopify_order_summary()
+    notice = st.session_state.pop("orders_notice", None)
+    warning = st.session_state.pop("orders_warning", None)
+    if notice:
+        st.success(notice)
+    if warning:
+        st.warning(warning)
+
+    toolbar = st.columns([2.4, 1, 1, 1])
+    search = toolbar[0].text_input("Search order/customer/product", placeholder="Order, customer, product")
+    sync_clicked = toolbar[1].button(
+        "Sync Shopify Orders",
+        type="primary",
+        disabled=not config["configured"],
+        use_container_width=True,
+    )
+    status_filter = toolbar[2].selectbox(
+        "Filter",
+        ["All", "Needs Edition", "Assigned", "Paid", "Unfulfilled", "Error", "Sold Out Issue"],
+    )
+    show_limit = toolbar[3].selectbox("Show", [25, 50, 100, 500], index=1)
+
+    if not config["configured"]:
+        st.warning("Shopify is not connected yet. Configure Shopify credentials in Render environment variables.")
+
+    if sync_clicked:
+        run_id = db.start_shopify_order_sync(config["store_domain"], config["api_version"])
+        progress = st.progress(0, text="Starting Shopify order sync...")
+        orders_seen = 0
+        pages_synced = 0
+        assignments_created = 0
+        changed_product_ids = set()
+        sync_warning = ""
+        try:
+            for page in shopify_sync.iter_order_pages(config=config):
+                for order in page["orders"]:
+                    result = db.process_shopify_order_for_editions(order)
+                    assignments_created += result["assignments_created"]
+                    changed_product_ids.update(result["changed_product_ids"])
+                orders_seen += len(page["orders"])
+                pages_synced += 1
+                db.update_shopify_order_sync_run(
+                    run_id,
+                    orders_seen=orders_seen,
+                    assignments_created=assignments_created,
+                    pages_synced=pages_synced,
+                )
+                progress.progress(
+                    min(int(orders_seen / config["max_orders"] * 100), 99),
+                    text=f"Synced {orders_seen} Shopify orders...",
+                )
+                del page
+                gc.collect()
+
+            if os.getenv("SHOPIFY_AUTO_SYNC_EDITION_WIDGET", "true").lower() == "true":
+                for product_id in changed_product_ids:
+                    try:
+                        product = db.get_shopify_edition_product(product_id)
+                        if product:
+                            shopify_sync.sync_edition_metafields(product, config=config)
+                            db.mark_shopify_edition_synced(product_id)
+                    except Exception:
+                        sync_warning = "Edition assigned locally, but storefront display sync failed."
+
+            db.update_shopify_order_sync_run(
+                run_id,
+                status="Complete",
+                orders_seen=orders_seen,
+                assignments_created=assignments_created,
+                pages_synced=pages_synced,
+            )
+            progress.progress(100, text="Shopify order sync complete.")
+            st.session_state.orders_notice = (
+                f"Synced {orders_seen} Shopify orders. Assigned {assignments_created} edition number"
+                f"{'s' if assignments_created != 1 else ''}."
+            )
+            if sync_warning:
+                st.session_state.orders_warning = sync_warning
+            st.rerun()
+        except Exception as error:
+            db.update_shopify_order_sync_run(
+                run_id,
+                status="Failed",
+                orders_seen=orders_seen,
+                assignments_created=assignments_created,
+                pages_synced=pages_synced,
+                error_message="Shopify order sync failed. Check read_orders scope and API version.",
+            )
+            progress.empty()
+            st.error("Shopify order sync failed. Check read_orders scope and API version.")
+            st.error(str(error))
+
+    metrics = st.columns(3)
+    metrics[0].metric("Orders synced", order_summary["total"])
+    metrics[1].metric("Needs edition", order_summary["needs_assignment"])
+    metrics[2].metric("Assigned today", order_summary["assigned_today"])
+    st.caption(
+        "Last order sync: "
+        + (format_updated_at(order_summary["last_synced_at"]) if order_summary["last_synced_at"] else "Never")
+    )
+
+    orders = db.list_shopify_orders(search=search, status_filter=status_filter, limit=show_limit)
+    if not orders:
+        st.info("No synced Shopify orders match these filters. Run Sync Shopify Orders when you are ready.")
+        return
+
+    for order in orders:
+        with st.container(border=True):
+            header = st.columns([1.3, 1.8, 1.2, 1.1, 1.2, 1])
+            header[0].markdown(f"**{order.get('order_name') or order.get('order_number') or 'Order'}**")
+            header[1].write(order.get("customer_name") or "Customer not shown")
+            header[2].write(format_updated_at(order.get("created_at")))
+            header[3].markdown(status_badge(order.get("financial_status") or "Unknown"), unsafe_allow_html=True)
+            header[4].markdown(status_badge(order.get("fulfillment_status") or "Unknown"), unsafe_allow_html=True)
+            if order.get("admin_url"):
+                header[5].link_button("Open Shopify Order", order["admin_url"], use_container_width=True)
+
+            for line in order["line_items"]:
+                line_columns = st.columns([2.6, 1.2, 1.6, 1.2, 1, 1, 1.4])
+                line_columns[0].write(line.get("product_title") or "Unknown product")
+                line_columns[0].caption(line.get("variant_title") or "Variant not shown")
+                line_columns[1].write(f"Qty {line.get('quantity') or 1}")
+                line_columns[2].write(_assignment_text(line.get("assignments") or []))
+                line_columns[3].markdown(status_badge(line.get("assignment_status")), unsafe_allow_html=True)
+                if line.get("psd_file_url"):
+                    line_columns[4].link_button("Open PSD", line["psd_file_url"], use_container_width=True)
+                if line.get("prodigi_url"):
+                    line_columns[5].link_button("Open Prodigi", line["prodigi_url"], use_container_width=True)
+                with line_columns[6].expander("Manual override"):
+                    st.warning("Manual edition changes can affect collector records.")
+                    override_number = st.number_input(
+                        "Edition number",
+                        min_value=1,
+                        step=1,
+                        key=f"override-number-{line['id']}",
+                    )
+                    override_notes = st.text_input("Notes", key=f"override-notes-{line['id']}")
+                    if st.button("Save Override", key=f"override-save-{line['id']}", use_container_width=True):
+                        try:
+                            db.manual_override_edition_assignment(
+                                line["id"],
+                                override_number,
+                                notes=override_notes,
+                                force=False,
+                            )
+                            st.session_state.orders_notice = "Manual edition override saved."
+                            st.rerun()
+                        except Exception as error:
+                            st.error(str(error))
 
 
 def render_settings_page(app_version, database_path, password_status):
-    render_page_intro(
-        "Settings",
-        "Connection status and file workflow settings for Sports Cave OS.",
-        "Check connection status for the Phase 4 Shopify catalog sync and the link-based Drive file hub.",
-    )
+    st.title("Settings")
+    st.caption("Safe connection status and file workflow settings for Sports Cave OS.")
     shopify_config = shopify_sync.get_config()
     shopify_token_status = shopify_sync.get_token_status(shopify_config)
     shopify_summary = db.get_shopify_summary()
+    order_summary = db.get_shopify_order_summary()
     latest_shopify_run = db.get_latest_shopify_sync_run()
+    latest_order_run = db.get_latest_shopify_order_sync_run()
     last_sync_status = "Never"
-    last_sync_error = "None"
     if latest_shopify_run:
         last_sync_status = (
             "Success"
             if latest_shopify_run["status"] == "Complete"
             else latest_shopify_run["status"]
         )
-        if latest_shopify_run.get("error_message"):
-            last_sync_error = "Shopify sync failed. Check authentication, access scopes, and API version."
+    order_sync_status = "Never"
+    if latest_order_run:
+        order_sync_status = "Success" if latest_order_run["status"] == "Complete" else latest_order_run["status"]
     settings = (
         ("Shopify connection", "Configured" if shopify_config["configured"] else "Not configured"),
         ("Shopify store domain", "Configured" if shopify_config["store_domain"] else "Missing"),
         ("Shopify API version", "Configured" if shopify_config["api_version"] else "Missing"),
         ("Shopify auth mode", shopify_config["auth_mode"]),
-        ("Shopify Client ID", "Configured" if shopify_config["client_id"] else "Missing"),
-        ("Shopify Client Secret", "Configured" if shopify_config["client_secret"] else "Missing"),
-        ("Shopify Admin Token", "Configured" if shopify_config["access_token"] else "Missing"),
+        ("Product sync count", str(shopify_summary["total"])),
+        ("Order sync count", str(order_summary["total"])),
+        ("Last product sync status", last_sync_status),
+        ("Last order sync status", order_sync_status),
+        ("Last product sync time", format_updated_at(shopify_summary["last_synced_at"]) if shopify_summary["last_synced_at"] else "Never"),
+        ("Last order sync time", format_updated_at(order_summary["last_synced_at"]) if order_summary["last_synced_at"] else "Never"),
         (
             "Last token refresh",
             format_updated_at(shopify_token_status["last_refresh"])
             if shopify_token_status["last_refresh"]
             else "Never",
         ),
-        ("Last Shopify sync", last_sync_status),
-        ("Last Shopify sync error", last_sync_error),
-        ("Shopify products cached", str(shopify_summary["total"])),
-        ("Shopify products matched", str(shopify_summary["matched"])),
         ("Google Drive mode", "Link-based file hub"),
         ("Full Google Drive API sync", "Coming later"),
-        ("OAuth / Drive Picker", "Coming later"),
+        ("Drive Picker", "Coming later"),
         ("Certificate system", "Not active yet"),
-        ("Marketing Factory", "Not active yet"),
     )
     columns = st.columns(2)
     for index, (label, value) in enumerate(settings):
@@ -1497,9 +2061,9 @@ def render_settings_page(app_version, database_path, password_status):
                 st.caption(value)
 
     st.info(
-        "Phase 4 reads Shopify product data only when Test or Sync is clicked on the Shopify Sync page. "
+        "Phase 5B reads Shopify products and orders only when a worker clicks Sync. "
         "Client credentials are exchanged for a temporary in-memory token only at that time. "
-        "It does not call Shopify during mockup generation. Google Drive remains link-based only."
+        "Edition numbers come from Sports Cave OS; Shopify metafields are display only."
     )
     st.write(f"**Local database:** `{database_path}`")
     st.write(f"**Password protection:** {password_status}")

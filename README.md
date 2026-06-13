@@ -1,8 +1,8 @@
 # Sports Cave OS
 
-Private Streamlit operations app for Sports Cave staff. Phase 4 combines the
+Private Streamlit operations app for Sports Cave staff. Phase 5B combines the
 existing Image Factory, Product Command Centre, link-based Google Drive asset
-workflow, and a manual Shopify product sync.
+workflow, Shopify product sync, and the backend-led limited edition engine.
 
 ## Active Workflows
 
@@ -12,14 +12,15 @@ workflow, and a manual Shopify product sync.
 - Files dashboard for missing, connected, review, and approved asset packs
 - Product Upload workflow board grouped by VA stage
 - CSV product backup/export including file links and asset statuses
-- Local limited-edition tracking and edition calculations
-- Manual Shopify Admin GraphQL catalog sync and product matching
+- Backend-led limited-edition tracking for synced Shopify products
+- Manual Shopify Admin GraphQL catalog sync from the Limited Editions page
+- Manual Shopify order sync with automatic paid-order edition assignment
+- Storefront edition metafield mirror for the exact next available edition
 - Cached Shopify variants, image links, tags, collections, and metafields
 - Existing mockup generation, previews, prompts, and ZIP downloads
 
-The sidebar also includes placeholders for Orders, Certificates, Marketing
-Factory, and VA Training. Those systems remain intentionally deferred until
-the Shopify product connection and limited-edition foundation are stable.
+The sidebar still includes placeholders for Certificates, Marketing Factory, and
+VA Training. Certificates and customer vault features remain intentionally deferred.
 
 ## Database
 
@@ -73,11 +74,11 @@ Sports Cave Products
 Full Drive API sync, OAuth, and a Drive Picker are intentionally deferred until
 the link-based file workflow is stable.
 
-## Shopify Product Sync
+## Shopify Products, Orders, And Editions
 
-Phase 4 uses Shopify's Admin GraphQL API only when a staff member opens
-`Shopify Sync` and clicks `Test Shopify Connection` or `Sync Shopify Products`.
-No Shopify request runs during mockup generation or normal page loads.
+Phase 5B uses Shopify's Admin GraphQL API only when a staff member clicks a sync
+button on `Limited Editions` or `Orders`. No Shopify request runs during mockup
+generation or normal page loads.
 
 Add these environment variables locally or in Render:
 
@@ -88,7 +89,10 @@ SHOPIFY_CLIENT_ID=your-dev-dashboard-client-id
 SHOPIFY_CLIENT_SECRET=your-dev-dashboard-client-secret
 # Optional legacy mode; preferred over client credentials when present:
 SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_...
-SHOPIFY_SYNC_MAX_PRODUCTS=250
+SHOPIFY_SYNC_MAX_PRODUCTS=500
+SHOPIFY_SYNC_MAX_ORDERS=250
+# Optional; defaults true:
+SHOPIFY_AUTO_SYNC_EDITION_WIDGET=true
 ```
 
 Sports Cave OS prefers a configured legacy Admin API token. Otherwise it uses
@@ -96,6 +100,20 @@ the Shopify Dev Dashboard client credentials grant and caches the temporary
 access token in process memory until shortly before expiry. Keep every credential
 in Render environment variables and never commit it. Product metadata is cached
 in the local SQLite database; image URLs are stored, but image files are not downloaded.
+
+Required Shopify app scopes for Phase 5B:
+
+- `read_products`
+- `write_products`
+- `read_orders`
+
+The backend database is the source of truth for edition numbers. Shopify
+metafields are only a storefront display mirror. Edition availability must not
+be based on Shopify inventory, stock, or variant inventory.
+
+The storefront snippet lives at
+`shopify_theme/snippets/sports-cave-edition-pill.liquid` and reads only the
+`sports_cave` product metafields synced from Sports Cave OS.
 
 Matching rules:
 

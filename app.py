@@ -55,19 +55,18 @@ ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
 MENU_OPTIONS = [
     "Dashboard",
     "Products",
-    "Shopify Sync",
     "Mockups",
     "Product Uploads",
     "Limited Editions",
-    "Prodigi",
     "Orders",
+    "Prodigi",
     "Certificates",
     "Files",
     "Marketing Factory",
     "VA Training",
     "Settings",
 ]
-APP_VERSION = "Sports Cave OS Phase 4 - 2026-06-13"
+APP_VERSION = "Sports Cave OS Phase 5B - 2026-06-13"
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
     "limited_editions": "Limited Editions",
@@ -4108,20 +4107,20 @@ def render_sidebar():
         st.sidebar.write("2. Connect product and file links.")
         st.sidebar.write("3. Set edition values.")
         st.sidebar.write("4. Clear the readiness checklist.")
-    elif st.session_state.selected_page == "Shopify Sync":
-        st.sidebar.divider()
-        st.sidebar.subheader("Shopify Sync")
-        st.sidebar.write("1. Test the Shopify connection.")
-        st.sidebar.write("2. Run a manual product sync.")
-        st.sidebar.write("3. Review unmatched products.")
-        st.sidebar.write("4. Confirm the correct internal product before matching.")
     elif st.session_state.selected_page == "Limited Editions":
         st.sidebar.divider()
         st.sidebar.subheader("Limited Editions")
-        st.sidebar.write("1. Filter products by edition status.")
-        st.sidebar.write("2. Open a product to update sold numbers.")
-        st.sidebar.write("3. Let Sports Cave OS calculate remaining editions.")
-        st.sidebar.write("4. Open the dispatch log only when needed.")
+        st.sidebar.write("1. Search the Shopify product.")
+        st.sidebar.write("2. Check the exact next edition number.")
+        st.sidebar.write("3. Save PSD and Prodigi links.")
+        st.sidebar.write("4. Sync the storefront display mirror when ready.")
+    elif st.session_state.selected_page == "Orders":
+        st.sidebar.divider()
+        st.sidebar.subheader("Orders")
+        st.sidebar.write("1. Sync recent Shopify orders manually.")
+        st.sidebar.write("2. Sports Cave OS assigns paid order editions.")
+        st.sidebar.write("3. Open PSD and Prodigi links from each line.")
+        st.sidebar.write("4. Review any missing or sold-out issues.")
     elif st.session_state.selected_page == "Prodigi":
         st.sidebar.divider()
         st.sidebar.subheader("Prodigi")
@@ -4143,9 +4142,9 @@ def render_sidebar():
         st.sidebar.write("Work through products by stage, then use the Shopify prompt tools when needed.")
 
     st.sidebar.divider()
-    st.sidebar.subheader("Phase 4")
+    st.sidebar.subheader("Phase 5B")
     st.sidebar.caption(
-        "Manual Shopify product sync and matching are active. Drive remains link-based and lightweight."
+        "Backend-led edition numbers and manual Shopify order sync are active. Drive remains link-based and lightweight."
     )
 
 
@@ -4652,12 +4651,12 @@ def main():
         os_pages.render_dashboard_page()
     elif current_page == "Products":
         os_pages.render_products_page()
-    elif current_page == "Shopify Sync":
-        os_pages.render_shopify_sync_page()
     elif current_page == "Mockups":
         render_mockups_page()
     elif current_page == "Limited Editions":
-        os_pages.render_limited_editions_page(dispatch_log_renderer=render_edition_dispatch_log)
+        os_pages.render_limited_editions_page()
+    elif current_page == "Orders":
+        os_pages.render_orders_page()
     elif current_page == "Prodigi":
         os_pages.render_prodigi_page()
     elif current_page == "Product Uploads":

@@ -1,0 +1,78 @@
+{%- comment -%}
+  Sports Cave Edition Pill
+  Backend source of truth: Sports Cave OS.
+  Shopify metafields are a display mirror only.
+  This snippet must never read inventory or variant stock.
+{%- endcomment -%}
+
+{%- liquid
+  assign edition_limit = product.metafields.sports_cave.edition_limit.value | default: 100
+  assign next_available_edition = product.metafields.sports_cave.next_available_edition.value | default: 1
+  assign editions_remaining = product.metafields.sports_cave.editions_remaining.value | default: edition_limit
+  assign edition_status = product.metafields.sports_cave.edition_status.value | default: 'Available'
+  assign edition_display_text = product.metafields.sports_cave.edition_display_text.value
+
+  if edition_display_text == blank
+    if edition_status == 'Sold Out' or editions_remaining <= 0
+      assign edition_display_text = 'SOLD OUT EDITION'
+    elsif editions_remaining <= 3
+      assign edition_display_text = 'FINAL EDITION #' | append: next_available_edition | append: ' OF ' | append: edition_limit | append: ' AVAILABLE'
+    else
+      assign edition_display_text = 'EDITION #' | append: next_available_edition | append: ' OF ' | append: edition_limit | append: ' AVAILABLE'
+    endif
+  endif
+-%}
+
+<div class="sports-cave-edition-pill" aria-label="{{ edition_display_text | escape }}">
+  <span class="sports-cave-edition-pill__dot" aria-hidden="true"></span>
+  <span class="sports-cave-edition-pill__text">{{ edition_display_text }}</span>
+</div>
+
+<style>
+  .sports-cave-edition-pill {
+    align-items: center;
+    background: #0B0B0D;
+    border: 1px solid #D4A54C;
+    border-radius: 999px;
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+    color: #D4A54C;
+    display: inline-flex;
+    font-size: 0.78rem;
+    font-weight: 800;
+    gap: 0.55rem;
+    letter-spacing: 0.12em;
+    line-height: 1.2;
+    margin: 0.75rem 0;
+    padding: 0.72rem 1rem;
+    text-transform: uppercase;
+  }
+
+  .sports-cave-edition-pill__dot {
+    animation: sports-cave-edition-pulse 1.8s ease-in-out infinite;
+    background: #D4A54C;
+    border-radius: 999px;
+    box-shadow: 0 0 0 0 rgba(212, 165, 76, 0.5);
+    flex: 0 0 auto;
+    height: 0.52rem;
+    width: 0.52rem;
+  }
+
+  .sports-cave-edition-pill__text {
+    color: #D4A54C;
+  }
+
+  @keyframes sports-cave-edition-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(212, 165, 76, 0.48); }
+    70% { box-shadow: 0 0 0 9px rgba(212, 165, 76, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(212, 165, 76, 0); }
+  }
+
+  @media screen and (max-width: 749px) {
+    .sports-cave-edition-pill {
+      font-size: 0.7rem;
+      justify-content: center;
+      padding: 0.66rem 0.86rem;
+      width: 100%;
+    }
+  }
+</style>
