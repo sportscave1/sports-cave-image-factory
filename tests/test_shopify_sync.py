@@ -1,6 +1,8 @@
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import db
 import shopify_sync
@@ -22,19 +24,166 @@ class FakeResponse:
 
 class ShopifySyncClientTests(unittest.TestCase):
     def setUp(self):
+        shopify_sync.clear_access_token_cache()
         self.config = {
             "store_domain": "sports-cave.myshopify.com",
             "access_token": "test-token",
+            "client_id": "",
+            "client_secret": "",
             "api_version": "2026-04",
             "max_products": 25,
+            "auth_mode": "Admin access token mode",
             "configured": True,
         }
+
+    def tearDown(self):
+        shopify_sync.clear_access_token_cache()
 
     def test_normalize_store_domain(self):
         self.assertEqual(
             shopify_sync.normalize_store_domain("https://SPORTS-CAVE.myshopify.com/admin"),
             "sports-cave.myshopify.com",
         )
+
+    def test_environment_config_prefers_legacy_admin_token(self):
+        environment = {
+            "SHOPIFY_STORE_DOMAIN": "sports-cave.myshopify.com",
+            "SHOPIFY_API_VERSION": "2026-04",
+            "SHOPIFY_ADMIN_ACCESS_TOKEN": "legacy-token",
+            "SHOPIFY_CLIENT_ID": "client-id",
+            "SHOPIFY_CLIENT_SECRET": "client-secret",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            config = shopify_sync.get_config()
+
+        self.assertTrue(config["configured"])
+        self.assertEqual(config["auth_mode"], "Admin access token mode")
+
+    def test_environment_config_accepts_client_credentials(self):
+        environment = {
+            "SHOPIFY_STORE_DOMAIN": "sports-cave.myshopify.com",
+            "SHOPIFY_API_VERSION": "2026-04",
+            "SHOPIFY_CLIENT_ID": "client-id",
+            "SHOPIFY_CLIENT_SECRET": "client-secret",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            config = shopify_sync.get_config()
+
+        self.assertTrue(config["configured"])
+        self.assertEqual(config["auth_mode"], "Client credentials mode")
+
+    def test_client_credentials_token_is_cached_for_graphql_calls(self):
+        config = {
+            "store_domain": "sports-cave.myshopify.com",
+            "access_token": "",
+            "client_id": "client-id",
+            "client_secret": "client-secret",
+            "api_version": "2026-04",
+            "max_products": 25,
+            "auth_mode": "Client credentials mode",
+            "configured": True,
+        }
+        token_requests = []
+        graphql_requests = []
+
+        def fake_post(url, **kwargs):
+            if url.endswith("/admin/oauth/access_token"):
+                token_requests.append(kwargs)
+                return FakeResponse(
+                    {"access_token": "temporary-token", "scope": "read_products", "expires_in": 3600}
+                )
+            graphql_requests.append(kwargs)
+            return FakeResponse(
+                {
+                    "data": {
+                        "shop": {
+                            "id": "gid://shopify/Shop/1",
+                            "name": "Sports Cave",
+                            "myshopifyDomain": "sports-cave.myshopify.com",
+                            "primaryDomain": {
+                                "host": "sportscaveshop.com",
+                                "url": "https://sportscaveshop.com",
+                            },
+                        }
+                    }
+                }
+            )
+
+        shopify_sync.test_connection(config=config, request_post=fake_post)
+        shopify_sync.test_connection(config=config, request_post=fake_post)
+
+        self.assertEqual(len(token_requests), 1)
+        self.assertEqual(len(graphql_requests), 2)
+        self.assertEqual(
+            token_requests[0]["data"],
+            {
+                "grant_type": "client_credentials",
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+            },
+        )
+        self.assertEqual(
+            graphql_requests[0]["headers"]["X-Shopify-Access-Token"],
+            "temporary-token",
+        )
+        self.assertIsNotNone(shopify_sync.get_token_status(config)["last_refresh"])
+
+    def test_client_token_refreshes_when_close_to_expiry(self):
+        config = {
+            "store_domain": "sports-cave.myshopify.com",
+            "access_token": "",
+            "client_id": "client-id",
+            "client_secret": "client-secret",
+            "api_version": "2026-04",
+            "max_products": 25,
+            "auth_mode": "Client credentials mode",
+            "configured": True,
+        }
+        tokens_issued = []
+
+        def fake_post(*args, **kwargs):
+            token = f"temporary-token-{len(tokens_issued) + 1}"
+            tokens_issued.append(token)
+            return FakeResponse({"access_token": token, "expires_in": 300})
+
+        first_token = shopify_sync.get_access_token(config=config, request_post=fake_post)
+        second_token = shopify_sync.get_access_token(config=config, request_post=fake_post)
+
+        self.assertEqual(first_token, "temporary-token-1")
+        self.assertEqual(second_token, "temporary-token-2")
+
+    def test_client_credentials_failure_does_not_expose_secret(self):
+        config = {
+            "store_domain": "sports-cave.myshopify.com",
+            "access_token": "",
+            "client_id": "client-id",
+            "client_secret": "do-not-expose-this-secret",
+            "api_version": "2026-04",
+            "max_products": 25,
+            "auth_mode": "Client credentials mode",
+            "configured": True,
+        }
+
+        with self.assertRaises(shopify_sync.ShopifyAuthenticationError) as context:
+            shopify_sync.get_access_token(
+                config=config,
+                request_post=lambda *args, **kwargs: FakeResponse({}, status_code=401),
+            )
+
+        self.assertNotIn(config["client_secret"], str(context.exception))
+        self.assertIn("authentication failed", str(context.exception))
+
+    def test_missing_auth_configuration_has_safe_message(self):
+        config = {
+            "store_domain": "sports-cave.myshopify.com",
+            "access_token": "",
+            "client_id": "",
+            "client_secret": "",
+            "api_version": "2026-04",
+        }
+        with self.assertRaises(shopify_sync.ShopifyConfigurationError) as context:
+            shopify_sync.validate_config(config)
+        self.assertIn("Missing Shopify authentication", str(context.exception))
 
     def test_connection_and_product_page_parsing(self):
         responses = [

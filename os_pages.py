@@ -285,6 +285,7 @@ def render_shopify_sync_page():
         "Check the handle and product title before confirming a manual match.",
     )
     config = shopify_sync.get_config()
+    token_status = shopify_sync.get_token_status(config)
     summary = db.get_shopify_summary()
     latest_run = db.get_latest_shopify_sync_run()
 
@@ -299,7 +300,8 @@ def render_shopify_sync_page():
     status_columns[3].metric("Needs matching", summary["unmatched"])
 
     st.caption(
-        f"Store domain: {config['store_domain'] or 'Missing'} | API version: {config['api_version']} | "
+        f"Store domain: {config['store_domain'] or 'Missing'} | "
+        f"API version: {config['api_version'] or 'Missing'} | Auth: {config['auth_mode']} | "
         f"Last catalog sync: {format_updated_at(summary['last_synced_at']) if summary['last_synced_at'] else 'Never'}"
     )
     if latest_run:
@@ -310,8 +312,13 @@ def render_shopify_sync_page():
 
     if not config["configured"]:
         st.warning(
-            "Shopify is not connected yet. Add SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_ACCESS_TOKEN "
-            "in Render environment variables. The store domain must be the .myshopify.com domain."
+            "Shopify is not connected yet. Configure SHOPIFY_STORE_DOMAIN, SHOPIFY_API_VERSION, "
+            "and either SHOPIFY_ADMIN_ACCESS_TOKEN or SHOPIFY_CLIENT_ID plus SHOPIFY_CLIENT_SECRET "
+            "in Render environment variables."
+        )
+    elif token_status["auth_mode"] == "Client credentials mode":
+        st.caption(
+            "Client credentials are configured. A temporary access token is requested only when Test or Sync is clicked."
         )
 
     action_columns = st.columns([1, 1, 2])
@@ -340,7 +347,7 @@ def render_shopify_sync_page():
             )
         except Exception as error:
             st.error("Could not connect to Shopify.")
-            st.exception(error)
+            st.error(str(error))
 
     if sync_clicked:
         run_id = db.start_shopify_sync(config["store_domain"], config["api_version"])
@@ -384,7 +391,7 @@ def render_shopify_sync_page():
             )
             progress.empty()
             st.error("Shopify sync failed. Existing cached products were kept.")
-            st.exception(error)
+            st.error(str(error))
 
     st.subheader("Shopify Product Matching")
     filter_columns = st.columns([2, 1, 1, 1])
@@ -1445,10 +1452,35 @@ def render_settings_page(app_version, database_path, password_status):
         "Check connection status for the Phase 4 Shopify catalog sync and the link-based Drive file hub.",
     )
     shopify_config = shopify_sync.get_config()
+    shopify_token_status = shopify_sync.get_token_status(shopify_config)
     shopify_summary = db.get_shopify_summary()
+    latest_shopify_run = db.get_latest_shopify_sync_run()
+    last_sync_status = "Never"
+    last_sync_error = "None"
+    if latest_shopify_run:
+        last_sync_status = (
+            "Success"
+            if latest_shopify_run["status"] == "Complete"
+            else latest_shopify_run["status"]
+        )
+        if latest_shopify_run.get("error_message"):
+            last_sync_error = "Shopify sync failed. Check authentication, access scopes, and API version."
     settings = (
         ("Shopify connection", "Configured" if shopify_config["configured"] else "Not configured"),
-        ("Shopify API version", shopify_config["api_version"]),
+        ("Shopify store domain", "Configured" if shopify_config["store_domain"] else "Missing"),
+        ("Shopify API version", "Configured" if shopify_config["api_version"] else "Missing"),
+        ("Shopify auth mode", shopify_config["auth_mode"]),
+        ("Shopify Client ID", "Configured" if shopify_config["client_id"] else "Missing"),
+        ("Shopify Client Secret", "Configured" if shopify_config["client_secret"] else "Missing"),
+        ("Shopify Admin Token", "Configured" if shopify_config["access_token"] else "Missing"),
+        (
+            "Last token refresh",
+            format_updated_at(shopify_token_status["last_refresh"])
+            if shopify_token_status["last_refresh"]
+            else "Never",
+        ),
+        ("Last Shopify sync", last_sync_status),
+        ("Last Shopify sync error", last_sync_error),
         ("Shopify products cached", str(shopify_summary["total"])),
         ("Shopify products matched", str(shopify_summary["matched"])),
         ("Google Drive mode", "Link-based file hub"),
@@ -1466,6 +1498,7 @@ def render_settings_page(app_version, database_path, password_status):
 
     st.info(
         "Phase 4 reads Shopify product data only when Test or Sync is clicked on the Shopify Sync page. "
+        "Client credentials are exchanged for a temporary in-memory token only at that time. "
         "It does not call Shopify during mockup generation. Google Drive remains link-based only."
     )
     st.write(f"**Local database:** `{database_path}`")

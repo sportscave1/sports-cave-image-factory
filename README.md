@@ -83,14 +83,19 @@ Add these environment variables locally or in Render:
 
 ```text
 SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
-SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_...
 SHOPIFY_API_VERSION=2026-04
+SHOPIFY_CLIENT_ID=your-dev-dashboard-client-id
+SHOPIFY_CLIENT_SECRET=your-dev-dashboard-client-secret
+# Optional legacy mode; preferred over client credentials when present:
+SHOPIFY_ADMIN_ACCESS_TOKEN=shpat_...
 SHOPIFY_SYNC_MAX_PRODUCTS=250
 ```
 
-The custom app token needs read access to products. Keep the token in Render
-environment variables and never commit it. Product metadata is cached in the
-local SQLite database; image URLs are stored, but image files are not downloaded.
+Sports Cave OS prefers a configured legacy Admin API token. Otherwise it uses
+the Shopify Dev Dashboard client credentials grant and caches the temporary
+access token in process memory until shortly before expiry. Keep every credential
+in Render environment variables and never commit it. Product metadata is cached
+in the local SQLite database; image URLs are stored, but image files are not downloaded.
 
 Matching rules:
 
