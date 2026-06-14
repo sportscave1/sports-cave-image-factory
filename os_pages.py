@@ -140,6 +140,21 @@ def status_badge(status):
     return f'<span class="sc-status sc-status-{status_class}">{status or "Not Set"}</span>'
 
 
+def render_product_thumbnail(image_url, *, key="", width=46):
+    image_url = str(image_url or "").strip()
+    if image_url:
+        st.image(image_url, width=width)
+        return
+    st.markdown(
+        f"""
+        <div class="sc-product-thumb-empty" aria-label="{html.escape(key or 'Artwork thumbnail missing')}">
+            SC
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def format_optional_number(value):
     return "Not Set" if value is None else str(value)
 
@@ -1714,6 +1729,33 @@ def render_files_page():
         "Connect links to the master product record rather than storing them in separate notes.",
     )
 
+    if supabase_backend.is_configured():
+        try:
+            supabase_asset_rows = supabase_backend.list_product_assets("")
+        except Exception:
+            supabase_asset_rows = []
+        psd_shortcuts = sorted(
+            [
+                row
+                for row in supabase_asset_rows
+                if row.get("asset_type") == "psd_master_file"
+                and (row.get("asset_url") or row.get("google_drive_file_url"))
+            ],
+            key=lambda item: (item.get("product_title") or item.get("shopify_handle") or "").lower(),
+        )
+        if psd_shortcuts:
+            with st.expander("PSD Shortcuts from Supabase", expanded=False):
+                st.caption("Alphabetical Drive shortcuts imported from the PSD CSV. These are links only; no PSD files are stored in the app.")
+                shortcut_header = st.columns([2.3, 1.2, 0.9])
+                for column, label in zip(shortcut_header, ("Product", "Handle", "PSD")):
+                    column.markdown(f"**{label}**")
+                for row in psd_shortcuts:
+                    url = row.get("asset_url") or row.get("google_drive_file_url")
+                    columns = st.columns([2.3, 1.2, 0.9])
+                    columns[0].write(row.get("product_title") or row.get("asset_name") or "PSD file")
+                    columns[1].caption(row.get("shopify_handle") or "")
+                    columns[2].link_button("Open PSD", url, use_container_width=True)
+
     file_filter = st.selectbox(
         "File status filter",
         (
@@ -1733,7 +1775,12 @@ def render_files_page():
             "All Connected",
         ),
     )
-    products = db.list_file_hub_products(file_filter)
+    try:
+        products = db.list_file_hub_products(file_filter)
+    except Exception as error:
+        st.warning("The legacy local file hub is unavailable, but Supabase PSD shortcuts above can still be used.")
+        st.caption(str(error))
+        return
     st.caption(f"{len(products)} product{'s' if len(products) != 1 else ''} shown")
     if not products:
         st.success("No products match this file filter.")
@@ -2208,13 +2255,22 @@ def render_supabase_limited_editions_page():
     )
     actions = st.columns([1.2, 1, 1, 2])
     if actions[0].button("Sync Products", type="primary", disabled=not config["configured"], use_container_width=True):
+        progress = st.progress(0, text="Loading Shopify products...")
         try:
-            result = supabase_backend.sync_shopify_products_to_supabase(config)
+            def update_product_progress(count):
+                progress.progress(min(count / 1000, 0.99), text=f"Loading {count} products...")
+
+            result = supabase_backend.sync_shopify_products_to_supabase(
+                config,
+                progress_callback=update_product_progress,
+            )
+            progress.progress(1.0, text="Shopify product sync complete.")
             st.session_state.supabase_limited_notice = (
                 f"Synced {result['products_processed']} active Shopify products into Supabase."
             )
             st.rerun()
         except Exception as error:
+            progress.empty()
             st.error("Shopify product sync failed. Open Settings -> Developer Tools -> Shopify Diagnostics.")
             supabase_backend.log_app_error(
                 "limited_editions_product_sync_failed",
@@ -2281,30 +2337,57 @@ def render_supabase_limited_editions_page():
         st.info("No edition products found yet. Click Sync Products.")
         return
 
-    header = st.columns([2.2, 1.25, 0.65, 0.65, 0.8, 0.75, 0.75, 0.75, 0.9, 1.0])
+    st.markdown(
+        """
+        <style>
+        .sc-product-thumb-empty {
+            width: 46px;
+            height: 46px;
+            border-radius: 10px;
+            border: 1px solid rgba(212, 165, 76, 0.36);
+            background: rgba(245, 242, 234, 0.08);
+            color: #D4A54C;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.72rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    header = st.columns([0.55, 2.0, 1.15, 0.6, 0.6, 0.75, 0.75, 0.7, 0.75, 0.85, 0.95])
     for column, label in zip(
         header,
-        ("Product", "Handle", "Total", "Next", "Last", "Remaining", "Active", "Sold Out", "PSD", "Links"),
+        ("Art", "Product", "Handle", "Total", "Next", "Last", "Remaining", "Active", "Sold Out", "PSD", "Links"),
     ):
         column.markdown(f"**{label}**")
     for product in products:
-        columns = st.columns([2.2, 1.25, 0.65, 0.65, 0.8, 0.75, 0.75, 0.75, 0.9, 1.0])
-        columns[0].write(product.get("product_title") or "Untitled product")
-        columns[1].caption(product.get("shopify_handle") or "")
-        columns[2].write(product.get("edition_total") or 100)
-        columns[3].write(product.get("next_edition_number") or 1)
+        columns = st.columns([0.55, 2.0, 1.15, 0.6, 0.6, 0.75, 0.75, 0.7, 0.75, 0.85, 0.95])
+        with columns[0]:
+            render_product_thumbnail(
+                product.get("display_image_url") or product.get("featured_image_url"),
+                key=f"edition-thumb-{product.get('shopify_handle')}",
+                width=44,
+            )
+        columns[1].write(product.get("product_title") or "Untitled product")
+        columns[2].caption(product.get("shopify_handle") or "")
+        columns[3].write(product.get("edition_total") or 100)
+        columns[4].write(product.get("next_edition_number") or 1)
         last_assigned = product.get("last_assigned_edition")
-        columns[4].write(f"{last_assigned}/{product.get('edition_total') or 100}" if last_assigned else "None")
-        columns[5].write(product.get("remaining_editions") or 0)
-        columns[6].markdown(status_badge("Active" if product.get("active") else "Inactive"), unsafe_allow_html=True)
-        columns[7].markdown(status_badge("Sold Out" if product.get("sold_out") else "Available"), unsafe_allow_html=True)
+        columns[5].write(f"{last_assigned}/{product.get('edition_total') or 100}" if last_assigned else "None")
+        columns[6].write(product.get("remaining_editions") or 0)
+        columns[7].markdown(status_badge("Active" if product.get("active") else "Inactive"), unsafe_allow_html=True)
+        columns[8].markdown(status_badge("Sold Out" if product.get("sold_out") else "Available"), unsafe_allow_html=True)
         psd_url = (asset_map.get(product.get("shopify_handle")) or {}).get("psd_master_file")
-        with columns[8]:
+        with columns[9]:
             if psd_url:
                 st.link_button("Open PSD", psd_url, use_container_width=True)
             else:
                 st.markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
-        with columns[9]:
+        with columns[10]:
             if product.get("admin_url"):
                 st.link_button("Shopify", product["admin_url"], use_container_width=True)
             elif product.get("online_store_url"):
@@ -2697,6 +2780,20 @@ def render_supabase_orders_page():
             font-weight: 650;
             line-height: 1.25;
         }
+        .sc-product-thumb-empty {
+            width: 46px;
+            height: 46px;
+            border-radius: 10px;
+            border: 1px solid rgba(212, 165, 76, 0.36);
+            background: rgba(245, 242, 234, 0.08);
+            color: #D4A54C;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.72rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -2766,11 +2863,12 @@ def render_supabase_orders_page():
         st.info("No orders found yet. Click Sync Orders.")
         return
 
-    header = st.columns([0.35, 0.85, 0.9, 1.15, 0.95, 1.85, 1.15, 0.8, 0.85, 0.85, 0.95])
+    header = st.columns([0.3, 0.45, 0.75, 0.82, 1.05, 0.9, 1.65, 1.05, 0.75, 0.75, 0.8, 0.9])
     for column, label in zip(
         header,
         (
             "",
+            "Art",
             "Order",
             "Date",
             "Customer",
@@ -2787,37 +2885,39 @@ def render_supabase_orders_page():
 
     for row_index, row in enumerate(rows):
         row_key = row.get("edition_order_id") or row.get("shopify_order_id") or row_index
-        columns = st.columns([0.35, 0.85, 0.9, 1.15, 0.95, 1.85, 1.15, 0.8, 0.85, 0.85, 0.95])
+        columns = st.columns([0.3, 0.45, 0.75, 0.82, 1.05, 0.9, 1.65, 1.05, 0.75, 0.75, 0.8, 0.9])
         columns[0].checkbox("Select", key=f"supabase-order-select-{row_key}", label_visibility="collapsed")
+        with columns[1]:
+            render_product_thumbnail(row.get("image_url"), key=f"order-thumb-{row_key}", width=42)
         order_label = row.get("order_name") or row.get("order_number") or "Order"
-        columns[1].markdown(f"**{html.escape(str(order_label))}**")
-        columns[2].caption(format_order_date(row.get("created_at") or row.get("processed_at")))
-        columns[3].write(customer_display_name(row.get("customer_name")))
-        columns[4].markdown(status_badge(row.get("fulfillment_status") or "Unknown"), unsafe_allow_html=True)
-        columns[5].markdown(
+        columns[2].markdown(f"**{html.escape(str(order_label))}**")
+        columns[3].caption(format_order_date(row.get("created_at") or row.get("processed_at")))
+        columns[4].write(customer_display_name(row.get("customer_name")))
+        columns[5].markdown(status_badge(row.get("fulfillment_status") or "Unknown"), unsafe_allow_html=True)
+        columns[6].markdown(
             f'<div class="sc-order-product">{html.escape(str(row.get("product_title") or "Needs edition"))}</div>',
             unsafe_allow_html=True,
         )
         if row.get("sku"):
-            columns[5].markdown(
+            columns[6].markdown(
                 f'<div class="sc-order-subtext">SKU {html.escape(str(row["sku"]))}</div>',
                 unsafe_allow_html=True,
             )
         variant_name, variant_dimensions = split_variant_title(row.get("variant_title"))
-        columns[6].write(variant_name)
+        columns[7].write(variant_name)
         if variant_dimensions:
-            columns[6].markdown(
+            columns[7].markdown(
                 f'<div class="sc-order-subtext">{html.escape(variant_dimensions)}</div>',
                 unsafe_allow_html=True,
             )
         if row.get("edition_number"):
-            columns[7].markdown(
+            columns[8].markdown(
                 status_badge(f"#{row['edition_number']}/{row.get('edition_total') or 100}"),
                 unsafe_allow_html=True,
             )
         else:
-            columns[7].markdown(status_badge("Needs Edition"), unsafe_allow_html=True)
-        with columns[8]:
+            columns[8].markdown(status_badge("Needs Edition"), unsafe_allow_html=True)
+        with columns[9]:
             if row.get("shopify_file_url"):
                 st.link_button("PDF", row["shopify_file_url"], use_container_width=True)
             elif row.get("local_file_path") and Path(row["local_file_path"]).exists():
@@ -2842,13 +2942,13 @@ def render_supabase_orders_page():
             else:
                 st.caption("Missing")
         if row.get("psd_url"):
-            columns[9].link_button("Open PSD", row["psd_url"], use_container_width=True)
+            columns[10].link_button("Open PSD", row["psd_url"], use_container_width=True)
         else:
-            columns[9].markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
+            columns[10].markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
         if row.get("prodigi_url"):
-            columns[10].link_button("Open Prodigi", row["prodigi_url"], use_container_width=True)
+            columns[11].link_button("Open Prodigi", row["prodigi_url"], use_container_width=True)
         else:
-            columns[10].markdown(status_badge("Prodigi Missing"), unsafe_allow_html=True)
+            columns[11].markdown(status_badge("Prodigi Missing"), unsafe_allow_html=True)
         st.markdown('<hr class="sc-order-divider" />', unsafe_allow_html=True)
 
 
@@ -3156,19 +3256,19 @@ def parse_psd_csv(uploaded_csv):
                 "google_drive_file_id": (row.get("Google Drive File ID") or "").strip(),
                 "asset_url": (row.get("Google Drive URL") or row.get("google_drive_file_url") or "").strip(),
                 "asset_type": asset_type,
-                "notes": (row.get("Parent Folder") or row.get("Parent Folder, if available") or "").strip(),
+                "notes": "PSD CSV import",
             }
         )
     return [row for row in rows if row["asset_url"] or row["google_drive_file_id"] or row["asset_name"]]
 
 
-def render_psd_csv_import(products):
-    with st.expander("Import PSD CSV", expanded=False):
+def render_psd_csv_import(products, *, expanded=False, key_prefix="supabase-psd", title="Import PSD CSV"):
+    with st.expander(title, expanded=expanded):
         st.caption("Upload the Google Drive export CSV only when you are ready. The app stores Drive links only, not PSD files.")
         uploaded_csv = st.file_uploader(
             "PSD CSV",
             type=["csv"],
-            key="supabase-psd-csv-upload",
+            key=f"{key_prefix}-csv-upload",
             label_visibility="collapsed",
         )
         if uploaded_csv is None:
@@ -3183,7 +3283,16 @@ def render_psd_csv_import(products):
             st.exception(error)
             return
 
-        product_handles = {item.get("shopify_handle") for item in known_products if item.get("shopify_handle")}
+        handle_lookup = {
+            normalize_psd_handle_guess(item.get("shopify_handle")): item.get("shopify_handle")
+            for item in known_products
+            if item.get("shopify_handle")
+        }
+        for row in csv_rows:
+            matched_handle = handle_lookup.get(row["shopify_handle"])
+            if matched_handle:
+                row["shopify_handle"] = matched_handle
+        product_handles = set(handle_lookup.values())
         product_options = {
             f"{item.get('product_title') or item.get('shopify_handle')} | {item.get('shopify_handle')}": item.get("shopify_handle")
             for item in known_products
@@ -3199,10 +3308,11 @@ def render_psd_csv_import(products):
         }
         missing = [item for item in products if item.get("shopify_handle") not in linked_psd_handles]
 
-        match_columns = st.columns(3)
-        match_columns[0].metric("Matched PSDs", len(matched))
-        match_columns[1].metric("Missing PSDs", len(missing))
-        match_columns[2].metric("Unmatched PSDs", len(unmatched))
+        match_columns = st.columns(4)
+        match_columns[0].metric("Rows read", len(csv_rows))
+        match_columns[1].metric("Matched PSDs", len(matched))
+        match_columns[2].metric("Missing PSDs", len(missing))
+        match_columns[3].metric("Unmatched PSDs", len(unmatched))
 
         if matched:
             st.markdown("**Matched PSDs**")
@@ -3210,7 +3320,7 @@ def render_psd_csv_import(products):
                 "Overwrite existing PSD links",
                 value=False,
                 help="Leave off to protect manually linked PSDs. Existing PSD links will be skipped.",
-                key="supabase-psd-overwrite-existing",
+                key=f"{key_prefix}-overwrite-existing",
             )
             st.dataframe(
                 [
@@ -3229,37 +3339,45 @@ def render_psd_csv_import(products):
                 run_id = supabase_backend.start_sync_run("psd_csv_import")
                 imported = 0
                 skipped = 0
+                errors = []
                 try:
                     for row in matched:
-                        existing_url = (asset_map.get(row["shopify_handle"]) or {}).get("psd_master_file")
-                        if existing_url and not overwrite_existing:
-                            skipped += 1
-                            continue
-                        supabase_backend.upsert_product_asset(
-                            row["shopify_handle"],
-                            row["asset_type"] or "psd_master_file",
-                            row["asset_url"],
-                            row["notes"] or "PSD CSV import",
-                            asset_name=row["asset_name"],
-                            google_drive_file_id=row["google_drive_file_id"],
-                            is_primary=True,
-                        )
-                        imported += 1
+                        try:
+                            existing_url = (asset_map.get(row["shopify_handle"]) or {}).get("psd_master_file")
+                            if existing_url and not overwrite_existing:
+                                skipped += 1
+                                continue
+                            supabase_backend.upsert_product_asset(
+                                row["shopify_handle"],
+                                row["asset_type"] or "psd_master_file",
+                                row["asset_url"],
+                                row["notes"] or "PSD CSV import",
+                                asset_name=row["asset_name"],
+                                google_drive_file_id=row["google_drive_file_id"],
+                                is_primary=True,
+                            )
+                            imported += 1
+                        except Exception as row_error:
+                            errors.append(f"{row.get('asset_name') or row.get('shopify_handle')}: {row_error}")
                     supabase_backend.finish_sync_run(
                         run_id,
-                        "Complete",
-                        records_seen=len(matched),
+                        "Complete" if not errors else "Complete With Warnings",
+                        records_seen=len(csv_rows),
                         records_processed=imported,
+                        error_message="; ".join(errors[:3]) if errors else "",
                     )
                     st.session_state.supabase_assets_notice = (
-                        f"Imported {imported} matched PSD links. Skipped {skipped} existing links."
+                        f"PSD import complete. Rows read: {len(csv_rows)}. Matched: {len(matched)}. "
+                        f"Imported/updated: {imported}. Skipped existing: {skipped}. "
+                        f"Unmatched: {len(unmatched)}. Missing PSDs after import may need refresh. "
+                        f"Errors: {len(errors)}."
                     )
                     st.rerun()
                 except Exception as error:
                     supabase_backend.finish_sync_run(
                         run_id,
                         "Failed",
-                        records_seen=len(matched),
+                        records_seen=len(csv_rows),
                         records_processed=imported,
                         error_message="PSD CSV import failed.",
                     )
@@ -3313,7 +3431,7 @@ def render_psd_csv_import(products):
             overwrite_manual = st.checkbox(
                 "Overwrite this product's existing PSD link",
                 value=False,
-                key="supabase-psd-manual-overwrite",
+                key=f"{key_prefix}-manual-overwrite",
             )
             if manual_columns[2].button("Save manual link", use_container_width=True):
                 row = unmatched[selected_index]
@@ -3326,7 +3444,7 @@ def render_psd_csv_import(products):
                     handle,
                     row["asset_type"] or "psd_master_file",
                     row["asset_url"],
-                    row["notes"],
+                    row["notes"] or "PSD CSV import",
                     asset_name=row["asset_name"],
                     google_drive_file_id=row["google_drive_file_id"],
                     is_primary=True,
@@ -3762,10 +3880,47 @@ def render_prompt_block(title, prompt, key, when_to_use=None, height=220):
         render_copy_text_button(prompt.strip(), f"marketing-{key}", "Copy Prompt")
 
 
+def render_marketing_card(title, body, *, key=None, copy_label=None):
+    st.markdown(
+        f"""
+        <div class="marketing-card">
+          <div class="marketing-card-title">{html.escape(title)}</div>
+          <div class="marketing-card-body">{html.escape(body).replace(chr(10), "<br>")}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if key and copy_label:
+        render_copy_text_button(body.strip(), f"marketing-card-{key}", copy_label)
+
+
+def render_prompt_collection(prompts, key_prefix):
+    for title, prompt in prompts:
+        render_prompt_block(title, prompt, f"{key_prefix}-{safe_filename_part(title)}", height=230)
+
+
 def inject_marketing_factory_styles():
     st.markdown(
         """
         <style>
+        .marketing-card {
+            border: 1px solid rgba(212, 165, 76, 0.28);
+            border-radius: 16px;
+            background: linear-gradient(135deg, rgba(17, 17, 17, 0.98), rgba(26, 22, 17, 0.92));
+            padding: 18px 20px;
+            margin: 0 0 14px 0;
+        }
+        .marketing-card-title {
+            color: #F5F2EA;
+            font-weight: 800;
+            font-size: 1.02rem;
+            margin-bottom: 8px;
+        }
+        .marketing-card-body {
+            color: #C9C2B8;
+            line-height: 1.48;
+            font-size: 0.94rem;
+        }
         div[data-testid="stTextArea"] textarea {
             background: #F5F2EA !important;
             color: #0B0B0D !important;
@@ -4306,6 +4461,214 @@ Rules:
 
 Output a comma-separated list only.
 """,
+    "alt_text": """
+Create Shopify image alt text for this Sports Cave product.
+
+Product name:
+[PASTE]
+
+Artwork/image notes:
+[PASTE]
+
+Rules:
+- Natural and descriptive
+- Include sport/player/team only when true
+- Include wall art intent only once
+- No keyword stuffing
+- No fake claims
+
+Output 5 alt text options.
+""",
+    "internal_linking": """
+Suggest internal links for this Sports Cave product or blog.
+
+Page/product:
+[PASTE]
+
+Relevant collections/products:
+[PASTE]
+
+Rules:
+- Only suggest links that genuinely help the shopper
+- Use natural anchor text
+- Keep collector/man cave tone
+- No spammy exact-match anchor stuffing
+
+Output:
+Anchor text | Destination | Where to place it | Reason
+""",
+}
+
+
+SOCIAL_PROMPTS = {
+    "Instagram caption prompt": """
+Write Instagram captions for this Sports Cave product.
+
+Product:
+[PASTE]
+
+Fan base / sport / story:
+[PASTE]
+
+Tone:
+- premium
+- nostalgic
+- collector-driven
+- short and human
+- not generic poster copy
+
+Output:
+1. Launch caption
+2. Scarcity caption
+3. Fan pride caption
+4. Man cave caption
+5. Final editions caption
+""",
+    "Story prompt": """
+Create a 5-frame Instagram Story sequence for this Sports Cave product.
+
+Product:
+[PASTE]
+
+Use:
+- short frame text
+- collector urgency
+- swipe/tap CTA
+- no overexplaining
+
+Output:
+Frame 1 text:
+Frame 2 text:
+Frame 3 text:
+Frame 4 text:
+Frame 5 text:
+""",
+    "Reel cover prompt": """
+Write Reel cover text options for a Sports Cave product video.
+
+Product:
+[PASTE]
+
+Rules:
+- maximum 5 words
+- bold fan emotion
+- collector feel
+- no clickbait
+
+Output 12 options.
+""",
+    "Launch post prompt": """
+Create a launch post for this new Sports Cave limited edition.
+
+Product:
+[PASTE]
+
+Details:
+[PASTE edition limit, sport, fan base]
+
+Output:
+- short caption
+- longer caption
+- 8 hashtags
+- CTA
+""",
+    "Final editions post prompt": """
+Write a final editions social post.
+
+Product:
+[PASTE]
+
+Remaining editions:
+[PASTE]
+
+Rules:
+- urgent but premium
+- no fake panic
+- collector tone
+- clear CTA
+
+Output 3 variants.
+""",
+}
+
+
+EMAIL_PROMPTS = {
+    "Product launch email prompt": """
+Write a product launch email for Sports Cave.
+
+Product:
+[PASTE]
+
+Audience:
+[PASTE]
+
+Output:
+Subject lines: 5
+Preview text: 3
+Email body:
+CTA:
+""",
+    "Abandoned cart email prompt": """
+Write an abandoned cart email for a Sports Cave shopper.
+
+Product/cart context:
+[PASTE]
+
+Tone:
+- helpful
+- collector-focused
+- no cheap discount pressure
+
+Output:
+Subject lines: 5
+Preview text: 3
+Email body:
+CTA:
+""",
+    "Browse abandonment prompt": """
+Write a browse abandonment email for someone who viewed Sports Cave wall art.
+
+Collection/product viewed:
+[PASTE]
+
+Output:
+Subject lines: 5
+Preview text: 3
+Email body:
+CTA:
+""",
+    "Collector drop email prompt": """
+Write a collector drop email announcing a numbered Sports Cave release.
+
+Drop:
+[PASTE]
+
+Edition limit:
+[PASTE]
+
+Output:
+Subject lines: 5
+Preview text: 3
+Email body:
+CTA:
+""",
+    "Father's Day/gift email prompt": """
+Write a Sports Cave gift email for Father's Day or gift season.
+
+Products/collection:
+[PASTE]
+
+Rules:
+- premium gift feel
+- man cave angle
+- not cheesy
+
+Output:
+Subject lines: 8
+Preview text: 4
+Email body:
+CTA:
+""",
 }
 
 
@@ -4319,7 +4682,10 @@ def render_meta_ads_section():
     with au_tab:
         st.markdown("### Australian Meta Ads SOP")
         st.caption("Nostalgia, rivalry, man cave, Aussie pride, and numbered collector drops.")
-        st.write("Goal: make the fan feel, 'That belongs on my wall.'")
+        render_marketing_card(
+            "Goal",
+            "Make the fan feel: 'That belongs on my wall.' Keep the copy short, nostalgic, Australian, and collector-led.",
+        )
         with st.expander("Winning AU themes", expanded=True):
             st.write("Nostalgia: History, Framed; Captured Forever; Final Bow; Centre Court Silence.")
             st.write("Identity: Gooner Pride; Built for Real Man Caves; For The Fans; Real Fans Remember.")
@@ -4334,6 +4700,10 @@ def render_meta_ads_section():
     with usa_tab:
         st.markdown("### USA Meta Ads SOP")
         st.caption("Identity, legacy debates, collector exclusivity, fan cave culture, and sports hero obsession.")
+        render_marketing_card(
+            "Goal",
+            "Make the product feel like legacy on the wall, not a normal poster. Use fan identity, rivalry, and collector scarcity.",
+        )
         with st.expander("Best USA angles", expanded=True):
             st.write("Gift for Sports Fans Who Have Everything")
             st.write("Limited Edition Collector Series")
@@ -4362,6 +4732,7 @@ def render_meta_ads_section():
             "Is there a clear CTA?",
             "Does it match the true fan base?",
         )
+        render_copy_text_button("\n".join(f"- {item}" for item in checks), "meta-quality-checklist", "Copy Checklist")
         for item in checks:
             st.checkbox(item, key=f"meta-check-{safe_filename_part(item)}")
         st.info("Carousel cards are micro-hooks. Primary text and landing pages do the deeper selling.")
@@ -4507,26 +4878,66 @@ def render_seo_section():
         st.warning("If not tracked, it does not count.")
 
 
+def render_simple_seo_section():
+    st.subheader("SEO")
+    st.caption("Manual prompt library for product SEO, metadata, image alt text, blogs, and internal links. No SEO APIs run here.")
+    render_marketing_card(
+        "SEO workflow",
+        "Paste the product/page context into one prompt at a time. Keep the final copy premium, human, and buyer-intent focused.",
+    )
+    prompt_pairs = (
+        ("Product SEO Prompt", SEO_PROMPTS["product_description"]),
+        ("Meta Title / Description Prompt", SEO_PROMPTS["product_meta"]),
+        ("Alt Text Prompt", SEO_PROMPTS["alt_text"]),
+        ("Blog Idea Prompt", SEO_PROMPTS["blog_topic"]),
+        ("Internal Linking Prompt", SEO_PROMPTS["internal_linking"]),
+    )
+    render_prompt_collection(prompt_pairs, "seo-simple")
+
+
+def render_social_media_section():
+    st.subheader("Social Media")
+    st.caption("Copy-ready social prompts for launch posts, captions, stories, reels, and final-edition urgency.")
+    render_marketing_card(
+        "Social rule",
+        "Lead with fan emotion, legacy, scarcity, or man cave pride. Keep every line shorter than it feels in the draft.",
+    )
+    render_prompt_collection(tuple(SOCIAL_PROMPTS.items()), "social")
+
+
+def render_email_marketing_section():
+    st.subheader("Email Marketing")
+    st.caption("Manual email prompt library for Sports Cave launches, carts, browse recovery, collector drops, and gifting.")
+    render_marketing_card(
+        "Email rule",
+        "Make the collector feel seen first, then sell. Avoid cheap discount pressure unless Nathan specifically asks for a promotion.",
+    )
+    render_prompt_collection(tuple(EMAIL_PROMPTS.items()), "email")
+
+
 def render_marketing_factory_page():
     inject_marketing_factory_styles()
     st.title("Marketing Factory")
-    st.caption("Meta Ads and SEO SOP hub for Sports Cave operators. No live AI generation.")
+    st.caption("Prompt and SOP hub for Sports Cave operators. No live AI generation.")
     meta_tab, seo_tab, social_tab, email_tab = st.tabs(
         ["Meta Ads", "SEO", "Social Media", "Email Marketing"]
     )
     with meta_tab:
         render_meta_ads_section()
     with seo_tab:
-        render_seo_section()
+        render_simple_seo_section()
     with social_tab:
-        st.info("Social Media workflows are coming soon.")
+        render_social_media_section()
     with email_tab:
-        st.info("Email Marketing workflows are coming soon.")
+        render_email_marketing_section()
 
 
 def render_settings_page(app_version, database_path, password_status):
     st.title("Settings")
     st.caption("Safe connection status and file workflow settings for Sports Cave OS.")
+    assets_notice = st.session_state.pop("supabase_assets_notice", None)
+    if assets_notice:
+        st.success(assets_notice)
     shopify_config = shopify_sync.get_config()
     shopify_token_status = shopify_sync.get_token_status(shopify_config)
     shopify_summary = db.get_shopify_summary()
@@ -4641,6 +5052,38 @@ def render_settings_page(app_version, database_path, password_status):
                         st.exception(error)
             else:
                 st.caption("No edition orders are available for certificate generation testing yet.")
+
+    with st.expander("Developer Tools", expanded=False):
+        dev_tabs = st.tabs(["Shopify Diagnostics", "Import PSD CSV", "Certificates"])
+        with dev_tabs[0]:
+            st.caption("Manual Shopify connection check. This only runs a token/API test when you click the button.")
+            render_shopify_scope_diagnostics(shopify_config, "settings-dev")
+        with dev_tabs[1]:
+            st.caption("Import Google Drive PSD links into Supabase product_assets. No PSD files are uploaded or stored.")
+            if not supabase_backend.is_configured():
+                st.warning("DATABASE_URL is required before importing PSD links.")
+            elif st.button("Load PSD CSV Import Tool", key="settings-load-psd-import", use_container_width=True):
+                st.session_state.settings_psd_import_loaded = True
+            if supabase_backend.is_configured() and st.session_state.get("settings_psd_import_loaded"):
+                try:
+                    products = supabase_backend.list_edition_products(limit=1000)
+                    render_psd_csv_import(
+                        products,
+                        expanded=True,
+                        key_prefix="settings-psd",
+                        title="Import PSD CSV",
+                    )
+                except Exception as error:
+                    st.error("Could not load products for PSD import.")
+                    st.exception(error)
+        with dev_tabs[2]:
+            st.caption("Certificate tools live here now; Orders remains the daily certificate workflow.")
+            if not supabase_backend.is_configured():
+                st.warning("DATABASE_URL is required before loading certificate tools.")
+            elif st.button("Load Certificate Tools", key="settings-load-certificates", use_container_width=True):
+                st.session_state.settings_certificates_loaded = True
+            if supabase_backend.is_configured() and st.session_state.get("settings_certificates_loaded"):
+                render_supabase_certificates_page()
 
 
 def render_placeholder_page(title):

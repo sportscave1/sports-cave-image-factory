@@ -458,6 +458,14 @@ def _ensure_schema_uncached():
                     ("created_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
+                "certificates": (
+                    ("pdf_filename", "TEXT"),
+                    ("local_file_path", "TEXT"),
+                    ("shopify_file_id", "TEXT"),
+                    ("shopify_file_url", "TEXT"),
+                    ("status", "TEXT DEFAULT 'Local PDF'"),
+                    ("generated_at", "TIMESTAMPTZ DEFAULT now()"),
+                ),
                 "webhook_events": (
                     ("topic", "TEXT"),
                     ("status", "TEXT"),
@@ -773,7 +781,7 @@ def upsert_products(products):
     return processed
 
 
-def sync_shopify_products_to_supabase(config=None):
+def sync_shopify_products_to_supabase(config=None, progress_callback=None):
     ensure_schema()
     config = config or shopify_sync.get_config()
     run_id = start_sync_run("shopify_products")
@@ -785,6 +793,8 @@ def sync_shopify_products_to_supabase(config=None):
         for page in shopify_sync.iter_catalog_pages(search="status:active", page_size=50, config=sync_config):
             seen += len(page["products"])
             processed += upsert_products(page["products"])
+            if progress_callback:
+                progress_callback(seen)
             del page
             gc.collect()
         finish_sync_run(run_id, "Complete", seen, processed)
@@ -804,6 +814,7 @@ def list_edition_products(search="", limit=500):
                 cur.execute(
                     """
                     SELECT ep.*, sp.admin_url, sp.online_store_url,
+                           COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS display_image_url,
                            (
                                SELECT MAX(eo.edition_number)
                                FROM edition_orders eo
@@ -823,6 +834,7 @@ def list_edition_products(search="", limit=500):
                 cur.execute(
                     """
                     SELECT ep.*, sp.admin_url, sp.online_store_url,
+                           COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS display_image_url,
                            (
                                SELECT MAX(eo.edition_number)
                                FROM edition_orders eo
@@ -1180,7 +1192,14 @@ def get_product_asset_map():
     ensure_schema()
     with connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT shopify_handle, asset_type, asset_url FROM product_assets WHERE is_primary IS DISTINCT FROM FALSE")
+            cur.execute(
+                """
+                SELECT shopify_handle, asset_type,
+                       COALESCE(NULLIF(asset_url, ''), NULLIF(google_drive_file_url, '')) AS asset_url
+                FROM product_assets
+                WHERE is_primary IS DISTINCT FROM FALSE
+                """
+            )
             rows = cur.fetchall()
     result = {}
     for row in rows:
@@ -1553,6 +1572,25 @@ def resolve_product_for_line(line_item, *, fetch_missing_products=True):
 def _generate_certificate_for_assignment(cur, assignment):
     local_file_path = ""
     try:
+        cur.execute(
+            """
+            SELECT local_file_path, shopify_file_url
+            FROM certificates
+            WHERE edition_order_id=%s
+            """,
+            (assignment["id"],),
+        )
+        existing_certificate = cur.fetchone()
+        if existing_certificate and (
+            existing_certificate.get("shopify_file_url")
+            or existing_certificate.get("local_file_path")
+        ):
+            cur.execute(
+                "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id=%s",
+                (assignment["id"],),
+            )
+            return existing_certificate.get("local_file_path") or existing_certificate.get("shopify_file_url")
+
         local_file_path = generate_certificate_pdf(
             CERTIFICATE_OUTPUT_DIR,
             product_title=assignment.get("product_title"),
@@ -1571,11 +1609,12 @@ def _generate_certificate_for_assignment(cur, assignment):
             """
             INSERT INTO certificates(
                 edition_order_id, shopify_order_id, shopify_handle, certificate_id, edition_number,
-                edition_total, local_file_path, status, generated_at
+                edition_total, pdf_filename, local_file_path, status, generated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, 'Local PDF', now())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Local PDF', now())
             ON CONFLICT (edition_order_id) DO UPDATE SET
                 certificate_id=EXCLUDED.certificate_id,
+                pdf_filename=EXCLUDED.pdf_filename,
                 local_file_path=EXCLUDED.local_file_path,
                 generated_at=now(),
                 status='Local PDF'
@@ -1587,6 +1626,7 @@ def _generate_certificate_for_assignment(cur, assignment):
                 generated_certificate_id,
                 assignment.get("edition_number"),
                 assignment.get("edition_total"),
+                Path(local_file_path).name,
                 local_file_path,
             ),
         )
@@ -2118,11 +2158,14 @@ def list_orders(search="", sort="Date newest", limit=250):
                eo.id AS edition_order_id, eo.shopify_line_item_id, eo.shopify_handle,
                eo.product_title, eo.variant_title, eo.sku, eo.edition_number,
                eo.edition_total, eo.allocation_index, eo.assigned_at, eo.certificate_status,
+               COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url,
                c.local_file_path, c.shopify_file_url,
-               psd.asset_url AS psd_url,
-               prodigi.asset_url AS prodigi_url
+               COALESCE(NULLIF(psd.asset_url, ''), NULLIF(psd.google_drive_file_url, '')) AS psd_url,
+               COALESCE(NULLIF(prodigi.asset_url, ''), NULLIF(prodigi.google_drive_file_url, '')) AS prodigi_url
         FROM shopify_orders o
         LEFT JOIN edition_orders eo ON eo.shopify_order_id = o.shopify_order_id
+        LEFT JOIN edition_products ep ON ep.shopify_handle = eo.shopify_handle
+        LEFT JOIN shopify_products sp ON sp.handle = eo.shopify_handle
         LEFT JOIN certificates c ON c.edition_order_id = eo.id
         LEFT JOIN product_assets psd ON psd.shopify_handle = eo.shopify_handle AND psd.asset_type = 'psd_master_file' AND psd.is_primary IS DISTINCT FROM FALSE
         LEFT JOIN product_assets prodigi ON prodigi.shopify_handle = eo.shopify_handle AND prodigi.asset_type = 'prodigi_link'
@@ -2167,10 +2210,10 @@ def get_order_summary():
                      WHERE c.id IS NULL) AS certificates_missing,
                     (SELECT COUNT(*) FROM edition_orders eo
                      LEFT JOIN product_assets pa ON pa.shopify_handle=eo.shopify_handle AND pa.asset_type='psd_master_file' AND pa.is_primary IS DISTINCT FROM FALSE
-                     WHERE COALESCE(pa.asset_url, '')='') AS psd_links_missing,
+                     WHERE COALESCE(NULLIF(pa.asset_url, ''), NULLIF(pa.google_drive_file_url, ''), '')='') AS psd_links_missing,
                     (SELECT COUNT(*) FROM edition_orders eo
                      LEFT JOIN product_assets pa ON pa.shopify_handle=eo.shopify_handle AND pa.asset_type='prodigi_link'
-                     WHERE COALESCE(pa.asset_url, '')='') AS prodigi_links_missing
+                     WHERE COALESCE(NULLIF(pa.asset_url, ''), NULLIF(pa.google_drive_file_url, ''), '')='') AS prodigi_links_missing
                 """
             )
             return cur.fetchone() or {}
@@ -2191,7 +2234,7 @@ def get_dashboard_summary():
                         WHERE pa.shopify_handle=ep.shopify_handle
                           AND pa.asset_type='psd_master_file'
                           AND pa.is_primary IS DISTINCT FROM FALSE
-                          AND COALESCE(pa.asset_url, '') <> ''
+                          AND COALESCE(NULLIF(pa.asset_url, ''), NULLIF(pa.google_drive_file_url, ''), '') <> ''
                      )) AS missing_psd,
                     (SELECT COUNT(*) FROM edition_orders WHERE certificate_status <> 'Certificate Ready') AS certificates_missing,
                     (SELECT COUNT(*) FROM app_errors WHERE created_at > now() - interval '7 days') AS recent_errors,
