@@ -2102,6 +2102,9 @@ def render_supabase_limited_editions_page():
     notice = st.session_state.pop("supabase_limited_notice", None)
     if notice:
         st.success(notice)
+    warning = st.session_state.pop("supabase_limited_warning", None)
+    if warning:
+        st.warning(warning)
 
     config = shopify_sync.get_config()
     search = st.text_input(
@@ -2139,6 +2142,55 @@ def render_supabase_limited_editions_page():
         use_container_width=True,
     )
     actions[3].caption(f"{len(products)} products shown")
+
+    with st.expander("Import Limited Edition CSV", expanded=False):
+        st.caption(
+            "Imports save permanently into Supabase. Product-level counters update edition_products; "
+            "rows with edition numbers also create edition_orders without duplicating existing editions."
+        )
+        import_columns = st.columns([2.4, 1.2, 1])
+        uploaded_csv = import_columns[0].file_uploader(
+            "Limited Edition CSV",
+            type=["csv"],
+            key="supabase-limited-edition-import-csv",
+            label_visibility="collapsed",
+        )
+        overwrite_orders = import_columns[1].checkbox(
+            "Overwrite existing assigned edition rows",
+            value=False,
+            key="supabase-limited-overwrite-orders",
+            help="Leave off to protect existing assigned edition records.",
+        )
+        if import_columns[2].button(
+            "Import CSV",
+            disabled=uploaded_csv is None,
+            type="primary",
+            use_container_width=True,
+            key="supabase-limited-import-button",
+        ):
+            try:
+                csv_text = uploaded_csv.getvalue().decode("utf-8-sig", errors="replace")
+                csv_rows = list(csv.DictReader(io.StringIO(csv_text)))
+                result = supabase_backend.import_limited_edition_rows(
+                    csv_rows,
+                    overwrite_existing_orders=overwrite_orders,
+                )
+                st.session_state.supabase_limited_notice = (
+                    f"Import complete: {result['rows_read']} rows read, "
+                    f"{result['rows_matched']} matched, {result['rows_inserted']} inserted, "
+                    f"{result['rows_updated']} updated, {result['rows_skipped']} skipped."
+                )
+                if result["errors"]:
+                    st.session_state.supabase_limited_warning = "First import issue: " + result["errors"][0]
+                st.rerun()
+            except Exception as error:
+                supabase_backend.log_app_error(
+                    "limited_edition_import_ui_failed",
+                    str(error),
+                    {"file_name": getattr(uploaded_csv, "name", "")},
+                )
+                st.error("Could not import the Limited Edition CSV into Supabase.")
+                st.exception(error)
 
     metrics = st.columns(4)
     metrics[0].metric("Products", len(products))
@@ -3149,18 +3201,21 @@ def render_psd_csv_import(products):
         if uploaded_csv is None:
             return
 
-        product_handles = {item.get("shopify_handle") for item in products if item.get("shopify_handle")}
-        product_options = {
-            f"{item.get('product_title') or item.get('shopify_handle')} | {item.get('shopify_handle')}": item.get("shopify_handle")
-            for item in products
-        }
         try:
             csv_rows = parse_psd_csv(uploaded_csv)
             asset_map = supabase_backend.get_product_asset_map()
+            known_products = supabase_backend.list_known_product_handles()
         except Exception as error:
             st.error("Could not read the PSD CSV.")
             st.exception(error)
             return
+
+        product_handles = {item.get("shopify_handle") for item in known_products if item.get("shopify_handle")}
+        product_options = {
+            f"{item.get('product_title') or item.get('shopify_handle')} | {item.get('shopify_handle')}": item.get("shopify_handle")
+            for item in known_products
+            if item.get("shopify_handle")
+        }
 
         matched = [row for row in csv_rows if row["shopify_handle"] in product_handles]
         unmatched = [row for row in csv_rows if row["shopify_handle"] not in product_handles]
@@ -3209,7 +3264,7 @@ def render_psd_csv_import(products):
                             continue
                         supabase_backend.upsert_product_asset(
                             row["shopify_handle"],
-                            "psd_master_file",
+                            row["asset_type"] or "psd_master_file",
                             row["asset_url"],
                             row["notes"] or "PSD CSV import",
                             asset_name=row["asset_name"],
@@ -3271,6 +3326,9 @@ def render_psd_csv_import(products):
                 use_container_width=True,
                 hide_index=True,
             )
+            if not product_options:
+                st.warning("No Shopify handles are available for manual linking yet. Sync Shopify products first.")
+                return
             manual_columns = st.columns([1.4, 1.6, 1])
             unmatched_options = [
                 f"{row['asset_name'] or row['shopify_handle']} | {index}"
@@ -3293,7 +3351,7 @@ def render_psd_csv_import(products):
                     return
                 supabase_backend.upsert_product_asset(
                     handle,
-                    "psd_master_file",
+                    row["asset_type"] or "psd_master_file",
                     row["asset_url"],
                     row["notes"],
                     asset_name=row["asset_name"],
@@ -3327,6 +3385,18 @@ def render_product_assets_page():
         key="supabase-assets-search",
         label_visibility="collapsed",
     )
+    filter_columns = st.columns([1, 1, 2])
+    asset_type_filter = filter_columns[0].selectbox(
+        "Asset type filter",
+        ["All", *list(supabase_backend.ASSET_TYPES)],
+        format_func=lambda value: "All asset types" if value == "All" else supabase_backend.ASSET_LABELS.get(value, value),
+        key="supabase-assets-type-filter",
+    )
+    link_filter = filter_columns[1].selectbox(
+        "Link status",
+        ["All", "Linked", "Missing"],
+        key="supabase-assets-link-filter",
+    )
     products = supabase_backend.list_edition_products(search=search, limit=1000)
     if not products:
         st.info("No products found yet. Open Limited Editions and click Sync Shopify Products first.")
@@ -3348,11 +3418,21 @@ def render_product_assets_page():
             format_func=lambda value: supabase_backend.ASSET_LABELS.get(value, value),
             key="supabase-asset-type",
         )
+        asset_name = st.text_input("Asset name", placeholder="Optional file/folder name")
         asset_url = st.text_input("Asset URL", placeholder="Paste the Google Drive, Shopify CDN, or Prodigi link")
+        google_drive_file_id = st.text_input("Google Drive file ID", placeholder="Optional Drive file/folder ID")
         notes = st.text_input("Notes", placeholder="Optional VA notes")
         if st.button("Save Asset Link", type="primary", use_container_width=True):
             try:
-                supabase_backend.upsert_product_asset(selected_handle, asset_type, asset_url, notes)
+                supabase_backend.upsert_product_asset(
+                    selected_handle,
+                    asset_type,
+                    asset_url,
+                    notes,
+                    asset_name=asset_name,
+                    google_drive_file_id=google_drive_file_id,
+                    is_primary=True,
+                )
                 st.session_state.supabase_assets_notice = "Asset link saved."
                 st.rerun()
             except Exception as error:
@@ -3360,6 +3440,35 @@ def render_product_assets_page():
                 st.exception(error)
 
     rows = supabase_backend.list_product_assets(search=search)
+    if asset_type_filter != "All":
+        rows = [row for row in rows if row.get("asset_type") == asset_type_filter]
+    if link_filter == "Linked":
+        rows = [row for row in rows if row.get("asset_url") or row.get("google_drive_file_url")]
+    elif link_filter == "Missing":
+        rows = [row for row in rows if not (row.get("asset_url") or row.get("google_drive_file_url"))]
+
+    st.subheader("Stored Asset Rows")
+    if rows:
+        st.dataframe(
+            [
+                {
+                    "shopify_handle": row.get("shopify_handle"),
+                    "asset_type": row.get("asset_type") or "Missing",
+                    "asset_name": row.get("asset_name") or "",
+                    "google_drive_file_url": row.get("google_drive_file_url") or row.get("asset_url") or "",
+                    "is_primary": row.get("is_primary"),
+                    "notes": row.get("notes") or "",
+                    "created_at": format_updated_at(row.get("created_at")) if row.get("created_at") else "",
+                    "updated_at": format_updated_at(row.get("updated_at")) if row.get("updated_at") else "",
+                }
+                for row in rows
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info("No product asset rows match the current filters.")
+
     asset_map = {}
     for row in rows:
         handle = row.get("shopify_handle")
@@ -3543,6 +3652,46 @@ def render_app_errors_page():
         st.exception(error)
         return
     st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+def render_persistence_check_page():
+    st.title("Persistence Check")
+    st.caption("Manual Supabase persistence check. Nothing runs until this page is opened or you press refresh.")
+    if not supabase_backend.is_configured():
+        st.warning("DATABASE_URL is missing. Supabase persistence is not connected.")
+        return
+
+    if st.button("Refresh Persistence Check", type="primary", use_container_width=True):
+        st.cache_data.clear()
+
+    try:
+        counts = supabase_backend.persistence_counts()
+    except Exception as error:
+        st.error("Could not connect to Supabase using DATABASE_URL.")
+        st.exception(error)
+        return
+
+    st.success("Supabase connection works.")
+    rows = [{"table": table_name, "rows": count} for table_name, count in counts.items()]
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    zero_tables = [table_name for table_name, count in counts.items() if int(count or 0) == 0]
+    if zero_tables:
+        st.warning("These tables currently have 0 rows: " + ", ".join(zero_tables))
+    else:
+        st.success("All tracked persistence tables contain rows.")
+
+    st.subheader("Quick Actions")
+    actions = st.columns(3)
+    if actions[0].button("Check Product Assets", use_container_width=True):
+        st.session_state.pending_page = "Product Assets"
+        st.rerun()
+    if actions[1].button("Check Edition Tables", use_container_width=True):
+        st.session_state.pending_page = "Limited Editions"
+        st.rerun()
+    if actions[2].button("Run Integrity Check", use_container_width=True):
+        st.session_state.pending_page = "Edition Integrity Check"
+        st.rerun()
 
 
 def render_edition_integrity_check_page():

@@ -127,6 +127,7 @@ MENU_OPTIONS = [
     "Webhook Events",
     "Sync Runs",
     "App Errors",
+    "Persistence Check",
     "Edition Integrity Check",
     "Files",
     "Marketing Factory",
@@ -4207,6 +4208,10 @@ def render_sidebar():
         st.sidebar.divider()
         st.sidebar.subheader("Asset Control")
         st.sidebar.write("Filter missing or review assets, then open the master product record to update them.")
+    elif st.session_state.selected_page == "Persistence Check":
+        st.sidebar.divider()
+        st.sidebar.subheader("Persistence Check")
+        st.sidebar.write("Confirm Supabase tables, imports, assets, certificates, and orders are permanently stored.")
     elif st.session_state.selected_page == "Product Uploads":
         st.sidebar.divider()
         st.sidebar.subheader("Upload Workflow")
@@ -4765,6 +4770,59 @@ def render_lightweight_dashboard_page():
         st.session_state.pending_page = "Limited Editions"
         st.rerun()
 
+    check_columns = st.columns(5)
+    if check_columns[0].button("Check Edition Tables", use_container_width=True):
+        try:
+            counts = get_os_pages().supabase_backend.persistence_counts()
+            st.write(
+                {
+                    "edition_products": counts.get("edition_products", 0),
+                    "edition_orders": counts.get("edition_orders", 0),
+                }
+            )
+        except Exception as error:
+            st.error("Edition table check failed.")
+            st.exception(error)
+    if check_columns[1].button("Check Product Assets", use_container_width=True):
+        try:
+            counts = get_os_pages().supabase_backend.persistence_counts()
+            count = counts.get("product_assets", 0)
+            if count:
+                st.success(f"{count} product asset rows stored.")
+            else:
+                st.warning("product_assets has 0 rows.")
+        except Exception as error:
+            st.error("Product asset check failed.")
+            st.exception(error)
+    if check_columns[2].button("Check PSD Links", use_container_width=True):
+        try:
+            results = get_os_pages().supabase_backend.run_integrity_check()
+            missing = len(results.get("missing_psd_links", []))
+            if missing:
+                st.warning(f"{missing} products are missing PSD links.")
+            else:
+                st.success("No missing PSD links found.")
+        except Exception as error:
+            st.error("PSD link check failed.")
+            st.exception(error)
+    if check_columns[3].button("Check Certificate Template", use_container_width=True):
+        try:
+            certificate_service = importlib.import_module("certificate_service")
+            if certificate_service.CERTIFICATE_TEMPLATE_PRINT_PATH.exists():
+                st.success("Certificate print template found.")
+            else:
+                st.error("certificate-template-print.png is missing.")
+            if certificate_service.CERTIFICATE_TEMPLATE_PREVIEW_PATH.exists():
+                st.success("Certificate preview template found.")
+            else:
+                st.warning("certificate-template-preview.webp is missing.")
+        except Exception as error:
+            st.error("Certificate template check failed.")
+            st.exception(error)
+    if check_columns[4].button("Run Edition Integrity Check", use_container_width=True):
+        st.session_state.pending_page = "Edition Integrity Check"
+        st.rerun()
+
     st.info(
         "If Render shows a loading skeleton again, check the STARTUP stage timings in the logs. "
         "Dashboard itself does not query Supabase or Shopify."
@@ -4813,6 +4871,8 @@ def render_selected_page(current_page):
         get_os_pages().render_sync_runs_page()
     elif current_page == "App Errors":
         get_os_pages().render_app_errors_page()
+    elif current_page == "Persistence Check":
+        get_os_pages().render_persistence_check_page()
     elif current_page == "Edition Integrity Check":
         get_os_pages().render_edition_integrity_check_page()
     elif current_page == "Product Uploads":

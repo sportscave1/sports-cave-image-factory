@@ -242,6 +242,7 @@ def ensure_schema():
                     google_drive_file_url TEXT,
                     notes TEXT,
                     is_primary BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ DEFAULT now(),
                     UNIQUE (shopify_handle, asset_type)
                 )
@@ -380,6 +381,7 @@ def ensure_schema():
                     ("google_drive_file_url", "TEXT"),
                     ("notes", "TEXT"),
                     ("is_primary", "BOOLEAN DEFAULT TRUE"),
+                    ("created_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "webhook_events": (
@@ -697,6 +699,310 @@ def update_edition_product(shopify_handle, *, edition_total=None, active=None):
         conn.commit()
 
 
+def persistence_counts():
+    ensure_schema()
+    tables = (
+        "edition_products",
+        "edition_orders",
+        "product_assets",
+        "certificates",
+        "shopify_products",
+        "shopify_orders",
+    )
+    counts = {}
+    with connect() as conn:
+        with conn.cursor() as cur:
+            for table_name in tables:
+                cur.execute(f"SELECT COUNT(*) AS count FROM {table_name}")
+                counts[table_name] = int((cur.fetchone() or {}).get("count") or 0)
+    return counts
+
+
+def _normalize_handle(value):
+    cleaned = re.sub(r"\.psd$", "", str(value or "").strip().lower(), flags=re.IGNORECASE)
+    cleaned = re.sub(r"[^a-z0-9]+", "-", cleaned)
+    return cleaned.strip("-")
+
+
+def _parse_int(value, default=None):
+    raw = str(value or "").strip()
+    if not raw:
+        return default
+    match = re.search(r"\d+", raw.replace(",", ""))
+    if not match:
+        return default
+    return int(match.group(0))
+
+
+def _parse_edition_number(value):
+    raw = str(value or "").strip()
+    if not raw or raw in {"-", "N/A", "n/a"}:
+        return None, None
+    numbers = re.findall(r"\d+", raw)
+    if not numbers:
+        return None, None
+    edition_number = int(numbers[0])
+    edition_total = int(numbers[1]) if len(numbers) > 1 else None
+    return edition_number, edition_total
+
+
+def _csv_value(row, *names):
+    lowered = {str(key or "").strip().lower(): value for key, value in (row or {}).items()}
+    for name in names:
+        value = lowered.get(str(name).strip().lower())
+        if value is not None and str(value).strip() != "":
+            return str(value).strip()
+    return ""
+
+
+def _match_product_handle(cur, *, handle="", shopify_product_id="", product_title=""):
+    normalized_handle = _normalize_handle(handle)
+    if normalized_handle:
+        cur.execute(
+            """
+            SELECT shopify_handle
+            FROM edition_products
+            WHERE shopify_handle=%s
+            UNION
+            SELECT handle AS shopify_handle
+            FROM shopify_products
+            WHERE handle=%s
+            LIMIT 1
+            """,
+            (normalized_handle, normalized_handle),
+        )
+        row = cur.fetchone()
+        if row and row.get("shopify_handle"):
+            return row["shopify_handle"]
+
+    if shopify_product_id:
+        cur.execute(
+            """
+            SELECT shopify_handle
+            FROM edition_products
+            WHERE shopify_product_id=%s
+            UNION
+            SELECT handle AS shopify_handle
+            FROM shopify_products
+            WHERE shopify_product_id=%s OR legacy_resource_id=%s
+            LIMIT 1
+            """,
+            (shopify_product_id, shopify_product_id, shopify_product_id),
+        )
+        row = cur.fetchone()
+        if row and row.get("shopify_handle"):
+            return row["shopify_handle"]
+
+    if product_title:
+        cur.execute(
+            """
+            SELECT shopify_handle
+            FROM edition_products
+            WHERE LOWER(COALESCE(product_title, '')) = LOWER(%s)
+            UNION
+            SELECT handle AS shopify_handle
+            FROM shopify_products
+            WHERE LOWER(COALESCE(title, '')) = LOWER(%s)
+            LIMIT 1
+            """,
+            (product_title, product_title),
+        )
+        row = cur.fetchone()
+        if row and row.get("shopify_handle"):
+            return row["shopify_handle"]
+
+    return normalized_handle
+
+
+def import_limited_edition_rows(rows, *, overwrite_existing_orders=False):
+    ensure_schema()
+    run_id = start_sync_run("limited_edition_csv_import")
+    result = {
+        "rows_read": 0,
+        "rows_matched": 0,
+        "rows_inserted": 0,
+        "rows_updated": 0,
+        "rows_skipped": 0,
+        "errors": [],
+    }
+    touched_handles = set()
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                for line_number, row in enumerate(rows or [], start=2):
+                    result["rows_read"] += 1
+                    shopify_product_id = _csv_value(row, "shopify_product_id", "Shopify Product ID")
+                    handle = _csv_value(row, "handle", "shopify_handle", "Shopify Handle")
+                    product_title = _csv_value(row, "product_title", "Product Title", "Edition Name", "Product")
+                    matched_handle = _match_product_handle(
+                        cur,
+                        handle=handle,
+                        shopify_product_id=shopify_product_id,
+                        product_title=product_title,
+                    )
+                    if not matched_handle:
+                        result["rows_skipped"] += 1
+                        result["errors"].append(f"Line {line_number}: no product handle could be matched.")
+                        continue
+
+                    result["rows_matched"] += 1
+                    edition_number, edition_total_from_no = _parse_edition_number(
+                        _csv_value(row, "Edition No.", "Edition No", "Edition Number", "edition_number")
+                    )
+                    edition_total = (
+                        _parse_int(_csv_value(row, "edition_total", "Edition Total", "edition_limit"), None)
+                        or edition_total_from_no
+                        or 100
+                    )
+                    next_number = _parse_int(
+                        _csv_value(row, "next_edition_number", "next_available_edition", "Next Edition"),
+                        None,
+                    )
+                    active_raw = _csv_value(row, "active", "Active")
+                    active = False if active_raw.lower() in {"false", "no", "0", "inactive"} else True
+
+                    cur.execute(
+                        """
+                        INSERT INTO edition_products(
+                            shopify_product_id, shopify_handle, product_title,
+                            edition_total, next_edition_number, active, sold_out, updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, COALESCE(%s, 1), %s, FALSE, now())
+                        ON CONFLICT (shopify_handle) DO UPDATE SET
+                            shopify_product_id=COALESCE(EXCLUDED.shopify_product_id, edition_products.shopify_product_id),
+                            product_title=COALESCE(NULLIF(EXCLUDED.product_title, ''), edition_products.product_title),
+                            edition_total=EXCLUDED.edition_total,
+                            next_edition_number=GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number),
+                            active=EXCLUDED.active,
+                            sold_out=GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number) > EXCLUDED.edition_total,
+                            updated_at=now()
+                        RETURNING (xmax = 0) AS inserted
+                        """,
+                        (
+                            shopify_product_id or None,
+                            matched_handle,
+                            product_title,
+                            int(edition_total),
+                            int(next_number) if next_number else None,
+                            bool(active),
+                        ),
+                    )
+                    inserted_product = bool((cur.fetchone() or {}).get("inserted"))
+                    if inserted_product:
+                        result["rows_inserted"] += 1
+                    else:
+                        result["rows_updated"] += 1
+                    touched_handles.add(matched_handle)
+
+                    if edition_number:
+                        order_name = _csv_value(row, "Shopify Order #", "Order", "order_name", "shopify_order_id")
+                        customer_name = _csv_value(row, "Customer Name", "customer_name")
+                        variant_title = " / ".join(
+                            part
+                            for part in (
+                                _csv_value(row, "Frame"),
+                                _csv_value(row, "Size"),
+                            )
+                            if part
+                        )
+                        synthetic_order_id = f"csv-import:{matched_handle}:{order_name or 'order'}:{edition_number}"
+                        synthetic_line_id = f"{synthetic_order_id}:line:1"
+                        if overwrite_existing_orders:
+                            cur.execute(
+                                """
+                                INSERT INTO edition_orders(
+                                    shopify_order_id, shopify_line_item_id, shopify_product_id,
+                                    shopify_handle, product_title, variant_title, customer_name,
+                                    edition_number, edition_total, allocation_index, assigned_at, certificate_status
+                                )
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, now(), 'Certificate Missing')
+                                ON CONFLICT (shopify_handle, edition_number) DO UPDATE SET
+                                    product_title=EXCLUDED.product_title,
+                                    variant_title=EXCLUDED.variant_title,
+                                    customer_name=EXCLUDED.customer_name,
+                                    edition_total=EXCLUDED.edition_total
+                                """,
+                                (
+                                    synthetic_order_id,
+                                    synthetic_line_id,
+                                    shopify_product_id,
+                                    matched_handle,
+                                    product_title,
+                                    variant_title,
+                                    customer_name,
+                                    int(edition_number),
+                                    int(edition_total),
+                                ),
+                            )
+                        else:
+                            cur.execute(
+                                """
+                                INSERT INTO edition_orders(
+                                    shopify_order_id, shopify_line_item_id, shopify_product_id,
+                                    shopify_handle, product_title, variant_title, customer_name,
+                                    edition_number, edition_total, allocation_index, assigned_at, certificate_status
+                                )
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, now(), 'Certificate Missing')
+                                ON CONFLICT DO NOTHING
+                                """,
+                                (
+                                    synthetic_order_id,
+                                    synthetic_line_id,
+                                    shopify_product_id,
+                                    matched_handle,
+                                    product_title,
+                                    variant_title,
+                                    customer_name,
+                                    int(edition_number),
+                                    int(edition_total),
+                                ),
+                            )
+
+                for handle in touched_handles:
+                    cur.execute(
+                        """
+                        UPDATE edition_products ep
+                        SET next_edition_number = GREATEST(
+                                COALESCE(ep.next_edition_number, 1),
+                                COALESCE((
+                                    SELECT MAX(eo.edition_number) + 1
+                                    FROM edition_orders eo
+                                    WHERE eo.shopify_handle = ep.shopify_handle
+                                ), 1)
+                            ),
+                            sold_out = GREATEST(
+                                COALESCE(ep.next_edition_number, 1),
+                                COALESCE((
+                                    SELECT MAX(eo.edition_number) + 1
+                                    FROM edition_orders eo
+                                    WHERE eo.shopify_handle = ep.shopify_handle
+                                ), 1)
+                            ) > COALESCE(ep.edition_total, 100),
+                            updated_at = now()
+                        WHERE ep.shopify_handle = %s
+                        """,
+                        (handle,),
+                    )
+            conn.commit()
+        finish_sync_run(
+            run_id,
+            "Complete",
+            records_seen=result["rows_read"],
+            records_processed=result["rows_inserted"] + result["rows_updated"],
+        )
+        return result
+    except Exception as error:
+        finish_sync_run(
+            run_id,
+            "Failed",
+            records_seen=result["rows_read"],
+            records_processed=result["rows_inserted"] + result["rows_updated"],
+            error_message="Limited edition CSV import failed.",
+        )
+        log_app_error("limited_edition_csv_import_failed", str(error), result)
+        raise
+
+
 def get_product_asset_map():
     ensure_schema()
     with connect() as conn:
@@ -720,7 +1026,7 @@ def list_product_assets(search=""):
                     SELECT ep.shopify_handle, ep.product_title, ep.active, ep.sold_out,
                            pa.asset_type, pa.asset_name, pa.asset_url, pa.google_drive_file_id,
                            pa.google_drive_file_url,
-                           pa.notes, pa.is_primary, pa.updated_at
+                           pa.notes, pa.is_primary, pa.created_at, pa.updated_at
                     FROM edition_products ep
                     LEFT JOIN product_assets pa ON pa.shopify_handle = ep.shopify_handle
                     WHERE LOWER(COALESCE(ep.product_title, '')) LIKE %s
@@ -735,13 +1041,48 @@ def list_product_assets(search=""):
                     SELECT ep.shopify_handle, ep.product_title, ep.active, ep.sold_out,
                            pa.asset_type, pa.asset_name, pa.asset_url, pa.google_drive_file_id,
                            pa.google_drive_file_url,
-                           pa.notes, pa.is_primary, pa.updated_at
+                           pa.notes, pa.is_primary, pa.created_at, pa.updated_at
                     FROM edition_products ep
                     LEFT JOIN product_assets pa ON pa.shopify_handle = ep.shopify_handle
                     ORDER BY ep.product_title NULLS LAST, pa.asset_type
                     """
                 )
             return cur.fetchall()
+
+
+def list_known_product_handles(search=""):
+    ensure_schema()
+    search_value = f"%{search.strip().lower()}%" if search.strip() else None
+    with connect() as conn:
+        with conn.cursor() as cur:
+            if search_value:
+                cur.execute(
+                    """
+                    SELECT shopify_handle, product_title
+                    FROM edition_products
+                    WHERE LOWER(COALESCE(product_title, '')) LIKE %s
+                       OR LOWER(COALESCE(shopify_handle, '')) LIKE %s
+                    UNION
+                    SELECT handle AS shopify_handle, title AS product_title
+                    FROM shopify_products
+                    WHERE LOWER(COALESCE(title, '')) LIKE %s
+                       OR LOWER(COALESCE(handle, '')) LIKE %s
+                    ORDER BY product_title NULLS LAST, shopify_handle
+                    """,
+                    (search_value, search_value, search_value, search_value),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT shopify_handle, product_title
+                    FROM edition_products
+                    UNION
+                    SELECT handle AS shopify_handle, title AS product_title
+                    FROM shopify_products
+                    ORDER BY product_title NULLS LAST, shopify_handle
+                    """
+                )
+            return [row for row in cur.fetchall() if row.get("shopify_handle")]
 
 
 def upsert_product_asset(
@@ -764,9 +1105,9 @@ def upsert_product_asset(
                 """
                 INSERT INTO product_assets(
                     shopify_handle, asset_type, asset_name, asset_url,
-                    google_drive_file_id, google_drive_file_url, notes, is_primary, updated_at
+                    google_drive_file_id, google_drive_file_url, notes, is_primary, created_at, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now(), now())
                 ON CONFLICT (shopify_handle, asset_type) DO UPDATE SET
                     asset_name=EXCLUDED.asset_name,
                     asset_url=EXCLUDED.asset_url,
