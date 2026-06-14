@@ -154,6 +154,33 @@ def format_updated_at(value):
         return str(value)
 
 
+def format_order_date(value):
+    if not value:
+        return "Unknown"
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed.strftime("%d %b, %I:%M %p").replace(" 0", " ")
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def customer_display_name(value):
+    cleaned = str(value or "").strip()
+    if not cleaned or "@" in cleaned:
+        return "Customer missing"
+    return cleaned
+
+
+def split_variant_title(value):
+    cleaned = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not cleaned:
+        return "Variant missing", ""
+    if " - " in cleaned:
+        first, second = cleaned.split(" - ", 1)
+        return first.strip(), second.strip()
+    return cleaned, ""
+
+
 def safe_filename_part(value):
     cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "").strip().lower())
     return cleaned.strip("-") or "sports-cave"
@@ -2180,7 +2207,7 @@ def render_supabase_limited_editions_page():
         label_visibility="collapsed",
     )
     actions = st.columns([1.2, 1, 1, 2])
-    if actions[0].button("Sync Shopify Products", type="primary", disabled=not config["configured"], use_container_width=True):
+    if actions[0].button("Sync Products", type="primary", disabled=not config["configured"], use_container_width=True):
         try:
             result = supabase_backend.sync_shopify_products_to_supabase(config)
             st.session_state.supabase_limited_notice = (
@@ -2188,11 +2215,13 @@ def render_supabase_limited_editions_page():
             )
             st.rerun()
         except Exception as error:
-            st.error("Shopify product sync failed.")
-            st.exception(error)
+            st.error("Shopify product sync failed. Open Settings -> Developer Tools -> Shopify Diagnostics.")
+            supabase_backend.log_app_error(
+                "limited_editions_product_sync_failed",
+                str(error),
+                {"source": "limited_editions_page"},
+            )
     actions[1].caption("Shopify connection: " + ("Configured" if config["configured"] else "Missing"))
-    with st.expander("Shopify connection diagnostics", expanded=False):
-        render_shopify_scope_diagnostics(config, "limited-editions")
 
     try:
         products = supabase_backend.list_edition_products(search=search, limit=1000)
@@ -2210,55 +2239,6 @@ def render_supabase_limited_editions_page():
         use_container_width=True,
     )
     actions[3].caption(f"{len(products)} products shown")
-
-    with st.expander("Import Limited Edition CSV", expanded=False):
-        st.caption(
-            "Imports save permanently into Supabase. Product-level counters update edition_products; "
-            "rows with edition numbers also create edition_orders without duplicating existing editions."
-        )
-        import_columns = st.columns([2.4, 1.2, 1])
-        uploaded_csv = import_columns[0].file_uploader(
-            "Limited Edition CSV",
-            type=["csv"],
-            key="supabase-limited-edition-import-csv",
-            label_visibility="collapsed",
-        )
-        overwrite_orders = import_columns[1].checkbox(
-            "Overwrite existing assigned edition rows",
-            value=False,
-            key="supabase-limited-overwrite-orders",
-            help="Leave off to protect existing assigned edition records.",
-        )
-        if import_columns[2].button(
-            "Import CSV",
-            disabled=uploaded_csv is None,
-            type="primary",
-            use_container_width=True,
-            key="supabase-limited-import-button",
-        ):
-            try:
-                csv_text = uploaded_csv.getvalue().decode("utf-8-sig", errors="replace")
-                csv_rows = list(csv.DictReader(io.StringIO(csv_text)))
-                result = supabase_backend.import_limited_edition_rows(
-                    csv_rows,
-                    overwrite_existing_orders=overwrite_orders,
-                )
-                st.session_state.supabase_limited_notice = (
-                    f"Import complete: {result['rows_read']} rows read, "
-                    f"{result['rows_matched']} matched, {result['rows_inserted']} inserted, "
-                    f"{result['rows_updated']} updated, {result['rows_skipped']} skipped."
-                )
-                if result["errors"]:
-                    st.session_state.supabase_limited_warning = "First import issue: " + result["errors"][0]
-                st.rerun()
-            except Exception as error:
-                supabase_backend.log_app_error(
-                    "limited_edition_import_ui_failed",
-                    str(error),
-                    {"file_name": getattr(uploaded_csv, "name", "")},
-                )
-                st.error("Could not import the Limited Edition CSV into Supabase.")
-                st.exception(error)
 
     metrics = st.columns(4)
     metrics[0].metric("Products", len(products))
@@ -2298,7 +2278,7 @@ def render_supabase_limited_editions_page():
 
     st.subheader("Edition Products")
     if not products:
-        st.info("No edition products found yet. Click Sync Shopify Products.")
+        st.info("No edition products found yet. Click Sync Products.")
         return
 
     header = st.columns([2.2, 1.25, 0.65, 0.65, 0.8, 0.75, 0.75, 0.75, 0.9, 1.0])
@@ -2699,6 +2679,28 @@ def _assignment_text(assignments):
 def render_supabase_orders_page():
     st.title("Orders")
     st.caption("Orders load from Supabase first. Shopify refreshes only when you click a sync button.")
+    st.markdown(
+        """
+        <style>
+        .sc-order-divider {
+            border: 0;
+            border-top: 1px solid rgba(245, 242, 234, 0.08);
+            margin: 0.45rem 0;
+        }
+        .sc-order-subtext {
+            color: #A6A19A;
+            font-size: 0.82rem;
+            line-height: 1.25;
+            margin-top: 0.18rem;
+        }
+        .sc-order-product {
+            font-weight: 650;
+            line-height: 1.25;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     try:
         supabase_backend.ensure_schema()
     except Exception as error:
@@ -2711,71 +2713,34 @@ def render_supabase_orders_page():
         st.success(notice)
 
     config = shopify_sync.get_config()
-    controls = st.columns([1, 1, 1.2, 1.2, 1.4])
-    if controls[0].button("Fetch latest 50", disabled=not config["configured"], use_container_width=True):
-        try:
-            result = supabase_backend.sync_shopify_orders_to_supabase(
-                config,
-                query="financial_status:paid",
-                max_orders=50,
-            )
-            st.session_state.supabase_orders_notice = (
-                f"Synced {result['orders_seen']} paid Shopify orders. "
-                f"Assigned {result['assignments_created']} edition numbers."
-            )
-            st.rerun()
-        except Exception as error:
-            st.error("Could not sync latest Shopify orders.")
-            st.exception(error)
-    if controls[1].button("Fetch latest 250", disabled=not config["configured"], use_container_width=True):
+    controls = st.columns([1, 3])
+    if controls[0].button("Sync Orders", disabled=not config["configured"], type="primary", use_container_width=True):
+        sync_message = st.empty()
+        sync_message.info("Syncing paid Shopify orders into Supabase...")
         try:
             result = supabase_backend.sync_shopify_orders_to_supabase(
                 config,
                 query="financial_status:paid",
                 max_orders=250,
             )
+            sync_message.empty()
             st.session_state.supabase_orders_notice = (
                 f"Synced {result['orders_seen']} paid Shopify orders. "
                 f"Assigned {result['assignments_created']} edition numbers."
             )
             st.rerun()
         except Exception as error:
-            st.error("Could not sync latest Shopify orders.")
-            st.exception(error)
-    if controls[2].button("Sync unfulfilled paid", disabled=not config["configured"], use_container_width=True):
-        try:
-            result = supabase_backend.sync_shopify_orders_to_supabase(
-                config,
-                query="financial_status:paid fulfillment_status:unfulfilled",
-                max_orders=1000,
-            )
-            st.session_state.supabase_orders_notice = (
-                f"Synced {result['orders_seen']} unfulfilled paid orders. "
-                f"Assigned {result['assignments_created']} edition numbers."
-            )
-            st.rerun()
-        except Exception as error:
-            st.error("Could not sync unfulfilled paid Shopify orders.")
-            st.exception(error)
-    since_date = controls[3].date_input("Since", value=date.today(), key="supabase-orders-since")
-    if controls[4].button("Sync since date", disabled=not config["configured"], use_container_width=True):
-        try:
-            result = supabase_backend.sync_shopify_orders_to_supabase(
-                config,
-                query=f"financial_status:paid created_at:>={since_date.isoformat()}",
-                max_orders=1000,
-            )
-            st.session_state.supabase_orders_notice = (
-                f"Synced {result['orders_seen']} paid orders since {since_date.isoformat()}. "
-                f"Assigned {result['assignments_created']} edition numbers."
-            )
-            st.rerun()
-        except Exception as error:
-            st.error("Could not sync Shopify orders since the selected date.")
-            st.exception(error)
-
-    with st.expander("Shopify connection diagnostics", expanded=False):
-        render_shopify_scope_diagnostics(config, "orders")
+            sync_message.empty()
+            st.error("Shopify sync failed. Open Settings -> Developer Tools -> Shopify Diagnostics.")
+            supabase_backend.log_app_error("orders_page_sync_failed", str(error), {"source": "orders_page"})
+    if not config["configured"]:
+        controls[1].caption("Shopify connection missing. Open Settings -> Developer Tools -> Shopify Diagnostics.")
+    search = controls[1].text_input(
+        "Search orders",
+        placeholder="Search order, customer, product, SKU, or edition",
+        label_visibility="collapsed",
+        key="supabase-orders-search",
+    )
 
     summary = supabase_backend.get_order_summary()
     metrics = st.columns(6)
@@ -2790,40 +2755,18 @@ def render_supabase_orders_page():
     for index, (label, value) in enumerate(metric_specs):
         metrics[index].metric(label, value)
 
-    tools = st.columns([2.5, 1.2, 1.2])
-    search = tools[0].text_input(
-        "Search orders",
-        placeholder="Search order, customer, email, product, SKU, or edition",
-        label_visibility="collapsed",
-        key="supabase-orders-search",
-    )
-    sort = tools[1].selectbox(
-        "Sort",
-        ["Date newest", "Date oldest", "Order number", "Customer", "Edition number", "Certificate status", "PSD status"],
-        key="supabase-orders-sort",
-    )
-    limit = tools[2].selectbox("Rows", [100, 250, 500, 1000], index=1, key="supabase-orders-limit")
-
     try:
-        rows = supabase_backend.list_orders(search=search, sort=sort, limit=limit)
+        rows = supabase_backend.list_orders(search=search, sort="Date newest", limit=250)
     except Exception as error:
         st.error("Could not load orders from Supabase.")
         st.exception(error)
         return
 
-    selected = []
-    bulk = st.columns([1, 1, 1, 1.4])
-    generate_bulk = bulk[0].button("Generate certificates", use_container_width=True)
-    mark_checked = bulk[1].button("Mark certificate checked", use_container_width=True)
-    export_clicked = bulk[2].button("Export selected CSV", use_container_width=True)
-    with bulk[3]:
-        st.caption("Select rows below for bulk actions.")
-
     if not rows:
-        st.info("No orders found yet. Use a Shopify sync button above.")
+        st.info("No orders found yet. Click Sync Orders.")
         return
 
-    header = st.columns([0.35, 0.9, 0.8, 1.25, 0.85, 0.95, 0.75, 0.75, 1.7, 1.1, 0.8, 1.0, 0.75, 0.75, 1.0])
+    header = st.columns([0.35, 0.85, 0.9, 1.15, 0.95, 1.85, 1.15, 0.8, 0.85, 0.85, 0.95])
     for column, label in zip(
         header,
         (
@@ -2831,57 +2774,52 @@ def render_supabase_orders_page():
             "Order",
             "Date",
             "Customer",
-            "Payment",
             "Fulfillment",
-            "Total",
-            "Items",
             "Product",
             "Variant",
             "Edition",
             "Certificate",
             "PSD",
             "Prodigi",
-            "Actions",
         ),
     ):
         column.markdown(f"**{label}**")
 
     for row_index, row in enumerate(rows):
         row_key = row.get("edition_order_id") or row.get("shopify_order_id") or row_index
-        columns = st.columns([0.35, 0.9, 0.8, 1.25, 0.85, 0.95, 0.75, 0.75, 1.7, 1.1, 0.8, 1.0, 0.75, 0.75, 1.0])
-        checked = columns[0].checkbox("Select", key=f"supabase-order-select-{row_key}", label_visibility="collapsed")
-        if checked:
-            selected.append(row)
+        columns = st.columns([0.35, 0.85, 0.9, 1.15, 0.95, 1.85, 1.15, 0.8, 0.85, 0.85, 0.95])
+        columns[0].checkbox("Select", key=f"supabase-order-select-{row_key}", label_visibility="collapsed")
         order_label = row.get("order_name") or row.get("order_number") or "Order"
-        if row.get("admin_url"):
-            columns[1].markdown(
-                f'<a href="{html.escape(row["admin_url"], quote=True)}" target="_blank" style="color:#F5F2EA;font-weight:700;text-decoration:none;">{html.escape(order_label)}</a>',
+        columns[1].markdown(f"**{html.escape(str(order_label))}**")
+        columns[2].caption(format_order_date(row.get("created_at") or row.get("processed_at")))
+        columns[3].write(customer_display_name(row.get("customer_name")))
+        columns[4].markdown(status_badge(row.get("fulfillment_status") or "Unknown"), unsafe_allow_html=True)
+        columns[5].markdown(
+            f'<div class="sc-order-product">{html.escape(str(row.get("product_title") or "Needs edition"))}</div>',
+            unsafe_allow_html=True,
+        )
+        if row.get("sku"):
+            columns[5].markdown(
+                f'<div class="sc-order-subtext">SKU {html.escape(str(row["sku"]))}</div>',
                 unsafe_allow_html=True,
             )
-        else:
-            columns[1].write(order_label)
-        columns[2].caption(format_updated_at(row.get("created_at")))
-        columns[3].write(row.get("customer_name") or row.get("customer_email") or "Customer not shown")
-        if row.get("customer_email"):
-            columns[3].caption(row["customer_email"])
-        columns[4].markdown(status_badge(row.get("financial_status") or "Unknown"), unsafe_allow_html=True)
-        columns[5].markdown(status_badge(row.get("fulfillment_status") or "Unknown"), unsafe_allow_html=True)
-        columns[6].write((row.get("currency") or "") + " " + str(row.get("total_price") or ""))
-        columns[7].write("1")
-        columns[8].write(row.get("product_title") or "Needs edition")
-        if row.get("sku"):
-            columns[8].caption(f"SKU {row['sku']}")
-        columns[9].caption(row.get("variant_title") or "Variant not shown")
+        variant_name, variant_dimensions = split_variant_title(row.get("variant_title"))
+        columns[6].write(variant_name)
+        if variant_dimensions:
+            columns[6].markdown(
+                f'<div class="sc-order-subtext">{html.escape(variant_dimensions)}</div>',
+                unsafe_allow_html=True,
+            )
         if row.get("edition_number"):
-            columns[10].markdown(
+            columns[7].markdown(
                 status_badge(f"#{row['edition_number']}/{row.get('edition_total') or 100}"),
                 unsafe_allow_html=True,
             )
         else:
-            columns[10].markdown(status_badge("Needs Edition"), unsafe_allow_html=True)
-        with columns[11]:
+            columns[7].markdown(status_badge("Needs Edition"), unsafe_allow_html=True)
+        with columns[8]:
             if row.get("shopify_file_url"):
-                st.link_button("Open PDF", row["shopify_file_url"], use_container_width=True)
+                st.link_button("PDF", row["shopify_file_url"], use_container_width=True)
             elif row.get("local_file_path") and Path(row["local_file_path"]).exists():
                 path = Path(row["local_file_path"])
                 st.download_button(
@@ -2904,58 +2842,14 @@ def render_supabase_orders_page():
             else:
                 st.caption("Missing")
         if row.get("psd_url"):
-            columns[12].link_button("PSD", row["psd_url"], use_container_width=True)
+            columns[9].link_button("Open PSD", row["psd_url"], use_container_width=True)
         else:
-            columns[12].markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
+            columns[9].markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
         if row.get("prodigi_url"):
-            columns[13].link_button("Prodigi", row["prodigi_url"], use_container_width=True)
+            columns[10].link_button("Open Prodigi", row["prodigi_url"], use_container_width=True)
         else:
-            columns[13].markdown(status_badge("Prodigi Missing"), unsafe_allow_html=True)
-        with columns[14]:
-            if row.get("edition_order_id"):
-                if st.button("View", key=f"supabase-order-view-{row_key}", use_container_width=True):
-                    st.session_state["supabase-edition-orders-search"] = str(row.get("order_name") or "")
-                    st.session_state.pending_page = "Edition Orders"
-                    st.rerun()
-            else:
-                st.caption("No edition")
-        st.divider()
-
-    if selected:
-        with st.expander("Selected Shopify order links", expanded=False):
-            shown = set()
-            for row in selected:
-                if row.get("admin_url") and row["admin_url"] not in shown:
-                    shown.add(row["admin_url"])
-                    st.link_button(
-                        row.get("order_name") or "Open Shopify order",
-                        row["admin_url"],
-                        use_container_width=True,
-                    )
-            if not shown:
-                st.caption("No Shopify order links are available for the selected rows.")
-
-    if generate_bulk and selected:
-        generated = 0
-        for row in selected:
-            if row.get("edition_order_id"):
-                supabase_backend.generate_certificate_for_edition_order(row["edition_order_id"])
-                generated += 1
-        st.session_state.supabase_orders_notice = f"Generated {generated} certificate PDF files."
-        st.rerun()
-    if mark_checked and selected:
-        checked_ids = [row.get("edition_order_id") for row in selected if row.get("edition_order_id")]
-        updated = supabase_backend.mark_certificates_checked(checked_ids)
-        st.session_state.supabase_orders_notice = f"Marked {updated} certificate records as checked."
-        st.rerun()
-    if export_clicked and selected:
-        st.download_button(
-            "Download selected CSV",
-            data=supabase_backend.export_orders_csv(selected),
-            file_name="sports-cave-selected-orders.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
+            columns[10].markdown(status_badge("Prodigi Missing"), unsafe_allow_html=True)
+        st.markdown('<hr class="sc-order-divider" />', unsafe_allow_html=True)
 
 
 def fetch_latest_orders(config):

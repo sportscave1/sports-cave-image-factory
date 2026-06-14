@@ -2111,7 +2111,7 @@ def list_orders(search="", sort="Date newest", limit=250):
     order_by = _order_sort_clause(sort)
     base_sql = f"""
         SELECT o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
-               COALESCE(NULLIF(o.customer_name, ''), NULLIF(eo.customer_name, ''), NULLIF(o.customer_email, ''), NULLIF(eo.customer_email, '')) AS customer_name,
+               COALESCE(NULLIF(o.customer_name, ''), NULLIF(eo.customer_name, '')) AS customer_name,
                COALESCE(NULLIF(o.customer_email, ''), NULLIF(eo.customer_email, '')) AS customer_email,
                o.financial_status, o.fulfillment_status,
                o.total_price, o.currency, o.created_at, o.processed_at,

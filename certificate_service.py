@@ -168,7 +168,7 @@ def generate_template_certificate_pdf(
         name_text,
         int(width * 0.41),
         int(width * 0.82),
-        int(height * 0.696),
+        int(height * 0.685),
         max_size=max(18, int(34 * scale)),
         min_size=max(12, int(16 * scale)),
     )
@@ -177,7 +177,7 @@ def generate_template_certificate_pdf(
         edition_text,
         int(width * 0.43),
         int(width * 0.54),
-        int(height * 0.758),
+        int(height * 0.747),
         max_size=max(18, int(34 * scale)),
         min_size=max(12, int(18 * scale)),
     )
