@@ -328,6 +328,43 @@ class ShopifySyncClientTests(unittest.TestCase):
 
         self.assertEqual(order["customer_name"], "Shipping Collector")
         self.assertEqual(order["customer_email"], "fallback@example.com")
+        self.assertEqual(order["customer_id"], "fallback@example.com")
+
+    def test_normalize_order_prefers_shopify_customer_identity(self):
+        order = shopify_sync.normalize_order(
+            {
+                "id": "gid://shopify/Order/2",
+                "legacyResourceId": "2",
+                "name": "#1002",
+                "createdAt": "2026-06-13T00:00:00Z",
+                "processedAt": "2026-06-13T00:01:00Z",
+                "displayFinancialStatus": "PAID",
+                "displayFulfillmentStatus": "UNFULFILLED",
+                "email": "order@example.com",
+                "customer": {
+                    "id": "gid://shopify/Customer/55",
+                    "displayName": "Ada Collector",
+                    "firstName": "Ada",
+                    "lastName": "Collector",
+                    "email": "ada@example.com",
+                },
+                "shippingAddress": {"name": "Shipping Name", "firstName": "", "lastName": ""},
+                "billingAddress": {"name": "Billing Name", "firstName": "", "lastName": ""},
+                "lineItems": {"nodes": []},
+            },
+            "sports-cave.myshopify.com",
+        )
+
+        self.assertEqual(order["customer_name"], "Ada Collector")
+        self.assertEqual(order["customer_email"], "ada@example.com")
+        self.assertEqual(order["customer_id"], "gid://shopify/Customer/55")
+        self.assertEqual(order["customer_raw"]["displayName"], "Ada Collector")
+
+    def test_orders_safe_query_still_requests_customer_fields(self):
+        self.assertIn("customer {", shopify_sync.ORDERS_SAFE_QUERY)
+        self.assertIn("shippingAddress", shopify_sync.ORDERS_SAFE_QUERY)
+        self.assertIn("billingAddress", shopify_sync.ORDERS_SAFE_QUERY)
+        self.assertIn("email", shopify_sync.ORDERS_SAFE_QUERY)
 
 
 class ShopifyDatabaseTests(unittest.TestCase):

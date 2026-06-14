@@ -658,6 +658,7 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
         }
       }
       customer {
+        id
         displayName
         firstName
         lastName
@@ -708,12 +709,31 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
       cancelledAt
       displayFinancialStatus
       displayFulfillmentStatus
+      email
+      customer {
+        id
+        displayName
+        firstName
+        lastName
+        email
+      }
+      shippingAddress {
+        name
+        firstName
+        lastName
+      }
+      billingAddress {
+        name
+        firstName
+        lastName
+      }
       lineItems(first: 100) {
         nodes {
           id
           title
           quantity
           variantTitle
+          sku
           product {
             id
             title
@@ -886,6 +906,7 @@ def normalize_order(node, store_domain):
         "order_name": node.get("name") or "",
         "order_number": (node.get("name") or "").lstrip("#"),
         "admin_url": build_order_admin_url(store_domain, legacy_resource_id),
+        "customer_id": customer.get("id") or customer_email or "",
         "created_at": node.get("createdAt") or "",
         "processed_at": node.get("processedAt") or "",
         "paid_at": node.get("processedAt") if financial_status == "PAID" else "",
@@ -893,6 +914,7 @@ def normalize_order(node, store_domain):
         "fulfillment_status": node.get("displayFulfillmentStatus") or "",
         "customer_name": customer_name,
         "customer_email": customer_email,
+        "customer_raw": customer,
         "total_price": str(total_price.get("amount") or ""),
         "currency": total_price.get("currencyCode") or "",
         "cancelled_at": node.get("cancelledAt") or "",

@@ -332,6 +332,7 @@ def ensure_schema():
 
             additive_columns = {
                 "shopify_products": (
+                    ("shopify_product_gid", "TEXT"),
                     ("legacy_resource_id", "TEXT"),
                     ("title", "TEXT"),
                     ("handle", "TEXT"),
@@ -341,7 +342,9 @@ def ensure_schema():
                     ("online_store_url", "TEXT"),
                     ("admin_url", "TEXT"),
                     ("image_url", "TEXT"),
+                    ("featured_image_url", "TEXT"),
                     ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
+                    ("raw", "JSONB DEFAULT '{}'::jsonb"),
                     ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
@@ -356,28 +359,41 @@ def ensure_schema():
                 ),
                 "edition_products": (
                     ("shopify_product_id", "TEXT"),
+                    ("shopify_product_gid", "TEXT"),
                     ("shopify_handle", "TEXT"),
                     ("product_title", "TEXT"),
                     ("edition_total", "INTEGER DEFAULT 100"),
                     ("next_edition_number", "INTEGER DEFAULT 1"),
                     ("active", "BOOLEAN DEFAULT TRUE"),
+                    ("is_active", "BOOLEAN DEFAULT TRUE"),
                     ("sold_out", "BOOLEAN DEFAULT FALSE"),
+                    ("is_sold_out", "BOOLEAN DEFAULT FALSE"),
+                    ("featured_image_url", "TEXT"),
+                    ("raw", "JSONB DEFAULT '{}'::jsonb"),
+                    ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "shopify_customers": (
                     ("customer_name", "TEXT"),
                     ("email", "TEXT"),
+                    ("first_name", "TEXT"),
+                    ("last_name", "TEXT"),
                     ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
+                    ("raw", "JSONB DEFAULT '{}'::jsonb"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "shopify_orders": (
                     ("legacy_resource_id", "TEXT"),
                     ("order_name", "TEXT"),
+                    ("shopify_order_name", "TEXT"),
                     ("order_number", "TEXT"),
+                    ("shopify_order_number", "TEXT"),
                     ("admin_url", "TEXT"),
                     ("customer_id", "TEXT"),
+                    ("shopify_customer_id", "TEXT"),
                     ("customer_name", "TEXT"),
                     ("customer_email", "TEXT"),
+                    ("email", "TEXT"),
                     ("financial_status", "TEXT"),
                     ("fulfillment_status", "TEXT"),
                     ("total_price", "TEXT"),
@@ -385,23 +401,32 @@ def ensure_schema():
                     ("created_at", "TIMESTAMPTZ"),
                     ("processed_at", "TIMESTAMPTZ"),
                     ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
+                    ("raw", "JSONB DEFAULT '{}'::jsonb"),
                     ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "edition_orders": (
                     ("shopify_order_id", "TEXT"),
+                    ("shopify_order_name", "TEXT"),
                     ("shopify_line_item_id", "TEXT"),
                     ("shopify_product_id", "TEXT"),
+                    ("shopify_variant_id", "TEXT"),
                     ("shopify_handle", "TEXT"),
                     ("product_title", "TEXT"),
                     ("variant_title", "TEXT"),
                     ("sku", "TEXT"),
                     ("customer_name", "TEXT"),
                     ("customer_email", "TEXT"),
+                    ("shopify_customer_name", "TEXT"),
+                    ("shopify_customer_email", "TEXT"),
                     ("edition_number", "INTEGER"),
                     ("edition_total", "INTEGER"),
                     ("allocation_index", "INTEGER DEFAULT 1"),
+                    ("quantity", "INTEGER DEFAULT 1"),
+                    ("status", "TEXT DEFAULT 'assigned'"),
                     ("assigned_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("certificate_status", "TEXT DEFAULT 'Certificate Missing'"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "certificates": (
                     ("edition_order_id", "BIGINT"),
@@ -615,15 +640,21 @@ def upsert_products(products):
                 handle = product.get("handle") or ""
                 if not handle:
                     continue
+                product_id = product.get("shopify_product_id")
+                image_url = _first_image_url(product)
+                raw_json = json_dumps(product)
+                is_active = str(product.get("status") or "").upper() == "ACTIVE"
                 cur.execute(
                     """
                     INSERT INTO shopify_products(
-                        shopify_product_id, legacy_resource_id, title, handle, status, vendor,
-                        product_type, online_store_url, admin_url, image_url, raw_json, synced_at, updated_at
+                        shopify_product_id, legacy_resource_id, shopify_product_gid, title, handle, status, vendor,
+                        product_type, online_store_url, admin_url, image_url, featured_image_url,
+                        raw_json, raw, synced_at, updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now(), now())
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, now(), now())
                     ON CONFLICT (shopify_product_id) DO UPDATE SET
                         legacy_resource_id=EXCLUDED.legacy_resource_id,
+                        shopify_product_gid=EXCLUDED.shopify_product_gid,
                         title=EXCLUDED.title,
                         handle=EXCLUDED.handle,
                         status=EXCLUDED.status,
@@ -632,13 +663,16 @@ def upsert_products(products):
                         online_store_url=EXCLUDED.online_store_url,
                         admin_url=EXCLUDED.admin_url,
                         image_url=EXCLUDED.image_url,
+                        featured_image_url=EXCLUDED.featured_image_url,
                         raw_json=EXCLUDED.raw_json,
+                        raw=EXCLUDED.raw,
                         synced_at=now(),
                         updated_at=now()
                     """,
                     (
-                        product.get("shopify_product_id"),
+                        product_id,
                         product.get("legacy_resource_id"),
+                        product_id,
                         product.get("title"),
                         handle,
                         product.get("status"),
@@ -646,8 +680,10 @@ def upsert_products(products):
                         product.get("product_type"),
                         product.get("online_store_url"),
                         product.get("admin_url"),
-                        _first_image_url(product),
-                        json_dumps(product),
+                        image_url,
+                        image_url,
+                        raw_json,
+                        raw_json,
                     ),
                 )
                 for variant in product.get("variants") or []:
@@ -683,21 +719,31 @@ def upsert_products(products):
                 cur.execute(
                     """
                     INSERT INTO edition_products(
-                        shopify_product_id, shopify_handle, product_title,
-                        edition_total, next_edition_number, active, sold_out, updated_at
+                        shopify_product_id, shopify_product_gid, shopify_handle, product_title,
+                        edition_total, next_edition_number, active, is_active, sold_out, is_sold_out,
+                        featured_image_url, raw, synced_at, updated_at
                     )
-                    VALUES (%s, %s, %s, 100, 1, %s, FALSE, now())
+                    VALUES (%s, %s, %s, %s, 100, 1, %s, %s, FALSE, FALSE, %s, %s::jsonb, now(), now())
                     ON CONFLICT (shopify_handle) DO UPDATE SET
                         shopify_product_id=EXCLUDED.shopify_product_id,
+                        shopify_product_gid=EXCLUDED.shopify_product_gid,
                         product_title=EXCLUDED.product_title,
                         active=EXCLUDED.active,
+                        is_active=EXCLUDED.is_active,
+                        featured_image_url=EXCLUDED.featured_image_url,
+                        raw=EXCLUDED.raw,
+                        synced_at=now(),
                         updated_at=now()
                     """,
                     (
-                        product.get("shopify_product_id"),
+                        product_id,
+                        product_id,
                         handle,
                         product.get("title"),
-                        str(product.get("status") or "").upper() == "ACTIVE",
+                        is_active,
+                        is_active,
+                        image_url,
+                        raw_json,
                     ),
                 )
                 processed += 1
@@ -781,19 +827,20 @@ def update_edition_product(shopify_handle, *, edition_total=None, active=None):
                     UPDATE edition_products
                     SET edition_total=%s,
                         sold_out=COALESCE(next_edition_number, 1) > %s,
+                        is_sold_out=COALESCE(next_edition_number, 1) > %s,
                         updated_at=now()
                     WHERE shopify_handle=%s
                     """,
-                    (int(edition_total), int(edition_total), shopify_handle),
+                    (int(edition_total), int(edition_total), int(edition_total), shopify_handle),
                 )
             if active is not None:
                 cur.execute(
                     """
                     UPDATE edition_products
-                    SET active=%s, updated_at=now()
+                    SET active=%s, is_active=%s, updated_at=now()
                     WHERE shopify_handle=%s
                     """,
-                    (bool(active), shopify_handle),
+                    (bool(active), bool(active), shopify_handle),
                 )
         conn.commit()
 
@@ -963,26 +1010,31 @@ def import_limited_edition_rows(rows, *, overwrite_existing_orders=False):
                     cur.execute(
                         """
                         INSERT INTO edition_products(
-                            shopify_product_id, shopify_handle, product_title,
-                            edition_total, next_edition_number, active, sold_out, updated_at
+                            shopify_product_id, shopify_product_gid, shopify_handle, product_title,
+                            edition_total, next_edition_number, active, is_active, sold_out, is_sold_out, updated_at
                         )
-                        VALUES (%s, %s, %s, %s, COALESCE(%s, 1), %s, FALSE, now())
+                        VALUES (%s, %s, %s, %s, %s, COALESCE(%s, 1), %s, %s, FALSE, FALSE, now())
                         ON CONFLICT (shopify_handle) DO UPDATE SET
                             shopify_product_id=COALESCE(EXCLUDED.shopify_product_id, edition_products.shopify_product_id),
+                            shopify_product_gid=COALESCE(EXCLUDED.shopify_product_gid, edition_products.shopify_product_gid),
                             product_title=COALESCE(NULLIF(EXCLUDED.product_title, ''), edition_products.product_title),
                             edition_total=EXCLUDED.edition_total,
                             next_edition_number=GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number),
                             active=EXCLUDED.active,
+                            is_active=EXCLUDED.is_active,
                             sold_out=GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number) > EXCLUDED.edition_total,
+                            is_sold_out=GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number) > EXCLUDED.edition_total,
                             updated_at=now()
                         RETURNING (xmax = 0) AS inserted
                         """,
                         (
                             shopify_product_id or None,
+                            shopify_product_id or None,
                             matched_handle,
                             product_title,
                             int(edition_total),
                             int(next_number) if next_number else None,
+                            bool(active),
                             bool(active),
                         ),
                     )
@@ -1239,9 +1291,22 @@ def _shopify_gid(resource_type, value):
     return f"gid://shopify/{resource_type}/{raw}"
 
 
+def _usable_customer_name(value):
+    name = str(value or "").strip()
+    if name.lower() in {"", "customer not shown", "not shown", "unknown customer"}:
+        return ""
+    return name
+
+
+def _customer_name_for_storage(order):
+    return _usable_customer_name(order.get("customer_name")) or str(
+        order.get("customer_email") or order.get("email") or ""
+    ).strip()
+
+
 def _customer_from_order(order):
     customer_email = order.get("customer_email") or order.get("email") or ""
-    customer_name = order.get("customer_name") or customer_email or "Customer not shown"
+    customer_name = _customer_name_for_storage(order) or "Customer not shown"
     customer_id = order.get("shopify_customer_id") or order.get("customer_id") or customer_email or order.get("shopify_order_id")
     return {
         "shopify_customer_id": str(customer_id or ""),
@@ -1254,43 +1319,67 @@ def _customer_from_order(order):
 def _upsert_customer(cur, customer):
     if not customer.get("shopify_customer_id"):
         return
+    raw_customer = customer.get("raw_json") or {}
+    first_name = raw_customer.get("firstName") or raw_customer.get("first_name") or ""
+    last_name = raw_customer.get("lastName") or raw_customer.get("last_name") or ""
     cur.execute(
         """
-        INSERT INTO shopify_customers(shopify_customer_id, customer_name, email, raw_json, updated_at)
-        VALUES (%s, %s, %s, %s::jsonb, now())
+        INSERT INTO shopify_customers(
+            shopify_customer_id, customer_name, email, first_name, last_name, raw_json, raw, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, now())
         ON CONFLICT (shopify_customer_id) DO UPDATE SET
             customer_name=EXCLUDED.customer_name,
             email=EXCLUDED.email,
+            first_name=EXCLUDED.first_name,
+            last_name=EXCLUDED.last_name,
             raw_json=EXCLUDED.raw_json,
+            raw=EXCLUDED.raw,
             updated_at=now()
         """,
         (
             customer["shopify_customer_id"],
             customer.get("customer_name"),
             customer.get("email"),
+            first_name,
+            last_name,
+            json_dumps(customer.get("raw_json")),
             json_dumps(customer.get("raw_json")),
         ),
     )
 
 
 def _upsert_order(cur, order):
+    customer_name = _customer_name_for_storage(order) or "Customer not shown"
+    customer_email = str(order.get("customer_email") or order.get("email") or "").strip()
+    order_name = order.get("order_name")
+    order_number = order.get("order_number")
+    customer_id = order.get("customer_id") or order.get("shopify_customer_id") or ""
+    raw_json = json_dumps(order)
     cur.execute(
         """
         INSERT INTO shopify_orders(
-            shopify_order_id, legacy_resource_id, order_name, order_number, admin_url,
-            customer_id, customer_name, customer_email, financial_status, fulfillment_status,
-            total_price, currency, created_at, processed_at, raw_json, synced_at
+            shopify_order_id, legacy_resource_id, order_name, shopify_order_name,
+            order_number, shopify_order_number, admin_url,
+            customer_id, shopify_customer_id, customer_name, customer_email, email,
+            financial_status, fulfillment_status,
+            total_price, currency, created_at, processed_at, raw_json, raw, synced_at, updated_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULLIF(%s, '')::timestamptz,
-                NULLIF(%s, '')::timestamptz, %s::jsonb, now())
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                NULLIF(%s, '')::timestamptz, NULLIF(%s, '')::timestamptz,
+                %s::jsonb, %s::jsonb, now(), now())
         ON CONFLICT (shopify_order_id) DO UPDATE SET
             legacy_resource_id=EXCLUDED.legacy_resource_id,
             order_name=EXCLUDED.order_name,
+            shopify_order_name=EXCLUDED.shopify_order_name,
             order_number=EXCLUDED.order_number,
+            shopify_order_number=EXCLUDED.shopify_order_number,
             admin_url=EXCLUDED.admin_url,
             customer_id=EXCLUDED.customer_id,
+            shopify_customer_id=EXCLUDED.shopify_customer_id,
             customer_name=EXCLUDED.customer_name,
             customer_email=EXCLUDED.customer_email,
+            email=EXCLUDED.email,
             financial_status=EXCLUDED.financial_status,
             fulfillment_status=EXCLUDED.fulfillment_status,
             total_price=EXCLUDED.total_price,
@@ -1298,26 +1387,88 @@ def _upsert_order(cur, order):
             created_at=EXCLUDED.created_at,
             processed_at=EXCLUDED.processed_at,
             raw_json=EXCLUDED.raw_json,
-            synced_at=now()
+            raw=EXCLUDED.raw,
+            synced_at=now(),
+            updated_at=now()
         """,
         (
             order.get("shopify_order_id"),
             order.get("legacy_resource_id"),
-            order.get("order_name"),
-            order.get("order_number"),
+            order_name,
+            order_name,
+            order_number,
+            order_number,
             order.get("admin_url"),
-            order.get("customer_id") or order.get("shopify_customer_id") or "",
-            order.get("customer_name"),
-            order.get("customer_email"),
+            customer_id,
+            customer_id,
+            customer_name,
+            customer_email,
+            customer_email,
             order.get("financial_status"),
             order.get("fulfillment_status"),
             order.get("total_price"),
             order.get("currency"),
             order.get("created_at") or "",
             order.get("processed_at") or "",
-            json_dumps(order),
+            raw_json,
+            raw_json,
         ),
     )
+
+
+def _backfill_edition_customer_details(cur, order):
+    customer_name = _customer_name_for_storage(order)
+    customer_email = str(order.get("customer_email") or order.get("email") or "").strip()
+    if not order.get("shopify_order_id") or not (customer_name or customer_email):
+        return 0
+    cur.execute(
+        """
+        UPDATE edition_orders
+        SET customer_name = CASE
+                WHEN %s <> ''
+                 AND LOWER(COALESCE(customer_name, '')) IN ('', 'customer not shown', 'not shown', 'unknown customer')
+                THEN %s
+                ELSE customer_name
+            END,
+            shopify_customer_name = CASE
+                WHEN %s <> ''
+                 AND LOWER(COALESCE(shopify_customer_name, '')) IN ('', 'customer not shown', 'not shown', 'unknown customer')
+                THEN %s
+                ELSE shopify_customer_name
+            END,
+            customer_email = CASE
+                WHEN %s <> ''
+                 AND COALESCE(customer_email, '') = ''
+                THEN %s
+                ELSE customer_email
+            END,
+            shopify_customer_email = CASE
+                WHEN %s <> ''
+                 AND COALESCE(shopify_customer_email, '') = ''
+                THEN %s
+                ELSE shopify_customer_email
+            END
+        WHERE shopify_order_id=%s
+          AND (
+              LOWER(COALESCE(customer_name, '')) IN ('', 'customer not shown', 'not shown', 'unknown customer')
+              OR LOWER(COALESCE(shopify_customer_name, '')) IN ('', 'customer not shown', 'not shown', 'unknown customer')
+              OR COALESCE(customer_email, '') = ''
+              OR COALESCE(shopify_customer_email, '') = ''
+          )
+        """,
+        (
+            customer_name,
+            customer_name,
+            customer_name,
+            customer_name,
+            customer_email,
+            customer_email,
+            customer_email,
+            customer_email,
+            order.get("shopify_order_id"),
+        ),
+    )
+    return cur.rowcount
 
 
 def _lookup_product_by_handle_or_id(cur, line_item):
@@ -1468,22 +1619,73 @@ def allocate_edition_for_order_line(
                 )
                 existing = cur.fetchone()
                 if existing:
+                    if customer_name or customer_email:
+                        cur.execute(
+                            """
+                            UPDATE edition_orders
+                            SET customer_name = CASE
+                                    WHEN %s <> ''
+                                     AND LOWER(COALESCE(customer_name, '')) IN ('', 'customer not shown', 'not shown', 'unknown customer')
+                                    THEN %s
+                                    ELSE customer_name
+                                END,
+                                shopify_customer_name = CASE
+                                    WHEN %s <> ''
+                                     AND LOWER(COALESCE(shopify_customer_name, '')) IN ('', 'customer not shown', 'not shown', 'unknown customer')
+                                    THEN %s
+                                    ELSE shopify_customer_name
+                                END,
+                                customer_email = CASE
+                                    WHEN %s <> ''
+                                     AND COALESCE(customer_email, '') = ''
+                                    THEN %s
+                                    ELSE customer_email
+                                END,
+                                shopify_customer_email = CASE
+                                    WHEN %s <> ''
+                                     AND COALESCE(shopify_customer_email, '') = ''
+                                    THEN %s
+                                    ELSE shopify_customer_email
+                                END
+                            WHERE shopify_order_id=%s
+                              AND shopify_line_item_id=%s
+                              AND allocation_index=%s
+                            RETURNING *
+                            """,
+                            (
+                                _usable_customer_name(customer_name),
+                                _usable_customer_name(customer_name),
+                                _usable_customer_name(customer_name),
+                                _usable_customer_name(customer_name),
+                                str(customer_email or "").strip(),
+                                str(customer_email or "").strip(),
+                                str(customer_email or "").strip(),
+                                str(customer_email or "").strip(),
+                                shopify_order_id,
+                                shopify_line_item_id,
+                                allocation_index,
+                            ),
+                        )
+                        updated_existing = cur.fetchone()
+                        if updated_existing:
+                            existing = updated_existing
                     conn.commit()
                     return {"created": False, "assignment": existing, "sold_out": False, "error": ""}
 
                 cur.execute(
                     """
                     INSERT INTO edition_products(
-                        shopify_product_id, shopify_handle, product_title,
-                        edition_total, next_edition_number, active, sold_out, updated_at
+                        shopify_product_id, shopify_product_gid, shopify_handle, product_title,
+                        edition_total, next_edition_number, active, is_active, sold_out, is_sold_out, updated_at
                     )
-                    VALUES (%s, %s, %s, 100, 1, TRUE, FALSE, now())
+                    VALUES (%s, %s, %s, %s, 100, 1, TRUE, TRUE, FALSE, FALSE, now())
                     ON CONFLICT (shopify_handle) DO UPDATE SET
                         shopify_product_id=COALESCE(EXCLUDED.shopify_product_id, edition_products.shopify_product_id),
+                        shopify_product_gid=COALESCE(EXCLUDED.shopify_product_gid, edition_products.shopify_product_gid),
                         product_title=COALESCE(EXCLUDED.product_title, edition_products.product_title),
                         updated_at=now()
                     """,
-                    (shopify_product_id, shopify_handle, product_title),
+                    (shopify_product_id, shopify_product_id, shopify_handle, product_title),
                 )
                 cur.execute(
                     """
@@ -1502,7 +1704,7 @@ def allocate_edition_for_order_line(
                     cur.execute(
                         """
                         UPDATE edition_products
-                        SET sold_out=TRUE, updated_at=now()
+                        SET sold_out=TRUE, is_sold_out=TRUE, updated_at=now()
                         WHERE shopify_handle=%s
                         """,
                         (shopify_handle,),
@@ -1534,11 +1736,14 @@ def allocate_edition_for_order_line(
                 cur.execute(
                     """
                     INSERT INTO edition_orders(
-                        shopify_order_id, shopify_line_item_id, shopify_product_id, shopify_handle,
-                        product_title, variant_title, sku, customer_name, customer_email,
-                        edition_number, edition_total, allocation_index, assigned_at, certificate_status
+                        shopify_order_id, shopify_order_name, shopify_line_item_id, shopify_product_id,
+                        shopify_handle, product_title, variant_title, sku,
+                        customer_name, customer_email, shopify_customer_name, shopify_customer_email,
+                        edition_number, edition_total, allocation_index, quantity,
+                        assigned_at, certificate_status, status, updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), 'Certificate Missing')
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1,
+                            now(), 'Certificate Missing', 'assigned', now())
                     ON CONFLICT DO NOTHING
                     RETURNING id, shopify_order_id, shopify_line_item_id, shopify_product_id,
                               shopify_handle, product_title, variant_title, sku, customer_name,
@@ -1547,12 +1752,15 @@ def allocate_edition_for_order_line(
                     """,
                     (
                         shopify_order_id,
+                        shopify_order_name,
                         shopify_line_item_id,
                         shopify_product_id,
                         shopify_handle,
                         product_title,
                         variant_title,
                         sku,
+                        customer_name,
+                        customer_email,
                         customer_name,
                         customer_email,
                         next_number,
@@ -1613,10 +1821,16 @@ def allocate_edition_for_order_line(
                     UPDATE edition_products
                     SET next_edition_number=%s,
                         sold_out=%s,
+                        is_sold_out=%s,
                         updated_at=now()
                     WHERE shopify_handle=%s
                     """,
-                    (incremented_next, incremented_next > edition_total, shopify_handle),
+                    (
+                        incremented_next,
+                        incremented_next > edition_total,
+                        incremented_next > edition_total,
+                        shopify_handle,
+                    ),
                 )
                 inserted["order_name"] = shopify_order_name
                 conn.commit()
@@ -1640,6 +1854,7 @@ def process_paid_order(order, *, fetch_missing_products=True):
                 customer = _customer_from_order(order)
                 _upsert_customer(cur, customer)
                 _upsert_order(cur, order)
+                _backfill_edition_customer_details(cur, order)
                 conn.commit()
         except Exception:
             conn.rollback()
@@ -1654,6 +1869,8 @@ def process_paid_order(order, *, fetch_missing_products=True):
             "errors": [],
         }
 
+    order_customer_name = _customer_name_for_storage(order)
+    order_customer_email = str(order.get("customer_email") or order.get("email") or "").strip()
     new_assignments = []
     for line_index, line_item in enumerate(order.get("line_items") or [], start=1):
         quantity = max(1, int(line_item.get("quantity") or 1))
@@ -1685,8 +1902,8 @@ def process_paid_order(order, *, fetch_missing_products=True):
                 product_title=product_title,
                 variant_title=line_item.get("variant_title") or "",
                 sku=line_item.get("sku") or "",
-                customer_name=order.get("customer_name") or order.get("customer_email") or "",
-                customer_email=order.get("customer_email") or "",
+                customer_name=order_customer_name or order_customer_email,
+                customer_email=order_customer_email,
             )
             if result.get("error"):
                 errors.append(result["error"])
@@ -1872,7 +2089,9 @@ def list_orders(search="", sort="Date newest", limit=250):
     order_by = _order_sort_clause(sort)
     base_sql = f"""
         SELECT o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
-               o.customer_name, o.customer_email, o.financial_status, o.fulfillment_status,
+               COALESCE(NULLIF(o.customer_name, ''), NULLIF(eo.customer_name, ''), NULLIF(o.customer_email, ''), NULLIF(eo.customer_email, '')) AS customer_name,
+               COALESCE(NULLIF(o.customer_email, ''), NULLIF(eo.customer_email, '')) AS customer_email,
+               o.financial_status, o.fulfillment_status,
                o.total_price, o.currency, o.created_at, o.processed_at,
                eo.id AS edition_order_id, eo.shopify_line_item_id, eo.shopify_handle,
                eo.product_title, eo.variant_title, eo.sku, eo.edition_number,
