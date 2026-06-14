@@ -390,18 +390,26 @@ def select_index(options, value, default=0):
 
 
 def allow_local_sqlite_fallback():
-    return os.getenv("ENABLE_LOCAL_SQLITE_FALLBACK", "false").lower() == "true"
+    return os.getenv("ENABLE_LOCAL_SQLITE_FALLBACK", "true").lower() == "true"
 
 
 def render_supabase_required_notice(page_title):
     st.title(page_title)
     st.error("Supabase is not connected, so this page cannot save or load persistent records.")
     st.info(
-        "Set DATABASE_URL in Render environment variables. The old local cache fallback is disabled "
-        "by default so orders, products, and edition numbers are not accidentally stored outside Supabase."
+        "Set DATABASE_URL, SUPABASE_DATABASE_URL, or POSTGRES_URL in Render environment variables. "
+        "Sports Cave OS can still run locally, but edition numbers are only safely preserved when "
+        "Supabase is connected."
     )
     st.caption(
-        "If you only need local development fallback, set ENABLE_LOCAL_SQLITE_FALLBACK=true locally."
+        "If you need to force Supabase-only mode, set ENABLE_LOCAL_SQLITE_FALLBACK=false."
+    )
+
+
+def render_local_cache_notice():
+    st.warning(
+        "Supabase is not connected. Showing the local Sports Cave cache so the app keeps working, "
+        "but edition counters will not be safely stored in Supabase until the Render database URL is connected."
     )
 
 
@@ -2334,6 +2342,7 @@ def render_limited_editions_page(dispatch_log_renderer=None):
         render_supabase_required_notice("Limited Editions")
         return
     st.title("Limited Editions")
+    render_local_cache_notice()
     st.caption("Track edition numbers and PSD files from the local product cache.")
     st.markdown(
         """
@@ -3084,6 +3093,7 @@ def render_orders_page():
         render_supabase_required_notice("Orders")
         return
     st.title("Orders")
+    render_local_cache_notice()
     st.caption("Edition numbers are assigned from Sports Cave OS, not Shopify stock.")
     config = shopify_sync.get_config()
     order_summary = db.get_shopify_order_summary()

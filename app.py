@@ -4801,8 +4801,8 @@ def page_uses_local_database(current_page):
         return False
     pages = get_os_pages()
     supabase_enabled = pages.supabase_backend.is_configured()
-    local_fallback_enabled = os.getenv("ENABLE_LOCAL_SQLITE_FALLBACK", "false").lower() == "true"
-    if current_page in {"Settings", "Files"}:
+    local_fallback_enabled = os.getenv("ENABLE_LOCAL_SQLITE_FALLBACK", "true").lower() == "true"
+    if current_page in {"Settings", "Files", "Product Uploads"}:
         return True
     if current_page in {"Limited Editions", "Orders"} and not supabase_enabled:
         return local_fallback_enabled

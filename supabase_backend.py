@@ -14,6 +14,17 @@ from certificate_service import certificate_id, generate_certificate_pdf
 
 BASE_DIR = Path(__file__).resolve().parent
 CERTIFICATE_OUTPUT_DIR = BASE_DIR / "output" / "certificates"
+DATABASE_URL_ENV_KEYS = (
+    "DATABASE_URL",
+    "SUPABASE_DATABASE_URL",
+    "SUPABASE_DB_URL",
+    "POSTGRES_URL",
+    "POSTGRES_PRISMA_URL",
+    "POSTGRES_URL_NON_POOLING",
+    "DATABASE_PRIVATE_URL",
+    "DATABASE_PUBLIC_URL",
+    "RENDER_DATABASE_URL",
+)
 
 ASSET_TYPES = (
     "google_drive_folder",
@@ -50,8 +61,19 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def get_database_url_source():
+    for key in DATABASE_URL_ENV_KEYS:
+        if os.getenv(key, "").strip():
+            return key
+    return ""
+
+
 def get_database_url():
-    return os.getenv("DATABASE_URL", "").strip()
+    for key in DATABASE_URL_ENV_KEYS:
+        value = os.getenv(key, "").strip()
+        if value:
+            return value
+    return ""
 
 
 def is_configured():
@@ -61,7 +83,10 @@ def is_configured():
 def _database_url_with_ssl():
     url = get_database_url()
     if not url:
-        raise SupabaseNotConfigured("DATABASE_URL is not configured.")
+        raise SupabaseNotConfigured(
+            "No Supabase/Postgres database URL is configured. Set DATABASE_URL, "
+            "SUPABASE_DATABASE_URL, or POSTGRES_URL in Render."
+        )
     parsed = urlparse(url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     query.setdefault("sslmode", "require")
@@ -103,9 +128,28 @@ def table_exists(cur, table_name):
     return bool((cur.fetchone() or {}).get("exists"))
 
 
+def column_exists(cur, table_name, column_name):
+    cur.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema='public'
+              AND table_name=%s
+              AND column_name=%s
+        ) AS exists
+        """,
+        (table_name, column_name),
+    )
+    return bool((cur.fetchone() or {}).get("exists"))
+
+
 def ensure_schema():
     if not is_configured():
-        raise SupabaseNotConfigured("DATABASE_URL is not configured.")
+        raise SupabaseNotConfigured(
+            "No Supabase/Postgres database URL is configured. Set DATABASE_URL, "
+            "SUPABASE_DATABASE_URL, or POSTGRES_URL in Render."
+        )
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -401,6 +445,8 @@ def ensure_schema():
                     ("error_message", "TEXT"),
                 ),
                 "app_errors": (
+                    ("source", "TEXT DEFAULT 'sports_cave_os'"),
+                    ("severity", "TEXT DEFAULT 'error'"),
                     ("error_type", "TEXT"),
                     ("message", "TEXT"),
                     ("context", "JSONB DEFAULT '{}'::jsonb"),
@@ -414,6 +460,20 @@ def ensure_schema():
                     cur.execute(
                         f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
                     )
+
+            if table_exists(cur, "app_errors"):
+                if column_exists(cur, "app_errors", "source"):
+                    cur.execute(
+                        "ALTER TABLE app_errors ALTER COLUMN source SET DEFAULT 'sports_cave_os'"
+                    )
+                    cur.execute(
+                        "UPDATE app_errors SET source='sports_cave_os' WHERE source IS NULL"
+                    )
+                if column_exists(cur, "app_errors", "severity"):
+                    cur.execute(
+                        "ALTER TABLE app_errors ALTER COLUMN severity SET DEFAULT 'error'"
+                    )
+                    cur.execute("UPDATE app_errors SET severity='error' WHERE severity IS NULL")
 
             uuid_id_tables = (
                 "shopify_products",
@@ -476,7 +536,11 @@ def test_connection():
         with conn.cursor() as cur:
             cur.execute("SELECT now() AS server_time")
             row = cur.fetchone() or {}
-    return {"connected": True, "server_time": row.get("server_time")}
+    return {
+        "connected": True,
+        "server_time": row.get("server_time"),
+        "url_source": get_database_url_source(),
+    }
 
 
 def log_app_error(error_type, message, context=None):
@@ -488,8 +552,8 @@ def log_app_error(error_type, message, context=None):
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO app_errors(error_type, message, context)
-                    VALUES (%s, %s, %s::jsonb)
+                    INSERT INTO app_errors(source, severity, error_type, message, context)
+                    VALUES ('sports_cave_os', 'error', %s, %s, %s::jsonb)
                     """,
                     (str(error_type or "error"), str(message or ""), json_dumps(context)),
                 )
