@@ -7,8 +7,6 @@ import os
 import re
 import sqlite3
 
-from edition_display import build_edition_display_text
-
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = BASE_DIR / "data" / "sports_cave_os.db"
@@ -250,13 +248,6 @@ def ensure_column(connection, table_name, column_name, definition):
         connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
-def create_index_safely(connection, statement, label):
-    try:
-        connection.execute(statement)
-    except (sqlite3.IntegrityError, sqlite3.OperationalError) as error:
-        print(f"SAFE MIGRATION WARNING: could not create {label}: {error}")
-
-
 def init_db():
     with get_connection() as connection:
         connection.executescript(
@@ -453,25 +444,6 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_assignments_line ON edition_assignments(line_item_id);
             """
         )
-        for label, statement in (
-            (
-                "unique Shopify order id index",
-                "CREATE UNIQUE INDEX IF NOT EXISTS ux_shopify_orders_order_id ON shopify_orders(shopify_order_id)",
-            ),
-            (
-                "unique Shopify line item id index",
-                "CREATE UNIQUE INDEX IF NOT EXISTS ux_order_line_items_line_id ON order_line_items(shopify_line_item_id)",
-            ),
-            (
-                "unique product edition number index",
-                "CREATE UNIQUE INDEX IF NOT EXISTS ux_edition_assignments_product_number ON edition_assignments(shopify_product_id, edition_number)",
-            ),
-            (
-                "unique line item edition number index",
-                "CREATE UNIQUE INDEX IF NOT EXISTS ux_edition_assignments_line_number ON edition_assignments(shopify_line_item_id, edition_number)",
-            ),
-        ):
-            create_index_safely(connection, statement, label)
         ensure_column(connection, "products", "prodigi_product_url", "TEXT")
         ensure_column(connection, "products", "prodigi_notes", "TEXT")
         ensure_column(connection, "products", "archived_at", "TEXT")
@@ -658,8 +630,6 @@ def upsert_shopify_products(products):
     timestamp = utc_now()
     with get_connection() as connection:
         for product in products:
-            # Product fetch updates Shopify metadata only. Local edition values,
-            # PSD URLs, notes, and assignment history are protected on conflict.
             connection.execute(
                 """
                 INSERT INTO shopify_products (
@@ -1044,20 +1014,13 @@ def calculate_shopify_edition_values(
     allow_oversold=False,
 ):
     if edition_limit in (None, ""):
-        display_values = {
-            "edition_limit": 100,
-            "next_available_edition": 1,
-            "editions_sold": max(int(editions_sold or 0), 0),
-            "editions_remaining": 100,
-            "edition_status": "Not Set",
-        }
         return {
             "edition_limit": None,
             "next_available_edition": None,
             "editions_sold": max(int(editions_sold or 0), 0),
             "editions_remaining": None,
             "edition_status": "Not Set",
-            "edition_display_text": build_edition_display_text(display_values),
+            "edition_display_text": "EDITION DETAILS COMING SOON",
         }
 
     limit_value = int(edition_limit)
@@ -1075,24 +1038,19 @@ def calculate_shopify_edition_values(
     remaining = max(limit_value - sold_value, 0)
     if remaining <= 0 or next_value > limit_value:
         status = "Sold Out"
+        display_text = "SOLD OUT EDITION"
     elif remaining <= 3:
         status = "Final Editions"
+        display_text = f"FINAL EDITION #{next_value} OF {limit_value} AVAILABLE"
     elif remaining <= 6:
         status = "Low"
+        display_text = f"EDITION #{next_value} OF {limit_value} AVAILABLE"
     elif remaining <= 12:
         status = "Count"
+        display_text = f"EDITION #{next_value} OF {limit_value} AVAILABLE"
     else:
         status = "Available"
-
-    display_text = build_edition_display_text(
-        {
-            "edition_limit": limit_value,
-            "next_available_edition": next_value,
-            "editions_sold": sold_value,
-            "editions_remaining": remaining,
-            "edition_status": status,
-        }
-    )
+        display_text = f"EDITION #{next_value} OF {limit_value} AVAILABLE"
 
     return {
         "edition_limit": limit_value,
@@ -1691,8 +1649,6 @@ def process_shopify_order_for_editions(order):
                     (local_line_id,),
                 ).fetchone()["count"]
             )
-            # Data protection rule: once an order line has its edition numbers,
-            # later order fetches must not reassign or renumber those records.
             if existing_count >= quantity:
                 connection.execute(
                     "UPDATE order_line_items SET assignment_status = 'Already Assigned', updated_at = ? WHERE id = ?",
@@ -1954,27 +1910,6 @@ def list_generated_certificates(limit=100):
             LIMIT ?
             """,
             (min(max(int(limit), 1), 500),),
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def list_edition_assignments_export(limit=5000):
-    with get_connection() as connection:
-        rows = connection.execute(
-            """
-            SELECT ea.id, ea.shopify_order_id, ea.shopify_line_item_id,
-                   ea.shopify_product_id, ea.product_title, ea.edition_number,
-                   ea.edition_limit, ea.assignment_status, ea.assigned_at,
-                   ea.certificate_pdf_path, ea.certificate_id,
-                   ea.certificate_generated_at, o.order_name, o.order_number,
-                   li.variant_title, li.sku
-            FROM edition_assignments ea
-            LEFT JOIN shopify_orders o ON o.id = ea.order_id
-            LEFT JOIN order_line_items li ON li.id = ea.line_item_id
-            ORDER BY ea.assigned_at DESC, ea.id DESC
-            LIMIT ?
-            """,
-            (min(max(int(limit), 1), 50000),),
         ).fetchall()
     return [dict(row) for row in rows]
 

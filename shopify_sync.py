@@ -6,8 +6,6 @@ from urllib.parse import urlparse
 
 import requests
 
-from edition_display import build_edition_display_text as build_sports_cave_edition_display_text
-
 
 DEFAULT_API_VERSION = "2026-04"
 DEFAULT_PAGE_SIZE = 10
@@ -580,7 +578,15 @@ def edition_metafield_inputs(product):
 
 
 def build_edition_display_text(product):
-    return build_sports_cave_edition_display_text(product)
+    limit = int(product.get("edition_limit") or 100)
+    next_number = int(product.get("next_available_edition") or 1)
+    remaining = int(product.get("editions_remaining") or max(limit - int(product.get("editions_sold") or 0), 0))
+    status = product.get("edition_status") or "Available"
+    if status == "Sold Out" or remaining <= 0 or next_number > limit:
+        return "SOLD OUT EDITION"
+    if remaining <= 3:
+        return f"FINAL EDITION #{next_number} OF {limit} AVAILABLE"
+    return f"EDITION #{next_number} OF {limit} AVAILABLE"
 
 
 def sync_edition_metafields(product, config=None, request_post=None):

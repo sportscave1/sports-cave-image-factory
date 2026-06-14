@@ -19,11 +19,3 @@ The snippet reads only the `sports_cave` product metafields synced from Sports C
 Sports Cave OS remains the backend source of truth. Shopify metafields are only the storefront display mirror.
 
 The snippet does not read Shopify inventory, variant inventory, stock, or `product.selected_or_first_available_variant.inventory_quantity`.
-
-## Install checklist
-
-1. Copy `snippets/sports-cave-edition-pill.liquid` into the active Shopify theme snippets folder.
-2. Add `{% render 'sports-cave-edition-pill' %}` to the product template where the edition pill should appear.
-3. In Sports Cave OS, update the edition limit, next edition, and sold count.
-4. Click `Sync Edition Display` on Limited Editions.
-5. Do not use the old inventory-based scarcity widget for Sports Cave limited editions.

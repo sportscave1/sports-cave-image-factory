@@ -344,30 +344,6 @@ class ShopifyDatabaseTests(unittest.TestCase):
         self.assertEqual(product["status"], "Live")
         self.assertEqual(product["shopify_sync_status"], "Shopify Active")
 
-    def test_product_fetch_preserves_local_edition_and_psd_fields(self):
-        remote = self.remote_product()
-        db.upsert_shopify_products([remote])
-        db.update_shopify_edition_product(
-            remote["shopify_product_id"],
-            edition_limit=250,
-            next_available_edition=67,
-            editions_sold=66,
-            psd_file_url="https://drive.google.com/file/d/psd",
-        )
-
-        changed_remote = self.remote_product()
-        changed_remote["title"] = "All Rise Updated Wall Art"
-        changed_remote["status"] = "DRAFT"
-        db.upsert_shopify_products([changed_remote])
-        product = db.get_shopify_edition_product(remote["shopify_product_id"])
-
-        self.assertEqual(product["product_title"], "All Rise Updated Wall Art")
-        self.assertEqual(product["status"], "DRAFT")
-        self.assertEqual(product["edition_limit"], 250)
-        self.assertEqual(product["next_available_edition"], 67)
-        self.assertEqual(product["editions_sold"], 66)
-        self.assertEqual(product["psd_file_url"], "https://drive.google.com/file/d/psd")
-
 
 class LimitedEditionEngineTests(unittest.TestCase):
     def setUp(self):

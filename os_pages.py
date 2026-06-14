@@ -13,11 +13,9 @@ import streamlit.components.v1 as components
 
 import db
 import shopify_sync
-from edition_display import build_edition_display_text
 
 
 CERTIFICATE_OUTPUT_DIR = db.BASE_DIR / "output" / "certificates"
-SHOPIFY_EDITION_SNIPPET_PATH = db.BASE_DIR / "shopify_theme" / "snippets" / "sports-cave-edition-pill.liquid"
 ORDER_FETCH_ERROR_MESSAGE = (
     "Orders require the read_orders scope. Add read_orders in Shopify Dev Dashboard, "
     "release a new app version, update/reinstall the app, then redeploy Render."
@@ -76,30 +74,6 @@ LIMITED_EDITION_EXPORT_FIELDS = (
     "edition_status",
     "psd_file_url",
     "updated_at",
-)
-
-ORDER_EXPORT_FIELDS = (
-    "order_name",
-    "shopify_order_id",
-    "customer",
-    "email",
-    "product_title",
-    "variant",
-    "assigned_editions",
-    "status",
-    "created_at",
-)
-
-ASSIGNMENT_EXPORT_FIELDS = (
-    "order",
-    "shopify_order_id",
-    "product",
-    "variant",
-    "edition_number",
-    "edition_limit",
-    "status",
-    "assigned_at",
-    "certificate_path",
 )
 
 PRODIGI_DASHBOARD_URL = "https://dashboard.prodigi.com/dashboard"
@@ -320,62 +294,6 @@ def build_limited_editions_template_csv():
     buffer = io.StringIO(newline="")
     writer = csv.DictWriter(buffer, fieldnames=LIMITED_EDITION_EXPORT_FIELDS)
     writer.writeheader()
-    return buffer.getvalue()
-
-
-def _assignment_export_text(assignments):
-    active = [
-        item for item in assignments
-        if item.get("assignment_status") not in {"Voided", "Refunded"}
-    ]
-    if not active:
-        return ""
-    return ", ".join(
-        f"#{item.get('edition_number')}/{item.get('edition_limit')}"
-        for item in active
-    )
-
-
-def build_orders_backup_csv(orders):
-    buffer = io.StringIO(newline="")
-    writer = csv.DictWriter(buffer, fieldnames=ORDER_EXPORT_FIELDS)
-    writer.writeheader()
-    for order in orders:
-        for line in order.get("line_items") or []:
-            writer.writerow(
-                {
-                    "order_name": order.get("order_name") or order.get("order_number") or "",
-                    "shopify_order_id": order.get("shopify_order_id") or "",
-                    "customer": order.get("customer_name") or "",
-                    "email": order.get("customer_email") or "",
-                    "product_title": line.get("product_title") or "",
-                    "variant": line.get("variant_title") or "",
-                    "assigned_editions": _assignment_export_text(line.get("assignments") or []),
-                    "status": line.get("assignment_status") or "",
-                    "created_at": order.get("created_at") or "",
-                }
-            )
-    return buffer.getvalue()
-
-
-def build_assignments_backup_csv(assignments):
-    buffer = io.StringIO(newline="")
-    writer = csv.DictWriter(buffer, fieldnames=ASSIGNMENT_EXPORT_FIELDS)
-    writer.writeheader()
-    for assignment in assignments:
-        writer.writerow(
-            {
-                "order": assignment.get("order_name") or assignment.get("order_number") or "",
-                "shopify_order_id": assignment.get("shopify_order_id") or "",
-                "product": assignment.get("product_title") or "",
-                "variant": assignment.get("variant_title") or "",
-                "edition_number": assignment.get("edition_number") or "",
-                "edition_limit": assignment.get("edition_limit") or "",
-                "status": assignment.get("assignment_status") or "",
-                "assigned_at": assignment.get("assigned_at") or "",
-                "certificate_path": assignment.get("certificate_pdf_path") or "",
-            }
-        )
     return buffer.getvalue()
 
 
@@ -2110,53 +2028,6 @@ def sync_changed_edition_widgets(config):
     return {"attempted": len(products), "synced": synced_count, "errors": errors[:10]}
 
 
-def load_edition_snippet_code():
-    try:
-        return SHOPIFY_EDITION_SNIPPET_PATH.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return ""
-
-
-def render_website_edition_embed_section():
-    with st.expander("Website Edition Embed Code", expanded=False):
-        st.caption(
-            "Sports Cave OS is the source of truth. Shopify metafields are only the storefront display mirror. "
-            "After changing edition numbers in Sports Cave OS, click Sync Edition Display to update the website widget."
-        )
-        preview_text = build_edition_display_text(
-            {
-                "edition_limit": 100,
-                "next_available_edition": 67,
-                "editions_sold": 66,
-                "editions_remaining": 34,
-                "edition_status": "Available",
-            }
-        )
-        st.markdown(status_badge(preview_text), unsafe_allow_html=True)
-        install_code = "{% render 'sports-cave-edition-pill' %}"
-        st.markdown("**Add this where the pill should appear on the Shopify product template:**")
-        st.code(install_code, language="liquid")
-        render_copy_text_button(install_code, "copy-edition-render-code", "Copy Render Code")
-
-        snippet_code = load_edition_snippet_code()
-        st.markdown("**Snippet file:** `shopify_theme/snippets/sports-cave-edition-pill.liquid`")
-        if snippet_code:
-            st.code(snippet_code, language="liquid")
-            render_copy_text_button(snippet_code, "copy-edition-snippet-code", "Copy Full Snippet")
-        else:
-            st.warning("Snippet file is missing from the repo.")
-
-        st.markdown(
-            """
-            1. Copy the snippet into the Shopify theme as `sports-cave-edition-pill.liquid`.
-            2. Render it on product pages with the render code above.
-            3. Update edition numbers in Sports Cave OS.
-            4. Click Sync Edition Display.
-            5. Do not use inventory-based scarcity widgets for Sports Cave editions.
-            """
-        )
-
-
 def render_limited_editions_page(dispatch_log_renderer=None):
     st.title("Limited Editions")
     st.caption("Track edition numbers and PSD files from the local product cache.")
@@ -2268,10 +2139,6 @@ def render_limited_editions_page(dispatch_log_renderer=None):
 
     if not config["configured"]:
         st.caption("Connection is not configured. Cached products still remain visible from Sports Cave OS.")
-    else:
-        st.caption("Fetch updates Shopify metadata only. Local edition numbers, PSD URLs, and assigned orders are protected.")
-
-    render_website_edition_embed_section()
 
     if fetch_clicked:
         try:
@@ -2305,7 +2172,7 @@ def render_limited_editions_page(dispatch_log_renderer=None):
                 )
             st.rerun()
         except Exception as error:
-            st.error("Edition display sync failed. Backend edition data was not changed.")
+            st.error("Could not sync edition display to Shopify.")
             st.error(str(error))
 
     if st.session_state.get("limited_edition_import_open", False):
@@ -2554,7 +2421,7 @@ def fetch_latest_orders(config):
                         shopify_sync.sync_edition_metafields(product, config=config)
                         db.mark_shopify_edition_synced(product_id)
                 except Exception:
-                    sync_warning = "Edition display sync failed. Backend edition assignments were not changed."
+                    sync_warning = "Edition assigned locally, but storefront display sync failed."
 
         db.update_shopify_order_sync_run(
             run_id,
@@ -2681,8 +2548,6 @@ def render_orders_page():
 
     if not config["configured"]:
         st.caption("Shopify connection is not configured. Cached orders still remain visible from Sports Cave OS.")
-    else:
-        st.caption("Fetch updates Shopify order metadata only. Existing assigned edition numbers and certificate paths are protected.")
 
     if fetch_clicked:
         try:
@@ -2824,58 +2689,14 @@ def render_prompt_block(title, prompt, key, when_to_use=None, height=220):
         if when_to_use:
             st.caption(f"When to use this: {when_to_use}")
         st.caption("Copy this prompt into ChatGPT.")
-        prompt_text = prompt.strip()
-        safe_title = html.escape(title)
-        safe_prompt = html.escape(prompt_text)
-        prompt_json = json.dumps(prompt_text)
-        text_height = max(int(height), 180)
-        component_height = text_height + 96
-        components.html(
-            f"""
-            <div style="background:#F5F2EA;color:#0B0B0D;border:1px solid rgba(212,165,76,.45);border-radius:12px;padding:14px 16px;box-sizing:border-box;">
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;">
-                <strong style="color:#0B0B0D;font-size:15px;">{safe_title}</strong>
-                <button
-                  id="marketing-copy-{key}"
-                  type="button"
-                  style="border:1px solid #0B0B0D;border-radius:999px;background:#F5F2EA;color:#0B0B0D;padding:8px 14px;font-weight:800;cursor:pointer;"
-                >Copy Prompt</button>
-              </div>
-              <textarea
-                id="marketing-prompt-{key}"
-                readonly
-                style="width:100%;height:{text_height}px;background:#FFFFFF;color:#0B0B0D;border:1px solid rgba(11,11,13,.2);border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.45;resize:none;box-sizing:border-box;"
-              >{safe_prompt}</textarea>
-            </div>
-            <script>
-            (() => {{
-              const button = document.getElementById("marketing-copy-{key}");
-              const textarea = document.getElementById("marketing-prompt-{key}");
-              const originalLabel = button.innerText;
-              const promptText = {prompt_json};
-              async function copyPrompt(event) {{
-                event.preventDefault();
-                textarea.focus();
-                textarea.select();
-                textarea.setSelectionRange(0, textarea.value.length);
-                try {{
-                  if (navigator.clipboard && window.isSecureContext) {{
-                    await navigator.clipboard.writeText(promptText);
-                  }} else {{
-                    document.execCommand("copy");
-                  }}
-                }} catch (error) {{
-                  document.execCommand("copy");
-                }}
-                button.innerText = "Copied";
-                setTimeout(() => {{ button.innerText = originalLabel; }}, 1400);
-              }}
-              button.addEventListener("click", copyPrompt);
-            }})();
-            </script>
-            """,
-            height=component_height,
+        st.text_area(
+            f"{title} prompt",
+            value=prompt.strip(),
+            height=height,
+            key=f"prompt-text-{key}",
+            label_visibility="collapsed",
         )
+        render_copy_text_button(prompt.strip(), f"marketing-{key}", "Copy Prompt")
 
 
 def inject_marketing_factory_styles():
@@ -3660,10 +3481,6 @@ def render_settings_page(app_version, database_path, password_status):
     order_sync_status = "Never"
     if latest_order_run:
         order_sync_status = "Success" if latest_order_run["status"] == "Complete" else latest_order_run["status"]
-    database_path = Path(database_path)
-    database_env_set = bool(os.getenv("SPORTS_CAVE_DB_PATH"))
-    database_exists = database_path.exists()
-    database_is_local_default = database_path == db.DEFAULT_DB_PATH
     settings = (
         ("Shopify connection", "Configured" if shopify_config["configured"] else "Not configured"),
         ("Shopify store domain", "Configured" if shopify_config["store_domain"] else "Missing"),
@@ -3686,10 +3503,6 @@ def render_settings_page(app_version, database_path, password_status):
         ("Full Google Drive API sync", "Coming later"),
         ("Drive Picker", "Coming later"),
         ("Certificate system", "Rough local PDF generation active"),
-        ("Database path", str(database_path)),
-        ("Database exists", "Yes" if database_exists else "No"),
-        ("SPORTS_CAVE_DB_PATH", "Set" if database_env_set else "Using local default"),
-        ("Backup/export", "Manual CSV exports available below"),
     )
     columns = st.columns(2)
     for index, (label, value) in enumerate(settings):
@@ -3703,39 +3516,9 @@ def render_settings_page(app_version, database_path, password_status):
         "Client credentials are exchanged for a temporary in-memory token only at that time. "
         "Edition numbers and certificates come from Sports Cave OS; Shopify metafields are display only."
     )
-    if database_is_local_default or not database_env_set:
-        st.warning(
-            "Production persistence warning: set `SPORTS_CAVE_DB_PATH=/var/data/sports_cave_os.db` "
-            "and attach a Render persistent disk. Render's normal filesystem can be wiped on redeploy."
-        )
-    st.write(f"**Database:** `{database_path}`")
+    st.write(f"**Local database:** `{database_path}`")
     st.write(f"**Password protection:** {password_status}")
     st.write(f"**App version:** {app_version}")
-
-    st.subheader("Manual Backup Exports")
-    st.caption("These exports read the local cache only. They do not call Shopify and do not alter edition data.")
-    export_columns = st.columns(3)
-    export_columns[0].download_button(
-        "Export Limited Editions CSV",
-        data=build_limited_editions_csv(db.list_all_shopify_edition_products()),
-        file_name="sports-cave-limited-editions-backup.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
-    export_columns[1].download_button(
-        "Export Orders CSV",
-        data=build_orders_backup_csv(db.list_shopify_orders(limit=500)),
-        file_name="sports-cave-orders-backup.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
-    export_columns[2].download_button(
-        "Export Edition Assignments CSV",
-        data=build_assignments_backup_csv(db.list_edition_assignments_export(limit=5000)),
-        file_name="sports-cave-edition-assignments-backup.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
 
 
 def render_placeholder_page(title):
