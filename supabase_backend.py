@@ -4,6 +4,7 @@ import io
 import json
 import os
 import re
+import threading
 from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -25,6 +26,8 @@ DATABASE_URL_ENV_KEYS = (
     "DATABASE_PUBLIC_URL",
     "RENDER_DATABASE_URL",
 )
+_SCHEMA_READY = False
+_SCHEMA_LOCK = threading.Lock()
 
 ASSET_TYPES = (
     "google_drive_folder",
@@ -90,7 +93,7 @@ def _database_url_with_ssl():
     parsed = urlparse(url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     query.setdefault("sslmode", "require")
-    query.setdefault("connect_timeout", "5")
+    query.setdefault("connect_timeout", "8")
     return urlunparse(parsed._replace(query=urlencode(query)))
 
 
@@ -102,10 +105,12 @@ def connect():
         raise RuntimeError(
             "Postgres support is not installed. Add psycopg[binary] to requirements.txt."
         ) from error
+    database_url = _database_url_with_ssl()
     return psycopg.connect(
-        _database_url_with_ssl(),
+        database_url,
         row_factory=dict_row,
-        connect_timeout=5,
+        connect_timeout=8,
+        prepare_threshold=None,
         options="-c statement_timeout=8000 -c idle_in_transaction_session_timeout=8000",
     )
 
@@ -144,7 +149,7 @@ def column_exists(cur, table_name, column_name):
     return bool((cur.fetchone() or {}).get("exists"))
 
 
-def ensure_schema():
+def _ensure_schema_uncached():
     if not is_configured():
         raise SupabaseNotConfigured(
             "No Supabase/Postgres database URL is configured. Set DATABASE_URL, "
@@ -553,6 +558,23 @@ def ensure_schema():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_handle ON edition_orders(shopify_handle)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_product_assets_handle ON product_assets(shopify_handle)")
         conn.commit()
+
+
+def reset_schema_cache():
+    global _SCHEMA_READY
+    with _SCHEMA_LOCK:
+        _SCHEMA_READY = False
+
+
+def ensure_schema():
+    global _SCHEMA_READY
+    if _SCHEMA_READY:
+        return
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY:
+            return
+        _ensure_schema_uncached()
+        _SCHEMA_READY = True
 
 
 def test_connection():
