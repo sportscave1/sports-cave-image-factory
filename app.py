@@ -65,6 +65,7 @@ MENU_OPTIONS = [
     "Webhook Events",
     "Sync Runs",
     "App Errors",
+    "Edition Integrity Check",
     "Files",
     "Marketing Factory",
     "VA Training",
@@ -4668,6 +4669,8 @@ def main():
         os_pages.render_sync_runs_page()
     elif current_page == "App Errors":
         os_pages.render_app_errors_page()
+    elif current_page == "Edition Integrity Check":
+        os_pages.render_edition_integrity_check_page()
     elif current_page == "Product Uploads":
         render_product_uploads_page()
     elif current_page == "Files":

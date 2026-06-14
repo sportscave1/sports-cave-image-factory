@@ -414,33 +414,70 @@ def render_focus_list(title, products, empty_message):
 
 
 def render_supabase_dashboard_page():
-    try:
-        summary = supabase_backend.get_dashboard_summary()
-    except Exception as error:
-        st.error("Could not load Supabase dashboard data.")
-        st.exception(error)
-        return
+    st.subheader("System Status")
+    st.caption("The app shell loaded. Live integrations are checked only when you click a button.")
+    status_columns = st.columns(3)
+    status_columns[0].success("App loaded")
+    status_columns[1].info("Supabase URL: Found")
+    shopify_config = shopify_sync.get_config()
+    status_columns[2].info("Shopify config: " + ("Found" if shopify_config["configured"] else "Missing"))
 
-    st.subheader("Dashboard")
-    st.caption("Live Supabase command centre for Shopify orders, editions, certificates, and asset links.")
-    metric_specs = (
-        ("Edition products", summary.get("edition_products", 0)),
-        ("Orders synced", summary.get("orders_synced", 0)),
-        ("Missing PSD links", summary.get("missing_psd", 0)),
-        ("Certificates missing", summary.get("certificates_missing", 0)),
-        ("Sold out products", summary.get("sold_out_products", 0)),
-        ("Recent app errors", summary.get("recent_errors", 0)),
+    action_columns = st.columns([1, 1, 1, 2])
+    load_summary = action_columns[0].button("Load live summary", use_container_width=True)
+    test_supabase = action_columns[1].button("Test Supabase", use_container_width=True)
+    test_shopify = action_columns[2].button(
+        "Test Shopify",
+        disabled=not shopify_config["configured"],
+        use_container_width=True,
     )
-    metric_columns = st.columns(3)
-    for index, (label, value) in enumerate(metric_specs):
-        metric_columns[index % 3].metric(label, value)
+    action_columns[3].caption("No Supabase or Shopify queries run during initial page render.")
+
+    if test_supabase:
+        try:
+            with st.spinner("Testing Supabase connection..."):
+                result = supabase_backend.test_connection()
+            st.success("Supabase connection OK.")
+            st.caption(f"Server time: {result.get('server_time')}")
+        except Exception as error:
+            st.error("Supabase connection failed, but the app is still running.")
+            st.exception(error)
+
+    if test_shopify:
+        try:
+            with st.spinner("Testing Shopify connection..."):
+                result = shopify_sync.test_connection(config=shopify_config)
+            st.success(f"Shopify connection OK: {result.get('name')}")
+        except Exception as error:
+            st.error("Shopify connection failed, but the app is still running.")
+            st.exception(error)
+
+    if load_summary:
+        try:
+            with st.spinner("Loading Supabase dashboard summary..."):
+                summary = supabase_backend.get_dashboard_summary()
+        except Exception as error:
+            st.error("Could not load Supabase dashboard data. Use Settings or App Errors for details.")
+            st.exception(error)
+            return
+
+        metric_specs = (
+            ("Edition products", summary.get("edition_products", 0)),
+            ("Orders synced", summary.get("orders_synced", 0)),
+            ("Missing PSD links", summary.get("missing_psd", 0)),
+            ("Certificates missing", summary.get("certificates_missing", 0)),
+            ("Sold out products", summary.get("sold_out_products", 0)),
+            ("Recent app errors", summary.get("recent_errors", 0)),
+        )
+        metric_columns = st.columns(3)
+        for index, (label, value) in enumerate(metric_specs):
+            metric_columns[index % 3].metric(label, value)
 
     st.subheader("Today's Focus")
     st.caption("Start by syncing Shopify products, then clear missing PSD links, certificates, and order issues.")
     focus_columns = st.columns(3)
     focus_columns[0].info("Open Limited Editions to sync products and confirm edition totals.")
     focus_columns[1].info("Open Orders to sync paid orders and check edition assignments.")
-    focus_columns[2].info("Open Product Assets to connect PSD, Drive, CDN, and Prodigi links.")
+    focus_columns[2].info("Open Product Assets to import PSD CSV links and connect Drive/CDN assets.")
 
 
 def render_dashboard_page():
@@ -2098,6 +2135,7 @@ def render_supabase_limited_editions_page():
 
     try:
         products = supabase_backend.list_edition_products(search=search, limit=1000)
+        asset_map = supabase_backend.get_product_asset_map()
     except Exception as error:
         st.error("Could not load edition products from Supabase.")
         st.exception(error)
@@ -2153,22 +2191,30 @@ def render_supabase_limited_editions_page():
         st.info("No edition products found yet. Click Sync Shopify Products.")
         return
 
-    header = st.columns([2.4, 1.3, 0.8, 0.8, 0.8, 0.8, 0.9, 1.1])
+    header = st.columns([2.2, 1.25, 0.65, 0.65, 0.8, 0.75, 0.75, 0.75, 0.9, 1.0])
     for column, label in zip(
         header,
-        ("Product", "Handle", "Total", "Next", "Remaining", "Active", "Sold Out", "Links"),
+        ("Product", "Handle", "Total", "Next", "Last", "Remaining", "Active", "Sold Out", "PSD", "Links"),
     ):
         column.markdown(f"**{label}**")
     for product in products:
-        columns = st.columns([2.4, 1.3, 0.8, 0.8, 0.8, 0.8, 0.9, 1.1])
+        columns = st.columns([2.2, 1.25, 0.65, 0.65, 0.8, 0.75, 0.75, 0.75, 0.9, 1.0])
         columns[0].write(product.get("product_title") or "Untitled product")
         columns[1].caption(product.get("shopify_handle") or "")
         columns[2].write(product.get("edition_total") or 100)
         columns[3].write(product.get("next_edition_number") or 1)
-        columns[4].write(product.get("remaining_editions") or 0)
-        columns[5].markdown(status_badge("Active" if product.get("active") else "Inactive"), unsafe_allow_html=True)
-        columns[6].markdown(status_badge("Sold Out" if product.get("sold_out") else "Available"), unsafe_allow_html=True)
-        with columns[7]:
+        last_assigned = product.get("last_assigned_edition")
+        columns[4].write(f"{last_assigned}/{product.get('edition_total') or 100}" if last_assigned else "None")
+        columns[5].write(product.get("remaining_editions") or 0)
+        columns[6].markdown(status_badge("Active" if product.get("active") else "Inactive"), unsafe_allow_html=True)
+        columns[7].markdown(status_badge("Sold Out" if product.get("sold_out") else "Available"), unsafe_allow_html=True)
+        psd_url = (asset_map.get(product.get("shopify_handle")) or {}).get("psd_master_file")
+        with columns[8]:
+            if psd_url:
+                st.link_button("Open PSD", psd_url, use_container_width=True)
+            else:
+                st.markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
+        with columns[9]:
             if product.get("admin_url"):
                 st.link_button("Shopify", product["admin_url"], use_container_width=True)
             elif product.get("online_store_url"):
@@ -3065,6 +3111,163 @@ def render_orders_page():
             st.rerun()
 
 
+def normalize_psd_handle_guess(value):
+    cleaned = str(value or "").strip().lower()
+    cleaned = re.sub(r"\.psd$", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[^a-z0-9]+", "-", cleaned)
+    return cleaned.strip("-")
+
+
+def parse_psd_csv(uploaded_csv):
+    text = uploaded_csv.getvalue().decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    rows = []
+    for row in reader:
+        file_name = (row.get("File Name") or row.get("file_name") or "").strip()
+        handle_guess = (
+            row.get("Shopify Handle Guess")
+            or row.get("shopify_handle")
+            or row.get("Shopify Handle")
+            or ""
+        )
+        normalized_handle = normalize_psd_handle_guess(handle_guess or file_name)
+        asset_type = (row.get("Asset Type") or "psd_master_file").strip() or "psd_master_file"
+        if asset_type not in supabase_backend.ASSET_TYPES:
+            asset_type = "psd_master_file"
+        rows.append(
+            {
+                "asset_name": file_name,
+                "shopify_handle": normalized_handle,
+                "google_drive_file_id": (row.get("Google Drive File ID") or "").strip(),
+                "asset_url": (row.get("Google Drive URL") or row.get("google_drive_file_url") or "").strip(),
+                "asset_type": asset_type,
+                "notes": (row.get("Parent Folder") or row.get("Parent Folder, if available") or "").strip(),
+            }
+        )
+    return [row for row in rows if row["asset_url"] or row["google_drive_file_id"] or row["asset_name"]]
+
+
+def render_psd_csv_import(products):
+    with st.expander("Import PSD CSV", expanded=False):
+        st.caption("Upload the Google Drive export CSV only when you are ready. The app stores Drive links only, not PSD files.")
+        uploaded_csv = st.file_uploader(
+            "PSD CSV",
+            type=["csv"],
+            key="supabase-psd-csv-upload",
+            label_visibility="collapsed",
+        )
+        if uploaded_csv is None:
+            return
+
+        product_handles = {item.get("shopify_handle") for item in products if item.get("shopify_handle")}
+        product_options = {
+            f"{item.get('product_title') or item.get('shopify_handle')} | {item.get('shopify_handle')}": item.get("shopify_handle")
+            for item in products
+        }
+        try:
+            csv_rows = parse_psd_csv(uploaded_csv)
+            asset_map = supabase_backend.get_product_asset_map()
+        except Exception as error:
+            st.error("Could not read the PSD CSV.")
+            st.exception(error)
+            return
+
+        matched = [row for row in csv_rows if row["shopify_handle"] in product_handles]
+        unmatched = [row for row in csv_rows if row["shopify_handle"] not in product_handles]
+        linked_psd_handles = {
+            handle
+            for handle, assets in asset_map.items()
+            if assets.get("psd_master_file")
+        }
+        missing = [item for item in products if item.get("shopify_handle") not in linked_psd_handles]
+
+        match_columns = st.columns(3)
+        match_columns[0].metric("Matched PSDs", len(matched))
+        match_columns[1].metric("Missing PSDs", len(missing))
+        match_columns[2].metric("Unmatched PSDs", len(unmatched))
+
+        if matched:
+            st.markdown("**Matched PSDs**")
+            st.dataframe(
+                [
+                    {
+                        "File Name": row["asset_name"],
+                        "Shopify Handle": row["shopify_handle"],
+                        "Drive URL": row["asset_url"],
+                    }
+                    for row in matched[:200]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            if st.button("Import matched PSD links", type="primary", use_container_width=True):
+                imported = 0
+                for row in matched:
+                    supabase_backend.upsert_product_asset(
+                        row["shopify_handle"],
+                        "psd_master_file",
+                        row["asset_url"],
+                        row["notes"],
+                        asset_name=row["asset_name"],
+                        google_drive_file_id=row["google_drive_file_id"],
+                        is_primary=True,
+                    )
+                    imported += 1
+                st.session_state.supabase_assets_notice = f"Imported {imported} matched PSD links."
+                st.rerun()
+
+        if missing:
+            st.markdown("**Missing PSDs**")
+            st.dataframe(
+                [
+                    {
+                        "Product": item.get("product_title"),
+                        "Shopify Handle": item.get("shopify_handle"),
+                    }
+                    for item in missing[:200]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+
+        if unmatched:
+            st.markdown("**Unmatched PSDs**")
+            st.dataframe(
+                [
+                    {
+                        "File Name": row["asset_name"],
+                        "Handle Guess": row["shopify_handle"],
+                        "Drive URL": row["asset_url"],
+                    }
+                    for row in unmatched[:200]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+            manual_columns = st.columns([1.4, 1.6, 1])
+            unmatched_options = [
+                f"{row['asset_name'] or row['shopify_handle']} | {index}"
+                for index, row in enumerate(unmatched)
+            ]
+            selected_unmatched = manual_columns[0].selectbox("Unmatched PSD", unmatched_options)
+            selected_index = int(selected_unmatched.rsplit("|", 1)[-1].strip())
+            selected_product_label = manual_columns[1].selectbox("Link to Shopify product", list(product_options.keys()))
+            if manual_columns[2].button("Save manual link", use_container_width=True):
+                row = unmatched[selected_index]
+                handle = product_options[selected_product_label]
+                supabase_backend.upsert_product_asset(
+                    handle,
+                    "psd_master_file",
+                    row["asset_url"],
+                    row["notes"],
+                    asset_name=row["asset_name"],
+                    google_drive_file_id=row["google_drive_file_id"],
+                    is_primary=True,
+                )
+                st.session_state.supabase_assets_notice = f"Linked {row['asset_name']} to {handle}."
+                st.rerun()
+
+
 def render_product_assets_page():
     st.title("Product Assets")
     st.caption("Store Google Drive, PSD, certificate, mockup, Shopify CDN, and Prodigi links by Shopify handle.")
@@ -3092,6 +3295,8 @@ def render_product_assets_page():
     if not products:
         st.info("No products found yet. Open Limited Editions and click Sync Shopify Products first.")
         return
+
+    render_psd_csv_import(products)
 
     with st.container(border=True):
         st.subheader("Add or Update Asset Link")
@@ -3302,6 +3507,49 @@ def render_app_errors_page():
         st.exception(error)
         return
     st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+def render_edition_integrity_check_page():
+    st.title("Edition Integrity Check")
+    st.caption("Read-only safety checks for duplicate editions, skipped numbers, counters, failed webhooks, and missing PSDs.")
+    if not supabase_backend.is_configured():
+        st.warning("Edition Integrity Check requires DATABASE_URL.")
+        return
+    st.warning("This tool does not auto-fix edition numbers. Review results before making any protected repair.")
+    if not st.button("Run Integrity Check", type="primary", use_container_width=True):
+        st.info("Click Run Integrity Check when you want to audit Supabase edition data.")
+        return
+    try:
+        with st.spinner("Checking edition integrity..."):
+            results = supabase_backend.run_integrity_check()
+    except Exception as error:
+        st.error("Could not run the integrity check.")
+        st.exception(error)
+        return
+
+    total_issues = sum(len(rows) for rows in results.values())
+    if total_issues == 0:
+        st.success("No integrity issues found.")
+        return
+    st.error(f"{total_issues} integrity issue groups/rows found. Review before sending further limited edition orders.")
+    labels = {
+        "duplicate_edition_numbers": "Duplicate edition numbers per product",
+        "skipped_edition_numbers": "Skipped edition numbers",
+        "missing_product_handle": "Edition orders missing product handle",
+        "counter_lower_than_expected": "next_edition_number lower than max assigned + 1",
+        "sold_out_not_marked": "Products sold out but not marked sold out",
+        "negative_remaining": "Products with negative remaining editions",
+        "failed_webhooks": "Failed webhook events",
+        "certificate_failures": "Certificate generation failures",
+        "missing_psd_links": "Product handles with missing PSD links",
+    }
+    for key, rows in results.items():
+        with st.expander(f"{labels.get(key, key)} ({len(rows)})", expanded=bool(rows)):
+            if rows:
+                st.dataframe(rows, use_container_width=True, hide_index=True)
+                st.caption("Repair suggestion: inspect the affected product/order records before any protected manual change.")
+            else:
+                st.success("No issues.")
 
 
 def render_certificates_page():

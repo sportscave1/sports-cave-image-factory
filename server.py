@@ -81,6 +81,23 @@ def _filtered_proxy_headers(headers):
     return {key: value for key, value in headers.items() if key.lower() not in blocked}
 
 
+async def _wait_for_streamlit(timeout_seconds=30):
+    deadline = time.monotonic() + timeout_seconds
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get(f"{STREAMLIT_HTTP_BASE}/_stcore/health")
+            if response.status_code < 500:
+                return True
+        except Exception as error:
+            last_error = error
+        await asyncio.sleep(0.5)
+    if last_error:
+        print(f"Streamlit did not become ready: {last_error}", flush=True)
+    return False
+
+
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
 async def streamlit_http_proxy(path: str, request: Request):
     query = request.url.query
@@ -89,8 +106,11 @@ async def streamlit_http_proxy(path: str, request: Request):
         target_url = f"{target_url}?{query}"
     body = await request.body()
     headers = _filtered_proxy_headers(request.headers)
-    async with httpx.AsyncClient(timeout=None, follow_redirects=False) as client:
-        upstream = await client.request(request.method, target_url, headers=headers, content=body)
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=False) as client:
+            upstream = await client.request(request.method, target_url, headers=headers, content=body)
+    except httpx.RequestError:
+        return Response("Sports Cave OS is still starting. Please refresh in a moment.", status_code=503)
     response_headers = _filtered_proxy_headers(upstream.headers)
     return Response(
         content=upstream.content,
@@ -107,27 +127,35 @@ async def streamlit_websocket_proxy(websocket: WebSocket, path: str):
     target_url = f"{STREAMLIT_WS_BASE}/{path}"
     if query:
         target_url = f"{target_url}?{query}"
-    header_pairs = [
-        (key, value)
-        for key, value in websocket.headers.items()
-        if key.lower() not in {"host", "connection", "upgrade", "sec-websocket-key", "sec-websocket-version"}
-    ]
+    header_pairs = []
+    for key, value in websocket.headers.items():
+        lower_key = key.lower()
+        if lower_key in {"host", "connection", "upgrade"} or lower_key.startswith("sec-websocket"):
+            continue
+        header_pairs.append((key, value))
     header_kwarg = (
         "additional_headers"
         if "additional_headers" in inspect.signature(websockets.connect).parameters
         else "extra_headers"
     )
     try:
-        async with websockets.connect(target_url, **{header_kwarg: header_pairs}) as upstream:
+        async with websockets.connect(
+            target_url,
+            open_timeout=10,
+            close_timeout=5,
+            ping_interval=20,
+            max_size=None,
+            **{header_kwarg: header_pairs},
+        ) as upstream:
             async def client_to_upstream():
                 while True:
                     message = await websocket.receive()
                     if message["type"] == "websocket.disconnect":
                         await upstream.close()
                         break
-                    if "text" in message:
+                    if message.get("text") is not None:
                         await upstream.send(message["text"])
-                    elif "bytes" in message:
+                    elif message.get("bytes") is not None:
                         await upstream.send(message["bytes"])
 
             async def upstream_to_client():
@@ -194,7 +222,7 @@ def stop_streamlit(process):
 if __name__ == "__main__":
     _streamlit_process = start_streamlit()
     try:
-        time.sleep(float(os.getenv("STREAMLIT_BOOT_SECONDS", "2")))
+        asyncio.run(_wait_for_streamlit(float(os.getenv("STREAMLIT_BOOT_TIMEOUT_SECONDS", "30"))))
         uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8500")))
     finally:
         stop_streamlit(_streamlit_process)

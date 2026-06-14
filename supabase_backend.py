@@ -3,6 +3,7 @@ import gc
 import io
 import json
 import os
+import re
 from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -64,6 +65,7 @@ def _database_url_with_ssl():
     parsed = urlparse(url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     query.setdefault("sslmode", "require")
+    query.setdefault("connect_timeout", "5")
     return urlunparse(parsed._replace(query=urlencode(query)))
 
 
@@ -75,7 +77,12 @@ def connect():
         raise RuntimeError(
             "Postgres support is not installed. Add psycopg[binary] to requirements.txt."
         ) from error
-    return psycopg.connect(_database_url_with_ssl(), row_factory=dict_row)
+    return psycopg.connect(
+        _database_url_with_ssl(),
+        row_factory=dict_row,
+        connect_timeout=5,
+        options="-c statement_timeout=8000 -c idle_in_transaction_session_timeout=8000",
+    )
 
 
 def json_dumps(value):
@@ -228,8 +235,11 @@ def ensure_schema():
                     id BIGSERIAL PRIMARY KEY,
                     shopify_handle TEXT,
                     asset_type TEXT,
+                    asset_name TEXT,
                     asset_url TEXT,
+                    google_drive_file_id TEXT,
                     notes TEXT,
+                    is_primary BOOLEAN DEFAULT TRUE,
                     updated_at TIMESTAMPTZ DEFAULT now(),
                     UNIQUE (shopify_handle, asset_type)
                 )
@@ -361,8 +371,11 @@ def ensure_schema():
                 "product_assets": (
                     ("shopify_handle", "TEXT"),
                     ("asset_type", "TEXT"),
+                    ("asset_name", "TEXT"),
                     ("asset_url", "TEXT"),
+                    ("google_drive_file_id", "TEXT"),
                     ("notes", "TEXT"),
+                    ("is_primary", "BOOLEAN DEFAULT TRUE"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "webhook_events": (
@@ -618,6 +631,11 @@ def list_edition_products(search="", limit=500):
                 cur.execute(
                     """
                     SELECT ep.*, sp.admin_url, sp.online_store_url,
+                           (
+                               SELECT MAX(eo.edition_number)
+                               FROM edition_orders eo
+                               WHERE eo.shopify_handle = ep.shopify_handle
+                           ) AS last_assigned_edition,
                            GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
                     FROM edition_products ep
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
@@ -632,6 +650,11 @@ def list_edition_products(search="", limit=500):
                 cur.execute(
                     """
                     SELECT ep.*, sp.admin_url, sp.online_store_url,
+                           (
+                               SELECT MAX(eo.edition_number)
+                               FROM edition_orders eo
+                               WHERE eo.shopify_handle = ep.shopify_handle
+                           ) AS last_assigned_edition,
                            GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
                     FROM edition_products ep
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
@@ -674,7 +697,7 @@ def get_product_asset_map():
     ensure_schema()
     with connect() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT shopify_handle, asset_type, asset_url FROM product_assets")
+            cur.execute("SELECT shopify_handle, asset_type, asset_url FROM product_assets WHERE is_primary IS DISTINCT FROM FALSE")
             rows = cur.fetchall()
     result = {}
     for row in rows:
@@ -691,7 +714,8 @@ def list_product_assets(search=""):
                 cur.execute(
                     """
                     SELECT ep.shopify_handle, ep.product_title, ep.active, ep.sold_out,
-                           pa.asset_type, pa.asset_url, pa.notes, pa.updated_at
+                           pa.asset_type, pa.asset_name, pa.asset_url, pa.google_drive_file_id,
+                           pa.notes, pa.is_primary, pa.updated_at
                     FROM edition_products ep
                     LEFT JOIN product_assets pa ON pa.shopify_handle = ep.shopify_handle
                     WHERE LOWER(COALESCE(ep.product_title, '')) LIKE %s
@@ -704,7 +728,8 @@ def list_product_assets(search=""):
                 cur.execute(
                     """
                     SELECT ep.shopify_handle, ep.product_title, ep.active, ep.sold_out,
-                           pa.asset_type, pa.asset_url, pa.notes, pa.updated_at
+                           pa.asset_type, pa.asset_name, pa.asset_url, pa.google_drive_file_id,
+                           pa.notes, pa.is_primary, pa.updated_at
                     FROM edition_products ep
                     LEFT JOIN product_assets pa ON pa.shopify_handle = ep.shopify_handle
                     ORDER BY ep.product_title NULLS LAST, pa.asset_type
@@ -713,22 +738,46 @@ def list_product_assets(search=""):
             return cur.fetchall()
 
 
-def upsert_product_asset(shopify_handle, asset_type, asset_url, notes=""):
+def upsert_product_asset(
+    shopify_handle,
+    asset_type,
+    asset_url,
+    notes="",
+    *,
+    asset_name="",
+    google_drive_file_id="",
+    is_primary=None,
+):
     ensure_schema()
     if asset_type not in ASSET_TYPES:
         raise ValueError("Unsupported asset type.")
+    primary_value = asset_type == "psd_master_file" if is_primary is None else bool(is_primary)
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO product_assets(shopify_handle, asset_type, asset_url, notes, updated_at)
-                VALUES (%s, %s, %s, %s, now())
+                INSERT INTO product_assets(
+                    shopify_handle, asset_type, asset_name, asset_url,
+                    google_drive_file_id, notes, is_primary, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (shopify_handle, asset_type) DO UPDATE SET
+                    asset_name=EXCLUDED.asset_name,
                     asset_url=EXCLUDED.asset_url,
+                    google_drive_file_id=EXCLUDED.google_drive_file_id,
                     notes=EXCLUDED.notes,
+                    is_primary=EXCLUDED.is_primary,
                     updated_at=now()
                 """,
-                (shopify_handle, asset_type, asset_url, notes),
+                (
+                    shopify_handle,
+                    asset_type,
+                    asset_name,
+                    asset_url,
+                    google_drive_file_id,
+                    notes,
+                    primary_value,
+                ),
             )
         conn.commit()
 
@@ -866,6 +915,20 @@ def _insert_product_if_fetched(cur, product):
     return cur.fetchone()
 
 
+def resolve_product_for_line(line_item, *, fetch_missing_products=True):
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            product = _lookup_product_by_handle_or_id(cur, line_item)
+    if product or not fetch_missing_products or not line_item.get("shopify_product_id"):
+        return product
+    fetched = shopify_sync.fetch_product_by_shopify_id(line_item["shopify_product_id"])
+    upsert_products([fetched])
+    with connect() as conn:
+        with conn.cursor() as cur:
+            return _lookup_product_by_handle_or_id(cur, line_item)
+
+
 def _generate_certificate_for_assignment(cur, assignment):
     local_file_path = ""
     try:
@@ -912,6 +975,202 @@ def _generate_certificate_for_assignment(cur, assignment):
     return local_file_path
 
 
+def allocate_edition_for_order_line(
+    *,
+    shopify_order_id,
+    shopify_order_name,
+    shopify_line_item_id,
+    allocation_index,
+    shopify_handle,
+    product_title,
+    variant_title="",
+    sku="",
+    shopify_product_id="",
+    customer_name="",
+    customer_email="",
+):
+    ensure_schema()
+    if not shopify_handle:
+        raise ValueError("Shopify handle is required for edition allocation.")
+    if not shopify_order_id:
+        raise ValueError("Shopify order ID is required for edition allocation.")
+    if not shopify_line_item_id:
+        raise ValueError("Shopify line item ID is required for edition allocation.")
+
+    with connect() as conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT eo.*, o.order_name
+                    FROM edition_orders eo
+                    LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+                    WHERE eo.shopify_order_id=%s
+                      AND eo.shopify_line_item_id=%s
+                      AND eo.allocation_index=%s
+                    """,
+                    (shopify_order_id, shopify_line_item_id, allocation_index),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    conn.commit()
+                    return {"created": False, "assignment": existing, "sold_out": False, "error": ""}
+
+                cur.execute(
+                    """
+                    INSERT INTO edition_products(
+                        shopify_product_id, shopify_handle, product_title,
+                        edition_total, next_edition_number, active, sold_out, updated_at
+                    )
+                    VALUES (%s, %s, %s, 100, 1, TRUE, FALSE, now())
+                    ON CONFLICT (shopify_handle) DO UPDATE SET
+                        shopify_product_id=COALESCE(EXCLUDED.shopify_product_id, edition_products.shopify_product_id),
+                        product_title=COALESCE(EXCLUDED.product_title, edition_products.product_title),
+                        updated_at=now()
+                    """,
+                    (shopify_product_id, shopify_handle, product_title),
+                )
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM edition_products
+                    WHERE shopify_handle=%s
+                    FOR UPDATE
+                    """,
+                    (shopify_handle,),
+                )
+                edition_product = cur.fetchone()
+                next_number = int(edition_product.get("next_edition_number") or 1)
+                edition_total = int(edition_product.get("edition_total") or 100)
+
+                if next_number > edition_total:
+                    cur.execute(
+                        """
+                        UPDATE edition_products
+                        SET sold_out=TRUE, updated_at=now()
+                        WHERE shopify_handle=%s
+                        """,
+                        (shopify_handle,),
+                    )
+                    message = (
+                        f"{shopify_handle} is sold out. Could not allocate edition "
+                        f"{next_number}/{edition_total}."
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO app_errors(error_type, message, context)
+                        VALUES ('sold_out_allocation_blocked', %s, %s::jsonb)
+                        """,
+                        (
+                            message,
+                            json_dumps(
+                                {
+                                    "shopify_order_id": shopify_order_id,
+                                    "shopify_line_item_id": shopify_line_item_id,
+                                    "allocation_index": allocation_index,
+                                    "shopify_handle": shopify_handle,
+                                }
+                            ),
+                        ),
+                    )
+                    conn.commit()
+                    return {"created": False, "assignment": None, "sold_out": True, "error": message}
+
+                cur.execute(
+                    """
+                    INSERT INTO edition_orders(
+                        shopify_order_id, shopify_line_item_id, shopify_product_id, shopify_handle,
+                        product_title, variant_title, sku, customer_name, customer_email,
+                        edition_number, edition_total, allocation_index, assigned_at, certificate_status
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), 'Certificate Missing')
+                    ON CONFLICT DO NOTHING
+                    RETURNING id, shopify_order_id, shopify_line_item_id, shopify_product_id,
+                              shopify_handle, product_title, variant_title, sku, customer_name,
+                              customer_email, edition_number, edition_total, allocation_index,
+                              assigned_at, certificate_status
+                    """,
+                    (
+                        shopify_order_id,
+                        shopify_line_item_id,
+                        shopify_product_id,
+                        shopify_handle,
+                        product_title,
+                        variant_title,
+                        sku,
+                        customer_name,
+                        customer_email,
+                        next_number,
+                        edition_total,
+                        allocation_index,
+                    ),
+                )
+                inserted = cur.fetchone()
+                if not inserted:
+                    cur.execute(
+                        """
+                        SELECT eo.*, o.order_name
+                        FROM edition_orders eo
+                        LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+                        WHERE eo.shopify_order_id=%s
+                          AND eo.shopify_line_item_id=%s
+                          AND eo.allocation_index=%s
+                        """,
+                        (shopify_order_id, shopify_line_item_id, allocation_index),
+                    )
+                    existing_after_conflict = cur.fetchone()
+                    if existing_after_conflict:
+                        conn.commit()
+                        return {
+                            "created": False,
+                            "assignment": existing_after_conflict,
+                            "sold_out": False,
+                            "error": "",
+                        }
+                    message = (
+                        f"Edition allocation conflict for {shopify_handle} "
+                        f"#{next_number}/{edition_total}."
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO app_errors(error_type, message, context)
+                        VALUES ('edition_allocation_conflict', %s, %s::jsonb)
+                        """,
+                        (
+                            message,
+                            json_dumps(
+                                {
+                                    "shopify_order_id": shopify_order_id,
+                                    "shopify_line_item_id": shopify_line_item_id,
+                                    "allocation_index": allocation_index,
+                                    "shopify_handle": shopify_handle,
+                                    "edition_number": next_number,
+                                }
+                            ),
+                        ),
+                    )
+                    conn.commit()
+                    return {"created": False, "assignment": None, "sold_out": False, "error": message}
+
+                incremented_next = next_number + 1
+                cur.execute(
+                    """
+                    UPDATE edition_products
+                    SET next_edition_number=%s,
+                        sold_out=%s,
+                        updated_at=now()
+                    WHERE shopify_handle=%s
+                    """,
+                    (incremented_next, incremented_next > edition_total, shopify_handle),
+                )
+                inserted["order_name"] = shopify_order_name
+                conn.commit()
+                return {"created": True, "assignment": inserted, "sold_out": False, "error": ""}
+        except Exception:
+            conn.rollback()
+            raise
+
+
 def process_paid_order(order, *, fetch_missing_products=True):
     ensure_schema()
     if not order.get("shopify_order_id"):
@@ -926,174 +1185,77 @@ def process_paid_order(order, *, fetch_missing_products=True):
                 customer = _customer_from_order(order)
                 _upsert_customer(cur, customer)
                 _upsert_order(cur, order)
-
-                financial_status = str(order.get("financial_status") or "").upper()
-                if financial_status and financial_status not in {"PAID", "PARTIALLY_PAID"}:
-                    conn.commit()
-                    return {
-                        "assignments_created": 0,
-                        "generated_certificates": 0,
-                        "changed_handles": [],
-                        "errors": [],
-                    }
-
-                for line_index, line_item in enumerate(order.get("line_items") or [], start=1):
-                    quantity = max(1, int(line_item.get("quantity") or 1))
-                    line_item_id = str(
-                        line_item.get("shopify_line_item_id")
-                        or f"{order['shopify_order_id']}:line:{line_index}"
-                    )
-                    product = _lookup_product_by_handle_or_id(cur, line_item)
-                    if not product and fetch_missing_products and line_item.get("shopify_product_id"):
-                        try:
-                            fetched = shopify_sync.fetch_product_by_shopify_id(line_item["shopify_product_id"])
-                            product = _insert_product_if_fetched(cur, fetched)
-                        except Exception as error:
-                            errors.append(f"Product fetch failed for {line_item.get('product_title')}: {error}")
-
-                    handle = (product or {}).get("handle") or line_item.get("product_handle") or ""
-                    if not handle:
-                        errors.append(f"Missing product handle for line item {line_item_id}.")
-                        continue
-                    product_title = (
-                        (product or {}).get("title")
-                        or line_item.get("product_title")
-                        or "Sports Cave Artwork"
-                    )
-                    cur.execute(
-                        """
-                        INSERT INTO edition_products(
-                            shopify_product_id, shopify_handle, product_title,
-                            edition_total, next_edition_number, active, sold_out, updated_at
-                        )
-                        VALUES (%s, %s, %s, 100, 1, TRUE, FALSE, now())
-                        ON CONFLICT (shopify_handle) DO UPDATE SET
-                            shopify_product_id=COALESCE(EXCLUDED.shopify_product_id, edition_products.shopify_product_id),
-                            product_title=COALESCE(EXCLUDED.product_title, edition_products.product_title),
-                            updated_at=now()
-                        """,
-                        ((product or {}).get("shopify_product_id") or line_item.get("shopify_product_id"), handle, product_title),
-                    )
-                    cur.execute(
-                        """
-                        SELECT *
-                        FROM edition_products
-                        WHERE shopify_handle=%s
-                        FOR UPDATE
-                        """,
-                        (handle,),
-                    )
-                    edition_product = cur.fetchone()
-                    if not edition_product:
-                        errors.append(f"Edition product missing for {handle}.")
-                        continue
-
-                    cur.execute(
-                        """
-                        SELECT COUNT(*) AS count
-                        FROM edition_orders
-                        WHERE shopify_line_item_id=%s
-                        """,
-                        (line_item_id,),
-                    )
-                    existing_count = int((cur.fetchone() or {}).get("count") or 0)
-                    if existing_count >= quantity:
-                        continue
-
-                    next_number = int(edition_product.get("next_edition_number") or 1)
-                    edition_total = int(edition_product.get("edition_total") or 100)
-                    for allocation_index in range(existing_count + 1, quantity + 1):
-                        if next_number > edition_total:
-                            cur.execute(
-                                """
-                                UPDATE edition_products
-                                SET sold_out=TRUE, updated_at=now()
-                                WHERE shopify_handle=%s
-                                """,
-                                (handle,),
-                            )
-                            message = f"{handle} is sold out. Could not allocate edition {next_number}/{edition_total}."
-                            errors.append(message)
-                            cur.execute(
-                                """
-                                INSERT INTO app_errors(error_type, message, context)
-                                VALUES ('sold_out_allocation_blocked', %s, %s::jsonb)
-                                """,
-                                (
-                                    message,
-                                    json_dumps(
-                                        {
-                                            "shopify_order_id": order.get("shopify_order_id"),
-                                            "shopify_line_item_id": line_item_id,
-                                            "shopify_handle": handle,
-                                        }
-                                    ),
-                                ),
-                            )
-                            break
-
-                        cur.execute(
-                            """
-                            INSERT INTO edition_orders(
-                                shopify_order_id, shopify_line_item_id, shopify_product_id, shopify_handle,
-                                product_title, variant_title, sku, customer_name, customer_email,
-                                edition_number, edition_total, allocation_index, assigned_at, certificate_status
-                            )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), 'Certificate Missing')
-                            ON CONFLICT (shopify_line_item_id, allocation_index) DO NOTHING
-                            RETURNING id, shopify_order_id, shopify_handle, product_title, edition_number,
-                                      edition_total, customer_name, assigned_at
-                            """,
-                            (
-                                order.get("shopify_order_id"),
-                                line_item_id,
-                                (product or {}).get("shopify_product_id") or line_item.get("shopify_product_id"),
-                                handle,
-                                product_title,
-                                line_item.get("variant_title"),
-                                line_item.get("sku"),
-                                order.get("customer_name") or order.get("customer_email") or "",
-                                order.get("customer_email") or "",
-                                next_number,
-                                edition_total,
-                                allocation_index,
-                            ),
-                        )
-                        inserted = cur.fetchone()
-                        if inserted:
-                            inserted["order_name"] = order.get("order_name")
-                            try:
-                                _generate_certificate_for_assignment(cur, inserted)
-                                generated_certificates += 1
-                            except Exception as error:
-                                errors.append(f"Certificate generation failed for {handle} #{next_number}: {error}")
-                                cur.execute(
-                                    """
-                                    INSERT INTO app_errors(error_type, message, context)
-                                    VALUES ('certificate_generation_failed', %s, %s::jsonb)
-                                    """,
-                                    (
-                                        str(error),
-                                        json_dumps({"edition_order_id": inserted["id"], "shopify_handle": handle}),
-                                    ),
-                                )
-                            assignments_created += 1
-                            changed_handles.add(handle)
-                            next_number += 1
-                            cur.execute(
-                                """
-                                UPDATE edition_products
-                                SET next_edition_number=%s,
-                                    sold_out=%s,
-                                    updated_at=now()
-                                WHERE shopify_handle=%s
-                                """,
-                                (next_number, next_number > edition_total, handle),
-                            )
                 conn.commit()
         except Exception:
             conn.rollback()
             raise
+
+    financial_status = str(order.get("financial_status") or "").upper()
+    if financial_status and financial_status not in {"PAID", "PARTIALLY_PAID"}:
+        return {
+            "assignments_created": 0,
+            "generated_certificates": 0,
+            "changed_handles": [],
+            "errors": [],
+        }
+
+    new_assignments = []
+    for line_index, line_item in enumerate(order.get("line_items") or [], start=1):
+        quantity = max(1, int(line_item.get("quantity") or 1))
+        line_item_id = str(
+            line_item.get("shopify_line_item_id")
+            or f"{order['shopify_order_id']}:line:{line_index}"
+        )
+        try:
+            product = resolve_product_for_line(line_item, fetch_missing_products=fetch_missing_products)
+        except Exception as error:
+            product = None
+            errors.append(f"Product fetch failed for {line_item.get('product_title')}: {error}")
+
+        handle = (product or {}).get("handle") or line_item.get("product_handle") or ""
+        if not handle:
+            errors.append(f"Missing product handle for line item {line_item_id}.")
+            continue
+        product_title = (product or {}).get("title") or line_item.get("product_title") or "Sports Cave Artwork"
+        product_id = (product or {}).get("shopify_product_id") or line_item.get("shopify_product_id") or ""
+
+        for allocation_index in range(1, quantity + 1):
+            result = allocate_edition_for_order_line(
+                shopify_order_id=order.get("shopify_order_id"),
+                shopify_order_name=order.get("order_name"),
+                shopify_line_item_id=line_item_id,
+                allocation_index=allocation_index,
+                shopify_handle=handle,
+                shopify_product_id=product_id,
+                product_title=product_title,
+                variant_title=line_item.get("variant_title") or "",
+                sku=line_item.get("sku") or "",
+                customer_name=order.get("customer_name") or order.get("customer_email") or "",
+                customer_email=order.get("customer_email") or "",
+            )
+            if result.get("error"):
+                errors.append(result["error"])
+            assignment = result.get("assignment")
+            if result.get("created") and assignment:
+                assignments_created += 1
+                changed_handles.add(handle)
+                new_assignments.append(assignment)
+
+    for assignment in new_assignments:
+        try:
+            generate_certificate_for_edition_order(assignment["id"])
+            generated_certificates += 1
+        except Exception as error:
+            errors.append(
+                f"Certificate generation failed for {assignment.get('shopify_handle')} "
+                f"#{assignment.get('edition_number')}: {error}"
+            )
+            log_app_error(
+                "certificate_generation_failed",
+                str(error),
+                {"edition_order_id": assignment.get("id"), "shopify_handle": assignment.get("shopify_handle")},
+            )
+
     for message in errors:
         log_app_error("order_processing_warning", message, {"shopify_order_id": order.get("shopify_order_id")})
     return {
@@ -1266,7 +1428,7 @@ def list_orders(search="", sort="Date newest", limit=250):
         FROM shopify_orders o
         LEFT JOIN edition_orders eo ON eo.shopify_order_id = o.shopify_order_id
         LEFT JOIN certificates c ON c.edition_order_id = eo.id
-        LEFT JOIN product_assets psd ON psd.shopify_handle = eo.shopify_handle AND psd.asset_type = 'psd_master_file'
+        LEFT JOIN product_assets psd ON psd.shopify_handle = eo.shopify_handle AND psd.asset_type = 'psd_master_file' AND psd.is_primary IS DISTINCT FROM FALSE
         LEFT JOIN product_assets prodigi ON prodigi.shopify_handle = eo.shopify_handle AND prodigi.asset_type = 'prodigi_link'
     """
     where = ""
@@ -1308,7 +1470,7 @@ def get_order_summary():
                      LEFT JOIN certificates c ON c.edition_order_id=eo.id
                      WHERE c.id IS NULL) AS certificates_missing,
                     (SELECT COUNT(*) FROM edition_orders eo
-                     LEFT JOIN product_assets pa ON pa.shopify_handle=eo.shopify_handle AND pa.asset_type='psd_master_file'
+                     LEFT JOIN product_assets pa ON pa.shopify_handle=eo.shopify_handle AND pa.asset_type='psd_master_file' AND pa.is_primary IS DISTINCT FROM FALSE
                      WHERE COALESCE(pa.asset_url, '')='') AS psd_links_missing,
                     (SELECT COUNT(*) FROM edition_orders eo
                      LEFT JOIN product_assets pa ON pa.shopify_handle=eo.shopify_handle AND pa.asset_type='prodigi_link'
@@ -1332,6 +1494,7 @@ def get_dashboard_summary():
                         SELECT 1 FROM product_assets pa
                         WHERE pa.shopify_handle=ep.shopify_handle
                           AND pa.asset_type='psd_master_file'
+                          AND pa.is_primary IS DISTINCT FROM FALSE
                           AND COALESCE(pa.asset_url, '') <> ''
                      )) AS missing_psd,
                     (SELECT COUNT(*) FROM edition_orders WHERE certificate_status <> 'Certificate Ready') AS certificates_missing,
@@ -1476,6 +1639,123 @@ def list_app_errors(limit=200):
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM app_errors ORDER BY created_at DESC LIMIT %s", (limit,))
             return cur.fetchall()
+
+
+def run_integrity_check():
+    ensure_schema()
+    results = {}
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT shopify_handle, edition_number, COUNT(*) AS count
+                FROM edition_orders
+                GROUP BY shopify_handle, edition_number
+                HAVING COUNT(*) > 1
+                ORDER BY shopify_handle, edition_number
+                """
+            )
+            results["duplicate_edition_numbers"] = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT eo.*
+                FROM edition_orders eo
+                WHERE COALESCE(eo.shopify_handle, '') = ''
+                ORDER BY eo.assigned_at DESC
+                """
+            )
+            results["missing_product_handle"] = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT ep.shopify_handle, ep.product_title, ep.next_edition_number,
+                       COALESCE(MAX(eo.edition_number), 0) AS max_assigned,
+                       COALESCE(MAX(eo.edition_number), 0) + 1 AS expected_next
+                FROM edition_products ep
+                LEFT JOIN edition_orders eo ON eo.shopify_handle = ep.shopify_handle
+                GROUP BY ep.shopify_handle, ep.product_title, ep.next_edition_number
+                HAVING COALESCE(ep.next_edition_number, 1) < COALESCE(MAX(eo.edition_number), 0) + 1
+                ORDER BY ep.shopify_handle
+                """
+            )
+            results["counter_lower_than_expected"] = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT ep.shopify_handle, ep.product_title, ep.edition_total, ep.next_edition_number
+                FROM edition_products ep
+                WHERE COALESCE(ep.next_edition_number, 1) > COALESCE(ep.edition_total, 100)
+                  AND COALESCE(ep.sold_out, FALSE) = FALSE
+                ORDER BY ep.shopify_handle
+                """
+            )
+            results["sold_out_not_marked"] = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT ep.shopify_handle, ep.product_title, ep.edition_total, ep.next_edition_number
+                FROM edition_products ep
+                WHERE COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1 < 0
+                ORDER BY ep.shopify_handle
+                """
+            )
+            results["negative_remaining"] = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT *
+                FROM webhook_events
+                WHERE status ILIKE '%fail%' OR COALESCE(error_message, '') <> ''
+                ORDER BY received_at DESC
+                LIMIT 100
+                """
+            )
+            results["failed_webhooks"] = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT *
+                FROM app_errors
+                WHERE error_type ILIKE '%certificate%'
+                ORDER BY created_at DESC
+                LIMIT 100
+                """
+            )
+            results["certificate_failures"] = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT ep.shopify_handle, ep.product_title
+                FROM edition_products ep
+                LEFT JOIN product_assets pa
+                  ON pa.shopify_handle=ep.shopify_handle
+                 AND pa.asset_type='psd_master_file'
+                 AND pa.is_primary IS DISTINCT FROM FALSE
+                WHERE COALESCE(pa.asset_url, '') = ''
+                ORDER BY ep.product_title NULLS LAST, ep.shopify_handle
+                """
+            )
+            results["missing_psd_links"] = cur.fetchall()
+
+            cur.execute(
+                """
+                WITH ordered AS (
+                    SELECT shopify_handle,
+                           edition_number,
+                           LAG(edition_number) OVER (PARTITION BY shopify_handle ORDER BY edition_number) AS previous_number
+                    FROM edition_orders
+                    WHERE edition_number IS NOT NULL
+                )
+                SELECT shopify_handle, previous_number, edition_number
+                FROM ordered
+                WHERE previous_number IS NOT NULL
+                  AND edition_number <> previous_number + 1
+                ORDER BY shopify_handle, edition_number
+                """
+            )
+            results["skipped_edition_numbers"] = cur.fetchall()
+    return results
 
 
 def export_orders_csv(rows):
