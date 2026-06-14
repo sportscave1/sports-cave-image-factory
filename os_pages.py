@@ -484,12 +484,18 @@ def render_shopify_scope_diagnostics(config, key_prefix):
             if scopes:
                 st.caption("Returned scopes: " + ", ".join(scopes))
                 scope_status = result.get("scope_status") or {}
-                scope_columns = st.columns(4)
-                for index, scope_name in enumerate(("read_orders", "read_products", "read_customers", "write_files")):
+                scope_columns = st.columns(3)
+                for index, scope_name in enumerate(
+                    ("read_products", "write_products", "read_orders", "write_orders", "read_customers", "write_files")
+                ):
                     if scope_status.get(scope_name):
-                        scope_columns[index].success(scope_name)
+                        scope_columns[index % len(scope_columns)].success(scope_name)
                     else:
-                        scope_columns[index].warning(f"{scope_name} missing")
+                        scope_columns[index % len(scope_columns)].warning(f"{scope_name} missing")
+                if not scope_status.get("write_orders"):
+                    st.warning("write_orders is required to save certificate metafields back to Shopify orders.")
+                if not scope_status.get("write_files"):
+                    st.warning("write_files is required to upload certificate PDFs to Shopify Files.")
             else:
                 st.caption("Scope list is unavailable for the legacy admin token fallback.")
         except Exception as error:
@@ -2253,7 +2259,7 @@ def render_supabase_limited_editions_page():
         key="supabase-limited-search",
         label_visibility="collapsed",
     )
-    actions = st.columns([1.2, 1, 1, 2])
+    actions = st.columns([1.15, 1.25, 0.9, 1, 1.35])
     if actions[0].button("Sync Products", type="primary", disabled=not config["configured"], use_container_width=True):
         progress = st.progress(0, text="Loading Shopify products...")
         try:
@@ -2265,8 +2271,13 @@ def render_supabase_limited_editions_page():
                 progress_callback=update_product_progress,
             )
             progress.progress(1.0, text="Shopify product sync complete.")
+            warning_suffix = ""
+            if result.get("metafield_errors"):
+                warning_suffix = f" Metafield sync warnings: {len(result['metafield_errors'])}."
             st.session_state.supabase_limited_notice = (
-                f"Synced {result['products_processed']} active Shopify products into Supabase."
+                f"Synced {result['products_processed']} active Shopify products into Supabase. "
+                f"Updated {result.get('metafields_synced', 0)} Shopify edition display records."
+                f"{warning_suffix}"
             )
             st.rerun()
         except Exception as error:
@@ -2277,7 +2288,41 @@ def render_supabase_limited_editions_page():
                 str(error),
                 {"source": "limited_editions_page"},
             )
-    actions[1].caption("Shopify connection: " + ("Configured" if config["configured"] else "Missing"))
+    if actions[1].button(
+        "Sync Edition Display",
+        disabled=not config["configured"],
+        use_container_width=True,
+    ):
+        progress = st.progress(0, text="Preparing edition display sync...")
+        try:
+            def update_metafield_progress(index, total, handle):
+                progress.progress(
+                    min(index / max(total, 1), 1.0),
+                    text=f"Updating {index} of {total} products...",
+                )
+
+            result = supabase_backend.sync_all_product_edition_metafields(
+                config=config,
+                search=search,
+                limit=1000,
+                progress_callback=update_metafield_progress,
+            )
+            progress.progress(1.0, text="Edition display sync complete.")
+            if result.get("errors"):
+                st.session_state.supabase_limited_warning = (
+                    f"Synced {result['synced']} of {result['attempted']} products. "
+                    f"First issue: {result['errors'][0]}"
+                )
+            else:
+                st.session_state.supabase_limited_notice = (
+                    f"Synced edition display metafields for {result['synced']} products."
+                )
+            st.rerun()
+        except Exception as error:
+            progress.empty()
+            st.error("Could not sync edition display to Shopify.")
+            st.exception(error)
+    actions[2].caption("Shopify connection: " + ("Configured" if config["configured"] else "Missing"))
 
     try:
         products = supabase_backend.list_edition_products(search=search, limit=1000)
@@ -2287,20 +2332,109 @@ def render_supabase_limited_editions_page():
         st.exception(error)
         return
 
-    actions[2].download_button(
+    actions[3].download_button(
         "Export CSV",
         data=supabase_backend.export_products_csv(products),
         file_name="sports-cave-supabase-limited-editions.csv",
         mime="text/csv",
         use_container_width=True,
     )
-    actions[3].caption(f"{len(products)} products shown")
+    actions[4].caption(f"{len(products)} products shown")
 
     metrics = st.columns(4)
     metrics[0].metric("Products", len(products))
     metrics[1].metric("Active", sum(1 for item in products if item.get("active")))
     metrics[2].metric("Sold out", sum(1 for item in products if item.get("sold_out")))
     metrics[3].metric("Remaining total", sum(int(item.get("remaining_editions") or 0) for item in products))
+
+    with st.expander("Widget Status", expanded=False):
+        st.caption("Test one product's Supabase edition data, Shopify metafields, and storefront widget text.")
+        if not products:
+            st.info("Sync Shopify products first.")
+        else:
+            status_rows = []
+            for item in products[:200]:
+                display_text = (
+                    item.get("edition_display_text")
+                    or supabase_backend.calculate_product_edition_metafield_values(item).get("edition_display_text")
+                )
+                status_rows.append(
+                    {
+                        "Product": item.get("product_title") or item.get("shopify_handle"),
+                        "Handle": item.get("shopify_handle"),
+                        "Shopify product synced": "Yes" if item.get("shopify_product_id") or item.get("shopify_product_gid") else "No",
+                        "Product metafields synced": item.get("metafields_sync_status") or "Never Synced",
+                        "Widget text": display_text,
+                        "Last sync": format_updated_at(item.get("metafields_synced_at")),
+                    }
+                )
+            st.dataframe(status_rows, use_container_width=True, hide_index=True)
+            widget_options = [
+                f"{item.get('product_title') or item.get('shopify_handle')} | {item.get('shopify_handle')}"
+                for item in products
+                if item.get("shopify_handle")
+            ]
+            selected_widget = st.selectbox(
+                "Product",
+                widget_options,
+                key="supabase-widget-status-product",
+            )
+            selected_widget_handle = selected_widget.rsplit("|", 1)[-1].strip()
+            try:
+                payload = supabase_backend.get_product_edition_metafield_payload(selected_widget_handle)
+            except Exception as error:
+                st.error("Could not calculate widget payload.")
+                st.exception(error)
+                payload = None
+            if payload:
+                status_columns = st.columns(4)
+                status_columns[0].metric("Shopify product synced", "Yes" if payload.get("shopify_product_id") else "No")
+                status_columns[1].metric(
+                    "Product metafields",
+                    "Synced" if payload.get("metafields_sync_status") == "Synced" else payload.get("metafields_sync_status") or "Never",
+                )
+                status_columns[2].metric("Next edition", payload.get("next_edition_number") or 1)
+                status_columns[3].metric("Remaining", payload.get("remaining_count") or 0)
+                st.markdown("**Preview Widget Text**")
+                st.code(payload.get("edition_display_text") or "Numbered Edition of 100", language="text")
+                action_columns = st.columns([1, 1, 2])
+                if action_columns[0].button(
+                    "Sync This Product",
+                    disabled=not config["configured"],
+                    key="supabase-widget-sync-one",
+                    use_container_width=True,
+                ):
+                    try:
+                        result = supabase_backend.sync_product_edition_metafields(
+                            selected_widget_handle,
+                            config=config,
+                        )
+                        st.success(
+                            f"Synced {result.get('count', 0)} metafields for {selected_widget_handle}."
+                        )
+                    except Exception as error:
+                        st.error("Could not sync this product to Shopify.")
+                        st.exception(error)
+                if action_columns[1].button(
+                    "Query Shopify",
+                    disabled=not config["configured"],
+                    key="supabase-widget-query-one",
+                    use_container_width=True,
+                ):
+                    try:
+                        remote = shopify_sync.fetch_metafields(
+                            payload["shopify_product_id"],
+                            namespace="sports_cave",
+                            config=config,
+                        )
+                        st.dataframe(remote["metafields"], use_container_width=True, hide_index=True)
+                    except Exception as error:
+                        st.error("Could not query Shopify product metafields.")
+                        st.exception(error)
+                if payload.get("online_store_url"):
+                    action_columns[2].link_button("Open Live Product", payload["online_store_url"], use_container_width=True)
+                elif payload.get("admin_url"):
+                    action_columns[2].link_button("Open Shopify Product", payload["admin_url"], use_container_width=True)
 
     with st.expander("Edit edition total or active status", expanded=False):
         if products:
@@ -2327,7 +2461,14 @@ def render_supabase_limited_editions_page():
                     edition_total=new_total,
                     active=new_active,
                 )
-                st.session_state.supabase_limited_notice = "Edition settings saved."
+                sync_note = ""
+                if config["configured"]:
+                    try:
+                        supabase_backend.sync_product_edition_metafields(selected_handle, config=config)
+                        sync_note = " Shopify edition display updated."
+                    except Exception as error:
+                        sync_note = f" Shopify edition display sync failed: {error}"
+                st.session_state.supabase_limited_notice = f"Edition settings saved.{sync_note}"
                 st.rerun()
         else:
             st.caption("Sync Shopify products first.")
@@ -5054,11 +5195,39 @@ def render_settings_page(app_version, database_path, password_status):
                 st.caption("No edition orders are available for certificate generation testing yet.")
 
     with st.expander("Developer Tools", expanded=False):
-        dev_tabs = st.tabs(["Shopify Diagnostics", "Import PSD CSV", "Certificates"])
+        dev_tabs = st.tabs(["Shopify Diagnostics", "Metafield Bridge", "Import PSD CSV", "Certificates"])
         with dev_tabs[0]:
             st.caption("Manual Shopify connection check. This only runs a token/API test when you click the button.")
             render_shopify_scope_diagnostics(shopify_config, "settings-dev")
         with dev_tabs[1]:
+            st.caption("Supabase is the source of truth. Shopify product/order metafields are display and customer-account bridges.")
+            snippet_path = Path("shopify/snippets/sports-cave-edition-widget.liquid")
+            bridge_columns = st.columns(3)
+            bridge_columns[0].markdown("**Product metafields**")
+            bridge_columns[0].caption("edition_total, next_edition_number, remaining_count, edition_display_text")
+            bridge_columns[1].markdown("**Order metafields**")
+            bridge_columns[1].caption("certificates JSON plus single-certificate fallback fields")
+            bridge_columns[2].markdown("**Storefront widget**")
+            bridge_columns[2].caption("Reads Shopify metafields only; never calls Supabase")
+            st.info(
+                "Manual install option: paste the snippet into Shopify Theme Editor -> Product page -> Custom Liquid. "
+                "Future option: wrap this same snippet in a Shopify Theme App Extension."
+            )
+            if snippet_path.exists():
+                st.text_area(
+                    "sports-cave-edition-widget.liquid",
+                    value=snippet_path.read_text(encoding="utf-8"),
+                    height=320,
+                    label_visibility="collapsed",
+                )
+                render_copy_text_button(
+                    snippet_path.read_text(encoding="utf-8"),
+                    "settings-metafield-widget-snippet",
+                    "Copy Widget Code",
+                )
+            else:
+                st.warning("Widget snippet file is missing from the repo.")
+        with dev_tabs[2]:
             st.caption("Import Google Drive PSD links into Supabase product_assets. No PSD files are uploaded or stored.")
             if not supabase_backend.is_configured():
                 st.warning("DATABASE_URL is required before importing PSD links.")
@@ -5076,7 +5245,7 @@ def render_settings_page(app_version, database_path, password_status):
                 except Exception as error:
                     st.error("Could not load products for PSD import.")
                     st.exception(error)
-        with dev_tabs[2]:
+        with dev_tabs[3]:
             st.caption("Certificate tools live here now; Orders remains the daily certificate workflow.")
             if not supabase_backend.is_configured():
                 st.warning("DATABASE_URL is required before loading certificate tools.")

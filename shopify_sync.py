@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 import time
@@ -155,7 +156,9 @@ def _scope_status(scopes):
     scope_set = set(scopes or [])
     return {
         "read_orders": "read_orders" in scope_set,
+        "write_orders": "write_orders" in scope_set,
         "read_products": "read_products" in scope_set,
+        "write_products": "write_products" in scope_set,
         "read_customers": "read_customers" in scope_set,
         "write_files": "write_files" in scope_set,
     }
@@ -624,10 +627,42 @@ mutation SportsCaveSetEditionMetafields($metafields: [MetafieldsSetInput!]!) {
       id
       namespace
       key
+      type
+      value
     }
     userErrors {
       field
       message
+    }
+  }
+}
+"""
+
+
+METAFIELDS_BY_OWNER_QUERY = """
+query SportsCaveMetafieldsByOwner($id: ID!, $namespace: String!) {
+  node(id: $id) {
+    ... on Product {
+      id
+      metafields(first: 50, namespace: $namespace) {
+        nodes {
+          namespace
+          key
+          type
+          value
+        }
+      }
+    }
+    ... on Order {
+      id
+      metafields(first: 50, namespace: $namespace) {
+        nodes {
+          namespace
+          key
+          type
+          value
+        }
+      }
     }
   }
 }
@@ -747,8 +782,103 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
 """
 
 
+def _string_value(value, default=""):
+    if value is None:
+        return str(default)
+    return str(value)
+
+
+def _bool_value(value):
+    return "true" if bool(value) else "false"
+
+
+def _metafield_input(owner_id, key, metafield_type, value, namespace="sports_cave"):
+    return {
+        "ownerId": owner_id,
+        "namespace": namespace,
+        "key": key,
+        "type": metafield_type,
+        "value": _string_value(value),
+    }
+
+
+def _metafields_user_error_text(errors):
+    messages = []
+    for error in errors or []:
+        field = ", ".join(str(item) for item in (error.get("field") or []))
+        message = error.get("message") or "Unknown Shopify metafield error"
+        messages.append(f"{field}: {message}" if field else message)
+    return "; ".join(messages)
+
+
+def metafields_set(metafields, config=None, request_post=None):
+    inputs = [item for item in (metafields or []) if item.get("ownerId") and item.get("key")]
+    if not inputs:
+        return {"count": 0, "metafields": [], "api_version": (config or get_config()).get("api_version")}
+    data, served_version = graphql_request(
+        METAFIELDS_SET_MUTATION,
+        variables={"metafields": inputs},
+        config=config,
+        request_post=request_post,
+    )
+    result = data.get("metafieldsSet") or {}
+    if result.get("userErrors"):
+        raise ShopifyAPIError(_metafields_user_error_text(result.get("userErrors")))
+    metafields = result.get("metafields") or []
+    return {
+        "count": len(metafields),
+        "metafields": metafields,
+        "api_version": served_version or (config or get_config()).get("api_version"),
+    }
+
+
+def fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+    if not owner_id:
+        raise ShopifyAPIError("Shopify owner ID is missing.")
+    data, served_version = graphql_request(
+        METAFIELDS_BY_OWNER_QUERY,
+        variables={"id": owner_id, "namespace": namespace},
+        config=config,
+        request_post=request_post,
+    )
+    node = data.get("node") or {}
+    metafields = ((node.get("metafields") or {}).get("nodes") or [])
+    return {"metafields": metafields, "api_version": served_version or (config or get_config()).get("api_version")}
+
+
+def product_edition_metafield_inputs(product):
+    owner_id = shopify_gid(
+        "Product",
+        product.get("shopify_product_gid") or product.get("shopify_product_id") or product.get("product_gid"),
+    )
+    display_text = product.get("edition_display_text") or build_edition_display_text(product)
+    edition_total = product.get("edition_total") or product.get("edition_limit") or 100
+    next_number = product.get("next_edition_number") or product.get("next_available_edition") or 1
+    last_assigned = product.get("last_assigned_edition") or 0
+    sold_count = product.get("sold_count") or product.get("editions_sold") or 0
+    remaining = product.get("remaining_count")
+    if remaining is None:
+        remaining = product.get("remaining_editions")
+    if remaining is None:
+        remaining = product.get("editions_remaining") or 0
+    is_sold_out = product.get("is_sold_out")
+    if is_sold_out is None:
+        is_sold_out = product.get("sold_out") or False
+    status = product.get("edition_status") or "limited_release"
+    return [
+        _metafield_input(owner_id, "edition_total", "number_integer", edition_total),
+        _metafield_input(owner_id, "next_edition_number", "number_integer", next_number),
+        _metafield_input(owner_id, "last_assigned_edition", "number_integer", last_assigned),
+        _metafield_input(owner_id, "sold_count", "number_integer", sold_count),
+        _metafield_input(owner_id, "remaining_count", "number_integer", remaining),
+        _metafield_input(owner_id, "is_sold_out", "boolean", _bool_value(is_sold_out)),
+        _metafield_input(owner_id, "edition_status", "single_line_text_field", status),
+        _metafield_input(owner_id, "edition_display_text", "single_line_text_field", display_text),
+    ]
+
+
 def edition_metafield_inputs(product):
-    owner_id = product["shopify_product_id"]
+    owner_id = shopify_gid("Product", product["shopify_product_id"])
     display_text = product.get("edition_display_text") or build_edition_display_text(product)
     metafields = [
         {
@@ -829,27 +959,85 @@ def build_edition_display_text(product):
     return f"EDITION #{next_number} OF {limit} AVAILABLE"
 
 
-def sync_edition_metafields(product, config=None, request_post=None):
+def sync_product_edition_metafields(product, config=None, request_post=None):
     try:
-        data, served_version = graphql_request(
-            METAFIELDS_SET_MUTATION,
-            variables={"metafields": edition_metafield_inputs(product)},
+        return metafields_set(
+            product_edition_metafield_inputs(product),
             config=config,
             request_post=request_post,
         )
-        result = data.get("metafieldsSet") or {}
-        if result.get("userErrors"):
-            raise ShopifyAPIError(
-                "Could not sync storefront edition display. Check Shopify scopes and product metafields."
-            )
-        return {
-            "count": len(result.get("metafields") or []),
-            "api_version": served_version or (config or get_config()).get("api_version"),
-        }
-    except ShopifyAPIError:
+    except ShopifyAPIError as error:
         raise ShopifyAPIError(
-            "Could not sync storefront edition display. Check Shopify scopes and product metafields."
+            f"Could not sync storefront edition display. {error}"
+        ) from error
+
+
+def sync_edition_metafields(product, config=None, request_post=None):
+    try:
+        return metafields_set(
+            edition_metafield_inputs(product),
+            config=config,
+            request_post=request_post,
         )
+    except ShopifyAPIError as error:
+        raise ShopifyAPIError(
+            f"Could not sync storefront edition display. {error}"
+        ) from error
+
+
+def _certificate_display(item):
+    number = int(item.get("edition_number") or 0)
+    total = int(item.get("edition_total") or 100)
+    if not number:
+        return ""
+    return f"#{number:03d}/{total}"
+
+
+def order_certificate_metafield_inputs(order_gid, certificates):
+    owner_id = shopify_gid("Order", order_gid)
+    items = []
+    for certificate in certificates or []:
+        items.append(
+            {
+                "product_title": certificate.get("product_title") or "",
+                "shopify_handle": certificate.get("shopify_handle") or "",
+                "edition_number": int(certificate.get("edition_number") or 0),
+                "edition_total": int(certificate.get("edition_total") or 100),
+                "edition_display": certificate.get("edition_display") or _certificate_display(certificate),
+                "certificate_id": certificate.get("certificate_id") or "",
+                "certificate_url": certificate.get("certificate_url") or "",
+                "generated_at": certificate.get("generated_at") or "",
+            }
+        )
+    metafields = [
+        _metafield_input(owner_id, "certificates", "json", json.dumps(items, ensure_ascii=True, separators=(",", ":")))
+    ]
+    if len(items) == 1:
+        item = items[0]
+        certificate_url = str(item.get("certificate_url") or "").strip()
+        if certificate_url.startswith(("http://", "https://")):
+            metafields.append(_metafield_input(owner_id, "certificate_url", "url", certificate_url))
+        metafields.extend(
+            [
+                _metafield_input(owner_id, "certificate_id", "single_line_text_field", item.get("certificate_id") or ""),
+                _metafield_input(owner_id, "edition_number", "single_line_text_field", item.get("edition_display") or ""),
+                _metafield_input(owner_id, "product_title", "single_line_text_field", item.get("product_title") or ""),
+            ]
+        )
+    return metafields
+
+
+def sync_order_certificate_metafields(order_gid, certificates, config=None, request_post=None):
+    try:
+        return metafields_set(
+            order_certificate_metafield_inputs(order_gid, certificates),
+            config=config,
+            request_post=request_post,
+        )
+    except ShopifyAPIError as error:
+        raise ShopifyAPIError(
+            f"Could not sync order certificate metafields. {error}"
+        ) from error
 
 
 def build_order_admin_url(store_domain, legacy_resource_id):

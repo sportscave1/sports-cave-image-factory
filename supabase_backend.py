@@ -369,6 +369,14 @@ def _ensure_schema_uncached():
                     ("product_title", "TEXT"),
                     ("edition_total", "INTEGER DEFAULT 100"),
                     ("next_edition_number", "INTEGER DEFAULT 1"),
+                    ("last_assigned_edition", "INTEGER DEFAULT 0"),
+                    ("sold_count", "INTEGER DEFAULT 0"),
+                    ("remaining_count", "INTEGER DEFAULT 100"),
+                    ("edition_status", "TEXT DEFAULT 'limited_release'"),
+                    ("edition_display_text", "TEXT"),
+                    ("metafields_synced_at", "TIMESTAMPTZ"),
+                    ("metafields_sync_status", "TEXT DEFAULT 'Never Synced'"),
+                    ("last_metafield_error", "TEXT"),
                     ("active", "BOOLEAN DEFAULT TRUE"),
                     ("is_active", "BOOLEAN DEFAULT TRUE"),
                     ("sold_out", "BOOLEAN DEFAULT FALSE"),
@@ -459,10 +467,19 @@ def _ensure_schema_uncached():
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "certificates": (
+                    ("edition_order_id", "BIGINT"),
+                    ("shopify_order_id", "TEXT"),
+                    ("shopify_handle", "TEXT"),
+                    ("certificate_id", "TEXT"),
+                    ("edition_number", "INTEGER"),
+                    ("edition_total", "INTEGER"),
                     ("pdf_filename", "TEXT"),
                     ("local_file_path", "TEXT"),
                     ("shopify_file_id", "TEXT"),
                     ("shopify_file_url", "TEXT"),
+                    ("order_metafields_synced_at", "TIMESTAMPTZ"),
+                    ("order_metafields_sync_status", "TEXT DEFAULT 'Never Synced'"),
+                    ("order_metafields_error", "TEXT"),
                     ("status", "TEXT DEFAULT 'Local PDF'"),
                     ("generated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
@@ -787,18 +804,40 @@ def sync_shopify_products_to_supabase(config=None, progress_callback=None):
     run_id = start_sync_run("shopify_products")
     seen = 0
     processed = 0
+    handles_seen = []
+    metafield_result = {"attempted": 0, "synced": 0, "skipped": 0, "errors": []}
     try:
         sync_config = dict(config)
         sync_config["max_products"] = max(int(sync_config.get("max_products") or 0), 1000)
         for page in shopify_sync.iter_catalog_pages(search="status:active", page_size=50, config=sync_config):
             seen += len(page["products"])
             processed += upsert_products(page["products"])
+            handles_seen.extend(product.get("handle") for product in page["products"] if product.get("handle"))
             if progress_callback:
                 progress_callback(seen)
             del page
             gc.collect()
+        if handles_seen:
+            try:
+                metafield_result = sync_product_edition_metafields_for_handles(
+                    handles_seen,
+                    config=config,
+                )
+            except Exception as metafield_error:
+                metafield_result = {
+                    "attempted": len(set(handles_seen)),
+                    "synced": 0,
+                    "skipped": len(set(handles_seen)),
+                    "errors": [str(metafield_error)],
+                }
         finish_sync_run(run_id, "Complete", seen, processed)
-        return {"products_seen": seen, "products_processed": processed}
+        return {
+            "products_seen": seen,
+            "products_processed": processed,
+            "metafields_attempted": metafield_result.get("attempted", 0),
+            "metafields_synced": metafield_result.get("synced", 0),
+            "metafield_errors": metafield_result.get("errors", []),
+        }
     except Exception as error:
         finish_sync_run(run_id, "Failed", seen, processed, "Shopify product sync failed.")
         log_app_error("shopify_product_sync_failed", str(error), {"records_seen": seen})
@@ -820,6 +859,16 @@ def list_edition_products(search="", limit=500):
                                FROM edition_orders eo
                                WHERE eo.shopify_handle = ep.shopify_handle
                            ) AS last_assigned_edition,
+                           (
+                               SELECT COUNT(*)
+                               FROM edition_orders eo
+                               WHERE eo.shopify_handle = ep.shopify_handle
+                           ) AS sold_count,
+                           GREATEST(COALESCE(ep.edition_total, 100) - COALESCE((
+                               SELECT COUNT(*)
+                               FROM edition_orders eo
+                               WHERE eo.shopify_handle = ep.shopify_handle
+                           ), 0), 0) AS remaining_count,
                            GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
                     FROM edition_products ep
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
@@ -840,6 +889,16 @@ def list_edition_products(search="", limit=500):
                                FROM edition_orders eo
                                WHERE eo.shopify_handle = ep.shopify_handle
                            ) AS last_assigned_edition,
+                           (
+                               SELECT COUNT(*)
+                               FROM edition_orders eo
+                               WHERE eo.shopify_handle = ep.shopify_handle
+                           ) AS sold_count,
+                           GREATEST(COALESCE(ep.edition_total, 100) - COALESCE((
+                               SELECT COUNT(*)
+                               FROM edition_orders eo
+                               WHERE eo.shopify_handle = ep.shopify_handle
+                           ), 0), 0) AS remaining_count,
                            GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
                     FROM edition_products ep
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
@@ -877,6 +936,296 @@ def update_edition_product(shopify_handle, *, edition_total=None, active=None):
                     (bool(active), bool(active), shopify_handle),
                 )
         conn.commit()
+
+
+def _safe_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def format_edition_display_number(edition_number, edition_total):
+    number = _safe_int(edition_number, 0)
+    total = _safe_int(edition_total, 100)
+    if number <= 0:
+        return f"Numbered Edition of {total}"
+    return f"#{number:03d}/{total}"
+
+
+def calculate_product_edition_metafield_values(row):
+    edition_total = max(_safe_int(row.get("edition_total"), 100), 1)
+    next_number = max(_safe_int(row.get("next_edition_number"), 1), 1)
+    last_assigned = _safe_int(row.get("last_assigned_edition"), 0)
+    sold_count = _safe_int(row.get("sold_count"), 0)
+    remaining_count = max(edition_total - sold_count, 0)
+    is_sold_out = bool(row.get("sold_out")) or next_number > edition_total or remaining_count <= 0
+    if is_sold_out:
+        edition_status = "sold_out"
+        edition_display_text = "Sold Out Archive"
+    elif remaining_count <= 5:
+        edition_status = "final_editions"
+        edition_display_text = f"Final Editions — Only {remaining_count} Remaining"
+    elif remaining_count <= 12:
+        edition_status = "selling_quickly"
+        edition_display_text = f"Next Available Edition {format_edition_display_number(next_number, edition_total)}"
+    else:
+        edition_status = "limited_release"
+        edition_display_text = f"Next Available Edition {format_edition_display_number(next_number, edition_total)}"
+    return {
+        "edition_total": edition_total,
+        "next_edition_number": next_number,
+        "last_assigned_edition": last_assigned,
+        "sold_count": sold_count,
+        "remaining_count": remaining_count,
+        "is_sold_out": is_sold_out,
+        "edition_status": edition_status,
+        "edition_display_text": edition_display_text,
+    }
+
+
+def get_product_edition_metafield_payload(shopify_handle):
+    ensure_schema()
+    handle = str(shopify_handle or "").strip()
+    if not handle:
+        raise ValueError("Shopify handle is required.")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT ep.*, sp.shopify_product_id AS synced_shopify_product_id,
+                       sp.shopify_product_gid AS synced_shopify_product_gid,
+                       sp.admin_url, sp.online_store_url,
+                       (
+                           SELECT MAX(eo.edition_number)
+                           FROM edition_orders eo
+                           WHERE eo.shopify_handle = ep.shopify_handle
+                       ) AS last_assigned_edition,
+                       (
+                           SELECT COUNT(*)
+                           FROM edition_orders eo
+                           WHERE eo.shopify_handle = ep.shopify_handle
+                       ) AS sold_count
+                FROM edition_products ep
+                LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
+                WHERE ep.shopify_handle=%s
+                """,
+                (handle,),
+            )
+            row = cur.fetchone()
+    if not row:
+        raise ValueError(f"No edition product found for {handle}.")
+    owner_gid = (
+        row.get("shopify_product_gid")
+        or row.get("shopify_product_id")
+        or row.get("synced_shopify_product_gid")
+        or row.get("synced_shopify_product_id")
+        or ""
+    )
+    if not owner_gid:
+        raise ValueError(f"{handle} does not have a Shopify product ID yet. Run Sync Products first.")
+    values = calculate_product_edition_metafield_values(row)
+    return {
+        **row,
+        **values,
+        "shopify_product_id": owner_gid,
+        "shopify_product_gid": owner_gid,
+        "shopify_handle": handle,
+    }
+
+
+def _mark_product_metafields_sync(shopify_handle, payload, status, error_message=""):
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE edition_products
+                SET last_assigned_edition=%s,
+                    sold_count=%s,
+                    remaining_count=%s,
+                    edition_status=%s,
+                    edition_display_text=%s,
+                    metafields_synced_at=CASE WHEN %s = 'Synced' THEN now() ELSE metafields_synced_at END,
+                    metafields_sync_status=%s,
+                    last_metafield_error=%s,
+                    sold_out=%s,
+                    is_sold_out=%s,
+                    updated_at=now()
+                WHERE shopify_handle=%s
+                """,
+                (
+                    payload.get("last_assigned_edition") or 0,
+                    payload.get("sold_count") or 0,
+                    payload.get("remaining_count") or 0,
+                    payload.get("edition_status") or "",
+                    payload.get("edition_display_text") or "",
+                    status,
+                    status,
+                    str(error_message or "")[:1000],
+                    bool(payload.get("is_sold_out")),
+                    bool(payload.get("is_sold_out")),
+                    shopify_handle,
+                ),
+            )
+        conn.commit()
+
+
+def sync_product_edition_metafields(shopify_handle, config=None, request_post=None):
+    payload = get_product_edition_metafield_payload(shopify_handle)
+    try:
+        result = shopify_sync.sync_product_edition_metafields(
+            payload,
+            config=config,
+            request_post=request_post,
+        )
+        _mark_product_metafields_sync(shopify_handle, payload, "Synced", "")
+        return {"shopify_handle": shopify_handle, "payload": payload, **result}
+    except Exception as error:
+        _mark_product_metafields_sync(shopify_handle, payload, "Failed", str(error))
+        log_app_error(
+            "product_metafield_sync_failed",
+            str(error),
+            {"shopify_handle": shopify_handle},
+        )
+        raise
+
+
+def sync_product_edition_metafields_for_handles(handles, config=None, progress_callback=None):
+    ensure_schema()
+    unique_handles = []
+    seen_handles = set()
+    for handle in handles or []:
+        clean_handle = str(handle or "").strip()
+        if clean_handle and clean_handle not in seen_handles:
+            unique_handles.append(clean_handle)
+            seen_handles.add(clean_handle)
+    run_id = start_sync_run("shopify_product_metafields")
+    synced = 0
+    skipped = 0
+    errors = []
+    try:
+        for index, handle in enumerate(unique_handles, start=1):
+            try:
+                sync_product_edition_metafields(handle, config=config)
+                synced += 1
+            except Exception as error:
+                skipped += 1
+                errors.append(f"{handle}: {error}")
+            if progress_callback:
+                progress_callback(index, len(unique_handles), handle)
+        finish_sync_run(
+            run_id,
+            "Complete" if not errors else "Complete With Warnings",
+            len(unique_handles),
+            synced,
+            "; ".join(errors[:3]),
+        )
+        return {
+            "attempted": len(unique_handles),
+            "synced": synced,
+            "skipped": skipped,
+            "errors": errors[:10],
+        }
+    except Exception as error:
+        finish_sync_run(run_id, "Failed", len(unique_handles), synced, str(error))
+        log_app_error("product_metafield_bulk_sync_failed", str(error), {})
+        raise
+
+
+def sync_all_product_edition_metafields(config=None, search="", limit=1000, progress_callback=None):
+    products = list_edition_products(search=search, limit=limit)
+    return sync_product_edition_metafields_for_handles(
+        [product.get("shopify_handle") for product in products],
+        config=config,
+        progress_callback=progress_callback,
+    )
+
+
+def _certificate_rows_for_order(shopify_order_id):
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT c.id AS certificate_row_id, c.certificate_id, c.edition_number,
+                       c.edition_total, c.shopify_file_url, c.generated_at,
+                       eo.product_title, eo.shopify_handle, o.shopify_order_id,
+                       o.order_name
+                FROM certificates c
+                LEFT JOIN edition_orders eo ON eo.id=c.edition_order_id
+                LEFT JOIN shopify_orders o ON o.shopify_order_id=c.shopify_order_id
+                WHERE c.shopify_order_id=%s
+                ORDER BY c.generated_at ASC, c.id ASC
+                """,
+                (shopify_order_id,),
+            )
+            return cur.fetchall()
+
+
+def sync_order_certificate_metafields(shopify_order_id, config=None, request_post=None):
+    order_id = str(shopify_order_id or "").strip()
+    if not order_id:
+        return {"count": 0, "skipped": True, "reason": "Missing Shopify order ID."}
+    rows = _certificate_rows_for_order(order_id)
+    if not rows:
+        return {"count": 0, "skipped": True, "reason": "No certificates for this order."}
+    certificates = []
+    for row in rows:
+        certificates.append(
+            {
+                "product_title": row.get("product_title") or "",
+                "shopify_handle": row.get("shopify_handle") or "",
+                "edition_number": row.get("edition_number") or 0,
+                "edition_total": row.get("edition_total") or 100,
+                "edition_display": format_edition_display_number(
+                    row.get("edition_number"),
+                    row.get("edition_total") or 100,
+                ),
+                "certificate_id": row.get("certificate_id") or "",
+                "certificate_url": row.get("shopify_file_url") or "",
+                "generated_at": str(row.get("generated_at") or ""),
+            }
+        )
+    try:
+        result = shopify_sync.sync_order_certificate_metafields(
+            order_id,
+            certificates,
+            config=config,
+            request_post=request_post,
+        )
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE certificates
+                    SET order_metafields_synced_at=now(),
+                        order_metafields_sync_status='Synced',
+                        order_metafields_error=''
+                    WHERE shopify_order_id=%s
+                    """,
+                    (order_id,),
+                )
+            conn.commit()
+        return {"certificates": certificates, **result}
+    except Exception as error:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE certificates
+                    SET order_metafields_sync_status='Failed',
+                        order_metafields_error=%s
+                    WHERE shopify_order_id=%s
+                    """,
+                    (str(error)[:1000], order_id),
+                )
+            conn.commit()
+        log_app_error(
+            "order_certificate_metafield_sync_failed",
+            str(error),
+            {"shopify_order_id": order_id},
+        )
+        raise
 
 
 def persistence_counts():
@@ -1990,6 +2339,12 @@ def process_paid_order(order, *, fetch_missing_products=True):
                 {"edition_order_id": assignment.get("id"), "shopify_handle": assignment.get("shopify_handle")},
             )
 
+    for handle in sorted(changed_handles):
+        try:
+            sync_product_edition_metafields(handle)
+        except Exception as error:
+            errors.append(f"Product metafield sync failed for {handle}: {error}")
+
     for message in errors:
         log_app_error("order_processing_warning", message, {"shopify_order_id": order.get("shopify_order_id")})
     return {
@@ -2282,6 +2637,7 @@ def list_edition_orders(search="", limit=250):
 
 def generate_certificate_for_edition_order(edition_order_id):
     ensure_schema()
+    assignment = None
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -2298,6 +2654,18 @@ def generate_certificate_for_edition_order(edition_order_id):
                 raise ValueError("Edition order was not found.")
             path = _generate_certificate_for_assignment(cur, assignment)
         conn.commit()
+    try:
+        if assignment and assignment.get("shopify_order_id"):
+            sync_order_certificate_metafields(assignment["shopify_order_id"])
+    except Exception as error:
+        log_app_error(
+            "order_certificate_metafield_sync_failed",
+            str(error),
+            {
+                "edition_order_id": edition_order_id,
+                "shopify_order_id": assignment.get("shopify_order_id") if assignment else "",
+            },
+        )
     return path
 
 
@@ -2534,6 +2902,12 @@ def export_products_csv(rows):
         "edition_total",
         "next_edition_number",
         "remaining_editions",
+        "sold_count",
+        "remaining_count",
+        "edition_status",
+        "edition_display_text",
+        "metafields_sync_status",
+        "metafields_synced_at",
         "active",
         "sold_out",
         *ASSET_TYPES,
