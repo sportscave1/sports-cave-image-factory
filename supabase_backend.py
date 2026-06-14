@@ -1343,7 +1343,12 @@ def _match_product_handle(cur, *, handle="", shopify_product_id="", product_titl
     return normalized_handle
 
 
-def import_limited_edition_rows(rows, *, overwrite_existing_orders=False):
+def import_limited_edition_rows(
+    rows,
+    *,
+    overwrite_existing_orders=False,
+    allow_next_number_override=False,
+):
     ensure_schema()
     run_id = start_sync_run("limited_edition_csv_import")
     result = {
@@ -1387,6 +1392,7 @@ def import_limited_edition_rows(rows, *, overwrite_existing_orders=False):
                         _csv_value(row, "next_edition_number", "next_available_edition", "Next Edition"),
                         None,
                     )
+                    override_next_number = bool(allow_next_number_override and next_number)
                     active_raw = _csv_value(row, "active", "Active")
                     active = False if active_raw.lower() in {"false", "no", "0", "inactive"} else True
 
@@ -1402,11 +1408,41 @@ def import_limited_edition_rows(rows, *, overwrite_existing_orders=False):
                             shopify_product_gid=COALESCE(EXCLUDED.shopify_product_gid, edition_products.shopify_product_gid),
                             product_title=COALESCE(NULLIF(EXCLUDED.product_title, ''), edition_products.product_title),
                             edition_total=EXCLUDED.edition_total,
-                            next_edition_number=GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number),
+                            next_edition_number=CASE
+                                WHEN %s THEN GREATEST(
+                                    COALESCE(EXCLUDED.next_edition_number, 1),
+                                    COALESCE((
+                                        SELECT MAX(eo.edition_number) + 1
+                                        FROM edition_orders eo
+                                        WHERE eo.shopify_handle = edition_products.shopify_handle
+                                    ), 1)
+                                )
+                                ELSE GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number)
+                            END,
                             active=EXCLUDED.active,
                             is_active=EXCLUDED.is_active,
-                            sold_out=GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number) > EXCLUDED.edition_total,
-                            is_sold_out=GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number) > EXCLUDED.edition_total,
+                            sold_out=CASE
+                                WHEN %s THEN GREATEST(
+                                    COALESCE(EXCLUDED.next_edition_number, 1),
+                                    COALESCE((
+                                        SELECT MAX(eo.edition_number) + 1
+                                        FROM edition_orders eo
+                                        WHERE eo.shopify_handle = edition_products.shopify_handle
+                                    ), 1)
+                                )
+                                ELSE GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number)
+                            END > EXCLUDED.edition_total,
+                            is_sold_out=CASE
+                                WHEN %s THEN GREATEST(
+                                    COALESCE(EXCLUDED.next_edition_number, 1),
+                                    COALESCE((
+                                        SELECT MAX(eo.edition_number) + 1
+                                        FROM edition_orders eo
+                                        WHERE eo.shopify_handle = edition_products.shopify_handle
+                                    ), 1)
+                                )
+                                ELSE GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number)
+                            END > EXCLUDED.edition_total,
                             updated_at=now()
                         RETURNING (xmax = 0) AS inserted
                         """,
@@ -1419,6 +1455,9 @@ def import_limited_edition_rows(rows, *, overwrite_existing_orders=False):
                             int(next_number) if next_number else None,
                             bool(active),
                             bool(active),
+                            override_next_number,
+                            override_next_number,
+                            override_next_number,
                         ),
                     )
                     inserted_product = bool((cur.fetchone() or {}).get("inserted"))

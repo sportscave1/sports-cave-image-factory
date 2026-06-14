@@ -124,7 +124,7 @@ MENU_OPTIONS = [
     "Files",
     "Marketing Factory",
     "VA Training",
-    "Settings",
+    "Developer",
 ]
 HIDDEN_PAGE_OPTIONS = [
     "Products",
@@ -1736,6 +1736,110 @@ def inject_styles():
             color: var(--sc-text) !important;
         }
 
+        /*
+        Sports Cave readability contract:
+        light/cream/white controls always use black text; dark panels keep warm white.
+        Keep this near the end of the core theme so page-specific CSS cannot make
+        prompt boxes, buttons, upload cards, or admin tools unreadable.
+        */
+        textarea,
+        textarea:focus,
+        textarea:hover,
+        input,
+        input:focus,
+        input:hover,
+        [data-testid="stTextArea"] textarea,
+        [data-testid="stTextArea"] textarea:focus,
+        [data-testid="stTextArea"] textarea:hover,
+        [data-testid="stTextInput"] input,
+        [data-testid="stTextInput"] input:focus,
+        [data-testid="stTextInput"] input:hover,
+        [data-testid="stNumberInput"] input,
+        [data-testid="stNumberInput"] input:focus,
+        [data-testid="stNumberInput"] input:hover,
+        [data-testid="stSelectbox"] div[data-baseweb="select"] *,
+        [data-testid="stMultiSelect"] div[data-baseweb="select"] *,
+        [data-testid="stDateInput"] input,
+        [data-testid="stTimeInput"] input,
+        [data-testid="stFileUploader"] [data-baseweb="tag"] *,
+        section[data-testid="stFileUploaderDropzone"] *,
+        [data-testid="stExpander"] details > div textarea,
+        [data-testid="stExpander"] details > div textarea:focus,
+        [data-testid="stExpander"] details > div textarea:hover,
+        [data-testid="stExpander"] details > div input,
+        [data-testid="stExpander"] details > div input:focus,
+        [data-testid="stExpander"] details > div input:hover,
+        [data-testid="stExpander"] details > div [data-testid="stTextArea"] textarea,
+        [data-testid="stExpander"] details > div [data-testid="stTextInput"] input,
+        [data-testid="stExpander"] details > div [data-testid="stNumberInput"] input,
+        [data-testid="stExpander"] details > div [data-testid="stSelectbox"] div[data-baseweb="select"] *,
+        [data-testid="stExpander"] details > div [data-testid="stFileUploader"] [data-baseweb="tag"] *,
+        [data-testid="stExpander"] details > div section[data-testid="stFileUploaderDropzone"] * {
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
+            caret-color: #000000 !important;
+        }
+
+        textarea::placeholder,
+        input::placeholder,
+        [data-testid="stTextArea"] textarea::placeholder,
+        [data-testid="stTextInput"] input::placeholder {
+            color: #4B4B4D !important;
+            -webkit-text-fill-color: #4B4B4D !important;
+            opacity: 1 !important;
+        }
+
+        textarea,
+        [data-testid="stTextArea"] textarea,
+        input,
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] input,
+        [data-testid="stDateInput"] input,
+        [data-testid="stTimeInput"] input,
+        [data-testid="stSelectbox"] div[data-baseweb="select"],
+        [data-testid="stMultiSelect"] div[data-baseweb="select"],
+        section[data-testid="stFileUploaderDropzone"],
+        pre,
+        code,
+        [data-testid="stCodeBlock"],
+        [data-testid="stCodeBlock"] * {
+            background-color: #F5F2EA !important;
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
+        }
+
+        [data-testid="stExpander"] details > div .stButton > button,
+        [data-testid="stExpander"] details > div .stButton > button:hover,
+        [data-testid="stExpander"] details > div .stButton > button:focus,
+        [data-testid="stExpander"] details > div .stDownloadButton > button,
+        [data-testid="stExpander"] details > div .stDownloadButton > button:hover,
+        [data-testid="stExpander"] details > div .stDownloadButton > button:focus,
+        [data-testid="stExpander"] details > div .stLinkButton > a,
+        [data-testid="stExpander"] details > div .stLinkButton > a:hover,
+        [data-testid="stExpander"] details > div .stLinkButton > a:focus,
+        [data-testid="stExpander"] details > div div[data-testid="stButton"] button,
+        [data-testid="stExpander"] details > div div[data-testid="stDownloadButton"] button,
+        [data-testid="stExpander"] details > div a[data-testid="stLinkButton"] {
+            background: #F5F2EA !important;
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
+            border-color: rgba(212, 165, 76, 0.55) !important;
+            filter: none !important;
+            transform: none !important;
+        }
+
+        [data-testid="stExpander"] details > div .stButton > button *,
+        [data-testid="stExpander"] details > div .stDownloadButton > button *,
+        [data-testid="stExpander"] details > div .stLinkButton > a *,
+        [data-testid="stExpander"] details > div div[data-testid="stButton"] button *,
+        [data-testid="stExpander"] details > div div[data-testid="stDownloadButton"] button *,
+        [data-testid="stExpander"] details > div a[data-testid="stLinkButton"] * {
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
+            fill: #000000 !important;
+            stroke: #000000 !important;
+        }
+
         .stButton > button,
         .stLinkButton > a,
         .stDownloadButton > button,
@@ -1843,6 +1947,14 @@ def inject_styles():
             display: none !important;
         }
 
+        [data-testid="stFileUploader"] [data-testid="stTooltipHoverTarget"],
+        [data-testid="stFileUploader"] [data-baseweb="tooltip"],
+        [data-testid="stFileUploader"] [role="tooltip"],
+        [data-testid="stFileUploader"] [aria-describedby],
+        [data-testid="stFileUploader"] [title] {
+            pointer-events: auto !important;
+        }
+
         [data-testid="stFileUploader"] button {
             font-weight: 700 !important;
         }
@@ -1851,16 +1963,16 @@ def inject_styles():
             display: none !important;
         }
 
-        [data-testid="stFileUploader"] button[aria-label] {
+        [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]) {
             background: #0B0B0D !important;
             border-color: #0B0B0D !important;
             color: #F5F2EA !important;
             border-radius: 999px !important;
         }
 
-        [data-testid="stFileUploader"] button[aria-label] *,
-        [data-testid="stFileUploader"] button[aria-label] svg,
-        [data-testid="stFileUploader"] button[aria-label] span {
+        [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]) *,
+        [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]) svg,
+        [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]) span {
             color: #F5F2EA !important;
             fill: #F5F2EA !important;
             stroke: #F5F2EA !important;
@@ -1939,16 +2051,16 @@ def inject_styles():
         [data-testid="stFileUploader"] button[aria-label*="Delete"]::before,
         [data-testid="stFileUploader"] button[aria-label*="Remove"]::before,
         [data-testid="stFileUploaderFile"] button::before {
-            content: "×";
+            content: "x";
             color: #000000 !important;
             font-size: 1rem !important;
             font-weight: 700 !important;
             line-height: 1 !important;
         }
 
-        [data-testid="stFileUploader"] button[aria-label]:hover,
-        [data-testid="stFileUploader"] button[aria-label]:focus,
-        [data-testid="stFileUploader"] button[aria-label]:active {
+        [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]):hover,
+        [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]):focus,
+        [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]):active {
             background: #0B0B0D !important;
             border-color: #0B0B0D !important;
             color: #F5F2EA !important;
@@ -1967,12 +2079,17 @@ def inject_styles():
         }
 
         [data-testid="stTooltipContent"],
-        .stTooltipContent {
-            background: #F5F2EA !important;
+        .stTooltipContent,
+        div[role="tooltip"] {
+            display: none !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+            opacity: 0 !important;
         }
 
         [data-testid="stTooltipContent"] *,
-        .stTooltipContent * {
+        .stTooltipContent *,
+        div[role="tooltip"] * {
             color: #000000 !important;
             fill: #000000 !important;
             stroke: #000000 !important;
@@ -2092,8 +2209,13 @@ def init_session_state():
         st.session_state.startup_shell_loaded = True
 
     pending_page = st.session_state.pop("pending_page", None)
+    if pending_page == "Settings":
+        pending_page = "Developer"
     if pending_page in ALL_PAGE_OPTIONS:
         st.session_state.selected_page = pending_page
+
+    if st.session_state.selected_page == "Settings":
+        st.session_state.selected_page = "Developer"
 
     if st.session_state.selected_page not in ALL_PAGE_OPTIONS:
         st.session_state.selected_page = "Dashboard"
@@ -3128,7 +3250,7 @@ def validate_uploaded_artwork(uploaded_file):
     if file_size is not None and file_size > image_factory.MAX_UPLOAD_SIZE_BYTES:
         raise ValueError(
             "Uploaded image is too large for the current Render instance. "
-            "Please upload a JPG or WebP under 10MB."
+            "Please upload a JPG or WebP under 20MB."
         )
 
     filename = getattr(uploaded_file, "name", "")
@@ -4233,6 +4355,10 @@ def render_sidebar():
         st.sidebar.divider()
         st.sidebar.subheader("Upload Workflow")
         st.sidebar.write("Work through products by stage, then use the Shopify prompt tools when needed.")
+    elif st.session_state.selected_page == "Developer":
+        st.sidebar.divider()
+        st.sidebar.subheader("Developer")
+        st.sidebar.write("Run connection tests, imports, diagnostics, and admin checks only when needed.")
 
     st.sidebar.divider()
     st.sidebar.subheader("Phase 5B")
@@ -4248,7 +4374,7 @@ def render_mockups_page():
     st.caption(
         "The existing Sports Cave Image Factory. Upload one finished artwork, generate the five core Shopify images, then download one simple ZIP bundle."
     )
-    st.caption("Upload limit: 10MB. Working images are capped to 2000px and UI previews are capped to 900px.")
+    st.caption("Upload limit: 20MB. Working images are capped to 2000px and UI previews are capped to 900px.")
 
     st.subheader("1. Upload Artwork")
     uploaded_file = st.file_uploader(
@@ -4709,8 +4835,8 @@ def get_password_protection_status():
 
 
 def render_settings_page():
-    st.title("Settings")
-    st.caption("Current app and environment status.")
+    st.title("Developer")
+    st.caption("Diagnostics, connection checks, imports, and admin tools.")
 
     st.write(f"**Password protection:** {get_password_protection_status()}")
     st.write(f"**Edition Log JSON URL present:** {'Yes' if get_edition_log_json_url() else 'No'}")
@@ -4736,64 +4862,29 @@ def render_placeholder_page(title, body):
 
 def render_lightweight_dashboard_page():
     st.title("Sports Cave OS")
-    st.caption("Internal backend for product creation, mockups, limited editions, files, and VA workflows.")
+    st.caption("Daily operating screen for Sports Cave VAs.")
     with st.container(border=True):
-        st.markdown("**Sports Cave OS loaded**")
+        st.markdown("**Today's task**")
         st.caption(
-            "This first screen stays lightweight. Supabase, Shopify, orders, assets, "
-            "and certificates only load after you click a button."
+            "Start with the work that moves customer orders and edition tracking forward. "
+            "Developer checks live in the Developer page so this Dashboard stays fast and simple."
         )
 
-    st.subheader("System Status")
-    status_columns = st.columns(3)
-    status_columns[0].success("App shell loaded")
-    status_columns[1].info(f"Supabase URL: {'Found' if os.getenv('DATABASE_URL', '').strip() else 'Missing'}")
-    shopify_found = bool(
-        (
-            os.getenv("SHOPIFY_STORE_DOMAIN", "").strip()
-            or os.getenv("SHOPIFY_SHOP_DOMAIN", "").strip()
-        )
-        and (
-            os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN", "").strip()
-            or (
-                os.getenv("SHOPIFY_CLIENT_ID", "").strip()
-                and os.getenv("SHOPIFY_CLIENT_SECRET", "").strip()
-            )
-        )
+    st.subheader("Today's Focus")
+    focus_columns = st.columns(3)
+    with focus_columns[0]:
+        st.info("Sync paid orders, then check any rows missing certificates, PSD links, or Prodigi details.")
+    with focus_columns[1]:
+        st.info("Open Limited Editions when product counters need review or a manual CSV correction.")
+    with focus_columns[2]:
+        st.info("Use Mockups only when artwork is ready. Keep generated ZIPs saved in the right Drive folder.")
+
+    st.subheader("VA Reminder")
+    st.write(
+        "Sports Cave OS stores edition numbers in Supabase. Shopify feeds product and order data into the system, "
+        "but the app reads the saved Supabase records so edition history is not lost."
     )
-    status_columns[2].info(f"Shopify config: {'Found' if shopify_found else 'Missing'}")
-
-    actions = st.columns(4)
-    if actions[0].button("Test Supabase", use_container_width=True):
-        try:
-            pages = get_os_pages()
-            result = pages.supabase_backend.test_connection()
-            st.success(result.get("message", "Supabase connection works."))
-        except Exception as error:
-            st.error("Supabase test failed.")
-            st.exception(error)
-    if actions[1].button("Test Shopify", use_container_width=True):
-        try:
-            pages = get_os_pages()
-            result = pages.shopify_sync.test_connection()
-            if result.get("ok"):
-                st.success(result.get("message", "Shopify connection works."))
-            else:
-                st.error(result.get("message", "Shopify connection failed."))
-        except Exception as error:
-            st.error("Shopify test failed.")
-            st.exception(error)
-    if actions[2].button("Open Orders", use_container_width=True):
-        st.session_state.pending_page = "Orders"
-        st.rerun()
-    if actions[3].button("Open Limited Editions", use_container_width=True):
-        st.session_state.pending_page = "Limited Editions"
-        st.rerun()
-
-    st.info(
-        "If Render shows a loading skeleton again, check the STARTUP stage timings in the logs. "
-        "Dashboard itself does not query Supabase or Shopify."
-    )
+    st.caption("Connection tests, diagnostics, imports, and developer tools are now under Developer.")
 
 
 def page_uses_local_database(current_page):
@@ -4802,7 +4893,7 @@ def page_uses_local_database(current_page):
     pages = get_os_pages()
     supabase_enabled = pages.supabase_backend.is_configured()
     local_fallback_enabled = os.getenv("ENABLE_LOCAL_SQLITE_FALLBACK", "true").lower() == "true"
-    if current_page in {"Settings", "Files", "Product Uploads"}:
+    if current_page in {"Settings", "Developer", "Files", "Product Uploads"}:
         return True
     if current_page in {"Limited Editions", "Orders"} and not supabase_enabled:
         return local_fallback_enabled
@@ -4851,7 +4942,7 @@ def render_selected_page(current_page):
         get_os_pages().render_files_page()
     elif current_page == "Marketing Factory":
         get_os_pages().render_marketing_factory_page()
-    elif current_page == "Settings":
+    elif current_page in {"Settings", "Developer"}:
         get_os_pages().render_settings_page(
             app_version=APP_VERSION,
             database_path=get_db().DB_PATH,

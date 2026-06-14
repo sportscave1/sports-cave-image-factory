@@ -528,61 +528,12 @@ def render_focus_list(title, products, empty_message):
 
 
 def render_supabase_dashboard_page():
-    st.subheader("System Status")
-    st.caption("The app shell loaded. Live integrations are checked only when you click a button.")
-    status_columns = st.columns(3)
-    status_columns[0].success("App loaded")
-    status_columns[1].info("Supabase URL: " + ("Found" if supabase_backend.is_configured() else "Missing"))
-    shopify_config = shopify_sync.get_config()
-    status_columns[2].info("Shopify config: " + ("Found" if shopify_config["configured"] else "Missing"))
-
-    action_columns = st.columns([1, 1, 1, 1])
-    test_supabase = action_columns[0].button(
-        "Test Supabase",
-        disabled=not supabase_backend.is_configured(),
-        use_container_width=True,
-    )
-    test_shopify = action_columns[1].button(
-        "Test Shopify",
-        disabled=not shopify_config["configured"],
-        use_container_width=True,
-    )
-    open_orders = action_columns[2].button("Open Orders", use_container_width=True)
-    open_limited = action_columns[3].button("Open Limited Editions", use_container_width=True)
-    st.caption("No Supabase or Shopify queries run during initial Dashboard render.")
-
-    if open_orders:
-        st.session_state.pending_page = "Orders"
-        st.rerun()
-    if open_limited:
-        st.session_state.pending_page = "Limited Editions"
-        st.rerun()
-
-    if test_supabase:
-        try:
-            with st.spinner("Testing Supabase connection..."):
-                result = supabase_backend.test_connection()
-            st.success("Supabase connection OK.")
-            st.caption(f"Server time: {result.get('server_time')}")
-        except Exception as error:
-            st.error("Supabase connection failed, but the app is still running.")
-            st.exception(error)
-
-    if test_shopify:
-        try:
-            with st.spinner("Testing Shopify connection..."):
-                result = shopify_sync.test_connection(config=shopify_config)
-            st.success(f"Shopify connection OK: {result.get('name')}")
-        except Exception as error:
-            st.error("Shopify connection failed, but the app is still running.")
-            st.exception(error)
-
     st.subheader("Today's Focus")
-    st.caption("Start by syncing Shopify products, then clear missing PSD links, certificates, and order issues.")
+    st.caption("VA-facing reminders only. Developer diagnostics and tests live on the Developer page.")
     focus_columns = st.columns(3)
-    focus_columns[0].info("Open Limited Editions to sync products and confirm edition totals.")
-    focus_columns[1].info("Open Orders to sync paid orders and check edition assignments.")
-    focus_columns[2].info("Open Product Assets to import PSD CSV links and connect Drive/CDN assets.")
+    focus_columns[0].info("Open Orders to sync paid orders and check edition assignments.")
+    focus_columns[1].info("Open Limited Editions to confirm edition totals or import a correction CSV.")
+    focus_columns[2].info("Open Files or Developer when PSD links, imports, or diagnostics need attention.")
 
 
 def render_dashboard_page():
@@ -2019,6 +1970,10 @@ def render_prodigi_page_legacy():
     )
 
     st.link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
+    st.markdown(
+        "**Prodigi support for errors or warranty:** "
+        "[support@prodigi.com](mailto:support@prodigi.com)"
+    )
 
     st.info(
         "Quick check: XL = A1, L = A2, M = A3, S = A4. Oak on Sports Cave = Natural in Prodigi. "
@@ -2074,6 +2029,10 @@ def render_prodigi_page():
     st.title("Prodigi")
     st.caption("Compact Prodigi matching for Shopify order variants.")
     st.link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
+    st.markdown(
+        "**Prodigi support for errors or warranty:** "
+        "[support@prodigi.com](mailto:support@prodigi.com)"
+    )
     st.info("XL=A1 - L=A2 - M=A3 - S=A4. Oak in Sports Cave = Natural in Prodigi. Framed = Classic Frame. Unframed = Fine Art Paper.")
 
     st.subheader("Size map")
@@ -2119,7 +2078,10 @@ def render_prodigi_page():
             with columns[5]:
                 render_copy_text_button(product_code, f"{key_base}-code", "Copy Code")
 
-    st.warning("Before sending to production: confirm XL=A1, L=A2, M=A3, S=A4, Classic Frame or Fine Art Paper, and the exact frame colour.")
+    st.warning(
+        "Before sending to production: confirm XL=A1, L=A2, M=A3, S=A4, Classic Frame or Fine Art Paper, "
+        "and the exact frame colour. For print errors, damage, or warranty support, email support@prodigi.com."
+    )
 
 
 def fetch_latest_shopify_products(config):
@@ -2235,6 +2197,86 @@ def sync_changed_edition_widgets(config):
     return {"attempted": len(products), "synced": synced_count, "errors": errors[:10]}
 
 
+def parse_limited_edition_supabase_csv(uploaded_csv):
+    text = uploaded_csv.getvalue().decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise ValueError("The CSV has no header row.")
+    return [dict(row) for row in reader]
+
+
+def render_supabase_limited_edition_csv_import():
+    with st.expander("Import Limited Edition CSV", expanded=False):
+        st.caption(
+            "Manual correction tool. Upload a CSV only when edition totals, next edition numbers, "
+            "or historical dispatched editions need to be corrected in Supabase."
+        )
+        uploaded_csv = st.file_uploader(
+            "Limited Edition CSV",
+            type=["csv"],
+            key="supabase-limited-edition-csv-upload",
+            label_visibility="collapsed",
+        )
+        if uploaded_csv is None:
+            st.info(
+                "Accepted columns include Shopify Handle, Product Title, Edition No., Edition Total, "
+                "Next Edition, Active, Customer Name, Frame, Size, and Shopify Order #."
+            )
+            return
+
+        try:
+            csv_rows = parse_limited_edition_supabase_csv(uploaded_csv)
+        except Exception as error:
+            st.error("Could not read the CSV.")
+            st.exception(error)
+            return
+
+        preview_rows = csv_rows[:50]
+        preview_columns = st.columns(4)
+        preview_columns[0].metric("Rows read", len(csv_rows))
+        preview_columns[1].metric("Preview rows", len(preview_rows))
+        preview_columns[2].metric("Columns", len(preview_rows[0].keys()) if preview_rows else 0)
+        preview_columns[3].metric("Destination", "Supabase")
+        if preview_rows:
+            st.dataframe(preview_rows, use_container_width=True, hide_index=True)
+        else:
+            st.warning("The CSV has headers but no data rows.")
+            return
+
+        overwrite_existing_orders = st.checkbox(
+            "Update existing imported edition order rows if the CSV contains the same product and edition number",
+            value=False,
+            key="supabase-limited-csv-overwrite-orders",
+        )
+        allow_counter_override = st.checkbox(
+            "Allow CSV to set next edition number, protected by assigned history",
+            value=False,
+            help=(
+                "Use this only for manual corrections. Sports Cave OS will not set the next number below "
+                "already assigned edition history for that product."
+            ),
+            key="supabase-limited-csv-allow-counter-override",
+        )
+        if st.button("Import Limited Edition CSV", type="primary", use_container_width=True):
+            try:
+                result = supabase_backend.import_limited_edition_rows(
+                    csv_rows,
+                    overwrite_existing_orders=overwrite_existing_orders,
+                    allow_next_number_override=allow_counter_override,
+                )
+                st.session_state.supabase_limited_notice = (
+                    f"CSV import complete. Rows read: {result['rows_read']}. "
+                    f"Matched: {result['rows_matched']}. Inserted: {result['rows_inserted']}. "
+                    f"Updated: {result['rows_updated']}. Skipped: {result['rows_skipped']}."
+                )
+                if result.get("errors"):
+                    st.session_state.supabase_limited_warning = "First CSV import issue: " + result["errors"][0]
+                st.rerun()
+            except Exception as error:
+                st.error("Limited Edition CSV import failed.")
+                st.exception(error)
+
+
 def render_supabase_limited_editions_page():
     st.title("Limited Editions")
     st.caption("Supabase is the source of truth for edition numbers. Shopify remains the product/order source.")
@@ -2282,7 +2324,7 @@ def render_supabase_limited_editions_page():
             st.rerun()
         except Exception as error:
             progress.empty()
-            st.error("Shopify product sync failed. Open Settings -> Developer Tools -> Shopify Diagnostics.")
+            st.error("Shopify product sync failed. Open Developer -> Developer Tools -> Shopify Diagnostics.")
             supabase_backend.log_app_error(
                 "limited_editions_product_sync_failed",
                 str(error),
@@ -2340,6 +2382,8 @@ def render_supabase_limited_editions_page():
         use_container_width=True,
     )
     actions[4].caption(f"{len(products)} products shown")
+
+    render_supabase_limited_edition_csv_import()
 
     metrics = st.columns(4)
     metrics[0].metric("Products", len(products))
@@ -2969,10 +3013,10 @@ def render_supabase_orders_page():
             st.rerun()
         except Exception as error:
             sync_message.empty()
-            st.error("Shopify sync failed. Open Settings -> Developer Tools -> Shopify Diagnostics.")
+            st.error("Shopify sync failed. Open Developer -> Developer Tools -> Shopify Diagnostics.")
             supabase_backend.log_app_error("orders_page_sync_failed", str(error), {"source": "orders_page"})
     if not config["configured"]:
-        controls[1].caption("Shopify connection missing. Open Settings -> Developer Tools -> Shopify Diagnostics.")
+        controls[1].caption("Shopify connection missing. Open Developer -> Developer Tools -> Shopify Diagnostics.")
     search = controls[1].text_input(
         "Search orders",
         placeholder="Search order, customer, product, SKU, or edition",
@@ -4065,6 +4109,7 @@ def inject_marketing_factory_styles():
         div[data-testid="stTextArea"] textarea {
             background: #F5F2EA !important;
             color: #0B0B0D !important;
+            -webkit-text-fill-color: #0B0B0D !important;
             border: 1px solid rgba(212, 165, 76, 0.55) !important;
             border-radius: 10px !important;
             padding: 14px 16px !important;
@@ -4074,6 +4119,7 @@ def inject_marketing_factory_styles():
         }
         div[data-testid="stTextArea"] textarea::placeholder {
             color: #4B4B4D !important;
+            -webkit-text-fill-color: #4B4B4D !important;
             opacity: 1 !important;
         }
         div[data-testid="stExpander"] {
@@ -4094,6 +4140,32 @@ def inject_marketing_factory_styles():
         div[data-testid="stExpander"] label,
         div[data-testid="stExpander"] span {
             color: #F5F2EA !important;
+        }
+        div[data-testid="stExpander"] div[data-testid="stTextArea"] textarea,
+        div[data-testid="stExpander"] div[data-testid="stTextArea"] textarea:focus,
+        div[data-testid="stExpander"] div[data-testid="stTextArea"] textarea:hover {
+            background: #F5F2EA !important;
+            color: #0B0B0D !important;
+            -webkit-text-fill-color: #0B0B0D !important;
+            caret-color: #0B0B0D !important;
+        }
+        div[data-testid="stExpander"] div[data-testid="stButton"] button,
+        div[data-testid="stExpander"] div[data-testid="stButton"] button:hover,
+        div[data-testid="stExpander"] div[data-testid="stButton"] button:focus {
+            background: #F5F2EA !important;
+            color: #0B0B0D !important;
+            -webkit-text-fill-color: #0B0B0D !important;
+            border-color: rgba(212, 165, 76, 0.55) !important;
+            filter: none !important;
+            transform: none !important;
+        }
+        div[data-testid="stExpander"] div[data-testid="stButton"] button *,
+        div[data-testid="stExpander"] div[data-testid="stButton"] button span,
+        div[data-testid="stExpander"] div[data-testid="stButton"] button p {
+            color: #0B0B0D !important;
+            -webkit-text-fill-color: #0B0B0D !important;
+            fill: #0B0B0D !important;
+            stroke: #0B0B0D !important;
         }
         div[data-testid="stTabs"] button,
         div[data-testid="stTabs"] button:hover,
@@ -5074,8 +5146,8 @@ def render_marketing_factory_page():
 
 
 def render_settings_page(app_version, database_path, password_status):
-    st.title("Settings")
-    st.caption("Safe connection status and file workflow settings for Sports Cave OS.")
+    st.title("Developer")
+    st.caption("Diagnostics, connection checks, imports, and admin tools for Sports Cave OS.")
     assets_notice = st.session_state.pop("supabase_assets_notice", None)
     if assets_notice:
         st.success(assets_notice)

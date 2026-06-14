@@ -16,7 +16,7 @@ except ImportError:
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 RENDER_LIGHTWEIGHT_MODE = True
-MAX_UPLOAD_MB = 10
+MAX_UPLOAD_MB = 20
 MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 MAX_SOURCE_PIXELS = 25_000_000
 MAX_WORKING_EDGE = 2000
@@ -35,7 +35,7 @@ MEMORY_LIMIT_MESSAGE = (
 )
 PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE = (
     "Memory limit reached while preparing the uploaded artwork. "
-    "Try exporting the artwork as JPG/WebP under 10MB, or upgrade Render to a higher-memory instance."
+    "Try exporting the artwork as JPG/WebP under 20MB, or upgrade Render to a higher-memory instance."
 )
 
 
