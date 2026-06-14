@@ -8,3 +8,8 @@ google-auth-oauthlib==1.0.0
 python-dotenv==1.0.0
 psutil==6.0.0
 requests>=2.31,<3
+psycopg[binary]>=3.2,<4
+fastapi>=0.115,<1
+uvicorn[standard]>=0.30,<1
+httpx>=0.27,<1
+websockets>=12,<16

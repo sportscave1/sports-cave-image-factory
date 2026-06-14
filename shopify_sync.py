@@ -303,6 +303,66 @@ query SportsCaveProducts($first: Int!, $after: String, $query: String) {
 """
 
 
+PRODUCT_BY_ID_QUERY = """
+query SportsCaveProductById($id: ID!) {
+  product(id: $id) {
+    id
+    legacyResourceId
+    title
+    handle
+    status
+    vendor
+    productType
+    tags
+    updatedAt
+    onlineStoreUrl
+    media(first: 10) {
+      nodes {
+        ... on MediaImage {
+          id
+          alt
+          image {
+            url
+            width
+            height
+          }
+        }
+      }
+    }
+    variants(first: 100) {
+      nodes {
+        id
+        legacyResourceId
+        title
+        sku
+        price
+        inventoryQuantity
+        selectedOptions {
+          name
+          value
+        }
+      }
+    }
+    collections(first: 20) {
+      nodes {
+        id
+        title
+        handle
+      }
+    }
+    metafields(first: 50) {
+      nodes {
+        namespace
+        key
+        type
+        value
+      }
+    }
+  }
+}
+"""
+
+
 def test_connection(config=None, request_post=None):
     data, served_version = graphql_request(
         SHOP_QUERY,
@@ -395,6 +455,34 @@ def normalize_product(node, store_domain):
         "admin_url": build_admin_url(store_domain, legacy_resource_id),
         "remote_updated_at": node.get("updatedAt") or "",
     }
+
+
+def shopify_gid(resource_type, value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("gid://"):
+        return raw
+    return f"gid://shopify/{resource_type}/{raw}"
+
+
+def fetch_product_by_shopify_id(shopify_product_id, config=None, request_post=None):
+    config = config or get_config()
+    product_gid = shopify_gid("Product", shopify_product_id)
+    if not product_gid:
+        raise ShopifyAPIError("Shopify product ID is missing.")
+    data, served_version = graphql_request(
+        PRODUCT_BY_ID_QUERY,
+        variables={"id": product_gid},
+        config=config,
+        request_post=request_post,
+    )
+    product = data.get("product")
+    if not product:
+        raise ShopifyAPIError("Shopify product could not be found.")
+    normalized = normalize_product(product, config["store_domain"])
+    normalized["api_version"] = served_version or config.get("api_version")
+    return normalized
 
 
 METAFIELDS_SET_MUTATION = """
@@ -680,11 +768,19 @@ def normalize_order(node, store_domain):
     }
 
 
-def fetch_orders_page(after=None, days=60, page_size=DEFAULT_PAGE_SIZE, config=None, request_post=None):
+def fetch_orders_page(
+    after=None,
+    days=60,
+    page_size=DEFAULT_PAGE_SIZE,
+    config=None,
+    request_post=None,
+    query=None,
+):
     config = config or get_config()
     first = min(max(int(page_size), 1), 25)
-    created_after = (datetime.now(timezone.utc) - timedelta(days=max(int(days), 1))).date().isoformat()
-    query = f"created_at:>={created_after}"
+    if query is None:
+        created_after = (datetime.now(timezone.utc) - timedelta(days=max(int(days), 1))).date().isoformat()
+        query = f"created_at:>={created_after}"
     variables = {"first": first, "after": after, "query": query}
     try:
         data, served_version = graphql_request(
@@ -712,17 +808,19 @@ def fetch_orders_page(after=None, days=60, page_size=DEFAULT_PAGE_SIZE, config=N
     }
 
 
-def iter_order_pages(days=60, page_size=DEFAULT_PAGE_SIZE, config=None, request_post=None):
+def iter_order_pages(days=60, page_size=DEFAULT_PAGE_SIZE, config=None, request_post=None, query=None, max_orders=None):
     config = config or get_config()
     after = None
     orders_seen = 0
-    while orders_seen < config["max_orders"]:
+    order_limit = max(1, int(max_orders if max_orders is not None else config.get("max_orders", DEFAULT_MAX_ORDERS)))
+    while orders_seen < order_limit:
         page = fetch_orders_page(
             after=after,
             days=days,
-            page_size=min(page_size, config["max_orders"] - orders_seen),
+            page_size=min(page_size, order_limit - orders_seen),
             config=config,
             request_post=request_post,
+            query=query,
         )
         if not page["orders"]:
             break

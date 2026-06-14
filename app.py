@@ -58,14 +58,19 @@ MENU_OPTIONS = [
     "Product Uploads",
     "Limited Editions",
     "Orders",
+    "Product Assets",
     "Prodigi",
+    "Edition Orders",
     "Certificates",
+    "Webhook Events",
+    "Sync Runs",
+    "App Errors",
     "Files",
     "Marketing Factory",
     "VA Training",
     "Settings",
 ]
-APP_VERSION = "Sports Cave OS Phase 5B - 2026-06-13"
+APP_VERSION = "Sports Cave OS Supabase Edition Backend - 2026-06-14"
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
     "limited_editions": "Limited Editions",
@@ -4649,10 +4654,20 @@ def main():
         os_pages.render_limited_editions_page()
     elif current_page == "Orders":
         os_pages.render_orders_page()
+    elif current_page == "Product Assets":
+        os_pages.render_product_assets_page()
     elif current_page == "Prodigi":
         os_pages.render_prodigi_page()
+    elif current_page == "Edition Orders":
+        os_pages.render_edition_orders_page()
     elif current_page == "Certificates":
         os_pages.render_certificates_page()
+    elif current_page == "Webhook Events":
+        os_pages.render_webhook_events_page()
+    elif current_page == "Sync Runs":
+        os_pages.render_sync_runs_page()
+    elif current_page == "App Errors":
+        os_pages.render_app_errors_page()
     elif current_page == "Product Uploads":
         render_product_uploads_page()
     elif current_page == "Files":
