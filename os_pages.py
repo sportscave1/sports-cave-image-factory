@@ -18,8 +18,8 @@ import supabase_backend
 
 CERTIFICATE_OUTPUT_DIR = db.BASE_DIR / "output" / "certificates"
 ORDER_FETCH_ERROR_MESSAGE = (
-    "Orders require the read_orders scope. Add read_orders in Shopify Dev Dashboard, "
-    "release a new app version, update/reinstall the app, then redeploy Render."
+    "Orders require a Shopify access token with the read_orders scope. For Shopify Dev Dashboard "
+    "apps, Sports Cave OS requests this token from SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET."
 )
 
 QUICK_LINKS = (
@@ -387,6 +387,64 @@ def select_index(options, value, default=0):
         return options.index(value)
     except ValueError:
         return default
+
+
+def allow_local_sqlite_fallback():
+    return os.getenv("ENABLE_LOCAL_SQLITE_FALLBACK", "false").lower() == "true"
+
+
+def render_supabase_required_notice(page_title):
+    st.title(page_title)
+    st.error("Supabase is not connected, so this page cannot save or load persistent records.")
+    st.info(
+        "Set DATABASE_URL in Render environment variables. The old local cache fallback is disabled "
+        "by default so orders, products, and edition numbers are not accidentally stored outside Supabase."
+    )
+    st.caption(
+        "If you only need local development fallback, set ENABLE_LOCAL_SQLITE_FALLBACK=true locally."
+    )
+
+
+def render_shopify_scope_diagnostics(config, key_prefix):
+    st.caption(
+        f"Shopify auth: {config.get('auth_mode') or 'Missing credentials'} | "
+        f"Store: {config.get('store_domain') or 'Missing'} | "
+        f"API: {config.get('api_version') or 'Missing'}"
+    )
+    st.caption(
+        "SHOPIFY_ADMIN_ACCESS_TOKEN: "
+        + ("Found (legacy fallback)" if config.get("has_legacy_admin_token") else "Missing (OK when client credentials are configured)")
+    )
+    if not config.get("configured"):
+        if config.get("client_id") and not config.get("client_secret"):
+            st.warning("SHOPIFY_CLIENT_SECRET is missing.")
+        elif config.get("client_secret") and not config.get("client_id"):
+            st.warning("SHOPIFY_CLIENT_ID is missing.")
+        elif not config.get("client_id") and not config.get("client_secret") and not config.get("access_token"):
+            st.warning(
+                "Missing Shopify credentials. Add SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET, "
+                "or legacy SHOPIFY_ADMIN_ACCESS_TOKEN."
+            )
+        return
+    if st.button("Test Shopify token and scopes", key=f"{key_prefix}-test-shopify-token", use_container_width=True):
+        try:
+            result = shopify_sync.test_connection(config=config)
+            st.success(f"Connected to {result.get('name')} ({result.get('myshopify_domain')}).")
+            scopes = result.get("scopes") or []
+            if scopes:
+                st.caption("Returned scopes: " + ", ".join(scopes))
+                scope_status = result.get("scope_status") or {}
+                scope_columns = st.columns(4)
+                for index, scope_name in enumerate(("read_orders", "read_products", "read_customers", "write_files")):
+                    if scope_status.get(scope_name):
+                        scope_columns[index].success(scope_name)
+                    else:
+                        scope_columns[index].warning(f"{scope_name} missing")
+            else:
+                st.caption("Scope list is unavailable for the legacy admin token fallback.")
+        except Exception as error:
+            st.error("Shopify token test failed.")
+            st.exception(error)
 
 
 def go_to_product(product_id, edit=False):
@@ -2125,6 +2183,8 @@ def render_supabase_limited_editions_page():
             st.error("Shopify product sync failed.")
             st.exception(error)
     actions[1].caption("Shopify connection: " + ("Configured" if config["configured"] else "Missing"))
+    with st.expander("Shopify connection diagnostics", expanded=False):
+        render_shopify_scope_diagnostics(config, "limited-editions")
 
     try:
         products = supabase_backend.list_edition_products(search=search, limit=1000)
@@ -2269,6 +2329,9 @@ def render_supabase_limited_editions_page():
 def render_limited_editions_page(dispatch_log_renderer=None):
     if supabase_backend.is_configured():
         render_supabase_limited_editions_page()
+        return
+    if not allow_local_sqlite_fallback():
+        render_supabase_required_notice("Limited Editions")
         return
     st.title("Limited Editions")
     st.caption("Track edition numbers and PSD files from the local product cache.")
@@ -2702,6 +2765,9 @@ def render_supabase_orders_page():
             st.error("Could not sync Shopify orders since the selected date.")
             st.exception(error)
 
+    with st.expander("Shopify connection diagnostics", expanded=False):
+        render_shopify_scope_diagnostics(config, "orders")
+
     summary = supabase_backend.get_order_summary()
     metrics = st.columns(6)
     metric_specs = (
@@ -3013,6 +3079,9 @@ def render_certificate_actions(assignments, key_prefix):
 def render_orders_page():
     if supabase_backend.is_configured():
         render_supabase_orders_page()
+        return
+    if not allow_local_sqlite_fallback():
+        render_supabase_required_notice("Orders")
         return
     st.title("Orders")
     st.caption("Edition numbers are assigned from Sports Cave OS, not Shopify stock.")

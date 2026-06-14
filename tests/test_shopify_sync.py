@@ -45,7 +45,7 @@ class ShopifySyncClientTests(unittest.TestCase):
             "sports-cave.myshopify.com",
         )
 
-    def test_environment_config_prefers_legacy_admin_token(self):
+    def test_environment_config_prefers_client_credentials_over_legacy_admin_token(self):
         environment = {
             "SHOPIFY_STORE_DOMAIN": "sports-cave.myshopify.com",
             "SHOPIFY_API_VERSION": "2026-04",
@@ -57,7 +57,8 @@ class ShopifySyncClientTests(unittest.TestCase):
             config = shopify_sync.get_config()
 
         self.assertTrue(config["configured"])
-        self.assertEqual(config["auth_mode"], "Admin access token mode")
+        self.assertEqual(config["auth_mode"], "Client credentials mode")
+        self.assertTrue(config["has_legacy_admin_token"])
 
     def test_environment_config_accepts_client_credentials(self):
         environment = {
@@ -90,7 +91,11 @@ class ShopifySyncClientTests(unittest.TestCase):
             if url.endswith("/admin/oauth/access_token"):
                 token_requests.append(kwargs)
                 return FakeResponse(
-                    {"access_token": "temporary-token", "scope": "read_products", "expires_in": 3600}
+                    {
+                        "access_token": "temporary-token",
+                        "scope": "read_products read_orders read_customers write_files",
+                        "expires_in": 3600,
+                    }
                 )
             graphql_requests.append(kwargs)
             return FakeResponse(
@@ -126,7 +131,53 @@ class ShopifySyncClientTests(unittest.TestCase):
             graphql_requests[0]["headers"]["X-Shopify-Access-Token"],
             "temporary-token",
         )
-        self.assertIsNotNone(shopify_sync.get_token_status(config)["last_refresh"])
+        status = shopify_sync.get_token_status(config)
+        self.assertIsNotNone(status["last_refresh"])
+        self.assertIn("read_orders", status["scopes"])
+
+    def test_connection_returns_scope_diagnostics(self):
+        config = {
+            "store_domain": "sports-cave.myshopify.com",
+            "access_token": "",
+            "client_id": "client-id",
+            "client_secret": "client-secret",
+            "api_version": "2026-04",
+            "max_products": 25,
+            "auth_mode": "Client credentials mode",
+            "configured": True,
+        }
+
+        def fake_post(url, **kwargs):
+            if url.endswith("/admin/oauth/access_token"):
+                return FakeResponse(
+                    {
+                        "access_token": "temporary-token",
+                        "scope": "read_products read_orders",
+                        "expires_in": 3600,
+                    }
+                )
+            return FakeResponse(
+                {
+                    "data": {
+                        "shop": {
+                            "id": "gid://shopify/Shop/1",
+                            "name": "Sports Cave",
+                            "myshopifyDomain": "sports-cave.myshopify.com",
+                            "primaryDomain": {
+                                "host": "sportscaveshop.com",
+                                "url": "https://sportscaveshop.com",
+                            },
+                        }
+                    }
+                }
+            )
+
+        result = shopify_sync.test_connection(config=config, request_post=fake_post)
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["scope_status"]["read_orders"])
+        self.assertTrue(result["scope_status"]["read_products"])
+        self.assertFalse(result["scope_status"]["read_customers"])
 
     def test_client_token_refreshes_when_close_to_expiry(self):
         config = {

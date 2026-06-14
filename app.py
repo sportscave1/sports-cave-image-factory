@@ -120,20 +120,24 @@ MENU_OPTIONS = [
     "Product Uploads",
     "Limited Editions",
     "Orders",
-    "Product Assets",
     "Prodigi",
-    "Edition Orders",
     "Certificates",
-    "Webhook Events",
-    "Sync Runs",
-    "App Errors",
-    "Persistence Check",
-    "Edition Integrity Check",
     "Files",
     "Marketing Factory",
     "VA Training",
     "Settings",
 ]
+HIDDEN_PAGE_OPTIONS = [
+    "Products",
+    "Product Assets",
+    "Edition Orders",
+    "Webhook Events",
+    "Sync Runs",
+    "App Errors",
+    "Persistence Check",
+    "Edition Integrity Check",
+]
+ALL_PAGE_OPTIONS = [*MENU_OPTIONS, *HIDDEN_PAGE_OPTIONS]
 APP_VERSION = "Sports Cave OS Supabase Edition Backend - 2026-06-14"
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
@@ -2088,10 +2092,10 @@ def init_session_state():
         st.session_state.startup_shell_loaded = True
 
     pending_page = st.session_state.pop("pending_page", None)
-    if pending_page in MENU_OPTIONS:
+    if pending_page in ALL_PAGE_OPTIONS:
         st.session_state.selected_page = pending_page
 
-    if st.session_state.selected_page not in MENU_OPTIONS:
+    if st.session_state.selected_page not in ALL_PAGE_OPTIONS:
         st.session_state.selected_page = "Dashboard"
 
     if "selected_product_id" not in st.session_state:
@@ -4164,12 +4168,25 @@ def render_sidebar():
     st.sidebar.title("Sports Cave OS")
     st.sidebar.caption("Internal operations command centre")
     st.sidebar.caption(APP_VERSION)
-    st.sidebar.radio(
+    visible_page = (
+        st.session_state.selected_page
+        if st.session_state.selected_page in MENU_OPTIONS
+        else "Dashboard"
+    )
+    chosen_page = st.sidebar.radio(
         "Navigation",
         MENU_OPTIONS,
-        key="selected_page",
+        index=MENU_OPTIONS.index(visible_page),
         label_visibility="collapsed",
     )
+    if chosen_page != visible_page:
+        st.session_state.selected_page = chosen_page
+        st.rerun()
+    if st.session_state.selected_page not in MENU_OPTIONS:
+        st.sidebar.caption(f"Internal page open: {st.session_state.selected_page}")
+        if st.sidebar.button("Back to Dashboard", use_container_width=True):
+            st.session_state.selected_page = "Dashboard"
+            st.rerun()
 
     if st.session_state.selected_page == "Mockups":
         st.sidebar.divider()
@@ -4732,7 +4749,10 @@ def render_lightweight_dashboard_page():
     status_columns[0].success("App shell loaded")
     status_columns[1].info(f"Supabase URL: {'Found' if os.getenv('DATABASE_URL', '').strip() else 'Missing'}")
     shopify_found = bool(
-        os.getenv("SHOPIFY_SHOP_DOMAIN", "").strip()
+        (
+            os.getenv("SHOPIFY_STORE_DOMAIN", "").strip()
+            or os.getenv("SHOPIFY_SHOP_DOMAIN", "").strip()
+        )
         and (
             os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN", "").strip()
             or (
@@ -4770,59 +4790,6 @@ def render_lightweight_dashboard_page():
         st.session_state.pending_page = "Limited Editions"
         st.rerun()
 
-    check_columns = st.columns(5)
-    if check_columns[0].button("Check Edition Tables", use_container_width=True):
-        try:
-            counts = get_os_pages().supabase_backend.persistence_counts()
-            st.write(
-                {
-                    "edition_products": counts.get("edition_products", 0),
-                    "edition_orders": counts.get("edition_orders", 0),
-                }
-            )
-        except Exception as error:
-            st.error("Edition table check failed.")
-            st.exception(error)
-    if check_columns[1].button("Check Product Assets", use_container_width=True):
-        try:
-            counts = get_os_pages().supabase_backend.persistence_counts()
-            count = counts.get("product_assets", 0)
-            if count:
-                st.success(f"{count} product asset rows stored.")
-            else:
-                st.warning("product_assets has 0 rows.")
-        except Exception as error:
-            st.error("Product asset check failed.")
-            st.exception(error)
-    if check_columns[2].button("Check PSD Links", use_container_width=True):
-        try:
-            results = get_os_pages().supabase_backend.run_integrity_check()
-            missing = len(results.get("missing_psd_links", []))
-            if missing:
-                st.warning(f"{missing} products are missing PSD links.")
-            else:
-                st.success("No missing PSD links found.")
-        except Exception as error:
-            st.error("PSD link check failed.")
-            st.exception(error)
-    if check_columns[3].button("Check Certificate Template", use_container_width=True):
-        try:
-            certificate_service = importlib.import_module("certificate_service")
-            if certificate_service.CERTIFICATE_TEMPLATE_PRINT_PATH.exists():
-                st.success("Certificate print template found.")
-            else:
-                st.error("certificate-template-print.png is missing.")
-            if certificate_service.CERTIFICATE_TEMPLATE_PREVIEW_PATH.exists():
-                st.success("Certificate preview template found.")
-            else:
-                st.warning("certificate-template-preview.webp is missing.")
-        except Exception as error:
-            st.error("Certificate template check failed.")
-            st.exception(error)
-    if check_columns[4].button("Run Edition Integrity Check", use_container_width=True):
-        st.session_state.pending_page = "Edition Integrity Check"
-        st.rerun()
-
     st.info(
         "If Render shows a loading skeleton again, check the STARTUP stage timings in the logs. "
         "Dashboard itself does not query Supabase or Shopify."
@@ -4834,8 +4801,11 @@ def page_uses_local_database(current_page):
         return False
     pages = get_os_pages()
     supabase_enabled = pages.supabase_backend.is_configured()
+    local_fallback_enabled = os.getenv("ENABLE_LOCAL_SQLITE_FALLBACK", "false").lower() == "true"
     if current_page in {"Settings", "Files"}:
         return True
+    if current_page in {"Limited Editions", "Orders"} and not supabase_enabled:
+        return local_fallback_enabled
     if not supabase_enabled and current_page in {
         "Products",
         "Limited Editions",

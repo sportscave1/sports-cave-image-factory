@@ -8,7 +8,7 @@ import requests
 
 
 DEFAULT_API_VERSION = "2026-04"
-DEFAULT_PAGE_SIZE = 10
+DEFAULT_PAGE_SIZE = 50
 DEFAULT_MAX_PRODUCTS = 500
 DEFAULT_MAX_ORDERS = 250
 TOKEN_REFRESH_BUFFER_SECONDS = 300
@@ -59,16 +59,17 @@ def get_config():
     except ValueError:
         max_orders = DEFAULT_MAX_ORDERS
 
-    if access_token:
-        auth_mode = "Admin access token mode"
-    elif client_id and client_secret:
+    if client_id and client_secret:
         auth_mode = "Client credentials mode"
+    elif access_token:
+        auth_mode = "Admin access token mode"
     else:
         auth_mode = "Missing credentials"
 
     return {
         "store_domain": store_domain,
         "access_token": access_token,
+        "has_legacy_admin_token": bool(access_token),
         "client_id": client_id,
         "client_secret": client_secret,
         "api_version": api_version,
@@ -108,33 +109,91 @@ def _token_cache_key(config):
 
 def get_token_status(config=None):
     config = config or get_config()
+    if config.get("client_id") and config.get("client_secret"):
+        with _TOKEN_CACHE_LOCK:
+            cached = _TOKEN_CACHE.get(_token_cache_key(config)) or {}
+        return {
+            "auth_mode": "Client credentials mode",
+            "last_refresh": cached.get("refreshed_at"),
+            "cached": bool(cached.get("access_token")),
+            "scopes": cached.get("scopes") or [],
+        }
     if config.get("access_token"):
         return {
             "auth_mode": "Admin access token mode",
             "last_refresh": None,
             "cached": False,
+            "scopes": [],
         }
 
-    with _TOKEN_CACHE_LOCK:
-        cached = _TOKEN_CACHE.get(_token_cache_key(config)) or {}
     return {
         "auth_mode": config.get("auth_mode", "Missing credentials"),
-        "last_refresh": cached.get("refreshed_at"),
-        "cached": bool(cached.get("access_token")),
+        "last_refresh": None,
+        "cached": False,
+        "scopes": [],
     }
 
 
-def get_access_token(config=None, timeout=10, request_post=None):
+def _sanitize_shopify_error_text(value, config):
+    text = str(value or "")
+    for secret_value in (
+        config.get("client_secret"),
+        config.get("access_token"),
+    ):
+        if secret_value:
+            text = text.replace(str(secret_value), "[redacted]")
+    return text[:2000]
+
+
+def _parse_scopes(value):
+    if isinstance(value, (list, tuple, set)):
+        return sorted({str(item).strip() for item in value if str(item).strip()})
+    return sorted({part.strip() for part in str(value or "").replace(",", " ").split() if part.strip()})
+
+
+def _scope_status(scopes):
+    scope_set = set(scopes or [])
+    return {
+        "read_orders": "read_orders" in scope_set,
+        "read_products": "read_products" in scope_set,
+        "read_customers": "read_customers" in scope_set,
+        "write_files": "write_files" in scope_set,
+    }
+
+
+def get_shopify_access_token_details(config=None, timeout=10, request_post=None, force_refresh=False):
     config = config or get_config()
     validate_config(config)
-    if config.get("access_token"):
-        return config["access_token"]
+    if not (config.get("client_id") and config.get("client_secret")):
+        return {
+            "access_token": config["access_token"],
+            "auth_mode": "Admin access token mode",
+            "scope": "",
+            "scopes": [],
+            "scope_status": {},
+            "expires_in": None,
+            "refreshed_at": None,
+            "cached": False,
+        }
 
     cache_key = _token_cache_key(config)
     with _TOKEN_CACHE_LOCK:
         cached = _TOKEN_CACHE.get(cache_key)
-        if cached and cached["expires_at"] - TOKEN_REFRESH_BUFFER_SECONDS > time.monotonic():
-            return cached["access_token"]
+        if (
+            not force_refresh
+            and cached
+            and cached["expires_at"] - TOKEN_REFRESH_BUFFER_SECONDS > time.monotonic()
+        ):
+            return {
+                "access_token": cached["access_token"],
+                "auth_mode": "Client credentials mode",
+                "scope": cached.get("scope", ""),
+                "scopes": cached.get("scopes") or [],
+                "scope_status": _scope_status(cached.get("scopes") or []),
+                "expires_in": cached.get("expires_in"),
+                "refreshed_at": cached.get("refreshed_at"),
+                "cached": True,
+            }
 
     request_post = request_post or requests.post
     endpoint = f"https://{config['store_domain']}/admin/oauth/access_token"
@@ -154,14 +213,36 @@ def get_access_token(config=None, timeout=10, request_post=None):
         access_token = str(payload.get("access_token") or "").strip()
         if not access_token:
             raise ValueError("Access token missing")
+        scope = str(payload.get("scope") or "")
+        scopes = _parse_scopes(scope)
         try:
             expires_in = max(60, int(payload.get("expires_in") or 86400))
         except (TypeError, ValueError):
             expires_in = 86400
-    except (requests.RequestException, TypeError, ValueError) as error:
+    except requests.RequestException as error:
+        response = getattr(error, "response", None)
+        status_code = getattr(response, "status_code", None) or getattr(
+            locals().get("response", None),
+            "status_code",
+            "unknown",
+        )
+        response_body = ""
+        if response is not None:
+            response_body = getattr(response, "text", "") or ""
+        elif "response" in locals():
+            response_body = getattr(locals()["response"], "text", "") or ""
         raise ShopifyAuthenticationError(
-            "Shopify client credentials authentication failed. Check app release, scopes, "
-            "store domain, Client ID, and Client Secret."
+            "Shopify client credentials authentication failed. "
+            f"Token request status: {status_code}. "
+            f"Response: {_sanitize_shopify_error_text(response_body, config)}"
+        ) from error
+    except (TypeError, ValueError) as error:
+        response_body = ""
+        if "response" in locals():
+            response_body = getattr(locals()["response"], "text", "") or ""
+        raise ShopifyAuthenticationError(
+            "Shopify client credentials authentication failed. "
+            f"Token response was invalid. Response: {_sanitize_shopify_error_text(response_body, config)}"
         ) from error
 
     refreshed_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -169,16 +250,44 @@ def get_access_token(config=None, timeout=10, request_post=None):
         _TOKEN_CACHE[cache_key] = {
             "access_token": access_token,
             "expires_at": time.monotonic() + expires_in,
+            "expires_in": expires_in,
             "refreshed_at": refreshed_at,
+            "scope": scope,
+            "scopes": scopes,
         }
-    return access_token
+    return {
+        "access_token": access_token,
+        "auth_mode": "Client credentials mode",
+        "scope": scope,
+        "scopes": scopes,
+        "scope_status": _scope_status(scopes),
+        "expires_in": expires_in,
+        "refreshed_at": refreshed_at,
+        "cached": False,
+    }
+
+
+def get_shopify_access_token(config=None, timeout=10, request_post=None):
+    return get_shopify_access_token_details(
+        config=config,
+        timeout=timeout,
+        request_post=request_post,
+    )["access_token"]
+
+
+def get_access_token(config=None, timeout=10, request_post=None):
+    return get_shopify_access_token(
+        config=config,
+        timeout=timeout,
+        request_post=request_post,
+    )
 
 
 def graphql_request(query, variables=None, timeout=10, config=None, request_post=None):
     config = config or get_config()
     validate_config(config)
     request_post = request_post or requests.post
-    access_token = get_access_token(
+    access_token = get_shopify_access_token(
         config=config,
         timeout=min(timeout, 10),
         request_post=request_post,
@@ -199,8 +308,20 @@ def graphql_request(query, variables=None, timeout=10, config=None, request_post
         )
         response.raise_for_status()
     except requests.RequestException as error:
+        response = getattr(error, "response", None)
+        status_code = getattr(response, "status_code", None) or getattr(
+            locals().get("response", None),
+            "status_code",
+            "unknown",
+        )
+        response_body = ""
+        if response is not None:
+            response_body = getattr(response, "text", "") or ""
+        elif "response" in locals():
+            response_body = getattr(locals()["response"], "text", "") or ""
         raise ShopifyAPIError(
-            "Shopify GraphQL sync failed. Check access scopes and API version."
+            "Shopify GraphQL sync failed. "
+            f"Status: {status_code}. Response: {_sanitize_shopify_error_text(response_body, config)}"
         ) from error
 
     try:
@@ -211,8 +332,9 @@ def graphql_request(query, variables=None, timeout=10, config=None, request_post
         ) from error
 
     if payload.get("errors"):
+        error_text = _sanitize_shopify_error_text(payload.get("errors"), config)
         raise ShopifyAPIError(
-            "Shopify GraphQL sync failed. Check access scopes and API version."
+            f"Shopify GraphQL sync failed. Errors: {error_text}"
         )
     if not isinstance(payload.get("data"), dict):
         raise ShopifyAPIError(
@@ -364,6 +486,11 @@ query SportsCaveProductById($id: ID!) {
 
 
 def test_connection(config=None, request_post=None):
+    config = config or get_config()
+    token_details = get_shopify_access_token_details(
+        config=config,
+        request_post=request_post,
+    )
     data, served_version = graphql_request(
         SHOP_QUERY,
         config=config,
@@ -378,7 +505,12 @@ def test_connection(config=None, request_post=None):
         "myshopify_domain": shop.get("myshopifyDomain") or "",
         "primary_domain": (shop.get("primaryDomain") or {}).get("host") or "",
         "primary_url": (shop.get("primaryDomain") or {}).get("url") or "",
-        "api_version": served_version or (config or get_config()).get("api_version"),
+        "api_version": served_version or config.get("api_version"),
+        "auth_mode": token_details.get("auth_mode") or config.get("auth_mode"),
+        "scopes": token_details.get("scopes") or [],
+        "scope_status": token_details.get("scope_status") or {},
+        "ok": True,
+        "message": "Shopify connection works.",
     }
 
 
@@ -777,7 +909,7 @@ def fetch_orders_page(
     query=None,
 ):
     config = config or get_config()
-    first = min(max(int(page_size), 1), 25)
+    first = min(max(int(page_size), 1), 100)
     if query is None:
         created_after = (datetime.now(timezone.utc) - timedelta(days=max(int(days), 1))).date().isoformat()
         query = f"created_at:>={created_after}"
@@ -833,7 +965,7 @@ def iter_order_pages(days=60, page_size=DEFAULT_PAGE_SIZE, config=None, request_
 
 def fetch_catalog_page(after=None, search="", page_size=DEFAULT_PAGE_SIZE, config=None, request_post=None):
     config = config or get_config()
-    first = min(max(int(page_size), 1), 25)
+    first = min(max(int(page_size), 1), 100)
     data, served_version = graphql_request(
         PRODUCTS_QUERY,
         variables={

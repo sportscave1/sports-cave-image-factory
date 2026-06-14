@@ -415,6 +415,41 @@ def ensure_schema():
                         f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
                     )
 
+            uuid_id_tables = (
+                "shopify_products",
+                "shopify_variants",
+                "edition_products",
+                "shopify_customers",
+                "shopify_orders",
+                "edition_orders",
+                "certificates",
+                "product_assets",
+                "sync_runs",
+                "app_errors",
+            )
+            pgcrypto_ready = False
+            for table_name in uuid_id_tables:
+                if not table_exists(cur, table_name):
+                    continue
+                cur.execute(
+                    """
+                    SELECT data_type, column_default
+                    FROM information_schema.columns
+                    WHERE table_schema='public'
+                      AND table_name=%s
+                      AND column_name='id'
+                    """,
+                    (table_name,),
+                )
+                id_column = cur.fetchone() or {}
+                if id_column.get("data_type") == "uuid" and not id_column.get("column_default"):
+                    if not pgcrypto_ready:
+                        cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+                        pgcrypto_ready = True
+                    cur.execute(
+                        f"ALTER TABLE {table_name} ALTER COLUMN id SET DEFAULT gen_random_uuid()"
+                    )
+
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_products_id_unique ON shopify_products(shopify_product_id)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_products_handle_unique ON shopify_products(handle)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_variants_id_unique ON shopify_variants(shopify_variant_id)")
@@ -615,7 +650,7 @@ def sync_shopify_products_to_supabase(config=None):
     try:
         sync_config = dict(config)
         sync_config["max_products"] = max(int(sync_config.get("max_products") or 0), 1000)
-        for page in shopify_sync.iter_catalog_pages(search="status:active", page_size=25, config=sync_config):
+        for page in shopify_sync.iter_catalog_pages(search="status:active", page_size=50, config=sync_config):
             seen += len(page["products"])
             processed += upsert_products(page["products"])
             del page
@@ -1737,7 +1772,7 @@ def sync_shopify_orders_to_supabase(config=None, *, query=None, max_orders=50):
         for page in shopify_sync.iter_order_pages(
             query=query,
             max_orders=max_orders,
-            page_size=25,
+            page_size=50,
             config=sync_config,
         ):
             for order in page["orders"]:
