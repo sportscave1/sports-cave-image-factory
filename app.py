@@ -37,9 +37,9 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-import db
-import image_factory
-import os_pages
+db = None
+image_factory = None
+os_pages = None
 
 
 load_dotenv()
@@ -65,6 +65,33 @@ def log_startup_stage(stage, extra=""):
     LAST_STARTUP_STAGE_TIME = now
 
 log_startup_stage("APP IMPORTS DONE")
+
+
+def get_db():
+    global db
+    if db is None:
+        log_startup_stage("DB MODULE IMPORT START")
+        db = importlib.import_module("db")
+        log_startup_stage("DB MODULE IMPORT DONE")
+    return db
+
+
+def get_image_factory():
+    global image_factory
+    if image_factory is None:
+        log_startup_stage("IMAGE FACTORY IMPORT START")
+        image_factory = importlib.import_module("image_factory")
+        log_startup_stage("IMAGE FACTORY IMPORT DONE")
+    return image_factory
+
+
+def get_os_pages():
+    global os_pages
+    if os_pages is None:
+        log_startup_stage("OS PAGES IMPORT START")
+        os_pages = importlib.import_module("os_pages")
+        log_startup_stage("OS PAGES IMPORT DONE")
+    return os_pages
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -2095,7 +2122,13 @@ def init_session_state():
 
 
 def log_app_memory(stage):
-    image_factory.log_memory(stage)
+    try:
+        import psutil
+
+        process = psutil.Process(os.getpid())
+        print(f"MEMORY MB {stage}: {process.memory_info().rss / 1024 / 1024:.1f}", flush=True)
+    except Exception:
+        safe_startup_print(f"MEMORY LOG SKIPPED {stage}")
 
 
 def normalize_whitespace(value):
@@ -4187,6 +4220,7 @@ def render_sidebar():
 
 
 def render_mockups_page():
+    get_image_factory()
     log_app_memory("Page load: Mockups")
     st.title("Mockups")
     st.caption(
@@ -4371,8 +4405,9 @@ def render_mockups_page():
 
 
 def render_product_uploads_page():
+    get_image_factory()
     log_app_memory("Page load: Product Uploads")
-    os_pages.render_product_uploads_workflow()
+    get_os_pages().render_product_uploads_workflow()
     st.divider()
     st.subheader("Shopify Prompt Tools")
     st.caption(
@@ -4677,8 +4712,70 @@ def render_placeholder_page(title, body):
     st.caption(body)
 
 
+def render_lightweight_dashboard_page():
+    st.title("Sports Cave OS")
+    st.caption("Internal backend for product creation, mockups, limited editions, files, and VA workflows.")
+    with st.container(border=True):
+        st.markdown("**Sports Cave OS loaded**")
+        st.caption(
+            "This first screen stays lightweight. Supabase, Shopify, orders, assets, "
+            "and certificates only load after you click a button."
+        )
+
+    st.subheader("System Status")
+    status_columns = st.columns(3)
+    status_columns[0].success("App shell loaded")
+    status_columns[1].info(f"Supabase URL: {'Found' if os.getenv('DATABASE_URL', '').strip() else 'Missing'}")
+    shopify_found = bool(
+        os.getenv("SHOPIFY_SHOP_DOMAIN", "").strip()
+        and (
+            os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN", "").strip()
+            or (
+                os.getenv("SHOPIFY_CLIENT_ID", "").strip()
+                and os.getenv("SHOPIFY_CLIENT_SECRET", "").strip()
+            )
+        )
+    )
+    status_columns[2].info(f"Shopify config: {'Found' if shopify_found else 'Missing'}")
+
+    actions = st.columns(4)
+    if actions[0].button("Test Supabase", use_container_width=True):
+        try:
+            pages = get_os_pages()
+            result = pages.supabase_backend.test_connection()
+            st.success(result.get("message", "Supabase connection works."))
+        except Exception as error:
+            st.error("Supabase test failed.")
+            st.exception(error)
+    if actions[1].button("Test Shopify", use_container_width=True):
+        try:
+            pages = get_os_pages()
+            result = pages.shopify_sync.test_connection()
+            if result.get("ok"):
+                st.success(result.get("message", "Shopify connection works."))
+            else:
+                st.error(result.get("message", "Shopify connection failed."))
+        except Exception as error:
+            st.error("Shopify test failed.")
+            st.exception(error)
+    if actions[2].button("Open Orders", use_container_width=True):
+        st.session_state.pending_page = "Orders"
+        st.rerun()
+    if actions[3].button("Open Limited Editions", use_container_width=True):
+        st.session_state.pending_page = "Limited Editions"
+        st.rerun()
+
+    st.info(
+        "If Render shows a loading skeleton again, check the STARTUP stage timings in the logs. "
+        "Dashboard itself does not query Supabase or Shopify."
+    )
+
+
 def page_uses_local_database(current_page):
-    supabase_enabled = os_pages.supabase_backend.is_configured()
+    if current_page == "Dashboard":
+        return False
+    pages = get_os_pages()
+    supabase_enabled = pages.supabase_backend.is_configured()
     if current_page in {"Settings", "Files"}:
         return True
     if not supabase_enabled and current_page in {
@@ -4693,45 +4790,45 @@ def page_uses_local_database(current_page):
 
 def render_selected_page(current_page):
     if current_page == "Dashboard":
-        os_pages.render_dashboard_page()
+        render_lightweight_dashboard_page()
     elif current_page == "Products":
-        os_pages.render_products_page()
+        get_os_pages().render_products_page()
     elif current_page == "Mockups":
         render_mockups_page()
     elif current_page == "Limited Editions":
-        os_pages.render_limited_editions_page()
+        get_os_pages().render_limited_editions_page()
     elif current_page == "Orders":
-        os_pages.render_orders_page()
+        get_os_pages().render_orders_page()
     elif current_page == "Product Assets":
-        os_pages.render_product_assets_page()
+        get_os_pages().render_product_assets_page()
     elif current_page == "Prodigi":
-        os_pages.render_prodigi_page()
+        get_os_pages().render_prodigi_page()
     elif current_page == "Edition Orders":
-        os_pages.render_edition_orders_page()
+        get_os_pages().render_edition_orders_page()
     elif current_page == "Certificates":
-        os_pages.render_certificates_page()
+        get_os_pages().render_certificates_page()
     elif current_page == "Webhook Events":
-        os_pages.render_webhook_events_page()
+        get_os_pages().render_webhook_events_page()
     elif current_page == "Sync Runs":
-        os_pages.render_sync_runs_page()
+        get_os_pages().render_sync_runs_page()
     elif current_page == "App Errors":
-        os_pages.render_app_errors_page()
+        get_os_pages().render_app_errors_page()
     elif current_page == "Edition Integrity Check":
-        os_pages.render_edition_integrity_check_page()
+        get_os_pages().render_edition_integrity_check_page()
     elif current_page == "Product Uploads":
         render_product_uploads_page()
     elif current_page == "Files":
-        os_pages.render_files_page()
+        get_os_pages().render_files_page()
     elif current_page == "Marketing Factory":
-        os_pages.render_marketing_factory_page()
+        get_os_pages().render_marketing_factory_page()
     elif current_page == "Settings":
-        os_pages.render_settings_page(
+        get_os_pages().render_settings_page(
             app_version=APP_VERSION,
-            database_path=db.DB_PATH,
+            database_path=get_db().DB_PATH,
             password_status=get_password_protection_status(),
         )
     else:
-        os_pages.render_placeholder_page(current_page)
+        get_os_pages().render_placeholder_page(current_page)
 
 
 def main():
@@ -4750,7 +4847,7 @@ def main():
 
     if page_uses_local_database(current_page):
         log_startup_stage("LOCAL DB INIT START")
-        db.init_db()
+        get_db().init_db()
         log_startup_stage("LOCAL DB INIT DONE")
 
     log_startup_stage("PAGE RENDER START", current_page)

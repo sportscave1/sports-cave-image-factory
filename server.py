@@ -15,8 +15,6 @@ import uvicorn
 import websockets
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
 
-import supabase_backend
-
 
 STREAMLIT_INTERNAL_PORT = int(os.getenv("STREAMLIT_INTERNAL_PORT", "8501"))
 STREAMLIT_HOST = os.getenv("STREAMLIT_INTERNAL_HOST", "127.0.0.1")
@@ -43,6 +41,8 @@ async def healthz():
 
 @app.post("/webhooks/shopify/orders-paid")
 async def shopify_orders_paid_webhook(request: Request):
+    import supabase_backend
+
     raw_body = await request.body()
     if not verify_shopify_hmac(raw_body, request.headers.get("X-Shopify-Hmac-SHA256", "")):
         return Response("Invalid Shopify webhook signature.", status_code=401)
