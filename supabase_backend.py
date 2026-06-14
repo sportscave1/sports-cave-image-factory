@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import shopify_sync
-from certificate_service import generate_certificate_pdf
+from certificate_service import certificate_id, generate_certificate_pdf
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -219,6 +219,7 @@ def ensure_schema():
                     edition_order_id BIGINT UNIQUE,
                     shopify_order_id TEXT,
                     shopify_handle TEXT,
+                    certificate_id TEXT,
                     edition_number INTEGER,
                     edition_total INTEGER,
                     local_file_path TEXT,
@@ -238,6 +239,7 @@ def ensure_schema():
                     asset_name TEXT,
                     asset_url TEXT,
                     google_drive_file_id TEXT,
+                    google_drive_file_url TEXT,
                     notes TEXT,
                     is_primary BOOLEAN DEFAULT TRUE,
                     updated_at TIMESTAMPTZ DEFAULT now(),
@@ -360,6 +362,7 @@ def ensure_schema():
                     ("edition_order_id", "BIGINT"),
                     ("shopify_order_id", "TEXT"),
                     ("shopify_handle", "TEXT"),
+                    ("certificate_id", "TEXT"),
                     ("edition_number", "INTEGER"),
                     ("edition_total", "INTEGER"),
                     ("local_file_path", "TEXT"),
@@ -374,6 +377,7 @@ def ensure_schema():
                     ("asset_name", "TEXT"),
                     ("asset_url", "TEXT"),
                     ("google_drive_file_id", "TEXT"),
+                    ("google_drive_file_url", "TEXT"),
                     ("notes", "TEXT"),
                     ("is_primary", "BOOLEAN DEFAULT TRUE"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
@@ -715,6 +719,7 @@ def list_product_assets(search=""):
                     """
                     SELECT ep.shopify_handle, ep.product_title, ep.active, ep.sold_out,
                            pa.asset_type, pa.asset_name, pa.asset_url, pa.google_drive_file_id,
+                           pa.google_drive_file_url,
                            pa.notes, pa.is_primary, pa.updated_at
                     FROM edition_products ep
                     LEFT JOIN product_assets pa ON pa.shopify_handle = ep.shopify_handle
@@ -729,6 +734,7 @@ def list_product_assets(search=""):
                     """
                     SELECT ep.shopify_handle, ep.product_title, ep.active, ep.sold_out,
                            pa.asset_type, pa.asset_name, pa.asset_url, pa.google_drive_file_id,
+                           pa.google_drive_file_url,
                            pa.notes, pa.is_primary, pa.updated_at
                     FROM edition_products ep
                     LEFT JOIN product_assets pa ON pa.shopify_handle = ep.shopify_handle
@@ -758,13 +764,14 @@ def upsert_product_asset(
                 """
                 INSERT INTO product_assets(
                     shopify_handle, asset_type, asset_name, asset_url,
-                    google_drive_file_id, notes, is_primary, updated_at
+                    google_drive_file_id, google_drive_file_url, notes, is_primary, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, now())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (shopify_handle, asset_type) DO UPDATE SET
                     asset_name=EXCLUDED.asset_name,
                     asset_url=EXCLUDED.asset_url,
                     google_drive_file_id=EXCLUDED.google_drive_file_id,
+                    google_drive_file_url=EXCLUDED.google_drive_file_url,
                     notes=EXCLUDED.notes,
                     is_primary=EXCLUDED.is_primary,
                     updated_at=now()
@@ -775,6 +782,7 @@ def upsert_product_asset(
                     asset_name,
                     asset_url,
                     google_drive_file_id,
+                    asset_url,
                     notes,
                     primary_value,
                 ),
@@ -940,15 +948,21 @@ def _generate_certificate_for_assignment(cur, assignment):
             order_name=assignment.get("order_name"),
             customer_name=assignment.get("customer_name"),
             assigned_at=assignment.get("assigned_at"),
+            shopify_handle=assignment.get("shopify_handle") or "",
+        )
+        generated_certificate_id = certificate_id(
+            assignment.get("order_name") or assignment.get("shopify_order_id"),
+            assignment.get("edition_number"),
         )
         cur.execute(
             """
             INSERT INTO certificates(
-                edition_order_id, shopify_order_id, shopify_handle, edition_number,
+                edition_order_id, shopify_order_id, shopify_handle, certificate_id, edition_number,
                 edition_total, local_file_path, status, generated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, 'Local PDF', now())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'Local PDF', now())
             ON CONFLICT (edition_order_id) DO UPDATE SET
+                certificate_id=EXCLUDED.certificate_id,
                 local_file_path=EXCLUDED.local_file_path,
                 generated_at=now(),
                 status='Local PDF'
@@ -957,6 +971,7 @@ def _generate_certificate_for_assignment(cur, assignment):
                 assignment["id"],
                 assignment.get("shopify_order_id"),
                 assignment.get("shopify_handle"),
+                generated_certificate_id,
                 assignment.get("edition_number"),
                 assignment.get("edition_total"),
                 local_file_path,

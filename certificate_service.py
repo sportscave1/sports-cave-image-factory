@@ -2,6 +2,11 @@ from pathlib import Path
 import re
 
 
+BASE_DIR = Path(__file__).resolve().parent
+CERTIFICATE_TEMPLATE_PRINT_PATH = BASE_DIR / "assets" / "certificates" / "certificate-template-print.png"
+CERTIFICATE_TEMPLATE_PREVIEW_PATH = BASE_DIR / "assets" / "certificates" / "certificate-template-preview.webp"
+
+
 def safe_filename_part(value):
     cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "").strip().lower())
     return cleaned.strip("-") or "sports-cave"
@@ -62,7 +67,160 @@ def write_simple_certificate_pdf(path, lines):
     path.write_bytes(bytes(pdf))
 
 
-def generate_certificate_pdf(output_dir, *, product_title, edition_number, edition_total, order_name, customer_name, assigned_at):
+def certificate_id(order_name, edition_number):
+    cleaned_order = safe_filename_part(str(order_name or "order").replace("#", ""))
+    return f"SC-{cleaned_order.upper()}-{int(edition_number):04d}"
+
+
+def format_edition_number(edition_number, edition_total):
+    return f"#{int(edition_number):03d}/{int(edition_total)}"
+
+
+def font_candidates():
+    return [
+        BASE_DIR / "assets" / "fonts" / "DejaVuSerif.ttf",
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"),
+        Path("/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"),
+        Path("C:/Windows/Fonts/georgia.ttf"),
+        Path("C:/Windows/Fonts/times.ttf"),
+    ]
+
+
+def load_serif_font(size):
+    from PIL import ImageFont
+
+    for font_path in font_candidates():
+        if font_path.exists():
+            return ImageFont.truetype(str(font_path), size=size)
+    return ImageFont.load_default()
+
+
+def text_width(draw, text, font):
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0]
+
+
+def truncate_to_fit(draw, text, font, max_width):
+    if text_width(draw, text, font) <= max_width:
+        return text
+    ellipsis = "..."
+    candidate = str(text or "")
+    while candidate and text_width(draw, candidate + ellipsis, font) > max_width:
+        candidate = candidate[:-1]
+    return (candidate.rstrip() + ellipsis) if candidate else ellipsis
+
+
+def fit_font(draw, text, max_width, max_size, min_size):
+    for size in range(int(max_size), int(min_size) - 1, -1):
+        font = load_serif_font(size)
+        if text_width(draw, text, font) <= max_width:
+            return font, text
+    font = load_serif_font(int(min_size))
+    return font, truncate_to_fit(draw, text, font, max_width)
+
+
+def draw_fitted_text(draw, text, x_start, x_end, y_center, max_size, min_size):
+    max_width = max(1, x_end - x_start)
+    font, fitted_text = fit_font(draw, text, max_width, max_size, min_size)
+    try:
+        draw.text((x_start, y_center), fitted_text, fill=(0, 0, 0), font=font, anchor="lm")
+    except TypeError:
+        bbox = draw.textbbox((0, 0), fitted_text, font=font)
+        text_height = bbox[3] - bbox[1]
+        draw.text((x_start, y_center - text_height / 2), fitted_text, fill=(0, 0, 0), font=font)
+    return fitted_text
+
+
+def generate_template_certificate_pdf(
+    output_dir,
+    *,
+    product_title,
+    edition_number,
+    edition_total,
+    order_name,
+    shopify_handle="",
+):
+    from PIL import Image, ImageDraw
+
+    if not CERTIFICATE_TEMPLATE_PRINT_PATH.exists():
+        raise FileNotFoundError(f"Certificate template missing: {CERTIFICATE_TEMPLATE_PRINT_PATH}")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    handle_part = safe_filename_part(shopify_handle or product_title)
+    filename = (
+        f"certificate_{safe_filename_part(order_name)}_{handle_part}"
+        f"_edition_{int(edition_number):03d}.pdf"
+    )
+    pdf_path = output_dir / filename
+
+    with Image.open(CERTIFICATE_TEMPLATE_PRINT_PATH) as template:
+        certificate = template.convert("RGB")
+    draw = ImageDraw.Draw(certificate)
+    width, height = certificate.size
+
+    name_text = str(product_title or "Sports Cave Artwork")
+    edition_text = format_edition_number(edition_number, edition_total)
+    scale = width / 1536
+
+    draw_fitted_text(
+        draw,
+        name_text,
+        int(width * 0.41),
+        int(width * 0.82),
+        int(height * 0.696),
+        max_size=max(18, int(34 * scale)),
+        min_size=max(12, int(16 * scale)),
+    )
+    draw_fitted_text(
+        draw,
+        edition_text,
+        int(width * 0.43),
+        int(width * 0.54),
+        int(height * 0.758),
+        max_size=max(18, int(34 * scale)),
+        min_size=max(12, int(18 * scale)),
+    )
+
+    certificate.save(pdf_path, "PDF", resolution=300.0)
+    certificate.close()
+    return str(pdf_path)
+
+
+def generate_certificate_pdf(
+    output_dir,
+    *,
+    product_title,
+    edition_number,
+    edition_total,
+    order_name,
+    customer_name="",
+    assigned_at="",
+    shopify_handle="",
+):
+    try:
+        return generate_template_certificate_pdf(
+            output_dir,
+            product_title=product_title,
+            edition_number=edition_number,
+            edition_total=edition_total,
+            order_name=order_name,
+            shopify_handle=shopify_handle,
+        )
+    except Exception:
+        # Keep certificate generation resilient if the template asset is unavailable.
+        return generate_simple_certificate_pdf(
+            output_dir,
+            product_title=product_title,
+            edition_number=edition_number,
+            edition_total=edition_total,
+            order_name=order_name,
+            customer_name=customer_name,
+            assigned_at=assigned_at,
+        )
+
+
+def generate_simple_certificate_pdf(output_dir, *, product_title, edition_number, edition_total, order_name, customer_name, assigned_at):
     filename = (
         f"certificate_{safe_filename_part(order_name)}_{safe_filename_part(product_title)}"
         f"_edition_{int(edition_number):03d}.pdf"

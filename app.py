@@ -14,8 +14,22 @@ import os
 import re
 import shutil
 import tempfile
+import time
 import traceback
 from urllib.parse import parse_qs, urlparse
+
+APP_START_TIME = time.perf_counter()
+LAST_STARTUP_STAGE_TIME = APP_START_TIME
+
+
+def safe_startup_print(message):
+    try:
+        print(message, flush=True)
+    except (OSError, ValueError):
+        pass
+
+
+safe_startup_print("STARTUP APP START total=0.000s stage=0.000s")
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 from dotenv import load_dotenv
@@ -30,6 +44,27 @@ import os_pages
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+
+def log_startup_stage(stage, extra=""):
+    global LAST_STARTUP_STAGE_TIME
+    now = time.perf_counter()
+    stage_elapsed = now - LAST_STARTUP_STAGE_TIME
+    total_elapsed = now - APP_START_TIME
+    suffix = f" {extra}" if extra else ""
+    message = (
+        f"STARTUP {stage} total={total_elapsed:.3f}s "
+        f"stage={stage_elapsed:.3f}s{suffix}"
+    )
+    safe_startup_print(message)
+    logging.info(message)
+    if stage_elapsed > 3:
+        warning = f"WARNING startup stage slow: {stage} took {stage_elapsed:.3f}s"
+        safe_startup_print(warning)
+        logging.warning(warning)
+    LAST_STARTUP_STAGE_TIME = now
+
+log_startup_stage("APP IMPORTS DONE")
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -1548,6 +1583,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+log_startup_stage("SET PAGE CONFIG DONE")
 
 
 def inject_styles():
@@ -2018,6 +2054,10 @@ def inject_styles():
 def init_session_state():
     if "selected_page" not in st.session_state:
         st.session_state.selected_page = "Dashboard"
+
+    if "startup_shell_loaded" not in st.session_state:
+        st.session_state.selected_page = "Dashboard"
+        st.session_state.startup_shell_loaded = True
 
     pending_page = st.session_state.pop("pending_page", None)
     if pending_page in MENU_OPTIONS:
@@ -4637,14 +4677,21 @@ def render_placeholder_page(title, body):
     st.caption(body)
 
 
-def main():
-    db.init_db()
-    inject_styles()
-    init_session_state()
-    render_sidebar()
+def page_uses_local_database(current_page):
+    supabase_enabled = os_pages.supabase_backend.is_configured()
+    if current_page in {"Settings", "Files"}:
+        return True
+    if not supabase_enabled and current_page in {
+        "Products",
+        "Limited Editions",
+        "Orders",
+        "Certificates",
+    }:
+        return True
+    return False
 
-    current_page = st.session_state.selected_page
-    log_app_memory(f"Page load start: {current_page}")
+
+def render_selected_page(current_page):
     if current_page == "Dashboard":
         os_pages.render_dashboard_page()
     elif current_page == "Products":
@@ -4685,6 +4732,37 @@ def main():
         )
     else:
         os_pages.render_placeholder_page(current_page)
+
+
+def main():
+    init_session_state()
+    inject_styles()
+    log_startup_stage("CSS LOADED")
+
+    log_startup_stage("SIDEBAR START")
+    render_sidebar()
+    log_startup_stage("SIDEBAR DONE")
+
+    log_startup_stage("ROUTER START")
+    current_page = st.session_state.selected_page
+    log_startup_stage(f"PAGE SELECTED: {current_page}")
+    log_app_memory(f"Page load start: {current_page}")
+
+    if page_uses_local_database(current_page):
+        log_startup_stage("LOCAL DB INIT START")
+        db.init_db()
+        log_startup_stage("LOCAL DB INIT DONE")
+
+    log_startup_stage("PAGE RENDER START", current_page)
+    try:
+        render_selected_page(current_page)
+    except Exception as error:
+        error_message = f"Page render failed for {current_page}: {error}"
+        print(f"ERROR {error_message}", flush=True)
+        logging.exception(error_message)
+        st.error("This page failed to load, but Sports Cave OS is still running.")
+        st.exception(error)
+    log_startup_stage("PAGE RENDER DONE", current_page)
     log_app_memory(f"Page load end: {current_page}")
 
 

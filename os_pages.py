@@ -418,19 +418,31 @@ def render_supabase_dashboard_page():
     st.caption("The app shell loaded. Live integrations are checked only when you click a button.")
     status_columns = st.columns(3)
     status_columns[0].success("App loaded")
-    status_columns[1].info("Supabase URL: Found")
+    status_columns[1].info("Supabase URL: " + ("Found" if supabase_backend.is_configured() else "Missing"))
     shopify_config = shopify_sync.get_config()
     status_columns[2].info("Shopify config: " + ("Found" if shopify_config["configured"] else "Missing"))
 
-    action_columns = st.columns([1, 1, 1, 2])
-    load_summary = action_columns[0].button("Load live summary", use_container_width=True)
-    test_supabase = action_columns[1].button("Test Supabase", use_container_width=True)
-    test_shopify = action_columns[2].button(
+    action_columns = st.columns([1, 1, 1, 1])
+    test_supabase = action_columns[0].button(
+        "Test Supabase",
+        disabled=not supabase_backend.is_configured(),
+        use_container_width=True,
+    )
+    test_shopify = action_columns[1].button(
         "Test Shopify",
         disabled=not shopify_config["configured"],
         use_container_width=True,
     )
-    action_columns[3].caption("No Supabase or Shopify queries run during initial page render.")
+    open_orders = action_columns[2].button("Open Orders", use_container_width=True)
+    open_limited = action_columns[3].button("Open Limited Editions", use_container_width=True)
+    st.caption("No Supabase or Shopify queries run during initial Dashboard render.")
+
+    if open_orders:
+        st.session_state.pending_page = "Orders"
+        st.rerun()
+    if open_limited:
+        st.session_state.pending_page = "Limited Editions"
+        st.rerun()
 
     if test_supabase:
         try:
@@ -451,27 +463,6 @@ def render_supabase_dashboard_page():
             st.error("Shopify connection failed, but the app is still running.")
             st.exception(error)
 
-    if load_summary:
-        try:
-            with st.spinner("Loading Supabase dashboard summary..."):
-                summary = supabase_backend.get_dashboard_summary()
-        except Exception as error:
-            st.error("Could not load Supabase dashboard data. Use Settings or App Errors for details.")
-            st.exception(error)
-            return
-
-        metric_specs = (
-            ("Edition products", summary.get("edition_products", 0)),
-            ("Orders synced", summary.get("orders_synced", 0)),
-            ("Missing PSD links", summary.get("missing_psd", 0)),
-            ("Certificates missing", summary.get("certificates_missing", 0)),
-            ("Sold out products", summary.get("sold_out_products", 0)),
-            ("Recent app errors", summary.get("recent_errors", 0)),
-        )
-        metric_columns = st.columns(3)
-        for index, (label, value) in enumerate(metric_specs):
-            metric_columns[index % 3].metric(label, value)
-
     st.subheader("Today's Focus")
     st.caption("Start by syncing Shopify products, then clear missing PSD links, certificates, and order issues.")
     focus_columns = st.columns(3)
@@ -487,9 +478,8 @@ def render_dashboard_page():
         "Start with Today's Focus, then open the products that need attention.",
         "Finish missing product data before moving a product to Live.",
     )
-    if supabase_backend.is_configured():
-        render_supabase_dashboard_page()
-        return
+    render_supabase_dashboard_page()
+    return
 
     st.subheader("Dashboard")
     st.caption("The daily command screen for product readiness, missing files, and edition priorities.")
@@ -3188,12 +3178,19 @@ def render_psd_csv_import(products):
 
         if matched:
             st.markdown("**Matched PSDs**")
+            overwrite_existing = st.checkbox(
+                "Overwrite existing PSD links",
+                value=False,
+                help="Leave off to protect manually linked PSDs. Existing PSD links will be skipped.",
+                key="supabase-psd-overwrite-existing",
+            )
             st.dataframe(
                 [
                     {
                         "File Name": row["asset_name"],
                         "Shopify Handle": row["shopify_handle"],
                         "Drive URL": row["asset_url"],
+                        "Existing PSD": "Yes" if (asset_map.get(row["shopify_handle"]) or {}).get("psd_master_file") else "No",
                     }
                     for row in matched[:200]
                 ],
@@ -3201,20 +3198,50 @@ def render_psd_csv_import(products):
                 hide_index=True,
             )
             if st.button("Import matched PSD links", type="primary", use_container_width=True):
+                run_id = supabase_backend.start_sync_run("psd_csv_import")
                 imported = 0
-                for row in matched:
-                    supabase_backend.upsert_product_asset(
-                        row["shopify_handle"],
-                        "psd_master_file",
-                        row["asset_url"],
-                        row["notes"],
-                        asset_name=row["asset_name"],
-                        google_drive_file_id=row["google_drive_file_id"],
-                        is_primary=True,
+                skipped = 0
+                try:
+                    for row in matched:
+                        existing_url = (asset_map.get(row["shopify_handle"]) or {}).get("psd_master_file")
+                        if existing_url and not overwrite_existing:
+                            skipped += 1
+                            continue
+                        supabase_backend.upsert_product_asset(
+                            row["shopify_handle"],
+                            "psd_master_file",
+                            row["asset_url"],
+                            row["notes"] or "PSD CSV import",
+                            asset_name=row["asset_name"],
+                            google_drive_file_id=row["google_drive_file_id"],
+                            is_primary=True,
+                        )
+                        imported += 1
+                    supabase_backend.finish_sync_run(
+                        run_id,
+                        "Complete",
+                        records_seen=len(matched),
+                        records_processed=imported,
                     )
-                    imported += 1
-                st.session_state.supabase_assets_notice = f"Imported {imported} matched PSD links."
-                st.rerun()
+                    st.session_state.supabase_assets_notice = (
+                        f"Imported {imported} matched PSD links. Skipped {skipped} existing links."
+                    )
+                    st.rerun()
+                except Exception as error:
+                    supabase_backend.finish_sync_run(
+                        run_id,
+                        "Failed",
+                        records_seen=len(matched),
+                        records_processed=imported,
+                        error_message="PSD CSV import failed.",
+                    )
+                    supabase_backend.log_app_error(
+                        "psd_csv_import_failed",
+                        str(error),
+                        {"imported": imported, "matched": len(matched)},
+                    )
+                    st.error("PSD CSV import failed.")
+                    st.exception(error)
 
         if missing:
             st.markdown("**Missing PSDs**")
@@ -3252,9 +3279,18 @@ def render_psd_csv_import(products):
             selected_unmatched = manual_columns[0].selectbox("Unmatched PSD", unmatched_options)
             selected_index = int(selected_unmatched.rsplit("|", 1)[-1].strip())
             selected_product_label = manual_columns[1].selectbox("Link to Shopify product", list(product_options.keys()))
+            overwrite_manual = st.checkbox(
+                "Overwrite this product's existing PSD link",
+                value=False,
+                key="supabase-psd-manual-overwrite",
+            )
             if manual_columns[2].button("Save manual link", use_container_width=True):
                 row = unmatched[selected_index]
                 handle = product_options[selected_product_label]
+                existing_url = (asset_map.get(handle) or {}).get("psd_master_file")
+                if existing_url and not overwrite_manual:
+                    st.warning("This product already has a PSD link. Tick overwrite if you want to replace it.")
+                    return
                 supabase_backend.upsert_product_asset(
                     handle,
                     "psd_master_file",

@@ -124,7 +124,7 @@ def get_token_status(config=None):
     }
 
 
-def get_access_token(config=None, timeout=15, request_post=None):
+def get_access_token(config=None, timeout=10, request_post=None):
     config = config or get_config()
     validate_config(config)
     if config.get("access_token"):
@@ -174,13 +174,13 @@ def get_access_token(config=None, timeout=15, request_post=None):
     return access_token
 
 
-def graphql_request(query, variables=None, timeout=30, config=None, request_post=None):
+def graphql_request(query, variables=None, timeout=10, config=None, request_post=None):
     config = config or get_config()
     validate_config(config)
     request_post = request_post or requests.post
     access_token = get_access_token(
         config=config,
-        timeout=min(timeout, 15),
+        timeout=min(timeout, 10),
         request_post=request_post,
     )
     endpoint = (
