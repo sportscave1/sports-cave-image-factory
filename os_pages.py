@@ -2368,7 +2368,12 @@ def render_supabase_limited_editions_page():
 
     try:
         products = supabase_backend.list_edition_products(search=search, limit=1000)
-        asset_map = supabase_backend.get_product_asset_map()
+        product_handles = [item.get("shopify_handle") for item in products if item.get("shopify_handle")]
+        psd_assets = supabase_backend.get_primary_psd_assets(product_handles)
+        asset_map = {
+            handle: {"psd_master_file": asset.get("asset_url") or asset.get("google_drive_file_url") or ""}
+            for handle, asset in psd_assets.items()
+        }
     except Exception as error:
         st.error("Could not load edition products from Supabase.")
         st.exception(error)
@@ -2566,12 +2571,24 @@ def render_supabase_limited_editions_page():
         columns[6].write(product.get("remaining_editions") or 0)
         columns[7].markdown(status_badge("Active" if product.get("active") else "Inactive"), unsafe_allow_html=True)
         columns[8].markdown(status_badge("Sold Out" if product.get("sold_out") else "Available"), unsafe_allow_html=True)
-        psd_url = (asset_map.get(product.get("shopify_handle")) or {}).get("psd_master_file")
+        product_handle = product.get("shopify_handle")
+        psd_asset = psd_assets.get(product_handle) or {}
+        psd_url = psd_asset.get("asset_url") or psd_asset.get("google_drive_file_url") or ""
         with columns[9]:
             if psd_url:
                 st.link_button("Open PSD", psd_url, use_container_width=True)
             else:
                 st.markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
+            if st.button(
+                "Edit",
+                key=f"limited-psd-edit-{product_handle}",
+                use_container_width=True,
+            ):
+                st.session_state.psd_editor_context = {
+                    "handle": product_handle,
+                    "title": product.get("product_title"),
+                    "source": "limited-editions",
+                }
         with columns[10]:
             if product.get("admin_url"):
                 st.link_button("Shopify", product["admin_url"], use_container_width=True)
@@ -2580,6 +2597,17 @@ def render_supabase_limited_editions_page():
             else:
                 st.caption("No link")
         st.divider()
+
+    editor_context = st.session_state.get("psd_editor_context") or {}
+    if editor_context.get("source") == "limited-editions":
+        handle = editor_context.get("handle")
+        product = get_product_by_handle(products, handle)
+        render_psd_link_editor(
+            handle,
+            product.get("product_title") or editor_context.get("title") or "",
+            existing_asset=psd_assets.get(handle),
+            key_prefix="limited-editions-psd-editor",
+        )
 
 
 def render_limited_editions_page(dispatch_log_renderer=None):
@@ -3048,6 +3076,12 @@ def render_supabase_orders_page():
         st.info("No orders found yet. Click Sync Orders.")
         return
 
+    order_handles = [row.get("shopify_handle") for row in rows if row.get("shopify_handle")]
+    try:
+        psd_assets = supabase_backend.get_primary_psd_assets(order_handles)
+    except Exception:
+        psd_assets = {}
+
     header = st.columns([0.3, 0.45, 0.75, 0.82, 1.05, 0.9, 1.65, 1.05, 0.75, 0.75, 0.8, 0.9])
     for column, label in zip(
         header,
@@ -3126,15 +3160,38 @@ def render_supabase_orders_page():
                         st.exception(error)
             else:
                 st.caption("Missing")
-        if row.get("psd_url"):
-            columns[10].link_button("Open PSD", row["psd_url"], use_container_width=True)
-        else:
-            columns[10].markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
+        psd_asset = psd_assets.get(row.get("shopify_handle")) or {}
+        psd_url = psd_asset.get("asset_url") or psd_asset.get("google_drive_file_url") or row.get("psd_url") or ""
+        with columns[10]:
+            if psd_url:
+                st.link_button("Open PSD", psd_url, use_container_width=True)
+            else:
+                st.markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
+            if row.get("shopify_handle") and st.button(
+                "Edit",
+                key=f"orders-psd-edit-{row_key}",
+                use_container_width=True,
+            ):
+                st.session_state.psd_editor_context = {
+                    "handle": row.get("shopify_handle"),
+                    "title": row.get("product_title"),
+                    "source": "orders",
+                }
         if row.get("prodigi_url"):
             columns[11].link_button("Open Prodigi", row["prodigi_url"], use_container_width=True)
         else:
             columns[11].markdown(status_badge("Prodigi Missing"), unsafe_allow_html=True)
         st.markdown('<hr class="sc-order-divider" />', unsafe_allow_html=True)
+
+    editor_context = st.session_state.get("psd_editor_context") or {}
+    if editor_context.get("source") == "orders":
+        handle = editor_context.get("handle")
+        render_psd_link_editor(
+            handle,
+            editor_context.get("title") or "",
+            existing_asset=psd_assets.get(handle),
+            key_prefix="orders-psd-editor",
+        )
 
 
 def fetch_latest_orders(config):
@@ -3447,9 +3504,189 @@ def parse_psd_csv(uploaded_csv):
     return [row for row in rows if row["asset_url"] or row["google_drive_file_id"] or row["asset_name"]]
 
 
+def get_product_by_handle(products, handle):
+    normalized = normalize_psd_handle_guess(handle)
+    for product in products:
+        if normalize_psd_handle_guess(product.get("shopify_handle")) == normalized:
+            return product
+    return {}
+
+
+def render_psd_storage_status():
+    try:
+        stats = supabase_backend.get_psd_link_stats()
+    except Exception as error:
+        st.warning("Could not load PSD storage counts.")
+        st.exception(error)
+        return
+    columns = st.columns(5)
+    columns[0].metric("Product asset rows", int(stats.get("product_assets_count") or 0))
+    columns[1].metric("PSD rows", int(stats.get("psd_master_file_count") or 0))
+    columns[2].metric("Matched PSDs", int(stats.get("matched_psd_count") or 0))
+    columns[3].metric("Missing PSDs", int(stats.get("missing_psd_count") or 0))
+    columns[4].metric("Products tracked", int(stats.get("products_count") or 0))
+    st.caption(f"PSD links stored in Supabase: {int(stats.get('psd_master_file_count') or 0)}")
+
+
+def render_psd_master_folder_controls(key_prefix="psd-master-folder"):
+    try:
+        setting = supabase_backend.ensure_psd_master_folder_setting()
+    except Exception as error:
+        st.warning("Could not save or load the PSD master folder setting.")
+        st.exception(error)
+        setting = supabase_backend.DEFAULT_PSD_MASTER_FOLDER_SETTING
+    folder_url = (setting or {}).get("url") or supabase_backend.DEFAULT_PSD_MASTER_FOLDER_SETTING["url"]
+    folder_name = (setting or {}).get("name") or "Sports Cave PSD Master Folder"
+    with st.container(border=True):
+        st.markdown("**PSD Master Folder**")
+        st.caption(folder_name)
+        st.code(folder_url, language="text")
+        st.link_button("Open PSD Master Folder", folder_url, use_container_width=True)
+        with st.expander("Update PSD master folder shortcut", expanded=False):
+            new_name = st.text_input(
+                "Folder name",
+                value=folder_name,
+                key=f"{key_prefix}-name",
+            )
+            new_url = st.text_input(
+                "Folder URL",
+                value=folder_url,
+                key=f"{key_prefix}-url",
+            )
+            if st.button("Save PSD Master Folder", key=f"{key_prefix}-save", use_container_width=True):
+                try:
+                    supabase_backend.set_app_setting(
+                        supabase_backend.PSD_MASTER_FOLDER_SETTING_KEY,
+                        {"url": new_url.strip(), "name": new_name.strip() or "Sports Cave PSD Master Folder"},
+                    )
+                    st.success("PSD master folder saved.")
+                except Exception as error:
+                    st.error("Could not save PSD master folder.")
+                    st.exception(error)
+
+
+def render_psd_link_editor(
+    shopify_handle,
+    product_title="",
+    *,
+    existing_asset=None,
+    key_prefix="psd-editor",
+    expanded=True,
+):
+    handle = normalize_psd_handle_guess(shopify_handle)
+    existing_asset = existing_asset or {}
+    existing_url = existing_asset.get("asset_url") or existing_asset.get("google_drive_file_url") or ""
+    default_asset_name = existing_asset.get("asset_name") or f"{handle}.psd"
+    with st.expander(f"Edit PSD link - {product_title or handle}", expanded=expanded):
+        st.caption("Supabase stores the Drive link only. The PSD file stays in Google Drive.")
+        read_only_columns = st.columns(2)
+        read_only_columns[0].text_input(
+            "Shopify handle",
+            value=handle,
+            disabled=True,
+            key=f"{key_prefix}-{handle}-handle",
+        )
+        read_only_columns[1].text_input(
+            "Product title",
+            value=product_title or "",
+            disabled=True,
+            key=f"{key_prefix}-{handle}-title",
+        )
+        psd_url = st.text_input(
+            "PSD Drive URL",
+            value=existing_url,
+            placeholder="https://drive.google.com/file/d/FILE_ID/view",
+            key=f"{key_prefix}-{handle}-url",
+        )
+        extracted_id = supabase_backend.extract_google_drive_file_id(psd_url)
+        drive_id = st.text_input(
+            "PSD file ID",
+            value=existing_asset.get("google_drive_file_id") or extracted_id,
+            placeholder="Auto-extracted where possible",
+            key=f"{key_prefix}-{handle}-file-id",
+        )
+        edit_columns = st.columns([1.2, 0.8])
+        asset_name = edit_columns[0].text_input(
+            "Asset name",
+            value=default_asset_name,
+            key=f"{key_prefix}-{handle}-asset-name",
+        )
+        is_primary = edit_columns[1].checkbox(
+            "Primary PSD",
+            value=existing_asset.get("is_primary") is not False,
+            key=f"{key_prefix}-{handle}-primary",
+        )
+        notes = st.text_input(
+            "Notes",
+            value=existing_asset.get("notes") or "Manual PSD link",
+            key=f"{key_prefix}-{handle}-notes",
+        )
+        if existing_url:
+            st.link_button("Open Current PSD", existing_url, use_container_width=True)
+        master_setting = supabase_backend.get_psd_master_folder_setting()
+        if master_setting.get("url"):
+            st.link_button("Open PSD Master Folder", master_setting["url"], use_container_width=True)
+        actions = st.columns(3)
+        if actions[0].button("Save PSD Link", type="primary", key=f"{key_prefix}-{handle}-save", use_container_width=True):
+            if not psd_url.strip() and not drive_id.strip():
+                st.warning("Paste a PSD Drive URL or file ID before saving.")
+            else:
+                try:
+                    supabase_backend.upsert_product_asset(
+                        handle,
+                        "psd_master_file",
+                        psd_url.strip(),
+                        notes.strip(),
+                        asset_name=asset_name.strip() or f"{handle}.psd",
+                        google_drive_file_id=drive_id.strip(),
+                        is_primary=is_primary,
+                    )
+                    st.session_state.supabase_assets_notice = "PSD link saved."
+                    st.rerun()
+                except Exception as error:
+                    st.error("Could not save PSD link.")
+                    st.exception(error)
+        if actions[1].button("Replace Existing Link", key=f"{key_prefix}-{handle}-replace", use_container_width=True):
+            try:
+                supabase_backend.upsert_product_asset(
+                    handle,
+                    "psd_master_file",
+                    psd_url.strip(),
+                    notes.strip() or "Manual PSD link replacement",
+                    asset_name=asset_name.strip() or f"{handle}.psd",
+                    google_drive_file_id=drive_id.strip(),
+                    is_primary=True,
+                )
+                st.session_state.supabase_assets_notice = "PSD link replaced."
+                st.rerun()
+            except Exception as error:
+                st.error("Could not replace PSD link.")
+                st.exception(error)
+        confirm_remove = st.checkbox(
+            "Confirm remove stored PSD link only",
+            key=f"{key_prefix}-{handle}-remove-confirm",
+            help="This removes the Supabase shortcut only. It does not delete anything from Google Drive.",
+        )
+        if actions[2].button(
+            "Remove PSD Link",
+            disabled=not confirm_remove,
+            key=f"{key_prefix}-{handle}-remove",
+            use_container_width=True,
+        ):
+            try:
+                supabase_backend.remove_product_asset(handle, "psd_master_file")
+                st.session_state.supabase_assets_notice = "PSD link removed from Supabase."
+                st.rerun()
+            except Exception as error:
+                st.error("Could not remove PSD link.")
+                st.exception(error)
+
+
 def render_psd_csv_import(products, *, expanded=False, key_prefix="supabase-psd", title="Import PSD CSV"):
     with st.expander(title, expanded=expanded):
         st.caption("Upload the Google Drive export CSV only when you are ready. The app stores Drive links only, not PSD files.")
+        render_psd_master_folder_controls(f"{key_prefix}-master")
+        render_psd_storage_status()
         uploaded_csv = st.file_uploader(
             "PSD CSV",
             type=["csv"],
@@ -3478,6 +3715,7 @@ def render_psd_csv_import(products, *, expanded=False, key_prefix="supabase-psd"
             if matched_handle:
                 row["shopify_handle"] = matched_handle
         product_handles = set(handle_lookup.values())
+        manually_linked_unmatched = set(st.session_state.get(f"{key_prefix}-linked-unmatched", []))
         product_options = {
             f"{item.get('product_title') or item.get('shopify_handle')} | {item.get('shopify_handle')}": item.get("shopify_handle")
             for item in known_products
@@ -3485,7 +3723,12 @@ def render_psd_csv_import(products, *, expanded=False, key_prefix="supabase-psd"
         }
 
         matched = [row for row in csv_rows if row["shopify_handle"] in product_handles]
-        unmatched = [row for row in csv_rows if row["shopify_handle"] not in product_handles]
+        unmatched = [
+            row
+            for row in csv_rows
+            if row["shopify_handle"] not in product_handles
+            and (row.get("google_drive_file_id") or row.get("asset_url") or row.get("asset_name")) not in manually_linked_unmatched
+        ]
         linked_psd_handles = {
             handle
             for handle, assets in asset_map.items()
@@ -3576,17 +3819,31 @@ def render_psd_csv_import(products, *, expanded=False, key_prefix="supabase-psd"
 
         if missing:
             st.markdown("**Missing PSDs**")
-            st.dataframe(
-                [
-                    {
-                        "Product": item.get("product_title"),
-                        "Shopify Handle": item.get("shopify_handle"),
+            for item in missing[:50]:
+                columns = st.columns([2.2, 1.3, 1, 1])
+                columns[0].write(item.get("product_title") or item.get("shopify_handle"))
+                columns[1].caption(item.get("shopify_handle"))
+                if item.get("admin_url"):
+                    columns[2].link_button("Shopify", item["admin_url"], use_container_width=True)
+                else:
+                    columns[2].caption("No Shopify link")
+                if columns[3].button("Add PSD Link", key=f"{key_prefix}-missing-add-{item.get('shopify_handle')}", use_container_width=True):
+                    st.session_state.psd_editor_context = {
+                        "handle": item.get("shopify_handle"),
+                        "title": item.get("product_title"),
+                        "source": key_prefix,
                     }
-                    for item in missing[:200]
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
+            editor_context = st.session_state.get("psd_editor_context") or {}
+            if editor_context.get("source") == key_prefix:
+                handle = editor_context.get("handle")
+                product = get_product_by_handle(products, handle)
+                psd_assets = supabase_backend.get_primary_psd_assets([handle])
+                render_psd_link_editor(
+                    handle,
+                    product.get("product_title") or editor_context.get("title") or "",
+                    existing_asset=psd_assets.get(handle),
+                    key_prefix=f"{key_prefix}-missing-editor",
+                )
 
         if unmatched:
             st.markdown("**Unmatched PSDs**")
@@ -3634,6 +3891,10 @@ def render_psd_csv_import(products, *, expanded=False, key_prefix="supabase-psd"
                     google_drive_file_id=row["google_drive_file_id"],
                     is_primary=True,
                 )
+                linked_key = row.get("google_drive_file_id") or row.get("asset_url") or row.get("asset_name")
+                st.session_state[f"{key_prefix}-linked-unmatched"] = list(
+                    set(st.session_state.get(f"{key_prefix}-linked-unmatched", [])) | {linked_key}
+                )
                 st.session_state.supabase_assets_notice = f"Linked {row['asset_name']} to {handle}."
                 st.rerun()
 
@@ -3654,6 +3915,9 @@ def render_product_assets_page():
     notice = st.session_state.pop("supabase_assets_notice", None)
     if notice:
         st.success(notice)
+
+    render_psd_master_folder_controls("product-assets-master-folder")
+    render_psd_storage_status()
 
     search = st.text_input(
         "Search products",
@@ -3771,9 +4035,10 @@ def render_product_assets_page():
                 with columns[index % 3]:
                     with st.container(border=True):
                         st.markdown(f"**{supabase_backend.ASSET_LABELS.get(asset_type, asset_type)}**")
-                        if asset.get("asset_url"):
+                        asset_link = asset.get("asset_url") or asset.get("google_drive_file_url")
+                        if asset_link:
                             st.markdown(status_badge("Connected"), unsafe_allow_html=True)
-                            st.link_button("Open", asset["asset_url"], use_container_width=True)
+                            st.link_button("Open", asset_link, use_container_width=True)
                             st.caption(format_updated_at(asset.get("updated_at")))
                         else:
                             st.markdown(status_badge("Missing"), unsafe_allow_html=True)
@@ -5783,7 +6048,7 @@ def render_settings_page(app_version, database_path, password_status):
                 st.caption("No edition orders are available for certificate generation testing yet.")
 
     with st.expander("Developer Tools", expanded=False):
-        dev_tabs = st.tabs(["Shopify Diagnostics", "Metafield Bridge", "Import PSD CSV", "Certificates"])
+        dev_tabs = st.tabs(["Shopify Diagnostics", "Metafield Bridge", "Product Assets / PSD Links", "Certificates"])
         with dev_tabs[0]:
             st.caption("Manual Shopify connection check. This only runs a token/API test when you click the button.")
             render_shopify_scope_diagnostics(shopify_config, "settings-dev")
@@ -5816,11 +6081,18 @@ def render_settings_page(app_version, database_path, password_status):
             else:
                 st.warning("Widget snippet file is missing from the repo.")
         with dev_tabs[2]:
-            st.caption("Import Google Drive PSD links into Supabase product_assets. No PSD files are uploaded or stored.")
+            st.caption("Import and manage Google Drive PSD links in Supabase product_assets. No PSD files are uploaded or stored.")
             if not supabase_backend.is_configured():
                 st.warning("DATABASE_URL is required before importing PSD links.")
-            elif st.button("Load PSD CSV Import Tool", key="settings-load-psd-import", use_container_width=True):
-                st.session_state.settings_psd_import_loaded = True
+            else:
+                try:
+                    render_psd_master_folder_controls("settings-dev-psd-master")
+                    render_psd_storage_status()
+                except Exception as error:
+                    st.warning("Could not load PSD link status.")
+                    st.exception(error)
+                if st.button("Load PSD CSV Import Tool", key="settings-load-psd-import", use_container_width=True):
+                    st.session_state.settings_psd_import_loaded = True
             if supabase_backend.is_configured() and st.session_state.get("settings_psd_import_loaded"):
                 try:
                     products = supabase_backend.list_edition_products(limit=1000)

@@ -15,6 +15,11 @@ from certificate_service import certificate_id, generate_certificate_pdf
 
 BASE_DIR = Path(__file__).resolve().parent
 CERTIFICATE_OUTPUT_DIR = BASE_DIR / "output" / "certificates"
+PSD_MASTER_FOLDER_SETTING_KEY = "psd_master_folder_url"
+DEFAULT_PSD_MASTER_FOLDER_SETTING = {
+    "url": "https://drive.google.com/drive/folders/1UCs_EsyjVXZUNclAfnmO7y2x7rKutwhH",
+    "name": "Sports Cave PSD Master Folder",
+}
 DATABASE_URL_ENV_KEYS = (
     "DATABASE_URL",
     "SUPABASE_DATABASE_URL",
@@ -299,6 +304,15 @@ def _ensure_schema_uncached():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value JSONB DEFAULT '{}'::jsonb,
+                    updated_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS webhook_events (
                     webhook_id TEXT PRIMARY KEY,
                     topic TEXT,
@@ -507,6 +521,11 @@ def _ensure_schema_uncached():
                     ("context", "JSONB DEFAULT '{}'::jsonb"),
                     ("created_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
+                "app_settings": (
+                    ("key", "TEXT"),
+                    ("value", "JSONB DEFAULT '{}'::jsonb"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
+                ),
             }
             for table_name, columns in additive_columns.items():
                 if not table_exists(cur, table_name):
@@ -575,6 +594,8 @@ def _ensure_schema_uncached():
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_line_allocation_unique ON edition_orders(shopify_line_item_id, allocation_index)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_certificates_edition_order_unique ON certificates(edition_order_id)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_unique ON product_assets(shopify_handle, asset_type)")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_name_unique ON product_assets(shopify_handle, asset_type, asset_name)")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_settings_key_unique ON app_settings(key)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_id_unique ON webhook_events(webhook_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_title ON shopify_products(title)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_created_at ON shopify_orders(created_at DESC)")
@@ -1247,6 +1268,46 @@ def persistence_counts():
     return counts
 
 
+def get_app_setting(key, default=None):
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_settings WHERE key=%s", (key,))
+            row = cur.fetchone()
+    if not row:
+        return default
+    return row.get("value") or default
+
+
+def set_app_setting(key, value):
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO app_settings(key, value, updated_at)
+                VALUES (%s, %s::jsonb, now())
+                ON CONFLICT (key) DO UPDATE SET
+                    value=EXCLUDED.value,
+                    updated_at=now()
+                """,
+                (key, json_dumps(value)),
+            )
+        conn.commit()
+
+
+def ensure_psd_master_folder_setting():
+    existing = get_app_setting(PSD_MASTER_FOLDER_SETTING_KEY)
+    if existing:
+        return existing
+    set_app_setting(PSD_MASTER_FOLDER_SETTING_KEY, DEFAULT_PSD_MASTER_FOLDER_SETTING)
+    return DEFAULT_PSD_MASTER_FOLDER_SETTING
+
+
+def get_psd_master_folder_setting():
+    return get_app_setting(PSD_MASTER_FOLDER_SETTING_KEY, DEFAULT_PSD_MASTER_FOLDER_SETTING)
+
+
 def _normalize_handle(value):
     cleaned = re.sub(r"\.psd$", "", str(value or "").strip().lower(), flags=re.IGNORECASE)
     cleaned = re.sub(r"[^a-z0-9]+", "-", cleaned)
@@ -1595,6 +1656,119 @@ def get_product_asset_map():
     return result
 
 
+def extract_google_drive_file_id(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    parsed = urlparse(raw)
+    query_id = dict(parse_qsl(parsed.query or "")).get("id")
+    if query_id:
+        return query_id.strip()
+    match = re.search(r"/(?:file/d|folders)/([^/?#]+)", parsed.path or raw)
+    if match:
+        return match.group(1).strip()
+    match = re.search(r"[?&]id=([^&#]+)", raw)
+    if match:
+        return match.group(1).strip()
+    return ""
+
+
+def get_primary_psd_assets(handles=None):
+    ensure_schema()
+    handle_values = [str(handle or "").strip() for handle in (handles or []) if str(handle or "").strip()]
+    where = ""
+    params = []
+    if handle_values:
+        where = "AND shopify_handle = ANY(%s)"
+        params.append(handle_values)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT shopify_handle, asset_type, asset_name, asset_url,
+                       google_drive_file_id, google_drive_file_url, notes,
+                       is_primary, created_at, updated_at
+                FROM product_assets
+                WHERE asset_type='psd_master_file'
+                  AND is_primary IS DISTINCT FROM FALSE
+                  AND COALESCE(NULLIF(asset_url, ''), NULLIF(google_drive_file_url, '')) <> ''
+                  {where}
+                ORDER BY shopify_handle, updated_at DESC NULLS LAST
+                """,
+                tuple(params),
+            )
+            rows = cur.fetchall()
+    assets = {}
+    for row in rows:
+        handle = row.get("shopify_handle")
+        if handle and handle not in assets:
+            assets[handle] = row
+    return assets
+
+
+def get_psd_link_stats():
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH products AS (
+                    SELECT shopify_handle, product_title FROM edition_products WHERE shopify_handle IS NOT NULL
+                    UNION
+                    SELECT handle AS shopify_handle, title AS product_title FROM shopify_products WHERE handle IS NOT NULL
+                ),
+                psd AS (
+                    SELECT DISTINCT shopify_handle
+                    FROM product_assets
+                    WHERE asset_type='psd_master_file'
+                      AND is_primary IS DISTINCT FROM FALSE
+                      AND COALESCE(NULLIF(asset_url, ''), NULLIF(google_drive_file_url, '')) <> ''
+                )
+                SELECT
+                    (SELECT COUNT(*) FROM product_assets) AS product_assets_count,
+                    (SELECT COUNT(*) FROM product_assets WHERE asset_type='psd_master_file') AS psd_master_file_count,
+                    (SELECT COUNT(*) FROM products) AS products_count,
+                    (SELECT COUNT(*) FROM products p JOIN psd ON psd.shopify_handle=p.shopify_handle) AS matched_psd_count,
+                    (SELECT COUNT(*) FROM products p LEFT JOIN psd ON psd.shopify_handle=p.shopify_handle WHERE psd.shopify_handle IS NULL) AS missing_psd_count
+                """
+            )
+            return cur.fetchone() or {}
+
+
+def list_missing_psd_products(limit=500):
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH products AS (
+                    SELECT ep.shopify_handle, ep.product_title, sp.admin_url, sp.online_store_url
+                    FROM edition_products ep
+                    LEFT JOIN shopify_products sp ON sp.handle=ep.shopify_handle
+                    WHERE ep.shopify_handle IS NOT NULL
+                    UNION
+                    SELECT sp.handle AS shopify_handle, sp.title AS product_title, sp.admin_url, sp.online_store_url
+                    FROM shopify_products sp
+                    WHERE sp.handle IS NOT NULL
+                )
+                SELECT p.*
+                FROM products p
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM product_assets pa
+                    WHERE pa.shopify_handle=p.shopify_handle
+                      AND pa.asset_type='psd_master_file'
+                      AND pa.is_primary IS DISTINCT FROM FALSE
+                      AND COALESCE(NULLIF(pa.asset_url, ''), NULLIF(pa.google_drive_file_url, '')) <> ''
+                )
+                ORDER BY p.product_title NULLS LAST, p.shopify_handle
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            return cur.fetchall()
+
+
 def list_product_assets(search=""):
     ensure_schema()
     search_value = f"%{search.strip().lower()}%" if search.strip() else None
@@ -1678,6 +1852,9 @@ def upsert_product_asset(
     ensure_schema()
     if asset_type not in ASSET_TYPES:
         raise ValueError("Unsupported asset type.")
+    shopify_handle = _normalize_handle(shopify_handle)
+    asset_url = str(asset_url or "").strip()
+    google_drive_file_id = str(google_drive_file_id or "").strip() or extract_google_drive_file_id(asset_url)
     primary_value = asset_type == "psd_master_file" if is_primary is None else bool(is_primary)
     with connect() as conn:
         with conn.cursor() as cur:
@@ -1707,6 +1884,20 @@ def upsert_product_asset(
                     notes,
                     primary_value,
                 ),
+            )
+        conn.commit()
+
+
+def remove_product_asset(shopify_handle, asset_type="psd_master_file"):
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM product_assets
+                WHERE shopify_handle=%s AND asset_type=%s
+                """,
+                (_normalize_handle(shopify_handle), asset_type),
             )
         conn.commit()
 
