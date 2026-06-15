@@ -1633,6 +1633,11 @@ def inject_styles():
             --sc-danger: #D56A4A;
         }
 
+        @keyframes sc-status-progress {
+            0% { transform: translateX(-120%); }
+            100% { transform: translateX(260%); }
+        }
+
         [data-testid="stAppViewContainer"] {
             background:
                 radial-gradient(circle at 82% 4%, rgba(212, 165, 76, 0.10), transparent 28rem),
@@ -1648,6 +1653,33 @@ def inject_styles():
 
         header[data-testid="stHeader"] {
             border-bottom: 1px solid rgba(212, 165, 76, 0.16);
+        }
+
+        div[data-testid="stStatusWidget"] {
+            width: 148px !important;
+            height: 8px !important;
+            min-height: 8px !important;
+            border: 1px solid rgba(212, 165, 76, 0.44) !important;
+            border-radius: 999px !important;
+            background: rgba(245, 242, 234, 0.12) !important;
+            overflow: hidden !important;
+            position: relative !important;
+            padding: 0 !important;
+            box-shadow: none !important;
+        }
+
+        div[data-testid="stStatusWidget"] * {
+            display: none !important;
+        }
+
+        div[data-testid="stStatusWidget"]::after {
+            content: "";
+            position: absolute;
+            inset: 0 auto 0 0;
+            width: 42%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, transparent, #D4A54C, transparent);
+            animation: sc-status-progress 1.15s ease-in-out infinite;
         }
 
         header[data-testid="stHeader"] button,
@@ -1963,10 +1995,34 @@ def inject_styles():
             display: none !important;
         }
 
+        [data-testid="stFileUploader"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]),
+        section[data-testid="stFileUploaderDropzone"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) {
+            background: #0B0B0D !important;
+            border-color: #0B0B0D !important;
+            color: #F5F2EA !important;
+            -webkit-text-fill-color: #F5F2EA !important;
+            border-radius: 999px !important;
+        }
+
+        [data-testid="stFileUploader"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) *,
+        [data-testid="stFileUploader"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) svg,
+        [data-testid="stFileUploader"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) span,
+        [data-testid="stFileUploader"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) p,
+        section[data-testid="stFileUploaderDropzone"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) *,
+        section[data-testid="stFileUploaderDropzone"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) svg,
+        section[data-testid="stFileUploaderDropzone"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) span,
+        section[data-testid="stFileUploaderDropzone"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) p {
+            color: #F5F2EA !important;
+            -webkit-text-fill-color: #F5F2EA !important;
+            fill: #F5F2EA !important;
+            stroke: #F5F2EA !important;
+        }
+
         [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]) {
             background: #0B0B0D !important;
             border-color: #0B0B0D !important;
             color: #F5F2EA !important;
+            -webkit-text-fill-color: #F5F2EA !important;
             border-radius: 999px !important;
         }
 
@@ -1974,6 +2030,7 @@ def inject_styles():
         [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]) svg,
         [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]) span {
             color: #F5F2EA !important;
+            -webkit-text-fill-color: #F5F2EA !important;
             fill: #F5F2EA !important;
             stroke: #F5F2EA !important;
         }
@@ -2064,6 +2121,7 @@ def inject_styles():
             background: #0B0B0D !important;
             border-color: #0B0B0D !important;
             color: #F5F2EA !important;
+            -webkit-text-fill-color: #F5F2EA !important;
             box-shadow: none !important;
             filter: none !important;
             transform: none !important;
