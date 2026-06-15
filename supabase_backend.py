@@ -953,21 +953,29 @@ def list_edition_products(search="", limit=500):
                     """
                     SELECT ep.*, sp.admin_url, sp.online_store_url,
                            COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS display_image_url,
-                           (
-                               SELECT MAX(eo.edition_number)
-                               FROM edition_orders eo
-                               WHERE eo.shopify_handle = ep.shopify_handle
+                           GREATEST(
+                               COALESCE(ep.last_assigned_edition, 0),
+                               COALESCE((
+                                   SELECT MAX(eo.edition_number)
+                                   FROM edition_orders eo
+                                   WHERE eo.shopify_handle = ep.shopify_handle
+                               ), 0),
+                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
                            ) AS last_assigned_edition,
                            (
                                SELECT COUNT(*)
                                FROM edition_orders eo
                                WHERE eo.shopify_handle = ep.shopify_handle
                            ) AS sold_count,
-                           GREATEST(COALESCE(ep.edition_total, 100) - COALESCE((
-                               SELECT COUNT(*)
-                               FROM edition_orders eo
-                               WHERE eo.shopify_handle = ep.shopify_handle
-                           ), 0), 0) AS remaining_count,
+                           GREATEST(COALESCE(ep.edition_total, 100) - GREATEST(
+                               COALESCE(ep.last_assigned_edition, 0),
+                               COALESCE((
+                                   SELECT MAX(eo.edition_number)
+                                   FROM edition_orders eo
+                                   WHERE eo.shopify_handle = ep.shopify_handle
+                               ), 0),
+                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                           ), 0) AS remaining_count,
                            GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
                     FROM edition_products ep
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
@@ -983,21 +991,29 @@ def list_edition_products(search="", limit=500):
                     """
                     SELECT ep.*, sp.admin_url, sp.online_store_url,
                            COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS display_image_url,
-                           (
-                               SELECT MAX(eo.edition_number)
-                               FROM edition_orders eo
-                               WHERE eo.shopify_handle = ep.shopify_handle
+                           GREATEST(
+                               COALESCE(ep.last_assigned_edition, 0),
+                               COALESCE((
+                                   SELECT MAX(eo.edition_number)
+                                   FROM edition_orders eo
+                                   WHERE eo.shopify_handle = ep.shopify_handle
+                               ), 0),
+                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
                            ) AS last_assigned_edition,
                            (
                                SELECT COUNT(*)
                                FROM edition_orders eo
                                WHERE eo.shopify_handle = ep.shopify_handle
                            ) AS sold_count,
-                           GREATEST(COALESCE(ep.edition_total, 100) - COALESCE((
-                               SELECT COUNT(*)
-                               FROM edition_orders eo
-                               WHERE eo.shopify_handle = ep.shopify_handle
-                           ), 0), 0) AS remaining_count,
+                           GREATEST(COALESCE(ep.edition_total, 100) - GREATEST(
+                               COALESCE(ep.last_assigned_edition, 0),
+                               COALESCE((
+                                   SELECT MAX(eo.edition_number)
+                                   FROM edition_orders eo
+                                   WHERE eo.shopify_handle = ep.shopify_handle
+                               ), 0),
+                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                           ), 0) AS remaining_count,
                            GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
                     FROM edition_products ep
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
@@ -1009,8 +1025,72 @@ def list_edition_products(search="", limit=500):
             return cur.fetchall()
 
 
-def update_edition_product(shopify_handle, *, edition_total=None, active=None):
+def get_edition_counter_state(shopify_handle):
     ensure_schema()
+    handle = str(shopify_handle or "").strip()
+    if not handle:
+        raise ValueError("Shopify handle is required.")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT ep.shopify_handle,
+                       ep.product_title,
+                       COALESCE(ep.edition_total, 100) AS edition_total,
+                       COALESCE(ep.next_edition_number, 1) AS next_edition_number,
+                       COALESCE(ep.active, ep.is_active, TRUE) AS active,
+                       COALESCE(ep.sold_out, ep.is_sold_out, FALSE) AS sold_out,
+                       COALESCE((
+                           SELECT MAX(eo.edition_number)
+                           FROM edition_orders eo
+                           WHERE eo.shopify_handle = ep.shopify_handle
+                       ), 0) AS max_assigned_edition
+                FROM edition_products ep
+                WHERE ep.shopify_handle=%s
+                """,
+                (handle,),
+            )
+            row = cur.fetchone()
+    if not row:
+        raise ValueError(f"No edition product found for {handle}.")
+    return row
+
+
+def update_edition_product(
+    shopify_handle,
+    *,
+    edition_total=None,
+    active=None,
+    sold_out=None,
+    current_edition=None,
+):
+    ensure_schema()
+    handle = str(shopify_handle or "").strip()
+    if not handle:
+        raise ValueError("Shopify handle is required.")
+    state = get_edition_counter_state(handle)
+    max_assigned = _safe_int(state.get("max_assigned_edition"), 0)
+    new_total = _safe_int(edition_total, _safe_int(state.get("edition_total"), 100))
+    if new_total < 1:
+        raise ValueError("Edition total must be at least 1.")
+    if new_total < max_assigned:
+        raise ValueError("Edition total cannot be lower than already assigned edition history.")
+
+    update_next_number = None
+    if current_edition is not None:
+        current = _safe_int(current_edition, 0)
+        if current < 0:
+            raise ValueError("Current edition cannot be below 0.")
+        if current < max_assigned:
+            raise ValueError("Cannot set current edition below already assigned edition history.")
+        if current > new_total:
+            raise ValueError("Current edition cannot be higher than edition total.")
+        update_next_number = current + 1
+
+    final_sold_out = sold_out
+    if final_sold_out is None and update_next_number is not None:
+        final_sold_out = update_next_number > new_total
+
     with connect() as conn:
         with conn.cursor() as cur:
             if edition_total is not None:
@@ -1023,7 +1103,20 @@ def update_edition_product(shopify_handle, *, edition_total=None, active=None):
                         updated_at=now()
                     WHERE shopify_handle=%s
                     """,
-                    (int(edition_total), int(edition_total), int(edition_total), shopify_handle),
+                    (new_total, new_total, new_total, handle),
+                )
+            if update_next_number is not None:
+                cur.execute(
+                    """
+                    UPDATE edition_products
+                    SET next_edition_number=%s,
+                        last_assigned_edition=%s,
+                        sold_out=%s,
+                        is_sold_out=%s,
+                        updated_at=now()
+                    WHERE shopify_handle=%s
+                    """,
+                    (update_next_number, max(update_next_number - 1, 0), bool(final_sold_out), bool(final_sold_out), handle),
                 )
             if active is not None:
                 cur.execute(
@@ -1032,9 +1125,19 @@ def update_edition_product(shopify_handle, *, edition_total=None, active=None):
                     SET active=%s, is_active=%s, updated_at=now()
                     WHERE shopify_handle=%s
                     """,
-                    (bool(active), bool(active), shopify_handle),
+                    (bool(active), bool(active), handle),
+                )
+            if sold_out is not None and update_next_number is None:
+                cur.execute(
+                    """
+                    UPDATE edition_products
+                    SET sold_out=%s, is_sold_out=%s, updated_at=now()
+                    WHERE shopify_handle=%s
+                    """,
+                    (bool(sold_out), bool(sold_out), handle),
                 )
         conn.commit()
+    return get_edition_counter_state(handle)
 
 
 def _safe_int(value, default=0):
@@ -1055,9 +1158,9 @@ def format_edition_display_number(edition_number, edition_total):
 def calculate_product_edition_metafield_values(row):
     edition_total = max(_safe_int(row.get("edition_total"), 100), 1)
     next_number = max(_safe_int(row.get("next_edition_number"), 1), 1)
-    last_assigned = _safe_int(row.get("last_assigned_edition"), 0)
-    sold_count = _safe_int(row.get("sold_count"), 0)
-    remaining_count = max(edition_total - sold_count, 0)
+    last_assigned = max(_safe_int(row.get("last_assigned_edition"), 0), next_number - 1)
+    sold_count = max(_safe_int(row.get("sold_count"), 0), last_assigned)
+    remaining_count = max(edition_total - last_assigned, 0)
     is_sold_out = bool(row.get("sold_out")) or next_number > edition_total or remaining_count <= 0
     if is_sold_out:
         edition_status = "sold_out"
@@ -1095,10 +1198,14 @@ def get_product_edition_metafield_payload(shopify_handle):
                 SELECT ep.*, sp.shopify_product_id AS synced_shopify_product_id,
                        sp.shopify_product_gid AS synced_shopify_product_gid,
                        sp.admin_url, sp.online_store_url,
-                       (
-                           SELECT MAX(eo.edition_number)
-                           FROM edition_orders eo
-                           WHERE eo.shopify_handle = ep.shopify_handle
+                       GREATEST(
+                           COALESCE(ep.last_assigned_edition, 0),
+                           COALESCE((
+                               SELECT MAX(eo.edition_number)
+                               FROM edition_orders eo
+                               WHERE eo.shopify_handle = ep.shopify_handle
+                           ), 0),
+                           GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
                        ) AS last_assigned_edition,
                        (
                            SELECT COUNT(*)

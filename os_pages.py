@@ -1940,6 +1940,15 @@ def render_copy_text_button(text, key, label):
         """,
         height=56,
     )
+
+
+def load_edition_widget_liquid():
+    snippet_path = Path("shopify/snippets/sports-cave-edition-widget.liquid")
+    if not snippet_path.exists():
+        return "", snippet_path
+    return snippet_path.read_text(encoding="utf-8"), snippet_path
+
+
 def render_prodigi_option_card(frame_label, frame_colour, size_option, is_unframed=False):
     shopify_variant = f"{frame_label} / {size_option['shopify_size']}"
     product_name = size_option["unframed_name"] if is_unframed else size_option["framed_name"]
@@ -2379,6 +2388,30 @@ def render_supabase_limited_editions_page():
 
     with st.expander("Widget Status", expanded=False):
         st.caption("Test one product's Supabase edition data, Shopify metafields, and storefront widget text.")
+        widget_code, widget_snippet_path = load_edition_widget_liquid()
+        st.caption("Paste this into Shopify -> Online Store -> Theme Editor -> Product page -> Custom Liquid.")
+        if widget_code:
+            copy_columns = st.columns([1.2, 1.2, 2.6])
+            with copy_columns[0]:
+                render_copy_text_button(
+                    widget_code,
+                    "limited-editions-copy-widget-html",
+                    "Copy Widget HTML",
+                )
+            show_widget_html = copy_columns[1].checkbox(
+                "View Widget HTML",
+                key="limited-editions-view-widget-html",
+            )
+            copy_columns[2].caption(f"Source: {widget_snippet_path.as_posix()}")
+            if show_widget_html:
+                st.text_area(
+                    "Shopify Custom Liquid widget",
+                    value=widget_code,
+                    height=340,
+                    help="If the copy button is blocked by the browser, select this code and copy it manually.",
+                )
+        else:
+            st.warning("Widget snippet file is missing from the repo.")
         if not products:
             st.info("Sync Shopify products first.")
         else:
@@ -2420,12 +2453,13 @@ def render_supabase_limited_editions_page():
                 status_columns = st.columns(4)
                 status_columns[0].metric("Shopify product synced", "Yes" if payload.get("shopify_product_id") else "No")
                 status_columns[1].metric(
-                    "Product metafields",
+                    "Metafield sync status",
                     "Synced" if payload.get("metafields_sync_status") == "Synced" else payload.get("metafields_sync_status") or "Never",
                 )
                 status_columns[2].metric("Next edition", payload.get("next_edition_number") or 1)
                 status_columns[3].metric("Remaining", payload.get("remaining_count") or 0)
-                st.markdown("**Preview Widget Text**")
+                st.caption("Last synced: " + format_updated_at(payload.get("metafields_synced_at")))
+                st.markdown("**Widget Preview Text for selected product**")
                 st.code(payload.get("edition_display_text") or "Numbered Edition of 100", language="text")
                 action_columns = st.columns([1, 1, 2])
                 if action_columns[0].button(
@@ -2472,34 +2506,96 @@ def render_supabase_limited_editions_page():
             selected = st.selectbox("Product", options, key="supabase-edition-edit-product")
             selected_handle = selected.rsplit("|", 1)[-1].strip()
             selected_product = next(item for item in products if item.get("shopify_handle") == selected_handle)
+            try:
+                counter_state = supabase_backend.get_edition_counter_state(selected_handle)
+            except Exception as error:
+                st.error("Could not load current edition counter state.")
+                st.exception(error)
+                counter_state = selected_product
+            current_next = int(counter_state.get("next_edition_number") or selected_product.get("next_edition_number") or 1)
+            max_assigned = int(counter_state.get("max_assigned_edition") or selected_product.get("last_assigned_edition") or 0)
+            current_from_counter = max(max(current_next - 1, 0), max_assigned)
             new_total = st.number_input(
                 "Edition total",
                 min_value=1,
                 max_value=100000,
-                value=int(selected_product.get("edition_total") or 100),
+                value=int(counter_state.get("edition_total") or selected_product.get("edition_total") or 100),
                 step=1,
-                key="supabase-edition-total-edit",
+                key=f"supabase-edition-total-edit-{selected_handle}",
+            )
+            current_edition = st.number_input(
+                "Current Edition / Last Assigned",
+                min_value=0,
+                max_value=100000,
+                value=current_from_counter,
+                step=1,
+                help="If Current Edition is 95, the next order receives edition 96.",
+                key=f"supabase-current-edition-edit-{selected_handle}",
             )
             new_active = st.checkbox(
                 "Active",
-                value=bool(selected_product.get("active")),
-                key="supabase-edition-active-edit",
+                value=bool(counter_state.get("active")),
+                key=f"supabase-edition-active-edit-{selected_handle}",
             )
-            if st.button("Save Edition Settings", use_container_width=True):
-                supabase_backend.update_edition_product(
-                    selected_handle,
-                    edition_total=new_total,
-                    active=new_active,
+            new_sold_out = st.checkbox(
+                "Sold Out",
+                value=bool(counter_state.get("sold_out")) or current_edition >= new_total,
+                key=f"supabase-edition-sold-out-edit-{selected_handle}",
+            )
+            proposed_next = int(current_edition) + 1
+            state_columns = st.columns(4)
+            state_columns[0].metric("Max assigned history", max_assigned)
+            state_columns[1].metric("Current next", current_next)
+            state_columns[2].metric("Proposed current", int(current_edition))
+            state_columns[3].metric("Proposed next", proposed_next)
+
+            validation_errors = []
+            if int(current_edition) < max_assigned:
+                validation_errors.append("Cannot set current edition below already assigned edition history.")
+            if int(new_total) < max_assigned:
+                validation_errors.append("Edition total cannot be lower than already assigned edition history.")
+            if int(new_total) < int(current_edition):
+                validation_errors.append("Edition total cannot be lower than the proposed current edition.")
+            if proposed_next > int(new_total) + 1:
+                validation_errors.append("Proposed next edition is beyond the edition total.")
+
+            if int(current_edition) == int(new_total):
+                st.warning("This product is at its edition total. Mark Sold Out before saving if this is final.")
+            for validation_error in validation_errors:
+                st.error(validation_error)
+
+            next_number_changes = proposed_next != current_next
+            confirmed = True
+            if next_number_changes:
+                confirmed = st.checkbox(
+                    "I understand this changes the next edition number",
+                    key=f"supabase-edition-counter-confirm-{selected_handle}",
                 )
-                sync_note = ""
-                if config["configured"]:
-                    try:
-                        supabase_backend.sync_product_edition_metafields(selected_handle, config=config)
-                        sync_note = " Shopify edition display updated."
-                    except Exception as error:
-                        sync_note = f" Shopify edition display sync failed: {error}"
-                st.session_state.supabase_limited_notice = f"Edition settings saved.{sync_note}"
-                st.rerun()
+            if st.button(
+                "Save Edition Settings",
+                use_container_width=True,
+                disabled=bool(validation_errors) or (next_number_changes and not confirmed),
+            ):
+                try:
+                    supabase_backend.update_edition_product(
+                        selected_handle,
+                        edition_total=new_total,
+                        current_edition=current_edition,
+                        active=new_active,
+                        sold_out=new_sold_out,
+                    )
+                    sync_note = ""
+                    if config["configured"]:
+                        try:
+                            supabase_backend.sync_product_edition_metafields(selected_handle, config=config)
+                            sync_note = " Shopify edition display updated."
+                        except Exception as error:
+                            sync_note = f" Shopify edition display sync failed: {error}"
+                    st.session_state.supabase_limited_notice = f"Edition settings saved.{sync_note}"
+                    st.rerun()
+                except Exception as error:
+                    st.error("Edition settings could not be saved.")
+                    st.exception(error)
         else:
             st.caption("Sync Shopify products first.")
 
@@ -2524,6 +2620,11 @@ def render_supabase_limited_editions_page():
             font-size: 0.72rem;
             font-weight: 800;
             letter-spacing: 0.04em;
+        }
+        div[data-testid="stButton"] button,
+        div[data-testid="stDownloadButton"] button,
+        div[data-testid="stLinkButton"] a {
+            white-space: nowrap !important;
         }
         </style>
         """,
@@ -2559,17 +2660,19 @@ def render_supabase_limited_editions_page():
             if psd_url:
                 st.link_button("Open PSD", psd_url, use_container_width=True)
             else:
-                st.markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
-            if st.button(
-                "Edit",
-                key=f"limited-psd-edit-{product_handle}",
-                use_container_width=True,
-            ):
-                st.session_state.psd_editor_context = {
-                    "handle": product_handle,
-                    "title": product.get("product_title"),
-                    "source": "limited-editions",
-                }
+                if product_handle:
+                    if st.button(
+                        "Enter PSD",
+                        key=f"limited-psd-enter-{product_handle}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.psd_editor_context = {
+                            "handle": product_handle,
+                            "title": product.get("product_title"),
+                            "source": "limited-editions",
+                        }
+                else:
+                    st.markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
         with columns[10]:
             if product.get("admin_url"):
                 st.link_button("Shopify", product["admin_url"], use_container_width=True)
@@ -3156,17 +3259,19 @@ def render_supabase_orders_page():
             if psd_url:
                 st.link_button("Open PSD", psd_url, use_container_width=True)
             else:
-                st.markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
-            if row.get("shopify_handle") and st.button(
-                "Edit",
-                key=f"orders-psd-edit-{row_key}",
-                use_container_width=True,
-            ):
-                st.session_state.psd_editor_context = {
-                    "handle": row.get("shopify_handle"),
-                    "title": row.get("product_title"),
-                    "source": "orders",
-                }
+                if row.get("shopify_handle"):
+                    if st.button(
+                        "Enter PSD",
+                        key=f"orders-psd-enter-{row_key}",
+                        use_container_width=True,
+                    ):
+                        st.session_state.psd_editor_context = {
+                            "handle": row.get("shopify_handle"),
+                            "title": row.get("product_title"),
+                            "source": "orders",
+                        }
+                else:
+                    st.markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
         if row.get("prodigi_url"):
             columns[11].link_button("Open Prodigi", row["prodigi_url"], use_container_width=True)
         else:
@@ -6149,7 +6254,7 @@ def render_settings_page(app_version, database_path, password_status):
                         st.exception(error)
         with dev_tabs[2]:
             st.caption("Supabase is the source of truth. Shopify product/order metafields are display and customer-account bridges.")
-            snippet_path = Path("shopify/snippets/sports-cave-edition-widget.liquid")
+            widget_code, snippet_path = load_edition_widget_liquid()
             bridge_columns = st.columns(3)
             bridge_columns[0].markdown("**Product metafields**")
             bridge_columns[0].caption("edition_total, next_edition_number, remaining_count, edition_display_text")
@@ -6164,12 +6269,12 @@ def render_settings_page(app_version, database_path, password_status):
             if snippet_path.exists():
                 st.text_area(
                     "sports-cave-edition-widget.liquid",
-                    value=snippet_path.read_text(encoding="utf-8"),
+                    value=widget_code,
                     height=320,
                     label_visibility="collapsed",
                 )
                 render_copy_text_button(
-                    snippet_path.read_text(encoding="utf-8"),
+                    widget_code,
                     "settings-metafield-widget-snippet",
                     "Copy Widget Code",
                 )
