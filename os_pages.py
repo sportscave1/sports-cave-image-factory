@@ -4079,6 +4079,25 @@ def render_marketing_card(title, body, *, key=None, copy_label=None):
         render_copy_text_button(body.strip(), f"marketing-card-{key}", copy_label)
 
 
+META_URL_PARAMETERS = "utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}"
+
+
+def render_meta_url_parameters_block():
+    st.markdown("#### Meta tracking URL parameters")
+    st.caption("Paste this into Meta Ads Manager under Tracking -> URL parameters.")
+    st.text_input(
+        "URL parameters",
+        value=META_URL_PARAMETERS,
+        key="meta-usa-url-parameters",
+        help="Copy this exact line into the Meta URL parameters field.",
+    )
+    render_copy_text_button(
+        META_URL_PARAMETERS,
+        "meta-usa-url-parameters",
+        "Copy URL Parameters",
+    )
+
+
 def render_prompt_collection(prompts, key_prefix):
     for title, prompt in prompts:
         render_prompt_block(title, prompt, f"{key_prefix}-{safe_filename_part(title)}", height=230)
@@ -4381,6 +4400,495 @@ Write:
 2. Five headlines
 3. Five descriptions
 4. Five carousel card headline/description pairs
+""",
+    "usa_master": """
+SPORTS CAVE USA - GENERIC MASTER PROMPT FOR ALL PRODUCTS
+
+Create a high-converting Meta Instant Experience concept for Sports Cave USA using the supplied product image as the core reference.
+
+This must work for any Sports Cave product - not just baseball, not just one athlete, and not just one sport.
+
+The final output must adapt to the specific artwork provided.
+
+Brand Context
+
+Sports Cave sells premium framed and unframed sports wall art for collectors, fans, man caves, home bars, garages, home offices, and gift buyers.
+
+The brand feel is:
+- premium
+- nostalgic
+- masculine
+- emotional
+- collector-driven
+- limited-edition
+- warm and cinematic
+- built for real fans, not casuals
+
+The goal is to make the viewer feel:
+"This belongs on my wall."
+
+Target Audience
+
+Primary audience: USA sports fans aged roughly 25-55, especially men who care about iconic moments, rivalries, legends, nostalgia, and identity.
+
+Secondary audience: gift buyers shopping for sports fans.
+
+The tone should feel premium and emotional, not corporate, generic, or overly polished.
+
+Core Rule
+
+The supplied product image decides everything:
+- sport
+- room style
+- props
+- emotional angle
+- wording
+- supporting details
+- image mood
+- carousel direction
+- CTA phrasing
+
+Do not default to baseball, Babe Ruth, The Called Shot, NBA, or any other single theme unless that exact product is what is supplied.
+
+Product Accuracy Rule
+
+The artwork in the generated concepts must stay as close as possible to the supplied product image.
+
+Preserve:
+- artwork title
+- layout
+- colours
+- frame style
+- names
+- signatures
+- edition details
+- central image
+- overall design identity
+
+Do not turn the artwork into a different product.
+Do not invent a new artwork.
+Do not swap the sport.
+Do not add unrelated teams, athletes, leagues, or moments.
+
+Visual Style Rule
+
+Every image should feel like a premium Sports Cave collector release for USA buyers.
+
+Use:
+- black frame
+- dark premium interiors
+- warm lighting
+- realistic shadows
+- cinematic atmosphere
+- masculine styling
+- subtle collector-room details
+- believable upscale environments
+
+Avoid:
+- clutter
+- cheap poster-shop feel
+- bright showroom feel
+- fake-looking CGI rooms
+- warped frames
+- distorted artwork
+- excessive text overlays
+- generic stock-style interiors
+
+USA Positioning Rule
+
+The overall feel should be tailored for USA buyers.
+
+Use room environments that fit American fan culture, such as:
+- fan caves
+- home bars
+- sports dens
+- garages
+- basement lounges
+- collector offices
+- trophy rooms
+- home offices
+- premium rec rooms
+
+Subtle USA trust/value cues can be supported in copy such as:
+- fast USA delivery
+- secure checkout
+- 30-day returns
+- limited collector release
+- framed or unframed options
+
+Do not overload the image with trust badges or promo clutter.
+
+COPY STYLE RULES
+
+Write all copy in a short, emotional, collector-focused tone.
+
+It should feel like:
+- nostalgia
+- pride
+- identity
+- scarcity
+- premium ownership
+
+Not like:
+- generic ecommerce copy
+- technical product descriptions
+- over-explained sales language
+- cheesy ad-speak
+
+Use short lines.
+Fragments are fine.
+Emotion first.
+Clarity second.
+
+Copy Themes to Lean On
+
+Use the product to identify the strongest angle:
+- iconic moment
+- rivalry
+- legend
+- greatness
+- nostalgia
+- collector pride
+- man cave identity
+- gift-worthy tribute
+- limited availability
+
+Scarcity Rule
+
+Where suitable, reinforce limited-edition positioning with language like:
+- Only 100 editions made
+- Numbered collector release
+- Limited run
+- Once it sells out, it's gone
+- No reprints after sellout
+
+Do not sound pushy or fake.
+
+GENERIC INSTANT EXPERIENCE STRUCTURE
+
+Create the Instant Experience around these core sections.
+
+1. Feed Hero Image
+
+Purpose: stop the scroll and make the product feel premium.
+
+Requirements:
+- vertical 4:5
+- supplied artwork shown clearly
+- black frame
+- dark premium room
+- warm lighting
+- artwork readable
+- strong hero composition
+- collector atmosphere
+- optional small overlay text
+
+Keep overlay text minimal.
+
+Possible examples:
+- Limited Collector Release
+- Only 100 Made
+- Numbered Edition
+- Built For Real Fans
+
+Do not overcrowd the image.
+
+2. IA Opening Photo
+
+Purpose: first image inside the Instant Experience.
+
+Use the cleanest, most premium room mockup.
+
+Requirements:
+- dark fan cave / sports room / office / collector den
+- large black-framed artwork on wall
+- artwork must be readable
+- no CTA button
+- no heavy overlay text
+- let the image breathe
+
+Text under it:
+
+[ARTWORK TITLE / MOMENT / RIVALRY / LEGEND] LIVES
+One moment.
+One memory.
+A story real fans never forgot.
+
+Examples:
+- THE RIVALRY LIVES
+- THE LEGEND LIVES
+- THE MOMENT LIVES
+- THE DYNASTY LIVES
+- THE GLORY LIVES
+
+Use what fits the product best.
+
+3. Mid Story / Desire Image
+
+Purpose: deepen emotional connection before a CTA.
+
+Use a second room angle or a more dramatic placement of the artwork.
+
+Requirements:
+- same artwork
+- same black frame
+- similar premium environment
+- slightly different angle or room
+- stronger emotional feel
+- product still readable
+- optional supporting text nearby
+
+Use short emotional copy such as:
+- For the fans who remember.
+- For the wall that means something.
+- For the ones who know this moment mattered.
+
+4. Collector Detail Close-Up
+
+Purpose: prove this is a premium collector piece.
+
+Show details like:
+- limited edition number
+- title detail
+- signature detail
+- gold accents
+- print texture
+- frame depth
+- premium finish
+
+This should feel tactile and valuable.
+
+Supporting copy:
+
+Only 100 Editions Made
+A numbered collector release for fans who know what this means.
+
+5. Emotional Artwork Detail Close-Up
+
+Purpose: sell the story inside the artwork.
+
+Zoom in on the most emotional or recognizable part of the design.
+
+That could be:
+- the athlete's face
+- a defining gesture
+- the rivalry interaction
+- the car
+- the jersey
+- the celebration
+- the track
+- the stadium
+- the fight pose
+- the horse
+- the signature moment
+- the title area
+
+Supporting copy:
+
+The moment.
+The rivalry.
+The memory that never left.
+
+Adapt to the product.
+
+6. Product Set Section
+
+Purpose: cross-sell related pieces without killing the story.
+
+Only include products that belong in the same emotional world.
+
+Rules:
+- show up to 4 products
+- use carousel layout if possible
+- hero product first
+- then 2-3 closely related products
+- same sport or same collector vibe
+- do not mix random unrelated sports
+
+Good product set logic:
+- same athlete series
+- same rivalry theme
+- same sport
+- same era
+- same legend-based collector appeal
+
+This should feel curated, not random.
+
+7. Frame / Finish Image
+
+Purpose: answer practical objections while keeping the premium feel.
+
+Show:
+- black framed version as hero
+- unframed version if relevant
+- frame depth
+- premium finish
+- clean styling
+- minimal clutter
+
+Supporting copy:
+
+Premium Collector Finish
+Available framed or unframed.
+Built for fan caves, offices, garages, home bars, and collector walls.
+
+8. Final CTA Hero Image
+
+Purpose: close the sale.
+
+Use the strongest room mockup again, or a tighter, darker, more dramatic version of it.
+
+Requirements:
+- artwork large
+- black frame
+- dark premium room
+- cinematic lighting
+- emotional and clean
+- no clutter
+
+Final Copy:
+
+Own The Moment
+Only 100 made. Once this edition sells out, it's gone.
+
+CTA Button:
+Secure Yours
+
+GENERIC IMAGE ENVIRONMENT RULES BY SPORT
+
+Use the supplied artwork to choose the right room feel and props.
+
+Only use props that naturally support the product.
+
+Motorsport:
+- premium garage
+- racing lounge
+- dark office
+- workshop-inspired collector space
+- helmet
+- shelf details
+- subtle motorsport memorabilia
+- leather seating
+- track-inspired mood
+
+Basketball:
+- man cave
+- sports lounge
+- loft office
+- trophy shelf
+- basketball accents
+- premium urban atmosphere
+- dark walls
+- collector-room energy
+
+Football / NFL:
+- home bar
+- game-day lounge
+- sports den
+- football helmet or ball as subtle props
+- leather couch
+- warm masculine atmosphere
+
+Baseball:
+- vintage American den
+- old-school office
+- premium sports room
+- glove, bat, ball, or scorecard only when relevant
+
+Hockey:
+- darker sports bar feel
+- collector room
+- rink nostalgia
+- stick or puck only when relevant
+- old-school fan cave mood
+
+Soccer / Football:
+- collector lounge
+- premium football room
+- scarf or boots only if subtle
+- dark modern sports den
+- stadium-memory atmosphere
+
+Combat Sports:
+- gym office
+- fight-night collector wall
+- gloves or robe only if subtle
+- dramatic moody lighting
+- bold, powerful atmosphere
+
+Horse Racing:
+- heritage lounge
+- refined timber room
+- racing-club mood
+- trophies
+- leather
+- classic sporting atmosphere
+
+Generic fallback:
+
+If the sport is unclear, keep the environment simple, dark, warm, premium, and collector-focused.
+
+Do not force props.
+
+HARD RULES
+- Every output must adapt to the supplied product image.
+- Do not default to Babe Ruth, baseball, The Called Shot, or any specific existing example unless that is the product provided.
+- Do not introduce unrelated athletes, teams, or sports.
+- Do not use official league or sponsor branding unless it already appears in the supplied artwork.
+- Keep the supplied artwork recognizable and faithful.
+- Prioritize premium collector emotion over busy ad design.
+- The artwork is always the hero.
+
+The viewer should instantly feel:
+"This is not just wall art. This is a piece of sports history for my wall."
+
+GENERIC COPY BLOCKS TO USE THROUGHOUT
+
+Use and adapt these as needed.
+
+Opening:
+
+[ARTWORK TITLE / MOMENT / RIVALRY / LEGEND] LIVES
+One moment.
+One memory.
+A story real fans never forgot.
+
+Collector block:
+
+Only 100 Editions Made
+A numbered collector release built for fans who know what this means.
+
+Identity block:
+
+For The Fans Who Remember
+The rivalry.
+The glory.
+The era that never left.
+
+Trust block:
+
+Premium Collector Finish
+Available framed or unframed.
+Fast USA delivery.
+Secure checkout.
+30-day returns.
+
+Final CTA:
+
+Own The Moment
+Only 100 made. Once this edition sells out, it's gone.
+
+Button:
+Secure Yours
+
+FINAL GOAL
+
+The final Instant Experience should feel like a premium collector campaign for USA sports fans.
+
+It should make a buyer think:
+"I remember this."
+"I want this on my wall."
+"If I wait too long, I'll miss it."
 """,
     "full_meta": """
 You are my Sports Cave Meta Ads strategist and copywriter.
@@ -4924,6 +5432,14 @@ def render_meta_ads_section():
             st.write("Legacy Debate / Mentality / Rivalry / Greatest Era")
             st.write("Championship Memory / Numbered Collector Drop")
             st.warning("Avoid Australian slang, generic sports poster wording, long card text, and corporate phrasing.")
+        render_meta_url_parameters_block()
+        render_prompt_block(
+            "USA Generic Instant Experience Master Prompt",
+            META_PROMPTS["usa_master"],
+            "usa-master-instant-experience",
+            when_to_use="Use this for any USA Meta Instant Experience creative brief. Upload the product image first, then paste this prompt.",
+            height=360,
+        )
         render_prompt_block("USA Carousel Card Copy Prompt", META_PROMPTS["usa_carousel"], "usa-carousel")
         render_prompt_block("USA Primary Text Prompt", META_PROMPTS["usa_primary"], "usa-primary")
         render_prompt_block("USA NBA Rivalry / Mentality Prompt", META_PROMPTS["usa_nba"], "usa-nba")
