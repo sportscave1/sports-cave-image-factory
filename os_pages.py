@@ -2301,23 +2301,33 @@ def render_supabase_limited_editions_page():
         key="supabase-limited-search",
         label_visibility="collapsed",
     )
-    actions = st.columns([1.15, 1.25, 0.9, 1, 1.35])
-    if actions[0].button("Sync Products", type="primary", disabled=not config["configured"], use_container_width=True):
-        progress = st.progress(0, text="Loading Shopify products...")
+    try:
+        sync_state = supabase_backend.get_sync_state()
+    except Exception:
+        sync_state = {}
+    actions = st.columns([1.15, 1.45, 1, 1.35])
+    if actions[0].button("Sync Product Updates", type="primary", disabled=not config["configured"], use_container_width=True):
+        progress = st.progress(0, text="Checking Shopify product updates...")
         try:
             def update_product_progress(count):
-                progress.progress(min(count / 1000, 0.99), text=f"Loading {count} products...")
+                progress.progress(min(count / 200, 0.99), text=f"Loading {count} product updates...")
 
             result = supabase_backend.sync_shopify_products_to_supabase(
                 config,
                 progress_callback=update_product_progress,
+                mode="incremental",
             )
             progress.progress(1.0, text="Shopify product sync complete.")
+            if result.get("skipped"):
+                st.session_state.supabase_limited_warning = result.get("message") or (
+                    "No products synced yet. Run Initial Full Product Sync from Developer Tools."
+                )
+                st.rerun()
             warning_suffix = ""
             if result.get("metafield_errors"):
                 warning_suffix = f" Metafield sync warnings: {len(result['metafield_errors'])}."
             st.session_state.supabase_limited_notice = (
-                f"Synced {result['products_processed']} active Shopify products into Supabase. "
+                f"Synced {result['products_processed']} updated Shopify products into Supabase. "
                 f"Updated {result.get('metafields_synced', 0)} Shopify edition display records."
                 f"{warning_suffix}"
             )
@@ -2330,41 +2340,12 @@ def render_supabase_limited_editions_page():
                 str(error),
                 {"source": "limited_editions_page"},
             )
-    if actions[1].button(
-        "Sync Edition Display",
-        disabled=not config["configured"],
-        use_container_width=True,
-    ):
-        progress = st.progress(0, text="Preparing edition display sync...")
-        try:
-            def update_metafield_progress(index, total, handle):
-                progress.progress(
-                    min(index / max(total, 1), 1.0),
-                    text=f"Updating {index} of {total} products...",
-                )
-
-            result = supabase_backend.sync_all_product_edition_metafields(
-                config=config,
-                search=search,
-                limit=1000,
-                progress_callback=update_metafield_progress,
-            )
-            progress.progress(1.0, text="Edition display sync complete.")
-            if result.get("errors"):
-                st.session_state.supabase_limited_warning = (
-                    f"Synced {result['synced']} of {result['attempted']} products. "
-                    f"First issue: {result['errors'][0]}"
-                )
-            else:
-                st.session_state.supabase_limited_notice = (
-                    f"Synced edition display metafields for {result['synced']} products."
-                )
-            st.rerun()
-        except Exception as error:
-            progress.empty()
-            st.error("Could not sync edition display to Shopify.")
-            st.exception(error)
-    actions[2].caption("Shopify connection: " + ("Configured" if config["configured"] else "Missing"))
+    last_product_sync = sync_state.get("last_successful_product_sync_at")
+    actions[1].caption(
+        "Last product sync: "
+        + (format_updated_at(last_product_sync) if last_product_sync else "Never")
+    )
+    actions[1].caption("Shopify connection: " + ("Configured" if config["configured"] else "Missing"))
 
     try:
         products = supabase_backend.list_edition_products(search=search, limit=1000)
@@ -2379,14 +2360,14 @@ def render_supabase_limited_editions_page():
         st.exception(error)
         return
 
-    actions[3].download_button(
+    actions[2].download_button(
         "Export CSV",
         data=supabase_backend.export_products_csv(products),
         file_name="sports-cave-supabase-limited-editions.csv",
         mime="text/csv",
         use_container_width=True,
     )
-    actions[4].caption(f"{len(products)} products shown")
+    actions[3].caption(f"{len(products)} products shown")
 
     render_supabase_limited_edition_csv_import()
 
@@ -3023,20 +3004,23 @@ def render_supabase_orders_page():
         st.success(notice)
 
     config = shopify_sync.get_config()
-    controls = st.columns([1, 3])
+    try:
+        sync_state = supabase_backend.get_sync_state()
+    except Exception:
+        sync_state = {}
+    controls = st.columns([1, 1.2, 2.8])
     if controls[0].button("Sync Orders", disabled=not config["configured"], type="primary", use_container_width=True):
         sync_message = st.empty()
-        sync_message.info("Syncing paid Shopify orders into Supabase...")
+        sync_message.info("Checking new and updated paid Shopify orders...")
         try:
-            result = supabase_backend.sync_shopify_orders_to_supabase(
-                config,
-                query="financial_status:paid",
-                max_orders=250,
-            )
+            result = supabase_backend.sync_shopify_orders_to_supabase(config)
             sync_message.empty()
             st.session_state.supabase_orders_notice = (
-                f"Synced {result['orders_seen']} paid Shopify orders. "
-                f"Assigned {result['assignments_created']} edition numbers."
+                f"Checked {result['orders_seen']} paid Shopify order updates. "
+                f"Processed {result.get('orders_processed', 0)}. "
+                f"Assigned {result['assignments_created']} new editions. "
+                f"Skipped {result.get('existing_assignments_skipped', 0)} existing allocations. "
+                f"Generated {result.get('generated_certificates', 0)} certificates."
             )
             st.rerun()
         except Exception as error:
@@ -3045,7 +3029,13 @@ def render_supabase_orders_page():
             supabase_backend.log_app_error("orders_page_sync_failed", str(error), {"source": "orders_page"})
     if not config["configured"]:
         controls[1].caption("Shopify connection missing. Open Developer -> Developer Tools -> Shopify Diagnostics.")
-    search = controls[1].text_input(
+    else:
+        last_order_sync = sync_state.get("last_successful_order_sync_at")
+        controls[1].caption(
+            "Last synced: "
+            + (format_updated_at(last_order_sync) if last_order_sync else "Never")
+        )
+    search = controls[2].text_input(
         "Search orders",
         placeholder="Search order, customer, product, SKU, or edition",
         label_visibility="collapsed",
@@ -5987,7 +5977,7 @@ def render_settings_page(app_version, database_path, password_status):
                 st.caption(value)
 
     st.info(
-        "Sports Cave OS reads Shopify products and orders only when a worker clicks Fetch. "
+        "Sports Cave OS reads Shopify products and orders only when a worker clicks Sync. "
         "Client credentials are exchanged for a temporary in-memory token only at that time. "
         "Edition numbers and certificates come from Sports Cave OS; Shopify metafields are display only."
     )
@@ -6013,13 +6003,16 @@ def render_settings_page(app_version, database_path, password_status):
                 st.error("Shopify connection failed.")
                 st.exception(error)
         if test_columns[2].button(
-            "Test product sync",
+            "Test product update sync",
             disabled=not (shopify_config["configured"] and supabase_backend.is_configured()),
             use_container_width=True,
         ):
             try:
-                result = supabase_backend.sync_shopify_products_to_supabase(shopify_config)
-                st.success(f"Synced {result['products_processed']} Shopify products.")
+                result = supabase_backend.sync_shopify_products_to_supabase(shopify_config, mode="incremental")
+                if result.get("skipped"):
+                    st.warning(result.get("message"))
+                else:
+                    st.success(f"Synced {result['products_processed']} updated Shopify products.")
             except Exception as error:
                 st.error("Product sync test failed.")
                 st.exception(error)
@@ -6048,11 +6041,113 @@ def render_settings_page(app_version, database_path, password_status):
                 st.caption("No edition orders are available for certificate generation testing yet.")
 
     with st.expander("Developer Tools", expanded=False):
-        dev_tabs = st.tabs(["Shopify Diagnostics", "Metafield Bridge", "Product Assets / PSD Links", "Certificates"])
+        dev_tabs = st.tabs(["Shopify Diagnostics", "Sync Tools", "Metafield Bridge", "Product Assets / PSD Links", "Certificates"])
         with dev_tabs[0]:
             st.caption("Manual Shopify connection check. This only runs a token/API test when you click the button.")
             render_shopify_scope_diagnostics(shopify_config, "settings-dev")
         with dev_tabs[1]:
+            st.caption("Protected sync tools. These are not part of the normal VA workflow.")
+            if not supabase_backend.is_configured():
+                st.warning("DATABASE_URL is required before running sync tools.")
+            else:
+                try:
+                    sync_state = supabase_backend.get_sync_state()
+                except Exception:
+                    sync_state = {}
+                state_columns = st.columns(3)
+                state_columns[0].metric(
+                    "Last order sync",
+                    format_updated_at(sync_state.get("last_successful_order_sync_at"))
+                    if sync_state.get("last_successful_order_sync_at")
+                    else "Never",
+                )
+                state_columns[1].metric(
+                    "Edition tracking start",
+                    format_updated_at(sync_state.get("edition_tracking_start_at"))
+                    if sync_state.get("edition_tracking_start_at")
+                    else "Not set",
+                )
+                state_columns[2].metric(
+                    "Last product sync",
+                    format_updated_at(sync_state.get("last_successful_product_sync_at"))
+                    if sync_state.get("last_successful_product_sync_at")
+                    else "Never",
+                )
+
+                st.markdown("**Initial Full Product Sync**")
+                st.caption("Use this once when Supabase has no products. It upserts products and creates missing edition records without resetting edition counters.")
+                full_confirm = st.checkbox(
+                    "I understand this fetches the Shopify product library but does not reset edition numbers.",
+                    key="dev-confirm-full-product-sync",
+                )
+                if st.button(
+                    "Run Initial Full Product Sync",
+                    disabled=not (shopify_config["configured"] and full_confirm),
+                    key="dev-full-product-sync",
+                    use_container_width=True,
+                ):
+                    progress = st.progress(0, text="Running initial full product sync...")
+                    try:
+                        def update_full_product_progress(count):
+                            progress.progress(min(count / 1000, 0.99), text=f"Loaded {count} products...")
+
+                        result = supabase_backend.sync_shopify_products_to_supabase(
+                            shopify_config,
+                            progress_callback=update_full_product_progress,
+                            mode="full",
+                        )
+                        progress.progress(1.0, text="Initial full product sync complete.")
+                        st.success(f"Synced {result.get('products_processed', 0)} products.")
+                    except Exception as error:
+                        progress.empty()
+                        st.error("Initial full product sync failed.")
+                        st.exception(error)
+
+                st.markdown("**Historical Order Backfill**")
+                st.caption("Only use this if you intentionally want previous paid Shopify orders assigned edition records.")
+                backfill_confirm = st.checkbox(
+                    "This will assign edition numbers to previous paid Shopify orders that do not already have edition records. Continue?",
+                    key="dev-confirm-historical-backfill",
+                )
+                if st.button(
+                    "Run Historical Order Backfill",
+                    disabled=not (shopify_config["configured"] and backfill_confirm),
+                    key="dev-historical-order-backfill",
+                    use_container_width=True,
+                ):
+                    try:
+                        result = supabase_backend.sync_shopify_orders_to_supabase(
+                            shopify_config,
+                            historical_backfill=True,
+                            query="financial_status:paid",
+                            max_orders=500,
+                        )
+                        st.success(
+                            f"Backfill checked {result.get('orders_seen', 0)} orders and assigned "
+                            f"{result.get('assignments_created', 0)} edition records."
+                        )
+                    except Exception as error:
+                        st.error("Historical order backfill failed.")
+                        st.exception(error)
+
+                st.markdown("**Reset Sync Timestamps**")
+                reset_confirm = st.checkbox(
+                    "Reset incremental sync timestamps and restart edition tracking from now.",
+                    key="dev-confirm-reset-sync-timestamps",
+                )
+                if st.button(
+                    "Reset Sync Timestamps",
+                    disabled=not reset_confirm,
+                    key="dev-reset-sync-timestamps",
+                    use_container_width=True,
+                ):
+                    try:
+                        supabase_backend.reset_incremental_sync_timestamps()
+                        st.success("Sync timestamps reset. Normal order sync will start from now with the lookback buffer.")
+                    except Exception as error:
+                        st.error("Could not reset sync timestamps.")
+                        st.exception(error)
+        with dev_tabs[2]:
             st.caption("Supabase is the source of truth. Shopify product/order metafields are display and customer-account bridges.")
             snippet_path = Path("shopify/snippets/sports-cave-edition-widget.liquid")
             bridge_columns = st.columns(3)
@@ -6080,7 +6175,7 @@ def render_settings_page(app_version, database_path, password_status):
                 )
             else:
                 st.warning("Widget snippet file is missing from the repo.")
-        with dev_tabs[2]:
+        with dev_tabs[3]:
             st.caption("Import and manage Google Drive PSD links in Supabase product_assets. No PSD files are uploaded or stored.")
             if not supabase_backend.is_configured():
                 st.warning("DATABASE_URL is required before importing PSD links.")
@@ -6105,7 +6200,7 @@ def render_settings_page(app_version, database_path, password_status):
                 except Exception as error:
                     st.error("Could not load products for PSD import.")
                     st.exception(error)
-        with dev_tabs[3]:
+        with dev_tabs[4]:
             st.caption("Certificate tools live here now; Orders remains the daily certificate workflow.")
             if not supabase_backend.is_configured():
                 st.warning("DATABASE_URL is required before loading certificate tools.")
