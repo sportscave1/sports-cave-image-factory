@@ -306,7 +306,6 @@ def _ensure_schema_uncached():
                     allocation_index INTEGER DEFAULT 1,
                     assigned_at TIMESTAMPTZ DEFAULT now(),
                     certificate_status TEXT DEFAULT 'Certificate Missing',
-                    UNIQUE (shopify_handle, edition_number),
                     UNIQUE (shopify_line_item_id, allocation_index)
                 )
                 """
@@ -433,6 +432,7 @@ def _ensure_schema_uncached():
                     ("remaining_count", "INTEGER DEFAULT 100"),
                     ("edition_status", "TEXT DEFAULT 'limited_release'"),
                     ("edition_display_text", "TEXT"),
+                    ("allow_counter_history_override", "BOOLEAN DEFAULT FALSE"),
                     ("metafields_synced_at", "TIMESTAMPTZ"),
                     ("metafields_sync_status", "TEXT DEFAULT 'Never Synced'"),
                     ("last_metafield_error", "TEXT"),
@@ -635,7 +635,9 @@ def _ensure_schema_uncached():
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_products_handle_unique ON edition_products(shopify_handle)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_customers_id_unique ON shopify_customers(shopify_customer_id)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_orders_id_unique ON shopify_orders(shopify_order_id)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_handle_number_unique ON edition_orders(shopify_handle, edition_number)")
+            cur.execute("ALTER TABLE edition_orders DROP CONSTRAINT IF EXISTS edition_orders_shopify_handle_edition_number_key")
+            cur.execute("DROP INDEX IF EXISTS idx_edition_orders_handle_number_unique")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_handle_number ON edition_orders(shopify_handle, edition_number)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_line_allocation_unique ON edition_orders(shopify_line_item_id, allocation_index)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_certificates_edition_order_unique ON certificates(edition_order_id)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_unique ON product_assets(shopify_handle, asset_type)")
@@ -953,29 +955,41 @@ def list_edition_products(search="", limit=500):
                     """
                     SELECT ep.*, sp.admin_url, sp.online_store_url,
                            COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS display_image_url,
-                           GREATEST(
-                               COALESCE(ep.last_assigned_edition, 0),
-                               COALESCE((
-                                   SELECT MAX(eo.edition_number)
-                                   FROM edition_orders eo
-                                   WHERE eo.shopify_handle = ep.shopify_handle
-                               ), 0),
-                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
-                           ) AS last_assigned_edition,
+                           CASE
+                               WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                               ELSE GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   COALESCE((
+                                       SELECT MAX(eo.edition_number)
+                                       FROM edition_orders eo
+                                       WHERE eo.shopify_handle = ep.shopify_handle
+                                   ), 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                           END AS last_assigned_edition,
                            (
                                SELECT COUNT(*)
                                FROM edition_orders eo
                                WHERE eo.shopify_handle = ep.shopify_handle
                            ) AS sold_count,
-                           GREATEST(COALESCE(ep.edition_total, 100) - GREATEST(
-                               COALESCE(ep.last_assigned_edition, 0),
-                               COALESCE((
-                                   SELECT MAX(eo.edition_number)
-                                   FROM edition_orders eo
-                                   WHERE eo.shopify_handle = ep.shopify_handle
-                               ), 0),
-                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
-                           ), 0) AS remaining_count,
+                           GREATEST(COALESCE(ep.edition_total, 100) - CASE
+                               WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                               ELSE GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   COALESCE((
+                                       SELECT MAX(eo.edition_number)
+                                       FROM edition_orders eo
+                                       WHERE eo.shopify_handle = ep.shopify_handle
+                                   ), 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                           END, 0) AS remaining_count,
                            GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
                     FROM edition_products ep
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
@@ -991,29 +1005,41 @@ def list_edition_products(search="", limit=500):
                     """
                     SELECT ep.*, sp.admin_url, sp.online_store_url,
                            COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS display_image_url,
-                           GREATEST(
-                               COALESCE(ep.last_assigned_edition, 0),
-                               COALESCE((
-                                   SELECT MAX(eo.edition_number)
-                                   FROM edition_orders eo
-                                   WHERE eo.shopify_handle = ep.shopify_handle
-                               ), 0),
-                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
-                           ) AS last_assigned_edition,
+                           CASE
+                               WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                               ELSE GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   COALESCE((
+                                       SELECT MAX(eo.edition_number)
+                                       FROM edition_orders eo
+                                       WHERE eo.shopify_handle = ep.shopify_handle
+                                   ), 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                           END AS last_assigned_edition,
                            (
                                SELECT COUNT(*)
                                FROM edition_orders eo
                                WHERE eo.shopify_handle = ep.shopify_handle
                            ) AS sold_count,
-                           GREATEST(COALESCE(ep.edition_total, 100) - GREATEST(
-                               COALESCE(ep.last_assigned_edition, 0),
-                               COALESCE((
-                                   SELECT MAX(eo.edition_number)
-                                   FROM edition_orders eo
-                                   WHERE eo.shopify_handle = ep.shopify_handle
-                               ), 0),
-                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
-                           ), 0) AS remaining_count,
+                           GREATEST(COALESCE(ep.edition_total, 100) - CASE
+                               WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                               ELSE GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   COALESCE((
+                                       SELECT MAX(eo.edition_number)
+                                       FROM edition_orders eo
+                                       WHERE eo.shopify_handle = ep.shopify_handle
+                                   ), 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                           END, 0) AS remaining_count,
                            GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
                     FROM edition_products ep
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
@@ -1040,6 +1066,8 @@ def get_edition_counter_state(shopify_handle):
                        COALESCE(ep.next_edition_number, 1) AS next_edition_number,
                        COALESCE(ep.active, ep.is_active, TRUE) AS active,
                        COALESCE(ep.sold_out, ep.is_sold_out, FALSE) AS sold_out,
+                       COALESCE(ep.allow_counter_history_override, FALSE) AS allow_counter_history_override,
+                       COALESCE(ep.last_assigned_edition, 0) AS stored_last_assigned_edition,
                        COALESCE((
                            SELECT MAX(eo.edition_number)
                            FROM edition_orders eo
@@ -1063,6 +1091,7 @@ def update_edition_product(
     active=None,
     sold_out=None,
     current_edition=None,
+    allow_history_override=False,
 ):
     ensure_schema()
     handle = str(shopify_handle or "").strip()
@@ -1081,11 +1110,14 @@ def update_edition_product(
         current = _safe_int(current_edition, 0)
         if current < 0:
             raise ValueError("Current edition cannot be below 0.")
-        if current < max_assigned:
+        if current < max_assigned and not allow_history_override:
             raise ValueError("Cannot set current edition below already assigned edition history.")
         if current > new_total:
             raise ValueError("Current edition cannot be higher than edition total.")
         update_next_number = current + 1
+        override_active = bool(allow_history_override and current < max_assigned)
+    else:
+        override_active = bool(state.get("allow_counter_history_override"))
 
     final_sold_out = sold_out
     if final_sold_out is None and update_next_number is not None:
@@ -1111,12 +1143,20 @@ def update_edition_product(
                     UPDATE edition_products
                     SET next_edition_number=%s,
                         last_assigned_edition=%s,
+                        allow_counter_history_override=%s,
                         sold_out=%s,
                         is_sold_out=%s,
                         updated_at=now()
                     WHERE shopify_handle=%s
                     """,
-                    (update_next_number, max(update_next_number - 1, 0), bool(final_sold_out), bool(final_sold_out), handle),
+                    (
+                        update_next_number,
+                        max(update_next_number - 1, 0),
+                        override_active,
+                        bool(final_sold_out),
+                        bool(final_sold_out),
+                        handle,
+                    ),
                 )
             if active is not None:
                 cur.execute(
@@ -1198,15 +1238,21 @@ def get_product_edition_metafield_payload(shopify_handle):
                 SELECT ep.*, sp.shopify_product_id AS synced_shopify_product_id,
                        sp.shopify_product_gid AS synced_shopify_product_gid,
                        sp.admin_url, sp.online_store_url,
-                       GREATEST(
-                           COALESCE(ep.last_assigned_edition, 0),
-                           COALESCE((
-                               SELECT MAX(eo.edition_number)
-                               FROM edition_orders eo
-                               WHERE eo.shopify_handle = ep.shopify_handle
-                           ), 0),
-                           GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
-                       ) AS last_assigned_edition,
+                       CASE
+                           WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
+                               COALESCE(ep.last_assigned_edition, 0),
+                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                           )
+                           ELSE GREATEST(
+                               COALESCE(ep.last_assigned_edition, 0),
+                               COALESCE((
+                                   SELECT MAX(eo.edition_number)
+                                   FROM edition_orders eo
+                                   WHERE eo.shopify_handle = ep.shopify_handle
+                               ), 0),
+                               GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                           )
+                       END AS last_assigned_edition,
                        (
                            SELECT COUNT(*)
                            FROM edition_orders eo
@@ -1727,47 +1773,31 @@ def import_limited_edition_rows(
                         """
                         INSERT INTO edition_products(
                             shopify_product_id, shopify_product_gid, shopify_handle, product_title,
-                            edition_total, next_edition_number, active, is_active, sold_out, is_sold_out, updated_at
+                            edition_total, next_edition_number, active, is_active,
+                            allow_counter_history_override, sold_out, is_sold_out, updated_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, COALESCE(%s, 1), %s, %s, FALSE, FALSE, now())
+                        VALUES (%s, %s, %s, %s, %s, COALESCE(%s, 1), %s, %s, %s, FALSE, FALSE, now())
                         ON CONFLICT (shopify_handle) DO UPDATE SET
                             shopify_product_id=COALESCE(EXCLUDED.shopify_product_id, edition_products.shopify_product_id),
                             shopify_product_gid=COALESCE(EXCLUDED.shopify_product_gid, edition_products.shopify_product_gid),
                             product_title=COALESCE(NULLIF(EXCLUDED.product_title, ''), edition_products.product_title),
                             edition_total=EXCLUDED.edition_total,
                             next_edition_number=CASE
-                                WHEN %s THEN GREATEST(
-                                    COALESCE(EXCLUDED.next_edition_number, 1),
-                                    COALESCE((
-                                        SELECT MAX(eo.edition_number) + 1
-                                        FROM edition_orders eo
-                                        WHERE eo.shopify_handle = edition_products.shopify_handle
-                                    ), 1)
-                                )
+                                WHEN %s THEN COALESCE(EXCLUDED.next_edition_number, 1)
                                 ELSE GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number)
+                            END,
+                            allow_counter_history_override=CASE
+                                WHEN %s THEN TRUE
+                                ELSE COALESCE(edition_products.allow_counter_history_override, FALSE)
                             END,
                             active=EXCLUDED.active,
                             is_active=EXCLUDED.is_active,
                             sold_out=CASE
-                                WHEN %s THEN GREATEST(
-                                    COALESCE(EXCLUDED.next_edition_number, 1),
-                                    COALESCE((
-                                        SELECT MAX(eo.edition_number) + 1
-                                        FROM edition_orders eo
-                                        WHERE eo.shopify_handle = edition_products.shopify_handle
-                                    ), 1)
-                                )
+                                WHEN %s THEN COALESCE(EXCLUDED.next_edition_number, 1)
                                 ELSE GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number)
                             END > EXCLUDED.edition_total,
                             is_sold_out=CASE
-                                WHEN %s THEN GREATEST(
-                                    COALESCE(EXCLUDED.next_edition_number, 1),
-                                    COALESCE((
-                                        SELECT MAX(eo.edition_number) + 1
-                                        FROM edition_orders eo
-                                        WHERE eo.shopify_handle = edition_products.shopify_handle
-                                    ), 1)
-                                )
+                                WHEN %s THEN COALESCE(EXCLUDED.next_edition_number, 1)
                                 ELSE GREATEST(edition_products.next_edition_number, EXCLUDED.next_edition_number)
                             END > EXCLUDED.edition_total,
                             updated_at=now()
@@ -1782,6 +1812,8 @@ def import_limited_edition_rows(
                             int(next_number) if next_number else None,
                             bool(active),
                             bool(active),
+                            override_next_number,
+                            override_next_number,
                             override_next_number,
                             override_next_number,
                             override_next_number,
@@ -1816,7 +1848,7 @@ def import_limited_edition_rows(
                                     edition_number, edition_total, allocation_index, assigned_at, certificate_status
                                 )
                                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, now(), 'Certificate Missing')
-                                ON CONFLICT (shopify_handle, edition_number) DO UPDATE SET
+                                ON CONFLICT (shopify_line_item_id, allocation_index) DO UPDATE SET
                                     product_title=EXCLUDED.product_title,
                                     variant_title=EXCLUDED.variant_title,
                                     customer_name=EXCLUDED.customer_name,
@@ -1880,6 +1912,7 @@ def import_limited_edition_rows(
                             ) > COALESCE(ep.edition_total, 100),
                             updated_at = now()
                         WHERE ep.shopify_handle = %s
+                          AND COALESCE(ep.allow_counter_history_override, FALSE) = FALSE
                         """,
                         (handle,),
                     )
@@ -2617,7 +2650,26 @@ def allocate_edition_for_order_line(
                 )
                 max_assigned = int((cur.fetchone() or {}).get("max_assigned") or 0)
                 should_be_next = max_assigned + 1
-                if next_number < should_be_next:
+                allow_counter_override = bool(edition_product.get("allow_counter_history_override"))
+                if next_number < should_be_next and allow_counter_override:
+                    cur.execute(
+                        """
+                        INSERT INTO app_errors(error_type, message, context)
+                        VALUES ('edition_counter_manual_override_active', %s, %s::jsonb)
+                        """,
+                        (
+                            f"Manual edition counter override is active for {shopify_handle}.",
+                            json_dumps(
+                                {
+                                    "shopify_handle": shopify_handle,
+                                    "next_edition_number": next_number,
+                                    "history_expected_next_edition_number": should_be_next,
+                                    "max_assigned": max_assigned,
+                                }
+                            ),
+                        ),
+                    )
+                elif next_number < should_be_next:
                     cur.execute(
                         """
                         UPDATE edition_products
@@ -3415,8 +3467,9 @@ def run_integrity_check():
                        COALESCE(MAX(eo.edition_number), 0) + 1 AS expected_next
                 FROM edition_products ep
                 LEFT JOIN edition_orders eo ON eo.shopify_handle = ep.shopify_handle
-                GROUP BY ep.shopify_handle, ep.product_title, ep.next_edition_number
+                GROUP BY ep.shopify_handle, ep.product_title, ep.next_edition_number, ep.allow_counter_history_override
                 HAVING COALESCE(ep.next_edition_number, 1) < COALESCE(MAX(eo.edition_number), 0) + 1
+                   AND COALESCE(ep.allow_counter_history_override, FALSE) = FALSE
                 ORDER BY ep.shopify_handle
                 """
             )

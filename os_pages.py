@@ -2258,11 +2258,11 @@ def render_supabase_limited_edition_csv_import():
             key="supabase-limited-csv-overwrite-orders",
         )
         allow_counter_override = st.checkbox(
-            "Allow CSV to set next edition number, protected by assigned history",
+            "Allow CSV to override the next edition number even below assigned history",
             value=False,
             help=(
-                "Use this only for manual corrections. Sports Cave OS will not set the next number below "
-                "already assigned edition history for that product."
+                "Use this only for manual corrections. This can intentionally make future orders reuse "
+                "an edition number that already exists in the history."
             ),
             key="supabase-limited-csv-allow-counter-override",
         )
@@ -2514,7 +2514,10 @@ def render_supabase_limited_editions_page():
                 counter_state = selected_product
             current_next = int(counter_state.get("next_edition_number") or selected_product.get("next_edition_number") or 1)
             max_assigned = int(counter_state.get("max_assigned_edition") or selected_product.get("last_assigned_edition") or 0)
-            current_from_counter = max(max(current_next - 1, 0), max_assigned)
+            history_override_active = bool(counter_state.get("allow_counter_history_override"))
+            current_from_counter = max(current_next - 1, 0)
+            if not history_override_active:
+                current_from_counter = max(current_from_counter, max_assigned)
             new_total = st.number_input(
                 "Edition total",
                 min_value=1,
@@ -2550,8 +2553,6 @@ def render_supabase_limited_editions_page():
             state_columns[3].metric("Proposed next", proposed_next)
 
             validation_errors = []
-            if int(current_edition) < max_assigned:
-                validation_errors.append("Cannot set current edition below already assigned edition history.")
             if int(new_total) < max_assigned:
                 validation_errors.append("Edition total cannot be lower than already assigned edition history.")
             if int(new_total) < int(current_edition):
@@ -2561,6 +2562,21 @@ def render_supabase_limited_editions_page():
 
             if int(current_edition) == int(new_total):
                 st.warning("This product is at its edition total. Mark Sold Out before saving if this is final.")
+            override_history = False
+            if int(current_edition) < max_assigned:
+                st.warning(
+                    "This current edition is below assigned history. Saving will intentionally allow the next "
+                    "orders to reuse older edition numbers if needed."
+                )
+                override_history = st.checkbox(
+                    "Override assigned history and allow this lower edition number",
+                    value=history_override_active,
+                    help=(
+                        "Use this only when you are manually correcting the live edition counter. "
+                        "Sports Cave OS will stop auto-correcting this product back to the highest historical number."
+                    ),
+                    key=f"supabase-edition-history-override-{selected_handle}",
+                )
             for validation_error in validation_errors:
                 st.error(validation_error)
 
@@ -2574,7 +2590,9 @@ def render_supabase_limited_editions_page():
             if st.button(
                 "Save Edition Settings",
                 use_container_width=True,
-                disabled=bool(validation_errors) or (next_number_changes and not confirmed),
+                disabled=bool(validation_errors)
+                or (next_number_changes and not confirmed)
+                or (int(current_edition) < max_assigned and not override_history),
             ):
                 try:
                     supabase_backend.update_edition_product(
@@ -2583,6 +2601,7 @@ def render_supabase_limited_editions_page():
                         current_edition=current_edition,
                         active=new_active,
                         sold_out=new_sold_out,
+                        allow_history_override=override_history,
                     )
                     sync_note = ""
                     if config["configured"]:
