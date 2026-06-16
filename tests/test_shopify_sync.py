@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -6,6 +7,7 @@ from unittest.mock import patch
 
 import db
 import shopify_sync
+import supabase_backend
 
 
 class FakeResponse:
@@ -337,10 +339,12 @@ class ShopifySyncClientTests(unittest.TestCase):
                 "legacyResourceId": "2",
                 "name": "#1002",
                 "createdAt": "2026-06-13T00:00:00Z",
+                "updatedAt": "2026-06-13T00:05:00Z",
                 "processedAt": "2026-06-13T00:01:00Z",
                 "displayFinancialStatus": "PAID",
                 "displayFulfillmentStatus": "UNFULFILLED",
                 "email": "order@example.com",
+                "totalPriceSet": {"shopMoney": {"amount": "249.00", "currencyCode": "AUD"}},
                 "customer": {
                     "id": "gid://shopify/Customer/55",
                     "displayName": "Ada Collector",
@@ -358,6 +362,9 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(order["customer_name"], "Ada Collector")
         self.assertEqual(order["customer_email"], "ada@example.com")
         self.assertEqual(order["customer_id"], "gid://shopify/Customer/55")
+        self.assertEqual(order["remote_updated_at"], "2026-06-13T00:05:00Z")
+        self.assertEqual(order["total_price"], "249.00")
+        self.assertEqual(order["currency"], "AUD")
         self.assertEqual(order["customer_raw"]["displayName"], "Ada Collector")
 
     def test_orders_safe_query_still_requests_customer_fields(self):
@@ -365,6 +372,104 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertIn("shippingAddress", shopify_sync.ORDERS_SAFE_QUERY)
         self.assertIn("billingAddress", shopify_sync.ORDERS_SAFE_QUERY)
         self.assertIn("email", shopify_sync.ORDERS_SAFE_QUERY)
+        self.assertIn("updatedAt", shopify_sync.ORDERS_SAFE_QUERY)
+        self.assertIn("totalPriceSet", shopify_sync.ORDERS_SAFE_QUERY)
+
+
+class SupabaseOrderSyncLogicTests(unittest.TestCase):
+    def setUp(self):
+        self.config = {
+            "store_domain": "sports-cave.myshopify.com",
+            "access_token": "test-token",
+            "client_id": "",
+            "client_secret": "",
+            "api_version": "2026-04",
+            "max_orders": 25,
+            "auth_mode": "Admin access token mode",
+            "configured": True,
+        }
+
+    def paid_order(self, *, processed_at, remote_updated_at):
+        return {
+            "shopify_order_id": "gid://shopify/Order/1000",
+            "legacy_resource_id": "1000",
+            "order_name": "#1000",
+            "order_number": "1000",
+            "admin_url": "https://admin.shopify.com/store/sports-cave/orders/1000",
+            "created_at": "2026-06-01T00:00:00Z",
+            "processed_at": processed_at,
+            "remote_updated_at": remote_updated_at,
+            "paid_at": processed_at,
+            "financial_status": "PAID",
+            "fulfillment_status": "UNFULFILLED",
+            "customer_name": "Collector",
+            "customer_email": "collector@example.com",
+            "line_items": [
+                {
+                    "shopify_line_item_id": "gid://shopify/LineItem/1",
+                    "shopify_product_id": "gid://shopify/Product/999",
+                    "product_title": "Messi The Final Crown Wall Art",
+                    "product_handle": "messi-the-final-crown-wall-art",
+                    "variant_title": "Black / XL",
+                    "quantity": 1,
+                }
+            ],
+        }
+
+    @patch.object(supabase_backend, "finish_sync_run")
+    @patch.object(supabase_backend, "start_sync_run", return_value="run-1")
+    @patch.object(supabase_backend, "_set_sync_success")
+    @patch.object(supabase_backend, "_set_sync_attempt")
+    @patch.object(
+        supabase_backend,
+        "get_sync_state",
+        return_value={
+            "last_successful_order_sync_at": "2026-06-16T02:00:00Z",
+            "sync_lookback_buffer_minutes": 10,
+        },
+    )
+    @patch.object(
+        supabase_backend,
+        "ensure_edition_tracking_start",
+        return_value=datetime(2026, 6, 16, 1, 0, tzinfo=timezone.utc),
+    )
+    @patch.object(supabase_backend, "ensure_schema")
+    @patch.object(supabase_backend.shopify_sync, "iter_order_pages")
+    @patch.object(supabase_backend, "process_paid_order")
+    def test_incremental_sync_keeps_historical_updates_but_skips_auto_assignment(
+        self,
+        process_paid_order,
+        iter_order_pages,
+        _ensure_schema,
+        _tracking_start,
+        _sync_state,
+        _set_attempt,
+        _set_success,
+        _start_run,
+        _finish_run,
+    ):
+        historical_order = self.paid_order(
+            processed_at="2026-06-01T00:05:00Z",
+            remote_updated_at="2026-06-16T02:05:00Z",
+        )
+        iter_order_pages.return_value = [{"orders": [historical_order]}]
+        process_paid_order.return_value = {
+            "assignments_created": 0,
+            "existing_assignments_skipped": 0,
+            "generated_certificates": 0,
+            "historical_lines_marked": 1,
+            "changed_handles": [],
+            "errors": [],
+        }
+
+        result = supabase_backend.sync_shopify_orders_to_supabase(config=self.config, max_orders=25)
+
+        self.assertEqual(result["orders_seen"], 1)
+        self.assertEqual(result["orders_processed"], 1)
+        self.assertEqual(result["historical_orders_synced"], 1)
+        _, kwargs = process_paid_order.call_args
+        self.assertFalse(kwargs["assign_editions"])
+        self.assertEqual(kwargs["allocation_skip_reason"], supabase_backend.HISTORICAL_ORDER_NOTE)
 
 
 class ShopifyDatabaseTests(unittest.TestCase):

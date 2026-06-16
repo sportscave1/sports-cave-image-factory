@@ -681,6 +681,7 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
       legacyResourceId
       name
       createdAt
+      updatedAt
       processedAt
       cancelledAt
       displayFinancialStatus
@@ -740,11 +741,18 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
       legacyResourceId
       name
       createdAt
+      updatedAt
       processedAt
       cancelledAt
       displayFinancialStatus
       displayFulfillmentStatus
       email
+      totalPriceSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
       customer {
         id
         displayName
@@ -1096,6 +1104,7 @@ def normalize_order(node, store_domain):
         "admin_url": build_order_admin_url(store_domain, legacy_resource_id),
         "customer_id": customer.get("id") or customer_email or "",
         "created_at": node.get("createdAt") or "",
+        "remote_updated_at": node.get("updatedAt") or "",
         "processed_at": node.get("processedAt") or "",
         "paid_at": node.get("processedAt") if financial_status == "PAID" else "",
         "financial_status": financial_status,

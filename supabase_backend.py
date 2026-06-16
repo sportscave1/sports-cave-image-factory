@@ -27,6 +27,10 @@ DEFAULT_PSD_MASTER_FOLDER_SETTING = {
     "url": "https://drive.google.com/drive/folders/1UCs_EsyjVXZUNclAfnmO7y2x7rKutwhH",
     "name": "Sports Cave PSD Master Folder",
 }
+HISTORICAL_ORDER_STATUS = "Historical Order"
+HISTORICAL_ORDER_NOTE = (
+    "Paid before edition tracking started. Run Historical Order Backfill if this order should receive editions."
+)
 DATABASE_URL_ENV_KEYS = (
     "DATABASE_URL",
     "SUPABASE_DATABASE_URL",
@@ -282,7 +286,9 @@ def _ensure_schema_uncached():
                     total_price TEXT,
                     currency TEXT,
                     created_at TIMESTAMPTZ,
+                    remote_updated_at TIMESTAMPTZ,
                     processed_at TIMESTAMPTZ,
+                    cancelled_at TIMESTAMPTZ,
                     raw_json JSONB DEFAULT '{}'::jsonb,
                     synced_at TIMESTAMPTZ DEFAULT now()
                 )
@@ -491,7 +497,9 @@ def _ensure_schema_uncached():
                     ("total_price", "TEXT"),
                     ("currency", "TEXT"),
                     ("created_at", "TIMESTAMPTZ"),
+                    ("remote_updated_at", "TIMESTAMPTZ"),
                     ("processed_at", "TIMESTAMPTZ"),
+                    ("cancelled_at", "TIMESTAMPTZ"),
                     ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
                     ("raw", "JSONB DEFAULT '{}'::jsonb"),
                     ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
@@ -2320,9 +2328,11 @@ def _upsert_order(cur, order):
             order_number, shopify_order_number, admin_url,
             customer_id, shopify_customer_id, customer_name, customer_email, email,
             financial_status, fulfillment_status,
-            total_price, currency, created_at, processed_at, raw_json, raw, synced_at, updated_at
+            total_price, currency, created_at, remote_updated_at, processed_at, cancelled_at,
+            raw_json, raw, synced_at, updated_at
         )
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                NULLIF(%s, '')::timestamptz, NULLIF(%s, '')::timestamptz,
                 NULLIF(%s, '')::timestamptz, NULLIF(%s, '')::timestamptz,
                 %s::jsonb, %s::jsonb, now(), now())
         ON CONFLICT (shopify_order_id) DO UPDATE SET
@@ -2342,7 +2352,9 @@ def _upsert_order(cur, order):
             total_price=EXCLUDED.total_price,
             currency=EXCLUDED.currency,
             created_at=EXCLUDED.created_at,
+            remote_updated_at=EXCLUDED.remote_updated_at,
             processed_at=EXCLUDED.processed_at,
+            cancelled_at=EXCLUDED.cancelled_at,
             raw_json=EXCLUDED.raw_json,
             raw=EXCLUDED.raw,
             synced_at=now(),
@@ -2366,7 +2378,9 @@ def _upsert_order(cur, order):
             order.get("total_price"),
             order.get("currency"),
             order.get("created_at") or "",
+            order.get("remote_updated_at") or "",
             order.get("processed_at") or "",
+            order.get("cancelled_at") or "",
             raw_json,
             raw_json,
         ),
@@ -2413,6 +2427,21 @@ def _upsert_order_lines(cur, order):
                 json_dumps(line_item),
             ),
         )
+
+
+def _persist_order_snapshot(order):
+    with connect() as conn:
+        try:
+            with conn.cursor() as cur:
+                customer = _customer_from_order(order)
+                _upsert_customer(cur, customer)
+                _upsert_order(cur, order)
+                _upsert_order_lines(cur, order)
+                _backfill_edition_customer_details(cur, order)
+                conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
 
 def _set_order_line_status(
@@ -2472,6 +2501,37 @@ def _set_order_line_status(
             shopify_line_item_id,
         ),
     )
+
+
+def _mark_order_lines_historical(shopify_order_id, reason=HISTORICAL_ORDER_NOTE):
+    if not shopify_order_id:
+        return 0
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE shopify_order_lines li
+                SET assignment_status=%s,
+                    last_error=%s,
+                    synced_at=now(),
+                    updated_at=now()
+                WHERE li.shopify_order_id=%s
+                  AND COALESCE(li.assignment_status, '') <> 'Assigned'
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM edition_orders eo
+                      WHERE eo.shopify_line_item_id=li.shopify_line_item_id
+                  )
+                """,
+                (
+                    HISTORICAL_ORDER_STATUS,
+                    str(reason or HISTORICAL_ORDER_NOTE),
+                    shopify_order_id,
+                ),
+            )
+            updated = cur.rowcount
+        conn.commit()
+    return updated
 
 
 def _backfill_edition_customer_details(cur, order):
@@ -3011,6 +3071,8 @@ def process_paid_order(
     allocation_status="assigned",
     generate_certificates=True,
     sync_product_metafields=True,
+    assign_editions=True,
+    allocation_skip_reason="",
 ):
     ensure_schema()
     if not order.get("shopify_order_id"):
@@ -3020,18 +3082,7 @@ def process_paid_order(
     changed_handles = set()
     generated_certificates = 0
     errors = []
-    with connect() as conn:
-        try:
-            with conn.cursor() as cur:
-                customer = _customer_from_order(order)
-                _upsert_customer(cur, customer)
-                _upsert_order(cur, order)
-                _upsert_order_lines(cur, order)
-                _backfill_edition_customer_details(cur, order)
-                conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
+    _persist_order_snapshot(order)
 
     financial_status = str(order.get("financial_status") or "").upper()
     if financial_status and financial_status not in {"PAID", "PARTIALLY_PAID"}:
@@ -3039,6 +3090,19 @@ def process_paid_order(
             "assignments_created": 0,
             "existing_assignments_skipped": 0,
             "generated_certificates": 0,
+            "historical_lines_marked": 0,
+            "changed_handles": [],
+            "errors": [],
+        }
+    if not assign_editions:
+        return {
+            "assignments_created": 0,
+            "existing_assignments_skipped": 0,
+            "generated_certificates": 0,
+            "historical_lines_marked": _mark_order_lines_historical(
+                order.get("shopify_order_id"),
+                allocation_skip_reason or HISTORICAL_ORDER_NOTE,
+            ),
             "changed_handles": [],
             "errors": [],
         }
@@ -3200,6 +3264,7 @@ def process_paid_order(
         "assignments_created": assignments_created,
         "existing_assignments_skipped": existing_assignments_skipped,
         "generated_certificates": generated_certificates,
+        "historical_lines_marked": 0,
         "changed_handles": sorted(changed_handles),
         "errors": errors,
     }
@@ -3257,7 +3322,9 @@ def normalize_rest_order(payload):
         "total_price": str(payload.get("total_price") or ""),
         "currency": payload.get("currency") or "",
         "created_at": payload.get("created_at") or "",
+        "remote_updated_at": payload.get("updated_at") or "",
         "processed_at": payload.get("processed_at") or "",
+        "cancelled_at": payload.get("cancelled_at") or "",
         "line_items": line_items,
         "raw_payload": payload,
         "customer_raw": customer,
@@ -3321,7 +3388,8 @@ def sync_shopify_orders_to_supabase(
     run_id = start_sync_run("shopify_orders_backfill" if historical_backfill else "shopify_orders_incremental")
     seen = 0
     processed_orders = 0
-    skipped_historical = 0
+    historical_orders_synced = 0
+    historical_lines_marked = 0
     assignments = 0
     existing_skipped = 0
     generated_certificates = 0
@@ -3358,21 +3426,28 @@ def sync_shopify_orders_to_supabase(
             config=sync_config,
         ):
             for order in page["orders"]:
+                should_assign_editions = True
+                allocation_skip_reason = ""
                 if not historical_backfill:
                     order_datetime = _order_effective_datetime(order)
                     if order_datetime and tracking_start and order_datetime < tracking_start:
-                        skipped_historical += 1
-                        continue
+                        should_assign_editions = False
+                        allocation_skip_reason = HISTORICAL_ORDER_NOTE
                 result = process_paid_order(
                     order,
                     allocation_status=allocation_status,
                     generate_certificates=generate_certificates_now,
                     sync_product_metafields=sync_product_metafields_now,
+                    assign_editions=should_assign_editions,
+                    allocation_skip_reason=allocation_skip_reason,
                 )
                 processed_orders += 1
+                if not should_assign_editions:
+                    historical_orders_synced += 1
                 assignments += int(result.get("assignments_created") or 0)
                 existing_skipped += int(result.get("existing_assignments_skipped") or 0)
                 generated_certificates += int(result.get("generated_certificates") or 0)
+                historical_lines_marked += int(result.get("historical_lines_marked") or 0)
                 changed_handles.update(result.get("changed_handles") or [])
                 errors.extend(result.get("errors") or [])
             seen += len(page["orders"])
@@ -3390,7 +3465,9 @@ def sync_shopify_orders_to_supabase(
             "generated_certificates": generated_certificates,
             "certificates_deferred": max(assignments - generated_certificates, 0),
             "product_metafields_deferred": len(changed_handles) if not sync_product_metafields_now else 0,
-            "skipped_historical": skipped_historical,
+            "historical_orders_synced": historical_orders_synced,
+            "historical_lines_marked": historical_lines_marked,
+            "skipped_historical": historical_orders_synced,
             "sync_from": _datetime_to_setting(sync_from) if sync_from else "",
             "mode": "historical_backfill" if historical_backfill else "incremental",
             "errors": errors[:10],
@@ -3403,48 +3480,91 @@ def sync_shopify_orders_to_supabase(
 
 def _order_sort_clause(sort):
     return {
-        "Date newest": "COALESCE(o.created_at, o.synced_at) DESC NULLS LAST, o.order_name DESC",
-        "Date oldest": "COALESCE(o.created_at, o.synced_at) ASC NULLS LAST, o.order_name ASC",
-        "Order number": "o.order_name ASC",
-        "Customer": "o.customer_name ASC NULLS LAST",
-        "Edition number": "eo.edition_number ASC NULLS LAST",
-        "Certificate status": "eo.certificate_status ASC NULLS LAST",
-        "PSD status": "psd.asset_url ASC NULLS LAST",
-    }.get(sort, "COALESCE(o.created_at, o.synced_at) DESC NULLS LAST, o.order_name DESC")
+        "Date newest": "COALESCE(created_at, synced_at) DESC NULLS LAST, order_name DESC",
+        "Date oldest": "COALESCE(created_at, synced_at) ASC NULLS LAST, order_name ASC",
+        "Shopify updated": "COALESCE(remote_updated_at, created_at, synced_at) DESC NULLS LAST, order_name DESC",
+        "Customer": "customer_name ASC NULLS LAST, order_name ASC",
+        "Edition number": "first_edition_number ASC NULLS LAST, order_name DESC",
+    }.get(sort, "COALESCE(created_at, synced_at) DESC NULLS LAST, order_name DESC")
 
 
 def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
     ensure_schema()
     search_value = f"%{search.strip().lower()}%" if search.strip() else None
     order_by = _order_sort_clause(sort)
-    base_sql = f"""
-        SELECT o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
-               COALESCE(NULLIF(o.customer_name, ''), NULLIF(eo.customer_name, '')) AS customer_name,
-               COALESCE(NULLIF(o.customer_email, ''), NULLIF(eo.customer_email, '')) AS customer_email,
-               o.financial_status, o.fulfillment_status,
-               o.total_price, o.currency, o.created_at, o.processed_at,
-               li.id AS order_line_id, COALESCE(eo.shopify_line_item_id, li.shopify_line_item_id) AS shopify_line_item_id, li.quantity,
-               li.assignment_status, li.last_error,
-               eo.id AS edition_order_id,
-               COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AS shopify_handle,
-               COALESCE(NULLIF(eo.shopify_product_id, ''), NULLIF(li.shopify_product_id, '')) AS shopify_product_id,
-               COALESCE(NULLIF(eo.product_title, ''), NULLIF(li.product_title, '')) AS product_title,
-               COALESCE(NULLIF(eo.variant_title, ''), NULLIF(li.variant_title, '')) AS variant_title,
-               COALESCE(NULLIF(eo.sku, ''), NULLIF(li.sku, '')) AS sku,
-               eo.edition_number,
-               eo.edition_total, eo.allocation_index, eo.assigned_at, eo.certificate_status,
-               COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url,
-               c.local_file_path, c.shopify_file_url,
-               COALESCE(NULLIF(psd.asset_url, ''), NULLIF(psd.google_drive_file_url, '')) AS psd_url,
-               COALESCE(NULLIF(prodigi.asset_url, ''), NULLIF(prodigi.google_drive_file_url, '')) AS prodigi_url
-        FROM shopify_orders o
-        LEFT JOIN shopify_order_lines li ON li.shopify_order_id = o.shopify_order_id
-        LEFT JOIN edition_orders eo ON eo.shopify_line_item_id = li.shopify_line_item_id
-        LEFT JOIN edition_products ep ON ep.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
-        LEFT JOIN shopify_products sp ON sp.handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
-        LEFT JOIN certificates c ON c.edition_order_id = eo.id
-        LEFT JOIN product_assets psd ON psd.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND psd.asset_type = 'psd_master_file' AND psd.is_primary IS DISTINCT FROM FALSE
-        LEFT JOIN product_assets prodigi ON prodigi.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND prodigi.asset_type = 'prodigi_link'
+    base_sql = """
+        WITH line_rows AS (
+            SELECT o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
+                   COALESCE(NULLIF(o.customer_name, ''), NULLIF(eo.customer_name, '')) AS customer_name,
+                   COALESCE(NULLIF(o.customer_email, ''), NULLIF(eo.customer_email, '')) AS customer_email,
+                   o.financial_status, o.fulfillment_status,
+                   o.total_price, o.currency, o.created_at, o.remote_updated_at, o.processed_at, o.cancelled_at, o.synced_at,
+                   li.id AS order_line_id, COALESCE(eo.shopify_line_item_id, li.shopify_line_item_id) AS shopify_line_item_id, li.quantity,
+                   li.assignment_status, li.last_error,
+                   eo.id AS edition_order_id,
+                   COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AS shopify_handle,
+                   COALESCE(NULLIF(eo.shopify_product_id, ''), NULLIF(li.shopify_product_id, '')) AS shopify_product_id,
+                   COALESCE(NULLIF(eo.product_title, ''), NULLIF(li.product_title, '')) AS product_title,
+                   COALESCE(NULLIF(eo.variant_title, ''), NULLIF(li.variant_title, '')) AS variant_title,
+                   COALESCE(NULLIF(eo.sku, ''), NULLIF(li.sku, '')) AS sku,
+                   eo.edition_number,
+                   eo.edition_total, eo.allocation_index, eo.assigned_at, eo.certificate_status, eo.status AS edition_order_status,
+                   COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url,
+                   c.certificate_id, c.local_file_path, c.shopify_file_url, c.generated_at,
+                   COALESCE(NULLIF(psd.asset_url, ''), NULLIF(psd.google_drive_file_url, '')) AS psd_url,
+                   COALESCE(NULLIF(prodigi.asset_url, ''), NULLIF(prodigi.google_drive_file_url, '')) AS prodigi_url
+            FROM shopify_orders o
+            LEFT JOIN shopify_order_lines li ON li.shopify_order_id = o.shopify_order_id
+            LEFT JOIN edition_orders eo ON eo.shopify_line_item_id = li.shopify_line_item_id
+            LEFT JOIN edition_products ep ON ep.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
+            LEFT JOIN shopify_products sp ON sp.handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
+            LEFT JOIN certificates c ON c.edition_order_id = eo.id
+            LEFT JOIN product_assets psd ON psd.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND psd.asset_type = 'psd_master_file' AND psd.is_primary IS DISTINCT FROM FALSE
+            LEFT JOIN product_assets prodigi ON prodigi.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND prodigi.asset_type = 'prodigi_link'
+            {where}
+        )
+        SELECT
+            shopify_order_id, order_name, order_number, admin_url,
+            customer_name, customer_email,
+            financial_status, fulfillment_status,
+            total_price, currency, created_at, remote_updated_at, processed_at, cancelled_at, synced_at,
+            order_line_id, shopify_line_item_id, quantity,
+            assignment_status, last_error,
+            shopify_handle, shopify_product_id, product_title, variant_title, sku,
+            COALESCE(image_url, '') AS image_url,
+            COALESCE(psd_url, '') AS psd_url,
+            COALESCE(prodigi_url, '') AS prodigi_url,
+            COALESCE(
+                jsonb_agg(
+                    jsonb_build_object(
+                        'edition_order_id', edition_order_id,
+                        'edition_number', edition_number,
+                        'edition_total', edition_total,
+                        'allocation_index', allocation_index,
+                        'assigned_at', assigned_at,
+                        'certificate_status', certificate_status,
+                        'assignment_status', edition_order_status,
+                        'certificate_id', certificate_id,
+                        'local_file_path', local_file_path,
+                        'shopify_file_url', shopify_file_url,
+                        'generated_at', generated_at
+                    )
+                    ORDER BY edition_number ASC NULLS LAST, allocation_index ASC NULLS LAST
+                ) FILTER (WHERE edition_order_id IS NOT NULL),
+                '[]'::jsonb
+            ) AS assignments,
+            COUNT(edition_order_id) FILTER (WHERE edition_order_id IS NOT NULL) AS assignments_count,
+            MIN(edition_number) FILTER (WHERE edition_order_id IS NOT NULL) AS first_edition_number
+        FROM line_rows
+        GROUP BY
+            shopify_order_id, order_name, order_number, admin_url,
+            customer_name, customer_email,
+            financial_status, fulfillment_status,
+            total_price, currency, created_at, remote_updated_at, processed_at, cancelled_at, synced_at,
+            order_line_id, shopify_line_item_id, quantity,
+            assignment_status, last_error,
+            shopify_handle, shopify_product_id, product_title, variant_title, sku,
+            image_url, psd_url, prodigi_url
     """
     where_clauses = []
     params = []
@@ -3458,14 +3578,16 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
                OR LOWER(COALESCE(eo.product_title, li.product_title, '')) LIKE %s
                OR LOWER(COALESCE(eo.variant_title, li.variant_title, '')) LIKE %s
                OR LOWER(COALESCE(eo.sku, li.sku, '')) LIKE %s
+               OR LOWER(COALESCE(eo.shopify_handle, li.shopify_handle, '')) LIKE %s
                OR LOWER(COALESCE(li.assignment_status, '')) LIKE %s
                OR CAST(COALESCE(eo.edition_number, 0) AS TEXT) LIKE %s
             """
         )
-        params = [search_value] * 8 + [f"%{search.strip()}%"]
+        params = [search_value] * 9 + [f"%{search.strip()}%"]
     status_clauses = {
         "Needs edition": "COALESCE(li.assignment_status, '') IN ('Needs Edition', 'Product Not Found', 'Needs Edition Setup', 'Error')",
         "Assigned": "(COALESCE(li.assignment_status, '') = 'Assigned' OR eo.id IS NOT NULL)",
+        "Historical": f"COALESCE(li.assignment_status, '') = '{HISTORICAL_ORDER_STATUS}' AND eo.id IS NULL",
         "Certificates missing": "eo.id IS NOT NULL AND c.id IS NULL",
         "PSD missing": "COALESCE(COALESCE(eo.shopify_handle, li.shopify_handle), '') <> '' AND COALESCE(NULLIF(psd.asset_url, ''), NULLIF(psd.google_drive_file_url, ''), '') = ''",
         "Prodigi missing": "COALESCE(COALESCE(eo.shopify_handle, li.shopify_handle), '') <> '' AND COALESCE(NULLIF(prodigi.asset_url, ''), NULLIF(prodigi.google_drive_file_url, ''), '') = ''",
@@ -3478,7 +3600,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"{base_sql} {where} ORDER BY {order_by} LIMIT %s",
+                base_sql.format(where=where) + f" ORDER BY {order_by} LIMIT %s",
                 (*params, limit),
             )
             return cur.fetchall()
@@ -3501,6 +3623,8 @@ def get_order_summary():
                     (SELECT COUNT(*) FROM shopify_orders) AS orders_synced,
                     (SELECT COUNT(*) FROM shopify_order_lines
                      WHERE assignment_status IN ('Needs Edition', 'Product Not Found', 'Needs Edition Setup', 'Error')) AS needs_edition,
+                    (SELECT COUNT(*) FROM shopify_order_lines
+                     WHERE assignment_status = %s) AS historical_lines,
                     (SELECT COUNT(*) FROM edition_orders WHERE assigned_at::date = CURRENT_DATE) AS assigned_today,
                     (SELECT COUNT(*) FROM edition_orders eo
                      LEFT JOIN certificates c ON c.edition_order_id=eo.id
@@ -3514,6 +3638,8 @@ def get_order_summary():
                      WHERE COALESCE(lh.shopify_handle, '') <> ''
                        AND COALESCE(NULLIF(pa.asset_url, ''), NULLIF(pa.google_drive_file_url, ''), '')='') AS prodigi_links_missing
                 """
+                ,
+                (HISTORICAL_ORDER_STATUS,),
             )
             return cur.fetchone() or {}
 

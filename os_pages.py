@@ -3069,10 +3069,486 @@ def _assignment_text(assignments):
     if not active:
         return "Needs Edition"
     numbers = sorted(int(item["edition_number"]) for item in active)
-    limit = active[0].get("edition_limit")
+    limit = active[0].get("edition_limit") or active[0].get("edition_total") or 100
     if len(numbers) > 1 and numbers == list(range(numbers[0], numbers[-1] + 1)):
         return f"#{numbers[0]}-{numbers[-1]}/{limit}"
     return ", ".join(f"#{number}/{limit}" for number in numbers)
+
+
+def _coerce_assignments(value):
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return []
+        return parsed if isinstance(parsed, list) else []
+    return []
+
+
+def _order_assignment_summary(row):
+    assignments = active_assignments(_coerce_assignments(row.get("assignments")))
+    if assignments:
+        count = len(assignments)
+        assigned_at = assignments[-1].get("assigned_at")
+        note = (
+            f"{count} edition{'s' if count != 1 else ''} allocated"
+            if count > 1
+            else f"Assigned {format_updated_at(assigned_at)}" if assigned_at else "Edition allocated"
+        )
+        return {
+            "assignments": assignments,
+            "status": "Assigned",
+            "label": _assignment_text(assignments),
+            "note": note,
+        }
+    fallback_status = row.get("assignment_status") or "Needs Edition"
+    fallback_note = row.get("last_error") or ""
+    if fallback_status == supabase_backend.HISTORICAL_ORDER_STATUS and not fallback_note:
+        fallback_note = supabase_backend.HISTORICAL_ORDER_NOTE
+    return {
+        "assignments": [],
+        "status": fallback_status,
+        "label": fallback_status,
+        "note": fallback_note,
+    }
+
+
+def _clean_order_text(value):
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _compact_text_list(values, *, empty="Not set", limit=2, separator=", "):
+    unique_values = []
+    seen = set()
+    for value in values or []:
+        cleaned = _clean_order_text(value)
+        if not cleaned:
+            continue
+        token = cleaned.casefold()
+        if token in seen:
+            continue
+        seen.add(token)
+        unique_values.append(cleaned)
+    if not unique_values:
+        return empty
+    if len(unique_values) <= limit:
+        return separator.join(unique_values)
+    return separator.join(unique_values[:limit]) + f" +{len(unique_values) - limit} more"
+
+
+def _line_variant_summary(line_item):
+    variant_text = _clean_order_text(line_item.get("variant_title"))
+    if variant_text:
+        return variant_text
+    product_text = _clean_order_text(line_item.get("product_title"))
+    return product_text or "Variant missing"
+
+
+def _line_assignment_status(line_item):
+    assignments = active_assignments(_coerce_assignments(line_item.get("assignments")))
+    if assignments:
+        return "Assigned"
+    return _clean_order_text(line_item.get("assignment_status")) or "Needs Edition"
+
+
+def _line_assignment_summary(line_item):
+    assignments = active_assignments(_coerce_assignments(line_item.get("assignments")))
+    if assignments:
+        return _assignment_text(assignments)
+    status = _line_assignment_status(line_item)
+    if status == supabase_backend.HISTORICAL_ORDER_STATUS:
+        return "Historical"
+    return status
+
+
+def _overall_order_status(line_items):
+    statuses = [_line_assignment_status(item) for item in (line_items or [])]
+    if not statuses:
+        return "Needs Edition"
+    has_assigned = "Assigned" in statuses
+    for candidate in ("Error", "Product Not Found", "Needs Edition Setup", "Sold Out", "Needs Edition"):
+        if candidate in statuses:
+            return "Partially Assigned" if has_assigned else candidate
+    if supabase_backend.HISTORICAL_ORDER_STATUS in statuses:
+        return "Partially Assigned" if has_assigned else supabase_backend.HISTORICAL_ORDER_STATUS
+    return "Assigned" if has_assigned else statuses[0]
+
+
+def _build_compact_order_summary(order_row, line_items):
+    normalized_items = []
+    for item in line_items or []:
+        line_copy = dict(item)
+        line_copy["assignments"] = active_assignments(_coerce_assignments(line_copy.get("assignments")))
+        normalized_items.append(line_copy)
+    return {
+        "order_key": str(order_row.get("shopify_order_id") or order_row.get("order_name") or ""),
+        "order_label": order_row.get("order_name") or order_row.get("order_number") or "Order",
+        "order_link": str(order_row.get("admin_url") or "").strip(),
+        "customer_name": customer_display_name(order_row.get("customer_name")),
+        "order_date": format_order_date(order_row.get("created_at") or order_row.get("processed_at")),
+        "variant_summary": _compact_text_list(
+            [_line_variant_summary(item) for item in normalized_items],
+            empty="Variant missing",
+            separator=" | ",
+        ),
+        "edition_summary": _compact_text_list(
+            [_line_assignment_summary(item) for item in normalized_items],
+            empty="Needs Edition",
+            separator=" | ",
+        ),
+        "status": _overall_order_status(normalized_items),
+        "line_items": normalized_items,
+    }
+
+
+def _group_supabase_order_rows(rows):
+    grouped_orders = {}
+    for row in rows or []:
+        order_id = str(row.get("shopify_order_id") or row.get("order_name") or len(grouped_orders))
+        if order_id not in grouped_orders:
+            grouped_orders[order_id] = {"order": dict(row), "line_items": []}
+        if row.get("order_line_id") or row.get("shopify_line_item_id") or row.get("product_title"):
+            grouped_orders[order_id]["line_items"].append(dict(row))
+    return [
+        _build_compact_order_summary(payload["order"], payload["line_items"])
+        for payload in grouped_orders.values()
+    ]
+
+
+def _build_local_order_summaries(orders):
+    summaries = []
+    for order in orders or []:
+        summaries.append(_build_compact_order_summary(order, order.get("line_items") or []))
+    return summaries
+
+
+def _orders_page_styles():
+    return """
+    <style>
+    .sc-orders-summary-copy {
+        color: #6D7175;
+        font-size: 0.92rem;
+        line-height: 1.45;
+        margin-top: 0.35rem;
+    }
+    .sc-orders-sync-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 0.85rem;
+    }
+    .sc-orders-sync-card {
+        border: 1px solid rgba(224, 226, 228, 0.92);
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 247, 248, 0.96));
+        padding: 1rem 1.05rem;
+        box-shadow: 0 1px 2px rgba(32, 34, 35, 0.06);
+    }
+    .sc-orders-sync-label {
+        color: #6D7175;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+    .sc-orders-sync-value {
+        color: #202223;
+        font-size: 1.08rem;
+        font-weight: 740;
+        line-height: 1.2;
+        margin-top: 0.45rem;
+    }
+    .sc-orders-sync-copy {
+        color: #6D7175;
+        font-size: 0.84rem;
+        line-height: 1.4;
+        margin-top: 0.35rem;
+    }
+    .sc-orders-metric-card,
+    .sc-orders-chart-card {
+        border: 1px solid rgba(224, 226, 228, 0.92);
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 247, 248, 0.96));
+        padding: 1rem 1.05rem;
+        min-height: 132px;
+        box-shadow: 0 1px 2px rgba(32, 34, 35, 0.06);
+    }
+    .sc-orders-metric-label {
+        color: #6D7175;
+        font-size: 0.82rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+    }
+    .sc-orders-metric-value {
+        color: #202223;
+        font-size: 2.1rem;
+        font-weight: 750;
+        line-height: 1.05;
+        margin-top: 0.55rem;
+    }
+    .sc-orders-metric-hint {
+        color: #6D7175;
+        font-size: 0.84rem;
+        margin-top: 0.42rem;
+    }
+    .sc-orders-card-title {
+        color: #202223;
+        font-size: 1rem;
+        font-weight: 700;
+    }
+    .sc-orders-card-copy {
+        color: #6D7175;
+        font-size: 0.85rem;
+        margin-top: 0.2rem;
+    }
+    .sc-orders-chart-header {
+        align-items: flex-start;
+        display: flex;
+        gap: 0.9rem;
+        justify-content: space-between;
+        margin-bottom: 0.95rem;
+    }
+    .sc-orders-chart-legend {
+        color: #6D7175;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.85rem;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .sc-orders-chart-legend span {
+        align-items: center;
+        display: inline-flex;
+        gap: 0.35rem;
+    }
+    .sc-orders-legend-dot {
+        border-radius: 999px;
+        display: inline-block;
+        height: 0.55rem;
+        width: 0.55rem;
+    }
+    .sc-orders-legend-orders {
+        background: #008060;
+    }
+    .sc-orders-legend-assigned {
+        background: #1A73E8;
+    }
+    .sc-orders-chart-shell {
+        align-items: flex-end;
+        display: flex;
+        gap: 0.7rem;
+        height: 150px;
+        padding-top: 0.5rem;
+    }
+    .sc-orders-chart-group {
+        align-items: center;
+        display: flex;
+        flex: 1 1 0;
+        flex-direction: column;
+        gap: 0.45rem;
+        height: 100%;
+        justify-content: flex-end;
+    }
+    .sc-orders-chart-bars {
+        align-items: flex-end;
+        display: flex;
+        gap: 0.28rem;
+        height: 118px;
+    }
+    .sc-orders-chart-bar {
+        border-radius: 999px 999px 0 0;
+        display: inline-block;
+        min-height: 6px;
+        width: 11px;
+    }
+    .sc-orders-chart-orders {
+        background: linear-gradient(180deg, #19A97E 0%, #008060 100%);
+    }
+    .sc-orders-chart-assigned {
+        background: linear-gradient(180deg, #69A5FF 0%, #1A73E8 100%);
+    }
+    .sc-orders-chart-label {
+        color: #6D7175;
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+    .sc-orders-empty-chart {
+        align-items: center;
+        color: #6D7175;
+        display: flex;
+        font-size: 0.92rem;
+        height: 110px;
+        justify-content: center;
+    }
+    .sc-order-divider {
+        border: 0;
+        border-top: 1px solid rgba(224, 226, 228, 0.92);
+        margin: 0.35rem 0 0.5rem;
+    }
+    .sc-orders-section-label {
+        color: #6D7175;
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        margin: 0.15rem 0 0.55rem;
+        text-transform: uppercase;
+    }
+    .sc-order-feed-shell {
+        overflow-x: auto;
+        padding-bottom: 0.2rem;
+    }
+    .sc-order-feed-table {
+        min-width: 720px;
+    }
+    .sc-order-feed-head,
+    .sc-order-feed-row {
+        display: grid;
+        grid-template-columns: minmax(120px, 0.9fr) minmax(140px, 1fr) minmax(220px, 1.45fr) minmax(180px, 1.2fr);
+        gap: 0.7rem;
+    }
+    .sc-order-feed-head {
+        margin-bottom: 0.35rem;
+    }
+    .sc-order-feed-head div {
+        color: #6D7175;
+        font-size: 0.74rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+    .sc-order-feed-row {
+        align-items: center;
+        border-bottom: 1px solid rgba(224, 226, 228, 0.92);
+        padding: 0.62rem 0;
+    }
+    .sc-order-feed-cell {
+        min-width: 0;
+    }
+    .sc-order-feed-value {
+        color: #202223;
+        font-size: 0.93rem;
+        font-weight: 660;
+        line-height: 1.25;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    @media (max-width: 900px) {
+        .sc-order-feed-table {
+            min-width: 640px;
+        }
+        .sc-order-feed-head,
+        .sc-order-feed-row {
+            gap: 0.55rem;
+        }
+        .sc-order-feed-head div {
+            font-size: 0.68rem;
+        }
+        .sc-order-feed-value {
+            font-size: 0.88rem;
+        }
+    }
+    @media (max-width: 560px) {
+        .sc-order-feed-table {
+            min-width: 560px;
+        }
+        .sc-order-feed-head,
+        .sc-order-feed-row {
+            gap: 0.45rem;
+        }
+        .sc-order-feed-row {
+            padding: 0.55rem 0;
+        }
+        .sc-order-feed-value {
+            font-size: 0.84rem;
+        }
+    }
+    .sc-status {
+        background: #F6F7F8;
+        border-color: rgba(201, 204, 207, 0.95);
+        color: #202223;
+    }
+    .sc-status-unfulfilled,
+    .sc-status-partially-assigned {
+        background: #FFF1B8;
+        border-color: #E3C75F;
+        color: #5E4A00;
+    }
+    .sc-status-assigned,
+    .sc-status-paid {
+        background: #E3F1DF;
+        border-color: #95C99C;
+        color: #166042;
+    }
+    .sc-status-needs-edition,
+    .sc-status-product-not-found,
+    .sc-status-sold-out,
+    .sc-status-prodigi-missing,
+    .sc-status-missing,
+    .sc-status-historical-order,
+    .sc-status-error,
+    .sc-status-certificate-missing {
+        background: #FFF1F1;
+        border-color: #E2A8A8;
+        color: #A53F3F;
+    }
+    </style>
+    """
+
+
+def _render_compact_orders_feed(order_summaries):
+    st.markdown(
+        """
+        <div class="sc-order-feed-shell">
+            <div class="sc-order-feed-table">
+                <div class="sc-order-feed-head">
+                    <div>Order</div>
+                    <div>Name</div>
+                    <div>Variant</div>
+                    <div>Edition Sync</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    for item in order_summaries or []:
+        order_link = str(item.get("order_link") or "").strip()
+        order_label = html.escape(str(item.get("order_label") or "Order"))
+        if order_link:
+            order_value = (
+                f'<a href="{html.escape(order_link, quote=True)}" '
+                f'style="color:#202223;font-weight:700;text-decoration:none;">{order_label}</a>'
+            )
+        else:
+            order_value = order_label
+        st.markdown(
+            f"""
+            <div class="sc-order-feed-shell">
+                <div class="sc-order-feed-table">
+                    <div class="sc-order-feed-row">
+                        <div class="sc-order-feed-cell">
+                            <div class="sc-order-feed-value" title="{order_label}">{order_value}</div>
+                        </div>
+                        <div class="sc-order-feed-cell">
+                            <div class="sc-order-feed-value" title="{html.escape(str(item.get("customer_name") or "Customer missing"), quote=True)}">{html.escape(str(item.get("customer_name") or "Customer missing"))}</div>
+                        </div>
+                        <div class="sc-order-feed-cell">
+                            <div class="sc-order-feed-value" title="{html.escape(str(item.get("variant_summary") or "Variant missing"), quote=True)}">{html.escape(str(item.get("variant_summary") or "Variant missing"))}</div>
+                        </div>
+                        <div class="sc-order-feed-cell">
+                            <div class="sc-order-feed-value" title="{html.escape(str(item.get("edition_summary") or "Needs Edition"), quote=True)}">{html.escape(str(item.get("edition_summary") or "Needs Edition"))}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def _orders_metric_card_html(label, value, hint=""):
@@ -3144,202 +3620,10 @@ def _orders_activity_chart_html(activity_rows):
 
 def render_supabase_orders_page():
     st.title("Orders")
-    st.caption("Fast local order desk. Shopify sync only runs when you ask for it, and the heavy follow-up work stays on demand.")
-    st.markdown(
-        """
-        <style>
-        .sc-orders-summary-copy {
-            color: #6D7175;
-            font-size: 0.92rem;
-            line-height: 1.45;
-            margin-top: 0.35rem;
-        }
-        .sc-orders-metric-card,
-        .sc-orders-chart-card {
-            border: 1px solid rgba(224, 226, 228, 0.92);
-            border-radius: 18px;
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 247, 248, 0.96));
-            padding: 1rem 1.05rem;
-            min-height: 132px;
-            box-shadow: 0 1px 2px rgba(32, 34, 35, 0.06);
-        }
-        .sc-orders-metric-label {
-            color: #6D7175;
-            font-size: 0.82rem;
-            font-weight: 600;
-            letter-spacing: 0.02em;
-            text-transform: uppercase;
-        }
-        .sc-orders-metric-value {
-            color: #202223;
-            font-size: 2.1rem;
-            font-weight: 750;
-            line-height: 1.05;
-            margin-top: 0.55rem;
-        }
-        .sc-orders-metric-hint {
-            color: #6D7175;
-            font-size: 0.84rem;
-            margin-top: 0.42rem;
-        }
-        .sc-orders-card-title {
-            color: #202223;
-            font-size: 1rem;
-            font-weight: 700;
-        }
-        .sc-orders-card-copy {
-            color: #6D7175;
-            font-size: 0.85rem;
-            margin-top: 0.2rem;
-        }
-        .sc-orders-chart-header {
-            align-items: flex-start;
-            display: flex;
-            gap: 0.9rem;
-            justify-content: space-between;
-            margin-bottom: 0.95rem;
-        }
-        .sc-orders-chart-legend {
-            color: #6D7175;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.85rem;
-            font-size: 0.8rem;
-            font-weight: 600;
-        }
-        .sc-orders-chart-legend span {
-            align-items: center;
-            display: inline-flex;
-            gap: 0.35rem;
-        }
-        .sc-orders-legend-dot {
-            border-radius: 999px;
-            display: inline-block;
-            height: 0.55rem;
-            width: 0.55rem;
-        }
-        .sc-orders-legend-orders {
-            background: #008060;
-        }
-        .sc-orders-legend-assigned {
-            background: #1A73E8;
-        }
-        .sc-orders-chart-shell {
-            align-items: flex-end;
-            display: flex;
-            gap: 0.7rem;
-            height: 150px;
-            padding-top: 0.5rem;
-        }
-        .sc-orders-chart-group {
-            align-items: center;
-            display: flex;
-            flex: 1 1 0;
-            flex-direction: column;
-            gap: 0.45rem;
-            height: 100%;
-            justify-content: flex-end;
-        }
-        .sc-orders-chart-bars {
-            align-items: flex-end;
-            display: flex;
-            gap: 0.28rem;
-            height: 118px;
-        }
-        .sc-orders-chart-bar {
-            border-radius: 999px 999px 0 0;
-            display: inline-block;
-            min-height: 6px;
-            width: 11px;
-        }
-        .sc-orders-chart-orders {
-            background: linear-gradient(180deg, #19A97E 0%, #008060 100%);
-        }
-        .sc-orders-chart-assigned {
-            background: linear-gradient(180deg, #69A5FF 0%, #1A73E8 100%);
-        }
-        .sc-orders-chart-label {
-            color: #6D7175;
-            font-size: 0.78rem;
-            font-weight: 600;
-        }
-        .sc-orders-empty-chart {
-            align-items: center;
-            color: #6D7175;
-            display: flex;
-            font-size: 0.92rem;
-            height: 110px;
-            justify-content: center;
-        }
-        .sc-order-divider {
-            border: 0;
-            border-top: 1px solid rgba(224, 226, 228, 0.92);
-            margin: 0.35rem 0 0.5rem;
-        }
-        .sc-order-subtext {
-            color: #6D7175;
-            font-size: 0.81rem;
-            line-height: 1.25;
-            margin-top: 0.18rem;
-        }
-        .sc-order-product {
-            font-weight: 650;
-            line-height: 1.25;
-            color: #202223;
-        }
-        .sc-product-thumb-empty {
-            width: 46px;
-            height: 46px;
-            border-radius: 10px;
-            border: 1px solid rgba(201, 204, 207, 0.95);
-            background: #F6F7F8;
-            color: #5C5F62;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.72rem;
-            font-weight: 800;
-            letter-spacing: 0.04em;
-        }
-        .sc-orders-section-label {
-            color: #6D7175;
-            font-size: 0.78rem;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            margin: 0.15rem 0 0.55rem;
-            text-transform: uppercase;
-        }
-        .sc-status {
-            background: #F6F7F8;
-            border-color: rgba(201, 204, 207, 0.95);
-            color: #202223;
-        }
-        .sc-status-unfulfilled {
-            background: #FFF1B8;
-            border-color: #E3C75F;
-            color: #5E4A00;
-        }
-        .sc-status-assigned,
-        .sc-status-paid {
-            background: #E3F1DF;
-            border-color: #95C99C;
-            color: #166042;
-        }
-        .sc-status-needs-edition,
-        .sc-status-product-not-found,
-        .sc-status-sold-out,
-        .sc-status-prodigi-missing,
-        .sc-status-missing,
-        .sc-status-error,
-        .sc-status-certificate-missing {
-            background: #FFF1F1;
-            border-color: #E2A8A8;
-            color: #A53F3F;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
+    st.caption(
+        "One line per order. Variants and edition sync stay grouped into a compact feed, and older paid orders remain visible as historical until you backfill them."
     )
+    st.markdown(_orders_page_styles(), unsafe_allow_html=True)
     try:
         supabase_backend.ensure_schema()
     except Exception as error:
@@ -3356,18 +3640,9 @@ def render_supabase_orders_page():
         sync_state = supabase_backend.get_sync_state()
     except Exception:
         sync_state = {}
-    try:
-        psd_master_setting = supabase_backend.get_psd_master_folder_setting()
-    except Exception:
-        psd_master_setting = supabase_backend.DEFAULT_PSD_MASTER_FOLDER_SETTING
-    psd_master_url = (
-        (psd_master_setting or {}).get("url")
-        or supabase_backend.DEFAULT_PSD_MASTER_FOLDER_SETTING.get("url")
-        or ""
-    )
 
-    toolbar = st.columns([1.15, 1.45, 1.05, 1.05])
-    if toolbar[0].button("Sync latest orders", disabled=not config["configured"], type="primary", use_container_width=True):
+    top_toolbar = st.columns([0.95, 1.75])
+    if top_toolbar[0].button("Sync latest orders", disabled=not config["configured"], type="primary", use_container_width=True):
         sync_message = st.empty()
         sync_message.info("Checking new and updated paid Shopify orders...")
         try:
@@ -3377,12 +3652,31 @@ def render_supabase_orders_page():
                 sync_product_metafields=False,
             )
             sync_message.empty()
+            warning_count = len(result.get("errors") or [])
+            warning_suffix = (
+                f" {warning_count} warning{'s' if warning_count != 1 else ''} logged."
+                if warning_count
+                else ""
+            )
+            historical_suffix = (
+                f" Preserved {result.get('historical_orders_synced', 0)} historical paid order update"
+                f"{'s' if result.get('historical_orders_synced', 0) != 1 else ''} without assigning editions."
+                if result.get("historical_orders_synced")
+                else ""
+            )
+            deferred_suffix = (
+                f" {result.get('certificates_deferred', 0)} certificate PDF"
+                f"{'s' if result.get('certificates_deferred', 0) != 1 else ''} still deferred."
+                if result.get("certificates_deferred")
+                else ""
+            )
             st.session_state.supabase_orders_notice = (
                 f"Checked {result['orders_seen']} paid Shopify order updates. "
                 f"Processed {result.get('orders_processed', 0)}. "
                 f"Assigned {result['assignments_created']} new editions. "
                 f"Skipped {result.get('existing_assignments_skipped', 0)} existing allocations. "
-                f"Certificates now generate on demand for faster syncs."
+                f"Certificates still generate on demand for faster syncs."
+                f"{historical_suffix}{deferred_suffix}{warning_suffix}"
             )
             st.rerun()
         except Exception as error:
@@ -3390,211 +3684,143 @@ def render_supabase_orders_page():
             st.error("Shopify sync failed. Open Developer -> Developer Tools -> Shopify Diagnostics.")
             supabase_backend.log_app_error("orders_page_sync_failed", str(error), {"source": "orders_page"})
 
-    search = toolbar[1].text_input(
+    search = top_toolbar[1].text_input(
         "Search orders",
-        placeholder="Search order, customer, product, SKU, or edition",
+        placeholder="Search order, customer, email, handle, SKU, or edition",
         key="supabase-orders-search",
     )
-    status_filter = toolbar[2].selectbox(
+
+    filter_toolbar = st.columns([1.1, 1.1, 0.9])
+    status_filter = filter_toolbar[0].selectbox(
         "View",
-        ("All", "Needs edition", "Assigned", "Certificates missing", "PSD missing", "Prodigi missing", "Errors"),
+        ("All", "Needs edition", "Historical", "Assigned", "Certificates missing", "PSD missing", "Prodigi missing", "Errors"),
         key="supabase-orders-status-filter",
     )
-    sort = toolbar[3].selectbox(
+    sort = filter_toolbar[1].selectbox(
         "Sort",
-        ("Date newest", "Date oldest", "Customer", "Edition number"),
+        ("Date newest", "Shopify updated", "Date oldest", "Customer", "Edition number"),
         key="supabase-orders-sort",
     )
-
-    secondary_toolbar = st.columns([0.9, 1.0, 2.1])
-    page_size = secondary_toolbar[0].selectbox(
+    page_size = filter_toolbar[2].selectbox(
         "Rows",
         (40, 80, 120),
         index=0,
         key="supabase-orders-page-size",
     )
-    show_artwork = secondary_toolbar[1].toggle(
-        "Artwork previews",
-        value=False,
-        key="supabase-orders-show-artwork",
-    )
+    last_order_sync = sync_state.get("last_successful_order_sync_at")
+    tracking_start = sync_state.get("edition_tracking_start_at")
     if not config["configured"]:
-        secondary_toolbar[2].caption("Shopify connection missing. Open Developer -> Developer Tools -> Shopify Diagnostics.")
+        st.caption("Shopify connection missing. Open Developer -> Developer Tools -> Shopify Diagnostics.")
     else:
-        last_order_sync = sync_state.get("last_successful_order_sync_at")
-        secondary_toolbar[2].caption(
+        st.caption(
             "Last synced: "
             + (format_updated_at(last_order_sync) if last_order_sync else "Never")
-            + "  |  Fast mode keeps certificates and Shopify display sync out of the critical path."
+            + "  |  Tracking start: "
+            + (format_updated_at(tracking_start) if tracking_start else "Not set")
         )
 
     summary = supabase_backend.get_order_summary()
     activity_rows = supabase_backend.get_order_activity(days=7)
-    st.markdown('<div class="sc-orders-section-label">Today</div>', unsafe_allow_html=True)
-    metrics = st.columns(6)
-    metric_specs = (
-        ("Orders synced", summary.get("orders_synced", 0), "Local cache ready"),
-        ("Needs edition", summary.get("needs_edition", 0), "Needs attention"),
-        ("Assigned today", summary.get("assigned_today", 0), "Fresh allocations"),
-        ("Certificates missing", summary.get("certificates_missing", 0), "Generate only when needed"),
-        ("PSD links missing", summary.get("psd_links_missing", 0), "Using master PSD folder for now"),
-        ("Prodigi links missing", summary.get("prodigi_links_missing", 0), "Merch links still needed"),
+    st.caption(
+        f"{summary.get('orders_synced', 0)} cached | "
+        f"{summary.get('needs_edition', 0)} need editions | "
+        f"{summary.get('historical_lines', 0)} historical | "
+        f"{summary.get('assigned_today', 0)} assigned today"
     )
-    for index, (label, value, hint) in enumerate(metric_specs):
-        with metrics[index]:
-            st.markdown(_orders_metric_card_html(label, value, hint), unsafe_allow_html=True)
 
-    insight_columns = st.columns([1.15, 1.0])
-    with insight_columns[0]:
-        with st.container(border=True):
-            st.markdown("**Fast sync mode**")
+    with st.expander("Sync health and counts", expanded=False):
+        sync_cards = [
+            (
+                "Last order sync",
+                format_updated_at(last_order_sync) if last_order_sync else "Never",
+                "Manual sync only. Shopify updates stay local until a worker runs the sync.",
+            ),
+            (
+                "Edition tracking start",
+                format_updated_at(tracking_start) if tracking_start else "Not set",
+                "Older paid orders stay visible as historical until you backfill them.",
+            ),
+            (
+                "Lookback buffer",
+                f"{int(sync_state.get('sync_lookback_buffer_minutes') or 0)} minutes",
+                "Recent Shopify updates are rechecked inside this overlap window.",
+            ),
+            (
+                "Shopify connection",
+                "Connected" if config["configured"] else "Missing",
+                "Cached orders still stay readable even if the live connection is offline.",
+            ),
+        ]
+        st.markdown(
+            "<div class='sc-orders-sync-grid'>"
+            + "".join(
+                (
+                    "<div class='sc-orders-sync-card'>"
+                    f"<div class='sc-orders-sync-label'>{html.escape(label)}</div>"
+                    f"<div class='sc-orders-sync-value'>{html.escape(value)}</div>"
+                    f"<div class='sc-orders-sync-copy'>{html.escape(copy)}</div>"
+                    "</div>"
+                )
+                for label, value, copy in sync_cards
+            )
+            + "</div>",
+            unsafe_allow_html=True,
+        )
+        metric_columns = st.columns(4)
+        metric_specs = (
+            ("Orders synced", summary.get("orders_synced", 0), "Cached and searchable"),
+            ("Needs edition", summary.get("needs_edition", 0), "Needs action now"),
+            ("Historical", summary.get("historical_lines", 0), "Backfill only if required"),
+            ("Assigned today", summary.get("assigned_today", 0), "Fresh allocations"),
+        )
+        for index, (label, value, hint) in enumerate(metric_specs):
+            with metric_columns[index]:
+                st.markdown(_orders_metric_card_html(label, value, hint), unsafe_allow_html=True)
+        support_columns = st.columns([1.0, 1.0])
+        with support_columns[0]:
+            st.markdown(_orders_activity_chart_html(activity_rows), unsafe_allow_html=True)
+        with support_columns[1]:
             st.markdown(
                 """
                 <div class="sc-orders-summary-copy">
-                    New and updated paid orders sync into Supabase first, then the page stays lightweight by default:
-                    artwork previews are optional, PSD opens the shared master folder, and certificate creation happens only when you need a PDF.
+                    Shopify remains the order source of truth. Sports Cave OS caches the paid order updates first,
+                    allocates editions for in-window orders, and keeps the list compact by grouping every line item back
+                    under its parent order.
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-    with insight_columns[1]:
-        st.markdown(_orders_activity_chart_html(activity_rows), unsafe_allow_html=True)
 
+    fetch_limit = min(max(page_size * 4, page_size), 800)
     try:
-        rows = supabase_backend.list_orders(
-            search=search,
-            sort=sort,
-            status_filter=status_filter,
-            limit=page_size,
-        )
+        raw_rows = []
+        order_summaries = []
+        while True:
+            raw_rows = supabase_backend.list_orders(
+                search=search,
+                sort=sort,
+                status_filter=status_filter,
+                limit=fetch_limit,
+            )
+            order_summaries = _group_supabase_order_rows(raw_rows)
+            if len(order_summaries) >= page_size or fetch_limit >= 800 or len(raw_rows) < fetch_limit:
+                order_summaries = order_summaries[:page_size]
+                break
+            fetch_limit = min(fetch_limit * 2, 800)
     except Exception as error:
         st.error("Could not load orders from Supabase.")
         st.exception(error)
         return
 
-    if not rows:
+    if not order_summaries:
         st.info("No orders match the current filters yet.")
         return
 
     st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
     st.caption(
-        f"Showing the latest {len(rows)} rows. Keep artwork previews off for the fastest page load, then turn them on only when you need to inspect art."
+        f"Showing {len(order_summaries)} orders. Every row is one order only, with variants and edition sync grouped together."
     )
-    header = st.columns([0.55, 1.0, 1.1, 1.6, 1.05, 0.9, 0.75, 0.68, 0.85])
-    for column, label in zip(
-        header,
-        (
-            "Art",
-            "Order",
-            "Customer",
-            "Product",
-            "Variant",
-            "Edition",
-            "Certificate",
-            "PSD",
-            "Prodigi",
-        ),
-    ):
-        column.markdown(f"**{label}**")
-
-    for row_index, row in enumerate(rows):
-        row_key = row.get("edition_order_id") or row.get("order_line_id") or row.get("shopify_order_id") or row_index
-        columns = st.columns([0.55, 1.0, 1.1, 1.6, 1.05, 0.9, 0.75, 0.68, 0.85])
-        with columns[0]:
-            if show_artwork:
-                render_product_thumbnail(row.get("image_url"), key=f"order-thumb-{row_key}", width=42)
-            else:
-                render_product_thumbnail("", key=f"order-thumb-{row_key}", width=42)
-        order_label = row.get("order_name") or row.get("order_number") or "Order"
-        order_link = str(row.get("admin_url") or "").strip()
-        if order_link:
-            columns[1].markdown(f"**[{html.escape(str(order_label))}]({order_link})**")
-        else:
-            columns[1].markdown(f"**{html.escape(str(order_label))}**")
-        columns[1].markdown(
-            f'<div class="sc-order-subtext">{html.escape(format_order_date(row.get("created_at") or row.get("processed_at")))}</div>',
-            unsafe_allow_html=True,
-        )
-        columns[1].markdown(status_badge(row.get("fulfillment_status") or "Unknown"), unsafe_allow_html=True)
-        columns[2].write(customer_display_name(row.get("customer_name")))
-        customer_meta = "Paid" if str(row.get("financial_status") or "").upper().startswith("PAID") else (row.get("financial_status") or "Status pending")
-        if row.get("total_price"):
-            currency = row.get("currency") or ""
-            customer_meta = f"{customer_meta} | {currency} {row['total_price']}".strip()
-        columns[2].markdown(
-            f'<div class="sc-order-subtext">{html.escape(customer_meta)}</div>',
-            unsafe_allow_html=True,
-        )
-        columns[3].markdown(
-            f'<div class="sc-order-product">{html.escape(str(row.get("product_title") or "Needs edition"))}</div>',
-            unsafe_allow_html=True,
-        )
-        product_meta = []
-        if row.get("sku"):
-            product_meta.append(f"SKU {row['sku']}")
-        if int(row.get("quantity") or 1) > 1:
-            product_meta.append(f"Qty {int(row['quantity'])}")
-        if product_meta:
-            columns[3].markdown(
-                f'<div class="sc-order-subtext">{html.escape(" | ".join(product_meta))}</div>',
-                unsafe_allow_html=True,
-            )
-        variant_name, variant_dimensions = split_variant_title(row.get("variant_title"))
-        columns[4].write(variant_name)
-        if variant_dimensions:
-            columns[4].markdown(
-                f'<div class="sc-order-subtext">{html.escape(variant_dimensions)}</div>',
-                unsafe_allow_html=True,
-            )
-        if row.get("edition_number"):
-            columns[5].markdown(
-                status_badge(f"#{row['edition_number']}/{row.get('edition_total') or 100}"),
-                unsafe_allow_html=True,
-            )
-        else:
-            columns[5].markdown(
-                status_badge(row.get("assignment_status") or "Needs Edition"),
-                unsafe_allow_html=True,
-            )
-            if row.get("last_error"):
-                columns[5].markdown(
-                    f'<div class="sc-order-subtext">{html.escape(str(row["last_error"]))}</div>',
-                    unsafe_allow_html=True,
-                )
-        with columns[6]:
-            if row.get("shopify_file_url"):
-                st.link_button("PDF", row["shopify_file_url"], use_container_width=True)
-            elif row.get("local_file_path") and Path(row["local_file_path"]).exists():
-                path = Path(row["local_file_path"])
-                st.download_button(
-                    "PDF",
-                    data=path.read_bytes(),
-                    file_name=path.name,
-                    mime="application/pdf",
-                    key=f"supabase-cert-download-{row_key}",
-                    use_container_width=True,
-                )
-            elif row.get("edition_order_id"):
-                if st.button("Generate", key=f"supabase-cert-generate-{row_key}", use_container_width=True):
-                    try:
-                        supabase_backend.generate_certificate_for_edition_order(row["edition_order_id"])
-                        st.session_state.supabase_orders_notice = "Certificate generated."
-                        st.rerun()
-                    except Exception as error:
-                        st.error("Could not generate certificate.")
-                        st.exception(error)
-            else:
-                st.markdown(status_badge("Missing"), unsafe_allow_html=True)
-        with columns[7]:
-            if psd_master_url:
-                st.link_button("PSD", psd_master_url, use_container_width=True)
-            else:
-                st.caption("PSD")
-        if row.get("prodigi_url"):
-            columns[8].link_button("Prodigi", row["prodigi_url"], use_container_width=True)
-        else:
-            columns[8].markdown(status_badge("Prodigi Missing"), unsafe_allow_html=True)
-        st.markdown('<hr class="sc-order-divider" />', unsafe_allow_html=True)
+    _render_compact_orders_feed(order_summaries)
 
 
 def fetch_latest_orders(config):
@@ -3733,7 +3959,8 @@ def render_orders_page():
         return
     st.title("Orders")
     render_local_cache_notice()
-    st.caption("Edition numbers are assigned from Sports Cave OS, not Shopify stock.")
+    st.caption("One line per order. The local cache stays compact and groups every variant and edition summary back under the parent order.")
+    st.markdown(_orders_page_styles(), unsafe_allow_html=True)
     config = shopify_sync.get_config()
     order_summary = db.get_shopify_order_summary()
     notice = st.session_state.pop("orders_notice", None)
@@ -3750,7 +3977,7 @@ def render_orders_page():
         label_visibility="collapsed",
     )
 
-    toolbar = st.columns([1, 1.2, 3])
+    toolbar = st.columns([1.0, 1.05, 0.9])
     fetch_clicked = toolbar[0].button(
         "Fetch Latest Orders",
         type="primary",
@@ -3761,10 +3988,17 @@ def render_orders_page():
         "Filter",
         ["All", "Needs Edition", "Assigned", "Paid", "Unfulfilled", "Error", "Sold Out Issue"],
     )
-    toolbar[2].caption(
+    page_size = toolbar[2].selectbox(
+        "Rows",
+        (40, 80, 120),
+        index=0,
+        key="local-orders-page-size",
+    )
+
+    st.caption(
         "Last fetched: "
         + (format_updated_at(order_summary["last_synced_at"]) if order_summary["last_synced_at"] else "Never")
-        + f" - {order_summary['total']} orders cached"
+        + f" | {order_summary['total']} cached | {order_summary['needs_assignment']} need editions | {order_summary['assigned_today']} assigned today"
     )
 
     if not config["configured"]:
@@ -3788,17 +4022,16 @@ def render_orders_page():
                 st.warning("Shopify order sync failed. Check read_orders scope and API version.")
             st.caption(ORDER_FETCH_ERROR_MESSAGE)
 
-    metrics = st.columns(3)
-    metrics[0].metric("Orders cached", order_summary["total"])
-    metrics[1].metric("Needs edition", order_summary["needs_assignment"])
-    metrics[2].metric("Assigned today", order_summary["assigned_today"])
+    with st.expander("Local cache counts", expanded=False):
+        metrics = st.columns(3)
+        metrics[0].metric("Orders cached", order_summary["total"])
+        metrics[1].metric("Needs edition", order_summary["needs_assignment"])
+        metrics[2].metric("Assigned today", order_summary["assigned_today"])
 
-    if "orders_visible_count" not in st.session_state:
-        st.session_state.orders_visible_count = 50
     orders = db.list_shopify_orders(
         search=search,
         status_filter=status_filter,
-        limit=st.session_state.orders_visible_count,
+        limit=page_size,
     )
     if not orders:
         if not order_summary["last_synced_at"]:
@@ -3807,68 +4040,9 @@ def render_orders_page():
             st.info("No cached Shopify orders match these filters. Use Fetch Latest Orders when you are ready.")
         return
 
-    header = st.columns([0.9, 0.9, 1.25, 0.9, 0.95, 2.1, 1.05, 1.1, 0.85, 0.95])
-    for column, label in zip(
-        header,
-        ("Order", "Date", "Customer", "Payment", "Fulfillment", "Product", "Edition", "Certificate", "PSD", "Prodigi"),
-    ):
-        column.markdown(f"**{label}**")
-
-    for order in orders:
-        for line_index, line in enumerate(order["line_items"]):
-            columns = st.columns([0.9, 0.9, 1.25, 0.9, 0.95, 2.1, 1.05, 1.1, 0.85, 0.95])
-            order_name = order.get("order_name") or order.get("order_number") or "Order"
-            if line_index == 0:
-                if order.get("admin_url"):
-                    safe_url = html.escape(order["admin_url"], quote=True)
-                    columns[0].markdown(
-                        f'<a href="{safe_url}" target="_blank" style="color:#F5F2EA;font-weight:700;text-decoration:none;">{html.escape(order_name)}</a>',
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    columns[0].markdown(f"**{order_name}**")
-                columns[1].caption(format_updated_at(order.get("created_at")))
-                columns[2].write(order.get("customer_name") or "Customer not shown")
-                if order.get("customer_email"):
-                    columns[2].caption(order["customer_email"])
-                columns[3].markdown(status_badge(order.get("financial_status") or "Unknown"), unsafe_allow_html=True)
-                columns[4].markdown(status_badge(order.get("fulfillment_status") or "Unknown"), unsafe_allow_html=True)
-            else:
-                columns[0].caption(order_name)
-
-            product_label = line.get("product_title") or "Unknown product"
-            if columns[5].button(product_label, key=f"order-track-product-{line['id']}", use_container_width=True):
-                st.session_state["limited-edition-search"] = line.get("product_handle") or product_label
-                st.session_state.pending_page = "Limited Editions"
-                st.rerun()
-            details = []
-            if line.get("variant_title"):
-                details.append(line["variant_title"])
-            if line.get("sku"):
-                details.append(f"SKU {line['sku']}")
-            if int(line.get("quantity") or 1) > 1:
-                details.append(f"Qty {line['quantity']}")
-            if line.get("assignment_status") == "Product Not Found":
-                details.append("Fetch Latest Shopify Products or check product ID")
-            columns[5].caption(" - ".join(details) if details else "Variant not shown")
-            columns[6].write(_assignment_text(line.get("assignments") or []))
-            columns[6].markdown(status_badge(line.get("assignment_status")), unsafe_allow_html=True)
-            with columns[7]:
-                render_certificate_actions(line.get("assignments") or [], f"cert-line-{line['id']}")
-            if line.get("psd_file_url"):
-                columns[8].link_button("Open PSD", line["psd_file_url"], use_container_width=True)
-            else:
-                columns[8].caption("Missing")
-            if line.get("prodigi_url"):
-                columns[9].link_button("Open Prodigi", line["prodigi_url"], use_container_width=True)
-            else:
-                columns[9].caption("Missing")
-            st.divider()
-
-    if len(orders) >= st.session_state.orders_visible_count:
-        if st.button("Load 50 More", use_container_width=True):
-            st.session_state.orders_visible_count = min(st.session_state.orders_visible_count + 50, 500)
-            st.rerun()
+    st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
+    st.caption(f"Showing {len(orders)} cached orders in one-line format.")
+    _render_compact_orders_feed(_build_local_order_summaries(orders))
 
 
 def normalize_psd_handle_guess(value):
