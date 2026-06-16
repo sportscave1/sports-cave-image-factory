@@ -290,6 +290,26 @@ def _ensure_schema_uncached():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS shopify_order_lines (
+                    id BIGSERIAL PRIMARY KEY,
+                    shopify_line_item_id TEXT UNIQUE,
+                    shopify_order_id TEXT,
+                    shopify_product_id TEXT,
+                    shopify_handle TEXT,
+                    product_title TEXT,
+                    variant_title TEXT,
+                    sku TEXT,
+                    quantity INTEGER DEFAULT 1,
+                    assignment_status TEXT DEFAULT 'Needs Edition',
+                    last_error TEXT DEFAULT '',
+                    raw_json JSONB DEFAULT '{}'::jsonb,
+                    synced_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS edition_orders (
                     id BIGSERIAL PRIMARY KEY,
                     shopify_order_id TEXT,
@@ -477,6 +497,20 @@ def _ensure_schema_uncached():
                     ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
+                "shopify_order_lines": (
+                    ("shopify_order_id", "TEXT"),
+                    ("shopify_product_id", "TEXT"),
+                    ("shopify_handle", "TEXT"),
+                    ("product_title", "TEXT"),
+                    ("variant_title", "TEXT"),
+                    ("sku", "TEXT"),
+                    ("quantity", "INTEGER DEFAULT 1"),
+                    ("assignment_status", "TEXT DEFAULT 'Needs Edition'"),
+                    ("last_error", "TEXT DEFAULT ''"),
+                    ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
+                    ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
+                ),
                 "edition_orders": (
                     ("shopify_order_id", "TEXT"),
                     ("shopify_order_name", "TEXT"),
@@ -600,6 +634,7 @@ def _ensure_schema_uncached():
                 "edition_products",
                 "shopify_customers",
                 "shopify_orders",
+                "shopify_order_lines",
                 "edition_orders",
                 "certificates",
                 "product_assets",
@@ -635,6 +670,9 @@ def _ensure_schema_uncached():
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_products_handle_unique ON edition_products(shopify_handle)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_customers_id_unique ON shopify_customers(shopify_customer_id)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_orders_id_unique ON shopify_orders(shopify_order_id)")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_order_lines_line_id_unique ON shopify_order_lines(shopify_line_item_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_order_lines_order_id ON shopify_order_lines(shopify_order_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_order_lines_handle ON shopify_order_lines(shopify_handle)")
             cur.execute("ALTER TABLE edition_orders DROP CONSTRAINT IF EXISTS edition_orders_shopify_handle_edition_number_key")
             cur.execute("DROP INDEX IF EXISTS idx_edition_orders_handle_number_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_handle_number ON edition_orders(shopify_handle, edition_number)")
@@ -2335,6 +2373,107 @@ def _upsert_order(cur, order):
     )
 
 
+def _upsert_order_lines(cur, order):
+    for line_index, line_item in enumerate(order.get("line_items") or [], start=1):
+        line_item_id = str(
+            line_item.get("shopify_line_item_id")
+            or f"{order.get('shopify_order_id') or 'order'}:line:{line_index}"
+        ).strip()
+        if not line_item_id:
+            continue
+        cur.execute(
+            """
+            INSERT INTO shopify_order_lines(
+                shopify_line_item_id, shopify_order_id, shopify_product_id, shopify_handle,
+                product_title, variant_title, sku, quantity, assignment_status, last_error,
+                raw_json, synced_at, updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Needs Edition', '', %s::jsonb, now(), now())
+            ON CONFLICT (shopify_line_item_id) DO UPDATE SET
+                shopify_order_id=EXCLUDED.shopify_order_id,
+                shopify_product_id=COALESCE(NULLIF(EXCLUDED.shopify_product_id, ''), shopify_order_lines.shopify_product_id),
+                shopify_handle=COALESCE(NULLIF(EXCLUDED.shopify_handle, ''), shopify_order_lines.shopify_handle),
+                product_title=COALESCE(NULLIF(EXCLUDED.product_title, ''), shopify_order_lines.product_title),
+                variant_title=COALESCE(NULLIF(EXCLUDED.variant_title, ''), shopify_order_lines.variant_title),
+                sku=COALESCE(NULLIF(EXCLUDED.sku, ''), shopify_order_lines.sku),
+                quantity=EXCLUDED.quantity,
+                raw_json=EXCLUDED.raw_json,
+                synced_at=now(),
+                updated_at=now()
+            """,
+            (
+                line_item_id,
+                order.get("shopify_order_id") or "",
+                line_item.get("shopify_product_id") or "",
+                line_item.get("product_handle") or "",
+                line_item.get("product_title") or "",
+                line_item.get("variant_title") or "",
+                line_item.get("sku") or "",
+                max(1, int(line_item.get("quantity") or 1)),
+                json_dumps(line_item),
+            ),
+        )
+
+
+def _set_order_line_status(
+    cur,
+    shopify_line_item_id,
+    assignment_status,
+    *,
+    shopify_product_id="",
+    shopify_handle="",
+    product_title="",
+    variant_title="",
+    sku="",
+    last_error="",
+):
+    cur.execute(
+        """
+        UPDATE shopify_order_lines
+        SET assignment_status=%s,
+            last_error=%s,
+            shopify_product_id=CASE
+                WHEN %s <> '' THEN %s
+                ELSE shopify_product_id
+            END,
+            shopify_handle=CASE
+                WHEN %s <> '' THEN %s
+                ELSE shopify_handle
+            END,
+            product_title=CASE
+                WHEN %s <> '' THEN %s
+                ELSE product_title
+            END,
+            variant_title=CASE
+                WHEN %s <> '' THEN %s
+                ELSE variant_title
+            END,
+            sku=CASE
+                WHEN %s <> '' THEN %s
+                ELSE sku
+            END,
+            synced_at=now(),
+            updated_at=now()
+        WHERE shopify_line_item_id=%s
+        """,
+        (
+            str(assignment_status or "Needs Edition"),
+            str(last_error or ""),
+            str(shopify_product_id or ""),
+            str(shopify_product_id or ""),
+            str(shopify_handle or ""),
+            str(shopify_handle or ""),
+            str(product_title or ""),
+            str(product_title or ""),
+            str(variant_title or ""),
+            str(variant_title or ""),
+            str(sku or ""),
+            str(sku or ""),
+            shopify_line_item_id,
+        ),
+    )
+
+
 def _backfill_edition_customer_details(cur, order):
     customer_name = _customer_name_for_storage(order)
     customer_email = str(order.get("customer_email") or order.get("email") or "").strip()
@@ -2887,6 +3026,7 @@ def process_paid_order(
                 customer = _customer_from_order(order)
                 _upsert_customer(cur, customer)
                 _upsert_order(cur, order)
+                _upsert_order_lines(cur, order)
                 _backfill_edition_customer_details(cur, order)
                 conn.commit()
         except Exception:
@@ -2906,24 +3046,76 @@ def process_paid_order(
     order_customer_name = _customer_name_for_storage(order)
     order_customer_email = str(order.get("customer_email") or order.get("email") or "").strip()
     new_assignments = []
+    product_cache = {}
     for line_index, line_item in enumerate(order.get("line_items") or [], start=1):
         quantity = max(1, int(line_item.get("quantity") or 1))
         line_item_id = str(
             line_item.get("shopify_line_item_id")
             or f"{order['shopify_order_id']}:line:{line_index}"
         )
+        line_cache_keys = [
+            str(line_item.get("shopify_product_id") or "").strip(),
+            str(line_item.get("product_handle") or "").strip().lower(),
+            str(line_item.get("product_title") or "").strip().lower(),
+        ]
+        cached_product = next((product_cache[key] for key in line_cache_keys if key and key in product_cache), None)
         try:
-            product = resolve_product_for_line(line_item, fetch_missing_products=fetch_missing_products)
+            product = cached_product if cached_product is not None else resolve_product_for_line(
+                line_item,
+                fetch_missing_products=fetch_missing_products,
+            )
         except Exception as error:
             product = None
             errors.append(f"Product fetch failed for {line_item.get('product_title')}: {error}")
+            with connect() as conn:
+                with conn.cursor() as cur:
+                    _set_order_line_status(
+                        cur,
+                        line_item_id,
+                        "Error",
+                        shopify_product_id=line_item.get("shopify_product_id") or "",
+                        shopify_handle=line_item.get("product_handle") or "",
+                        product_title=line_item.get("product_title") or "",
+                        variant_title=line_item.get("variant_title") or "",
+                        sku=line_item.get("sku") or "",
+                        last_error=str(error),
+                    )
+                conn.commit()
+            continue
+
+        if product:
+            for cache_key in (
+                str(product.get("shopify_product_id") or "").strip(),
+                str(product.get("handle") or "").strip().lower(),
+                str(product.get("title") or "").strip().lower(),
+                *line_cache_keys,
+            ):
+                if cache_key:
+                    product_cache[cache_key] = product
 
         handle = (product or {}).get("handle") or line_item.get("product_handle") or ""
         if not handle:
             errors.append(f"Missing product handle for line item {line_item_id}.")
+            with connect() as conn:
+                with conn.cursor() as cur:
+                    _set_order_line_status(
+                        cur,
+                        line_item_id,
+                        "Product Not Found",
+                        shopify_product_id=(product or {}).get("shopify_product_id") or line_item.get("shopify_product_id") or "",
+                        product_title=(product or {}).get("title") or line_item.get("product_title") or "",
+                        variant_title=line_item.get("variant_title") or "",
+                        sku=line_item.get("sku") or "",
+                        last_error="Missing product handle returned from Shopify.",
+                    )
+                conn.commit()
             continue
         product_title = (product or {}).get("title") or line_item.get("product_title") or "Sports Cave Artwork"
         product_id = (product or {}).get("shopify_product_id") or line_item.get("shopify_product_id") or ""
+        line_created = 0
+        line_existing = 0
+        line_sold_out = False
+        line_errors = []
 
         for allocation_index in range(1, quantity + 1):
             result = allocate_edition_for_order_line(
@@ -2941,14 +3133,43 @@ def process_paid_order(
                 allocation_status=allocation_status,
             )
             if result.get("error"):
+                line_errors.append(result["error"])
                 errors.append(result["error"])
             assignment = result.get("assignment")
             if result.get("created") and assignment:
                 assignments_created += 1
+                line_created += 1
                 changed_handles.add(handle)
                 new_assignments.append(assignment)
             elif assignment:
                 existing_assignments_skipped += 1
+                line_existing += 1
+            if result.get("sold_out"):
+                line_sold_out = True
+
+        line_status = "Needs Edition"
+        line_error = line_errors[0] if line_errors else ""
+        if line_created + line_existing >= quantity:
+            line_status = "Assigned"
+            line_error = ""
+        elif line_sold_out:
+            line_status = "Sold Out"
+        elif line_errors:
+            line_status = "Error"
+        with connect() as conn:
+            with conn.cursor() as cur:
+                _set_order_line_status(
+                    cur,
+                    line_item_id,
+                    line_status,
+                    shopify_product_id=product_id,
+                    shopify_handle=handle,
+                    product_title=product_title,
+                    variant_title=line_item.get("variant_title") or "",
+                    sku=line_item.get("sku") or "",
+                    last_error=line_error,
+                )
+            conn.commit()
 
     if generate_certificates:
         for assignment in new_assignments:
@@ -3092,6 +3313,8 @@ def sync_shopify_orders_to_supabase(
     max_orders=250,
     historical_backfill=False,
     days=365,
+    generate_certificates=False,
+    sync_product_metafields=False,
 ):
     ensure_schema()
     config = config or shopify_sync.get_config()
@@ -3102,6 +3325,7 @@ def sync_shopify_orders_to_supabase(
     assignments = 0
     existing_skipped = 0
     generated_certificates = 0
+    changed_handles = set()
     errors = []
     sync_from = None
     try:
@@ -3109,8 +3333,8 @@ def sync_shopify_orders_to_supabase(
         if historical_backfill:
             effective_query = query or "financial_status:paid"
             allocation_status = "backfilled"
-            generate_certificates = False
-            sync_product_metafields = False
+            generate_certificates_now = False
+            sync_product_metafields_now = False
             tracking_start = None
         else:
             tracking_start = ensure_edition_tracking_start()
@@ -3121,8 +3345,8 @@ def sync_shopify_orders_to_supabase(
             )
             effective_query = query or f"financial_status:paid updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
             allocation_status = "assigned"
-            generate_certificates = True
-            sync_product_metafields = True
+            generate_certificates_now = bool(generate_certificates)
+            sync_product_metafields_now = bool(sync_product_metafields)
 
         sync_config = dict(config)
         sync_config["max_orders"] = max(int(max_orders or 50), 1)
@@ -3142,13 +3366,14 @@ def sync_shopify_orders_to_supabase(
                 result = process_paid_order(
                     order,
                     allocation_status=allocation_status,
-                    generate_certificates=generate_certificates,
-                    sync_product_metafields=sync_product_metafields,
+                    generate_certificates=generate_certificates_now,
+                    sync_product_metafields=sync_product_metafields_now,
                 )
                 processed_orders += 1
                 assignments += int(result.get("assignments_created") or 0)
                 existing_skipped += int(result.get("existing_assignments_skipped") or 0)
                 generated_certificates += int(result.get("generated_certificates") or 0)
+                changed_handles.update(result.get("changed_handles") or [])
                 errors.extend(result.get("errors") or [])
             seen += len(page["orders"])
             del page
@@ -3163,6 +3388,8 @@ def sync_shopify_orders_to_supabase(
             "assignments_created": assignments,
             "existing_assignments_skipped": existing_skipped,
             "generated_certificates": generated_certificates,
+            "certificates_deferred": max(assignments - generated_certificates, 0),
+            "product_metafields_deferred": len(changed_handles) if not sync_product_metafields_now else 0,
             "skipped_historical": skipped_historical,
             "sync_from": _datetime_to_setting(sync_from) if sync_from else "",
             "mode": "historical_backfill" if historical_backfill else "incremental",
@@ -3186,7 +3413,7 @@ def _order_sort_clause(sort):
     }.get(sort, "COALESCE(o.created_at, o.synced_at) DESC NULLS LAST, o.order_name DESC")
 
 
-def list_orders(search="", sort="Date newest", limit=250):
+def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
     ensure_schema()
     search_value = f"%{search.strip().lower()}%" if search.strip() else None
     order_by = _order_sort_clause(sort)
@@ -3196,34 +3423,58 @@ def list_orders(search="", sort="Date newest", limit=250):
                COALESCE(NULLIF(o.customer_email, ''), NULLIF(eo.customer_email, '')) AS customer_email,
                o.financial_status, o.fulfillment_status,
                o.total_price, o.currency, o.created_at, o.processed_at,
-               eo.id AS edition_order_id, eo.shopify_line_item_id, eo.shopify_handle,
-               eo.product_title, eo.variant_title, eo.sku, eo.edition_number,
+               li.id AS order_line_id, COALESCE(eo.shopify_line_item_id, li.shopify_line_item_id) AS shopify_line_item_id, li.quantity,
+               li.assignment_status, li.last_error,
+               eo.id AS edition_order_id,
+               COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AS shopify_handle,
+               COALESCE(NULLIF(eo.shopify_product_id, ''), NULLIF(li.shopify_product_id, '')) AS shopify_product_id,
+               COALESCE(NULLIF(eo.product_title, ''), NULLIF(li.product_title, '')) AS product_title,
+               COALESCE(NULLIF(eo.variant_title, ''), NULLIF(li.variant_title, '')) AS variant_title,
+               COALESCE(NULLIF(eo.sku, ''), NULLIF(li.sku, '')) AS sku,
+               eo.edition_number,
                eo.edition_total, eo.allocation_index, eo.assigned_at, eo.certificate_status,
                COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url,
                c.local_file_path, c.shopify_file_url,
                COALESCE(NULLIF(psd.asset_url, ''), NULLIF(psd.google_drive_file_url, '')) AS psd_url,
                COALESCE(NULLIF(prodigi.asset_url, ''), NULLIF(prodigi.google_drive_file_url, '')) AS prodigi_url
         FROM shopify_orders o
-        LEFT JOIN edition_orders eo ON eo.shopify_order_id = o.shopify_order_id
-        LEFT JOIN edition_products ep ON ep.shopify_handle = eo.shopify_handle
-        LEFT JOIN shopify_products sp ON sp.handle = eo.shopify_handle
+        LEFT JOIN shopify_order_lines li ON li.shopify_order_id = o.shopify_order_id
+        LEFT JOIN edition_orders eo ON eo.shopify_line_item_id = li.shopify_line_item_id
+        LEFT JOIN edition_products ep ON ep.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
+        LEFT JOIN shopify_products sp ON sp.handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
         LEFT JOIN certificates c ON c.edition_order_id = eo.id
-        LEFT JOIN product_assets psd ON psd.shopify_handle = eo.shopify_handle AND psd.asset_type = 'psd_master_file' AND psd.is_primary IS DISTINCT FROM FALSE
-        LEFT JOIN product_assets prodigi ON prodigi.shopify_handle = eo.shopify_handle AND prodigi.asset_type = 'prodigi_link'
+        LEFT JOIN product_assets psd ON psd.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND psd.asset_type = 'psd_master_file' AND psd.is_primary IS DISTINCT FROM FALSE
+        LEFT JOIN product_assets prodigi ON prodigi.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND prodigi.asset_type = 'prodigi_link'
     """
-    where = ""
+    where_clauses = []
     params = []
     if search_value:
-        where = """
-            WHERE LOWER(COALESCE(o.order_name, '')) LIKE %s
+        where_clauses.append(
+            """
+            LOWER(COALESCE(o.order_name, '')) LIKE %s
                OR LOWER(COALESCE(o.order_number, '')) LIKE %s
                OR LOWER(COALESCE(o.customer_name, '')) LIKE %s
                OR LOWER(COALESCE(o.customer_email, '')) LIKE %s
-               OR LOWER(COALESCE(eo.product_title, '')) LIKE %s
-               OR LOWER(COALESCE(eo.sku, '')) LIKE %s
+               OR LOWER(COALESCE(eo.product_title, li.product_title, '')) LIKE %s
+               OR LOWER(COALESCE(eo.variant_title, li.variant_title, '')) LIKE %s
+               OR LOWER(COALESCE(eo.sku, li.sku, '')) LIKE %s
+               OR LOWER(COALESCE(li.assignment_status, '')) LIKE %s
                OR CAST(COALESCE(eo.edition_number, 0) AS TEXT) LIKE %s
-        """
-        params = [search_value] * 6 + [f"%{search.strip()}%"]
+            """
+        )
+        params = [search_value] * 8 + [f"%{search.strip()}%"]
+    status_clauses = {
+        "Needs edition": "COALESCE(li.assignment_status, '') IN ('Needs Edition', 'Product Not Found', 'Needs Edition Setup', 'Error')",
+        "Assigned": "(COALESCE(li.assignment_status, '') = 'Assigned' OR eo.id IS NOT NULL)",
+        "Certificates missing": "eo.id IS NOT NULL AND c.id IS NULL",
+        "PSD missing": "COALESCE(COALESCE(eo.shopify_handle, li.shopify_handle), '') <> '' AND COALESCE(NULLIF(psd.asset_url, ''), NULLIF(psd.google_drive_file_url, ''), '') = ''",
+        "Prodigi missing": "COALESCE(COALESCE(eo.shopify_handle, li.shopify_handle), '') <> '' AND COALESCE(NULLIF(prodigi.asset_url, ''), NULLIF(prodigi.google_drive_file_url, ''), '') = ''",
+        "Errors": "COALESCE(li.assignment_status, '') IN ('Error', 'Product Not Found', 'Needs Edition Setup', 'Sold Out')",
+    }
+    selected_status_clause = status_clauses.get(str(status_filter or "").strip())
+    if selected_status_clause:
+        where_clauses.append(selected_status_clause)
+    where = f"WHERE {' AND '.join(f'({clause})' for clause in where_clauses)}" if where_clauses else ""
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -3239,25 +3490,74 @@ def get_order_summary():
         with conn.cursor() as cur:
             cur.execute(
                 """
+                WITH line_handles AS (
+                    SELECT li.shopify_line_item_id,
+                           COALESCE(NULLIF(MAX(eo.shopify_handle), ''), NULLIF(MAX(li.shopify_handle), '')) AS shopify_handle
+                    FROM shopify_order_lines li
+                    LEFT JOIN edition_orders eo ON eo.shopify_line_item_id=li.shopify_line_item_id
+                    GROUP BY li.shopify_line_item_id
+                )
                 SELECT
                     (SELECT COUNT(*) FROM shopify_orders) AS orders_synced,
-                    (SELECT COUNT(*) FROM shopify_orders o
-                     WHERE NOT EXISTS (
-                        SELECT 1 FROM edition_orders eo WHERE eo.shopify_order_id=o.shopify_order_id
-                     )) AS needs_edition,
+                    (SELECT COUNT(*) FROM shopify_order_lines
+                     WHERE assignment_status IN ('Needs Edition', 'Product Not Found', 'Needs Edition Setup', 'Error')) AS needs_edition,
                     (SELECT COUNT(*) FROM edition_orders WHERE assigned_at::date = CURRENT_DATE) AS assigned_today,
                     (SELECT COUNT(*) FROM edition_orders eo
                      LEFT JOIN certificates c ON c.edition_order_id=eo.id
                      WHERE c.id IS NULL) AS certificates_missing,
-                    (SELECT COUNT(*) FROM edition_orders eo
-                     LEFT JOIN product_assets pa ON pa.shopify_handle=eo.shopify_handle AND pa.asset_type='psd_master_file' AND pa.is_primary IS DISTINCT FROM FALSE
-                     WHERE COALESCE(NULLIF(pa.asset_url, ''), NULLIF(pa.google_drive_file_url, ''), '')='') AS psd_links_missing,
-                    (SELECT COUNT(*) FROM edition_orders eo
-                     LEFT JOIN product_assets pa ON pa.shopify_handle=eo.shopify_handle AND pa.asset_type='prodigi_link'
-                     WHERE COALESCE(NULLIF(pa.asset_url, ''), NULLIF(pa.google_drive_file_url, ''), '')='') AS prodigi_links_missing
+                    (SELECT COUNT(*) FROM line_handles lh
+                     LEFT JOIN product_assets pa ON pa.shopify_handle=lh.shopify_handle AND pa.asset_type='psd_master_file' AND pa.is_primary IS DISTINCT FROM FALSE
+                     WHERE COALESCE(lh.shopify_handle, '') <> ''
+                       AND COALESCE(NULLIF(pa.asset_url, ''), NULLIF(pa.google_drive_file_url, ''), '')='') AS psd_links_missing,
+                    (SELECT COUNT(*) FROM line_handles lh
+                     LEFT JOIN product_assets pa ON pa.shopify_handle=lh.shopify_handle AND pa.asset_type='prodigi_link'
+                     WHERE COALESCE(lh.shopify_handle, '') <> ''
+                       AND COALESCE(NULLIF(pa.asset_url, ''), NULLIF(pa.google_drive_file_url, ''), '')='') AS prodigi_links_missing
                 """
             )
             return cur.fetchone() or {}
+
+
+def get_order_activity(days=7):
+    ensure_schema()
+    window_days = min(max(int(days or 7), 3), 30)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH series AS (
+                    SELECT generate_series(
+                        CURRENT_DATE - (%s::integer - 1),
+                        CURRENT_DATE,
+                        interval '1 day'
+                    )::date AS day
+                ),
+                order_counts AS (
+                    SELECT COALESCE(created_at::date, synced_at::date) AS day,
+                           COUNT(DISTINCT shopify_order_id) AS orders_synced
+                    FROM shopify_orders
+                    WHERE COALESCE(created_at, synced_at) >= CURRENT_DATE - (%s::integer - 1)
+                    GROUP BY 1
+                ),
+                assignment_counts AS (
+                    SELECT assigned_at::date AS day,
+                           COUNT(*) AS editions_assigned
+                    FROM edition_orders
+                    WHERE assigned_at >= CURRENT_DATE - (%s::integer - 1)
+                    GROUP BY 1
+                )
+                SELECT
+                    series.day,
+                    COALESCE(order_counts.orders_synced, 0) AS orders_synced,
+                    COALESCE(assignment_counts.editions_assigned, 0) AS editions_assigned
+                FROM series
+                LEFT JOIN order_counts ON order_counts.day = series.day
+                LEFT JOIN assignment_counts ON assignment_counts.day = series.day
+                ORDER BY series.day
+                """,
+                (window_days, window_days, window_days),
+            )
+            return cur.fetchall()
 
 
 def get_dashboard_summary():

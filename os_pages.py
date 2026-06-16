@@ -3075,40 +3075,266 @@ def _assignment_text(assignments):
     return ", ".join(f"#{number}/{limit}" for number in numbers)
 
 
+def _orders_metric_card_html(label, value, hint=""):
+    safe_hint = (
+        f'<div class="sc-orders-metric-hint">{html.escape(str(hint))}</div>'
+        if str(hint or "").strip()
+        else ""
+    )
+    return f"""
+    <div class="sc-orders-metric-card">
+        <div class="sc-orders-metric-label">{html.escape(str(label))}</div>
+        <div class="sc-orders-metric-value">{html.escape(str(value))}</div>
+        {safe_hint}
+    </div>
+    """
+
+
+def _orders_activity_chart_html(activity_rows):
+    rows = activity_rows or []
+    if not rows:
+        return """
+        <div class="sc-orders-chart-card">
+            <div class="sc-orders-card-title">7-day activity</div>
+            <div class="sc-orders-empty-chart">No synced order activity yet.</div>
+        </div>
+        """
+
+    peak = max(
+        max(int(row.get("orders_synced") or 0), int(row.get("editions_assigned") or 0))
+        for row in rows
+    ) or 1
+    groups = []
+    for row in rows:
+        try:
+            day_label = datetime.fromisoformat(str(row.get("day"))).strftime("%a")
+        except ValueError:
+            day_label = str(row.get("day") or "")[-2:]
+        orders_height = max(10, round((int(row.get("orders_synced") or 0) / peak) * 100)) if int(row.get("orders_synced") or 0) else 6
+        assigned_height = max(10, round((int(row.get("editions_assigned") or 0) / peak) * 100)) if int(row.get("editions_assigned") or 0) else 6
+        groups.append(
+            f"""
+            <div class="sc-orders-chart-group" title="{html.escape(day_label)}: {int(row.get('orders_synced') or 0)} orders synced, {int(row.get('editions_assigned') or 0)} editions assigned">
+                <div class="sc-orders-chart-bars">
+                    <span class="sc-orders-chart-bar sc-orders-chart-orders" style="height:{orders_height}%"></span>
+                    <span class="sc-orders-chart-bar sc-orders-chart-assigned" style="height:{assigned_height}%"></span>
+                </div>
+                <div class="sc-orders-chart-label">{html.escape(day_label)}</div>
+            </div>
+            """
+        )
+    return f"""
+    <div class="sc-orders-chart-card">
+        <div class="sc-orders-chart-header">
+            <div>
+                <div class="sc-orders-card-title">7-day activity</div>
+                <div class="sc-orders-card-copy">Orders synced vs editions assigned.</div>
+            </div>
+            <div class="sc-orders-chart-legend">
+                <span><i class="sc-orders-legend-dot sc-orders-legend-orders"></i>Orders</span>
+                <span><i class="sc-orders-legend-dot sc-orders-legend-assigned"></i>Editions</span>
+            </div>
+        </div>
+        <div class="sc-orders-chart-shell">
+            {''.join(groups)}
+        </div>
+    </div>
+    """
+
+
 def render_supabase_orders_page():
     st.title("Orders")
-    st.caption("Orders load from Supabase first. Shopify refreshes only when you click a sync button.")
+    st.caption("Fast local order desk. Shopify sync only runs when you ask for it, and the heavy follow-up work stays on demand.")
     st.markdown(
         """
         <style>
+        .sc-orders-summary-copy {
+            color: #6D7175;
+            font-size: 0.92rem;
+            line-height: 1.45;
+            margin-top: 0.35rem;
+        }
+        .sc-orders-metric-card,
+        .sc-orders-chart-card {
+            border: 1px solid rgba(224, 226, 228, 0.92);
+            border-radius: 18px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 247, 248, 0.96));
+            padding: 1rem 1.05rem;
+            min-height: 132px;
+            box-shadow: 0 1px 2px rgba(32, 34, 35, 0.06);
+        }
+        .sc-orders-metric-label {
+            color: #6D7175;
+            font-size: 0.82rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+        }
+        .sc-orders-metric-value {
+            color: #202223;
+            font-size: 2.1rem;
+            font-weight: 750;
+            line-height: 1.05;
+            margin-top: 0.55rem;
+        }
+        .sc-orders-metric-hint {
+            color: #6D7175;
+            font-size: 0.84rem;
+            margin-top: 0.42rem;
+        }
+        .sc-orders-card-title {
+            color: #202223;
+            font-size: 1rem;
+            font-weight: 700;
+        }
+        .sc-orders-card-copy {
+            color: #6D7175;
+            font-size: 0.85rem;
+            margin-top: 0.2rem;
+        }
+        .sc-orders-chart-header {
+            align-items: flex-start;
+            display: flex;
+            gap: 0.9rem;
+            justify-content: space-between;
+            margin-bottom: 0.95rem;
+        }
+        .sc-orders-chart-legend {
+            color: #6D7175;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.85rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .sc-orders-chart-legend span {
+            align-items: center;
+            display: inline-flex;
+            gap: 0.35rem;
+        }
+        .sc-orders-legend-dot {
+            border-radius: 999px;
+            display: inline-block;
+            height: 0.55rem;
+            width: 0.55rem;
+        }
+        .sc-orders-legend-orders {
+            background: #008060;
+        }
+        .sc-orders-legend-assigned {
+            background: #1A73E8;
+        }
+        .sc-orders-chart-shell {
+            align-items: flex-end;
+            display: flex;
+            gap: 0.7rem;
+            height: 150px;
+            padding-top: 0.5rem;
+        }
+        .sc-orders-chart-group {
+            align-items: center;
+            display: flex;
+            flex: 1 1 0;
+            flex-direction: column;
+            gap: 0.45rem;
+            height: 100%;
+            justify-content: flex-end;
+        }
+        .sc-orders-chart-bars {
+            align-items: flex-end;
+            display: flex;
+            gap: 0.28rem;
+            height: 118px;
+        }
+        .sc-orders-chart-bar {
+            border-radius: 999px 999px 0 0;
+            display: inline-block;
+            min-height: 6px;
+            width: 11px;
+        }
+        .sc-orders-chart-orders {
+            background: linear-gradient(180deg, #19A97E 0%, #008060 100%);
+        }
+        .sc-orders-chart-assigned {
+            background: linear-gradient(180deg, #69A5FF 0%, #1A73E8 100%);
+        }
+        .sc-orders-chart-label {
+            color: #6D7175;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+        .sc-orders-empty-chart {
+            align-items: center;
+            color: #6D7175;
+            display: flex;
+            font-size: 0.92rem;
+            height: 110px;
+            justify-content: center;
+        }
         .sc-order-divider {
             border: 0;
-            border-top: 1px solid rgba(245, 242, 234, 0.08);
-            margin: 0.45rem 0;
+            border-top: 1px solid rgba(224, 226, 228, 0.92);
+            margin: 0.35rem 0 0.5rem;
         }
         .sc-order-subtext {
-            color: #A6A19A;
-            font-size: 0.82rem;
+            color: #6D7175;
+            font-size: 0.81rem;
             line-height: 1.25;
             margin-top: 0.18rem;
         }
         .sc-order-product {
             font-weight: 650;
             line-height: 1.25;
+            color: #202223;
         }
         .sc-product-thumb-empty {
             width: 46px;
             height: 46px;
             border-radius: 10px;
-            border: 1px solid rgba(212, 165, 76, 0.36);
-            background: rgba(245, 242, 234, 0.08);
-            color: #D4A54C;
+            border: 1px solid rgba(201, 204, 207, 0.95);
+            background: #F6F7F8;
+            color: #5C5F62;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             font-size: 0.72rem;
             font-weight: 800;
             letter-spacing: 0.04em;
+        }
+        .sc-orders-section-label {
+            color: #6D7175;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            margin: 0.15rem 0 0.55rem;
+            text-transform: uppercase;
+        }
+        .sc-status {
+            background: #F6F7F8;
+            border-color: rgba(201, 204, 207, 0.95);
+            color: #202223;
+        }
+        .sc-status-unfulfilled {
+            background: #FFF1B8;
+            border-color: #E3C75F;
+            color: #5E4A00;
+        }
+        .sc-status-assigned,
+        .sc-status-paid {
+            background: #E3F1DF;
+            border-color: #95C99C;
+            color: #166042;
+        }
+        .sc-status-needs-edition,
+        .sc-status-product-not-found,
+        .sc-status-sold-out,
+        .sc-status-prodigi-missing,
+        .sc-status-missing,
+        .sc-status-error,
+        .sc-status-certificate-missing {
+            background: #FFF1F1;
+            border-color: #E2A8A8;
+            color: #A53F3F;
         }
         </style>
         """,
@@ -3130,80 +3356,137 @@ def render_supabase_orders_page():
         sync_state = supabase_backend.get_sync_state()
     except Exception:
         sync_state = {}
-    controls = st.columns([1, 1.2, 2.8])
-    if controls[0].button("Sync Orders", disabled=not config["configured"], type="primary", use_container_width=True):
+    try:
+        psd_master_setting = supabase_backend.get_psd_master_folder_setting()
+    except Exception:
+        psd_master_setting = supabase_backend.DEFAULT_PSD_MASTER_FOLDER_SETTING
+    psd_master_url = (
+        (psd_master_setting or {}).get("url")
+        or supabase_backend.DEFAULT_PSD_MASTER_FOLDER_SETTING.get("url")
+        or ""
+    )
+
+    toolbar = st.columns([1.15, 1.45, 1.05, 1.05])
+    if toolbar[0].button("Sync latest orders", disabled=not config["configured"], type="primary", use_container_width=True):
         sync_message = st.empty()
         sync_message.info("Checking new and updated paid Shopify orders...")
         try:
-            result = supabase_backend.sync_shopify_orders_to_supabase(config)
+            result = supabase_backend.sync_shopify_orders_to_supabase(
+                config,
+                generate_certificates=False,
+                sync_product_metafields=False,
+            )
             sync_message.empty()
             st.session_state.supabase_orders_notice = (
                 f"Checked {result['orders_seen']} paid Shopify order updates. "
                 f"Processed {result.get('orders_processed', 0)}. "
                 f"Assigned {result['assignments_created']} new editions. "
                 f"Skipped {result.get('existing_assignments_skipped', 0)} existing allocations. "
-                f"Generated {result.get('generated_certificates', 0)} certificates."
+                f"Certificates now generate on demand for faster syncs."
             )
             st.rerun()
         except Exception as error:
             sync_message.empty()
             st.error("Shopify sync failed. Open Developer -> Developer Tools -> Shopify Diagnostics.")
             supabase_backend.log_app_error("orders_page_sync_failed", str(error), {"source": "orders_page"})
-    if not config["configured"]:
-        controls[1].caption("Shopify connection missing. Open Developer -> Developer Tools -> Shopify Diagnostics.")
-    else:
-        last_order_sync = sync_state.get("last_successful_order_sync_at")
-        controls[1].caption(
-            "Last synced: "
-            + (format_updated_at(last_order_sync) if last_order_sync else "Never")
-        )
-    search = controls[2].text_input(
+
+    search = toolbar[1].text_input(
         "Search orders",
         placeholder="Search order, customer, product, SKU, or edition",
-        label_visibility="collapsed",
         key="supabase-orders-search",
     )
+    status_filter = toolbar[2].selectbox(
+        "View",
+        ("All", "Needs edition", "Assigned", "Certificates missing", "PSD missing", "Prodigi missing", "Errors"),
+        key="supabase-orders-status-filter",
+    )
+    sort = toolbar[3].selectbox(
+        "Sort",
+        ("Date newest", "Date oldest", "Customer", "Edition number"),
+        key="supabase-orders-sort",
+    )
+
+    secondary_toolbar = st.columns([0.9, 1.0, 2.1])
+    page_size = secondary_toolbar[0].selectbox(
+        "Rows",
+        (40, 80, 120),
+        index=0,
+        key="supabase-orders-page-size",
+    )
+    show_artwork = secondary_toolbar[1].toggle(
+        "Artwork previews",
+        value=False,
+        key="supabase-orders-show-artwork",
+    )
+    if not config["configured"]:
+        secondary_toolbar[2].caption("Shopify connection missing. Open Developer -> Developer Tools -> Shopify Diagnostics.")
+    else:
+        last_order_sync = sync_state.get("last_successful_order_sync_at")
+        secondary_toolbar[2].caption(
+            "Last synced: "
+            + (format_updated_at(last_order_sync) if last_order_sync else "Never")
+            + "  |  Fast mode keeps certificates and Shopify display sync out of the critical path."
+        )
 
     summary = supabase_backend.get_order_summary()
+    activity_rows = supabase_backend.get_order_activity(days=7)
+    st.markdown('<div class="sc-orders-section-label">Today</div>', unsafe_allow_html=True)
     metrics = st.columns(6)
     metric_specs = (
-        ("Orders synced", summary.get("orders_synced", 0)),
-        ("Needs edition", summary.get("needs_edition", 0)),
-        ("Assigned today", summary.get("assigned_today", 0)),
-        ("Certificates missing", summary.get("certificates_missing", 0)),
-        ("PSD links missing", summary.get("psd_links_missing", 0)),
-        ("Prodigi links missing", summary.get("prodigi_links_missing", 0)),
+        ("Orders synced", summary.get("orders_synced", 0), "Local cache ready"),
+        ("Needs edition", summary.get("needs_edition", 0), "Needs attention"),
+        ("Assigned today", summary.get("assigned_today", 0), "Fresh allocations"),
+        ("Certificates missing", summary.get("certificates_missing", 0), "Generate only when needed"),
+        ("PSD links missing", summary.get("psd_links_missing", 0), "Using master PSD folder for now"),
+        ("Prodigi links missing", summary.get("prodigi_links_missing", 0), "Merch links still needed"),
     )
-    for index, (label, value) in enumerate(metric_specs):
-        metrics[index].metric(label, value)
+    for index, (label, value, hint) in enumerate(metric_specs):
+        with metrics[index]:
+            st.markdown(_orders_metric_card_html(label, value, hint), unsafe_allow_html=True)
+
+    insight_columns = st.columns([1.15, 1.0])
+    with insight_columns[0]:
+        with st.container(border=True):
+            st.markdown("**Fast sync mode**")
+            st.markdown(
+                """
+                <div class="sc-orders-summary-copy">
+                    New and updated paid orders sync into Supabase first, then the page stays lightweight by default:
+                    artwork previews are optional, PSD opens the shared master folder, and certificate creation happens only when you need a PDF.
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    with insight_columns[1]:
+        st.markdown(_orders_activity_chart_html(activity_rows), unsafe_allow_html=True)
 
     try:
-        rows = supabase_backend.list_orders(search=search, sort="Date newest", limit=250)
+        rows = supabase_backend.list_orders(
+            search=search,
+            sort=sort,
+            status_filter=status_filter,
+            limit=page_size,
+        )
     except Exception as error:
         st.error("Could not load orders from Supabase.")
         st.exception(error)
         return
 
     if not rows:
-        st.info("No orders found yet. Click Sync Orders.")
+        st.info("No orders match the current filters yet.")
         return
 
-    order_handles = [row.get("shopify_handle") for row in rows if row.get("shopify_handle")]
-    try:
-        psd_assets = supabase_backend.get_primary_psd_assets(order_handles)
-    except Exception:
-        psd_assets = {}
-
-    header = st.columns([0.3, 0.45, 0.75, 0.82, 1.05, 0.9, 1.65, 1.05, 0.75, 0.75, 0.8, 0.9])
+    st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
+    st.caption(
+        f"Showing the latest {len(rows)} rows. Keep artwork previews off for the fastest page load, then turn them on only when you need to inspect art."
+    )
+    header = st.columns([0.55, 1.0, 1.1, 1.6, 1.05, 0.9, 0.75, 0.68, 0.85])
     for column, label in zip(
         header,
         (
-            "",
             "Art",
             "Order",
-            "Date",
             "Customer",
-            "Fulfillment",
             "Product",
             "Variant",
             "Edition",
@@ -3215,40 +3498,70 @@ def render_supabase_orders_page():
         column.markdown(f"**{label}**")
 
     for row_index, row in enumerate(rows):
-        row_key = row.get("edition_order_id") or row.get("shopify_order_id") or row_index
-        columns = st.columns([0.3, 0.45, 0.75, 0.82, 1.05, 0.9, 1.65, 1.05, 0.75, 0.75, 0.8, 0.9])
-        columns[0].checkbox("Select", key=f"supabase-order-select-{row_key}", label_visibility="collapsed")
-        with columns[1]:
-            render_product_thumbnail(row.get("image_url"), key=f"order-thumb-{row_key}", width=42)
+        row_key = row.get("edition_order_id") or row.get("order_line_id") or row.get("shopify_order_id") or row_index
+        columns = st.columns([0.55, 1.0, 1.1, 1.6, 1.05, 0.9, 0.75, 0.68, 0.85])
+        with columns[0]:
+            if show_artwork:
+                render_product_thumbnail(row.get("image_url"), key=f"order-thumb-{row_key}", width=42)
+            else:
+                render_product_thumbnail("", key=f"order-thumb-{row_key}", width=42)
         order_label = row.get("order_name") or row.get("order_number") or "Order"
-        columns[2].markdown(f"**{html.escape(str(order_label))}**")
-        columns[3].caption(format_order_date(row.get("created_at") or row.get("processed_at")))
-        columns[4].write(customer_display_name(row.get("customer_name")))
-        columns[5].markdown(status_badge(row.get("fulfillment_status") or "Unknown"), unsafe_allow_html=True)
-        columns[6].markdown(
+        order_link = str(row.get("admin_url") or "").strip()
+        if order_link:
+            columns[1].markdown(f"**[{html.escape(str(order_label))}]({order_link})**")
+        else:
+            columns[1].markdown(f"**{html.escape(str(order_label))}**")
+        columns[1].markdown(
+            f'<div class="sc-order-subtext">{html.escape(format_order_date(row.get("created_at") or row.get("processed_at")))}</div>',
+            unsafe_allow_html=True,
+        )
+        columns[1].markdown(status_badge(row.get("fulfillment_status") or "Unknown"), unsafe_allow_html=True)
+        columns[2].write(customer_display_name(row.get("customer_name")))
+        customer_meta = "Paid" if str(row.get("financial_status") or "").upper().startswith("PAID") else (row.get("financial_status") or "Status pending")
+        if row.get("total_price"):
+            currency = row.get("currency") or ""
+            customer_meta = f"{customer_meta} | {currency} {row['total_price']}".strip()
+        columns[2].markdown(
+            f'<div class="sc-order-subtext">{html.escape(customer_meta)}</div>',
+            unsafe_allow_html=True,
+        )
+        columns[3].markdown(
             f'<div class="sc-order-product">{html.escape(str(row.get("product_title") or "Needs edition"))}</div>',
             unsafe_allow_html=True,
         )
+        product_meta = []
         if row.get("sku"):
-            columns[6].markdown(
-                f'<div class="sc-order-subtext">SKU {html.escape(str(row["sku"]))}</div>',
+            product_meta.append(f"SKU {row['sku']}")
+        if int(row.get("quantity") or 1) > 1:
+            product_meta.append(f"Qty {int(row['quantity'])}")
+        if product_meta:
+            columns[3].markdown(
+                f'<div class="sc-order-subtext">{html.escape(" | ".join(product_meta))}</div>',
                 unsafe_allow_html=True,
             )
         variant_name, variant_dimensions = split_variant_title(row.get("variant_title"))
-        columns[7].write(variant_name)
+        columns[4].write(variant_name)
         if variant_dimensions:
-            columns[7].markdown(
+            columns[4].markdown(
                 f'<div class="sc-order-subtext">{html.escape(variant_dimensions)}</div>',
                 unsafe_allow_html=True,
             )
         if row.get("edition_number"):
-            columns[8].markdown(
+            columns[5].markdown(
                 status_badge(f"#{row['edition_number']}/{row.get('edition_total') or 100}"),
                 unsafe_allow_html=True,
             )
         else:
-            columns[8].markdown(status_badge("Needs Edition"), unsafe_allow_html=True)
-        with columns[9]:
+            columns[5].markdown(
+                status_badge(row.get("assignment_status") or "Needs Edition"),
+                unsafe_allow_html=True,
+            )
+            if row.get("last_error"):
+                columns[5].markdown(
+                    f'<div class="sc-order-subtext">{html.escape(str(row["last_error"]))}</div>',
+                    unsafe_allow_html=True,
+                )
+        with columns[6]:
             if row.get("shopify_file_url"):
                 st.link_button("PDF", row["shopify_file_url"], use_container_width=True)
             elif row.get("local_file_path") and Path(row["local_file_path"]).exists():
@@ -3271,41 +3584,17 @@ def render_supabase_orders_page():
                         st.error("Could not generate certificate.")
                         st.exception(error)
             else:
-                st.caption("Missing")
-        psd_asset = psd_assets.get(row.get("shopify_handle")) or {}
-        psd_url = psd_asset.get("asset_url") or psd_asset.get("google_drive_file_url") or row.get("psd_url") or ""
-        with columns[10]:
-            if psd_url:
-                st.link_button("Open PSD", psd_url, use_container_width=True)
+                st.markdown(status_badge("Missing"), unsafe_allow_html=True)
+        with columns[7]:
+            if psd_master_url:
+                st.link_button("PSD", psd_master_url, use_container_width=True)
             else:
-                if row.get("shopify_handle"):
-                    if st.button(
-                        "Enter PSD",
-                        key=f"orders-psd-enter-{row_key}",
-                        use_container_width=True,
-                    ):
-                        st.session_state.psd_editor_context = {
-                            "handle": row.get("shopify_handle"),
-                            "title": row.get("product_title"),
-                            "source": "orders",
-                        }
-                else:
-                    st.markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
+                st.caption("PSD")
         if row.get("prodigi_url"):
-            columns[11].link_button("Open Prodigi", row["prodigi_url"], use_container_width=True)
+            columns[8].link_button("Prodigi", row["prodigi_url"], use_container_width=True)
         else:
-            columns[11].markdown(status_badge("Prodigi Missing"), unsafe_allow_html=True)
+            columns[8].markdown(status_badge("Prodigi Missing"), unsafe_allow_html=True)
         st.markdown('<hr class="sc-order-divider" />', unsafe_allow_html=True)
-
-    editor_context = st.session_state.get("psd_editor_context") or {}
-    if editor_context.get("source") == "orders":
-        handle = editor_context.get("handle")
-        render_psd_link_editor(
-            handle,
-            editor_context.get("title") or "",
-            existing_asset=psd_assets.get(handle),
-            key_prefix="orders-psd-editor",
-        )
 
 
 def fetch_latest_orders(config):

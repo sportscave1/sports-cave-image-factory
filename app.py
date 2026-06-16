@@ -4388,7 +4388,7 @@ def render_sidebar():
         st.sidebar.subheader("Orders")
         st.sidebar.write("1. Fetch recent Shopify orders manually.")
         st.sidebar.write("2. Sports Cave OS assigns paid order editions.")
-        st.sidebar.write("3. Open PSD and Prodigi links from each line.")
+        st.sidebar.write("3. Open the shared PSD folder and Prodigi links from each line.")
         st.sidebar.write("4. Review any missing or sold-out issues.")
     elif st.session_state.selected_page == "Prodigi":
         st.sidebar.divider()
