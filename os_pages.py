@@ -14,6 +14,7 @@ import streamlit.components.v1 as components
 import db
 import shopify_sync
 import supabase_backend
+from services import r2_storage
 
 
 CERTIFICATE_OUTPUT_DIR = db.BASE_DIR / "output" / "certificates"
@@ -4393,6 +4394,66 @@ def render_psd_csv_import(products, *, expanded=False, key_prefix="supabase-psd"
                 st.rerun()
 
 
+def _certificate_r2_download_url(row):
+    bucket = row.get("certificate_r2_bucket") or row.get("certificate_pdf_r2_bucket")
+    key = row.get("certificate_r2_key") or row.get("certificate_pdf_r2_key")
+    if not bucket or not key:
+        return ""
+    return r2_storage.generate_presigned_download_url(bucket, key)
+
+
+def render_r2_storage_panel():
+    with st.expander("Cloudflare R2 Storage", expanded=False):
+        status = r2_storage.get_r2_status()
+        status_columns = st.columns(2)
+        status_columns[0].metric("R2 configured", "Yes" if status["configured"] else "No")
+        status_columns[1].metric("R2 endpoint configured", "Yes" if status["endpoint_configured"] else "No")
+
+        bucket_columns = st.columns(4)
+        bucket_columns[0].caption("Certificates bucket")
+        bucket_columns[0].write(status["certificates_bucket"] or "Missing")
+        bucket_columns[1].caption("Assets bucket")
+        bucket_columns[1].write(status["assets_bucket"] or "Missing")
+        bucket_columns[2].caption("Backups bucket")
+        bucket_columns[2].write(status["backups_bucket"] or "Missing")
+        bucket_columns[3].caption("PSD archive bucket")
+        bucket_columns[3].write(status["psd_archive_bucket"] or "Missing")
+
+        test_columns = st.columns(2)
+        if test_columns[0].button("Test R2 connection", disabled=not status["configured"], use_container_width=True):
+            result = r2_storage.test_r2_connection()
+            if result.get("ok"):
+                st.success(f"R2 connection OK: {result.get('bucket')}")
+            else:
+                st.error(result.get("error") or "R2 connection failed.")
+
+        if test_columns[1].button("Test R2 upload", disabled=not status["configured"], use_container_width=True):
+            result = r2_storage.test_upload_backup_file()
+            if result.get("ok"):
+                st.success("R2 test upload complete.")
+                st.caption(f"{result.get('bucket')}/{result.get('key')}")
+                if result.get("download_url"):
+                    st.link_button("Open temporary download", result["download_url"], use_container_width=True)
+                metadata_result = supabase_backend.upsert_file_asset(
+                    {
+                        "asset_type": "backup_test",
+                        "bucket": result.get("bucket"),
+                        "object_key": result.get("key"),
+                        "filename": "sports-cave-os-r2-test.txt",
+                        "mime_type": result.get("content_type") or "text/plain; charset=utf-8",
+                        "size_bytes": result.get("size_bytes"),
+                        "source": "r2",
+                        "status": "active",
+                    }
+                )
+                if metadata_result.get("ok"):
+                    st.caption("Supabase file metadata saved.")
+                else:
+                    st.warning(metadata_result.get("warning") or "Upload worked, but metadata was not saved.")
+            else:
+                st.error(result.get("error") or "R2 test upload failed.")
+
+
 def render_product_assets_page():
     st.title("Product Assets")
     st.caption("Store Google Drive, PSD, certificate, mockup, Shopify CDN, and Prodigi links by Shopify handle.")
@@ -4570,8 +4631,11 @@ def render_edition_orders_page():
         columns[2].markdown(status_badge(f"#{row.get('edition_number')}/{row.get('edition_total')}"), unsafe_allow_html=True)
         columns[3].write(row.get("customer_name") or row.get("customer_email") or "Customer")
         columns[4].caption(format_updated_at(row.get("assigned_at")))
+        r2_download_url = _certificate_r2_download_url(row)
         if row.get("shopify_file_url"):
             columns[5].link_button("Open PDF", row["shopify_file_url"], use_container_width=True)
+        elif r2_download_url:
+            columns[5].link_button("Open R2 PDF", r2_download_url, use_container_width=True)
         elif row.get("local_file_path") and Path(row["local_file_path"]).exists():
             path = Path(row["local_file_path"])
             columns[5].download_button(
@@ -4628,8 +4692,11 @@ def render_supabase_certificates_page():
         columns[2].write(f"#{row.get('edition_number')}/{row.get('edition_total')}")
         columns[3].caption(row.get("customer_name") or "Collector")
         columns[4].caption(format_updated_at(row.get("generated_at")))
+        r2_download_url = _certificate_r2_download_url(row)
         if row.get("shopify_file_url"):
             columns[5].link_button("Open PDF", row["shopify_file_url"], use_container_width=True)
+        elif r2_download_url:
+            columns[5].link_button("Open R2 PDF", r2_download_url, use_container_width=True)
         elif row.get("local_file_path") and Path(row["local_file_path"]).exists():
             path = Path(row["local_file_path"])
             columns[5].download_button(
@@ -6488,6 +6555,8 @@ def render_settings_page(app_version, database_path, password_status):
     st.write(f"**Local database:** `{database_path}`")
     st.write(f"**Password protection:** {password_status}")
     st.write(f"**App version:** {app_version}")
+
+    render_r2_storage_panel()
 
     with st.expander("Admin test tools", expanded=False):
         test_columns = st.columns(3)

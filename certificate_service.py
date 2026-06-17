@@ -187,6 +187,63 @@ def generate_template_certificate_pdf(
     return str(pdf_path)
 
 
+def generate_certificate_preview_png(
+    output_dir,
+    *,
+    product_title,
+    edition_number,
+    edition_total,
+    order_name,
+    shopify_handle="",
+):
+    from PIL import Image, ImageDraw
+
+    template_path = (
+        CERTIFICATE_TEMPLATE_PREVIEW_PATH
+        if CERTIFICATE_TEMPLATE_PREVIEW_PATH.exists()
+        else CERTIFICATE_TEMPLATE_PRINT_PATH
+    )
+    if not template_path.exists():
+        raise FileNotFoundError(f"Certificate template missing: {template_path}")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    handle_part = safe_filename_part(shopify_handle or product_title)
+    filename = (
+        f"certificate_{safe_filename_part(order_name)}_{handle_part}"
+        f"_edition_{int(edition_number):03d}_preview.png"
+    )
+    preview_path = output_dir / filename
+
+    with Image.open(template_path) as template:
+        certificate = template.convert("RGB")
+    draw = ImageDraw.Draw(certificate)
+    width, height = certificate.size
+
+    scale = width / 1536
+    draw_fitted_text(
+        draw,
+        str(product_title or "Sports Cave Artwork"),
+        int(width * 0.41),
+        int(width * 0.82),
+        int(height * 0.682),
+        max_size=max(17, int(32 * scale)),
+        min_size=max(12, int(15 * scale)),
+    )
+    draw_fitted_text(
+        draw,
+        format_edition_number(edition_number, edition_total),
+        int(width * 0.43),
+        int(width * 0.54),
+        int(height * 0.744),
+        max_size=max(18, int(33 * scale)),
+        min_size=max(12, int(18 * scale)),
+    )
+    certificate.save(preview_path, "PNG")
+    certificate.close()
+    return str(preview_path)
+
+
 def generate_certificate_pdf(
     output_dir,
     *,

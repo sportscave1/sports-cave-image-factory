@@ -10,7 +10,8 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import shopify_sync
-from certificate_service import certificate_id, generate_certificate_pdf
+from certificate_service import certificate_id, generate_certificate_pdf, generate_certificate_preview_png
+from services import r2_storage
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -373,6 +374,29 @@ def _ensure_schema_uncached():
                 )
                 """
             )
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS file_assets (
+                    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                    asset_type TEXT NOT NULL,
+                    bucket TEXT NOT NULL,
+                    object_key TEXT NOT NULL,
+                    filename TEXT,
+                    mime_type TEXT,
+                    size_bytes BIGINT,
+                    related_shopify_product_id TEXT,
+                    related_shopify_order_id TEXT,
+                    related_shopify_handle TEXT,
+                    related_edition_order_id uuid NULL,
+                    source TEXT DEFAULT 'r2',
+                    status TEXT DEFAULT 'active',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ DEFAULT now(),
+                    UNIQUE (bucket, object_key)
+                )
+                """
+            )
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS app_settings (
@@ -541,6 +565,10 @@ def _ensure_schema_uncached():
                     ("status", "TEXT DEFAULT 'assigned'"),
                     ("assigned_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("certificate_status", "TEXT DEFAULT 'Certificate Missing'"),
+                    ("certificate_r2_bucket", "TEXT"),
+                    ("certificate_r2_key", "TEXT"),
+                    ("certificate_preview_r2_bucket", "TEXT"),
+                    ("certificate_preview_r2_key", "TEXT"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "certificates": (
@@ -582,8 +610,28 @@ def _ensure_schema_uncached():
                     ("order_metafields_synced_at", "TIMESTAMPTZ"),
                     ("order_metafields_sync_status", "TEXT DEFAULT 'Never Synced'"),
                     ("order_metafields_error", "TEXT"),
+                    ("certificate_r2_bucket", "TEXT"),
+                    ("certificate_r2_key", "TEXT"),
+                    ("certificate_preview_r2_bucket", "TEXT"),
+                    ("certificate_preview_r2_key", "TEXT"),
                     ("status", "TEXT DEFAULT 'Local PDF'"),
                     ("generated_at", "TIMESTAMPTZ DEFAULT now()"),
+                ),
+                "file_assets": (
+                    ("asset_type", "TEXT"),
+                    ("bucket", "TEXT"),
+                    ("object_key", "TEXT"),
+                    ("filename", "TEXT"),
+                    ("mime_type", "TEXT"),
+                    ("size_bytes", "BIGINT"),
+                    ("related_shopify_product_id", "TEXT"),
+                    ("related_shopify_order_id", "TEXT"),
+                    ("related_shopify_handle", "TEXT"),
+                    ("related_edition_order_id", "uuid NULL"),
+                    ("source", "TEXT DEFAULT 'r2'"),
+                    ("status", "TEXT DEFAULT 'active'"),
+                    ("created_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "webhook_events": (
                     ("topic", "TEXT"),
@@ -647,6 +695,7 @@ def _ensure_schema_uncached():
                 "edition_orders",
                 "certificates",
                 "product_assets",
+                "file_assets",
                 "sync_runs",
                 "app_errors",
             )
@@ -689,6 +738,9 @@ def _ensure_schema_uncached():
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_certificates_edition_order_unique ON certificates(edition_order_id)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_unique ON product_assets(shopify_handle, asset_type)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_name_unique ON product_assets(shopify_handle, asset_type, asset_name)")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_file_assets_bucket_key_unique ON file_assets(bucket, object_key)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_file_assets_handle ON file_assets(related_shopify_handle)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_file_assets_order ON file_assets(related_shopify_order_id)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_settings_key_unique ON app_settings(key)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_id_unique ON webhook_events(webhook_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_title ON shopify_products(title)")
@@ -2633,6 +2685,230 @@ def _insert_product_if_fetched(cur, product):
     return cur.fetchone()
 
 
+UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _coerce_uuid_or_none(value):
+    cleaned = str(value or "").strip()
+    return cleaned if UUID_RE.match(cleaned) else None
+
+
+def _upsert_file_asset_with_cursor(cur, metadata):
+    if not table_exists(cur, "file_assets"):
+        return {"ok": False, "warning": "R2 file uploaded, but file_assets metadata table is missing."}
+    bucket = str(metadata.get("bucket") or "").strip()
+    object_key = str(metadata.get("object_key") or "").strip()
+    asset_type = str(metadata.get("asset_type") or "").strip()
+    if not bucket or not object_key or not asset_type:
+        return {"ok": False, "warning": "R2 file uploaded, but required file metadata was incomplete."}
+    cur.execute(
+        """
+        INSERT INTO file_assets (
+            asset_type, bucket, object_key, filename, mime_type, size_bytes,
+            related_shopify_product_id, related_shopify_order_id, related_shopify_handle,
+            related_edition_order_id, source, status, created_at, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, 'r2'), COALESCE(%s, 'active'), now(), now())
+        ON CONFLICT (bucket, object_key) DO UPDATE SET
+            asset_type=EXCLUDED.asset_type,
+            filename=EXCLUDED.filename,
+            mime_type=EXCLUDED.mime_type,
+            size_bytes=EXCLUDED.size_bytes,
+            related_shopify_product_id=EXCLUDED.related_shopify_product_id,
+            related_shopify_order_id=EXCLUDED.related_shopify_order_id,
+            related_shopify_handle=EXCLUDED.related_shopify_handle,
+            related_edition_order_id=EXCLUDED.related_edition_order_id,
+            source=EXCLUDED.source,
+            status=EXCLUDED.status,
+            updated_at=now()
+        RETURNING id
+        """,
+        (
+            asset_type,
+            bucket,
+            object_key,
+            metadata.get("filename"),
+            metadata.get("mime_type"),
+            metadata.get("size_bytes"),
+            metadata.get("related_shopify_product_id"),
+            metadata.get("related_shopify_order_id"),
+            metadata.get("related_shopify_handle"),
+            _coerce_uuid_or_none(metadata.get("related_edition_order_id")),
+            metadata.get("source") or "r2",
+            metadata.get("status") or "active",
+        ),
+    )
+    row = cur.fetchone() or {}
+    return {"ok": True, "id": row.get("id"), "bucket": bucket, "object_key": object_key}
+
+
+def upsert_file_asset(metadata):
+    if not is_configured():
+        return {"ok": False, "warning": "R2 file uploaded, but Supabase DATABASE_URL is not configured."}
+    try:
+        ensure_schema()
+        with connect() as conn:
+            with conn.cursor() as cur:
+                result = _upsert_file_asset_with_cursor(cur, metadata or {})
+            conn.commit()
+        return result
+    except Exception as error:
+        return {"ok": False, "warning": f"R2 file uploaded, but metadata was not saved: {error}"}
+
+
+def _log_app_error_with_cursor(cur, error_type, message, context=None):
+    if not table_exists(cur, "app_errors"):
+        return
+    cur.execute(
+        """
+        INSERT INTO app_errors(error_type, message, context, source, severity, created_at)
+        VALUES (%s, %s, %s::jsonb, 'sports_cave_os', 'warning', now())
+        """,
+        (error_type, str(message), json_dumps(context or {})),
+    )
+
+
+def _record_r2_file_asset(cur, *, asset_type, upload_result, local_path, assignment, mime_type):
+    if not upload_result.get("ok"):
+        return upload_result
+    path = Path(local_path)
+    return _upsert_file_asset_with_cursor(
+        cur,
+        {
+            "asset_type": asset_type,
+            "bucket": upload_result.get("bucket"),
+            "object_key": upload_result.get("key"),
+            "filename": path.name,
+            "mime_type": mime_type,
+            "size_bytes": upload_result.get("size_bytes") or (path.stat().st_size if path.exists() else None),
+            "related_shopify_product_id": assignment.get("shopify_product_id"),
+            "related_shopify_order_id": assignment.get("shopify_order_id"),
+            "related_shopify_handle": assignment.get("shopify_handle"),
+            "related_edition_order_id": assignment.get("id"),
+            "source": "r2",
+            "status": "active",
+        },
+    )
+
+
+def _upload_certificate_outputs_to_r2(cur, assignment, pdf_path, preview_path=""):
+    if not r2_storage.safe_r2_enabled():
+        return {}
+    bucket = r2_storage.get_bucket_name("certificates")
+    if not bucket:
+        return {"warning": "R2 certificates bucket is not configured."}
+
+    order_name = assignment.get("order_name") or assignment.get("shopify_order_name") or assignment.get("shopify_order_id")
+    pdf_key = r2_storage.certificate_pdf_key(
+        assignment.get("shopify_handle"),
+        order_name,
+        assignment.get("edition_number"),
+    )
+    pdf_upload = r2_storage.upload_file(bucket, pdf_key, pdf_path, content_type="application/pdf")
+    if not pdf_upload.get("ok"):
+        _log_app_error_with_cursor(
+            cur,
+            "r2_certificate_pdf_upload_failed",
+            pdf_upload.get("error") or "Certificate PDF upload failed.",
+            {"edition_order_id": assignment.get("id"), "bucket": bucket, "object_key": pdf_key},
+        )
+        return {"pdf": pdf_upload}
+
+    metadata_result = _record_r2_file_asset(
+        cur,
+        asset_type="certificate_pdf",
+        upload_result=pdf_upload,
+        local_path=pdf_path,
+        assignment=assignment,
+        mime_type="application/pdf",
+    )
+    if not metadata_result.get("ok"):
+        _log_app_error_with_cursor(
+            cur,
+            "r2_certificate_metadata_failed",
+            metadata_result.get("warning") or "Certificate PDF metadata was not saved.",
+            {"edition_order_id": assignment.get("id"), "bucket": bucket, "object_key": pdf_key},
+        )
+
+    preview_upload = {}
+    preview_key = ""
+    if preview_path:
+        preview_key = r2_storage.certificate_preview_key(
+            assignment.get("shopify_handle"),
+            order_name,
+            assignment.get("edition_number"),
+        )
+        preview_upload = r2_storage.upload_file(bucket, preview_key, preview_path, content_type="image/png")
+        if preview_upload.get("ok"):
+            preview_metadata = _record_r2_file_asset(
+                cur,
+                asset_type="certificate_preview_png",
+                upload_result=preview_upload,
+                local_path=preview_path,
+                assignment=assignment,
+                mime_type="image/png",
+            )
+            if not preview_metadata.get("ok"):
+                _log_app_error_with_cursor(
+                    cur,
+                    "r2_certificate_preview_metadata_failed",
+                    preview_metadata.get("warning") or "Certificate preview metadata was not saved.",
+                    {"edition_order_id": assignment.get("id"), "bucket": bucket, "object_key": preview_key},
+                )
+        else:
+            _log_app_error_with_cursor(
+                cur,
+                "r2_certificate_preview_upload_failed",
+                preview_upload.get("error") or "Certificate preview upload failed.",
+                {"edition_order_id": assignment.get("id"), "bucket": bucket, "object_key": preview_key},
+            )
+
+    certificate_update = {
+        "certificate_r2_bucket": bucket,
+        "certificate_r2_key": pdf_key,
+        "certificate_preview_r2_bucket": bucket if preview_upload.get("ok") else "",
+        "certificate_preview_r2_key": preview_key if preview_upload.get("ok") else "",
+    }
+    cur.execute(
+        """
+        UPDATE certificates
+        SET certificate_r2_bucket=%s,
+            certificate_r2_key=%s,
+            certificate_preview_r2_bucket=%s,
+            certificate_preview_r2_key=%s
+        WHERE edition_order_id=%s
+        """,
+        (
+            certificate_update["certificate_r2_bucket"],
+            certificate_update["certificate_r2_key"],
+            certificate_update["certificate_preview_r2_bucket"],
+            certificate_update["certificate_preview_r2_key"],
+            assignment.get("id"),
+        ),
+    )
+    cur.execute(
+        """
+        UPDATE edition_orders
+        SET certificate_r2_bucket=%s,
+            certificate_r2_key=%s,
+            certificate_preview_r2_bucket=%s,
+            certificate_preview_r2_key=%s
+        WHERE id=%s
+        """,
+        (
+            certificate_update["certificate_r2_bucket"],
+            certificate_update["certificate_r2_key"],
+            certificate_update["certificate_preview_r2_bucket"],
+            certificate_update["certificate_preview_r2_key"],
+            assignment.get("id"),
+        ),
+    )
+    return {"pdf": pdf_upload, "preview": preview_upload, **certificate_update}
+
+
 def resolve_product_for_line(line_item, *, fetch_missing_products=True):
     ensure_schema()
     with connect() as conn:
@@ -2649,6 +2925,7 @@ def resolve_product_for_line(line_item, *, fetch_missing_products=True):
 
 def _generate_certificate_for_assignment(cur, assignment):
     local_file_path = ""
+    local_preview_path = ""
     try:
         cur.execute(
             """
@@ -2679,6 +2956,22 @@ def _generate_certificate_for_assignment(cur, assignment):
             assigned_at=assignment.get("assigned_at"),
             shopify_handle=assignment.get("shopify_handle") or "",
         )
+        try:
+            local_preview_path = generate_certificate_preview_png(
+                CERTIFICATE_OUTPUT_DIR,
+                product_title=assignment.get("product_title"),
+                edition_number=assignment.get("edition_number"),
+                edition_total=assignment.get("edition_total"),
+                order_name=assignment.get("order_name"),
+                shopify_handle=assignment.get("shopify_handle") or "",
+            )
+        except Exception as preview_error:
+            _log_app_error_with_cursor(
+                cur,
+                "certificate_preview_generation_failed",
+                str(preview_error),
+                {"edition_order_id": assignment.get("id")},
+            )
         generated_certificate_id = certificate_id(
             assignment.get("order_name") or assignment.get("shopify_order_id"),
             assignment.get("edition_number"),
@@ -2708,6 +3001,7 @@ def _generate_certificate_for_assignment(cur, assignment):
                 local_file_path,
             ),
         )
+        _upload_certificate_outputs_to_r2(cur, assignment, local_file_path, local_preview_path)
         cur.execute(
             "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id=%s",
             (assignment["id"],),
@@ -3812,7 +4106,9 @@ def list_edition_orders(search="", limit=250):
             if search_value:
                 cur.execute(
                     """
-                    SELECT eo.*, o.order_name, o.admin_url, c.local_file_path, c.shopify_file_url
+                    SELECT eo.*, o.order_name, o.admin_url, c.local_file_path, c.shopify_file_url,
+                           c.certificate_r2_bucket, c.certificate_r2_key,
+                           c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
                     FROM edition_orders eo
                     LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
                     LEFT JOIN certificates c ON c.edition_order_id=eo.id
@@ -3828,7 +4124,9 @@ def list_edition_orders(search="", limit=250):
             else:
                 cur.execute(
                     """
-                    SELECT eo.*, o.order_name, o.admin_url, c.local_file_path, c.shopify_file_url
+                    SELECT eo.*, o.order_name, o.admin_url, c.local_file_path, c.shopify_file_url,
+                           c.certificate_r2_bucket, c.certificate_r2_key,
+                           c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
                     FROM edition_orders eo
                     LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
                     LEFT JOIN certificates c ON c.edition_order_id=eo.id
