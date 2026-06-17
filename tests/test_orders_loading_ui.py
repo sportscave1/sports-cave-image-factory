@@ -22,13 +22,22 @@ class OrdersLoadingUiTests(unittest.TestCase):
         for phrase in blocked_phrases:
             self.assertNotIn(phrase, source)
 
-    def test_certificate_schema_uses_uuid_safe_related_column(self):
+    def test_certificate_schema_uses_uuid_safe_related_column_without_runtime_fk(self):
         source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
 
         self.assertIn("related_edition_order_id uuid NULL", source)
-        self.assertIn("certificates_related_edition_order_id_fkey", source)
         self.assertIn("DROP CONSTRAINT IF EXISTS certificates_edition_order_id_fkey", source)
+        self.assertIn("DROP CONSTRAINT IF EXISTS certificates_related_edition_order_id_fkey", source)
         self.assertNotIn("FOREIGN KEY (edition_order_id)", source)
+        self.assertNotIn("FOREIGN KEY (related_edition_order_id)", source)
+
+    def test_orders_read_without_full_schema_gate(self):
+        source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
+
+        self.assertIn("def ensure_order_read_schema", source)
+        self.assertIn("def list_orders", source)
+        self.assertIn("def get_order_summary", source)
+        self.assertIn("ensure_order_read_schema()", source)
 
 
 if __name__ == "__main__":

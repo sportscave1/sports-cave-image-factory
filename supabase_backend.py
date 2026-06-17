@@ -45,6 +45,7 @@ DATABASE_URL_ENV_KEYS = (
     "RENDER_DATABASE_URL",
 )
 _SCHEMA_READY = False
+_ORDER_READ_SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
 DEFAULT_EDITION_NAME = "Original Edition"
 ACTIVE_RUN_STATUS = "active"
@@ -791,6 +792,7 @@ def _ensure_schema_uncached():
                 # certificates.edition_order_id -> edition_orders.id incompatible.
                 # related_edition_order_id is the nullable uuid-safe link for newer rows.
                 cur.execute("ALTER TABLE certificates DROP CONSTRAINT IF EXISTS certificates_edition_order_id_fkey")
+                cur.execute("ALTER TABLE certificates DROP CONSTRAINT IF EXISTS certificates_related_edition_order_id_fkey")
                 cur.execute("ALTER TABLE certificates ADD COLUMN IF NOT EXISTS related_edition_order_id uuid NULL")
                 cur.execute(
                     """
@@ -834,24 +836,6 @@ def _ensure_schema_uncached():
                               FROM edition_orders eo
                               WHERE eo.id = certificates.related_edition_order_id
                           )
-                        """
-                    )
-                    cur.execute(
-                        """
-                        DO $$
-                        BEGIN
-                            IF NOT EXISTS (
-                                SELECT 1
-                                FROM pg_constraint
-                                WHERE conname = 'certificates_related_edition_order_id_fkey'
-                            ) THEN
-                                ALTER TABLE certificates
-                                ADD CONSTRAINT certificates_related_edition_order_id_fkey
-                                FOREIGN KEY (related_edition_order_id)
-                                REFERENCES edition_orders(id)
-                                ON DELETE SET NULL;
-                            END IF;
-                        END $$;
                         """
                     )
 
@@ -1014,9 +998,10 @@ def _ensure_schema_uncached():
 
 
 def reset_schema_cache():
-    global _SCHEMA_READY
+    global _SCHEMA_READY, _ORDER_READ_SCHEMA_READY
     with _SCHEMA_LOCK:
         _SCHEMA_READY = False
+        _ORDER_READ_SCHEMA_READY = False
 
 
 def ensure_schema():
@@ -1028,6 +1013,233 @@ def ensure_schema():
             return
         _ensure_schema_uncached()
         _SCHEMA_READY = True
+
+
+def ensure_order_read_schema():
+    """Keep Orders readable even if a later full-schema migration needs attention."""
+    global _ORDER_READ_SCHEMA_READY
+    if _SCHEMA_READY or _ORDER_READ_SCHEMA_READY:
+        return
+    if not is_configured():
+        raise SupabaseNotConfigured(
+            "No Supabase/Postgres database URL is configured. Set DATABASE_URL, "
+            "SUPABASE_DATABASE_URL, or POSTGRES_URL in Render."
+        )
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY or _ORDER_READ_SCHEMA_READY:
+            return
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS shopify_orders (
+                        shopify_order_id TEXT PRIMARY KEY,
+                        order_name TEXT,
+                        order_number TEXT,
+                        admin_url TEXT,
+                        customer_name TEXT,
+                        customer_email TEXT,
+                        financial_status TEXT,
+                        fulfillment_status TEXT,
+                        total_price TEXT,
+                        currency TEXT,
+                        created_at TIMESTAMPTZ,
+                        remote_updated_at TIMESTAMPTZ,
+                        processed_at TIMESTAMPTZ,
+                        cancelled_at TIMESTAMPTZ,
+                        raw_json JSONB DEFAULT '{}'::jsonb,
+                        synced_at TIMESTAMPTZ DEFAULT now()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS shopify_order_lines (
+                        id BIGSERIAL PRIMARY KEY,
+                        shopify_line_item_id TEXT UNIQUE,
+                        shopify_order_id TEXT,
+                        shopify_product_id TEXT,
+                        shopify_handle TEXT,
+                        product_title TEXT,
+                        variant_title TEXT,
+                        sku TEXT,
+                        quantity INTEGER DEFAULT 1,
+                        assignment_status TEXT DEFAULT 'Needs Edition',
+                        last_error TEXT DEFAULT '',
+                        raw_json JSONB DEFAULT '{}'::jsonb,
+                        synced_at TIMESTAMPTZ DEFAULT now(),
+                        updated_at TIMESTAMPTZ DEFAULT now()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS edition_orders (
+                        id BIGSERIAL PRIMARY KEY,
+                        shopify_order_id TEXT,
+                        shopify_line_item_id TEXT,
+                        shopify_product_id TEXT,
+                        shopify_handle TEXT,
+                        product_title TEXT,
+                        variant_title TEXT,
+                        sku TEXT,
+                        customer_name TEXT,
+                        customer_email TEXT,
+                        edition_number INTEGER,
+                        edition_total INTEGER,
+                        allocation_index INTEGER DEFAULT 1,
+                        assigned_at TIMESTAMPTZ DEFAULT now(),
+                        certificate_status TEXT DEFAULT 'Certificate Missing'
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS certificates (
+                        id BIGSERIAL PRIMARY KEY,
+                        edition_order_id TEXT UNIQUE,
+                        related_edition_order_id uuid NULL,
+                        shopify_order_id TEXT,
+                        shopify_handle TEXT,
+                        certificate_id TEXT,
+                        edition_number INTEGER,
+                        edition_total INTEGER,
+                        local_file_path TEXT,
+                        shopify_file_url TEXT,
+                        certificate_file_url TEXT,
+                        generated_at TIMESTAMPTZ DEFAULT now(),
+                        status TEXT DEFAULT 'Local PDF'
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS edition_products (
+                        id BIGSERIAL PRIMARY KEY,
+                        shopify_handle TEXT UNIQUE,
+                        product_title TEXT,
+                        featured_image_url TEXT
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS shopify_products (
+                        shopify_product_id TEXT PRIMARY KEY,
+                        handle TEXT UNIQUE,
+                        title TEXT,
+                        image_url TEXT,
+                        featured_image_url TEXT
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS product_assets (
+                        id BIGSERIAL PRIMARY KEY,
+                        shopify_handle TEXT,
+                        asset_type TEXT,
+                        asset_url TEXT,
+                        google_drive_file_url TEXT,
+                        is_primary BOOLEAN DEFAULT TRUE
+                    )
+                    """
+                )
+
+                read_columns = {
+                    "shopify_orders": (
+                        ("order_name", "TEXT"),
+                        ("order_number", "TEXT"),
+                        ("admin_url", "TEXT"),
+                        ("customer_name", "TEXT"),
+                        ("customer_email", "TEXT"),
+                        ("financial_status", "TEXT"),
+                        ("fulfillment_status", "TEXT"),
+                        ("total_price", "TEXT"),
+                        ("currency", "TEXT"),
+                        ("created_at", "TIMESTAMPTZ"),
+                        ("remote_updated_at", "TIMESTAMPTZ"),
+                        ("processed_at", "TIMESTAMPTZ"),
+                        ("cancelled_at", "TIMESTAMPTZ"),
+                        ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
+                        ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ),
+                    "shopify_order_lines": (
+                        ("shopify_line_item_id", "TEXT"),
+                        ("shopify_order_id", "TEXT"),
+                        ("shopify_product_id", "TEXT"),
+                        ("shopify_handle", "TEXT"),
+                        ("product_title", "TEXT"),
+                        ("variant_title", "TEXT"),
+                        ("sku", "TEXT"),
+                        ("quantity", "INTEGER DEFAULT 1"),
+                        ("assignment_status", "TEXT DEFAULT 'Needs Edition'"),
+                        ("last_error", "TEXT DEFAULT ''"),
+                        ("raw_json", "JSONB DEFAULT '{}'::jsonb"),
+                        ("synced_at", "TIMESTAMPTZ DEFAULT now()"),
+                        ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ),
+                    "edition_orders": (
+                        ("shopify_order_id", "TEXT"),
+                        ("shopify_line_item_id", "TEXT"),
+                        ("shopify_product_id", "TEXT"),
+                        ("shopify_handle", "TEXT"),
+                        ("product_title", "TEXT"),
+                        ("variant_title", "TEXT"),
+                        ("sku", "TEXT"),
+                        ("customer_name", "TEXT"),
+                        ("customer_email", "TEXT"),
+                        ("edition_number", "INTEGER"),
+                        ("edition_total", "INTEGER"),
+                        ("allocation_index", "INTEGER DEFAULT 1"),
+                        ("assigned_at", "TIMESTAMPTZ DEFAULT now()"),
+                        ("certificate_status", "TEXT DEFAULT 'Certificate Missing'"),
+                        ("status", "TEXT DEFAULT 'assigned'"),
+                    ),
+                    "certificates": (
+                        ("edition_order_id", "TEXT"),
+                        ("related_edition_order_id", "uuid NULL"),
+                        ("certificate_id", "TEXT"),
+                        ("local_file_path", "TEXT"),
+                        ("shopify_file_url", "TEXT"),
+                        ("certificate_file_url", "TEXT"),
+                        ("generated_at", "TIMESTAMPTZ DEFAULT now()"),
+                        ("certificate_r2_bucket", "TEXT"),
+                        ("certificate_r2_key", "TEXT"),
+                        ("certificate_preview_r2_bucket", "TEXT"),
+                        ("certificate_preview_r2_key", "TEXT"),
+                    ),
+                    "edition_products": (
+                        ("shopify_handle", "TEXT"),
+                        ("product_title", "TEXT"),
+                        ("featured_image_url", "TEXT"),
+                    ),
+                    "shopify_products": (
+                        ("handle", "TEXT"),
+                        ("title", "TEXT"),
+                        ("image_url", "TEXT"),
+                        ("featured_image_url", "TEXT"),
+                    ),
+                    "product_assets": (
+                        ("shopify_handle", "TEXT"),
+                        ("asset_type", "TEXT"),
+                        ("asset_url", "TEXT"),
+                        ("google_drive_file_url", "TEXT"),
+                        ("is_primary", "BOOLEAN DEFAULT TRUE"),
+                    ),
+                }
+                for table_name, columns in read_columns.items():
+                    if not table_exists(cur, table_name):
+                        continue
+                    for column_name, column_type in columns:
+                        cur.execute(
+                            f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                        )
+                if table_exists(cur, "certificates"):
+                    cur.execute("ALTER TABLE certificates DROP CONSTRAINT IF EXISTS certificates_edition_order_id_fkey")
+                    cur.execute("ALTER TABLE certificates DROP CONSTRAINT IF EXISTS certificates_related_edition_order_id_fkey")
+            conn.commit()
+        _ORDER_READ_SCHEMA_READY = True
 
 
 def test_connection():
@@ -5077,7 +5289,7 @@ def _order_sort_clause(sort):
 
 
 def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
-    ensure_schema()
+    ensure_order_read_schema()
     search_value = f"%{search.strip().lower()}%" if search.strip() else None
     order_by = _order_sort_clause(sort)
     base_sql = """
@@ -5205,7 +5417,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
 
 
 def get_order_summary():
-    ensure_schema()
+    ensure_order_read_schema()
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -5243,7 +5455,7 @@ def get_order_summary():
 
 
 def get_order_activity(days=7):
-    ensure_schema()
+    ensure_order_read_schema()
     window_days = min(max(int(days or 7), 3), 30)
     with connect() as conn:
         with conn.cursor() as cur:

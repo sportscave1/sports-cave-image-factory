@@ -4920,12 +4920,11 @@ def render_placeholder_page(title, body):
 
 def render_lightweight_dashboard_page():
     st.title("Sports Cave OS")
-    st.caption("Daily operating screen for Sports Cave VAs.")
+    st.caption("Daily operating screen for orders, editions, products, and files.")
     with st.container(border=True):
-        st.markdown("**Today's task**")
+        st.markdown("**Today**")
         st.caption(
-            "Start with the work that moves customer orders and edition tracking forward. "
-            "Developer checks live in the Developer page so this Dashboard stays fast and simple."
+            "Start with orders, then check edition numbers and any missing production links."
         )
 
     st.subheader("Today's Focus")
@@ -4937,12 +4936,12 @@ def render_lightweight_dashboard_page():
     with focus_columns[2]:
         st.info("Use Mockups only when artwork is ready. Keep generated ZIPs saved in the right Drive folder.")
 
-    st.subheader("VA Reminder")
+    st.subheader("Order Data")
     st.write(
-        "Sports Cave OS stores edition numbers in Supabase. Shopify feeds product and order data into the system, "
-        "but the app reads the saved Supabase records so edition history is not lost."
+        "Sports Cave OS stores edition numbers and synced order history. Shopify provides product and order updates "
+        "when sync runs."
     )
-    st.caption("Connection tests, diagnostics, imports, and developer tools are now under Developer.")
+    st.caption("Advanced tools are kept separate from the daily order workflow.")
 
 
 def page_uses_local_database(current_page):

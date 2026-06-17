@@ -608,17 +608,17 @@ def render_focus_list(title, products, empty_message):
 
 def render_supabase_dashboard_page():
     st.subheader("Today's Focus")
-    st.caption("VA-facing reminders only. Developer diagnostics and tests live on the Developer page.")
+    st.caption("Start with the live order and edition screens.")
     focus_columns = st.columns(3)
     focus_columns[0].info("Open Orders to sync paid orders and check edition assignments.")
     focus_columns[1].info("Open Limited Editions to confirm edition totals or import a correction CSV.")
-    focus_columns[2].info("Open Files or Developer when PSD links, imports, or diagnostics need attention.")
+    focus_columns[2].info("Open Files when PSD links or production assets need attention.")
 
 
 def render_dashboard_page():
     render_page_intro(
         "Sports Cave OS",
-        "Internal backend for product creation, mockups, limited editions, files, and VA workflows.",
+        "Order, edition, product, and file control centre.",
         "Start with Today's Focus, then open the products that need attention.",
         "Finish missing product data before moving a product to Live.",
     )
@@ -3907,7 +3907,7 @@ def _render_compact_orders_feed(order_summaries):
 def render_supabase_orders_page():
     st.title("Orders")
     st.caption(
-        "Edition numbers now lead the page. Each order stays on one row, but the product name and required edition number are split so the edition is easy to spot."
+        "Synced Shopify orders appear here automatically. Use sync only when new paid orders are missing."
     )
     st.markdown(_orders_page_styles(), unsafe_allow_html=True)
 
@@ -3924,7 +3924,7 @@ def render_supabase_orders_page():
     top_toolbar = st.columns([0.85, 1.9])
     if top_toolbar[0].button("Sync latest orders", disabled=not config["configured"], type="primary", use_container_width=True):
         sync_message = st.empty()
-        sync_message.info("Checking new and updated paid Shopify orders...")
+        sync_message.info("Syncing paid Shopify orders...")
         try:
             result = supabase_backend.sync_shopify_orders_to_supabase(
                 config,
@@ -3957,7 +3957,7 @@ def render_supabase_orders_page():
             repair_suffix = ""
             if repair_result.get("orders_reprocessed"):
                 repair_suffix = (
-                    f" Rechecked {repair_result.get('orders_reprocessed', 0)} cached issue order"
+                    f" Rechecked {repair_result.get('orders_reprocessed', 0)} saved issue order"
                     f"{'s' if repair_result.get('orders_reprocessed', 0) != 1 else ''}"
                 )
                 if repair_result.get("assignments_created"):
@@ -3967,7 +3967,7 @@ def render_supabase_orders_page():
                     )
                 repair_suffix += "."
             st.session_state.supabase_orders_notice = (
-                f"Checked {result['orders_seen']} paid Shopify order updates. "
+                f"Synced {result['orders_seen']} paid Shopify order updates. "
                 f"Processed {result.get('orders_processed', 0)}. "
                 f"Assigned {result['assignments_created']} new editions. "
                 f"Skipped {result.get('existing_assignments_skipped', 0)} existing allocations. "
@@ -4012,29 +4012,25 @@ def render_supabase_orders_page():
         try:
             sync_state = cached_supabase_sync_state(supabase_cache_version("sync-state"))
             last_order_sync = sync_state.get("last_successful_order_sync_at")
-            tracking_start = sync_state.get("edition_tracking_start_at")
         except Exception:
             last_order_sync = ""
-            tracking_start = ""
         st.caption(
             "Last synced: "
             + (format_updated_at(last_order_sync) if last_order_sync else "Never")
-            + "  |  Tracking start: "
-            + (format_updated_at(tracking_start) if tracking_start else "Not set")
         )
 
     try:
         summary = cached_supabase_order_summary(supabase_cache_version("order-summary"))
     except Exception as error:
-        render_supabase_load_warning("Order summary", error, "orders-summary")
         supabase_backend.log_app_error("orders_page_summary_failed", str(error), {"source": "orders_page"})
         summary = {}
-    st.caption(
-        f"{summary.get('orders_synced', 0)} cached | "
-        f"{summary.get('needs_edition', 0)} need editions | "
-        f"{summary.get('historical_lines', 0)} historical | "
-        f"{summary.get('assigned_today', 0)} assigned today"
-    )
+    if summary:
+        st.caption(
+            f"{summary.get('orders_synced', 0)} saved | "
+            f"{summary.get('needs_edition', 0)} need editions | "
+            f"{summary.get('historical_lines', 0)} historical | "
+            f"{summary.get('assigned_today', 0)} assigned today"
+        )
 
     page_size = min(int(page_size or 60), 100)
     try:
@@ -4047,17 +4043,17 @@ def render_supabase_orders_page():
                 cache_version=supabase_cache_version("orders"),
             )
     except Exception as error:
-        render_supabase_load_warning("Orders", error, "orders-list")
         supabase_backend.log_app_error("orders_page_load_failed", str(error), {"source": "orders_page"})
+        st.info("Orders are not available right now. Use Sync latest orders to refresh the saved order list.")
         return
 
     if not order_summaries:
-        st.info("No orders match the current filters yet.")
+        st.info("No saved orders match the current filters yet.")
         return
 
     st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
     st.caption(
-        f"Showing {len(order_summaries)} orders. The edition number has its own column so you can scan the required allocation first."
+        f"Showing {len(order_summaries)} saved orders."
     )
     _render_compact_orders_feed(order_summaries)
 
