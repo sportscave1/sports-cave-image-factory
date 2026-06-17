@@ -3138,17 +3138,25 @@ def import_limited_edition_rows(
         raise
 
 
-def get_product_asset_map():
+def get_product_asset_map(handles=None):
     ensure_schema()
+    handle_values = [str(handle or "").strip() for handle in (handles or []) if str(handle or "").strip()]
+    where = ""
+    params = []
+    if handle_values:
+        where = "AND shopify_handle = ANY(%s)"
+        params.append(handle_values)
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT shopify_handle, asset_type,
                        COALESCE(NULLIF(asset_url, ''), NULLIF(google_drive_file_url, '')) AS asset_url
                 FROM product_assets
                 WHERE is_primary IS DISTINCT FROM FALSE
-                """
+                  {where}
+                """,
+                tuple(params),
             )
             rows = cur.fetchall()
     result = {}

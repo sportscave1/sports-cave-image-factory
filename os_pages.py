@@ -18,6 +18,7 @@ from services import r2_storage
 
 
 CERTIFICATE_OUTPUT_DIR = db.BASE_DIR / "output" / "certificates"
+SUPABASE_PAGE_CACHE_TTL_SECONDS = int(os.getenv("SUPABASE_PAGE_CACHE_TTL_SECONDS", "45"))
 
 QUICK_LINKS = (
     ("shopify_admin_url", "Open Shopify Admin"),
@@ -337,6 +338,37 @@ def build_limited_editions_template_csv():
     return buffer.getvalue()
 
 
+def build_supabase_products_csv(rows, asset_map):
+    fields = (
+        "product_title",
+        "shopify_handle",
+        "shopify_product_id",
+        "edition_total",
+        "next_edition_number",
+        "remaining_editions",
+        "sold_count",
+        "remaining_count",
+        "edition_status",
+        "edition_display_text",
+        "metafields_sync_status",
+        "metafields_synced_at",
+        "active",
+        "sold_out",
+        *supabase_backend.ASSET_TYPES,
+        "admin_url",
+        "online_store_url",
+    )
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows or []:
+        record = {field: row.get(field, "") for field in fields}
+        for asset_type in supabase_backend.ASSET_TYPES:
+            record[asset_type] = (asset_map.get(row.get("shopify_handle")) or {}).get(asset_type, "")
+        writer.writerow(record)
+    return buffer.getvalue()
+
+
 def csv_value(row, field, fallback=""):
     value = row.get(field)
     if value is None:
@@ -443,6 +475,73 @@ def render_supabase_required_notice(page_title):
     st.caption(
         "If you need to force Supabase-only mode, set ENABLE_LOCAL_SQLITE_FALLBACK=false."
     )
+
+
+def supabase_cache_version(key):
+    session_key = f"{key}-cache-version"
+    st.session_state.setdefault(session_key, 0)
+    return int(st.session_state[session_key])
+
+
+def bump_supabase_cache_version(*keys):
+    for key in keys:
+        session_key = f"{key}-cache-version"
+        st.session_state[session_key] = int(st.session_state.get(session_key, 0)) + 1
+
+
+def render_fast_load_prompt(title, body, button_label, button_key):
+    with st.container(border=True):
+        st.markdown(f"**{title}**")
+        st.caption(body)
+        return st.button(button_label, key=button_key, type="primary", use_container_width=True)
+
+
+def render_supabase_load_warning(action, error, key_prefix):
+    with st.container(border=True):
+        st.warning(f"{action} could not load from Supabase right now.")
+        st.caption(
+            "The page shell stayed loaded so the app remains usable. This is usually a temporary "
+            "database connection timeout or missing DATABASE_URL, not lost order or edition data."
+        )
+        with st.expander("Technical detail", expanded=False):
+            st.exception(error)
+
+
+@st.cache_data(ttl=SUPABASE_PAGE_CACHE_TTL_SECONDS, show_spinner=False)
+def cached_supabase_sync_state(cache_version):
+    return supabase_backend.get_sync_state()
+
+
+@st.cache_data(ttl=SUPABASE_PAGE_CACHE_TTL_SECONDS, show_spinner=False)
+def cached_supabase_limited_products(search, limit, cache_version):
+    return supabase_backend.list_edition_products(search=search, limit=int(limit))
+
+
+@st.cache_data(ttl=SUPABASE_PAGE_CACHE_TTL_SECONDS, show_spinner=False)
+def cached_supabase_product_asset_map(handles, cache_version):
+    return supabase_backend.get_product_asset_map(list(handles or ()))
+
+
+@st.cache_data(ttl=SUPABASE_PAGE_CACHE_TTL_SECONDS, show_spinner=False)
+def cached_supabase_order_summary(cache_version):
+    return supabase_backend.get_order_summary()
+
+
+@st.cache_data(ttl=SUPABASE_PAGE_CACHE_TTL_SECONDS, show_spinner=False)
+def cached_supabase_order_summaries(search, sort, status_filter, page_size, cache_version):
+    page_size = min(int(page_size or 60), 100)
+    fetch_limit = min(max(page_size * 3, page_size), 450)
+    while True:
+        raw_rows = supabase_backend.list_orders(
+            search=search,
+            sort=sort,
+            status_filter=status_filter,
+            limit=fetch_limit,
+        )
+        order_summaries = _group_supabase_order_rows(raw_rows)
+        if len(order_summaries) >= page_size or fetch_limit >= 450 or len(raw_rows) < fetch_limit:
+            return order_summaries[:page_size]
+        fetch_limit = min(fetch_limit * 2, 450)
 
 
 def render_local_cache_notice():
@@ -2391,6 +2490,8 @@ def render_supabase_limited_edition_csv_import(uploaded_csv):
             )
             if result.get("errors"):
                 st.session_state.supabase_limited_warning = "First CSV import issue: " + result["errors"][0]
+            bump_supabase_cache_version("limited", "sync-state")
+            st.session_state["supabase-limited-data-loaded"] = True
             st.rerun()
         except Exception as error:
             st.error("Limited Edition CSV import failed.")
@@ -2400,12 +2501,6 @@ def render_supabase_limited_edition_csv_import(uploaded_csv):
 def render_supabase_limited_editions_page():
     st.title("Limited Editions")
     st.caption("Supabase is the source of truth for edition numbers. Shopify remains the product/order source.")
-    try:
-        supabase_backend.ensure_schema()
-    except Exception as error:
-        st.error("Could not connect to Supabase using DATABASE_URL.")
-        st.exception(error)
-        return
 
     notice = st.session_state.pop("supabase_limited_notice", None)
     if notice:
@@ -2415,17 +2510,18 @@ def render_supabase_limited_editions_page():
         st.warning(warning)
 
     config = shopify_sync.get_config()
+    if not st.session_state.get("supabase-limited-defaults-v3-applied"):
+        st.session_state["supabase-limited-row-limit"] = 60
+        st.session_state.setdefault("supabase-limited-data-loaded", False)
+        st.session_state["supabase-limited-defaults-v3-applied"] = True
+
     search = st.text_input(
         "Search products",
         placeholder="Search product title or Shopify handle",
         key="supabase-limited-search",
         label_visibility="collapsed",
     )
-    try:
-        sync_state = supabase_backend.get_sync_state()
-    except Exception:
-        sync_state = {}
-    actions = st.columns([1.15, 1.15, 1, 1.0])
+    actions = st.columns([1.05, 1.05, 0.95, 0.7, 0.95])
     if actions[0].button("Sync Product Updates", type="primary", disabled=not config["configured"], use_container_width=True):
         progress = st.progress(0, text="Checking Shopify product updates...")
         try:
@@ -2451,10 +2547,12 @@ def render_supabase_limited_editions_page():
                 f"Updated {result.get('metafields_synced', 0)} Shopify edition display records."
                 f"{warning_suffix}"
             )
+            bump_supabase_cache_version("limited", "sync-state")
+            st.session_state["supabase-limited-data-loaded"] = True
             st.rerun()
         except Exception as error:
             progress.empty()
-            st.error("Shopify product sync failed. Open Developer -> Developer Tools -> Shopify Diagnostics.")
+            render_supabase_load_warning("Shopify product sync", error, "limited-sync")
             supabase_backend.log_app_error(
                 "limited_editions_product_sync_failed",
                 str(error),
@@ -2465,30 +2563,75 @@ def render_supabase_limited_editions_page():
         type=["csv"],
         key="supabase-limited-edition-csv-upload",
     )
-    last_product_sync = sync_state.get("last_successful_product_sync_at")
+    load_clicked = actions[2].button("Load / Refresh", use_container_width=True)
+    row_limit = actions[3].selectbox(
+        "Rows",
+        (60, 100, 200, 300),
+        key="supabase-limited-row-limit",
+    )
+    actions[4].caption("Fast mode")
+    actions[4].caption("Products load only when requested.")
 
-    try:
-        products = supabase_backend.list_edition_products(search=search, limit=1000)
-        product_handles = [item.get("shopify_handle") for item in products if item.get("shopify_handle")]
-        asset_map = supabase_backend.get_product_asset_map()
-    except Exception as error:
-        st.error("Could not load edition products from Supabase.")
-        st.exception(error)
+    if load_clicked:
+        st.session_state["supabase-limited-applied-search"] = search
+        st.session_state["supabase-limited-applied-row-limit"] = int(row_limit)
+        bump_supabase_cache_version("limited", "sync-state")
+        st.session_state["supabase-limited-data-loaded"] = True
+
+    render_supabase_limited_edition_csv_import(uploaded_csv)
+
+    if not st.session_state.get("supabase-limited-data-loaded"):
+        if render_fast_load_prompt(
+            "Edition data is lazy loaded",
+            "The page controls are ready. Click once to load the current product rows; after that, the list is cached briefly so reruns stay fast.",
+            "Load edition products",
+            "supabase-limited-first-load",
+        ):
+            st.session_state["supabase-limited-applied-search"] = search
+            st.session_state["supabase-limited-applied-row-limit"] = int(row_limit)
+            st.session_state["supabase-limited-data-loaded"] = True
+            st.rerun()
         return
 
-    actions[2].download_button(
-        "Export CSV",
-        data=supabase_backend.export_products_csv(products),
+    applied_search = st.session_state.get("supabase-limited-applied-search", search)
+    applied_row_limit = int(st.session_state.get("supabase-limited-applied-row-limit", row_limit))
+    if applied_search != search or applied_row_limit != int(row_limit):
+        st.caption("Filters changed. Click Load / Refresh to apply without querying on every edit.")
+
+    try:
+        sync_state = cached_supabase_sync_state(supabase_cache_version("sync-state"))
+        last_product_sync = sync_state.get("last_successful_product_sync_at")
+    except Exception:
+        last_product_sync = ""
+
+    try:
+        with st.spinner("Loading edition products..."):
+            cache_version = supabase_cache_version("limited")
+            products = cached_supabase_limited_products(applied_search, applied_row_limit, cache_version)
+            product_handles = tuple(
+                item.get("shopify_handle") for item in products if item.get("shopify_handle")
+            )
+            asset_map = cached_supabase_product_asset_map(product_handles, cache_version)
+    except Exception as error:
+        render_supabase_load_warning("Edition products", error, "limited-products")
+        supabase_backend.log_app_error("limited_editions_load_failed", str(error), {"source": "limited_editions_page"})
+        return
+
+    loaded_columns = st.columns([1.0, 1.0, 1.4])
+    loaded_columns[0].download_button(
+        "Export shown rows",
+        data=build_supabase_products_csv(products, asset_map),
         file_name="sports-cave-supabase-limited-editions.csv",
         mime="text/csv",
         use_container_width=True,
     )
-    actions[3].caption(f"{len(products)} products shown")
-    actions[3].caption(
-        "Last sync: " + (format_updated_at(last_product_sync) if last_product_sync else "Never")
+    loaded_columns[1].caption(f"{len(products)} products shown")
+    loaded_columns[1].caption(
+        "Last sync: " + (format_updated_at(last_product_sync) if last_product_sync else "Load unavailable")
     )
-
-    render_supabase_limited_edition_csv_import(uploaded_csv)
+    loaded_columns[2].caption(
+        f"Cached for {SUPABASE_PAGE_CACHE_TTL_SECONDS}s. Use Load / Refresh after edits from another tab."
+    )
 
     st.subheader("Edition Products")
     st.caption("Edit the live Supabase counters directly. If Latest sent is changed, Next is saved as Latest + 1.")
@@ -2670,6 +2813,8 @@ def render_supabase_limited_editions_page():
                         asset_name="Prodigi",
                         is_primary=True,
                     )
+                bump_supabase_cache_version("limited")
+                st.session_state["supabase-limited-data-loaded"] = True
                 st.session_state.supabase_limited_notice = f"Saved edition settings for {product.get('product_title') or product_handle}."
                 st.rerun()
             except Exception as error:
@@ -3816,28 +3961,19 @@ def render_supabase_orders_page():
         "Edition numbers now lead the page. Each order stays on one row, but the product name and required edition number are split so the edition is easy to spot."
     )
     st.markdown(_orders_page_styles(), unsafe_allow_html=True)
-    try:
-        supabase_backend.ensure_schema()
-    except Exception as error:
-        st.error("Could not connect to Supabase using DATABASE_URL.")
-        supabase_backend.log_app_error("orders_page_schema_failed", str(error), {"source": "orders_page"})
-        return
 
     notice = st.session_state.pop("supabase_orders_notice", None)
     if notice:
         st.success(notice)
 
     config = shopify_sync.get_config()
-    try:
-        sync_state = supabase_backend.get_sync_state()
-    except Exception:
-        sync_state = {}
-    if not st.session_state.get("supabase-orders-defaults-v2-applied"):
+    if not st.session_state.get("supabase-orders-defaults-v3-applied"):
         st.session_state["supabase-orders-sort"] = "Date newest"
         st.session_state["supabase-orders-page-size"] = 60
-        st.session_state["supabase-orders-defaults-v2-applied"] = True
+        st.session_state.setdefault("supabase-orders-data-loaded", False)
+        st.session_state["supabase-orders-defaults-v3-applied"] = True
 
-    top_toolbar = st.columns([0.95, 1.75])
+    top_toolbar = st.columns([0.82, 0.82, 1.9])
     if top_toolbar[0].button("Sync latest orders", disabled=not config["configured"], type="primary", use_container_width=True):
         sync_message = st.empty()
         sync_message.info("Checking new and updated paid Shopify orders...")
@@ -3890,13 +4026,16 @@ def render_supabase_orders_page():
                 f"Certificates generate automatically for new assignments."
                 f"{certificate_suffix}{historical_suffix}{repair_suffix}{warning_suffix}"
             )
+            bump_supabase_cache_version("orders", "order-summary", "sync-state")
+            st.session_state["supabase-orders-data-loaded"] = True
             st.rerun()
         except Exception as error:
             sync_message.empty()
-            st.error("Shopify sync failed. Open Developer -> Developer Tools -> Shopify Diagnostics.")
+            render_supabase_load_warning("Shopify order sync", error, "orders-sync")
             supabase_backend.log_app_error("orders_page_sync_failed", str(error), {"source": "orders_page"})
 
-    search = top_toolbar[1].text_input(
+    load_clicked = top_toolbar[1].button("Load / Refresh", use_container_width=True)
+    search = top_toolbar[2].text_input(
         "Search orders",
         placeholder="Search order, customer, email, handle, SKU, or edition",
         key="supabase-orders-search",
@@ -3920,19 +4059,67 @@ def render_supabase_orders_page():
         index=0,
         key="supabase-orders-page-size",
     )
-    last_order_sync = sync_state.get("last_successful_order_sync_at")
-    tracking_start = sync_state.get("edition_tracking_start_at")
+
+    if load_clicked:
+        st.session_state["supabase-orders-applied-search"] = search
+        st.session_state["supabase-orders-applied-status-filter"] = status_filter
+        st.session_state["supabase-orders-applied-sort"] = sort
+        st.session_state["supabase-orders-applied-page-size"] = int(page_size)
+        bump_supabase_cache_version("orders", "order-summary", "sync-state")
+        st.session_state["supabase-orders-data-loaded"] = True
+
     if not config["configured"]:
         st.caption("Shopify connection missing. Open Developer -> Developer Tools -> Shopify Diagnostics.")
-    else:
+    elif st.session_state.get("supabase-orders-data-loaded"):
+        try:
+            sync_state = cached_supabase_sync_state(supabase_cache_version("sync-state"))
+            last_order_sync = sync_state.get("last_successful_order_sync_at")
+            tracking_start = sync_state.get("edition_tracking_start_at")
+        except Exception:
+            last_order_sync = ""
+            tracking_start = ""
         st.caption(
             "Last synced: "
             + (format_updated_at(last_order_sync) if last_order_sync else "Never")
             + "  |  Tracking start: "
             + (format_updated_at(tracking_start) if tracking_start else "Not set")
         )
+    else:
+        st.caption("Fast mode: orders load only when you click Load / Refresh or Sync latest orders.")
 
-    summary = supabase_backend.get_order_summary()
+    if not st.session_state.get("supabase-orders-data-loaded"):
+        if render_fast_load_prompt(
+            "Orders are lazy loaded",
+            "The controls are ready immediately. Click once to load the current order table; reruns use a short cache so the page stays fast.",
+            "Load orders",
+            "supabase-orders-first-load",
+        ):
+            st.session_state["supabase-orders-applied-search"] = search
+            st.session_state["supabase-orders-applied-status-filter"] = status_filter
+            st.session_state["supabase-orders-applied-sort"] = sort
+            st.session_state["supabase-orders-applied-page-size"] = int(page_size)
+            st.session_state["supabase-orders-data-loaded"] = True
+            st.rerun()
+        return
+
+    applied_search = st.session_state.get("supabase-orders-applied-search", search)
+    applied_status_filter = st.session_state.get("supabase-orders-applied-status-filter", status_filter)
+    applied_sort = st.session_state.get("supabase-orders-applied-sort", sort)
+    applied_page_size = int(st.session_state.get("supabase-orders-applied-page-size", page_size))
+    if (
+        applied_search != search
+        or applied_status_filter != status_filter
+        or applied_sort != sort
+        or applied_page_size != int(page_size)
+    ):
+        st.caption("Filters changed. Click Load / Refresh to apply without querying on every edit.")
+
+    try:
+        summary = cached_supabase_order_summary(supabase_cache_version("order-summary"))
+    except Exception as error:
+        render_supabase_load_warning("Order summary", error, "orders-summary")
+        supabase_backend.log_app_error("orders_page_summary_failed", str(error), {"source": "orders_page"})
+        summary = {}
     st.caption(
         f"{summary.get('orders_synced', 0)} cached | "
         f"{summary.get('needs_edition', 0)} need editions | "
@@ -3940,26 +4127,18 @@ def render_supabase_orders_page():
         f"{summary.get('assigned_today', 0)} assigned today"
     )
 
-    page_size = min(int(page_size or 60), 100)
-    fetch_limit = min(max(page_size * 4, page_size), 800)
+    page_size = min(int(applied_page_size or 60), 100)
     try:
-        raw_rows = []
-        order_summaries = []
-        while True:
-            raw_rows = supabase_backend.list_orders(
-                search=search,
-                sort=sort,
-                status_filter=status_filter,
-                limit=fetch_limit,
+        with st.spinner("Loading orders..."):
+            order_summaries = cached_supabase_order_summaries(
+                search=applied_search,
+                sort=applied_sort,
+                status_filter=applied_status_filter,
+                page_size=page_size,
+                cache_version=supabase_cache_version("orders"),
             )
-            order_summaries = _group_supabase_order_rows(raw_rows)
-            if len(order_summaries) >= page_size or fetch_limit >= 800 or len(raw_rows) < fetch_limit:
-                order_summaries = order_summaries[:page_size]
-                break
-            fetch_limit = min(fetch_limit * 2, 800)
     except Exception as error:
-        st.error("Could not load orders from Supabase.")
-        st.caption("Open Developer -> App Errors if this keeps happening.")
+        render_supabase_load_warning("Orders", error, "orders-list")
         supabase_backend.log_app_error("orders_page_load_failed", str(error), {"source": "orders_page"})
         return
 
