@@ -769,10 +769,6 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
         firstName
         lastName
       }
-      shippingLine {
-        title
-        code
-      }
       billingAddress {
         name
         firstName

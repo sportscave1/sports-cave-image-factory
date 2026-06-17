@@ -775,26 +775,6 @@ def _ensure_schema_uncached():
                         f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
                     )
 
-            if table_exists(cur, "certificates") and column_exists(cur, "certificates", "edition_order_id"):
-                cur.execute(
-                    """
-                    SELECT data_type
-                    FROM information_schema.columns
-                    WHERE table_schema='public'
-                      AND table_name='certificates'
-                      AND column_name='edition_order_id'
-                    """
-                )
-                certificate_edition_order_type = (cur.fetchone() or {}).get("data_type")
-                if certificate_edition_order_type != "text":
-                    cur.execute(
-                        """
-                        ALTER TABLE certificates
-                        ALTER COLUMN edition_order_id TYPE TEXT
-                        USING edition_order_id::text
-                        """
-                    )
-
             if table_exists(cur, "app_errors"):
                 if column_exists(cur, "app_errors", "source"):
                     cur.execute(

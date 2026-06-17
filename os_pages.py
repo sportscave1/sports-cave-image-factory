@@ -3970,10 +3970,9 @@ def render_supabase_orders_page():
     if not st.session_state.get("supabase-orders-defaults-v3-applied"):
         st.session_state["supabase-orders-sort"] = "Date newest"
         st.session_state["supabase-orders-page-size"] = 60
-        st.session_state.setdefault("supabase-orders-data-loaded", False)
         st.session_state["supabase-orders-defaults-v3-applied"] = True
 
-    top_toolbar = st.columns([0.82, 0.82, 1.9])
+    top_toolbar = st.columns([0.85, 1.9])
     if top_toolbar[0].button("Sync latest orders", disabled=not config["configured"], type="primary", use_container_width=True):
         sync_message = st.empty()
         sync_message.info("Checking new and updated paid Shopify orders...")
@@ -4027,15 +4026,13 @@ def render_supabase_orders_page():
                 f"{certificate_suffix}{historical_suffix}{repair_suffix}{warning_suffix}"
             )
             bump_supabase_cache_version("orders", "order-summary", "sync-state")
-            st.session_state["supabase-orders-data-loaded"] = True
             st.rerun()
         except Exception as error:
             sync_message.empty()
             render_supabase_load_warning("Shopify order sync", error, "orders-sync")
             supabase_backend.log_app_error("orders_page_sync_failed", str(error), {"source": "orders_page"})
 
-    load_clicked = top_toolbar[1].button("Load / Refresh", use_container_width=True)
-    search = top_toolbar[2].text_input(
+    search = top_toolbar[1].text_input(
         "Search orders",
         placeholder="Search order, customer, email, handle, SKU, or edition",
         key="supabase-orders-search",
@@ -4060,17 +4057,9 @@ def render_supabase_orders_page():
         key="supabase-orders-page-size",
     )
 
-    if load_clicked:
-        st.session_state["supabase-orders-applied-search"] = search
-        st.session_state["supabase-orders-applied-status-filter"] = status_filter
-        st.session_state["supabase-orders-applied-sort"] = sort
-        st.session_state["supabase-orders-applied-page-size"] = int(page_size)
-        bump_supabase_cache_version("orders", "order-summary", "sync-state")
-        st.session_state["supabase-orders-data-loaded"] = True
-
     if not config["configured"]:
         st.caption("Shopify connection missing. Open Developer -> Developer Tools -> Shopify Diagnostics.")
-    elif st.session_state.get("supabase-orders-data-loaded"):
+    else:
         try:
             sync_state = cached_supabase_sync_state(supabase_cache_version("sync-state"))
             last_order_sync = sync_state.get("last_successful_order_sync_at")
@@ -4084,35 +4073,6 @@ def render_supabase_orders_page():
             + "  |  Tracking start: "
             + (format_updated_at(tracking_start) if tracking_start else "Not set")
         )
-    else:
-        st.caption("Fast mode: orders load only when you click Load / Refresh or Sync latest orders.")
-
-    if not st.session_state.get("supabase-orders-data-loaded"):
-        if render_fast_load_prompt(
-            "Orders are lazy loaded",
-            "The controls are ready immediately. Click once to load the current order table; reruns use a short cache so the page stays fast.",
-            "Load orders",
-            "supabase-orders-first-load",
-        ):
-            st.session_state["supabase-orders-applied-search"] = search
-            st.session_state["supabase-orders-applied-status-filter"] = status_filter
-            st.session_state["supabase-orders-applied-sort"] = sort
-            st.session_state["supabase-orders-applied-page-size"] = int(page_size)
-            st.session_state["supabase-orders-data-loaded"] = True
-            st.rerun()
-        return
-
-    applied_search = st.session_state.get("supabase-orders-applied-search", search)
-    applied_status_filter = st.session_state.get("supabase-orders-applied-status-filter", status_filter)
-    applied_sort = st.session_state.get("supabase-orders-applied-sort", sort)
-    applied_page_size = int(st.session_state.get("supabase-orders-applied-page-size", page_size))
-    if (
-        applied_search != search
-        or applied_status_filter != status_filter
-        or applied_sort != sort
-        or applied_page_size != int(page_size)
-    ):
-        st.caption("Filters changed. Click Load / Refresh to apply without querying on every edit.")
 
     try:
         summary = cached_supabase_order_summary(supabase_cache_version("order-summary"))
@@ -4127,13 +4087,13 @@ def render_supabase_orders_page():
         f"{summary.get('assigned_today', 0)} assigned today"
     )
 
-    page_size = min(int(applied_page_size or 60), 100)
+    page_size = min(int(page_size or 60), 100)
     try:
         with st.spinner("Loading orders..."):
             order_summaries = cached_supabase_order_summaries(
-                search=applied_search,
-                sort=applied_sort,
-                status_filter=applied_status_filter,
+                search=search,
+                sort=sort,
+                status_filter=status_filter,
                 page_size=page_size,
                 cache_version=supabase_cache_version("orders"),
             )
