@@ -2305,109 +2305,96 @@ def apply_supabase_edition_editor_changes(products, edited_rows):
     return {"updated": updated, "unchanged": unchanged, "errors": errors}
 
 
-def render_supabase_limited_edition_csv_import():
-    with st.expander("Import Limited Edition CSV", expanded=False):
-        st.caption(
-            "Manual correction tool. Upload a CSV only when edition totals, next edition numbers, "
-            "or historical dispatched editions need to be corrected in Supabase."
-        )
-        uploaded_csv = st.file_uploader(
-            "Limited Edition CSV",
-            type=["csv"],
-            key="supabase-limited-edition-csv-upload",
-            label_visibility="collapsed",
-        )
-        if uploaded_csv is None:
-            st.info(
-                "Accepted columns include Shopify Handle, Product Title, Edition No., Edition Total, "
-                "Next Edition, Active, Customer Name, Frame, Size, and Shopify Order #."
-            )
-            return
+def render_supabase_limited_edition_csv_import(uploaded_csv):
+    if uploaded_csv is None:
+        return
+    st.markdown("**CSV import preview**")
+    st.caption(
+        "Matched rows update Supabase edition fields. Missing CSV products are not deleted."
+    )
+    try:
+        csv_rows = parse_limited_edition_supabase_csv(uploaded_csv)
+    except Exception as error:
+        st.error("Could not read the CSV.")
+        st.exception(error)
+        return
 
-        try:
-            csv_rows = parse_limited_edition_supabase_csv(uploaded_csv)
-        except Exception as error:
-            st.error("Could not read the CSV.")
-            st.exception(error)
-            return
+    if not csv_rows:
+        st.warning("The CSV has headers but no data rows.")
+        return
 
-        if not csv_rows:
-            st.warning("The CSV has headers but no data rows.")
-            return
+    try:
+        preview = supabase_backend.preview_limited_edition_import_rows(csv_rows)
+    except Exception as error:
+        st.error("Could not preview this CSV.")
+        st.exception(error)
+        return
 
-        try:
-            preview = supabase_backend.preview_limited_edition_import_rows(csv_rows)
-        except Exception as error:
-            st.error("Could not preview this CSV.")
-            st.exception(error)
-            return
+    preview_columns = st.columns(5)
+    preview_columns[0].metric("Rows read", preview["rows_read"])
+    preview_columns[1].metric("Matched", len(preview["matched"]))
+    preview_columns[2].metric("Changes", len(preview["changes"]))
+    preview_columns[3].metric("Createable", len(preview["createable"]))
+    preview_columns[4].metric("Unmatched", len(preview["unmatched"]))
 
-        preview_columns = st.columns(5)
-        preview_columns[0].metric("Rows read", preview["rows_read"])
-        preview_columns[1].metric("Matched", len(preview["matched"]))
-        preview_columns[2].metric("Changes", len(preview["changes"]))
-        preview_columns[3].metric("Createable", len(preview["createable"]))
-        preview_columns[4].metric("Unmatched", len(preview["unmatched"]))
-
-        if preview["changes"]:
-            st.markdown("**Preview changes before applying**")
-            st.dataframe(
-                [
-                    {
-                        "Line": item["line"],
-                        "Product": item["product_title"],
-                        "Handle": item["shopify_handle"],
-                        "Edition": f"{item['current_edition_name']} -> {item['new_edition_name']}",
-                        "Next": f"{item['current_next']} -> {item['new_next']}",
-                        "Total": f"{item['current_total']} -> {item['new_total']}",
-                        "Status": f"{item['current_status']} -> {item['new_status']}",
-                    }
-                    for item in preview["changes"]
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-        else:
-            st.info("No counter changes found in the matched CSV rows.")
-
-        if preview["createable"]:
-            st.markdown("**Products found in Shopify sync but not edition tracking yet**")
-            st.dataframe(preview["createable"], use_container_width=True, hide_index=True)
-        if preview["unmatched"]:
-            st.markdown("**Unmatched rows**")
-            st.dataframe(preview["unmatched"], use_container_width=True, hide_index=True)
-
-        create_missing = st.checkbox(
-            "Create missing edition products only when they already exist in Shopify sync",
-            value=False,
-            key="supabase-limited-csv-create-missing",
-        )
-        confirmed = st.checkbox(
-            "I reviewed the preview and want to apply these edition tracker changes",
-            key="supabase-limited-csv-confirm-apply",
-        )
-        if st.button(
-            "Apply CSV Changes",
-            type="primary",
+    if preview["changes"]:
+        st.dataframe(
+            [
+                {
+                    "Line": item["line"],
+                    "Product": item["product_title"],
+                    "Handle": item["shopify_handle"],
+                    "Edition": f"{item['current_edition_name']} -> {item['new_edition_name']}",
+                    "Next": f"{item['current_next']} -> {item['new_next']}",
+                    "Total": f"{item['current_total']} -> {item['new_total']}",
+                    "Status": f"{item['current_status']} -> {item['new_status']}",
+                }
+                for item in preview["changes"]
+            ],
             use_container_width=True,
-            disabled=not confirmed,
-        ):
-            try:
-                result = supabase_backend.apply_limited_edition_import_rows(
-                    csv_rows,
-                    create_missing_from_shopify=create_missing,
-                )
-                st.session_state.supabase_limited_notice = (
-                    f"CSV import complete. Rows read: {result['rows_read']}. "
-                    f"Matched: {result['rows_matched']}. Created: {result['rows_created']}. "
-                    f"Updated: {result['rows_updated']}. Skipped: {result['rows_skipped']}."
-                )
-                if result.get("errors"):
-                    st.session_state.supabase_limited_warning = "First CSV import issue: " + result["errors"][0]
-                st.rerun()
-            except Exception as error:
-                st.error("Limited Edition CSV import failed.")
-                st.exception(error)
+            hide_index=True,
+        )
+    else:
+        st.info("No counter changes found in the matched CSV rows.")
+
+    if preview["createable"]:
+        st.markdown("**Products found in Shopify sync but not edition tracking yet**")
+        st.dataframe(preview["createable"], use_container_width=True, hide_index=True)
+    if preview["unmatched"]:
+        st.markdown("**Unmatched rows**")
+        st.dataframe(preview["unmatched"], use_container_width=True, hide_index=True)
+
+    create_missing = st.checkbox(
+        "Create missing edition products only when they already exist in Shopify sync",
+        value=False,
+        key="supabase-limited-csv-create-missing",
+    )
+    confirmed = st.checkbox(
+        "I reviewed the preview and want to apply these edition tracker changes",
+        key="supabase-limited-csv-confirm-apply",
+    )
+    if st.button(
+        "Apply CSV Changes",
+        type="primary",
+        use_container_width=True,
+        disabled=not confirmed,
+    ):
+        try:
+            result = supabase_backend.apply_limited_edition_import_rows(
+                csv_rows,
+                create_missing_from_shopify=create_missing,
+            )
+            st.session_state.supabase_limited_notice = (
+                f"CSV import complete. Rows read: {result['rows_read']}. "
+                f"Matched: {result['rows_matched']}. Created: {result['rows_created']}. "
+                f"Updated: {result['rows_updated']}. Skipped: {result['rows_skipped']}."
+            )
+            if result.get("errors"):
+                st.session_state.supabase_limited_warning = "First CSV import issue: " + result["errors"][0]
+            st.rerun()
+        except Exception as error:
+            st.error("Limited Edition CSV import failed.")
+            st.exception(error)
 
 
 def render_supabase_limited_editions_page():
@@ -2438,7 +2425,7 @@ def render_supabase_limited_editions_page():
         sync_state = supabase_backend.get_sync_state()
     except Exception:
         sync_state = {}
-    actions = st.columns([1.15, 1.45, 1, 1.35])
+    actions = st.columns([1.15, 1.15, 1, 1.0])
     if actions[0].button("Sync Product Updates", type="primary", disabled=not config["configured"], use_container_width=True):
         progress = st.progress(0, text="Checking Shopify product updates...")
         try:
@@ -2473,21 +2460,17 @@ def render_supabase_limited_editions_page():
                 str(error),
                 {"source": "limited_editions_page"},
             )
-    last_product_sync = sync_state.get("last_successful_product_sync_at")
-    actions[1].caption(
-        "Last product sync: "
-        + (format_updated_at(last_product_sync) if last_product_sync else "Never")
+    uploaded_csv = actions[1].file_uploader(
+        "Import CSV",
+        type=["csv"],
+        key="supabase-limited-edition-csv-upload",
     )
-    actions[1].caption("Shopify connection: " + ("Configured" if config["configured"] else "Missing"))
+    last_product_sync = sync_state.get("last_successful_product_sync_at")
 
     try:
         products = supabase_backend.list_edition_products(search=search, limit=1000)
         product_handles = [item.get("shopify_handle") for item in products if item.get("shopify_handle")]
-        psd_assets = supabase_backend.get_primary_psd_assets(product_handles)
-        asset_map = {
-            handle: {"psd_master_file": asset.get("asset_url") or asset.get("google_drive_file_url") or ""}
-            for handle, asset in psd_assets.items()
-        }
+        asset_map = supabase_backend.get_product_asset_map()
     except Exception as error:
         st.error("Could not load edition products from Supabase.")
         st.exception(error)
@@ -2501,322 +2484,14 @@ def render_supabase_limited_editions_page():
         use_container_width=True,
     )
     actions[3].caption(f"{len(products)} products shown")
-
-    render_supabase_limited_edition_csv_import()
-
-    metrics = st.columns(4)
-    metrics[0].metric("Products", len(products))
-    metrics[1].metric("Active", sum(1 for item in products if item.get("active")))
-    metrics[2].metric("Sold out", sum(1 for item in products if item.get("sold_out")))
-    metrics[3].metric("Remaining total", sum(int(item.get("remaining_editions") or 0) for item in products))
-
-    st.subheader("Edition Tracker")
-    st.caption(
-        "Edit the active edition run here. Latest sent saves as next edition number + 1. "
-        "To restart at #1/100, use Start New Edition Run instead of lowering this grid."
+    actions[3].caption(
+        "Last sync: " + (format_updated_at(last_product_sync) if last_product_sync else "Never")
     )
-    editor_rows = build_supabase_edition_editor_rows(products)
-    edited_rows = st.data_editor(
-        editor_rows,
-        key="supabase-edition-tracker-grid",
-        use_container_width=True,
-        hide_index=True,
-        num_rows="fixed",
-        disabled=[
-            "Product title",
-            "Shopify handle",
-            "Shopify product ID",
-            "Remaining",
-            "Last updated",
-        ],
-        column_config={
-            "Product title": st.column_config.TextColumn(width="large"),
-            "Edition name": st.column_config.TextColumn(width="medium"),
-            "Latest sent": st.column_config.NumberColumn(min_value=0, step=1),
-            "Next edition number": st.column_config.NumberColumn(min_value=1, step=1),
-            "Total editions": st.column_config.NumberColumn(min_value=1, step=1),
-            "Remaining": st.column_config.NumberColumn(min_value=0, step=1),
-            "Status": st.column_config.SelectboxColumn(
-                options=["active", "inactive", "sold_out"],
-                width="small",
-            ),
-        },
-    )
-    if hasattr(edited_rows, "to_dict"):
-        edited_records = edited_rows.to_dict("records")
-    else:
-        edited_records = list(edited_rows or [])
-    products_by_handle = {item.get("shopify_handle"): item for item in products if item.get("shopify_handle")}
-    lowering_changes = []
-    validation_errors = []
-    for row in edited_records:
-        handle = str(row.get("Shopify handle") or "").strip()
-        product = products_by_handle.get(handle)
-        if not product:
-            continue
-        old_latest = int(product.get("latest_sent") if product.get("latest_sent") is not None else max(int(product.get("next_edition_number") or 1) - 1, 0))
-        old_next = int(product.get("next_edition_number") or 1)
-        try:
-            new_latest = int(row.get("Latest sent") if row.get("Latest sent") is not None else old_latest)
-            new_next_from_grid = int(row.get("Next edition number") if row.get("Next edition number") is not None else old_next)
-            new_total = int(row.get("Total editions") if row.get("Total editions") is not None else product.get("edition_total") or 100)
-        except (TypeError, ValueError):
-            validation_errors.append(f"{handle}: numbers must be whole numbers.")
-            continue
-        proposed_next = new_latest + 1 if new_latest != old_latest else new_next_from_grid
-        if proposed_next < old_next:
-            lowering_changes.append(f"{handle}: {old_next} -> {proposed_next}")
-        if proposed_next < 1:
-            validation_errors.append(f"{handle}: next edition number cannot be below 1.")
-        if new_total < 1:
-            validation_errors.append(f"{handle}: total editions cannot be below 1.")
-        if new_total - (proposed_next - 1) < 0 and str(row.get("Status") or "").lower() != "sold_out":
-            validation_errors.append(f"{handle}: remaining would go below 0 unless status is sold_out.")
 
-    for validation_error in validation_errors[:5]:
-        st.error(validation_error)
-    lowering_confirmed = True
-    if lowering_changes:
-        st.warning(
-            "You are lowering edition counters. This is blocked below active-run history and should not be used "
-            "to restart a product at #1/100."
-        )
-        st.caption("; ".join(lowering_changes[:6]))
-        lowering_confirmed = st.checkbox(
-            "I understand this lowers the next edition number for the current active run",
-            key="supabase-edition-grid-confirm-lowering",
-        )
-    save_columns = st.columns([1.1, 1.1, 3])
-    if save_columns[0].button(
-        "Save Tracker Changes",
-        type="primary",
-        use_container_width=True,
-        disabled=bool(validation_errors) or (bool(lowering_changes) and not lowering_confirmed),
-    ):
-        result = apply_supabase_edition_editor_changes(products, edited_records)
-        if result["errors"]:
-            st.session_state.supabase_limited_warning = "First save issue: " + result["errors"][0]
-        st.session_state.supabase_limited_notice = (
-            f"Saved {result['updated']} edition tracker row"
-            f"{'s' if result['updated'] != 1 else ''}. {result['unchanged']} unchanged."
-        )
-        st.rerun()
-    if save_columns[1].button("Refresh", use_container_width=True):
-        st.rerun()
-
-    pending_new_run_handle = st.session_state.get("supabase_new_run_handle", "")
-    with st.expander("Start New Edition Run", expanded=bool(pending_new_run_handle)):
-        st.caption(
-            "Use this when a product legitimately restarts at #1/100. The current run is archived; "
-            "old orders and certificates are not deleted."
-        )
-        new_run_options = [
-            f"{item.get('product_title') or item.get('shopify_handle')} | {item.get('shopify_handle')}"
-            for item in products
-            if item.get("shopify_handle")
-        ]
-        preset_handle = st.session_state.pop("supabase_new_run_handle", "")
-        default_index = 0
-        if preset_handle:
-            for index, option in enumerate(new_run_options):
-                if option.rsplit("|", 1)[-1].strip() == preset_handle:
-                    default_index = index
-                    break
-        if new_run_options:
-            selected_new_run = st.selectbox(
-                "Product",
-                new_run_options,
-                index=default_index,
-                key="supabase-new-edition-run-product",
-            )
-            selected_new_run_handle = selected_new_run.rsplit("|", 1)[-1].strip()
-            run_columns = st.columns([1.4, 0.8, 2])
-            new_run_name = run_columns[0].text_input(
-                "Edition name",
-                value="Original Edition",
-                key=f"supabase-new-run-name-{selected_new_run_handle}",
-            )
-            new_run_total = run_columns[1].number_input(
-                "Total",
-                min_value=1,
-                value=100,
-                step=1,
-                key=f"supabase-new-run-total-{selected_new_run_handle}",
-            )
-            new_run_notes = run_columns[2].text_input(
-                "Notes",
-                placeholder="Example: 2026 Edition",
-                key=f"supabase-new-run-notes-{selected_new_run_handle}",
-            )
-            confirm_new_run = st.checkbox(
-                "Archive the current run and start this product again at #1",
-                key=f"supabase-new-run-confirm-{selected_new_run_handle}",
-            )
-            if st.button(
-                "Start New Edition Run",
-                type="primary",
-                disabled=not confirm_new_run,
-                use_container_width=True,
-                key=f"supabase-new-run-submit-{selected_new_run_handle}",
-            ):
-                try:
-                    supabase_backend.start_new_edition_run(
-                        selected_new_run_handle,
-                        edition_name=new_run_name,
-                        edition_total=new_run_total,
-                        notes=new_run_notes,
-                    )
-                    st.session_state.supabase_limited_notice = (
-                        f"Started new edition run for {selected_new_run_handle} at #1/{new_run_total}."
-                    )
-                    st.rerun()
-                except Exception as error:
-                    st.error("Could not start a new edition run.")
-                    st.exception(error)
-
-    with st.expander("Edition Adjustment Audit Log", expanded=False):
-        try:
-            adjustments = supabase_backend.list_edition_adjustments(search=search, limit=100)
-        except Exception as error:
-            st.error("Could not load edition adjustment audit log.")
-            st.exception(error)
-            adjustments = []
-        if adjustments:
-            st.dataframe(
-                [
-                    {
-                        "Changed at": format_updated_at(item.get("created_at")),
-                        "Product": item.get("product_title") or item.get("shopify_handle"),
-                        "Handle": item.get("shopify_handle"),
-                        "Edition run": item.get("edition_name") or "",
-                        "Next": f"{item.get('old_next_edition_number')} -> {item.get('new_next_edition_number')}",
-                        "Total": f"{item.get('old_edition_total')} -> {item.get('new_edition_total')}",
-                        "Reason": item.get("reason") or "",
-                        "Source": item.get("source") or "",
-                    }
-                    for item in adjustments
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-        else:
-            st.caption("No manual edition adjustments recorded yet.")
-
-    with st.expander("Widget Status", expanded=False):
-        st.caption("Test one product's Supabase edition data, Shopify metafields, and storefront widget text.")
-        widget_code, widget_snippet_path = load_edition_widget_liquid()
-        st.caption("Paste this into Shopify -> Online Store -> Theme Editor -> Product page -> Custom Liquid.")
-        if widget_code:
-            copy_columns = st.columns([1.2, 1.2, 2.6])
-            with copy_columns[0]:
-                render_copy_text_button(
-                    widget_code,
-                    "limited-editions-copy-widget-html",
-                    "Copy Widget HTML",
-                )
-            show_widget_html = copy_columns[1].checkbox(
-                "View Widget HTML",
-                key="limited-editions-view-widget-html",
-            )
-            copy_columns[2].caption(f"Source: {widget_snippet_path.as_posix()}")
-            if show_widget_html:
-                st.text_area(
-                    "Shopify Custom Liquid widget",
-                    value=widget_code,
-                    height=340,
-                    help="If the copy button is blocked by the browser, select this code and copy it manually.",
-                )
-        else:
-            st.warning("Widget snippet file is missing from the repo.")
-        if not products:
-            st.info("Sync Shopify products first.")
-        else:
-            status_rows = []
-            for item in products[:200]:
-                display_text = (
-                    item.get("edition_display_text")
-                    or supabase_backend.calculate_product_edition_metafield_values(item).get("edition_display_text")
-                )
-                status_rows.append(
-                    {
-                        "Product": item.get("product_title") or item.get("shopify_handle"),
-                        "Handle": item.get("shopify_handle"),
-                        "Shopify product synced": "Yes" if item.get("shopify_product_id") or item.get("shopify_product_gid") else "No",
-                        "Product metafields synced": item.get("metafields_sync_status") or "Never Synced",
-                        "Widget text": display_text,
-                        "Last sync": format_updated_at(item.get("metafields_synced_at")),
-                    }
-                )
-            st.dataframe(status_rows, use_container_width=True, hide_index=True)
-            widget_options = [
-                f"{item.get('product_title') or item.get('shopify_handle')} | {item.get('shopify_handle')}"
-                for item in products
-                if item.get("shopify_handle")
-            ]
-            selected_widget = st.selectbox(
-                "Product",
-                widget_options,
-                key="supabase-widget-status-product",
-            )
-            selected_widget_handle = selected_widget.rsplit("|", 1)[-1].strip()
-            try:
-                payload = supabase_backend.get_product_edition_metafield_payload(selected_widget_handle)
-            except Exception as error:
-                st.error("Could not calculate widget payload.")
-                st.exception(error)
-                payload = None
-            if payload:
-                status_columns = st.columns(4)
-                status_columns[0].metric("Shopify product synced", "Yes" if payload.get("shopify_product_id") else "No")
-                status_columns[1].metric(
-                    "Metafield sync status",
-                    "Synced" if payload.get("metafields_sync_status") == "Synced" else payload.get("metafields_sync_status") or "Never",
-                )
-                status_columns[2].metric("Next edition", payload.get("next_edition_number") or 1)
-                status_columns[3].metric("Remaining", payload.get("remaining_count") or 0)
-                st.caption("Last synced: " + format_updated_at(payload.get("metafields_synced_at")))
-                st.markdown("**Widget Preview Text for selected product**")
-                st.code(payload.get("edition_display_text") or "Numbered Edition of 100", language="text")
-                action_columns = st.columns([1, 1, 2])
-                if action_columns[0].button(
-                    "Sync This Product",
-                    disabled=not config["configured"],
-                    key="supabase-widget-sync-one",
-                    use_container_width=True,
-                ):
-                    try:
-                        result = supabase_backend.sync_product_edition_metafields(
-                            selected_widget_handle,
-                            config=config,
-                        )
-                        st.success(
-                            f"Synced {result.get('count', 0)} metafields for {selected_widget_handle}."
-                        )
-                    except Exception as error:
-                        st.error("Could not sync this product to Shopify.")
-                        st.exception(error)
-                if action_columns[1].button(
-                    "Query Shopify",
-                    disabled=not config["configured"],
-                    key="supabase-widget-query-one",
-                    use_container_width=True,
-                ):
-                    try:
-                        remote = shopify_sync.fetch_metafields(
-                            payload["shopify_product_id"],
-                            namespace="sports_cave",
-                            config=config,
-                        )
-                        st.dataframe(remote["metafields"], use_container_width=True, hide_index=True)
-                    except Exception as error:
-                        st.error("Could not query Shopify product metafields.")
-                        st.exception(error)
-                if payload.get("online_store_url"):
-                    action_columns[2].link_button("Open Live Product", payload["online_store_url"], use_container_width=True)
-                elif payload.get("admin_url"):
-                    action_columns[2].link_button("Open Shopify Product", payload["admin_url"], use_container_width=True)
+    render_supabase_limited_edition_csv_import(uploaded_csv)
 
     st.subheader("Edition Products")
+    st.caption("Edit the live Supabase counters directly. If Latest sent is changed, Next is saved as Latest + 1.")
     if not products:
         st.info("No edition products found yet. Click Sync Products.")
         return
@@ -2838,58 +2513,122 @@ def render_supabase_limited_editions_page():
             font-weight: 800;
             letter-spacing: 0.04em;
         }
+        .sc-limited-product-title {
+            color: #F8FAFC;
+            font-weight: 800;
+            line-height: 1.2;
+        }
+        .sc-limited-handle {
+            color: #A6A19A;
+            font-size: 0.78rem;
+            line-height: 1.25;
+            word-break: break-word;
+        }
         div[data-testid="stButton"] button,
         div[data-testid="stDownloadButton"] button,
         div[data-testid="stLinkButton"] a {
             white-space: nowrap !important;
         }
+        div[data-testid="stNumberInput"] input,
+        div[data-testid="stTextInput"] input {
+            min-height: 2.45rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    header = st.columns([0.55, 2.0, 1.15, 0.6, 0.6, 0.75, 0.75, 0.7, 0.75, 0.85, 0.95, 0.85])
+    header = st.columns([0.52, 2.0, 1.05, 0.62, 0.72, 0.62, 0.72, 0.78, 1.2, 1.2, 0.82, 0.7])
     for column, label in zip(
         header,
-        ("Art", "Product", "Handle", "Total", "Next", "Last", "Remaining", "Active", "Sold Out", "PSD", "Links", "New Run"),
+        ("Art", "Product", "Handle", "Total", "Latest", "Next", "Remaining", "Status", "PSD", "Prodigi", "Shopify", "Save"),
     ):
         column.markdown(f"**{label}**")
-    for product in products:
-        columns = st.columns([0.55, 2.0, 1.15, 0.6, 0.6, 0.75, 0.75, 0.7, 0.75, 0.85, 0.95, 0.85])
+    status_options = {
+        "active": "Active",
+        "inactive": "Inactive",
+        "sold_out": "Sold out",
+    }
+    for product_index, product in enumerate(products):
+        product_handle = product.get("shopify_handle") or ""
+        key_base = f"limited-row-{product_index}-{product_handle or 'missing'}"
+        product_assets = asset_map.get(product_handle) or {}
+        psd_url = product_assets.get("psd_master_file") or ""
+        prodigi_url = product_assets.get("prodigi_link") or ""
+        edition_total = max(int(product.get("edition_total") or 100), 1)
+        next_number = max(int(product.get("next_edition_number") or 1), 1)
+        latest_sent = max(int(product.get("latest_sent") if product.get("latest_sent") is not None else next_number - 1), 0)
+        current_status = str(product.get("status") or ("sold_out" if product.get("sold_out") else "active")).lower()
+        if current_status not in status_options:
+            current_status = "active" if product.get("active") else "inactive"
+
+        columns = st.columns([0.52, 2.0, 1.05, 0.62, 0.72, 0.62, 0.72, 0.78, 1.2, 1.2, 0.82, 0.7])
         with columns[0]:
             render_product_thumbnail(
                 product.get("display_image_url") or product.get("featured_image_url"),
-                key=f"edition-thumb-{product.get('shopify_handle')}",
+                key=f"edition-thumb-{product_handle}",
                 width=44,
             )
-        columns[1].write(product.get("product_title") or "Untitled product")
-        columns[2].caption(product.get("shopify_handle") or "")
-        columns[3].write(product.get("edition_total") or 100)
-        columns[4].write(product.get("next_edition_number") or 1)
-        last_assigned = product.get("last_assigned_edition")
-        columns[5].write(f"{last_assigned}/{product.get('edition_total') or 100}" if last_assigned else "None")
-        columns[6].write(product.get("remaining_editions") or 0)
-        columns[7].markdown(status_badge("Active" if product.get("active") else "Inactive"), unsafe_allow_html=True)
-        columns[8].markdown(status_badge("Sold Out" if product.get("sold_out") else "Available"), unsafe_allow_html=True)
-        product_handle = product.get("shopify_handle")
-        psd_asset = psd_assets.get(product_handle) or {}
-        psd_url = psd_asset.get("asset_url") or psd_asset.get("google_drive_file_url") or ""
-        with columns[9]:
-            if psd_url:
-                st.link_button("Open PSD", psd_url, use_container_width=True)
-            else:
-                if product_handle:
-                    if st.button(
-                        "Enter PSD",
-                        key=f"limited-psd-enter-{product_handle}",
-                        use_container_width=True,
-                    ):
-                        st.session_state.psd_editor_context = {
-                            "handle": product_handle,
-                            "title": product.get("product_title"),
-                            "source": "limited-editions",
-                        }
-                else:
-                    st.markdown(status_badge("PSD Missing"), unsafe_allow_html=True)
+        with columns[1]:
+            st.markdown(
+                f'<div class="sc-limited-product-title">{html.escape(product.get("product_title") or "Untitled product")}</div>',
+                unsafe_allow_html=True,
+            )
+        columns[2].markdown(
+            f'<div class="sc-limited-handle">{html.escape(product_handle or "-")}</div>',
+            unsafe_allow_html=True,
+        )
+        total_value = columns[3].number_input(
+            "Total",
+            min_value=1,
+            value=edition_total,
+            step=1,
+            key=f"{key_base}-total",
+            label_visibility="collapsed",
+        )
+        latest_value = columns[4].number_input(
+            "Latest sent",
+            min_value=0,
+            value=latest_sent,
+            step=1,
+            key=f"{key_base}-latest",
+            label_visibility="collapsed",
+        )
+        next_value = columns[5].number_input(
+            "Next edition",
+            min_value=1,
+            value=next_number,
+            step=1,
+            key=f"{key_base}-next",
+            label_visibility="collapsed",
+        )
+        proposed_next = int(latest_value) + 1 if int(latest_value) != latest_sent else int(next_value)
+        columns[6].markdown(f"**{max(int(total_value) - (proposed_next - 1), 0)}**")
+        status_label = columns[7].selectbox(
+            "Status",
+            list(status_options.values()),
+            index=select_index(list(status_options), current_status),
+            key=f"{key_base}-status",
+            label_visibility="collapsed",
+        )
+        selected_status = next(key for key, label in status_options.items() if label == status_label)
+        psd_value = columns[8].text_input(
+            "PSD URL",
+            value=psd_url,
+            placeholder="PSD link",
+            key=f"{key_base}-psd",
+            label_visibility="collapsed",
+        )
+        if psd_value.strip():
+            columns[8].link_button("Open PSD", psd_value.strip(), use_container_width=True)
+        prodigi_value = columns[9].text_input(
+            "Prodigi URL",
+            value=prodigi_url,
+            placeholder="Prodigi link",
+            key=f"{key_base}-prodigi",
+            label_visibility="collapsed",
+        )
+        if prodigi_value.strip():
+            columns[9].link_button("Open Prodigi", prodigi_value.strip(), use_container_width=True)
         with columns[10]:
             if product.get("admin_url"):
                 st.link_button("Shopify", product["admin_url"], use_container_width=True)
@@ -2897,26 +2636,46 @@ def render_supabase_limited_editions_page():
                 st.link_button("Storefront", product["online_store_url"], use_container_width=True)
             else:
                 st.caption("No link")
-        with columns[11]:
-            if product_handle and st.button(
-                "New Run",
-                key=f"limited-new-run-{product_handle}",
-                use_container_width=True,
-            ):
-                st.session_state.supabase_new_run_handle = product_handle
+        if columns[11].button(
+            "Save",
+            key=f"{key_base}-save",
+            type="primary",
+            disabled=not product_handle,
+            use_container_width=True,
+        ):
+            try:
+                final_next = int(latest_value) + 1 if int(latest_value) != latest_sent else int(next_value)
+                supabase_backend.update_edition_product(
+                    product_handle,
+                    edition_total=int(total_value),
+                    next_edition_number=final_next,
+                    status=selected_status,
+                    reason="Limited Editions row edit",
+                )
+                if psd_value.strip():
+                    supabase_backend.upsert_product_asset(
+                        product_handle,
+                        "psd_master_file",
+                        psd_value.strip(),
+                        "Limited Editions row edit",
+                        asset_name=f"{product_handle}.psd",
+                        is_primary=True,
+                    )
+                if prodigi_value.strip():
+                    supabase_backend.upsert_product_asset(
+                        product_handle,
+                        "prodigi_link",
+                        prodigi_value.strip(),
+                        "Limited Editions row edit",
+                        asset_name="Prodigi",
+                        is_primary=True,
+                    )
+                st.session_state.supabase_limited_notice = f"Saved edition settings for {product.get('product_title') or product_handle}."
                 st.rerun()
+            except Exception as error:
+                st.error("Could not save this edition row.")
+                st.exception(error)
         st.divider()
-
-    editor_context = st.session_state.get("psd_editor_context") or {}
-    if editor_context.get("source") == "limited-editions":
-        handle = editor_context.get("handle")
-        product = get_product_by_handle(products, handle)
-        render_psd_link_editor(
-            handle,
-            product.get("product_title") or editor_context.get("title") or "",
-            existing_asset=psd_assets.get(handle),
-            key_prefix="limited-editions-psd-editor",
-        )
 
 
 def render_limited_editions_page(dispatch_log_renderer=None):
@@ -3428,6 +3187,108 @@ def _order_psd_summary(line_items):
     }
 
 
+def _jsonish(value):
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return json.loads(value)
+        except Exception:
+            return {}
+    return {}
+
+
+def _shipping_text_from_raw(raw_order):
+    raw = _jsonish(raw_order)
+    values = []
+
+    def add(value):
+        cleaned = _clean_order_text(value)
+        if cleaned:
+            values.append(cleaned)
+
+    if isinstance(raw, dict):
+        for key in ("shipping_title", "shipping_method", "shippingMethod", "shippingLine"):
+            item = raw.get(key)
+            if isinstance(item, dict):
+                add(item.get("title") or item.get("code") or item.get("name"))
+            else:
+                add(item)
+        shipping_lines = raw.get("shipping_lines") or raw.get("shippingLines") or raw.get("shippingRates")
+        if isinstance(shipping_lines, dict):
+            shipping_lines = shipping_lines.get("edges") or shipping_lines.get("nodes") or shipping_lines.get("items")
+        if isinstance(shipping_lines, list):
+            for item in shipping_lines:
+                if isinstance(item, dict) and "node" in item and isinstance(item["node"], dict):
+                    item = item["node"]
+                if isinstance(item, dict):
+                    add(item.get("title") or item.get("code") or item.get("name"))
+                else:
+                    add(item)
+    elif isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                add(item.get("title") or item.get("code") or item.get("name"))
+            else:
+                add(item)
+    return _compact_text_list(values, empty="", separator=" | ")
+
+
+def _shipping_speed_label(order_row):
+    raw_shipping = (
+        order_row.get("shipping")
+        or order_row.get("shipping_method")
+        or order_row.get("shipping_title")
+        or _shipping_text_from_raw(order_row.get("order_raw_json") or order_row.get("raw_json") or order_row.get("raw"))
+    )
+    shipping_text = _clean_order_text(raw_shipping)
+    lowered = shipping_text.casefold()
+    if "express" in lowered or "expedited" in lowered or "priority" in lowered:
+        return "Express"
+    if "standard" in lowered or "regular" in lowered or "economy" in lowered:
+        return "Standard"
+    return shipping_text or "-"
+
+
+def _assignment_certificate_status(assignment):
+    status = _clean_order_text(assignment.get("certificate_status"))
+    has_r2 = bool(assignment.get("certificate_r2_bucket") and assignment.get("certificate_r2_key"))
+    has_remote = bool(assignment.get("shopify_file_url"))
+    local_path = _clean_order_text(assignment.get("local_file_path") or assignment.get("certificate_pdf_path"))
+    if "error" in status.casefold():
+        return "Error"
+    if has_r2 or has_remote:
+        return "Generated"
+    if local_path:
+        return "Generated" if Path(local_path).exists() else "Missing file"
+    if status in {"Certificate Ready", "Generated"}:
+        return "Missing file"
+    return "Not generated"
+
+
+def _r2_temporary_url(bucket, key):
+    if not bucket or not key:
+        return ""
+    try:
+        return r2_storage.generate_presigned_download_url(bucket, key) or ""
+    except Exception:
+        return ""
+
+
+def _order_assignments_for_certificates(order_summary):
+    assignments = []
+    for line_item in order_summary.get("line_items") or []:
+        for assignment in active_assignments(_coerce_assignments(line_item.get("assignments"))):
+            if not assignment.get("edition_order_id") and not assignment.get("id"):
+                continue
+            merged = dict(assignment)
+            merged.setdefault("product_title", line_item.get("product_title"))
+            merged.setdefault("variant_title", line_item.get("variant_title"))
+            merged.setdefault("shopify_handle", line_item.get("shopify_handle"))
+            assignments.append(merged)
+    return assignments
+
+
 def _overall_order_status(line_items):
     statuses = [_line_assignment_status(item) for item in (line_items or [])]
     if not statuses:
@@ -3455,6 +3316,7 @@ def _build_compact_order_summary(order_row, line_items):
         "order_link": str(order_row.get("admin_url") or "").strip(),
         "customer_name": customer_display_name(order_row.get("customer_name")),
         "order_date": format_order_date(order_row.get("created_at") or order_row.get("processed_at")),
+        "shipping_summary": _shipping_speed_label(order_row),
         "product_summary": _compact_text_list(
             product_items,
             empty="Product missing",
@@ -3711,85 +3573,184 @@ def _edition_chip_class(value):
     return "sc-order-edition-chip sc-order-edition-chip-issue"
 
 
+def _render_certificate_popover(order_summary, key_prefix):
+    assignments = _order_assignments_for_certificates(order_summary)
+    if not assignments:
+        st.markdown(status_badge("Not generated"), unsafe_allow_html=True)
+        st.caption("Needs edition")
+        return
+
+    statuses = [_assignment_certificate_status(assignment) for assignment in assignments]
+    if all(status == "Generated" for status in statuses):
+        badge_label = "Generated"
+    elif any(status == "Error" for status in statuses):
+        badge_label = "Error"
+    elif any(status == "Missing file" for status in statuses):
+        badge_label = "Missing file"
+    else:
+        badge_label = "Not generated"
+    st.markdown(status_badge(badge_label), unsafe_allow_html=True)
+
+    with st.popover("Certificate", use_container_width=True):
+        for index, assignment in enumerate(assignments, start=1):
+            edition_order_id = assignment.get("edition_order_id") or assignment.get("id")
+            edition_label = f"#{assignment.get('edition_number')}/{assignment.get('edition_total') or 100}"
+            product_label = assignment.get("product_title") or order_summary.get("product_summary") or "Product"
+            st.markdown(f"**{edition_label}**")
+            st.caption(product_label)
+            status_label = _assignment_certificate_status(assignment)
+            st.markdown(status_badge(status_label), unsafe_allow_html=True)
+
+            button_columns = st.columns(2)
+            generate_label = "Regenerate" if status_label == "Generated" else "Generate"
+            if button_columns[0].button(
+                generate_label,
+                key=f"{key_prefix}-cert-generate-{edition_order_id}-{index}",
+                use_container_width=True,
+            ):
+                try:
+                    if assignment.get("edition_order_id"):
+                        supabase_backend.generate_certificate_for_edition_order(
+                            int(assignment["edition_order_id"]),
+                            force=True,
+                        )
+                    else:
+                        generate_certificate_pdf(int(edition_order_id))
+                    st.session_state.supabase_orders_notice = f"Certificate generated for {edition_label}."
+                    st.rerun()
+                except Exception as error:
+                    st.error("Could not generate certificate.")
+                    st.exception(error)
+
+            preview_url = _r2_temporary_url(
+                assignment.get("certificate_preview_r2_bucket"),
+                assignment.get("certificate_preview_r2_key"),
+            )
+            if preview_url:
+                button_columns[1].link_button("Preview", preview_url, use_container_width=True)
+            else:
+                button_columns[1].button(
+                    "Preview",
+                    disabled=True,
+                    key=f"{key_prefix}-cert-preview-missing-{edition_order_id}-{index}",
+                    use_container_width=True,
+                )
+
+            pdf_url = (
+                _r2_temporary_url(assignment.get("certificate_r2_bucket"), assignment.get("certificate_r2_key"))
+                or str(assignment.get("shopify_file_url") or "").strip()
+            )
+            local_path_text = str(assignment.get("local_file_path") or assignment.get("certificate_pdf_path") or "").strip()
+            local_path = Path(local_path_text) if local_path_text else None
+            if pdf_url:
+                st.link_button("Open Certificate", pdf_url, use_container_width=True)
+            elif local_path and local_path.exists() and local_path.is_file():
+                st.download_button(
+                    "Download Certificate",
+                    data=local_path.read_bytes(),
+                    file_name=local_path.name,
+                    mime="application/pdf",
+                    key=f"{key_prefix}-cert-download-{edition_order_id}-{index}",
+                    use_container_width=True,
+                )
+            elif status_label == "Missing file":
+                st.warning("Certificate row exists, but the file is missing.")
+            st.divider()
+
+
 def _render_compact_orders_feed(order_summaries):
-    rows_html = []
-    for item in order_summaries or []:
-        order_link = str(item.get("order_link") or "").strip()
-        order_label_text = str(item.get("order_label") or "Order")
-        order_label = html.escape(order_label_text)
-        if order_link:
-            order_value = (
-                f'<a class="sc-order-feed-link" href="{html.escape(order_link, quote=True)}" '
-                f'target="_blank" rel="noopener noreferrer">{order_label}</a>'
-            )
-        else:
-            order_value = order_label
-        customer_text = str(item.get("customer_name") or "Customer missing")
-        product_text = str(item.get("product_summary") or "Product missing")
-        edition_items = item.get("edition_number_items") or [str(item.get("edition_summary") or "Needs Edition")]
-        variant_text = str(item.get("variant_summary") or "Variant missing")
-        psd = item.get("psd") or {}
-        psd_url = str(psd.get("url") or "").strip()
-        psd_label = html.escape(str(psd.get("label") or "No PSD"))
-        psd_title = html.escape(str(psd.get("title") or psd_label), quote=True)
-        edition_html = "".join(
-            f'<span class="{_edition_chip_class(edition_value)}">{html.escape(str(edition_value))}</span>'
-            for edition_value in edition_items
-        )
-        if psd_url:
-            psd_html = (
-                f'<a class="sc-order-feed-action" href="{html.escape(psd_url, quote=True)}" '
-                f'target="_blank" rel="noopener noreferrer" title="{psd_title}">{psd_label}</a>'
-            )
-        else:
-            psd_html = (
-                f'<span class="sc-order-feed-action sc-order-feed-action-disabled" '
-                f'title="{psd_title}">{psd_label}</span>'
-            )
-        rows_html.append(
-            f"""
-<div class="sc-order-feed-row">
-    <div class="sc-order-feed-cell">
-        <div class="sc-order-feed-value" title="{html.escape(order_label_text, quote=True)}">{order_value}</div>
-    </div>
-    <div class="sc-order-feed-cell">
-        <div class="sc-order-feed-value" title="{html.escape(customer_text, quote=True)}">{html.escape(customer_text)}</div>
-    </div>
-    <div class="sc-order-feed-cell">
-        <div class="sc-order-feed-value sc-order-feed-product" title="{html.escape(product_text, quote=True)}">{html.escape(product_text)}</div>
-    </div>
-    <div class="sc-order-feed-cell">
-        <div class="sc-order-feed-edition-cell" title="{html.escape(' | '.join(str(value) for value in edition_items), quote=True)}">{edition_html}</div>
-    </div>
-    <div class="sc-order-feed-cell">
-        <div class="sc-order-feed-value" title="{html.escape(variant_text, quote=True)}">{html.escape(variant_text)}</div>
-    </div>
-    <div class="sc-order-feed-cell">
-        {psd_html}
-    </div>
-</div>
-"""
-        )
     st.markdown(
         """
-<div class="sc-order-feed-shell">
-    <div class="sc-order-feed-table">
-        <div class="sc-order-feed-head">
-            <div>Order</div>
-            <div>Name</div>
-            <div>Product</div>
-            <div>Edition No.</div>
-            <div>Variant</div>
-            <div>PSD</div>
-        </div>
-"""
-        + "".join(rows_html)
-        + """
-    </div>
-</div>
-""",
+        <style>
+        div[data-testid="stPopover"] button {
+            white-space: nowrap !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-stream-header) {
+            background: #FFFFFF;
+            border: 1px solid #D9DEE5;
+            border-bottom: 0;
+            border-radius: 20px 20px 0 0;
+            padding: 0.75rem 0.85rem 0.45rem;
+        }
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-stream-cell),
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-edition-chip) {
+            background: #FFFFFF;
+            border-left: 1px solid #D9DEE5;
+            border-right: 1px solid #D9DEE5;
+            border-bottom: 1px solid #E5E7EB;
+            padding: 0.62rem 0.85rem;
+        }
+        .sc-order-stream-header {
+            color: #5B6472;
+            font-size: 0.75rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .sc-order-stream-cell {
+            color: #111827;
+            font-size: 0.92rem;
+            font-weight: 700;
+            line-height: 1.25;
+            overflow-wrap: anywhere;
+        }
+        .sc-order-stream-muted {
+            color: #64748B;
+            font-size: 0.78rem;
+            font-weight: 650;
+        }
+        </style>
+        """,
         unsafe_allow_html=True,
     )
+    header = st.columns([0.75, 1.0, 1.65, 0.82, 1.25, 0.68, 0.7, 1.05, 0.65])
+    for column, label in zip(
+        header,
+        ("Order", "Name", "Product", "Edition", "Variant", "Shipping", "PSD", "Certificate", "Link"),
+    ):
+        column.markdown(f'<div class="sc-order-stream-header">{label}</div>', unsafe_allow_html=True)
+    st.divider()
+    for index, item in enumerate(order_summaries or []):
+        key_prefix = f"orders-row-{index}-{re.sub(r'[^a-zA-Z0-9_-]+', '-', str(item.get('order_key') or index))}"
+        columns = st.columns([0.75, 1.0, 1.65, 0.82, 1.25, 0.68, 0.7, 1.05, 0.65])
+        order_label = html.escape(str(item.get("order_label") or "Order"))
+        columns[0].markdown(f'<div class="sc-order-stream-cell">{order_label}</div>', unsafe_allow_html=True)
+        columns[1].markdown(
+            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("customer_name") or "Customer missing"))}</div>',
+            unsafe_allow_html=True,
+        )
+        columns[2].markdown(
+            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("product_summary") or "Product missing"))}</div>',
+            unsafe_allow_html=True,
+        )
+        with columns[3]:
+            for edition_value in item.get("edition_number_items") or [item.get("edition_summary") or "Needs Edition"]:
+                st.markdown(
+                    f'<span class="{_edition_chip_class(edition_value)}">{html.escape(str(edition_value))}</span>',
+                    unsafe_allow_html=True,
+                )
+        columns[4].markdown(
+            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("variant_summary") or "Variant missing"))}</div>',
+            unsafe_allow_html=True,
+        )
+        columns[5].markdown(
+            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("shipping_summary") or "-"))}</div>',
+            unsafe_allow_html=True,
+        )
+        psd = item.get("psd") or {}
+        psd_url = str(psd.get("url") or "").strip()
+        if psd_url:
+            columns[6].link_button(str(psd.get("label") or "PSD"), psd_url, use_container_width=True)
+        else:
+            columns[6].button("No PSD", disabled=True, key=f"{key_prefix}-no-psd", use_container_width=True)
+        with columns[7]:
+            _render_certificate_popover(item, key_prefix)
+        order_link = str(item.get("order_link") or "").strip()
+        if order_link:
+            columns[8].link_button("Open", order_link, use_container_width=True)
+        else:
+            columns[8].button("No link", disabled=True, key=f"{key_prefix}-no-link", use_container_width=True)
+        st.divider()
 def render_supabase_orders_page():
     st.title("Orders")
     st.caption(
@@ -3812,6 +3773,10 @@ def render_supabase_orders_page():
         sync_state = supabase_backend.get_sync_state()
     except Exception:
         sync_state = {}
+    if not st.session_state.get("supabase-orders-defaults-v2-applied"):
+        st.session_state["supabase-orders-sort"] = "Date newest"
+        st.session_state["supabase-orders-page-size"] = 60
+        st.session_state["supabase-orders-defaults-v2-applied"] = True
 
     top_toolbar = st.columns([0.95, 1.75])
     if top_toolbar[0].button("Sync latest orders", disabled=not config["configured"], type="primary", use_container_width=True):
@@ -3884,12 +3849,12 @@ def render_supabase_orders_page():
     sort = filter_toolbar[1].selectbox(
         "Sort",
         ("Date newest", "Shopify updated", "Date oldest", "Customer", "Edition number"),
-        index=4,
+        index=0,
         key="supabase-orders-sort",
     )
     page_size = filter_toolbar[2].selectbox(
         "Rows",
-        (40, 80, 120),
+        (60, 80, 100),
         index=0,
         key="supabase-orders-page-size",
     )
@@ -3913,6 +3878,7 @@ def render_supabase_orders_page():
         f"{summary.get('assigned_today', 0)} assigned today"
     )
 
+    page_size = min(int(page_size or 60), 100)
     fetch_limit = min(max(page_size * 4, page_size), 800)
     try:
         raw_rows = []
@@ -4094,6 +4060,9 @@ def render_orders_page():
         st.success(notice)
     if warning:
         st.warning(warning)
+    if not st.session_state.get("local-orders-defaults-v2-applied"):
+        st.session_state["local-orders-page-size"] = 60
+        st.session_state["local-orders-defaults-v2-applied"] = True
 
     search = st.text_input(
         "Search orders",
@@ -4115,7 +4084,7 @@ def render_orders_page():
     )
     page_size = toolbar[2].selectbox(
         "Rows",
-        (40, 80, 120),
+        (60, 80, 100),
         index=0,
         key="local-orders-page-size",
     )
@@ -6696,6 +6665,88 @@ def render_marketing_factory_page():
         render_email_marketing_section()
 
 
+def render_developer_widget_status(shopify_config):
+    st.markdown("**Widget Status**")
+    st.caption("Shopify widgets read product metafields only. Supabase remains the source of truth for edition counters.")
+    if not supabase_backend.is_configured():
+        st.warning("DATABASE_URL is required before loading widget status.")
+        return
+
+    controls = st.columns([1.1, 0.85, 0.85])
+    widget_search = controls[0].text_input(
+        "Widget status search",
+        placeholder="Search product or handle",
+        key="dev-widget-status-search",
+        label_visibility="collapsed",
+    )
+    widget_limit = controls[1].selectbox(
+        "Rows",
+        [50, 100, 200],
+        index=1,
+        key="dev-widget-status-limit",
+        label_visibility="collapsed",
+    )
+    if controls[2].button(
+        "Sync Edition Display",
+        disabled=not shopify_config["configured"],
+        key="dev-widget-sync-all",
+        use_container_width=True,
+    ):
+        progress = st.progress(0, text="Syncing Shopify edition display metafields...")
+        try:
+            def update_widget_progress(count):
+                progress.progress(min(count / max(int(widget_limit), 1), 0.99), text=f"Synced {count} products...")
+
+            result = supabase_backend.sync_all_product_edition_metafields(
+                shopify_config,
+                search=widget_search,
+                limit=int(widget_limit),
+                progress_callback=update_widget_progress,
+            )
+            progress.progress(1.0, text="Shopify edition display sync complete.")
+            if result.get("errors"):
+                st.warning(
+                    f"Synced {result.get('synced', 0)} of {result.get('attempted', 0)} products. "
+                    f"First issue: {result['errors'][0]}"
+                )
+            else:
+                st.success(f"Synced {result.get('synced', 0)} product display records.")
+        except Exception as error:
+            progress.empty()
+            st.error("Widget display sync failed.")
+            st.exception(error)
+
+    try:
+        products = supabase_backend.list_edition_products(search=widget_search, limit=int(widget_limit))
+    except Exception as error:
+        st.error("Could not load widget status from Supabase.")
+        st.exception(error)
+        return
+
+    if not products:
+        st.info("No products found for this widget status view.")
+        return
+
+    rows = []
+    for product in products:
+        payload = supabase_backend.calculate_product_edition_metafield_values(product)
+        rows.append(
+            {
+                "Product": product.get("product_title") or "Untitled product",
+                "Handle": product.get("shopify_handle") or "",
+                "Next": supabase_backend.format_edition_display_number(
+                    payload.get("next_edition_number"),
+                    payload.get("edition_total"),
+                ),
+                "Remaining": payload.get("remaining_count"),
+                "Widget text": payload.get("edition_display_text") or "",
+                "Metafields": product.get("metafields_sync_status") or "Never Synced",
+                "Last sync": format_updated_at(product.get("metafields_synced_at")),
+            }
+        )
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
 def render_settings_page(app_version, database_path, password_status):
     st.title("Developer")
     st.caption("Diagnostics, connection checks, imports, and admin tools for Sports Cave OS.")
@@ -6929,6 +6980,31 @@ def render_settings_page(app_version, database_path, password_status):
                     except Exception as error:
                         st.error("Could not reset sync timestamps.")
                         st.exception(error)
+
+                st.markdown("**Reset all edition counters to 0 sold**")
+                st.caption(
+                    "Sets every active product/run to Next #1 and Latest sent 0. "
+                    "Historical orders, certificates, totals, PSD links, and Prodigi links are kept."
+                )
+                edition_reset_confirm = st.text_input(
+                    "Type RESET EDITIONS to enable this reset",
+                    key="dev-reset-editions-confirm",
+                    placeholder="RESET EDITIONS",
+                )
+                if st.button(
+                    "Reset all edition counters to 0 sold",
+                    disabled=edition_reset_confirm.strip() != "RESET EDITIONS",
+                    key="dev-reset-all-editions-zero-sold",
+                    use_container_width=True,
+                ):
+                    try:
+                        result = supabase_backend.reset_active_edition_counters_to_zero_sold()
+                        st.success(
+                            f"Reset {result.get('active_runs_reset', 0)} active edition counters to 0 sold."
+                        )
+                    except Exception as error:
+                        st.error("Could not reset edition counters.")
+                        st.exception(error)
         with dev_tabs[2]:
             st.caption("Supabase is the source of truth. Shopify product/order metafields are display and customer-account bridges.")
             widget_code, snippet_path = load_edition_widget_liquid()
@@ -6957,6 +7033,8 @@ def render_settings_page(app_version, database_path, password_status):
                 )
             else:
                 st.warning("Widget snippet file is missing from the repo.")
+            st.divider()
+            render_developer_widget_status(shopify_config)
         with dev_tabs[3]:
             st.caption("Import and manage Google Drive PSD links in Supabase product_assets. No PSD files are uploaded or stored.")
             if not supabase_backend.is_configured():

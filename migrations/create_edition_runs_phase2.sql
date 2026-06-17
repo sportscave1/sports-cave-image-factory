@@ -40,7 +40,9 @@ ALTER TABLE edition_orders ADD COLUMN IF NOT EXISTS edition_name TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_edition_orders_run_id ON edition_orders(edition_run_id);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_run_number_unique
+DROP INDEX IF EXISTS idx_edition_orders_run_number_unique;
+
+CREATE INDEX IF NOT EXISTS idx_edition_orders_run_number
 ON edition_orders(edition_run_id, edition_number)
 WHERE edition_run_id IS NOT NULL AND edition_number IS NOT NULL;
 
