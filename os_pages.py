@@ -1543,6 +1543,30 @@ def render_shopify_product_sync(product):
 
 def render_edition_tracking(product):
     st.subheader("Limited Edition Tracking")
+    supabase_handle = (
+        product.get("handle")
+        or (product.get("shopify_match") or {}).get("handle")
+        or product.get("shopify_handle")
+        or ""
+    )
+    if supabase_backend.is_configured() and supabase_handle:
+        try:
+            run_state = supabase_backend.get_edition_counter_state(supabase_handle)
+        except Exception:
+            run_state = None
+        if run_state:
+            st.caption("Active Supabase edition run")
+            run_columns = st.columns(6)
+            run_columns[0].metric("Edition", run_state.get("edition_name") or "Original Edition")
+            run_columns[1].metric("Latest sent", run_state.get("latest_sent") or 0)
+            run_columns[2].metric("Next", run_state.get("next_edition_number") or 1)
+            run_columns[3].metric("Total", run_state.get("edition_total") or 100)
+            run_columns[4].metric("Remaining", run_state.get("remaining_editions") or 0)
+            run_columns[5].markdown(status_badge(run_state.get("status") or "active"), unsafe_allow_html=True)
+            if st.button("Edit in Limited Editions", key=f"product-run-edit-{product['id']}", use_container_width=True):
+                st.session_state.pending_page = "Limited Editions"
+                st.rerun()
+
     edition_columns = st.columns(5)
     edition_columns[0].metric("Edition limit", format_optional_number(product.get("edition_limit")))
     edition_columns[1].metric("Sold", product.get("editions_sold") or 0)
@@ -2211,6 +2235,76 @@ def parse_limited_edition_supabase_csv(uploaded_csv):
     return [dict(row) for row in reader]
 
 
+def build_supabase_edition_editor_rows(products):
+    rows = []
+    for product in products:
+        next_number = int(product.get("next_edition_number") or 1)
+        total = int(product.get("edition_total") or 100)
+        latest_sent = int(product.get("latest_sent") if product.get("latest_sent") is not None else max(next_number - 1, 0))
+        rows.append(
+            {
+                "Product title": product.get("product_title") or "Untitled product",
+                "Shopify handle": product.get("shopify_handle") or "",
+                "Shopify product ID": product.get("shopify_product_id") or product.get("shopify_product_gid") or "",
+                "Edition name": product.get("edition_name") or "Original Edition",
+                "Latest sent": latest_sent,
+                "Next edition number": next_number,
+                "Total editions": total,
+                "Remaining": max(total - latest_sent, 0),
+                "Status": product.get("status") or ("sold_out" if product.get("sold_out") else "active"),
+                "Last updated": format_updated_at(product.get("updated_at")),
+            }
+        )
+    return rows
+
+
+def apply_supabase_edition_editor_changes(products, edited_rows):
+    products_by_handle = {item.get("shopify_handle"): item for item in products if item.get("shopify_handle")}
+    updated = 0
+    unchanged = 0
+    errors = []
+    for row in edited_rows or []:
+        handle = str(row.get("Shopify handle") or "").strip()
+        product = products_by_handle.get(handle)
+        if not product:
+            continue
+        old_latest = int(product.get("latest_sent") if product.get("latest_sent") is not None else max(int(product.get("next_edition_number") or 1) - 1, 0))
+        old_next = int(product.get("next_edition_number") or 1)
+        old_total = int(product.get("edition_total") or 100)
+        old_name = product.get("edition_name") or "Original Edition"
+        old_status = product.get("status") or ("sold_out" if product.get("sold_out") else "active")
+
+        new_latest = int(row.get("Latest sent") if row.get("Latest sent") is not None else old_latest)
+        new_next_from_grid = int(row.get("Next edition number") if row.get("Next edition number") is not None else old_next)
+        new_next = new_latest + 1 if new_latest != old_latest else new_next_from_grid
+        new_total = int(row.get("Total editions") if row.get("Total editions") is not None else old_total)
+        new_name = str(row.get("Edition name") or old_name).strip() or "Original Edition"
+        new_status = str(row.get("Status") or old_status).strip().lower().replace(" ", "_")
+
+        if (
+            new_latest == old_latest
+            and new_next == old_next
+            and new_total == old_total
+            and new_name == old_name
+            and new_status == old_status
+        ):
+            unchanged += 1
+            continue
+        try:
+            supabase_backend.update_edition_product(
+                handle,
+                edition_name=new_name,
+                edition_total=new_total,
+                next_edition_number=new_next,
+                status=new_status,
+                reason="Limited Editions tracker grid edit",
+            )
+            updated += 1
+        except Exception as error:
+            errors.append(f"{handle}: {error}")
+    return {"updated": updated, "unchanged": unchanged, "errors": errors}
+
+
 def render_supabase_limited_edition_csv_import():
     with st.expander("Import Limited Edition CSV", expanded=False):
         st.caption(
@@ -2237,42 +2331,75 @@ def render_supabase_limited_edition_csv_import():
             st.exception(error)
             return
 
-        preview_rows = csv_rows[:50]
-        preview_columns = st.columns(4)
-        preview_columns[0].metric("Rows read", len(csv_rows))
-        preview_columns[1].metric("Preview rows", len(preview_rows))
-        preview_columns[2].metric("Columns", len(preview_rows[0].keys()) if preview_rows else 0)
-        preview_columns[3].metric("Destination", "Supabase")
-        if preview_rows:
-            st.dataframe(preview_rows, use_container_width=True, hide_index=True)
-        else:
+        if not csv_rows:
             st.warning("The CSV has headers but no data rows.")
             return
 
-        overwrite_existing_orders = st.checkbox(
-            "Update existing imported edition order rows if the CSV contains the same product and edition number",
+        try:
+            preview = supabase_backend.preview_limited_edition_import_rows(csv_rows)
+        except Exception as error:
+            st.error("Could not preview this CSV.")
+            st.exception(error)
+            return
+
+        preview_columns = st.columns(5)
+        preview_columns[0].metric("Rows read", preview["rows_read"])
+        preview_columns[1].metric("Matched", len(preview["matched"]))
+        preview_columns[2].metric("Changes", len(preview["changes"]))
+        preview_columns[3].metric("Createable", len(preview["createable"]))
+        preview_columns[4].metric("Unmatched", len(preview["unmatched"]))
+
+        if preview["changes"]:
+            st.markdown("**Preview changes before applying**")
+            st.dataframe(
+                [
+                    {
+                        "Line": item["line"],
+                        "Product": item["product_title"],
+                        "Handle": item["shopify_handle"],
+                        "Edition": f"{item['current_edition_name']} -> {item['new_edition_name']}",
+                        "Next": f"{item['current_next']} -> {item['new_next']}",
+                        "Total": f"{item['current_total']} -> {item['new_total']}",
+                        "Status": f"{item['current_status']} -> {item['new_status']}",
+                    }
+                    for item in preview["changes"]
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.info("No counter changes found in the matched CSV rows.")
+
+        if preview["createable"]:
+            st.markdown("**Products found in Shopify sync but not edition tracking yet**")
+            st.dataframe(preview["createable"], use_container_width=True, hide_index=True)
+        if preview["unmatched"]:
+            st.markdown("**Unmatched rows**")
+            st.dataframe(preview["unmatched"], use_container_width=True, hide_index=True)
+
+        create_missing = st.checkbox(
+            "Create missing edition products only when they already exist in Shopify sync",
             value=False,
-            key="supabase-limited-csv-overwrite-orders",
+            key="supabase-limited-csv-create-missing",
         )
-        allow_counter_override = st.checkbox(
-            "Allow CSV to override the next edition number even below assigned history",
-            value=False,
-            help=(
-                "Use this only for manual corrections. This can intentionally make future orders reuse "
-                "an edition number that already exists in the history."
-            ),
-            key="supabase-limited-csv-allow-counter-override",
+        confirmed = st.checkbox(
+            "I reviewed the preview and want to apply these edition tracker changes",
+            key="supabase-limited-csv-confirm-apply",
         )
-        if st.button("Import Limited Edition CSV", type="primary", use_container_width=True):
+        if st.button(
+            "Apply CSV Changes",
+            type="primary",
+            use_container_width=True,
+            disabled=not confirmed,
+        ):
             try:
-                result = supabase_backend.import_limited_edition_rows(
+                result = supabase_backend.apply_limited_edition_import_rows(
                     csv_rows,
-                    overwrite_existing_orders=overwrite_existing_orders,
-                    allow_next_number_override=allow_counter_override,
+                    create_missing_from_shopify=create_missing,
                 )
                 st.session_state.supabase_limited_notice = (
                     f"CSV import complete. Rows read: {result['rows_read']}. "
-                    f"Matched: {result['rows_matched']}. Inserted: {result['rows_inserted']}. "
+                    f"Matched: {result['rows_matched']}. Created: {result['rows_created']}. "
                     f"Updated: {result['rows_updated']}. Skipped: {result['rows_skipped']}."
                 )
                 if result.get("errors"):
@@ -2382,6 +2509,198 @@ def render_supabase_limited_editions_page():
     metrics[1].metric("Active", sum(1 for item in products if item.get("active")))
     metrics[2].metric("Sold out", sum(1 for item in products if item.get("sold_out")))
     metrics[3].metric("Remaining total", sum(int(item.get("remaining_editions") or 0) for item in products))
+
+    st.subheader("Edition Tracker")
+    st.caption(
+        "Edit the active edition run here. Latest sent saves as next edition number + 1. "
+        "To restart at #1/100, use Start New Edition Run instead of lowering this grid."
+    )
+    editor_rows = build_supabase_edition_editor_rows(products)
+    edited_rows = st.data_editor(
+        editor_rows,
+        key="supabase-edition-tracker-grid",
+        use_container_width=True,
+        hide_index=True,
+        num_rows="fixed",
+        disabled=[
+            "Product title",
+            "Shopify handle",
+            "Shopify product ID",
+            "Remaining",
+            "Last updated",
+        ],
+        column_config={
+            "Product title": st.column_config.TextColumn(width="large"),
+            "Edition name": st.column_config.TextColumn(width="medium"),
+            "Latest sent": st.column_config.NumberColumn(min_value=0, step=1),
+            "Next edition number": st.column_config.NumberColumn(min_value=1, step=1),
+            "Total editions": st.column_config.NumberColumn(min_value=1, step=1),
+            "Remaining": st.column_config.NumberColumn(min_value=0, step=1),
+            "Status": st.column_config.SelectboxColumn(
+                options=["active", "inactive", "sold_out"],
+                width="small",
+            ),
+        },
+    )
+    if hasattr(edited_rows, "to_dict"):
+        edited_records = edited_rows.to_dict("records")
+    else:
+        edited_records = list(edited_rows or [])
+    products_by_handle = {item.get("shopify_handle"): item for item in products if item.get("shopify_handle")}
+    lowering_changes = []
+    validation_errors = []
+    for row in edited_records:
+        handle = str(row.get("Shopify handle") or "").strip()
+        product = products_by_handle.get(handle)
+        if not product:
+            continue
+        old_latest = int(product.get("latest_sent") if product.get("latest_sent") is not None else max(int(product.get("next_edition_number") or 1) - 1, 0))
+        old_next = int(product.get("next_edition_number") or 1)
+        try:
+            new_latest = int(row.get("Latest sent") if row.get("Latest sent") is not None else old_latest)
+            new_next_from_grid = int(row.get("Next edition number") if row.get("Next edition number") is not None else old_next)
+            new_total = int(row.get("Total editions") if row.get("Total editions") is not None else product.get("edition_total") or 100)
+        except (TypeError, ValueError):
+            validation_errors.append(f"{handle}: numbers must be whole numbers.")
+            continue
+        proposed_next = new_latest + 1 if new_latest != old_latest else new_next_from_grid
+        if proposed_next < old_next:
+            lowering_changes.append(f"{handle}: {old_next} -> {proposed_next}")
+        if proposed_next < 1:
+            validation_errors.append(f"{handle}: next edition number cannot be below 1.")
+        if new_total < 1:
+            validation_errors.append(f"{handle}: total editions cannot be below 1.")
+        if new_total - (proposed_next - 1) < 0 and str(row.get("Status") or "").lower() != "sold_out":
+            validation_errors.append(f"{handle}: remaining would go below 0 unless status is sold_out.")
+
+    for validation_error in validation_errors[:5]:
+        st.error(validation_error)
+    lowering_confirmed = True
+    if lowering_changes:
+        st.warning(
+            "You are lowering edition counters. This is blocked below active-run history and should not be used "
+            "to restart a product at #1/100."
+        )
+        st.caption("; ".join(lowering_changes[:6]))
+        lowering_confirmed = st.checkbox(
+            "I understand this lowers the next edition number for the current active run",
+            key="supabase-edition-grid-confirm-lowering",
+        )
+    save_columns = st.columns([1.1, 1.1, 3])
+    if save_columns[0].button(
+        "Save Tracker Changes",
+        type="primary",
+        use_container_width=True,
+        disabled=bool(validation_errors) or (bool(lowering_changes) and not lowering_confirmed),
+    ):
+        result = apply_supabase_edition_editor_changes(products, edited_records)
+        if result["errors"]:
+            st.session_state.supabase_limited_warning = "First save issue: " + result["errors"][0]
+        st.session_state.supabase_limited_notice = (
+            f"Saved {result['updated']} edition tracker row"
+            f"{'s' if result['updated'] != 1 else ''}. {result['unchanged']} unchanged."
+        )
+        st.rerun()
+    if save_columns[1].button("Refresh", use_container_width=True):
+        st.rerun()
+
+    pending_new_run_handle = st.session_state.get("supabase_new_run_handle", "")
+    with st.expander("Start New Edition Run", expanded=bool(pending_new_run_handle)):
+        st.caption(
+            "Use this when a product legitimately restarts at #1/100. The current run is archived; "
+            "old orders and certificates are not deleted."
+        )
+        new_run_options = [
+            f"{item.get('product_title') or item.get('shopify_handle')} | {item.get('shopify_handle')}"
+            for item in products
+            if item.get("shopify_handle")
+        ]
+        preset_handle = st.session_state.pop("supabase_new_run_handle", "")
+        default_index = 0
+        if preset_handle:
+            for index, option in enumerate(new_run_options):
+                if option.rsplit("|", 1)[-1].strip() == preset_handle:
+                    default_index = index
+                    break
+        if new_run_options:
+            selected_new_run = st.selectbox(
+                "Product",
+                new_run_options,
+                index=default_index,
+                key="supabase-new-edition-run-product",
+            )
+            selected_new_run_handle = selected_new_run.rsplit("|", 1)[-1].strip()
+            run_columns = st.columns([1.4, 0.8, 2])
+            new_run_name = run_columns[0].text_input(
+                "Edition name",
+                value="Original Edition",
+                key=f"supabase-new-run-name-{selected_new_run_handle}",
+            )
+            new_run_total = run_columns[1].number_input(
+                "Total",
+                min_value=1,
+                value=100,
+                step=1,
+                key=f"supabase-new-run-total-{selected_new_run_handle}",
+            )
+            new_run_notes = run_columns[2].text_input(
+                "Notes",
+                placeholder="Example: 2026 Edition",
+                key=f"supabase-new-run-notes-{selected_new_run_handle}",
+            )
+            confirm_new_run = st.checkbox(
+                "Archive the current run and start this product again at #1",
+                key=f"supabase-new-run-confirm-{selected_new_run_handle}",
+            )
+            if st.button(
+                "Start New Edition Run",
+                type="primary",
+                disabled=not confirm_new_run,
+                use_container_width=True,
+                key=f"supabase-new-run-submit-{selected_new_run_handle}",
+            ):
+                try:
+                    supabase_backend.start_new_edition_run(
+                        selected_new_run_handle,
+                        edition_name=new_run_name,
+                        edition_total=new_run_total,
+                        notes=new_run_notes,
+                    )
+                    st.session_state.supabase_limited_notice = (
+                        f"Started new edition run for {selected_new_run_handle} at #1/{new_run_total}."
+                    )
+                    st.rerun()
+                except Exception as error:
+                    st.error("Could not start a new edition run.")
+                    st.exception(error)
+
+    with st.expander("Edition Adjustment Audit Log", expanded=False):
+        try:
+            adjustments = supabase_backend.list_edition_adjustments(search=search, limit=100)
+        except Exception as error:
+            st.error("Could not load edition adjustment audit log.")
+            st.exception(error)
+            adjustments = []
+        if adjustments:
+            st.dataframe(
+                [
+                    {
+                        "Changed at": format_updated_at(item.get("created_at")),
+                        "Product": item.get("product_title") or item.get("shopify_handle"),
+                        "Handle": item.get("shopify_handle"),
+                        "Edition run": item.get("edition_name") or "",
+                        "Next": f"{item.get('old_next_edition_number')} -> {item.get('new_next_edition_number')}",
+                        "Total": f"{item.get('old_edition_total')} -> {item.get('new_edition_total')}",
+                        "Reason": item.get("reason") or "",
+                        "Source": item.get("source") or "",
+                    }
+                    for item in adjustments
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption("No manual edition adjustments recorded yet.")
 
     with st.expander("Widget Status", expanded=False):
         st.caption("Test one product's Supabase edition data, Shopify metafields, and storefront widget text.")
@@ -2497,124 +2816,6 @@ def render_supabase_limited_editions_page():
                 elif payload.get("admin_url"):
                     action_columns[2].link_button("Open Shopify Product", payload["admin_url"], use_container_width=True)
 
-    with st.expander("Edit edition total or active status", expanded=False):
-        if products:
-            options = [f"{item.get('product_title') or item.get('shopify_handle')} | {item.get('shopify_handle')}" for item in products]
-            selected = st.selectbox("Product", options, key="supabase-edition-edit-product")
-            selected_handle = selected.rsplit("|", 1)[-1].strip()
-            selected_product = next(item for item in products if item.get("shopify_handle") == selected_handle)
-            try:
-                counter_state = supabase_backend.get_edition_counter_state(selected_handle)
-            except Exception as error:
-                st.error("Could not load current edition counter state.")
-                st.exception(error)
-                counter_state = selected_product
-            current_next = int(counter_state.get("next_edition_number") or selected_product.get("next_edition_number") or 1)
-            max_assigned = int(counter_state.get("max_assigned_edition") or selected_product.get("last_assigned_edition") or 0)
-            history_override_active = bool(counter_state.get("allow_counter_history_override"))
-            current_from_counter = max(current_next - 1, 0)
-            if not history_override_active:
-                current_from_counter = max(current_from_counter, max_assigned)
-            new_total = st.number_input(
-                "Edition total",
-                min_value=1,
-                max_value=100000,
-                value=int(counter_state.get("edition_total") or selected_product.get("edition_total") or 100),
-                step=1,
-                key=f"supabase-edition-total-edit-{selected_handle}",
-            )
-            current_edition = st.number_input(
-                "Current Edition / Last Assigned",
-                min_value=0,
-                max_value=100000,
-                value=current_from_counter,
-                step=1,
-                help="If Current Edition is 95, the next order receives edition 96.",
-                key=f"supabase-current-edition-edit-{selected_handle}",
-            )
-            new_active = st.checkbox(
-                "Active",
-                value=bool(counter_state.get("active")),
-                key=f"supabase-edition-active-edit-{selected_handle}",
-            )
-            new_sold_out = st.checkbox(
-                "Sold Out",
-                value=bool(counter_state.get("sold_out")) or current_edition >= new_total,
-                key=f"supabase-edition-sold-out-edit-{selected_handle}",
-            )
-            proposed_next = int(current_edition) + 1
-            state_columns = st.columns(4)
-            state_columns[0].metric("Max assigned history", max_assigned)
-            state_columns[1].metric("Current next", current_next)
-            state_columns[2].metric("Proposed current", int(current_edition))
-            state_columns[3].metric("Proposed next", proposed_next)
-
-            validation_errors = []
-            if int(new_total) < max_assigned:
-                validation_errors.append("Edition total cannot be lower than already assigned edition history.")
-            if int(new_total) < int(current_edition):
-                validation_errors.append("Edition total cannot be lower than the proposed current edition.")
-            if proposed_next > int(new_total) + 1:
-                validation_errors.append("Proposed next edition is beyond the edition total.")
-
-            if int(current_edition) == int(new_total):
-                st.warning("This product is at its edition total. Mark Sold Out before saving if this is final.")
-            override_history = False
-            if int(current_edition) < max_assigned:
-                st.warning(
-                    "This current edition is below assigned history. Saving will intentionally allow the next "
-                    "orders to reuse older edition numbers if needed."
-                )
-                override_history = st.checkbox(
-                    "Override assigned history and allow this lower edition number",
-                    value=history_override_active,
-                    help=(
-                        "Use this only when you are manually correcting the live edition counter. "
-                        "Sports Cave OS will stop auto-correcting this product back to the highest historical number."
-                    ),
-                    key=f"supabase-edition-history-override-{selected_handle}",
-                )
-            for validation_error in validation_errors:
-                st.error(validation_error)
-
-            next_number_changes = proposed_next != current_next
-            confirmed = True
-            if next_number_changes:
-                confirmed = st.checkbox(
-                    "I understand this changes the next edition number",
-                    key=f"supabase-edition-counter-confirm-{selected_handle}",
-                )
-            if st.button(
-                "Save Edition Settings",
-                use_container_width=True,
-                disabled=bool(validation_errors)
-                or (next_number_changes and not confirmed)
-                or (int(current_edition) < max_assigned and not override_history),
-            ):
-                try:
-                    supabase_backend.update_edition_product(
-                        selected_handle,
-                        edition_total=new_total,
-                        current_edition=current_edition,
-                        active=new_active,
-                        sold_out=new_sold_out,
-                        allow_history_override=override_history,
-                    )
-                    sync_note = ""
-                    if config["configured"]:
-                        try:
-                            supabase_backend.sync_product_edition_metafields(selected_handle, config=config)
-                            sync_note = " Shopify edition display updated."
-                        except Exception as error:
-                            sync_note = f" Shopify edition display sync failed: {error}"
-                    st.session_state.supabase_limited_notice = f"Edition settings saved.{sync_note}"
-                    st.rerun()
-                except Exception as error:
-                    st.error("Edition settings could not be saved.")
-                    st.exception(error)
-        else:
-            st.caption("Sync Shopify products first.")
-
     st.subheader("Edition Products")
     if not products:
         st.info("No edition products found yet. Click Sync Products.")
@@ -2646,14 +2847,14 @@ def render_supabase_limited_editions_page():
         """,
         unsafe_allow_html=True,
     )
-    header = st.columns([0.55, 2.0, 1.15, 0.6, 0.6, 0.75, 0.75, 0.7, 0.75, 0.85, 0.95])
+    header = st.columns([0.55, 2.0, 1.15, 0.6, 0.6, 0.75, 0.75, 0.7, 0.75, 0.85, 0.95, 0.85])
     for column, label in zip(
         header,
-        ("Art", "Product", "Handle", "Total", "Next", "Last", "Remaining", "Active", "Sold Out", "PSD", "Links"),
+        ("Art", "Product", "Handle", "Total", "Next", "Last", "Remaining", "Active", "Sold Out", "PSD", "Links", "New Run"),
     ):
         column.markdown(f"**{label}**")
     for product in products:
-        columns = st.columns([0.55, 2.0, 1.15, 0.6, 0.6, 0.75, 0.75, 0.7, 0.75, 0.85, 0.95])
+        columns = st.columns([0.55, 2.0, 1.15, 0.6, 0.6, 0.75, 0.75, 0.7, 0.75, 0.85, 0.95, 0.85])
         with columns[0]:
             render_product_thumbnail(
                 product.get("display_image_url") or product.get("featured_image_url"),
@@ -2696,6 +2897,14 @@ def render_supabase_limited_editions_page():
                 st.link_button("Storefront", product["online_store_url"], use_container_width=True)
             else:
                 st.caption("No link")
+        with columns[11]:
+            if product_handle and st.button(
+                "New Run",
+                key=f"limited-new-run-{product_handle}",
+                use_container_width=True,
+            ):
+                st.session_state.supabase_new_run_handle = product_handle
+                st.rerun()
         st.divider()
 
     editor_context = st.session_state.get("psd_editor_context") or {}

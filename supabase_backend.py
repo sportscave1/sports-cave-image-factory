@@ -46,6 +46,17 @@ DATABASE_URL_ENV_KEYS = (
 )
 _SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
+DEFAULT_EDITION_NAME = "Original Edition"
+ACTIVE_RUN_STATUS = "active"
+SOLD_OUT_RUN_STATUS = "sold_out"
+ARCHIVED_RUN_STATUS = "archived"
+INACTIVE_RUN_STATUS = "inactive"
+EDITION_RUN_STATUSES = {
+    ACTIVE_RUN_STATUS,
+    SOLD_OUT_RUN_STATUS,
+    ARCHIVED_RUN_STATUS,
+    INACTIVE_RUN_STATUS,
+}
 
 ASSET_TYPES = (
     "google_drive_folder",
@@ -377,6 +388,67 @@ def _ensure_schema_uncached():
             cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
             cur.execute(
                 """
+                SELECT data_type
+                FROM information_schema.columns
+                WHERE table_schema='public'
+                  AND table_name='edition_products'
+                  AND column_name='id'
+                """
+            )
+            edition_product_id_type = (cur.fetchone() or {}).get("data_type")
+            if edition_product_id_type == "uuid":
+                edition_product_fk_type = "UUID"
+            elif edition_product_id_type == "integer":
+                edition_product_fk_type = "INTEGER"
+            elif edition_product_id_type == "bigint":
+                edition_product_fk_type = "BIGINT"
+            else:
+                edition_product_fk_type = "TEXT"
+            edition_product_fk = (
+                " REFERENCES edition_products(id) ON DELETE SET NULL"
+                if edition_product_fk_type != "TEXT"
+                else ""
+            )
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS edition_runs (
+                    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                    edition_product_id {edition_product_fk_type}{edition_product_fk},
+                    shopify_product_id TEXT,
+                    shopify_handle TEXT NOT NULL,
+                    product_title TEXT,
+                    edition_name TEXT DEFAULT '{DEFAULT_EDITION_NAME}',
+                    edition_total INTEGER DEFAULT 100,
+                    next_edition_number INTEGER DEFAULT 1,
+                    status TEXT DEFAULT '{ACTIVE_RUN_STATUS}',
+                    started_at TIMESTAMPTZ DEFAULT now(),
+                    archived_at TIMESTAMPTZ NULL,
+                    notes TEXT,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
+            cur.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS edition_adjustments (
+                    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+                    edition_product_id {edition_product_fk_type}{edition_product_fk},
+                    edition_run_id uuid NULL REFERENCES edition_runs(id) ON DELETE SET NULL,
+                    shopify_product_id TEXT,
+                    shopify_handle TEXT,
+                    old_next_edition_number INTEGER,
+                    new_next_edition_number INTEGER,
+                    old_edition_total INTEGER,
+                    new_edition_total INTEGER,
+                    reason TEXT,
+                    source TEXT DEFAULT 'manual_app',
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS file_assets (
                     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
                     asset_type TEXT NOT NULL,
@@ -483,6 +555,8 @@ def _ensure_schema_uncached():
                     ("remaining_count", "INTEGER DEFAULT 100"),
                     ("edition_status", "TEXT DEFAULT 'limited_release'"),
                     ("edition_display_text", "TEXT"),
+                    ("active_edition_run_id", "UUID"),
+                    ("edition_name", f"TEXT DEFAULT '{DEFAULT_EDITION_NAME}'"),
                     ("allow_counter_history_override", "BOOLEAN DEFAULT FALSE"),
                     ("metafields_synced_at", "TIMESTAMPTZ"),
                     ("metafields_sync_status", "TEXT DEFAULT 'Never Synced'"),
@@ -565,6 +639,8 @@ def _ensure_schema_uncached():
                     ("status", "TEXT DEFAULT 'assigned'"),
                     ("assigned_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("certificate_status", "TEXT DEFAULT 'Certificate Missing'"),
+                    ("edition_run_id", "UUID"),
+                    ("edition_name", "TEXT"),
                     ("certificate_r2_bucket", "TEXT"),
                     ("certificate_r2_key", "TEXT"),
                     ("certificate_preview_r2_bucket", "TEXT"),
@@ -633,6 +709,34 @@ def _ensure_schema_uncached():
                     ("created_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
+                "edition_runs": (
+                    ("edition_product_id", f"{edition_product_fk_type}{edition_product_fk}"),
+                    ("shopify_product_id", "TEXT"),
+                    ("shopify_handle", "TEXT"),
+                    ("product_title", "TEXT"),
+                    ("edition_name", f"TEXT DEFAULT '{DEFAULT_EDITION_NAME}'"),
+                    ("edition_total", "INTEGER DEFAULT 100"),
+                    ("next_edition_number", "INTEGER DEFAULT 1"),
+                    ("status", f"TEXT DEFAULT '{ACTIVE_RUN_STATUS}'"),
+                    ("started_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ("archived_at", "TIMESTAMPTZ"),
+                    ("notes", "TEXT"),
+                    ("created_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
+                ),
+                "edition_adjustments": (
+                    ("edition_product_id", f"{edition_product_fk_type}{edition_product_fk}"),
+                    ("edition_run_id", "UUID"),
+                    ("shopify_product_id", "TEXT"),
+                    ("shopify_handle", "TEXT"),
+                    ("old_next_edition_number", "INTEGER"),
+                    ("new_next_edition_number", "INTEGER"),
+                    ("old_edition_total", "INTEGER"),
+                    ("new_edition_total", "INTEGER"),
+                    ("reason", "TEXT"),
+                    ("source", "TEXT DEFAULT 'manual_app'"),
+                    ("created_at", "TIMESTAMPTZ DEFAULT now()"),
+                ),
                 "webhook_events": (
                     ("topic", "TEXT"),
                     ("status", "TEXT"),
@@ -693,6 +797,8 @@ def _ensure_schema_uncached():
                 "shopify_orders",
                 "shopify_order_lines",
                 "edition_orders",
+                "edition_runs",
+                "edition_adjustments",
                 "certificates",
                 "product_assets",
                 "file_assets",
@@ -735,6 +841,24 @@ def _ensure_schema_uncached():
             cur.execute("DROP INDEX IF EXISTS idx_edition_orders_handle_number_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_handle_number ON edition_orders(shopify_handle, edition_number)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_line_allocation_unique ON edition_orders(shopify_line_item_id, allocation_index)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_run_id ON edition_orders(edition_run_id)")
+            cur.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_run_number_unique
+                ON edition_orders(edition_run_id, edition_number)
+                WHERE edition_run_id IS NOT NULL AND edition_number IS NOT NULL
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_runs_handle_status ON edition_runs(shopify_handle, status)")
+            cur.execute(
+                f"""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_runs_one_active_per_handle
+                ON edition_runs(shopify_handle)
+                WHERE status='{ACTIVE_RUN_STATUS}'
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_adjustments_handle ON edition_adjustments(shopify_handle, created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_adjustments_run ON edition_adjustments(edition_run_id, created_at DESC)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_certificates_edition_order_unique ON certificates(edition_order_id)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_unique ON product_assets(shopify_handle, asset_type)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_name_unique ON product_assets(shopify_handle, asset_type, asset_name)")
@@ -749,6 +873,61 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_order_id ON edition_orders(shopify_order_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_handle ON edition_orders(shopify_handle)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_product_assets_handle ON product_assets(shopify_handle)")
+            cur.execute(
+                f"""
+                INSERT INTO edition_runs(
+                    edition_product_id, shopify_product_id, shopify_handle, product_title,
+                    edition_name, edition_total, next_edition_number, status, started_at, updated_at
+                )
+                SELECT ep.id,
+                       ep.shopify_product_id,
+                       ep.shopify_handle,
+                       ep.product_title,
+                       COALESCE(NULLIF(ep.edition_name, ''), '{DEFAULT_EDITION_NAME}'),
+                       COALESCE(ep.edition_total, 100),
+                       GREATEST(COALESCE(ep.next_edition_number, 1), 1),
+                       CASE
+                           WHEN COALESCE(ep.sold_out, ep.is_sold_out, FALSE) THEN '{SOLD_OUT_RUN_STATUS}'
+                           WHEN COALESCE(ep.active, ep.is_active, TRUE) THEN '{ACTIVE_RUN_STATUS}'
+                           ELSE '{INACTIVE_RUN_STATUS}'
+                       END,
+                       now(),
+                       now()
+                FROM edition_products ep
+                WHERE ep.shopify_handle IS NOT NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM edition_runs er
+                      WHERE er.shopify_handle = ep.shopify_handle
+                        AND er.status IN ('{ACTIVE_RUN_STATUS}', '{SOLD_OUT_RUN_STATUS}', '{INACTIVE_RUN_STATUS}')
+                  )
+                """
+            )
+            cur.execute(
+                f"""
+                UPDATE edition_products ep
+                SET active_edition_run_id=er.id,
+                    edition_name=er.edition_name,
+                    updated_at=now()
+                FROM edition_runs er
+                WHERE er.shopify_handle=ep.shopify_handle
+                  AND er.id = (
+                      SELECT er2.id
+                      FROM edition_runs er2
+                      WHERE er2.shopify_handle=ep.shopify_handle
+                        AND er2.status IN ('{ACTIVE_RUN_STATUS}', '{SOLD_OUT_RUN_STATUS}', '{INACTIVE_RUN_STATUS}')
+                      ORDER BY CASE
+                          WHEN er2.status='{ACTIVE_RUN_STATUS}' THEN 0
+                          WHEN er2.status='{SOLD_OUT_RUN_STATUS}' THEN 1
+                          ELSE 2
+                      END,
+                      er2.started_at DESC NULLS LAST,
+                      er2.created_at DESC NULLS LAST
+                      LIMIT 1
+                  )
+                  AND (ep.active_edition_run_id IS NULL OR ep.active_edition_run_id <> er.id)
+                """
+            )
         conn.commit()
 
 
@@ -961,6 +1140,7 @@ def upsert_products(products):
                     ),
                 )
                 processed += 1
+            _ensure_active_edition_runs_for_products(cur)
         conn.commit()
     return processed
 
@@ -1044,15 +1224,324 @@ def sync_shopify_products_to_supabase(config=None, progress_callback=None, *, mo
         raise
 
 
+def _int_value(value, default=0):
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clean_edition_run_status(status, *, active=True, sold_out=False):
+    normalized = str(status or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if normalized in {"soldout", "sold_out", "sold"}:
+        return SOLD_OUT_RUN_STATUS
+    if normalized in {"inactive", "disabled", "paused"}:
+        return INACTIVE_RUN_STATUS
+    if normalized in {"archived", "archive", "legacy", "historical"}:
+        return ARCHIVED_RUN_STATUS
+    if normalized in {"active", "available", "live", "open"}:
+        return ACTIVE_RUN_STATUS
+    if sold_out:
+        return SOLD_OUT_RUN_STATUS
+    return ACTIVE_RUN_STATUS if active else INACTIVE_RUN_STATUS
+
+
+def _status_flags_from_run(status):
+    normalized = _clean_edition_run_status(status)
+    return {
+        "active": normalized == ACTIVE_RUN_STATUS,
+        "sold_out": normalized == SOLD_OUT_RUN_STATUS,
+    }
+
+
+def _ensure_active_edition_runs_for_products(cur):
+    cur.execute(
+        f"""
+        INSERT INTO edition_runs(
+            edition_product_id, shopify_product_id, shopify_handle, product_title,
+            edition_name, edition_total, next_edition_number, status, started_at, updated_at
+        )
+        SELECT ep.id,
+               ep.shopify_product_id,
+               ep.shopify_handle,
+               ep.product_title,
+               COALESCE(NULLIF(ep.edition_name, ''), '{DEFAULT_EDITION_NAME}'),
+               COALESCE(ep.edition_total, 100),
+               GREATEST(COALESCE(ep.next_edition_number, 1), 1),
+               CASE
+                   WHEN COALESCE(ep.sold_out, ep.is_sold_out, FALSE) THEN '{SOLD_OUT_RUN_STATUS}'
+                   WHEN COALESCE(ep.active, ep.is_active, TRUE) THEN '{ACTIVE_RUN_STATUS}'
+                   ELSE '{INACTIVE_RUN_STATUS}'
+               END,
+               now(),
+               now()
+        FROM edition_products ep
+        WHERE ep.shopify_handle IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1
+              FROM edition_runs er
+              WHERE er.shopify_handle = ep.shopify_handle
+                AND er.status IN ('{ACTIVE_RUN_STATUS}', '{SOLD_OUT_RUN_STATUS}', '{INACTIVE_RUN_STATUS}')
+          )
+        """
+    )
+    cur.execute(
+        f"""
+        UPDATE edition_products ep
+        SET active_edition_run_id=er.id,
+            edition_name=er.edition_name,
+            edition_total=COALESCE(er.edition_total, ep.edition_total, 100),
+            next_edition_number=GREATEST(COALESCE(er.next_edition_number, ep.next_edition_number, 1), 1),
+            active=(er.status='{ACTIVE_RUN_STATUS}'),
+            is_active=(er.status='{ACTIVE_RUN_STATUS}'),
+            sold_out=(er.status='{SOLD_OUT_RUN_STATUS}'),
+            is_sold_out=(er.status='{SOLD_OUT_RUN_STATUS}'),
+            updated_at=now()
+        FROM edition_runs er
+        WHERE er.shopify_handle=ep.shopify_handle
+          AND er.id = (
+              SELECT er2.id
+              FROM edition_runs er2
+              WHERE er2.shopify_handle=ep.shopify_handle
+                AND er2.status IN ('{ACTIVE_RUN_STATUS}', '{SOLD_OUT_RUN_STATUS}', '{INACTIVE_RUN_STATUS}')
+              ORDER BY CASE
+                  WHEN er2.id = ep.active_edition_run_id THEN 0
+                  WHEN er2.status='{ACTIVE_RUN_STATUS}' THEN 1
+                  WHEN er2.status='{SOLD_OUT_RUN_STATUS}' THEN 2
+                  ELSE 3
+              END,
+              er2.started_at DESC NULLS LAST,
+              er2.created_at DESC NULLS LAST
+              LIMIT 1
+          )
+        """
+    )
+
+
+def _active_run_lateral_sql():
+    return f"""
+        LEFT JOIN LATERAL (
+            SELECT er.*
+            FROM edition_runs er
+            WHERE er.shopify_handle=ep.shopify_handle
+              AND (
+                  er.id=ep.active_edition_run_id
+                  OR (
+                      ep.active_edition_run_id IS NULL
+                      AND er.status IN ('{ACTIVE_RUN_STATUS}', '{SOLD_OUT_RUN_STATUS}', '{INACTIVE_RUN_STATUS}')
+                  )
+              )
+            ORDER BY CASE
+                WHEN er.id=ep.active_edition_run_id THEN 0
+                WHEN er.status='{ACTIVE_RUN_STATUS}' THEN 1
+                WHEN er.status='{SOLD_OUT_RUN_STATUS}' THEN 2
+                ELSE 3
+            END,
+            er.started_at DESC NULLS LAST,
+            er.created_at DESC NULLS LAST
+            LIMIT 1
+        ) er ON TRUE
+    """
+
+
+def _normalize_edition_product_row(row):
+    normalized = dict(row or {})
+    run_id = normalized.get("edition_run_id") or normalized.get("active_edition_run_id")
+    run_status = _clean_edition_run_status(
+        normalized.get("run_status") or normalized.get("status"),
+        active=bool(normalized.get("active")),
+        sold_out=bool(normalized.get("sold_out")),
+    )
+    edition_total = max(
+        _int_value(normalized.get("run_edition_total"), _int_value(normalized.get("edition_total"), 100)),
+        1,
+    )
+    next_number = max(
+        _int_value(
+            normalized.get("run_next_edition_number"),
+            _int_value(normalized.get("next_edition_number"), 1),
+        ),
+        1,
+    )
+    latest_sent = max(next_number - 1, 0)
+    active_run_max = _int_value(normalized.get("active_run_max_assigned"), 0)
+    remaining = max(edition_total - latest_sent, 0)
+    normalized.update(
+        {
+            "active_edition_run_id": run_id,
+            "edition_run_id": run_id,
+            "edition_name": normalized.get("run_edition_name")
+            or normalized.get("edition_name")
+            or DEFAULT_EDITION_NAME,
+            "edition_total": edition_total,
+            "next_edition_number": next_number,
+            "latest_sent": latest_sent,
+            "last_assigned_edition": max(active_run_max, latest_sent),
+            "active_run_max_assigned": active_run_max,
+            "remaining_count": remaining,
+            "remaining_editions": remaining,
+            "status": run_status,
+            "active": run_status == ACTIVE_RUN_STATUS,
+            "sold_out": run_status == SOLD_OUT_RUN_STATUS,
+            "updated_at": normalized.get("run_updated_at") or normalized.get("updated_at"),
+        }
+    )
+    return normalized
+
+
+def _normalize_edition_product_rows(rows):
+    return [_normalize_edition_product_row(row) for row in rows or []]
+
+
+def _get_active_edition_run_for_handle(cur, shopify_handle, *, lock=False, create_missing=True):
+    handle = str(shopify_handle or "").strip()
+    if not handle:
+        return None, None
+    lock_sql = " FOR UPDATE" if lock else ""
+    cur.execute(
+        f"""
+        SELECT *
+        FROM edition_products
+        WHERE shopify_handle=%s
+        {lock_sql}
+        """,
+        (handle,),
+    )
+    product = cur.fetchone()
+    if not product:
+        return None, None
+
+    active_run_id = product.get("active_edition_run_id")
+    cur.execute(
+        f"""
+        SELECT *
+        FROM edition_runs
+        WHERE shopify_handle=%s
+          AND (
+              id=%s
+              OR (
+                  %s IS NULL
+                  AND status IN ('{ACTIVE_RUN_STATUS}', '{SOLD_OUT_RUN_STATUS}', '{INACTIVE_RUN_STATUS}')
+              )
+          )
+        ORDER BY CASE
+            WHEN id=%s THEN 0
+            WHEN status='{ACTIVE_RUN_STATUS}' THEN 1
+            WHEN status='{SOLD_OUT_RUN_STATUS}' THEN 2
+            ELSE 3
+        END,
+        started_at DESC NULLS LAST,
+        created_at DESC NULLS LAST
+        LIMIT 1
+        {lock_sql}
+        """,
+        (handle, active_run_id, active_run_id, active_run_id),
+    )
+    run = cur.fetchone()
+    if not run and create_missing:
+        status = _clean_edition_run_status(
+            "",
+            active=bool(product.get("active") if product.get("active") is not None else True),
+            sold_out=bool(product.get("sold_out")),
+        )
+        cur.execute(
+            f"""
+            INSERT INTO edition_runs(
+                edition_product_id, shopify_product_id, shopify_handle, product_title,
+                edition_name, edition_total, next_edition_number, status, started_at, updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, now(), now())
+            RETURNING *
+            """,
+            (
+                product.get("id"),
+                product.get("shopify_product_id") or product.get("shopify_product_gid"),
+                handle,
+                product.get("product_title"),
+                product.get("edition_name") or DEFAULT_EDITION_NAME,
+                max(_int_value(product.get("edition_total"), 100), 1),
+                max(_int_value(product.get("next_edition_number"), 1), 1),
+                status,
+            ),
+        )
+        run = cur.fetchone()
+
+    if run and product.get("active_edition_run_id") != run.get("id"):
+        cur.execute(
+            """
+            UPDATE edition_products
+            SET active_edition_run_id=%s,
+                edition_name=%s,
+                updated_at=now()
+            WHERE shopify_handle=%s
+            """,
+            (run.get("id"), run.get("edition_name") or DEFAULT_EDITION_NAME, handle),
+        )
+    return product, run
+
+
+def _insert_edition_adjustment_with_cursor(
+    cur,
+    *,
+    product,
+    run,
+    old_next,
+    new_next,
+    old_total,
+    new_total,
+    reason="",
+    source="manual_app",
+):
+    if _int_value(old_next, 1) == _int_value(new_next, 1) and _int_value(old_total, 100) == _int_value(new_total, 100):
+        return
+    cur.execute(
+        """
+        INSERT INTO edition_adjustments(
+            edition_product_id, edition_run_id, shopify_product_id, shopify_handle,
+            old_next_edition_number, new_next_edition_number,
+            old_edition_total, new_edition_total, reason, source
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            (product or {}).get("id"),
+            (run or {}).get("id"),
+            (run or {}).get("shopify_product_id") or (product or {}).get("shopify_product_id"),
+            (run or {}).get("shopify_handle") or (product or {}).get("shopify_handle"),
+            _int_value(old_next, 1),
+            _int_value(new_next, 1),
+            _int_value(old_total, 100),
+            _int_value(new_total, 100),
+            str(reason or "Manual edition adjustment"),
+            str(source or "manual_app"),
+        ),
+    )
+
+
 def list_edition_products(search="", limit=500):
     ensure_schema()
     search_value = f"%{search.strip().lower()}%" if search.strip() else None
     with connect() as conn:
         with conn.cursor() as cur:
+            _ensure_active_edition_runs_for_products(cur)
+            active_run_join = _active_run_lateral_sql()
             if search_value:
                 cur.execute(
-                    """
+                    f"""
                     SELECT ep.*, sp.admin_url, sp.online_store_url,
+                           er.id AS edition_run_id,
+                           er.edition_name AS run_edition_name,
+                           er.edition_total AS run_edition_total,
+                           er.next_edition_number AS run_next_edition_number,
+                           er.status AS run_status,
+                           er.updated_at AS run_updated_at,
+                           COALESCE((
+                               SELECT MAX(eo.edition_number)
+                               FROM edition_orders eo
+                               WHERE eo.edition_run_id = er.id
+                           ), 0) AS active_run_max_assigned,
                            COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS display_image_url,
                            CASE
                                WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
@@ -1091,6 +1580,7 @@ def list_edition_products(search="", limit=500):
                            END, 0) AS remaining_count,
                            GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
                     FROM edition_products ep
+                    {active_run_join}
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
                     WHERE LOWER(COALESCE(ep.product_title, '')) LIKE %s
                        OR LOWER(COALESCE(ep.shopify_handle, '')) LIKE %s
@@ -1101,8 +1591,19 @@ def list_edition_products(search="", limit=500):
                 )
             else:
                 cur.execute(
-                    """
+                    f"""
                     SELECT ep.*, sp.admin_url, sp.online_store_url,
+                           er.id AS edition_run_id,
+                           er.edition_name AS run_edition_name,
+                           er.edition_total AS run_edition_total,
+                           er.next_edition_number AS run_next_edition_number,
+                           er.status AS run_status,
+                           er.updated_at AS run_updated_at,
+                           COALESCE((
+                               SELECT MAX(eo.edition_number)
+                               FROM edition_orders eo
+                               WHERE eo.edition_run_id = er.id
+                           ), 0) AS active_run_max_assigned,
                            COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS display_image_url,
                            CASE
                                WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
@@ -1141,13 +1642,14 @@ def list_edition_products(search="", limit=500):
                            END, 0) AS remaining_count,
                            GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
                     FROM edition_products ep
+                    {active_run_join}
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
                     ORDER BY ep.product_title NULLS LAST, ep.shopify_handle
                     LIMIT %s
                     """,
                     (limit,),
                 )
-            return cur.fetchall()
+            return _normalize_edition_product_rows(cur.fetchall())
 
 
 def get_edition_counter_state(shopify_handle):
@@ -1157,12 +1659,30 @@ def get_edition_counter_state(shopify_handle):
         raise ValueError("Shopify handle is required.")
     with connect() as conn:
         with conn.cursor() as cur:
+            product, run = _get_active_edition_run_for_handle(cur, handle, create_missing=True)
+            if not product:
+                raise ValueError(f"No edition product found for {handle}.")
             cur.execute(
                 """
-                SELECT ep.shopify_handle,
+                SELECT COALESCE(MAX(edition_number), 0) AS max_assigned
+                FROM edition_orders
+                WHERE edition_run_id=%s
+                """,
+                (run.get("id") if run else None,),
+            )
+            active_run_max = _int_value((cur.fetchone() or {}).get("max_assigned"), 0)
+            cur.execute(
+                """
+                SELECT ep.*,
+                       er.id AS edition_run_id,
+                       er.edition_name AS run_edition_name,
+                       er.edition_total AS run_edition_total,
+                       er.next_edition_number AS run_next_edition_number,
+                       er.status AS run_status,
+                       er.updated_at AS run_updated_at,
+                       %s AS active_run_max_assigned,
+                       ep.shopify_handle,
                        ep.product_title,
-                       COALESCE(ep.edition_total, 100) AS edition_total,
-                       COALESCE(ep.next_edition_number, 1) AS next_edition_number,
                        COALESCE(ep.active, ep.is_active, TRUE) AS active,
                        COALESCE(ep.sold_out, ep.is_sold_out, FALSE) AS sold_out,
                        COALESCE(ep.allow_counter_history_override, FALSE) AS allow_counter_history_override,
@@ -1173,110 +1693,275 @@ def get_edition_counter_state(shopify_handle):
                            WHERE eo.shopify_handle = ep.shopify_handle
                        ), 0) AS max_assigned_edition
                 FROM edition_products ep
+                LEFT JOIN edition_runs er ON er.id=%s
                 WHERE ep.shopify_handle=%s
                 """,
-                (handle,),
+                (active_run_max, run.get("id") if run else None, handle),
             )
             row = cur.fetchone()
     if not row:
         raise ValueError(f"No edition product found for {handle}.")
-    return row
+    normalized = _normalize_edition_product_row(row)
+    normalized["max_assigned_edition"] = max(
+        _int_value(row.get("max_assigned_edition"), 0),
+        _int_value(normalized.get("active_run_max_assigned"), 0),
+    )
+    return normalized
 
 
 def update_edition_product(
     shopify_handle,
     *,
+    edition_name=None,
     edition_total=None,
+    next_edition_number=None,
     active=None,
     sold_out=None,
+    status=None,
     current_edition=None,
     allow_history_override=False,
+    reason="Manual edition edit",
 ):
     ensure_schema()
     handle = str(shopify_handle or "").strip()
     if not handle:
         raise ValueError("Shopify handle is required.")
-    state = get_edition_counter_state(handle)
-    max_assigned = _safe_int(state.get("max_assigned_edition"), 0)
-    new_total = _safe_int(edition_total, _safe_int(state.get("edition_total"), 100))
-    if new_total < 1:
-        raise ValueError("Edition total must be at least 1.")
-    if new_total < max_assigned:
-        raise ValueError("Edition total cannot be lower than already assigned edition history.")
-
-    update_next_number = None
-    if current_edition is not None:
-        current = _safe_int(current_edition, 0)
-        if current < 0:
-            raise ValueError("Current edition cannot be below 0.")
-        if current < max_assigned and not allow_history_override:
-            raise ValueError("Cannot set current edition below already assigned edition history.")
-        if current > new_total:
-            raise ValueError("Current edition cannot be higher than edition total.")
-        update_next_number = current + 1
-        override_active = bool(allow_history_override and current < max_assigned)
-    else:
-        override_active = bool(state.get("allow_counter_history_override"))
-
-    final_sold_out = sold_out
-    if final_sold_out is None and update_next_number is not None:
-        final_sold_out = update_next_number > new_total
-
     with connect() as conn:
         with conn.cursor() as cur:
-            if edition_total is not None:
-                cur.execute(
-                    """
-                    UPDATE edition_products
-                    SET edition_total=%s,
-                        sold_out=COALESCE(next_edition_number, 1) > %s,
-                        is_sold_out=COALESCE(next_edition_number, 1) > %s,
-                        updated_at=now()
-                    WHERE shopify_handle=%s
-                    """,
-                    (new_total, new_total, new_total, handle),
+            product, run = _get_active_edition_run_for_handle(cur, handle, lock=True, create_missing=True)
+            if not product or not run:
+                raise ValueError(f"No edition product found for {handle}.")
+
+            old_next = max(_int_value(run.get("next_edition_number"), 1), 1)
+            old_total = max(_int_value(run.get("edition_total"), 100), 1)
+            new_total = max(_int_value(edition_total, old_total), 1)
+            if current_edition is not None:
+                current = _int_value(current_edition, 0)
+                if current < 0:
+                    raise ValueError("Latest sent cannot be below 0.")
+                proposed_next = current + 1
+            elif next_edition_number is not None:
+                proposed_next = _int_value(next_edition_number, old_next)
+            else:
+                proposed_next = old_next
+            proposed_next = max(proposed_next, 1)
+
+            cur.execute(
+                """
+                SELECT COALESCE(MAX(edition_number), 0) AS max_assigned
+                FROM edition_orders
+                WHERE edition_run_id=%s
+                """,
+                (run.get("id"),),
+            )
+            max_assigned_in_run = _int_value((cur.fetchone() or {}).get("max_assigned"), 0)
+            if proposed_next <= max_assigned_in_run:
+                raise ValueError(
+                    "Cannot lower the next edition number below the highest edition already "
+                    "allocated in this active run. Start New Edition Run if this product must restart at 1/100."
                 )
-            if update_next_number is not None:
-                cur.execute(
-                    """
-                    UPDATE edition_products
-                    SET next_edition_number=%s,
-                        last_assigned_edition=%s,
-                        allow_counter_history_override=%s,
-                        sold_out=%s,
-                        is_sold_out=%s,
-                        updated_at=now()
-                    WHERE shopify_handle=%s
-                    """,
-                    (
-                        update_next_number,
-                        max(update_next_number - 1, 0),
-                        override_active,
-                        bool(final_sold_out),
-                        bool(final_sold_out),
-                        handle,
-                    ),
-                )
-            if active is not None:
-                cur.execute(
-                    """
-                    UPDATE edition_products
-                    SET active=%s, is_active=%s, updated_at=now()
-                    WHERE shopify_handle=%s
-                    """,
-                    (bool(active), bool(active), handle),
-                )
-            if sold_out is not None and update_next_number is None:
-                cur.execute(
-                    """
-                    UPDATE edition_products
-                    SET sold_out=%s, is_sold_out=%s, updated_at=now()
-                    WHERE shopify_handle=%s
-                    """,
-                    (bool(sold_out), bool(sold_out), handle),
-                )
+            if new_total < max_assigned_in_run:
+                raise ValueError("Edition total cannot be lower than editions already allocated in this active run.")
+
+            requested_status = _clean_edition_run_status(
+                status,
+                active=bool(active if active is not None else run.get("status") == ACTIVE_RUN_STATUS),
+                sold_out=bool(sold_out if sold_out is not None else run.get("status") == SOLD_OUT_RUN_STATUS),
+            )
+            if sold_out is True or proposed_next > new_total:
+                requested_status = SOLD_OUT_RUN_STATUS
+            elif active is False and status is None:
+                requested_status = INACTIVE_RUN_STATUS
+            elif active is True and sold_out is False and status is None:
+                requested_status = ACTIVE_RUN_STATUS
+
+            latest_sent = proposed_next - 1
+            remaining = new_total - latest_sent
+            if remaining < 0 and requested_status != SOLD_OUT_RUN_STATUS:
+                raise ValueError("Remaining editions cannot go below 0 unless the run is marked sold out.")
+
+            new_name = str(edition_name or run.get("edition_name") or DEFAULT_EDITION_NAME).strip() or DEFAULT_EDITION_NAME
+            cur.execute(
+                """
+                UPDATE edition_runs
+                SET edition_name=%s,
+                    edition_total=%s,
+                    next_edition_number=%s,
+                    status=%s,
+                    archived_at=CASE WHEN %s = 'archived' THEN COALESCE(archived_at, now()) ELSE archived_at END,
+                    updated_at=now()
+                WHERE id=%s
+                RETURNING *
+                """,
+                (
+                    new_name,
+                    new_total,
+                    proposed_next,
+                    requested_status,
+                    requested_status,
+                    run.get("id"),
+                ),
+            )
+            updated_run = cur.fetchone() or run
+            flags = _status_flags_from_run(requested_status)
+            cur.execute(
+                """
+                UPDATE edition_products
+                SET active_edition_run_id=%s,
+                    edition_name=%s,
+                    edition_total=%s,
+                    next_edition_number=%s,
+                    last_assigned_edition=%s,
+                    remaining_count=%s,
+                    active=%s,
+                    is_active=%s,
+                    sold_out=%s,
+                    is_sold_out=%s,
+                    allow_counter_history_override=%s,
+                    updated_at=now()
+                WHERE shopify_handle=%s
+                """,
+                (
+                    updated_run.get("id"),
+                    new_name,
+                    new_total,
+                    proposed_next,
+                    latest_sent,
+                    max(remaining, 0),
+                    flags["active"],
+                    flags["active"],
+                    flags["sold_out"],
+                    flags["sold_out"],
+                    bool(allow_history_override),
+                    handle,
+                ),
+            )
+            _insert_edition_adjustment_with_cursor(
+                cur,
+                product=product,
+                run=updated_run,
+                old_next=old_next,
+                new_next=proposed_next,
+                old_total=old_total,
+                new_total=new_total,
+                reason=reason,
+                source="manual_app",
+            )
         conn.commit()
     return get_edition_counter_state(handle)
+
+
+def start_new_edition_run(shopify_handle, *, edition_name="", edition_total=100, notes="", reason="Start new edition run"):
+    ensure_schema()
+    handle = str(shopify_handle or "").strip()
+    if not handle:
+        raise ValueError("Shopify handle is required.")
+    new_name = str(edition_name or DEFAULT_EDITION_NAME).strip() or DEFAULT_EDITION_NAME
+    new_total = max(_int_value(edition_total, 100), 1)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            product, current_run = _get_active_edition_run_for_handle(cur, handle, lock=True, create_missing=True)
+            if not product:
+                raise ValueError(f"No edition product found for {handle}.")
+            old_next = _int_value((current_run or {}).get("next_edition_number"), _int_value(product.get("next_edition_number"), 1))
+            old_total = _int_value((current_run or {}).get("edition_total"), _int_value(product.get("edition_total"), 100))
+            if current_run:
+                cur.execute(
+                    """
+                    UPDATE edition_runs
+                    SET status=%s,
+                        archived_at=COALESCE(archived_at, now()),
+                        updated_at=now()
+                    WHERE id=%s
+                    """,
+                    (ARCHIVED_RUN_STATUS, current_run.get("id")),
+                )
+            cur.execute(
+                """
+                INSERT INTO edition_runs(
+                    edition_product_id, shopify_product_id, shopify_handle, product_title,
+                    edition_name, edition_total, next_edition_number, status, notes, started_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, 1, %s, %s, now(), now())
+                RETURNING *
+                """,
+                (
+                    product.get("id"),
+                    product.get("shopify_product_id") or product.get("shopify_product_gid"),
+                    handle,
+                    product.get("product_title"),
+                    new_name,
+                    new_total,
+                    ACTIVE_RUN_STATUS,
+                    str(notes or ""),
+                ),
+            )
+            new_run = cur.fetchone()
+            cur.execute(
+                """
+                UPDATE edition_products
+                SET active_edition_run_id=%s,
+                    edition_name=%s,
+                    edition_total=%s,
+                    next_edition_number=1,
+                    last_assigned_edition=0,
+                    remaining_count=%s,
+                    active=TRUE,
+                    is_active=TRUE,
+                    sold_out=FALSE,
+                    is_sold_out=FALSE,
+                    allow_counter_history_override=FALSE,
+                    updated_at=now()
+                WHERE shopify_handle=%s
+                """,
+                (new_run.get("id"), new_name, new_total, new_total, handle),
+            )
+            _insert_edition_adjustment_with_cursor(
+                cur,
+                product=product,
+                run=new_run,
+                old_next=old_next,
+                new_next=1,
+                old_total=old_total,
+                new_total=new_total,
+                reason=reason or f"Started new edition run: {new_name}",
+                source="manual_app",
+            )
+        conn.commit()
+    return get_edition_counter_state(handle)
+
+
+def list_edition_adjustments(search="", limit=100):
+    ensure_schema()
+    search_value = f"%{search.strip().lower()}%" if search.strip() else None
+    with connect() as conn:
+        with conn.cursor() as cur:
+            if search_value:
+                cur.execute(
+                    """
+                    SELECT ea.*, er.edition_name, er.product_title
+                    FROM edition_adjustments ea
+                    LEFT JOIN edition_runs er ON er.id=ea.edition_run_id
+                    WHERE LOWER(COALESCE(ea.shopify_handle, '')) LIKE %s
+                       OR LOWER(COALESCE(er.product_title, '')) LIKE %s
+                       OR LOWER(COALESCE(er.edition_name, '')) LIKE %s
+                    ORDER BY ea.created_at DESC
+                    LIMIT %s
+                    """,
+                    (search_value, search_value, search_value, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT ea.*, er.edition_name, er.product_title
+                    FROM edition_adjustments ea
+                    LEFT JOIN edition_runs er ON er.id=ea.edition_run_id
+                    ORDER BY ea.created_at DESC
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+            return cur.fetchall()
 
 
 def _safe_int(value, default=0):
@@ -1332,11 +2017,24 @@ def get_product_edition_metafield_payload(shopify_handle):
         raise ValueError("Shopify handle is required.")
     with connect() as conn:
         with conn.cursor() as cur:
+            _get_active_edition_run_for_handle(cur, handle, create_missing=True)
+            active_run_join = _active_run_lateral_sql()
             cur.execute(
-                """
+                f"""
                 SELECT ep.*, sp.shopify_product_id AS synced_shopify_product_id,
                        sp.shopify_product_gid AS synced_shopify_product_gid,
                        sp.admin_url, sp.online_store_url,
+                       er.id AS edition_run_id,
+                       er.edition_name AS run_edition_name,
+                       er.edition_total AS run_edition_total,
+                       er.next_edition_number AS run_next_edition_number,
+                       er.status AS run_status,
+                       er.updated_at AS run_updated_at,
+                       COALESCE((
+                           SELECT MAX(eo.edition_number)
+                           FROM edition_orders eo
+                           WHERE eo.edition_run_id = er.id
+                       ), 0) AS active_run_max_assigned,
                        CASE
                            WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
                                COALESCE(ep.last_assigned_edition, 0),
@@ -1358,6 +2056,7 @@ def get_product_edition_metafield_payload(shopify_handle):
                            WHERE eo.shopify_handle = ep.shopify_handle
                        ) AS sold_count
                 FROM edition_products ep
+                {active_run_join}
                 LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
                 WHERE ep.shopify_handle=%s
                 """,
@@ -1366,6 +2065,7 @@ def get_product_edition_metafield_payload(shopify_handle):
             row = cur.fetchone()
     if not row:
         raise ValueError(f"No edition product found for {handle}.")
+    row = _normalize_edition_product_row(row)
     owner_gid = (
         row.get("shopify_product_gid")
         or row.get("shopify_product_id")
@@ -1794,25 +2494,330 @@ def _match_product_handle(cur, *, handle="", shopify_product_id="", product_titl
         if row and row.get("shopify_handle"):
             return row["shopify_handle"]
 
-    if product_title:
+    return normalized_handle
+
+
+def _find_import_product(cur, *, shopify_product_id="", handle=""):
+    product_id = str(shopify_product_id or "").strip()
+    normalized_handle = _normalize_handle(handle)
+    if product_id:
         cur.execute(
             """
-            SELECT shopify_handle
-            FROM edition_products
-            WHERE LOWER(COALESCE(product_title, '')) = LOWER(%s)
-            UNION
-            SELECT handle AS shopify_handle
-            FROM shopify_products
-            WHERE LOWER(COALESCE(title, '')) = LOWER(%s)
+            SELECT ep.*, TRUE AS edition_product_exists,
+                   sp.admin_url, sp.online_store_url
+            FROM edition_products ep
+            LEFT JOIN shopify_products sp ON sp.handle=ep.shopify_handle
+            WHERE ep.shopify_product_id=%s OR ep.shopify_product_gid=%s
             LIMIT 1
             """,
-            (product_title, product_title),
+            (product_id, product_id),
         )
         row = cur.fetchone()
-        if row and row.get("shopify_handle"):
-            return row["shopify_handle"]
+        if row:
+            return row
+        cur.execute(
+            """
+            SELECT NULL AS id,
+                   sp.shopify_product_id,
+                   sp.shopify_product_gid,
+                   sp.handle AS shopify_handle,
+                   sp.title AS product_title,
+                   FALSE AS edition_product_exists,
+                   TRUE AS shopify_product_exists,
+                   sp.admin_url,
+                   sp.online_store_url
+            FROM shopify_products sp
+            WHERE sp.shopify_product_id=%s OR sp.shopify_product_gid=%s OR sp.legacy_resource_id=%s
+            LIMIT 1
+            """,
+            (product_id, product_id, product_id),
+        )
+        row = cur.fetchone()
+        if row:
+            return row
+    if normalized_handle:
+        cur.execute(
+            """
+            SELECT ep.*, TRUE AS edition_product_exists,
+                   sp.admin_url, sp.online_store_url
+            FROM edition_products ep
+            LEFT JOIN shopify_products sp ON sp.handle=ep.shopify_handle
+            WHERE ep.shopify_handle=%s
+            LIMIT 1
+            """,
+            (normalized_handle,),
+        )
+        row = cur.fetchone()
+        if row:
+            return row
+        cur.execute(
+            """
+            SELECT NULL AS id,
+                   sp.shopify_product_id,
+                   sp.shopify_product_gid,
+                   sp.handle AS shopify_handle,
+                   sp.title AS product_title,
+                   FALSE AS edition_product_exists,
+                   TRUE AS shopify_product_exists,
+                   sp.admin_url,
+                   sp.online_store_url
+            FROM shopify_products sp
+            WHERE sp.handle=%s
+            LIMIT 1
+            """,
+            (normalized_handle,),
+        )
+        row = cur.fetchone()
+        if row:
+            return row
+    return None
 
-    return normalized_handle
+
+def _limited_edition_import_values(row):
+    edition_number, edition_total_from_number = _parse_edition_number(
+        _csv_value(row, "Edition No.", "Edition No", "Edition Number", "edition_number")
+    )
+    latest_sent = _parse_int(
+        _csv_value(row, "latest_sent", "Latest Sent", "Current Number", "current_number", "Current Edition"),
+        None,
+    )
+    if latest_sent is None and edition_number is not None:
+        latest_sent = edition_number
+    next_number = _parse_int(
+        _csv_value(
+            row,
+            "next_edition_number",
+            "Next Edition Number",
+            "Next Edition",
+        ),
+        None,
+    )
+    if next_number is None and latest_sent is not None:
+        next_number = latest_sent + 1
+    edition_total = (
+        _parse_int(
+            _csv_value(
+                row,
+                "edition_total",
+                "Edition Total",
+                "Total Editions",
+                "total_editions",
+                "edition_limit",
+                "Total",
+            ),
+            None,
+        )
+        or edition_total_from_number
+    )
+    status = _clean_edition_run_status(
+        _csv_value(row, "status", "Status", "Active"),
+        active=True,
+        sold_out=False,
+    )
+    return {
+        "shopify_product_id": _csv_value(row, "shopify_product_id", "Shopify Product ID", "Product ID"),
+        "shopify_handle": _normalize_handle(_csv_value(row, "handle", "shopify_handle", "Shopify Handle")),
+        "product_title": _csv_value(row, "product_title", "Product Title", "Product", "Title"),
+        "edition_name": _csv_value(row, "edition_name", "Edition Name") or DEFAULT_EDITION_NAME,
+        "latest_sent": latest_sent,
+        "next_edition_number": next_number,
+        "edition_total": edition_total,
+        "status": status,
+        "psd_link": _csv_value(row, "psd link", "psd_link", "psd_file_url", "PSD"),
+        "prodigi_link": _csv_value(row, "prodigi link", "prodigi_link", "prodigi_url", "Prodigi"),
+    }
+
+
+def preview_limited_edition_import_rows(rows):
+    ensure_schema()
+    result = {
+        "rows_read": 0,
+        "matched": [],
+        "createable": [],
+        "unmatched": [],
+        "changes": [],
+        "errors": [],
+    }
+    with connect() as conn:
+        with conn.cursor() as cur:
+            _ensure_active_edition_runs_for_products(cur)
+            conn.commit()
+            for line_number, row in enumerate(rows or [], start=2):
+                result["rows_read"] += 1
+                parsed = _limited_edition_import_values(row)
+                matched = _find_import_product(
+                    cur,
+                    shopify_product_id=parsed["shopify_product_id"],
+                    handle=parsed["shopify_handle"],
+                )
+                if not matched:
+                    result["unmatched"].append(
+                        {
+                            "line": line_number,
+                            "product_title": parsed["product_title"],
+                            "shopify_handle": parsed["shopify_handle"],
+                            "shopify_product_id": parsed["shopify_product_id"],
+                            "reason": "No Shopify product ID or handle match. Title-only matching is disabled.",
+                        }
+                    )
+                    continue
+
+                handle = matched.get("shopify_handle") or parsed["shopify_handle"]
+                if not matched.get("edition_product_exists"):
+                    result["createable"].append(
+                        {
+                            "line": line_number,
+                            "product_title": matched.get("product_title") or parsed["product_title"],
+                            "shopify_handle": handle,
+                            "shopify_product_id": matched.get("shopify_product_id") or parsed["shopify_product_id"],
+                            "next_edition_number": parsed["next_edition_number"] or 1,
+                            "edition_total": parsed["edition_total"] or 100,
+                            "status": parsed["status"],
+                        }
+                    )
+                    continue
+
+                state = get_edition_counter_state(handle)
+                proposed_next = parsed["next_edition_number"] or state.get("next_edition_number") or 1
+                proposed_total = parsed["edition_total"] or state.get("edition_total") or 100
+                proposed_name = parsed["edition_name"] or state.get("edition_name") or DEFAULT_EDITION_NAME
+                proposed_status = parsed["status"] or state.get("status") or ACTIVE_RUN_STATUS
+                row_changes = []
+                comparisons = (
+                    ("edition_name", state.get("edition_name"), proposed_name),
+                    ("next_edition_number", state.get("next_edition_number"), proposed_next),
+                    ("edition_total", state.get("edition_total"), proposed_total),
+                    ("status", state.get("status"), proposed_status),
+                )
+                for field, old_value, new_value in comparisons:
+                    if str(old_value or "") != str(new_value or ""):
+                        row_changes.append({"field": field, "old": old_value, "new": new_value})
+                preview_row = {
+                    "line": line_number,
+                    "product_title": state.get("product_title") or parsed["product_title"],
+                    "shopify_handle": handle,
+                    "shopify_product_id": state.get("shopify_product_id") or parsed["shopify_product_id"],
+                    "current_edition_name": state.get("edition_name"),
+                    "new_edition_name": proposed_name,
+                    "current_next": state.get("next_edition_number"),
+                    "new_next": proposed_next,
+                    "current_total": state.get("edition_total"),
+                    "new_total": proposed_total,
+                    "current_status": state.get("status"),
+                    "new_status": proposed_status,
+                    "changes": row_changes,
+                }
+                result["matched"].append(preview_row)
+                if row_changes:
+                    result["changes"].append(preview_row)
+    return result
+
+
+def apply_limited_edition_import_rows(rows, *, create_missing_from_shopify=False, reason="Google Sheet CSV import"):
+    ensure_schema()
+    result = {
+        "rows_read": 0,
+        "rows_matched": 0,
+        "rows_created": 0,
+        "rows_updated": 0,
+        "rows_skipped": 0,
+        "errors": [],
+    }
+    run_id = start_sync_run("limited_edition_csv_import")
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                _ensure_active_edition_runs_for_products(cur)
+                conn.commit()
+                for line_number, row in enumerate(rows or [], start=2):
+                    result["rows_read"] += 1
+                    parsed = _limited_edition_import_values(row)
+                    matched = _find_import_product(
+                        cur,
+                        shopify_product_id=parsed["shopify_product_id"],
+                        handle=parsed["shopify_handle"],
+                    )
+                    if not matched:
+                        result["rows_skipped"] += 1
+                        result["errors"].append(f"Line {line_number}: no Shopify product ID or handle match.")
+                        continue
+                    handle = matched.get("shopify_handle") or parsed["shopify_handle"]
+                    if not matched.get("edition_product_exists"):
+                        if not create_missing_from_shopify:
+                            result["rows_skipped"] += 1
+                            result["errors"].append(
+                                f"Line {line_number}: {handle} exists in Shopify sync but not edition_products."
+                            )
+                            continue
+                        cur.execute(
+                            """
+                            INSERT INTO edition_products(
+                                shopify_product_id, shopify_product_gid, shopify_handle, product_title,
+                                edition_name, edition_total, next_edition_number,
+                                active, is_active, sold_out, is_sold_out, updated_at
+                            )
+                            VALUES (%s, %s, %s, %s, %s, 100, 1, TRUE, TRUE, FALSE, FALSE, now())
+                            ON CONFLICT (shopify_handle) DO NOTHING
+                            """,
+                            (
+                                matched.get("shopify_product_id") or parsed["shopify_product_id"],
+                                matched.get("shopify_product_gid") or matched.get("shopify_product_id") or parsed["shopify_product_id"],
+                                handle,
+                                matched.get("product_title") or parsed["product_title"],
+                                parsed["edition_name"] or DEFAULT_EDITION_NAME,
+                            ),
+                        )
+                        conn.commit()
+                        result["rows_created"] += 1
+                    result["rows_matched"] += 1
+                    state = get_edition_counter_state(handle)
+                    proposed_next = parsed["next_edition_number"] or state.get("next_edition_number") or 1
+                    proposed_total = parsed["edition_total"] or state.get("edition_total") or 100
+                    proposed_name = parsed["edition_name"] or state.get("edition_name") or DEFAULT_EDITION_NAME
+                    proposed_status = parsed["status"] or state.get("status") or ACTIVE_RUN_STATUS
+                    update_edition_product(
+                        handle,
+                        edition_name=proposed_name,
+                        edition_total=proposed_total,
+                        next_edition_number=proposed_next,
+                        status=proposed_status,
+                        reason=f"{reason} line {line_number}",
+                    )
+                    if parsed["psd_link"]:
+                        upsert_product_asset(
+                            handle,
+                            "psd_master_file",
+                            parsed["psd_link"],
+                            asset_name="PSD Master File",
+                            notes="Imported from Limited Edition CSV",
+                        )
+                    if parsed["prodigi_link"]:
+                        upsert_product_asset(
+                            handle,
+                            "prodigi_link",
+                            parsed["prodigi_link"],
+                            asset_name="Prodigi",
+                            notes="Imported from Limited Edition CSV",
+                        )
+                    result["rows_updated"] += 1
+            conn.commit()
+        finish_sync_run(
+            run_id,
+            "Complete",
+            records_seen=result["rows_read"],
+            records_processed=result["rows_updated"] + result["rows_created"],
+        )
+        return result
+    except Exception as error:
+        finish_sync_run(
+            run_id,
+            "Failed",
+            records_seen=result["rows_read"],
+            records_processed=result["rows_updated"] + result["rows_created"],
+            error_message="Limited edition CSV import failed.",
+        )
+        log_app_error("limited_edition_csv_import_failed", str(error), result)
+        raise
 
 
 def import_limited_edition_rows(
@@ -3142,19 +4147,29 @@ def allocate_edition_for_order_line(
                     (shopify_handle,),
                 )
                 edition_product = cur.fetchone()
-                next_number = int(edition_product.get("next_edition_number") or 1)
-                edition_total = int(edition_product.get("edition_total") or 100)
+                _, edition_run = _get_active_edition_run_for_handle(
+                    cur,
+                    shopify_handle,
+                    lock=True,
+                    create_missing=True,
+                )
+                if not edition_run:
+                    raise ValueError(f"No active edition run found for {shopify_handle}.")
+                next_number = int(edition_run.get("next_edition_number") or edition_product.get("next_edition_number") or 1)
+                edition_total = int(edition_run.get("edition_total") or edition_product.get("edition_total") or 100)
+                edition_name = edition_run.get("edition_name") or DEFAULT_EDITION_NAME
+                run_status = _clean_edition_run_status(edition_run.get("status"))
                 cur.execute(
                     """
                     SELECT COALESCE(MAX(edition_number), 0) AS max_assigned
                     FROM edition_orders
-                    WHERE shopify_handle=%s
+                    WHERE edition_run_id=%s
                     """,
-                    (shopify_handle,),
+                    (edition_run.get("id"),),
                 )
                 max_assigned = int((cur.fetchone() or {}).get("max_assigned") or 0)
                 should_be_next = max_assigned + 1
-                allow_counter_override = bool(edition_product.get("allow_counter_history_override"))
+                allow_counter_override = False
                 counter_state = _resolve_next_edition_number_state(
                     next_number,
                     should_be_next,
@@ -3179,6 +4194,14 @@ def allocate_edition_for_order_line(
                         ),
                     )
                 elif counter_state["mode"] == "auto_correct":
+                    cur.execute(
+                        """
+                        UPDATE edition_runs
+                        SET next_edition_number=%s, updated_at=now()
+                        WHERE id=%s
+                        """,
+                        (should_be_next, edition_run.get("id")),
+                    )
                     cur.execute(
                         """
                         UPDATE edition_products
@@ -3206,7 +4229,15 @@ def allocate_edition_for_order_line(
                     )
                 next_number = int(counter_state["next_number"])
 
-                if next_number > edition_total:
+                if run_status == SOLD_OUT_RUN_STATUS or next_number > edition_total:
+                    cur.execute(
+                        """
+                        UPDATE edition_runs
+                        SET status=%s, updated_at=now()
+                        WHERE id=%s
+                        """,
+                        (SOLD_OUT_RUN_STATUS, edition_run.get("id")),
+                    )
                     cur.execute(
                         """
                         UPDATE edition_products
@@ -3243,16 +4274,16 @@ def allocate_edition_for_order_line(
                     """
                     INSERT INTO edition_orders(
                         shopify_order_id, shopify_order_name, shopify_line_item_id, shopify_product_id,
-                        shopify_handle, product_title, variant_title, sku,
+                        shopify_handle, product_title, edition_run_id, edition_name, variant_title, sku,
                         customer_name, customer_email, shopify_customer_name, shopify_customer_email,
                         edition_number, edition_total, allocation_index, quantity,
                         assigned_at, certificate_status, status, updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1,
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1,
                             now(), 'Certificate Missing', %s, now())
                     ON CONFLICT DO NOTHING
                     RETURNING id, shopify_order_id, shopify_line_item_id, shopify_product_id,
-                              shopify_handle, product_title, variant_title, sku, customer_name,
+                              shopify_handle, product_title, edition_run_id, edition_name, variant_title, sku, customer_name,
                               customer_email, edition_number, edition_total, allocation_index,
                               assigned_at, certificate_status
                     """,
@@ -3263,6 +4294,8 @@ def allocate_edition_for_order_line(
                         shopify_product_id,
                         shopify_handle,
                         product_title,
+                        edition_run.get("id"),
+                        edition_name,
                         variant_title,
                         sku,
                         customer_name,
@@ -3325,8 +4358,25 @@ def allocate_edition_for_order_line(
                 incremented_next = next_number + 1
                 cur.execute(
                     """
+                    UPDATE edition_runs
+                    SET next_edition_number=%s,
+                        status=%s,
+                        updated_at=now()
+                    WHERE id=%s
+                    """,
+                    (
+                        incremented_next,
+                        SOLD_OUT_RUN_STATUS if incremented_next > edition_total else ACTIVE_RUN_STATUS,
+                        edition_run.get("id"),
+                    ),
+                )
+                cur.execute(
+                    """
                     UPDATE edition_products
                     SET next_edition_number=%s,
+                        edition_name=%s,
+                        last_assigned_edition=%s,
+                        remaining_count=%s,
                         sold_out=%s,
                         is_sold_out=%s,
                         updated_at=now()
@@ -3334,6 +4384,9 @@ def allocate_edition_for_order_line(
                     """,
                     (
                         incremented_next,
+                        edition_name,
+                        next_number,
+                        max(edition_total - next_number, 0),
                         incremented_next > edition_total,
                         incremented_next > edition_total,
                         shopify_handle,
