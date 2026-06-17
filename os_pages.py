@@ -3215,6 +3215,10 @@ def _shipping_text_from_raw(raw_order):
             else:
                 add(item)
         shipping_lines = raw.get("shipping_lines") or raw.get("shippingLines") or raw.get("shippingRates")
+        if not shipping_lines and isinstance(raw.get("raw_payload"), dict):
+            nested_raw = raw["raw_payload"]
+            add(nested_raw.get("shipping_title") or nested_raw.get("shipping_method"))
+            shipping_lines = nested_raw.get("shipping_lines") or nested_raw.get("shippingLines")
         if isinstance(shipping_lines, dict):
             shipping_lines = shipping_lines.get("edges") or shipping_lines.get("nodes") or shipping_lines.get("items")
         if isinstance(shipping_lines, list):
@@ -3573,27 +3577,33 @@ def _edition_chip_class(value):
     return "sc-order-edition-chip sc-order-edition-chip-issue"
 
 
+def _order_widget_token(value):
+    return re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "row")).strip("-") or "row"
+
+
+def _certificate_row_label(assignments):
+    if not assignments:
+        return "Needs edition"
+    statuses = [_assignment_certificate_status(assignment) for assignment in assignments]
+    if all(status == "Generated" for status in statuses):
+        return "Open cert" if len(assignments) == 1 else f"{len(assignments)} certs"
+    if any(status == "Error" for status in statuses):
+        return "Cert error"
+    if any(status == "Missing file" for status in statuses):
+        return "Missing file"
+    return "Generate"
+
+
 def _render_certificate_popover(order_summary, key_prefix):
     assignments = _order_assignments_for_certificates(order_summary)
     if not assignments:
-        st.markdown(status_badge("Not generated"), unsafe_allow_html=True)
-        st.caption("Needs edition")
+        st.markdown('<span class="sc-order-muted-pill">Needs edition</span>', unsafe_allow_html=True)
         return
 
-    statuses = [_assignment_certificate_status(assignment) for assignment in assignments]
-    if all(status == "Generated" for status in statuses):
-        badge_label = "Generated"
-    elif any(status == "Error" for status in statuses):
-        badge_label = "Error"
-    elif any(status == "Missing file" for status in statuses):
-        badge_label = "Missing file"
-    else:
-        badge_label = "Not generated"
-    st.markdown(status_badge(badge_label), unsafe_allow_html=True)
-
-    with st.popover("Certificate", use_container_width=True):
+    with st.popover(_certificate_row_label(assignments), use_container_width=True):
         for index, assignment in enumerate(assignments, start=1):
             edition_order_id = assignment.get("edition_order_id") or assignment.get("id")
+            key_id = _order_widget_token(edition_order_id)
             edition_label = f"#{assignment.get('edition_number')}/{assignment.get('edition_total') or 100}"
             product_label = assignment.get("product_title") or order_summary.get("product_summary") or "Product"
             st.markdown(f"**{edition_label}**")
@@ -3605,18 +3615,19 @@ def _render_certificate_popover(order_summary, key_prefix):
             generate_label = "Regenerate" if status_label == "Generated" else "Generate"
             if button_columns[0].button(
                 generate_label,
-                key=f"{key_prefix}-cert-generate-{edition_order_id}-{index}",
+                key=f"{key_prefix}-cert-generate-{key_id}-{index}",
                 use_container_width=True,
             ):
                 try:
                     if assignment.get("edition_order_id"):
                         supabase_backend.generate_certificate_for_edition_order(
-                            int(assignment["edition_order_id"]),
+                            assignment["edition_order_id"],
                             force=True,
                         )
+                        st.session_state.supabase_orders_notice = f"Certificate generated for {edition_label}."
                     else:
-                        generate_certificate_pdf(int(edition_order_id))
-                    st.session_state.supabase_orders_notice = f"Certificate generated for {edition_label}."
+                        generate_certificate_pdf(edition_order_id)
+                        st.session_state.orders_notice = f"Certificate generated for {edition_label}."
                     st.rerun()
                 except Exception as error:
                     st.error("Could not generate certificate.")
@@ -3628,13 +3639,6 @@ def _render_certificate_popover(order_summary, key_prefix):
             )
             if preview_url:
                 button_columns[1].link_button("Preview", preview_url, use_container_width=True)
-            else:
-                button_columns[1].button(
-                    "Preview",
-                    disabled=True,
-                    key=f"{key_prefix}-cert-preview-missing-{edition_order_id}-{index}",
-                    use_container_width=True,
-                )
 
             pdf_url = (
                 _r2_temporary_url(assignment.get("certificate_r2_bucket"), assignment.get("certificate_r2_key"))
@@ -3650,71 +3654,127 @@ def _render_certificate_popover(order_summary, key_prefix):
                     data=local_path.read_bytes(),
                     file_name=local_path.name,
                     mime="application/pdf",
-                    key=f"{key_prefix}-cert-download-{edition_order_id}-{index}",
+                    key=f"{key_prefix}-cert-download-{key_id}-{index}",
                     use_container_width=True,
                 )
             elif status_label == "Missing file":
                 st.warning("Certificate row exists, but the file is missing.")
-            st.divider()
 
 
 def _render_compact_orders_feed(order_summaries):
     st.markdown(
         """
         <style>
-        div[data-testid="stPopover"] button {
-            white-space: nowrap !important;
-        }
-        div[data-testid="stHorizontalBlock"]:has(.sc-order-stream-header) {
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-header-marker) {
             background: #FFFFFF;
             border: 1px solid #D9DEE5;
             border-bottom: 0;
             border-radius: 20px 20px 0 0;
-            padding: 0.75rem 0.85rem 0.45rem;
+            gap: 0.5rem !important;
+            margin: 0 !important;
+            padding: 0.56rem 0.78rem 0.42rem;
         }
-        div[data-testid="stHorizontalBlock"]:has(.sc-order-stream-cell),
-        div[data-testid="stHorizontalBlock"]:has(.sc-order-edition-chip) {
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-row-marker) {
             background: #FFFFFF;
             border-left: 1px solid #D9DEE5;
             border-right: 1px solid #D9DEE5;
             border-bottom: 1px solid #E5E7EB;
-            padding: 0.62rem 0.85rem;
+            gap: 0.5rem !important;
+            margin: 0 !important;
+            min-height: 0 !important;
+            padding: 0.42rem 0.78rem;
+        }
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-header-marker) > div,
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-row-marker) > div {
+            min-width: 0 !important;
+        }
+        div[data-testid="stElementContainer"]:has(.sc-order-header-marker),
+        div[data-testid="stElementContainer"]:has(.sc-order-row-marker),
+        div[data-testid="stElementContainer"]:has(.sc-order-stream-cell),
+        div[data-testid="stElementContainer"]:has(.sc-order-edition-chip),
+        div[data-testid="stElementContainer"]:has(.sc-order-link-pill),
+        div[data-testid="stElementContainer"]:has(.sc-order-muted-pill) {
+            margin-bottom: 0 !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-row-marker):last-of-type {
+            border-radius: 0 0 20px 20px;
+        }
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-row-marker) button,
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-row-marker) a {
+            color: #111827 !important;
+            font-weight: 800 !important;
+            min-height: 2.05rem !important;
+            padding: 0.18rem 0.55rem !important;
+            white-space: nowrap !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-row-marker) button:disabled {
+            color: #111827 !important;
+            opacity: 1 !important;
+        }
+        div[data-testid="stHorizontalBlock"]:has(.sc-order-row-marker) a.sc-order-link-pill {
+            color: #FFFFFF !important;
+            min-height: 1.9rem !important;
+            padding: 0.14rem 0.56rem !important;
         }
         .sc-order-stream-header {
             color: #5B6472;
-            font-size: 0.75rem;
+            font-size: 0.68rem;
             font-weight: 800;
             letter-spacing: 0.08em;
             text-transform: uppercase;
         }
         .sc-order-stream-cell {
             color: #111827;
-            font-size: 0.92rem;
-            font-weight: 700;
-            line-height: 1.25;
+            font-size: 0.82rem;
+            font-weight: 760;
+            line-height: 1.18;
             overflow-wrap: anywhere;
         }
-        .sc-order-stream-muted {
-            color: #64748B;
-            font-size: 0.78rem;
-            font-weight: 650;
+        .sc-order-row-marker,
+        .sc-order-header-marker {
+            display: none;
+        }
+        .sc-order-link-pill,
+        .sc-order-muted-pill {
+            align-items: center;
+            border-radius: 999px;
+            display: inline-flex;
+            font-size: 0.72rem;
+            font-weight: 820;
+            min-height: 1.9rem;
+            padding: 0.14rem 0.56rem;
+            text-decoration: none !important;
+            white-space: nowrap;
+        }
+        .sc-order-link-pill {
+            background: #111827;
+            border: 1px solid #111827;
+            color: #FFFFFF !important;
+        }
+        .sc-order-muted-pill {
+            background: #F3F4F6;
+            border: 1px solid #D1D5DB;
+            color: #111827 !important;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    header = st.columns([0.75, 1.0, 1.65, 0.82, 1.25, 0.68, 0.7, 1.05, 0.65])
+    header = st.columns([0.72, 0.95, 1.68, 0.78, 1.28, 0.62, 0.92, 0.64], gap="small")
     for column, label in zip(
         header,
-        ("Order", "Name", "Product", "Edition", "Variant", "Shipping", "PSD", "Certificate", "Link"),
+        ("Order", "Name", "Product", "Edition", "Variant", "PSD", "Certificate", "Shipping"),
     ):
-        column.markdown(f'<div class="sc-order-stream-header">{label}</div>', unsafe_allow_html=True)
-    st.divider()
+        marker = '<span class="sc-order-header-marker"></span>' if label == "Order" else ""
+        column.markdown(f'{marker}<div class="sc-order-stream-header">{label}</div>', unsafe_allow_html=True)
     for index, item in enumerate(order_summaries or []):
-        key_prefix = f"orders-row-{index}-{re.sub(r'[^a-zA-Z0-9_-]+', '-', str(item.get('order_key') or index))}"
-        columns = st.columns([0.75, 1.0, 1.65, 0.82, 1.25, 0.68, 0.7, 1.05, 0.65])
+        key_prefix = f"orders-row-{index}-{_order_widget_token(item.get('order_key') or index)}"
+        columns = st.columns([0.72, 0.95, 1.68, 0.78, 1.28, 0.62, 0.92, 0.64], gap="small")
         order_label = html.escape(str(item.get("order_label") or "Order"))
-        columns[0].markdown(f'<div class="sc-order-stream-cell">{order_label}</div>', unsafe_allow_html=True)
+        columns[0].markdown(
+            f'<span class="sc-order-row-marker"></span><div class="sc-order-stream-cell">{order_label}</div>',
+            unsafe_allow_html=True,
+        )
         columns[1].markdown(
             f'<div class="sc-order-stream-cell">{html.escape(str(item.get("customer_name") or "Customer missing"))}</div>',
             unsafe_allow_html=True,
@@ -3733,24 +3793,23 @@ def _render_compact_orders_feed(order_summaries):
             f'<div class="sc-order-stream-cell">{html.escape(str(item.get("variant_summary") or "Variant missing"))}</div>',
             unsafe_allow_html=True,
         )
-        columns[5].markdown(
-            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("shipping_summary") or "-"))}</div>',
-            unsafe_allow_html=True,
-        )
         psd = item.get("psd") or {}
         psd_url = str(psd.get("url") or "").strip()
         if psd_url:
-            columns[6].link_button(str(psd.get("label") or "PSD"), psd_url, use_container_width=True)
+            columns[5].markdown(
+                f'<a class="sc-order-link-pill" href="{html.escape(psd_url, quote=True)}" target="_blank" rel="noreferrer">{html.escape(str(psd.get("label") or "PSD"))}</a>',
+                unsafe_allow_html=True,
+            )
         else:
-            columns[6].button("No PSD", disabled=True, key=f"{key_prefix}-no-psd", use_container_width=True)
-        with columns[7]:
+            columns[5].markdown('<span class="sc-order-muted-pill">No PSD</span>', unsafe_allow_html=True)
+        with columns[6]:
             _render_certificate_popover(item, key_prefix)
-        order_link = str(item.get("order_link") or "").strip()
-        if order_link:
-            columns[8].link_button("Open", order_link, use_container_width=True)
-        else:
-            columns[8].button("No link", disabled=True, key=f"{key_prefix}-no-link", use_container_width=True)
-        st.divider()
+        columns[7].markdown(
+            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("shipping_summary") or "-"))}</div>',
+            unsafe_allow_html=True,
+        )
+
+
 def render_supabase_orders_page():
     st.title("Orders")
     st.caption(
@@ -3785,10 +3844,13 @@ def render_supabase_orders_page():
         try:
             result = supabase_backend.sync_shopify_orders_to_supabase(
                 config,
-                generate_certificates=False,
+                generate_certificates=True,
                 sync_product_metafields=False,
             )
-            repair_result = supabase_backend.reprocess_cached_problem_orders(limit=150)
+            repair_result = supabase_backend.reprocess_cached_problem_orders(
+                limit=150,
+                generate_certificates=True,
+            )
             sync_message.empty()
             warning_count = len(result.get("errors") or []) + len(repair_result.get("errors") or [])
             warning_suffix = (
@@ -3802,10 +3864,10 @@ def render_supabase_orders_page():
                 if result.get("historical_orders_synced")
                 else ""
             )
-            deferred_suffix = (
-                f" {result.get('certificates_deferred', 0)} certificate PDF"
-                f"{'s' if result.get('certificates_deferred', 0) != 1 else ''} still deferred."
-                if result.get("certificates_deferred")
+            certificate_suffix = (
+                f" Generated {result.get('generated_certificates', 0) + repair_result.get('generated_certificates', 0)} certificate PDF"
+                f"{'s' if (result.get('generated_certificates', 0) + repair_result.get('generated_certificates', 0)) != 1 else ''}."
+                if result.get("generated_certificates") or repair_result.get("generated_certificates")
                 else ""
             )
             repair_suffix = ""
@@ -3825,8 +3887,8 @@ def render_supabase_orders_page():
                 f"Processed {result.get('orders_processed', 0)}. "
                 f"Assigned {result['assignments_created']} new editions. "
                 f"Skipped {result.get('existing_assignments_skipped', 0)} existing allocations. "
-                f"Certificates still generate on demand for faster syncs."
-                f"{historical_suffix}{deferred_suffix}{repair_suffix}{warning_suffix}"
+                f"Certificates generate automatically for new assignments."
+                f"{certificate_suffix}{historical_suffix}{repair_suffix}{warning_suffix}"
             )
             st.rerun()
         except Exception as error:
@@ -6861,7 +6923,7 @@ def render_settings_page(app_version, database_path, password_status):
                     for item in edition_orders
                 ]
                 selected = st.selectbox("Certificate test edition order", options)
-                selected_id = int(selected.rsplit("|", 1)[-1].strip())
+                selected_id = selected.rsplit("|", 1)[-1].strip()
                 if st.button("Test certificate generation", use_container_width=True):
                     try:
                         path = supabase_backend.generate_certificate_for_edition_order(selected_id)

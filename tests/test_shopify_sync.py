@@ -345,6 +345,7 @@ class ShopifySyncClientTests(unittest.TestCase):
                 "displayFulfillmentStatus": "UNFULFILLED",
                 "email": "order@example.com",
                 "totalPriceSet": {"shopMoney": {"amount": "249.00", "currencyCode": "AUD"}},
+                "shippingLine": {"title": "Express Shipping", "code": "EXPRESS"},
                 "customer": {
                     "id": "gid://shopify/Customer/55",
                     "displayName": "Ada Collector",
@@ -366,9 +367,12 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(order["total_price"], "249.00")
         self.assertEqual(order["currency"], "AUD")
         self.assertEqual(order["customer_raw"]["displayName"], "Ada Collector")
+        self.assertEqual(order["shipping_title"], "Express Shipping")
+        self.assertEqual(order["shipping_method"], "Express Shipping")
 
     def test_orders_safe_query_still_requests_customer_fields(self):
         self.assertIn("customer {", shopify_sync.ORDERS_SAFE_QUERY)
+        self.assertIn("shippingLine", shopify_sync.ORDERS_SAFE_QUERY)
         self.assertIn("shippingAddress", shopify_sync.ORDERS_SAFE_QUERY)
         self.assertIn("billingAddress", shopify_sync.ORDERS_SAFE_QUERY)
         self.assertIn("email", shopify_sync.ORDERS_SAFE_QUERY)

@@ -353,7 +353,7 @@ def _ensure_schema_uncached():
                 """
                 CREATE TABLE IF NOT EXISTS certificates (
                     id BIGSERIAL PRIMARY KEY,
-                    edition_order_id BIGINT UNIQUE,
+                    edition_order_id TEXT UNIQUE,
                     shopify_order_id TEXT,
                     shopify_handle TEXT,
                     certificate_id TEXT,
@@ -648,7 +648,7 @@ def _ensure_schema_uncached():
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "certificates": (
-                    ("edition_order_id", "BIGINT"),
+                    ("edition_order_id", "TEXT"),
                     ("shopify_order_id", "TEXT"),
                     ("shopify_handle", "TEXT"),
                     ("certificate_id", "TEXT"),
@@ -673,7 +673,7 @@ def _ensure_schema_uncached():
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "certificates": (
-                    ("edition_order_id", "BIGINT"),
+                    ("edition_order_id", "TEXT"),
                     ("shopify_order_id", "TEXT"),
                     ("shopify_handle", "TEXT"),
                     ("certificate_id", "TEXT"),
@@ -773,6 +773,26 @@ def _ensure_schema_uncached():
                 for column_name, column_type in columns:
                     cur.execute(
                         f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
+                    )
+
+            if table_exists(cur, "certificates") and column_exists(cur, "certificates", "edition_order_id"):
+                cur.execute(
+                    """
+                    SELECT data_type
+                    FROM information_schema.columns
+                    WHERE table_schema='public'
+                      AND table_name='certificates'
+                      AND column_name='edition_order_id'
+                    """
+                )
+                certificate_edition_order_type = (cur.fetchone() or {}).get("data_type")
+                if certificate_edition_order_type != "text":
+                    cur.execute(
+                        """
+                        ALTER TABLE certificates
+                        ALTER COLUMN edition_order_id TYPE TEXT
+                        USING edition_order_id::text
+                        """
                     )
 
             if table_exists(cur, "app_errors"):
@@ -2281,7 +2301,7 @@ def _certificate_rows_for_order(shopify_order_id):
                        eo.product_title, eo.shopify_handle, o.shopify_order_id,
                        o.order_name
                 FROM certificates c
-                LEFT JOIN edition_orders eo ON eo.id=c.edition_order_id
+                LEFT JOIN edition_orders eo ON eo.id::text=c.edition_order_id::text
                 LEFT JOIN shopify_orders o ON o.shopify_order_id=c.shopify_order_id
                 WHERE c.shopify_order_id=%s
                 ORDER BY c.generated_at ASC, c.id ASC
@@ -3962,14 +3982,14 @@ def _upload_certificate_outputs_to_r2(cur, assignment, pdf_path, preview_path=""
             certificate_r2_key=%s,
             certificate_preview_r2_bucket=%s,
             certificate_preview_r2_key=%s
-        WHERE edition_order_id=%s
+        WHERE edition_order_id::text=%s
         """,
         (
             certificate_update["certificate_r2_bucket"],
             certificate_update["certificate_r2_key"],
             certificate_update["certificate_preview_r2_bucket"],
             certificate_update["certificate_preview_r2_key"],
-            assignment.get("id"),
+            str(assignment.get("id")),
         ),
     )
     cur.execute(
@@ -3979,14 +3999,14 @@ def _upload_certificate_outputs_to_r2(cur, assignment, pdf_path, preview_path=""
             certificate_r2_key=%s,
             certificate_preview_r2_bucket=%s,
             certificate_preview_r2_key=%s
-        WHERE id=%s
+        WHERE id::text=%s
         """,
         (
             certificate_update["certificate_r2_bucket"],
             certificate_update["certificate_r2_key"],
             certificate_update["certificate_preview_r2_bucket"],
             certificate_update["certificate_preview_r2_key"],
-            assignment.get("id"),
+            str(assignment.get("id")),
         ),
     )
     return {"pdf": pdf_upload, "preview": preview_upload, **certificate_update}
@@ -4014,9 +4034,9 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
             """
             SELECT local_file_path, shopify_file_url, certificate_r2_bucket, certificate_r2_key
             FROM certificates
-            WHERE edition_order_id=%s
+            WHERE edition_order_id::text=%s
             """,
-            (assignment["id"],),
+            (str(assignment["id"]),),
         )
         existing_certificate = cur.fetchone()
         if not force and existing_certificate and (
@@ -4025,8 +4045,8 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
             or (existing_certificate.get("certificate_r2_bucket") and existing_certificate.get("certificate_r2_key"))
         ):
             cur.execute(
-                "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id=%s",
-                (assignment["id"],),
+                "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id::text=%s",
+                (str(assignment["id"]),),
             )
             return (
                 existing_certificate.get("local_file_path")
@@ -4079,7 +4099,7 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
                 status='Local PDF'
             """,
             (
-                assignment["id"],
+                str(assignment["id"]),
                 assignment.get("shopify_order_id"),
                 assignment.get("shopify_handle"),
                 generated_certificate_id,
@@ -4091,13 +4111,13 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
         )
         _upload_certificate_outputs_to_r2(cur, assignment, local_file_path, local_preview_path)
         cur.execute(
-            "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id=%s",
-            (assignment["id"],),
+            "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id::text=%s",
+            (str(assignment["id"]),),
         )
     except Exception as error:
         cur.execute(
-            "UPDATE edition_orders SET certificate_status='Certificate Missing' WHERE id=%s",
-            (assignment["id"],),
+            "UPDATE edition_orders SET certificate_status='Certificate Missing' WHERE id::text=%s",
+            (str(assignment["id"]),),
         )
         raise error
     return local_file_path
@@ -4664,6 +4684,8 @@ def normalize_rest_order(payload):
     customer = payload.get("customer") or {}
     shipping = payload.get("shipping_address") or {}
     billing = payload.get("billing_address") or {}
+    shipping_lines = payload.get("shipping_lines") or []
+    primary_shipping = shipping_lines[0] if shipping_lines and isinstance(shipping_lines[0], dict) else {}
     customer_full_name = " ".join(
         part for part in (customer.get("first_name"), customer.get("last_name")) if part
     ).strip()
@@ -4703,6 +4725,9 @@ def normalize_rest_order(payload):
         "customer_email": customer_email,
         "financial_status": str(payload.get("financial_status") or "").upper(),
         "fulfillment_status": str(payload.get("fulfillment_status") or "UNFULFILLED").upper(),
+        "shipping_title": primary_shipping.get("title") or primary_shipping.get("code") or "",
+        "shipping_method": primary_shipping.get("title") or primary_shipping.get("code") or "",
+        "shipping_lines": shipping_lines,
         "total_price": str(payload.get("total_price") or ""),
         "currency": payload.get("currency") or "",
         "created_at": payload.get("created_at") or "",
@@ -5009,7 +5034,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
             LEFT JOIN edition_orders eo ON eo.shopify_line_item_id = li.shopify_line_item_id
             LEFT JOIN edition_products ep ON ep.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
             LEFT JOIN shopify_products sp ON sp.handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
-            LEFT JOIN certificates c ON c.edition_order_id = eo.id
+            LEFT JOIN certificates c ON c.edition_order_id::text = eo.id::text
             LEFT JOIN product_assets psd ON psd.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND psd.asset_type = 'psd_master_file' AND psd.is_primary IS DISTINCT FROM FALSE
             LEFT JOIN product_assets prodigi ON prodigi.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND prodigi.asset_type = 'prodigi_link'
             {where}
@@ -5123,7 +5148,7 @@ def get_order_summary():
                      WHERE assignment_status = %s) AS historical_lines,
                     (SELECT COUNT(*) FROM edition_orders WHERE assigned_at::date = CURRENT_DATE) AS assigned_today,
                     (SELECT COUNT(*) FROM edition_orders eo
-                     LEFT JOIN certificates c ON c.edition_order_id=eo.id
+                     LEFT JOIN certificates c ON c.edition_order_id::text=eo.id::text
                      WHERE c.id IS NULL) AS certificates_missing,
                     (SELECT COUNT(*) FROM line_handles lh
                      LEFT JOIN product_assets pa ON pa.shopify_handle=lh.shopify_handle AND pa.asset_type='psd_master_file' AND pa.is_primary IS DISTINCT FROM FALSE
@@ -5220,7 +5245,7 @@ def list_edition_orders(search="", limit=250):
                            c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
                     FROM edition_orders eo
                     LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                    LEFT JOIN certificates c ON c.edition_order_id=eo.id
+                    LEFT JOIN certificates c ON c.edition_order_id::text=eo.id::text
                     WHERE LOWER(COALESCE(eo.product_title, '')) LIKE %s
                        OR LOWER(COALESCE(eo.shopify_handle, '')) LIKE %s
                        OR LOWER(COALESCE(o.order_name, '')) LIKE %s
@@ -5238,7 +5263,7 @@ def list_edition_orders(search="", limit=250):
                            c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
                     FROM edition_orders eo
                     LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                    LEFT JOIN certificates c ON c.edition_order_id=eo.id
+                    LEFT JOIN certificates c ON c.edition_order_id::text=eo.id::text
                     ORDER BY eo.assigned_at DESC
                     LIMIT %s
                     """,
@@ -5257,9 +5282,9 @@ def generate_certificate_for_edition_order(edition_order_id, *, force=False):
                 SELECT eo.*, o.order_name
                 FROM edition_orders eo
                 LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                WHERE eo.id=%s
+                WHERE eo.id::text=%s
                 """,
-                (edition_order_id,),
+                (str(edition_order_id),),
             )
             assignment = cur.fetchone()
             if not assignment:
@@ -5283,7 +5308,7 @@ def generate_certificate_for_edition_order(edition_order_id, *, force=False):
 
 def mark_certificates_checked(edition_order_ids):
     ensure_schema()
-    ids = [int(value) for value in edition_order_ids if value]
+    ids = [str(value) for value in edition_order_ids if value]
     if not ids:
         return 0
     with connect() as conn:
@@ -5292,7 +5317,7 @@ def mark_certificates_checked(edition_order_ids):
                 """
                 UPDATE edition_orders
                 SET certificate_status='Certificate Ready'
-                WHERE id = ANY(%s)
+                WHERE id::text = ANY(%s)
                 """,
                 (ids,),
             )
@@ -5311,7 +5336,7 @@ def list_certificates(search="", limit=250):
                     """
                     SELECT c.*, eo.product_title, eo.customer_name, o.order_name
                     FROM certificates c
-                    LEFT JOIN edition_orders eo ON eo.id=c.edition_order_id
+                    LEFT JOIN edition_orders eo ON eo.id::text=c.edition_order_id::text
                     LEFT JOIN shopify_orders o ON o.shopify_order_id=c.shopify_order_id
                     WHERE LOWER(COALESCE(eo.product_title, '')) LIKE %s
                        OR LOWER(COALESCE(eo.customer_name, '')) LIKE %s
@@ -5326,7 +5351,7 @@ def list_certificates(search="", limit=250):
                     """
                     SELECT c.*, eo.product_title, eo.customer_name, o.order_name
                     FROM certificates c
-                    LEFT JOIN edition_orders eo ON eo.id=c.edition_order_id
+                    LEFT JOIN edition_orders eo ON eo.id::text=c.edition_order_id::text
                     LEFT JOIN shopify_orders o ON o.shopify_order_id=c.shopify_order_id
                     ORDER BY c.generated_at DESC
                     LIMIT %s

@@ -705,6 +705,10 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
         firstName
         lastName
       }
+      shippingLine {
+        title
+        code
+      }
       billingAddress {
         name
         firstName
@@ -764,6 +768,10 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
         name
         firstName
         lastName
+      }
+      shippingLine {
+        title
+        code
       }
       billingAddress {
         name
@@ -1058,6 +1066,7 @@ def build_order_admin_url(store_domain, legacy_resource_id):
 def normalize_order(node, store_domain):
     customer = node.get("customer") or {}
     shipping_address = node.get("shippingAddress") or {}
+    shipping_line = node.get("shippingLine") or {}
     billing_address = node.get("billingAddress") or {}
     total_price = ((node.get("totalPriceSet") or {}).get("shopMoney") or {})
     customer_full_name = " ".join(
@@ -1112,6 +1121,9 @@ def normalize_order(node, store_domain):
         "customer_name": customer_name,
         "customer_email": customer_email,
         "customer_raw": customer,
+        "shipping_title": shipping_line.get("title") or shipping_line.get("code") or "",
+        "shipping_method": shipping_line.get("title") or shipping_line.get("code") or "",
+        "shipping_line": shipping_line,
         "total_price": str(total_price.get("amount") or ""),
         "currency": total_price.get("currencyCode") or "",
         "cancelled_at": node.get("cancelledAt") or "",
