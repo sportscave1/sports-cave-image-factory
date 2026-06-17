@@ -471,6 +471,85 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertFalse(kwargs["assign_editions"])
         self.assertEqual(kwargs["allocation_skip_reason"], supabase_backend.HISTORICAL_ORDER_NOTE)
 
+    def test_manual_edition_counter_ahead_of_history_is_respected(self):
+        result = supabase_backend._resolve_next_edition_number_state(75, 12, False)
+
+        self.assertEqual(result["next_number"], 75)
+        self.assertEqual(result["mode"], "respect_manual_counter")
+
+    @patch.object(supabase_backend, "process_paid_order")
+    @patch.object(
+        supabase_backend,
+        "ensure_edition_tracking_start",
+        return_value=datetime(2026, 6, 16, 1, 0, tzinfo=timezone.utc),
+    )
+    @patch.object(supabase_backend, "ensure_schema")
+    def test_reprocess_cached_problem_orders_uses_saved_order_snapshot(
+        self,
+        _ensure_schema,
+        _tracking_start,
+        process_paid_order,
+    ):
+        class FakeCursor:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def execute(self, sql, params):
+                self.sql = sql
+                self.params = params
+
+            def fetchall(self):
+                return self.rows
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeConnection:
+            def __init__(self, rows):
+                self.rows = rows
+
+            def cursor(self):
+                return FakeCursor(self.rows)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        snapshot = self.paid_order(
+            processed_at="2026-06-16T03:00:00Z",
+            remote_updated_at="2026-06-16T03:05:00Z",
+        )
+        process_paid_order.return_value = {
+            "assignments_created": 1,
+            "existing_assignments_skipped": 0,
+            "generated_certificates": 0,
+            "historical_lines_marked": 0,
+            "changed_handles": [],
+            "errors": [],
+        }
+
+        with patch.object(
+            supabase_backend,
+            "connect",
+            return_value=FakeConnection(
+                [{"shopify_order_id": snapshot["shopify_order_id"], "raw_json": snapshot}]
+            ),
+        ):
+            result = supabase_backend.reprocess_cached_problem_orders(limit=10)
+
+        self.assertEqual(result["orders_reprocessed"], 1)
+        self.assertEqual(result["assignments_created"], 1)
+        process_paid_order.assert_called_once()
+        args, kwargs = process_paid_order.call_args
+        self.assertEqual(args[0]["shopify_order_id"], snapshot["shopify_order_id"])
+        self.assertTrue(kwargs["assign_editions"])
+        self.assertEqual(kwargs["allocation_skip_reason"], "")
+
 
 class ShopifyDatabaseTests(unittest.TestCase):
     def setUp(self):

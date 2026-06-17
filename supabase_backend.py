@@ -28,6 +28,7 @@ DEFAULT_PSD_MASTER_FOLDER_SETTING = {
     "name": "Sports Cave PSD Master Folder",
 }
 HISTORICAL_ORDER_STATUS = "Historical Order"
+REPAIRABLE_ORDER_LINE_STATUSES = ("Error", "Product Not Found", "Needs Edition Setup")
 HISTORICAL_ORDER_NOTE = (
     "Paid before edition tracking started. Run Historical Order Backfill if this order should receive editions."
 )
@@ -2720,6 +2721,16 @@ def _generate_certificate_for_assignment(cur, assignment):
     return local_file_path
 
 
+def _resolve_next_edition_number_state(next_number, should_be_next, allow_counter_override):
+    if next_number < should_be_next:
+        if allow_counter_override:
+            return {"next_number": next_number, "mode": "manual_override_active"}
+        return {"next_number": should_be_next, "mode": "auto_correct"}
+    if next_number > should_be_next:
+        return {"next_number": next_number, "mode": "respect_manual_counter"}
+    return {"next_number": next_number, "mode": "matched"}
+
+
 def allocate_edition_for_order_line(
     *,
     shopify_order_id,
@@ -2850,7 +2861,12 @@ def allocate_edition_for_order_line(
                 max_assigned = int((cur.fetchone() or {}).get("max_assigned") or 0)
                 should_be_next = max_assigned + 1
                 allow_counter_override = bool(edition_product.get("allow_counter_history_override"))
-                if next_number < should_be_next and allow_counter_override:
+                counter_state = _resolve_next_edition_number_state(
+                    next_number,
+                    should_be_next,
+                    allow_counter_override,
+                )
+                if counter_state["mode"] == "manual_override_active":
                     cur.execute(
                         """
                         INSERT INTO app_errors(error_type, message, context)
@@ -2868,7 +2884,7 @@ def allocate_edition_for_order_line(
                             ),
                         ),
                     )
-                elif next_number < should_be_next:
+                elif counter_state["mode"] == "auto_correct":
                     cur.execute(
                         """
                         UPDATE edition_products
@@ -2894,34 +2910,7 @@ def allocate_edition_for_order_line(
                             ),
                         ),
                     )
-                    next_number = should_be_next
-                elif next_number > should_be_next:
-                    message = (
-                        f"Edition counter gap detected for {shopify_handle}. "
-                        f"next_edition_number={next_number}, expected={should_be_next}."
-                    )
-                    cur.execute(
-                        """
-                        INSERT INTO app_errors(error_type, message, context)
-                        VALUES ('edition_counter_gap_detected', %s, %s::jsonb)
-                        """,
-                        (
-                            message,
-                            json_dumps(
-                                {
-                                    "shopify_order_id": shopify_order_id,
-                                    "shopify_line_item_id": shopify_line_item_id,
-                                    "allocation_index": allocation_index,
-                                    "shopify_handle": shopify_handle,
-                                    "next_edition_number": next_number,
-                                    "expected_next_edition_number": should_be_next,
-                                    "max_assigned": max_assigned,
-                                }
-                            ),
-                        ),
-                    )
-                    conn.commit()
-                    return {"created": False, "assignment": None, "sold_out": False, "error": message}
+                next_number = int(counter_state["next_number"])
 
                 if next_number > edition_total:
                     cur.execute(
@@ -3371,6 +3360,110 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid"):
             conn.commit()
         log_app_error("webhook_order_processing_failed", str(error), {"webhook_id": webhook_id})
         raise
+
+
+def _normalize_cached_order_snapshot(raw_value):
+    payload = raw_value
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except ValueError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("shopify_order_id") and isinstance(payload.get("line_items"), list):
+        return payload
+    if payload.get("id") and isinstance(payload.get("line_items"), list):
+        return normalize_rest_order(payload)
+    return None
+
+
+def reprocess_cached_problem_orders(
+    *,
+    limit=150,
+    statuses=None,
+    generate_certificates=False,
+    sync_product_metafields=False,
+):
+    ensure_schema()
+    selected_statuses = tuple(statuses or REPAIRABLE_ORDER_LINE_STATUSES)
+    if not selected_statuses or int(limit or 0) <= 0:
+        return {
+            "orders_reprocessed": 0,
+            "assignments_created": 0,
+            "existing_assignments_skipped": 0,
+            "generated_certificates": 0,
+            "historical_lines_marked": 0,
+            "skipped_missing_snapshot": 0,
+            "errors": [],
+        }
+
+    placeholders = ", ".join(["%s"] * len(selected_statuses))
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT o.shopify_order_id, o.raw_json
+                FROM shopify_orders o
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM shopify_order_lines li
+                    WHERE li.shopify_order_id=o.shopify_order_id
+                      AND COALESCE(li.assignment_status, '') IN ({placeholders})
+                )
+                ORDER BY COALESCE(o.remote_updated_at, o.created_at, o.synced_at) DESC NULLS LAST, o.order_name DESC
+                LIMIT %s
+                """,
+                (*selected_statuses, int(limit)),
+            )
+            snapshots = cur.fetchall()
+
+    tracking_start = ensure_edition_tracking_start()
+    processed_orders = 0
+    assignments_created = 0
+    existing_assignments_skipped = 0
+    generated_certificates = 0
+    historical_lines_marked = 0
+    skipped_missing_snapshot = 0
+    errors = []
+
+    for row in snapshots:
+        order = _normalize_cached_order_snapshot(row.get("raw_json"))
+        if not order:
+            skipped_missing_snapshot += 1
+            errors.append(
+                f"Skipped cached repair for {row.get('shopify_order_id') or 'unknown order'} because no reusable order snapshot was stored."
+            )
+            continue
+        should_assign_editions = True
+        allocation_skip_reason = ""
+        order_datetime = _order_effective_datetime(order)
+        if order_datetime and tracking_start and order_datetime < tracking_start:
+            should_assign_editions = False
+            allocation_skip_reason = HISTORICAL_ORDER_NOTE
+        result = process_paid_order(
+            order,
+            generate_certificates=generate_certificates,
+            sync_product_metafields=sync_product_metafields,
+            assign_editions=should_assign_editions,
+            allocation_skip_reason=allocation_skip_reason,
+        )
+        processed_orders += 1
+        assignments_created += int(result.get("assignments_created") or 0)
+        existing_assignments_skipped += int(result.get("existing_assignments_skipped") or 0)
+        generated_certificates += int(result.get("generated_certificates") or 0)
+        historical_lines_marked += int(result.get("historical_lines_marked") or 0)
+        errors.extend(result.get("errors") or [])
+
+    return {
+        "orders_reprocessed": processed_orders,
+        "assignments_created": assignments_created,
+        "existing_assignments_skipped": existing_assignments_skipped,
+        "generated_certificates": generated_certificates,
+        "historical_lines_marked": historical_lines_marked,
+        "skipped_missing_snapshot": skipped_missing_snapshot,
+        "errors": errors[:10],
+    }
 
 
 def sync_shopify_orders_to_supabase(

@@ -3148,6 +3148,16 @@ def _line_variant_summary(line_item):
     return product_text or "Variant missing"
 
 
+def _line_product_title(line_item):
+    product_text = _clean_order_text(line_item.get("product_title"))
+    if product_text:
+        return product_text
+    handle_text = _clean_order_text(line_item.get("shopify_handle"))
+    if handle_text:
+        return handle_text.replace("-", " ").title()
+    return "Product missing"
+
+
 def _line_assignment_status(line_item):
     assignments = active_assignments(_coerce_assignments(line_item.get("assignments")))
     if assignments:
@@ -3155,14 +3165,57 @@ def _line_assignment_status(line_item):
     return _clean_order_text(line_item.get("assignment_status")) or "Needs Edition"
 
 
+def _line_assignment_label(line_item):
+    status = _line_assignment_status(line_item)
+    if status == "Error":
+        return "Needs review"
+    if status == "Product Not Found":
+        return "Needs product sync"
+    if status == "Needs Edition Setup":
+        return "Needs edition setup"
+    if status == "Sold Out":
+        return "Sold out"
+    if status == supabase_backend.HISTORICAL_ORDER_STATUS:
+        return "Historical"
+    return status
+
+
 def _line_assignment_summary(line_item):
     assignments = active_assignments(_coerce_assignments(line_item.get("assignments")))
     if assignments:
         return _assignment_text(assignments)
-    status = _line_assignment_status(line_item)
-    if status == supabase_backend.HISTORICAL_ORDER_STATUS:
-        return "Historical"
-    return status
+    return _line_assignment_label(line_item)
+
+
+def _line_edition_summary(line_item):
+    product_name = _line_product_title(line_item)
+    assignment_summary = _line_assignment_summary(line_item)
+    if product_name and assignment_summary:
+        return f"{product_name} {assignment_summary}"
+    return product_name or assignment_summary or "Needs Edition"
+
+
+def _order_psd_summary(line_items):
+    urls = []
+    seen = set()
+    for line_item in line_items or []:
+        url = _clean_order_text(line_item.get("psd_url") or line_item.get("psd_file_url"))
+        if not url:
+            continue
+        token = url.casefold()
+        if token in seen:
+            continue
+        seen.add(token)
+        urls.append(url)
+    if not urls:
+        return {"url": "", "label": "No PSD", "title": "PSD folder missing"}
+    if len(urls) == 1:
+        return {"url": urls[0], "label": "Open PSD", "title": "Open PSD folder"}
+    return {
+        "url": urls[0],
+        "label": f"PSD x{len(urls)}",
+        "title": f"Open the first of {len(urls)} PSD links on this order",
+    }
 
 
 def _overall_order_status(line_items):
@@ -3196,11 +3249,12 @@ def _build_compact_order_summary(order_row, line_items):
             separator=" | ",
         ),
         "edition_summary": _compact_text_list(
-            [_line_assignment_summary(item) for item in normalized_items],
+            [_line_edition_summary(item) for item in normalized_items],
             empty="Needs Edition",
             separator=" | ",
         ),
         "status": _overall_order_status(normalized_items),
+        "psd": _order_psd_summary(normalized_items),
         "line_items": normalized_items,
     }
 
@@ -3230,7 +3284,7 @@ def _orders_page_styles():
     return """
     <style>
     .sc-orders-summary-copy {
-        color: #6D7175;
+        color: rgba(255, 255, 255, 0.76);
         font-size: 0.92rem;
         line-height: 1.45;
         margin-top: 0.35rem;
@@ -3390,7 +3444,7 @@ def _orders_page_styles():
         margin: 0.35rem 0 0.5rem;
     }
     .sc-orders-section-label {
-        color: #6D7175;
+        color: rgba(255, 255, 255, 0.72);
         font-size: 0.78rem;
         font-weight: 700;
         letter-spacing: 0.08em;
@@ -3402,19 +3456,21 @@ def _orders_page_styles():
         padding-bottom: 0.2rem;
     }
     .sc-order-feed-table {
-        min-width: 720px;
+        min-width: 980px;
     }
     .sc-order-feed-head,
     .sc-order-feed-row {
         display: grid;
-        grid-template-columns: minmax(120px, 0.9fr) minmax(140px, 1fr) minmax(220px, 1.45fr) minmax(180px, 1.2fr);
+        grid-template-columns: minmax(110px, 0.8fr) minmax(150px, 1fr) minmax(300px, 1.7fr) minmax(220px, 1.25fr) minmax(92px, 0.55fr);
         gap: 0.7rem;
     }
     .sc-order-feed-head {
         margin-bottom: 0.35rem;
+        padding-bottom: 0.35rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.14);
     }
     .sc-order-feed-head div {
-        color: #6D7175;
+        color: rgba(255, 255, 255, 0.6);
         font-size: 0.74rem;
         font-weight: 700;
         letter-spacing: 0.08em;
@@ -3422,14 +3478,17 @@ def _orders_page_styles():
     }
     .sc-order-feed-row {
         align-items: center;
-        border-bottom: 1px solid rgba(224, 226, 228, 0.92);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.18);
         padding: 0.62rem 0;
+    }
+    .sc-order-feed-row:hover {
+        background: rgba(255, 255, 255, 0.025);
     }
     .sc-order-feed-cell {
         min-width: 0;
     }
     .sc-order-feed-value {
-        color: #202223;
+        color: #FFFFFF;
         font-size: 0.93rem;
         font-weight: 660;
         line-height: 1.25;
@@ -3437,9 +3496,42 @@ def _orders_page_styles():
         text-overflow: ellipsis;
         white-space: nowrap;
     }
+    .sc-order-feed-link {
+        color: #FFFFFF;
+        font-weight: 700;
+        text-decoration: none;
+    }
+    .sc-order-feed-link:hover {
+        color: #DCEBFF;
+        text-decoration: none;
+    }
+    .sc-order-feed-action {
+        align-items: center;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        color: #FFFFFF;
+        display: inline-flex;
+        font-size: 0.76rem;
+        font-weight: 700;
+        justify-content: center;
+        min-height: 30px;
+        padding: 0.05rem 0.72rem;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+    .sc-order-feed-action:hover {
+        background: rgba(255, 255, 255, 0.16);
+        color: #FFFFFF;
+        text-decoration: none;
+    }
+    .sc-order-feed-action-disabled {
+        opacity: 0.52;
+        pointer-events: none;
+    }
     @media (max-width: 900px) {
         .sc-order-feed-table {
-            min-width: 640px;
+            min-width: 860px;
         }
         .sc-order-feed-head,
         .sc-order-feed-row {
@@ -3454,7 +3546,7 @@ def _orders_page_styles():
     }
     @media (max-width: 560px) {
         .sc-order-feed-table {
-            min-width: 560px;
+            min-width: 760px;
         }
         .sc-order-feed-head,
         .sc-order-feed-row {
@@ -3501,54 +3593,75 @@ def _orders_page_styles():
 
 
 def _render_compact_orders_feed(order_summaries):
-    st.markdown(
-        """
-        <div class="sc-order-feed-shell">
-            <div class="sc-order-feed-table">
-                <div class="sc-order-feed-head">
-                    <div>Order</div>
-                    <div>Name</div>
-                    <div>Variant</div>
-                    <div>Edition Sync</div>
-                </div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    rows_html = []
     for item in order_summaries or []:
         order_link = str(item.get("order_link") or "").strip()
-        order_label = html.escape(str(item.get("order_label") or "Order"))
+        order_label_text = str(item.get("order_label") or "Order")
+        order_label = html.escape(order_label_text)
         if order_link:
             order_value = (
-                f'<a href="{html.escape(order_link, quote=True)}" '
-                f'style="color:#202223;font-weight:700;text-decoration:none;">{order_label}</a>'
+                f'<a class="sc-order-feed-link" href="{html.escape(order_link, quote=True)}" '
+                f'target="_blank" rel="noopener noreferrer">{order_label}</a>'
             )
         else:
             order_value = order_label
-        st.markdown(
+        customer_text = str(item.get("customer_name") or "Customer missing")
+        edition_text = str(item.get("edition_summary") or "Needs Edition")
+        variant_text = str(item.get("variant_summary") or "Variant missing")
+        psd = item.get("psd") or {}
+        psd_url = str(psd.get("url") or "").strip()
+        psd_label = html.escape(str(psd.get("label") or "No PSD"))
+        psd_title = html.escape(str(psd.get("title") or psd_label), quote=True)
+        if psd_url:
+            psd_html = (
+                f'<a class="sc-order-feed-action" href="{html.escape(psd_url, quote=True)}" '
+                f'target="_blank" rel="noopener noreferrer" title="{psd_title}">{psd_label}</a>'
+            )
+        else:
+            psd_html = (
+                f'<span class="sc-order-feed-action sc-order-feed-action-disabled" '
+                f'title="{psd_title}">{psd_label}</span>'
+            )
+        rows_html.append(
             f"""
-            <div class="sc-order-feed-shell">
-                <div class="sc-order-feed-table">
-                    <div class="sc-order-feed-row">
-                        <div class="sc-order-feed-cell">
-                            <div class="sc-order-feed-value" title="{order_label}">{order_value}</div>
-                        </div>
-                        <div class="sc-order-feed-cell">
-                            <div class="sc-order-feed-value" title="{html.escape(str(item.get("customer_name") or "Customer missing"), quote=True)}">{html.escape(str(item.get("customer_name") or "Customer missing"))}</div>
-                        </div>
-                        <div class="sc-order-feed-cell">
-                            <div class="sc-order-feed-value" title="{html.escape(str(item.get("variant_summary") or "Variant missing"), quote=True)}">{html.escape(str(item.get("variant_summary") or "Variant missing"))}</div>
-                        </div>
-                        <div class="sc-order-feed-cell">
-                            <div class="sc-order-feed-value" title="{html.escape(str(item.get("edition_summary") or "Needs Edition"), quote=True)}">{html.escape(str(item.get("edition_summary") or "Needs Edition"))}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+<div class="sc-order-feed-row">
+    <div class="sc-order-feed-cell">
+        <div class="sc-order-feed-value" title="{html.escape(order_label_text, quote=True)}">{order_value}</div>
+    </div>
+    <div class="sc-order-feed-cell">
+        <div class="sc-order-feed-value" title="{html.escape(customer_text, quote=True)}">{html.escape(customer_text)}</div>
+    </div>
+    <div class="sc-order-feed-cell">
+        <div class="sc-order-feed-value" title="{html.escape(edition_text, quote=True)}">{html.escape(edition_text)}</div>
+    </div>
+    <div class="sc-order-feed-cell">
+        <div class="sc-order-feed-value" title="{html.escape(variant_text, quote=True)}">{html.escape(variant_text)}</div>
+    </div>
+    <div class="sc-order-feed-cell">
+        {psd_html}
+    </div>
+</div>
+"""
         )
+    st.markdown(
+        """
+<div class="sc-order-feed-shell">
+    <div class="sc-order-feed-table">
+        <div class="sc-order-feed-head">
+            <div>Order</div>
+            <div>Name</div>
+            <div>Edition</div>
+            <div>Variant</div>
+            <div>PSD</div>
+        </div>
+"""
+        + "".join(rows_html)
+        + """
+    </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 def _orders_metric_card_html(label, value, hint=""):
@@ -3621,7 +3734,7 @@ def _orders_activity_chart_html(activity_rows):
 def render_supabase_orders_page():
     st.title("Orders")
     st.caption(
-        "One line per order. Variants and edition sync stay grouped into a compact feed, and older paid orders remain visible as historical until you backfill them."
+        "One readable row per order. Product edition numbers stay tied to the synced limited-edition counter, variants stay visible, and PSD access is back inline."
     )
     st.markdown(_orders_page_styles(), unsafe_allow_html=True)
     try:
@@ -3651,8 +3764,9 @@ def render_supabase_orders_page():
                 generate_certificates=False,
                 sync_product_metafields=False,
             )
+            repair_result = supabase_backend.reprocess_cached_problem_orders(limit=150)
             sync_message.empty()
-            warning_count = len(result.get("errors") or [])
+            warning_count = len(result.get("errors") or []) + len(repair_result.get("errors") or [])
             warning_suffix = (
                 f" {warning_count} warning{'s' if warning_count != 1 else ''} logged."
                 if warning_count
@@ -3670,13 +3784,25 @@ def render_supabase_orders_page():
                 if result.get("certificates_deferred")
                 else ""
             )
+            repair_suffix = ""
+            if repair_result.get("orders_reprocessed"):
+                repair_suffix = (
+                    f" Rechecked {repair_result.get('orders_reprocessed', 0)} cached issue order"
+                    f"{'s' if repair_result.get('orders_reprocessed', 0) != 1 else ''}"
+                )
+                if repair_result.get("assignments_created"):
+                    repair_suffix += (
+                        f" and recovered {repair_result.get('assignments_created', 0)} extra edition allocation"
+                        f"{'s' if repair_result.get('assignments_created', 0) != 1 else ''}"
+                    )
+                repair_suffix += "."
             st.session_state.supabase_orders_notice = (
                 f"Checked {result['orders_seen']} paid Shopify order updates. "
                 f"Processed {result.get('orders_processed', 0)}. "
                 f"Assigned {result['assignments_created']} new editions. "
                 f"Skipped {result.get('existing_assignments_skipped', 0)} existing allocations. "
                 f"Certificates still generate on demand for faster syncs."
-                f"{historical_suffix}{deferred_suffix}{warning_suffix}"
+                f"{historical_suffix}{deferred_suffix}{repair_suffix}{warning_suffix}"
             )
             st.rerun()
         except Exception as error:
@@ -3720,76 +3846,12 @@ def render_supabase_orders_page():
         )
 
     summary = supabase_backend.get_order_summary()
-    activity_rows = supabase_backend.get_order_activity(days=7)
     st.caption(
         f"{summary.get('orders_synced', 0)} cached | "
         f"{summary.get('needs_edition', 0)} need editions | "
         f"{summary.get('historical_lines', 0)} historical | "
         f"{summary.get('assigned_today', 0)} assigned today"
     )
-
-    with st.expander("Sync health and counts", expanded=False):
-        sync_cards = [
-            (
-                "Last order sync",
-                format_updated_at(last_order_sync) if last_order_sync else "Never",
-                "Manual sync only. Shopify updates stay local until a worker runs the sync.",
-            ),
-            (
-                "Edition tracking start",
-                format_updated_at(tracking_start) if tracking_start else "Not set",
-                "Older paid orders stay visible as historical until you backfill them.",
-            ),
-            (
-                "Lookback buffer",
-                f"{int(sync_state.get('sync_lookback_buffer_minutes') or 0)} minutes",
-                "Recent Shopify updates are rechecked inside this overlap window.",
-            ),
-            (
-                "Shopify connection",
-                "Connected" if config["configured"] else "Missing",
-                "Cached orders still stay readable even if the live connection is offline.",
-            ),
-        ]
-        st.markdown(
-            "<div class='sc-orders-sync-grid'>"
-            + "".join(
-                (
-                    "<div class='sc-orders-sync-card'>"
-                    f"<div class='sc-orders-sync-label'>{html.escape(label)}</div>"
-                    f"<div class='sc-orders-sync-value'>{html.escape(value)}</div>"
-                    f"<div class='sc-orders-sync-copy'>{html.escape(copy)}</div>"
-                    "</div>"
-                )
-                for label, value, copy in sync_cards
-            )
-            + "</div>",
-            unsafe_allow_html=True,
-        )
-        metric_columns = st.columns(4)
-        metric_specs = (
-            ("Orders synced", summary.get("orders_synced", 0), "Cached and searchable"),
-            ("Needs edition", summary.get("needs_edition", 0), "Needs action now"),
-            ("Historical", summary.get("historical_lines", 0), "Backfill only if required"),
-            ("Assigned today", summary.get("assigned_today", 0), "Fresh allocations"),
-        )
-        for index, (label, value, hint) in enumerate(metric_specs):
-            with metric_columns[index]:
-                st.markdown(_orders_metric_card_html(label, value, hint), unsafe_allow_html=True)
-        support_columns = st.columns([1.0, 1.0])
-        with support_columns[0]:
-            st.markdown(_orders_activity_chart_html(activity_rows), unsafe_allow_html=True)
-        with support_columns[1]:
-            st.markdown(
-                """
-                <div class="sc-orders-summary-copy">
-                    Shopify remains the order source of truth. Sports Cave OS caches the paid order updates first,
-                    allocates editions for in-window orders, and keeps the list compact by grouping every line item back
-                    under its parent order.
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
 
     fetch_limit = min(max(page_size * 4, page_size), 800)
     try:
@@ -3818,7 +3880,7 @@ def render_supabase_orders_page():
 
     st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
     st.caption(
-        f"Showing {len(order_summaries)} orders. Every row is one order only, with variants and edition sync grouped together."
+        f"Showing {len(order_summaries)} orders. Each row stays compact, readable, and keeps the edition number aligned with the synced product."
     )
     _render_compact_orders_feed(order_summaries)
 
@@ -3959,7 +4021,9 @@ def render_orders_page():
         return
     st.title("Orders")
     render_local_cache_notice()
-    st.caption("One line per order. The local cache stays compact and groups every variant and edition summary back under the parent order.")
+    st.caption(
+        "One readable row per order. Product edition numbers stay tied to the saved counter, variants stay visible, and PSD access stays inline."
+    )
     st.markdown(_orders_page_styles(), unsafe_allow_html=True)
     config = shopify_sync.get_config()
     order_summary = db.get_shopify_order_summary()
@@ -4041,7 +4105,9 @@ def render_orders_page():
         return
 
     st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
-    st.caption(f"Showing {len(orders)} cached orders in one-line format.")
+    st.caption(
+        f"Showing {len(orders)} cached orders. Each row stays compact, readable, and keeps edition details grouped under the order."
+    )
     _render_compact_orders_feed(_build_local_order_summaries(orders))
 
 
