@@ -17,10 +17,6 @@ import supabase_backend
 
 
 CERTIFICATE_OUTPUT_DIR = db.BASE_DIR / "output" / "certificates"
-ORDER_FETCH_ERROR_MESSAGE = (
-    "Orders require a Shopify access token with the read_orders scope. For Shopify Dev Dashboard "
-    "apps, Sports Cave OS requests this token from SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET."
-)
 
 QUICK_LINKS = (
     ("shopify_admin_url", "Open Shopify Admin"),
@@ -3122,6 +3118,15 @@ def _clean_order_text(value):
 
 
 def _compact_text_list(values, *, empty="Not set", limit=2, separator=", "):
+    unique_values = _unique_order_texts(values)
+    if not unique_values:
+        return empty
+    if len(unique_values) <= limit:
+        return separator.join(unique_values)
+    return separator.join(unique_values[:limit]) + f" +{len(unique_values) - limit} more"
+
+
+def _unique_order_texts(values):
     unique_values = []
     seen = set()
     for value in values or []:
@@ -3133,11 +3138,7 @@ def _compact_text_list(values, *, empty="Not set", limit=2, separator=", "):
             continue
         seen.add(token)
         unique_values.append(cleaned)
-    if not unique_values:
-        return empty
-    if len(unique_values) <= limit:
-        return separator.join(unique_values)
-    return separator.join(unique_values[:limit]) + f" +{len(unique_values) - limit} more"
+    return unique_values
 
 
 def _line_variant_summary(line_item):
@@ -3187,12 +3188,11 @@ def _line_assignment_summary(line_item):
     return _line_assignment_label(line_item)
 
 
-def _line_edition_summary(line_item):
-    product_name = _line_product_title(line_item)
-    assignment_summary = _line_assignment_summary(line_item)
-    if product_name and assignment_summary:
-        return f"{product_name} {assignment_summary}"
-    return product_name or assignment_summary or "Needs Edition"
+def _line_edition_number_summary(line_item):
+    assignments = active_assignments(_coerce_assignments(line_item.get("assignments")))
+    if assignments:
+        return _assignment_text(assignments)
+    return _line_assignment_label(line_item)
 
 
 def _order_psd_summary(line_items):
@@ -3237,22 +3237,31 @@ def _build_compact_order_summary(order_row, line_items):
         line_copy = dict(item)
         line_copy["assignments"] = active_assignments(_coerce_assignments(line_copy.get("assignments")))
         normalized_items.append(line_copy)
+    product_items = _unique_order_texts(_line_product_title(item) for item in normalized_items)
+    edition_number_items = _unique_order_texts(_line_edition_number_summary(item) for item in normalized_items)
     return {
         "order_key": str(order_row.get("shopify_order_id") or order_row.get("order_name") or ""),
         "order_label": order_row.get("order_name") or order_row.get("order_number") or "Order",
         "order_link": str(order_row.get("admin_url") or "").strip(),
         "customer_name": customer_display_name(order_row.get("customer_name")),
         "order_date": format_order_date(order_row.get("created_at") or order_row.get("processed_at")),
+        "product_summary": _compact_text_list(
+            product_items,
+            empty="Product missing",
+            separator=" | ",
+        ),
+        "product_items": product_items,
         "variant_summary": _compact_text_list(
             [_line_variant_summary(item) for item in normalized_items],
             empty="Variant missing",
             separator=" | ",
         ),
         "edition_summary": _compact_text_list(
-            [_line_edition_summary(item) for item in normalized_items],
+            edition_number_items,
             empty="Needs Edition",
             separator=" | ",
         ),
+        "edition_number_items": edition_number_items,
         "status": _overall_order_status(normalized_items),
         "psd": _order_psd_summary(normalized_items),
         "line_items": normalized_items,
@@ -3283,166 +3292,6 @@ def _build_local_order_summaries(orders):
 def _orders_page_styles():
     return """
     <style>
-    .sc-orders-summary-copy {
-        color: rgba(255, 255, 255, 0.76);
-        font-size: 0.92rem;
-        line-height: 1.45;
-        margin-top: 0.35rem;
-    }
-    .sc-orders-sync-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 0.85rem;
-    }
-    .sc-orders-sync-card {
-        border: 1px solid rgba(224, 226, 228, 0.92);
-        border-radius: 18px;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 247, 248, 0.96));
-        padding: 1rem 1.05rem;
-        box-shadow: 0 1px 2px rgba(32, 34, 35, 0.06);
-    }
-    .sc-orders-sync-label {
-        color: #6D7175;
-        font-size: 0.78rem;
-        font-weight: 700;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-    }
-    .sc-orders-sync-value {
-        color: #202223;
-        font-size: 1.08rem;
-        font-weight: 740;
-        line-height: 1.2;
-        margin-top: 0.45rem;
-    }
-    .sc-orders-sync-copy {
-        color: #6D7175;
-        font-size: 0.84rem;
-        line-height: 1.4;
-        margin-top: 0.35rem;
-    }
-    .sc-orders-metric-card,
-    .sc-orders-chart-card {
-        border: 1px solid rgba(224, 226, 228, 0.92);
-        border-radius: 18px;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(246, 247, 248, 0.96));
-        padding: 1rem 1.05rem;
-        min-height: 132px;
-        box-shadow: 0 1px 2px rgba(32, 34, 35, 0.06);
-    }
-    .sc-orders-metric-label {
-        color: #6D7175;
-        font-size: 0.82rem;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-        text-transform: uppercase;
-    }
-    .sc-orders-metric-value {
-        color: #202223;
-        font-size: 2.1rem;
-        font-weight: 750;
-        line-height: 1.05;
-        margin-top: 0.55rem;
-    }
-    .sc-orders-metric-hint {
-        color: #6D7175;
-        font-size: 0.84rem;
-        margin-top: 0.42rem;
-    }
-    .sc-orders-card-title {
-        color: #202223;
-        font-size: 1rem;
-        font-weight: 700;
-    }
-    .sc-orders-card-copy {
-        color: #6D7175;
-        font-size: 0.85rem;
-        margin-top: 0.2rem;
-    }
-    .sc-orders-chart-header {
-        align-items: flex-start;
-        display: flex;
-        gap: 0.9rem;
-        justify-content: space-between;
-        margin-bottom: 0.95rem;
-    }
-    .sc-orders-chart-legend {
-        color: #6D7175;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.85rem;
-        font-size: 0.8rem;
-        font-weight: 600;
-    }
-    .sc-orders-chart-legend span {
-        align-items: center;
-        display: inline-flex;
-        gap: 0.35rem;
-    }
-    .sc-orders-legend-dot {
-        border-radius: 999px;
-        display: inline-block;
-        height: 0.55rem;
-        width: 0.55rem;
-    }
-    .sc-orders-legend-orders {
-        background: #008060;
-    }
-    .sc-orders-legend-assigned {
-        background: #1A73E8;
-    }
-    .sc-orders-chart-shell {
-        align-items: flex-end;
-        display: flex;
-        gap: 0.7rem;
-        height: 150px;
-        padding-top: 0.5rem;
-    }
-    .sc-orders-chart-group {
-        align-items: center;
-        display: flex;
-        flex: 1 1 0;
-        flex-direction: column;
-        gap: 0.45rem;
-        height: 100%;
-        justify-content: flex-end;
-    }
-    .sc-orders-chart-bars {
-        align-items: flex-end;
-        display: flex;
-        gap: 0.28rem;
-        height: 118px;
-    }
-    .sc-orders-chart-bar {
-        border-radius: 999px 999px 0 0;
-        display: inline-block;
-        min-height: 6px;
-        width: 11px;
-    }
-    .sc-orders-chart-orders {
-        background: linear-gradient(180deg, #19A97E 0%, #008060 100%);
-    }
-    .sc-orders-chart-assigned {
-        background: linear-gradient(180deg, #69A5FF 0%, #1A73E8 100%);
-    }
-    .sc-orders-chart-label {
-        color: #6D7175;
-        font-size: 0.78rem;
-        font-weight: 600;
-    }
-    .sc-orders-empty-chart {
-        align-items: center;
-        color: #6D7175;
-        display: flex;
-        font-size: 0.92rem;
-        height: 110px;
-        justify-content: center;
-    }
-    .sc-order-divider {
-        border: 0;
-        border-top: 1px solid rgba(224, 226, 228, 0.92);
-        margin: 0.35rem 0 0.5rem;
-    }
     .sc-orders-section-label {
         color: rgba(255, 255, 255, 0.72);
         font-size: 0.78rem;
@@ -3452,25 +3301,29 @@ def _orders_page_styles():
         text-transform: uppercase;
     }
     .sc-order-feed-shell {
+        background: #FFFFFF;
+        border: 1px solid #D9DEE5;
+        border-radius: 22px;
+        box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
         overflow-x: auto;
-        padding-bottom: 0.2rem;
+        padding: 0.55rem 1rem 0.35rem;
     }
     .sc-order-feed-table {
-        min-width: 980px;
+        min-width: 1160px;
     }
     .sc-order-feed-head,
     .sc-order-feed-row {
         display: grid;
-        grid-template-columns: minmax(110px, 0.8fr) minmax(150px, 1fr) minmax(300px, 1.7fr) minmax(220px, 1.25fr) minmax(92px, 0.55fr);
+        grid-template-columns: minmax(110px, 0.72fr) minmax(165px, 1fr) minmax(300px, 1.7fr) minmax(180px, 0.95fr) minmax(230px, 1.2fr) minmax(92px, 0.5fr);
         gap: 0.7rem;
     }
     .sc-order-feed-head {
         margin-bottom: 0.35rem;
-        padding-bottom: 0.35rem;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+        padding: 0.2rem 0 0.55rem;
+        border-bottom: 1px solid #E5E7EB;
     }
     .sc-order-feed-head div {
-        color: rgba(255, 255, 255, 0.6);
+        color: #5B6472;
         font-size: 0.74rem;
         font-weight: 700;
         letter-spacing: 0.08em;
@@ -3478,37 +3331,79 @@ def _orders_page_styles():
     }
     .sc-order-feed-row {
         align-items: center;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.18);
-        padding: 0.62rem 0;
+        border-bottom: 1px solid #ECEFF3;
+        padding: 0.78rem 0;
     }
     .sc-order-feed-row:hover {
-        background: rgba(255, 255, 255, 0.025);
+        background: #F8FAFC;
+    }
+    .sc-order-feed-row:last-child {
+        border-bottom: 0;
     }
     .sc-order-feed-cell {
         min-width: 0;
     }
     .sc-order-feed-value {
-        color: #FFFFFF;
+        color: #111827;
         font-size: 0.93rem;
         font-weight: 660;
         line-height: 1.25;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        overflow-wrap: anywhere;
+        white-space: normal;
     }
     .sc-order-feed-link {
-        color: #FFFFFF;
-        font-weight: 700;
+        color: #0A66C2;
+        font-weight: 800;
         text-decoration: none;
     }
     .sc-order-feed-link:hover {
-        color: #DCEBFF;
+        color: #084C92;
         text-decoration: none;
+    }
+    .sc-order-feed-product {
+        color: #111827;
+        font-weight: 760;
+    }
+    .sc-order-feed-edition-cell {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.36rem;
+    }
+    .sc-order-edition-chip {
+        align-items: center;
+        background: #EEF4FF;
+        border: 1px solid #C9D8F4;
+        border-radius: 999px;
+        color: #163D73;
+        display: inline-flex;
+        font-size: 0.92rem;
+        font-variant-numeric: tabular-nums;
+        font-weight: 820;
+        letter-spacing: 0.01em;
+        line-height: 1.15;
+        min-height: 34px;
+        padding: 0.2rem 0.72rem;
+        white-space: nowrap;
+    }
+    .sc-order-edition-chip-pending {
+        background: #FFF5D6;
+        border-color: #F0D27A;
+        color: #6A4B00;
+    }
+    .sc-order-edition-chip-issue {
+        background: #FFE8E8;
+        border-color: #EAB4B4;
+        color: #8B2323;
+    }
+    .sc-order-edition-chip-historical {
+        background: #EEF2F6;
+        border-color: #D5DCE3;
+        color: #4B5563;
     }
     .sc-order-feed-action {
         align-items: center;
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: #111827;
+        border: 1px solid #111827;
         border-radius: 999px;
         color: #FFFFFF;
         display: inline-flex;
@@ -3521,17 +3416,20 @@ def _orders_page_styles():
         white-space: nowrap;
     }
     .sc-order-feed-action:hover {
-        background: rgba(255, 255, 255, 0.16);
+        background: #1F2937;
         color: #FFFFFF;
         text-decoration: none;
     }
     .sc-order-feed-action-disabled {
-        opacity: 0.52;
+        background: #F3F4F6;
+        border-color: #D1D5DB;
+        color: #6B7280;
+        opacity: 1;
         pointer-events: none;
     }
     @media (max-width: 900px) {
         .sc-order-feed-table {
-            min-width: 860px;
+            min-width: 1040px;
         }
         .sc-order-feed-head,
         .sc-order-feed-row {
@@ -3546,7 +3444,7 @@ def _orders_page_styles():
     }
     @media (max-width: 560px) {
         .sc-order-feed-table {
-            min-width: 760px;
+            min-width: 980px;
         }
         .sc-order-feed-head,
         .sc-order-feed-row {
@@ -3592,6 +3490,17 @@ def _orders_page_styles():
     """
 
 
+def _edition_chip_class(value):
+    normalized = _clean_order_text(value).casefold()
+    if normalized.startswith("#"):
+        return "sc-order-edition-chip"
+    if "historical" in normalized:
+        return "sc-order-edition-chip sc-order-edition-chip-historical"
+    if "needs edition" in normalized:
+        return "sc-order-edition-chip sc-order-edition-chip-pending"
+    return "sc-order-edition-chip sc-order-edition-chip-issue"
+
+
 def _render_compact_orders_feed(order_summaries):
     rows_html = []
     for item in order_summaries or []:
@@ -3606,12 +3515,17 @@ def _render_compact_orders_feed(order_summaries):
         else:
             order_value = order_label
         customer_text = str(item.get("customer_name") or "Customer missing")
-        edition_text = str(item.get("edition_summary") or "Needs Edition")
+        product_text = str(item.get("product_summary") or "Product missing")
+        edition_items = item.get("edition_number_items") or [str(item.get("edition_summary") or "Needs Edition")]
         variant_text = str(item.get("variant_summary") or "Variant missing")
         psd = item.get("psd") or {}
         psd_url = str(psd.get("url") or "").strip()
         psd_label = html.escape(str(psd.get("label") or "No PSD"))
         psd_title = html.escape(str(psd.get("title") or psd_label), quote=True)
+        edition_html = "".join(
+            f'<span class="{_edition_chip_class(edition_value)}">{html.escape(str(edition_value))}</span>'
+            for edition_value in edition_items
+        )
         if psd_url:
             psd_html = (
                 f'<a class="sc-order-feed-action" href="{html.escape(psd_url, quote=True)}" '
@@ -3632,7 +3546,10 @@ def _render_compact_orders_feed(order_summaries):
         <div class="sc-order-feed-value" title="{html.escape(customer_text, quote=True)}">{html.escape(customer_text)}</div>
     </div>
     <div class="sc-order-feed-cell">
-        <div class="sc-order-feed-value" title="{html.escape(edition_text, quote=True)}">{html.escape(edition_text)}</div>
+        <div class="sc-order-feed-value sc-order-feed-product" title="{html.escape(product_text, quote=True)}">{html.escape(product_text)}</div>
+    </div>
+    <div class="sc-order-feed-cell">
+        <div class="sc-order-feed-edition-cell" title="{html.escape(' | '.join(str(value) for value in edition_items), quote=True)}">{edition_html}</div>
     </div>
     <div class="sc-order-feed-cell">
         <div class="sc-order-feed-value" title="{html.escape(variant_text, quote=True)}">{html.escape(variant_text)}</div>
@@ -3650,7 +3567,8 @@ def _render_compact_orders_feed(order_summaries):
         <div class="sc-order-feed-head">
             <div>Order</div>
             <div>Name</div>
-            <div>Edition</div>
+            <div>Product</div>
+            <div>Edition No.</div>
             <div>Variant</div>
             <div>PSD</div>
         </div>
@@ -3662,86 +3580,17 @@ def _render_compact_orders_feed(order_summaries):
 """,
         unsafe_allow_html=True,
     )
-
-
-def _orders_metric_card_html(label, value, hint=""):
-    safe_hint = (
-        f'<div class="sc-orders-metric-hint">{html.escape(str(hint))}</div>'
-        if str(hint or "").strip()
-        else ""
-    )
-    return f"""
-    <div class="sc-orders-metric-card">
-        <div class="sc-orders-metric-label">{html.escape(str(label))}</div>
-        <div class="sc-orders-metric-value">{html.escape(str(value))}</div>
-        {safe_hint}
-    </div>
-    """
-
-
-def _orders_activity_chart_html(activity_rows):
-    rows = activity_rows or []
-    if not rows:
-        return """
-        <div class="sc-orders-chart-card">
-            <div class="sc-orders-card-title">7-day activity</div>
-            <div class="sc-orders-empty-chart">No synced order activity yet.</div>
-        </div>
-        """
-
-    peak = max(
-        max(int(row.get("orders_synced") or 0), int(row.get("editions_assigned") or 0))
-        for row in rows
-    ) or 1
-    groups = []
-    for row in rows:
-        try:
-            day_label = datetime.fromisoformat(str(row.get("day"))).strftime("%a")
-        except ValueError:
-            day_label = str(row.get("day") or "")[-2:]
-        orders_height = max(10, round((int(row.get("orders_synced") or 0) / peak) * 100)) if int(row.get("orders_synced") or 0) else 6
-        assigned_height = max(10, round((int(row.get("editions_assigned") or 0) / peak) * 100)) if int(row.get("editions_assigned") or 0) else 6
-        groups.append(
-            f"""
-            <div class="sc-orders-chart-group" title="{html.escape(day_label)}: {int(row.get('orders_synced') or 0)} orders synced, {int(row.get('editions_assigned') or 0)} editions assigned">
-                <div class="sc-orders-chart-bars">
-                    <span class="sc-orders-chart-bar sc-orders-chart-orders" style="height:{orders_height}%"></span>
-                    <span class="sc-orders-chart-bar sc-orders-chart-assigned" style="height:{assigned_height}%"></span>
-                </div>
-                <div class="sc-orders-chart-label">{html.escape(day_label)}</div>
-            </div>
-            """
-        )
-    return f"""
-    <div class="sc-orders-chart-card">
-        <div class="sc-orders-chart-header">
-            <div>
-                <div class="sc-orders-card-title">7-day activity</div>
-                <div class="sc-orders-card-copy">Orders synced vs editions assigned.</div>
-            </div>
-            <div class="sc-orders-chart-legend">
-                <span><i class="sc-orders-legend-dot sc-orders-legend-orders"></i>Orders</span>
-                <span><i class="sc-orders-legend-dot sc-orders-legend-assigned"></i>Editions</span>
-            </div>
-        </div>
-        <div class="sc-orders-chart-shell">
-            {''.join(groups)}
-        </div>
-    </div>
-    """
-
-
 def render_supabase_orders_page():
     st.title("Orders")
     st.caption(
-        "One readable row per order. Product edition numbers stay tied to the synced limited-edition counter, variants stay visible, and PSD access is back inline."
+        "Edition numbers now lead the page. Each order stays on one row, but the product name and required edition number are split so the edition is easy to spot."
     )
     st.markdown(_orders_page_styles(), unsafe_allow_html=True)
     try:
         supabase_backend.ensure_schema()
     except Exception as error:
         st.error("Could not connect to Supabase using DATABASE_URL.")
-        st.exception(error)
+        supabase_backend.log_app_error("orders_page_schema_failed", str(error), {"source": "orders_page"})
         return
 
     notice = st.session_state.pop("supabase_orders_notice", None)
@@ -3825,6 +3674,7 @@ def render_supabase_orders_page():
     sort = filter_toolbar[1].selectbox(
         "Sort",
         ("Date newest", "Shopify updated", "Date oldest", "Customer", "Edition number"),
+        index=4,
         key="supabase-orders-sort",
     )
     page_size = filter_toolbar[2].selectbox(
@@ -3871,7 +3721,8 @@ def render_supabase_orders_page():
             fetch_limit = min(fetch_limit * 2, 800)
     except Exception as error:
         st.error("Could not load orders from Supabase.")
-        st.exception(error)
+        st.caption("Open Developer -> App Errors if this keeps happening.")
+        supabase_backend.log_app_error("orders_page_load_failed", str(error), {"source": "orders_page"})
         return
 
     if not order_summaries:
@@ -3880,7 +3731,7 @@ def render_supabase_orders_page():
 
     st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
     st.caption(
-        f"Showing {len(order_summaries)} orders. Each row stays compact, readable, and keeps the edition number aligned with the synced product."
+        f"Showing {len(order_summaries)} orders. The edition number has its own column so you can scan the required allocation first."
     )
     _render_compact_orders_feed(order_summaries)
 
@@ -4022,7 +3873,7 @@ def render_orders_page():
     st.title("Orders")
     render_local_cache_notice()
     st.caption(
-        "One readable row per order. Product edition numbers stay tied to the saved counter, variants stay visible, and PSD access stays inline."
+        "Edition numbers now lead the page. Each order stays on one row, but the product name and required edition number are split so the edition is easy to spot."
     )
     st.markdown(_orders_page_styles(), unsafe_allow_html=True)
     config = shopify_sync.get_config()
@@ -4084,7 +3935,7 @@ def render_orders_page():
                 st.warning("Latest Shopify fetch failed. Showing cached orders.")
             else:
                 st.warning("Shopify order sync failed. Check read_orders scope and API version.")
-            st.caption(ORDER_FETCH_ERROR_MESSAGE)
+            st.caption("Shopify sync is unavailable right now, so the cached order list is staying visible.")
 
     with st.expander("Local cache counts", expanded=False):
         metrics = st.columns(3)
@@ -4106,7 +3957,7 @@ def render_orders_page():
 
     st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
     st.caption(
-        f"Showing {len(orders)} cached orders. Each row stays compact, readable, and keeps edition details grouped under the order."
+        f"Showing {len(orders)} cached orders. The edition number has its own column so you can scan the required allocation first."
     )
     _render_compact_orders_feed(_build_local_order_summaries(orders))
 
