@@ -58,28 +58,6 @@ class LimitedEditionPhase2Tests(unittest.TestCase):
         self.assertTrue(normalized["active"])
         self.assertFalse(normalized["sold_out"])
 
-    def test_manual_lowered_counter_stays_authoritative(self):
-        row = {
-            "shopify_handle": "jalen-brunson",
-            "product_title": "Jalen Brunson Built for Big Moments",
-            "run_edition_total": 100,
-            "run_next_edition_number": 10,
-            "run_status": "active",
-            "active_run_max_assigned": 70,
-            "last_assigned_edition": 70,
-            "sold_count": 70,
-        }
-
-        normalized = supabase_backend._normalize_edition_product_row(row)
-        payload = supabase_backend.calculate_product_edition_metafield_values(normalized)
-
-        self.assertEqual(normalized["next_edition_number"], 10)
-        self.assertEqual(normalized["latest_sent"], 9)
-        self.assertEqual(normalized["last_assigned_edition"], 9)
-        self.assertEqual(normalized["historical_max_assigned_edition"], 70)
-        self.assertEqual(payload["sold_count"], 9)
-        self.assertIn("#010/100", payload["edition_display_text"])
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -842,10 +842,9 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_handle_number ON edition_orders(shopify_handle, edition_number)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_line_allocation_unique ON edition_orders(shopify_line_item_id, allocation_index)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_run_id ON edition_orders(edition_run_id)")
-            cur.execute("DROP INDEX IF EXISTS idx_edition_orders_run_number_unique")
             cur.execute(
                 """
-                CREATE INDEX IF NOT EXISTS idx_edition_orders_run_number
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_run_number_unique
                 ON edition_orders(edition_run_id, edition_number)
                 WHERE edition_run_id IS NOT NULL AND edition_number IS NOT NULL
                 """
@@ -1368,7 +1367,6 @@ def _normalize_edition_product_row(row):
     )
     latest_sent = max(next_number - 1, 0)
     active_run_max = _int_value(normalized.get("active_run_max_assigned"), 0)
-    historical_max = max(active_run_max, _int_value(normalized.get("last_assigned_edition"), 0))
     remaining = max(edition_total - latest_sent, 0)
     normalized.update(
         {
@@ -1380,8 +1378,7 @@ def _normalize_edition_product_row(row):
             "edition_total": edition_total,
             "next_edition_number": next_number,
             "latest_sent": latest_sent,
-            "last_assigned_edition": latest_sent,
-            "historical_max_assigned_edition": historical_max,
+            "last_assigned_edition": max(active_run_max, latest_sent),
             "active_run_max_assigned": active_run_max,
             "remaining_count": remaining,
             "remaining_editions": remaining,
@@ -1747,10 +1744,24 @@ def update_edition_product(
                 proposed_next = _int_value(next_edition_number, old_next)
             else:
                 proposed_next = old_next
-            if proposed_next < 1:
-                raise ValueError("Next edition number must be at least 1.")
-            if new_total < 1:
-                raise ValueError("Edition total must be at least 1.")
+            proposed_next = max(proposed_next, 1)
+
+            cur.execute(
+                """
+                SELECT COALESCE(MAX(edition_number), 0) AS max_assigned
+                FROM edition_orders
+                WHERE edition_run_id=%s
+                """,
+                (run.get("id"),),
+            )
+            max_assigned_in_run = _int_value((cur.fetchone() or {}).get("max_assigned"), 0)
+            if proposed_next <= max_assigned_in_run:
+                raise ValueError(
+                    "Cannot lower the next edition number below the highest edition already "
+                    "allocated in this active run. Start New Edition Run if this product must restart at 1/100."
+                )
+            if new_total < max_assigned_in_run:
+                raise ValueError("Edition total cannot be lower than editions already allocated in this active run.")
 
             requested_status = _clean_edition_run_status(
                 status,
@@ -1766,6 +1777,8 @@ def update_edition_product(
 
             latest_sent = proposed_next - 1
             remaining = new_total - latest_sent
+            if remaining < 0 and requested_status != SOLD_OUT_RUN_STATUS:
+                raise ValueError("Remaining editions cannot go below 0 unless the run is marked sold out.")
 
             new_name = str(edition_name or run.get("edition_name") or DEFAULT_EDITION_NAME).strip() or DEFAULT_EDITION_NAME
             cur.execute(
@@ -1951,97 +1964,6 @@ def list_edition_adjustments(search="", limit=100):
             return cur.fetchall()
 
 
-def reset_active_edition_counters_to_zero_sold(reason="Developer reset all active edition counters to 0 sold"):
-    ensure_schema()
-    reset_rows = []
-    with connect() as conn:
-        with conn.cursor() as cur:
-            _ensure_active_edition_runs_for_products(cur)
-            cur.execute(
-                f"""
-                SELECT ep.id AS edition_product_id,
-                       er.id AS edition_run_id,
-                       er.shopify_product_id,
-                       er.shopify_handle,
-                       COALESCE(er.next_edition_number, ep.next_edition_number, 1) AS old_next_edition_number,
-                       COALESCE(er.edition_total, ep.edition_total, 100) AS edition_total
-                FROM edition_runs er
-                JOIN edition_products ep ON ep.shopify_handle=er.shopify_handle
-                WHERE er.status=%s
-                  AND COALESCE(ep.active, ep.is_active, TRUE) = TRUE
-                ORDER BY er.shopify_handle
-                """,
-                (ACTIVE_RUN_STATUS,),
-            )
-            reset_rows = cur.fetchall()
-            for row in reset_rows:
-                edition_total = max(_int_value(row.get("edition_total"), 100), 1)
-                edition_display_text = f"Next Available Edition {format_edition_display_number(1, edition_total)}"
-                cur.execute(
-                    """
-                    UPDATE edition_runs
-                    SET next_edition_number=1,
-                        updated_at=now()
-                    WHERE id=%s
-                    """,
-                    (row.get("edition_run_id"),),
-                )
-                cur.execute(
-                    """
-                    UPDATE edition_products
-                    SET active_edition_run_id=%s,
-                        next_edition_number=1,
-                        last_assigned_edition=0,
-                        sold_count=0,
-                        remaining_count=%s,
-                        edition_status='limited_release',
-                        edition_display_text=%s,
-                        sold_out=FALSE,
-                        is_sold_out=FALSE,
-                        updated_at=now()
-                    WHERE shopify_handle=%s
-                    """,
-                    (
-                        row.get("edition_run_id"),
-                        edition_total,
-                        edition_display_text,
-                        row.get("shopify_handle"),
-                    ),
-                )
-                _insert_edition_adjustment_with_cursor(
-                    cur,
-                    product={"id": row.get("edition_product_id"), "shopify_handle": row.get("shopify_handle")},
-                    run={
-                        "id": row.get("edition_run_id"),
-                        "shopify_product_id": row.get("shopify_product_id"),
-                        "shopify_handle": row.get("shopify_handle"),
-                    },
-                    old_next=row.get("old_next_edition_number"),
-                    new_next=1,
-                    old_total=edition_total,
-                    new_total=edition_total,
-                    reason=reason,
-                    source="developer_reset",
-                )
-            cur.execute(
-                """
-                INSERT INTO app_errors(source, severity, error_type, message, context)
-                VALUES ('sports_cave_os', 'info', 'edition_counters_reset_to_zero_sold', %s, %s::jsonb)
-                """,
-                (
-                    reason,
-                    json_dumps(
-                        {
-                            "active_runs_reset": len(reset_rows),
-                            "next_edition_number": 1,
-                        }
-                    ),
-                ),
-            )
-        conn.commit()
-    return {"active_runs_reset": len(reset_rows)}
-
-
 def _safe_int(value, default=0):
     try:
         return int(value)
@@ -2060,8 +1982,8 @@ def format_edition_display_number(edition_number, edition_total):
 def calculate_product_edition_metafield_values(row):
     edition_total = max(_safe_int(row.get("edition_total"), 100), 1)
     next_number = max(_safe_int(row.get("next_edition_number"), 1), 1)
-    last_assigned = max(next_number - 1, 0)
-    sold_count = last_assigned
+    last_assigned = max(_safe_int(row.get("last_assigned_edition"), 0), next_number - 1)
+    sold_count = max(_safe_int(row.get("sold_count"), 0), last_assigned)
     remaining_count = max(edition_total - last_assigned, 0)
     is_sold_out = bool(row.get("sold_out")) or next_number > edition_total or remaining_count <= 0
     if is_sold_out:
@@ -4006,33 +3928,28 @@ def resolve_product_for_line(line_item, *, fetch_missing_products=True):
             return _lookup_product_by_handle_or_id(cur, line_item)
 
 
-def _generate_certificate_for_assignment(cur, assignment, *, force=False):
+def _generate_certificate_for_assignment(cur, assignment):
     local_file_path = ""
     local_preview_path = ""
     try:
         cur.execute(
             """
-            SELECT local_file_path, shopify_file_url, certificate_r2_bucket, certificate_r2_key
+            SELECT local_file_path, shopify_file_url
             FROM certificates
             WHERE edition_order_id=%s
             """,
             (assignment["id"],),
         )
         existing_certificate = cur.fetchone()
-        if not force and existing_certificate and (
+        if existing_certificate and (
             existing_certificate.get("shopify_file_url")
             or existing_certificate.get("local_file_path")
-            or (existing_certificate.get("certificate_r2_bucket") and existing_certificate.get("certificate_r2_key"))
         ):
             cur.execute(
                 "UPDATE edition_orders SET certificate_status='Certificate Ready' WHERE id=%s",
                 (assignment["id"],),
             )
-            return (
-                existing_certificate.get("local_file_path")
-                or existing_certificate.get("shopify_file_url")
-                or existing_certificate.get("certificate_r2_key")
-            )
+            return existing_certificate.get("local_file_path") or existing_certificate.get("shopify_file_url")
 
         local_file_path = generate_certificate_pdf(
             CERTIFICATE_OUTPUT_DIR,
@@ -4242,40 +4159,75 @@ def allocate_edition_for_order_line(
                 edition_total = int(edition_run.get("edition_total") or edition_product.get("edition_total") or 100)
                 edition_name = edition_run.get("edition_name") or DEFAULT_EDITION_NAME
                 run_status = _clean_edition_run_status(edition_run.get("status"))
-                if next_number < 1:
-                    cur.execute(
-                        """
-                        UPDATE edition_runs
-                        SET next_edition_number=1, updated_at=now()
-                        WHERE id=%s
-                        """,
-                        (edition_run.get("id"),),
-                    )
-                    cur.execute(
-                        """
-                        UPDATE edition_products
-                        SET next_edition_number=1, updated_at=now()
-                        WHERE shopify_handle=%s
-                        """,
-                        (shopify_handle,),
-                    )
+                cur.execute(
+                    """
+                    SELECT COALESCE(MAX(edition_number), 0) AS max_assigned
+                    FROM edition_orders
+                    WHERE edition_run_id=%s
+                    """,
+                    (edition_run.get("id"),),
+                )
+                max_assigned = int((cur.fetchone() or {}).get("max_assigned") or 0)
+                should_be_next = max_assigned + 1
+                allow_counter_override = False
+                counter_state = _resolve_next_edition_number_state(
+                    next_number,
+                    should_be_next,
+                    allow_counter_override,
+                )
+                if counter_state["mode"] == "manual_override_active":
                     cur.execute(
                         """
                         INSERT INTO app_errors(error_type, message, context)
-                        VALUES ('edition_counter_zero_blocked', %s, %s::jsonb)
+                        VALUES ('edition_counter_manual_override_active', %s, %s::jsonb)
                         """,
                         (
-                            f"Edition counter for {shopify_handle} was below 1 and was corrected before allocation.",
+                            f"Manual edition counter override is active for {shopify_handle}.",
                             json_dumps(
                                 {
                                     "shopify_handle": shopify_handle,
-                                    "previous_next_edition_number": next_number,
-                                    "corrected_next_edition_number": 1,
+                                    "next_edition_number": next_number,
+                                    "history_expected_next_edition_number": should_be_next,
+                                    "max_assigned": max_assigned,
                                 }
                             ),
                         ),
                     )
-                    next_number = 1
+                elif counter_state["mode"] == "auto_correct":
+                    cur.execute(
+                        """
+                        UPDATE edition_runs
+                        SET next_edition_number=%s, updated_at=now()
+                        WHERE id=%s
+                        """,
+                        (should_be_next, edition_run.get("id")),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE edition_products
+                        SET next_edition_number=%s, updated_at=now()
+                        WHERE shopify_handle=%s
+                        """,
+                        (should_be_next, shopify_handle),
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO app_errors(error_type, message, context)
+                        VALUES ('edition_counter_auto_corrected', %s, %s::jsonb)
+                        """,
+                        (
+                            f"Edition counter for {shopify_handle} was below assigned history and was corrected.",
+                            json_dumps(
+                                {
+                                    "shopify_handle": shopify_handle,
+                                    "previous_next_edition_number": next_number,
+                                    "corrected_next_edition_number": should_be_next,
+                                    "max_assigned": max_assigned,
+                                }
+                            ),
+                        ),
+                    )
+                next_number = int(counter_state["next_number"])
 
                 if run_status == SOLD_OUT_RUN_STATUS or next_number > edition_total:
                     cur.execute(
@@ -4987,7 +4939,6 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
                    COALESCE(NULLIF(o.customer_email, ''), NULLIF(eo.customer_email, '')) AS customer_email,
                    o.financial_status, o.fulfillment_status,
                    o.total_price, o.currency, o.created_at, o.remote_updated_at, o.processed_at, o.cancelled_at, o.synced_at,
-                   o.raw_json AS order_raw_json,
                    li.id AS order_line_id, COALESCE(eo.shopify_line_item_id, li.shopify_line_item_id) AS shopify_line_item_id, li.quantity,
                    li.assignment_status, li.last_error,
                    eo.id AS edition_order_id,
@@ -5000,8 +4951,6 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
                    eo.edition_total, eo.allocation_index, eo.assigned_at, eo.certificate_status, eo.status AS edition_order_status,
                    COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url,
                    c.certificate_id, c.local_file_path, c.shopify_file_url, c.generated_at,
-                   c.certificate_r2_bucket, c.certificate_r2_key,
-                   c.certificate_preview_r2_bucket, c.certificate_preview_r2_key,
                    COALESCE(NULLIF(psd.asset_url, ''), NULLIF(psd.google_drive_file_url, '')) AS psd_url,
                    COALESCE(NULLIF(prodigi.asset_url, ''), NULLIF(prodigi.google_drive_file_url, '')) AS prodigi_url
             FROM shopify_orders o
@@ -5019,7 +4968,6 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
             customer_name, customer_email,
             financial_status, fulfillment_status,
             total_price, currency, created_at, remote_updated_at, processed_at, cancelled_at, synced_at,
-            order_raw_json,
             order_line_id, shopify_line_item_id, quantity,
             assignment_status, last_error,
             shopify_handle, shopify_product_id, product_title, variant_title, sku,
@@ -5039,10 +4987,6 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
                         'certificate_id', certificate_id,
                         'local_file_path', local_file_path,
                         'shopify_file_url', shopify_file_url,
-                        'certificate_r2_bucket', certificate_r2_bucket,
-                        'certificate_r2_key', certificate_r2_key,
-                        'certificate_preview_r2_bucket', certificate_preview_r2_bucket,
-                        'certificate_preview_r2_key', certificate_preview_r2_key,
                         'generated_at', generated_at
                     )
                     ORDER BY edition_number ASC NULLS LAST, allocation_index ASC NULLS LAST
@@ -5056,7 +5000,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
             shopify_order_id, order_name, order_number, admin_url,
             customer_name, customer_email,
             financial_status, fulfillment_status,
-            total_price, currency, created_at, remote_updated_at, processed_at, cancelled_at, synced_at, order_raw_json,
+            total_price, currency, created_at, remote_updated_at, processed_at, cancelled_at, synced_at,
             order_line_id, shopify_line_item_id, quantity,
             assignment_status, last_error,
             shopify_handle, shopify_product_id, product_title, variant_title, sku,
@@ -5247,7 +5191,7 @@ def list_edition_orders(search="", limit=250):
             return cur.fetchall()
 
 
-def generate_certificate_for_edition_order(edition_order_id, *, force=False):
+def generate_certificate_for_edition_order(edition_order_id):
     ensure_schema()
     assignment = None
     with connect() as conn:
@@ -5264,7 +5208,7 @@ def generate_certificate_for_edition_order(edition_order_id, *, force=False):
             assignment = cur.fetchone()
             if not assignment:
                 raise ValueError("Edition order was not found.")
-            path = _generate_certificate_for_assignment(cur, assignment, force=force)
+            path = _generate_certificate_for_assignment(cur, assignment)
         conn.commit()
     try:
         if assignment and assignment.get("shopify_order_id"):
