@@ -19,6 +19,7 @@ from services import r2_storage
 
 CERTIFICATE_OUTPUT_DIR = db.BASE_DIR / "output" / "certificates"
 SUPABASE_PAGE_CACHE_TTL_SECONDS = int(os.getenv("SUPABASE_PAGE_CACHE_TTL_SECONDS", "45"))
+PRODUCT_CACHE_DISPLAY_LIMIT = 5000
 
 QUICK_LINKS = (
     ("shopify_admin_url", "Open Shopify Admin"),
@@ -466,14 +467,10 @@ def allow_local_sqlite_fallback():
 
 def render_supabase_required_notice(page_title):
     st.title(page_title)
-    st.error("Supabase is not connected, so this page cannot save or load persistent records.")
+    st.error("Cloud storage is not connected, so this page cannot save or load shared records right now.")
     st.info(
-        "Set DATABASE_URL, SUPABASE_DATABASE_URL, or POSTGRES_URL in Render environment variables. "
-        "Sports Cave OS can still run locally, but edition numbers are only safely preserved when "
-        "Supabase is connected."
-    )
-    st.caption(
-        "If you need to force Supabase-only mode, set ENABLE_LOCAL_SQLITE_FALLBACK=false."
+        "Reconnect the shared database from the deployment settings, then refresh. Existing orders, "
+        "products, edition numbers, and certificates are not changed by this message."
     )
 
 
@@ -489,22 +486,8 @@ def bump_supabase_cache_version(*keys):
         st.session_state[session_key] = int(st.session_state.get(session_key, 0)) + 1
 
 
-def render_fast_load_prompt(title, body, button_label, button_key):
-    with st.container(border=True):
-        st.markdown(f"**{title}**")
-        st.caption(body)
-        return st.button(button_label, key=button_key, type="primary", use_container_width=True)
-
-
 def render_supabase_load_warning(action, error, key_prefix):
-    with st.container(border=True):
-        st.warning(f"{action} could not load from Supabase right now.")
-        st.caption(
-            "The page shell stayed loaded so the app remains usable. This is usually a temporary "
-            "database connection timeout or missing DATABASE_URL, not lost order or edition data."
-        )
-        with st.expander("Technical detail", expanded=False):
-            st.exception(error)
+    st.warning(f"{action} could not be refreshed. Existing saved data is still kept.")
 
 
 @st.cache_data(ttl=SUPABASE_PAGE_CACHE_TTL_SECONDS, show_spinner=False)
@@ -546,8 +529,8 @@ def cached_supabase_order_summaries(search, sort, status_filter, page_size, cach
 
 def render_local_cache_notice():
     st.warning(
-        "Supabase is not connected. Showing the local Sports Cave cache so the app keeps working, "
-        "but edition counters will not be safely stored in Supabase until the Render database URL is connected."
+        "Shared cloud storage is not connected in this environment. Showing saved local data for now; "
+        "existing live orders, products, edition numbers, and certificates are not changed."
     )
 
 
@@ -2415,7 +2398,7 @@ def render_supabase_limited_edition_csv_import(uploaded_csv):
         csv_rows = parse_limited_edition_supabase_csv(uploaded_csv)
     except Exception as error:
         st.error("Could not read the CSV.")
-        st.exception(error)
+        supabase_backend.log_app_error("limited_editions_csv_read_failed", str(error), {"source": "limited_editions_page"})
         return
 
     if not csv_rows:
@@ -2426,7 +2409,7 @@ def render_supabase_limited_edition_csv_import(uploaded_csv):
         preview = supabase_backend.preview_limited_edition_import_rows(csv_rows)
     except Exception as error:
         st.error("Could not preview this CSV.")
-        st.exception(error)
+        supabase_backend.log_app_error("limited_editions_csv_preview_failed", str(error), {"source": "limited_editions_page"})
         return
 
     preview_columns = st.columns(5)
@@ -2491,11 +2474,10 @@ def render_supabase_limited_edition_csv_import(uploaded_csv):
             if result.get("errors"):
                 st.session_state.supabase_limited_warning = "First CSV import issue: " + result["errors"][0]
             bump_supabase_cache_version("limited", "sync-state")
-            st.session_state["supabase-limited-data-loaded"] = True
             st.rerun()
         except Exception as error:
             st.error("Limited Edition CSV import failed.")
-            st.exception(error)
+            supabase_backend.log_app_error("limited_editions_csv_apply_failed", str(error), {"source": "limited_editions_page"})
 
 
 def render_supabase_limited_editions_page():
@@ -2511,8 +2493,6 @@ def render_supabase_limited_editions_page():
 
     config = shopify_sync.get_config()
     if not st.session_state.get("supabase-limited-defaults-v3-applied"):
-        st.session_state["supabase-limited-row-limit"] = 60
-        st.session_state.setdefault("supabase-limited-data-loaded", False)
         st.session_state["supabase-limited-defaults-v3-applied"] = True
 
     search = st.text_input(
@@ -2521,7 +2501,7 @@ def render_supabase_limited_editions_page():
         key="supabase-limited-search",
         label_visibility="collapsed",
     )
-    actions = st.columns([1.05, 1.05, 0.95, 0.7, 0.95])
+    actions = st.columns([1.05, 1.05, 1.1, 1.1])
     if actions[0].button("Sync Product Updates", type="primary", disabled=not config["configured"], use_container_width=True):
         progress = st.progress(0, text="Checking Shopify product updates...")
         try:
@@ -2536,7 +2516,7 @@ def render_supabase_limited_editions_page():
             progress.progress(1.0, text="Shopify product sync complete.")
             if result.get("skipped"):
                 st.session_state.supabase_limited_warning = result.get("message") or (
-                    "No products synced yet. Run Initial Full Product Sync from Developer Tools."
+                    "No products synced yet. Run the first product sync before checking daily updates."
                 )
                 st.rerun()
             warning_suffix = ""
@@ -2548,11 +2528,10 @@ def render_supabase_limited_editions_page():
                 f"{warning_suffix}"
             )
             bump_supabase_cache_version("limited", "sync-state")
-            st.session_state["supabase-limited-data-loaded"] = True
             st.rerun()
         except Exception as error:
             progress.empty()
-            render_supabase_load_warning("Shopify product sync", error, "limited-sync")
+            render_supabase_load_warning("Product sync", error, "limited-sync")
             supabase_backend.log_app_error(
                 "limited_editions_product_sync_failed",
                 str(error),
@@ -2563,40 +2542,10 @@ def render_supabase_limited_editions_page():
         type=["csv"],
         key="supabase-limited-edition-csv-upload",
     )
-    load_clicked = actions[2].button("Load / Refresh", use_container_width=True)
-    row_limit = actions[3].selectbox(
-        "Rows",
-        (60, 100, 200, 300),
-        key="supabase-limited-row-limit",
-    )
-    actions[4].caption("Fast mode")
-    actions[4].caption("Products load only when requested.")
-
-    if load_clicked:
-        st.session_state["supabase-limited-applied-search"] = search
-        st.session_state["supabase-limited-applied-row-limit"] = int(row_limit)
-        bump_supabase_cache_version("limited", "sync-state")
-        st.session_state["supabase-limited-data-loaded"] = True
+    actions[2].caption("Saved products show automatically.")
+    actions[3].caption("Sync only when Shopify has new updates.")
 
     render_supabase_limited_edition_csv_import(uploaded_csv)
-
-    if not st.session_state.get("supabase-limited-data-loaded"):
-        if render_fast_load_prompt(
-            "Edition data is lazy loaded",
-            "The page controls are ready. Click once to load the current product rows; after that, the list is cached briefly so reruns stay fast.",
-            "Load edition products",
-            "supabase-limited-first-load",
-        ):
-            st.session_state["supabase-limited-applied-search"] = search
-            st.session_state["supabase-limited-applied-row-limit"] = int(row_limit)
-            st.session_state["supabase-limited-data-loaded"] = True
-            st.rerun()
-        return
-
-    applied_search = st.session_state.get("supabase-limited-applied-search", search)
-    applied_row_limit = int(st.session_state.get("supabase-limited-applied-row-limit", row_limit))
-    if applied_search != search or applied_row_limit != int(row_limit):
-        st.caption("Filters changed. Click Load / Refresh to apply without querying on every edit.")
 
     try:
         sync_state = cached_supabase_sync_state(supabase_cache_version("sync-state"))
@@ -2607,7 +2556,7 @@ def render_supabase_limited_editions_page():
     try:
         with st.spinner("Loading edition products..."):
             cache_version = supabase_cache_version("limited")
-            products = cached_supabase_limited_products(applied_search, applied_row_limit, cache_version)
+            products = cached_supabase_limited_products(search, PRODUCT_CACHE_DISPLAY_LIMIT, cache_version)
             product_handles = tuple(
                 item.get("shopify_handle") for item in products if item.get("shopify_handle")
             )
@@ -2627,16 +2576,13 @@ def render_supabase_limited_editions_page():
     )
     loaded_columns[1].caption(f"{len(products)} products shown")
     loaded_columns[1].caption(
-        "Last sync: " + (format_updated_at(last_product_sync) if last_product_sync else "Load unavailable")
-    )
-    loaded_columns[2].caption(
-        f"Cached for {SUPABASE_PAGE_CACHE_TTL_SECONDS}s. Use Load / Refresh after edits from another tab."
+        "Last sync: " + (format_updated_at(last_product_sync) if last_product_sync else "Never")
     )
 
     st.subheader("Edition Products")
     st.caption("Edit the live Supabase counters directly. If Latest sent is changed, Next is saved as Latest + 1.")
     if not products:
-        st.info("No edition products found yet. Click Sync Products.")
+        st.info("No edition products match the current search yet.")
         return
 
     st.markdown(
@@ -2814,12 +2760,11 @@ def render_supabase_limited_editions_page():
                         is_primary=True,
                     )
                 bump_supabase_cache_version("limited")
-                st.session_state["supabase-limited-data-loaded"] = True
                 st.session_state.supabase_limited_notice = f"Saved edition settings for {product.get('product_title') or product_handle}."
                 st.rerun()
             except Exception as error:
                 st.error("Could not save this edition row.")
-                st.exception(error)
+                supabase_backend.log_app_error("limited_editions_row_save_failed", str(error), {"source": "limited_editions_page", "handle": product_handle})
         st.divider()
 
 
@@ -2832,7 +2777,7 @@ def render_limited_editions_page(dispatch_log_renderer=None):
         return
     st.title("Limited Editions")
     render_local_cache_notice()
-    st.caption("Track edition numbers and PSD files from the local product cache.")
+    st.caption("Track edition numbers and PSD files from saved product data.")
     st.markdown(
         """
         <style>
@@ -2906,7 +2851,7 @@ def render_limited_editions_page(dispatch_log_renderer=None):
 
     actions = st.columns([1.25, 0.8, 0.8, 0.95, 1.05, 1.05])
     fetch_clicked = actions[0].button(
-        "Fetch Latest Shopify Products",
+        "Sync Product Updates",
         type="primary",
         disabled=not config["configured"],
         use_container_width=True,
@@ -2940,7 +2885,7 @@ def render_limited_editions_page(dispatch_log_renderer=None):
         )
 
     if not config["configured"]:
-        st.caption("Connection is not configured. Cached products still remain visible from Sports Cave OS.")
+        st.caption("Product sync is not configured. Saved products remain visible.")
 
     if fetch_clicked:
         try:
@@ -3054,7 +2999,7 @@ def render_limited_editions_page(dispatch_log_renderer=None):
     range_end = min(offset + len(products), total_products)
     st.caption(f"{range_start}-{range_end} of {total_products} products")
     if not products:
-        st.info("No cached products match this search or filter. Use Fetch Latest Shopify Products if the cache is empty.")
+        st.info("No saved products match this search or filter. Use Sync Product Updates if product updates are needed.")
         return
 
     header = st.columns([3.0, 0.75, 0.75, 0.75, 0.6, 0.7, 0.95, 1.65, 0.85])
@@ -3776,7 +3721,11 @@ def _render_certificate_popover(order_summary, key_prefix):
                     st.rerun()
                 except Exception as error:
                     st.error("Could not generate certificate.")
-                    st.exception(error)
+                    supabase_backend.log_app_error(
+                        "orders_certificate_generate_failed",
+                        str(error),
+                        {"source": "orders_page", "edition_order_id": edition_order_id},
+                    )
 
             preview_url = _r2_temporary_url(
                 assignment.get("certificate_preview_r2_bucket"),
@@ -4029,7 +3978,7 @@ def render_supabase_orders_page():
             st.rerun()
         except Exception as error:
             sync_message.empty()
-            render_supabase_load_warning("Shopify order sync", error, "orders-sync")
+            render_supabase_load_warning("Order sync", error, "orders-sync")
             supabase_backend.log_app_error("orders_page_sync_failed", str(error), {"source": "orders_page"})
 
     search = top_toolbar[1].text_input(
@@ -4058,7 +4007,7 @@ def render_supabase_orders_page():
     )
 
     if not config["configured"]:
-        st.caption("Shopify connection missing. Open Developer -> Developer Tools -> Shopify Diagnostics.")
+        st.caption("Shopify sync is not configured. Saved orders remain visible.")
     else:
         try:
             sync_state = cached_supabase_sync_state(supabase_cache_version("sync-state"))
@@ -4274,7 +4223,7 @@ def render_orders_page():
 
     toolbar = st.columns([1.0, 1.05, 0.9])
     fetch_clicked = toolbar[0].button(
-        "Fetch Latest Orders",
+        "Sync New Orders",
         type="primary",
         disabled=not config["configured"],
         use_container_width=True,
@@ -4293,17 +4242,17 @@ def render_orders_page():
     st.caption(
         "Last fetched: "
         + (format_updated_at(order_summary["last_synced_at"]) if order_summary["last_synced_at"] else "Never")
-        + f" | {order_summary['total']} cached | {order_summary['needs_assignment']} need editions | {order_summary['assigned_today']} assigned today"
+        + f" | {order_summary['total']} saved | {order_summary['needs_assignment']} need editions | {order_summary['assigned_today']} assigned today"
     )
 
     if not config["configured"]:
-        st.caption("Shopify connection is not configured. Cached orders still remain visible from Sports Cave OS.")
+        st.caption("Order sync is not configured. Saved orders remain visible.")
 
     if fetch_clicked:
         try:
             result = fetch_latest_orders(config)
             st.session_state.orders_notice = (
-                f"Fetched {result['orders_seen']} Shopify orders. Cached orders remain available offline. Assigned "
+                f"Synced {result['orders_seen']} Shopify orders. Saved orders remain visible. Assigned "
                 f"{result['assignments_created']} edition number"
                 f"{'s' if result['assignments_created'] != 1 else ''}."
             )
@@ -4312,14 +4261,14 @@ def render_orders_page():
             st.rerun()
         except Exception:
             if order_summary["total"]:
-                st.warning("Latest Shopify fetch failed. Showing cached orders.")
+                st.warning("Order sync failed. Saved orders are still shown.")
             else:
-                st.warning("Shopify order sync failed. Check read_orders scope and API version.")
-            st.caption("Shopify sync is unavailable right now, so the cached order list is staying visible.")
+                st.warning("Order sync failed. Saved orders will appear here after the first successful sync.")
+            st.caption("Order sync is unavailable right now, so the saved order list is staying visible.")
 
-    with st.expander("Local cache counts", expanded=False):
+    with st.expander("Order totals", expanded=False):
         metrics = st.columns(3)
-        metrics[0].metric("Orders cached", order_summary["total"])
+        metrics[0].metric("Saved orders", order_summary["total"])
         metrics[1].metric("Needs edition", order_summary["needs_assignment"])
         metrics[2].metric("Assigned today", order_summary["assigned_today"])
 
@@ -4330,14 +4279,14 @@ def render_orders_page():
     )
     if not orders:
         if not order_summary["last_synced_at"]:
-            st.info("No orders fetched yet. Click Fetch Latest Orders to import recent Shopify orders.")
+            st.info("No saved orders yet. Use Sync New Orders to bring in recent Shopify orders.")
         else:
-            st.info("No cached Shopify orders match these filters. Use Fetch Latest Orders when you are ready.")
+            st.info("No saved orders match these filters. Use Sync New Orders when you are ready.")
         return
 
     st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
     st.caption(
-        f"Showing {len(orders)} cached orders. The edition number has its own column so you can scan the required allocation first."
+        f"Showing {len(orders)} saved orders. The edition number has its own column so you can scan the required allocation first."
     )
     _render_compact_orders_feed(_build_local_order_summaries(orders))
 
@@ -4837,13 +4786,13 @@ def render_product_assets_page():
     st.title("Product Assets")
     st.caption("Store Google Drive, PSD, certificate, mockup, Shopify CDN, and Prodigi links by Shopify handle.")
     if not supabase_backend.is_configured():
-        st.warning("Product Assets requires DATABASE_URL. Configure Supabase on Render to use this page.")
+        st.warning("Shared product asset storage is not connected right now. Existing saved asset links are not changed.")
         return
     try:
         supabase_backend.ensure_schema()
     except Exception as error:
-        st.error("Could not connect to Supabase.")
-        st.exception(error)
+        st.error("Product assets could not be refreshed. Existing saved asset links are not changed.")
+        supabase_backend.log_app_error("product_assets_schema_check_failed", str(error), {"source": "product_assets_page"})
         return
 
     notice = st.session_state.pop("supabase_assets_notice", None)
@@ -4982,7 +4931,7 @@ def render_edition_orders_page():
     st.title("Edition Orders")
     st.caption("Every allocated edition number from paid Shopify orders.")
     if not supabase_backend.is_configured():
-        st.warning("Edition Orders requires DATABASE_URL.")
+        st.warning("Shared order storage is not connected right now. Existing edition allocations are not changed.")
         return
     search = st.text_input(
         "Search edition orders",
@@ -4993,8 +4942,8 @@ def render_edition_orders_page():
     try:
         rows = supabase_backend.list_edition_orders(search=search, limit=500)
     except Exception as error:
-        st.error("Could not load edition orders.")
-        st.exception(error)
+        st.error("Edition orders could not be refreshed. Existing edition allocations are not changed.")
+        supabase_backend.log_app_error("edition_orders_page_load_failed", str(error), {"source": "edition_orders_page"})
         return
     if not rows:
         st.info("No edition allocations found yet.")
@@ -5044,7 +4993,7 @@ def render_supabase_certificates_page():
     st.title("Certificates")
     st.caption("Certificate PDFs generated from Supabase edition allocations.")
     if not supabase_backend.is_configured():
-        st.warning("Certificates requires DATABASE_URL.")
+        st.warning("Shared certificate storage is not connected right now. Existing certificate records are not changed.")
         return
     search = st.text_input(
         "Search certificates",
@@ -5055,8 +5004,8 @@ def render_supabase_certificates_page():
     try:
         rows = supabase_backend.list_certificates(search=search, limit=500)
     except Exception as error:
-        st.error("Could not load certificates.")
-        st.exception(error)
+        st.error("Certificates could not be refreshed. Existing certificate records are not changed.")
+        supabase_backend.log_app_error("certificates_page_load_failed", str(error), {"source": "certificates_page"})
         return
     if not rows:
         st.info("No certificates generated yet.")

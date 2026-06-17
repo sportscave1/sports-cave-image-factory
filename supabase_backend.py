@@ -354,6 +354,7 @@ def _ensure_schema_uncached():
                 CREATE TABLE IF NOT EXISTS certificates (
                     id BIGSERIAL PRIMARY KEY,
                     edition_order_id TEXT UNIQUE,
+                    related_edition_order_id uuid NULL,
                     shopify_order_id TEXT,
                     shopify_handle TEXT,
                     certificate_id TEXT,
@@ -362,6 +363,8 @@ def _ensure_schema_uncached():
                     local_file_path TEXT,
                     shopify_file_id TEXT,
                     shopify_file_url TEXT,
+                    certificate_file_url TEXT,
+                    certificate_shopify_file_id TEXT,
                     generated_at TIMESTAMPTZ DEFAULT now(),
                     status TEXT DEFAULT 'Local PDF'
                 )
@@ -649,6 +652,7 @@ def _ensure_schema_uncached():
                 ),
                 "certificates": (
                     ("edition_order_id", "TEXT"),
+                    ("related_edition_order_id", "uuid NULL"),
                     ("shopify_order_id", "TEXT"),
                     ("shopify_handle", "TEXT"),
                     ("certificate_id", "TEXT"),
@@ -657,6 +661,8 @@ def _ensure_schema_uncached():
                     ("local_file_path", "TEXT"),
                     ("shopify_file_id", "TEXT"),
                     ("shopify_file_url", "TEXT"),
+                    ("certificate_file_url", "TEXT"),
+                    ("certificate_shopify_file_id", "TEXT"),
                     ("generated_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("status", "TEXT DEFAULT 'Local PDF'"),
                 ),
@@ -674,6 +680,7 @@ def _ensure_schema_uncached():
                 ),
                 "certificates": (
                     ("edition_order_id", "TEXT"),
+                    ("related_edition_order_id", "uuid NULL"),
                     ("shopify_order_id", "TEXT"),
                     ("shopify_handle", "TEXT"),
                     ("certificate_id", "TEXT"),
@@ -683,6 +690,8 @@ def _ensure_schema_uncached():
                     ("local_file_path", "TEXT"),
                     ("shopify_file_id", "TEXT"),
                     ("shopify_file_url", "TEXT"),
+                    ("certificate_file_url", "TEXT"),
+                    ("certificate_shopify_file_id", "TEXT"),
                     ("order_metafields_synced_at", "TIMESTAMPTZ"),
                     ("order_metafields_sync_status", "TEXT DEFAULT 'Never Synced'"),
                     ("order_metafields_error", "TEXT"),
@@ -775,6 +784,77 @@ def _ensure_schema_uncached():
                         f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {column_name} {column_type}"
                     )
 
+            if table_exists(cur, "certificates"):
+                # The legacy certificate key is text because older deployments stored
+                # stringified assignment ids there. Do not attach a foreign key to it:
+                # some Supabase databases use uuid ids for edition_orders, which makes
+                # certificates.edition_order_id -> edition_orders.id incompatible.
+                # related_edition_order_id is the nullable uuid-safe link for newer rows.
+                cur.execute("ALTER TABLE certificates DROP CONSTRAINT IF EXISTS certificates_edition_order_id_fkey")
+                cur.execute("ALTER TABLE certificates ADD COLUMN IF NOT EXISTS related_edition_order_id uuid NULL")
+                cur.execute(
+                    """
+                    SELECT data_type
+                    FROM information_schema.columns
+                    WHERE table_schema='public'
+                      AND table_name='edition_orders'
+                      AND column_name='id'
+                    """
+                )
+                edition_order_id_type = (cur.fetchone() or {}).get("data_type")
+                if edition_order_id_type == "uuid":
+                    cur.execute(
+                        """
+                        UPDATE certificates
+                        SET related_edition_order_id = CASE
+                            WHEN edition_order_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                            THEN edition_order_id::uuid
+                            ELSE NULL
+                        END
+                        WHERE related_edition_order_id IS NULL
+                          AND edition_order_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                          AND EXISTS (
+                              SELECT 1
+                              FROM edition_orders eo
+                              WHERE eo.id = CASE
+                                  WHEN certificates.edition_order_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                                  THEN certificates.edition_order_id::uuid
+                                  ELSE NULL
+                              END
+                          )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        UPDATE certificates
+                        SET related_edition_order_id = NULL
+                        WHERE related_edition_order_id IS NOT NULL
+                          AND NOT EXISTS (
+                              SELECT 1
+                              FROM edition_orders eo
+                              WHERE eo.id = certificates.related_edition_order_id
+                          )
+                        """
+                    )
+                    cur.execute(
+                        """
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (
+                                SELECT 1
+                                FROM pg_constraint
+                                WHERE conname = 'certificates_related_edition_order_id_fkey'
+                            ) THEN
+                                ALTER TABLE certificates
+                                ADD CONSTRAINT certificates_related_edition_order_id_fkey
+                                FOREIGN KEY (related_edition_order_id)
+                                REFERENCES edition_orders(id)
+                                ON DELETE SET NULL;
+                            END IF;
+                        END $$;
+                        """
+                    )
+
             if table_exists(cur, "app_errors"):
                 if column_exists(cur, "app_errors", "source"):
                     cur.execute(
@@ -861,6 +941,7 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_adjustments_handle ON edition_adjustments(shopify_handle, created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_adjustments_run ON edition_adjustments(edition_run_id, created_at DESC)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_certificates_edition_order_unique ON certificates(edition_order_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_certificates_related_edition_order ON certificates(related_edition_order_id)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_unique ON product_assets(shopify_handle, asset_type)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_name_unique ON product_assets(shopify_handle, asset_type, asset_name)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_file_assets_bucket_key_unique ON file_assets(bucket, object_key)")
@@ -1172,7 +1253,7 @@ def sync_shopify_products_to_supabase(config=None, progress_callback=None, *, mo
                         "Skipped",
                         0,
                         0,
-                        "No products synced yet. Run Initial Full Product Sync from Developer Tools.",
+                        "No products synced yet. Run the initial full product sync first.",
                     )
                     return {
                         "products_seen": 0,
@@ -1181,7 +1262,7 @@ def sync_shopify_products_to_supabase(config=None, progress_callback=None, *, mo
                         "metafields_synced": 0,
                         "metafield_errors": [],
                         "skipped": True,
-                        "message": "No products synced yet. Run Initial Full Product Sync from Developer Tools.",
+                        "message": "No products synced yet. Run the initial full product sync first.",
                     }
                 last_success = utc_now_datetime()
             sync_from = last_success - timedelta(minutes=state.get("sync_lookback_buffer_minutes") or DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES)
@@ -2277,11 +2358,13 @@ def _certificate_rows_for_order(shopify_order_id):
             cur.execute(
                 """
                 SELECT c.id AS certificate_row_id, c.certificate_id, c.edition_number,
-                       c.edition_total, c.shopify_file_url, c.generated_at,
+                       c.edition_total,
+                       COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
+                       c.generated_at,
                        eo.product_title, eo.shopify_handle, o.shopify_order_id,
                        o.order_name
                 FROM certificates c
-                LEFT JOIN edition_orders eo ON eo.id::text=c.edition_order_id::text
+                LEFT JOIN edition_orders eo ON eo.id::text=COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)
                 LEFT JOIN shopify_orders o ON o.shopify_order_id=c.shopify_order_id
                 WHERE c.shopify_order_id=%s
                 ORDER BY c.generated_at ASC, c.id ASC
@@ -3970,7 +4053,7 @@ def _upload_certificate_outputs_to_r2(cur, assignment, pdf_path, preview_path=""
             certificate_r2_key=%s,
             certificate_preview_r2_bucket=%s,
             certificate_preview_r2_key=%s
-        WHERE edition_order_id::text=%s
+        WHERE COALESCE(related_edition_order_id::text, edition_order_id::text)=%s
         """,
         (
             certificate_update["certificate_r2_bucket"],
@@ -4020,9 +4103,11 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
     try:
         cur.execute(
             """
-            SELECT local_file_path, shopify_file_url, certificate_r2_bucket, certificate_r2_key
+            SELECT local_file_path,
+                   COALESCE(NULLIF(shopify_file_url, ''), NULLIF(certificate_file_url, '')) AS shopify_file_url,
+                   certificate_r2_bucket, certificate_r2_key
             FROM certificates
-            WHERE edition_order_id::text=%s
+            WHERE COALESCE(related_edition_order_id::text, edition_order_id::text)=%s
             """,
             (str(assignment["id"]),),
         )
@@ -4075,11 +4160,12 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
         cur.execute(
             """
             INSERT INTO certificates(
-                edition_order_id, shopify_order_id, shopify_handle, certificate_id, edition_number,
+                edition_order_id, related_edition_order_id, shopify_order_id, shopify_handle, certificate_id, edition_number,
                 edition_total, pdf_filename, local_file_path, status, generated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Local PDF', now())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'Local PDF', now())
             ON CONFLICT (edition_order_id) DO UPDATE SET
+                related_edition_order_id=EXCLUDED.related_edition_order_id,
                 certificate_id=EXCLUDED.certificate_id,
                 pdf_filename=EXCLUDED.pdf_filename,
                 local_file_path=EXCLUDED.local_file_path,
@@ -4088,6 +4174,7 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
             """,
             (
                 str(assignment["id"]),
+                _coerce_uuid_or_none(assignment.get("id")),
                 assignment.get("shopify_order_id"),
                 assignment.get("shopify_handle"),
                 generated_certificate_id,
@@ -5012,7 +5099,9 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
                    eo.edition_number,
                    eo.edition_total, eo.allocation_index, eo.assigned_at, eo.certificate_status, eo.status AS edition_order_status,
                    COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url,
-                   c.certificate_id, c.local_file_path, c.shopify_file_url, c.generated_at,
+                   c.certificate_id, c.local_file_path,
+                   COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
+                   c.generated_at,
                    c.certificate_r2_bucket, c.certificate_r2_key,
                    c.certificate_preview_r2_bucket, c.certificate_preview_r2_key,
                    COALESCE(NULLIF(psd.asset_url, ''), NULLIF(psd.google_drive_file_url, '')) AS psd_url,
@@ -5022,7 +5111,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
             LEFT JOIN edition_orders eo ON eo.shopify_line_item_id = li.shopify_line_item_id
             LEFT JOIN edition_products ep ON ep.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
             LEFT JOIN shopify_products sp ON sp.handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
-            LEFT JOIN certificates c ON c.edition_order_id::text = eo.id::text
+            LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
             LEFT JOIN product_assets psd ON psd.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND psd.asset_type = 'psd_master_file' AND psd.is_primary IS DISTINCT FROM FALSE
             LEFT JOIN product_assets prodigi ON prodigi.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND prodigi.asset_type = 'prodigi_link'
             {where}
@@ -5136,7 +5225,7 @@ def get_order_summary():
                      WHERE assignment_status = %s) AS historical_lines,
                     (SELECT COUNT(*) FROM edition_orders WHERE assigned_at::date = CURRENT_DATE) AS assigned_today,
                     (SELECT COUNT(*) FROM edition_orders eo
-                     LEFT JOIN certificates c ON c.edition_order_id::text=eo.id::text
+                     LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)=eo.id::text
                      WHERE c.id IS NULL) AS certificates_missing,
                     (SELECT COUNT(*) FROM line_handles lh
                      LEFT JOIN product_assets pa ON pa.shopify_handle=lh.shopify_handle AND pa.asset_type='psd_master_file' AND pa.is_primary IS DISTINCT FROM FALSE
@@ -5228,12 +5317,13 @@ def list_edition_orders(search="", limit=250):
             if search_value:
                 cur.execute(
                     """
-                    SELECT eo.*, o.order_name, o.admin_url, c.local_file_path, c.shopify_file_url,
+                    SELECT eo.*, o.order_name, o.admin_url, c.local_file_path,
+                           COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
                            c.certificate_r2_bucket, c.certificate_r2_key,
                            c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
                     FROM edition_orders eo
                     LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                    LEFT JOIN certificates c ON c.edition_order_id::text=eo.id::text
+                    LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)=eo.id::text
                     WHERE LOWER(COALESCE(eo.product_title, '')) LIKE %s
                        OR LOWER(COALESCE(eo.shopify_handle, '')) LIKE %s
                        OR LOWER(COALESCE(o.order_name, '')) LIKE %s
@@ -5246,12 +5336,13 @@ def list_edition_orders(search="", limit=250):
             else:
                 cur.execute(
                     """
-                    SELECT eo.*, o.order_name, o.admin_url, c.local_file_path, c.shopify_file_url,
+                    SELECT eo.*, o.order_name, o.admin_url, c.local_file_path,
+                           COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
                            c.certificate_r2_bucket, c.certificate_r2_key,
                            c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
                     FROM edition_orders eo
                     LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                    LEFT JOIN certificates c ON c.edition_order_id::text=eo.id::text
+                    LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)=eo.id::text
                     ORDER BY eo.assigned_at DESC
                     LIMIT %s
                     """,
@@ -5324,7 +5415,7 @@ def list_certificates(search="", limit=250):
                     """
                     SELECT c.*, eo.product_title, eo.customer_name, o.order_name
                     FROM certificates c
-                    LEFT JOIN edition_orders eo ON eo.id::text=c.edition_order_id::text
+                    LEFT JOIN edition_orders eo ON eo.id::text=COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)
                     LEFT JOIN shopify_orders o ON o.shopify_order_id=c.shopify_order_id
                     WHERE LOWER(COALESCE(eo.product_title, '')) LIKE %s
                        OR LOWER(COALESCE(eo.customer_name, '')) LIKE %s
@@ -5339,7 +5430,7 @@ def list_certificates(search="", limit=250):
                     """
                     SELECT c.*, eo.product_title, eo.customer_name, o.order_name
                     FROM certificates c
-                    LEFT JOIN edition_orders eo ON eo.id::text=c.edition_order_id::text
+                    LEFT JOIN edition_orders eo ON eo.id::text=COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)
                     LEFT JOIN shopify_orders o ON o.shopify_order_id=c.shopify_order_id
                     ORDER BY c.generated_at DESC
                     LIMIT %s

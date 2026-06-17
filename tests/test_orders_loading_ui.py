@@ -1,0 +1,35 @@
+from pathlib import Path
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class OrdersLoadingUiTests(unittest.TestCase):
+    def test_orders_and_limited_pages_do_not_show_lazy_load_copy(self):
+        source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
+
+        blocked_phrases = (
+            "Load / Refresh",
+            "Load orders",
+            "Load edition products",
+            "Fetch Latest Orders",
+            "Fetch Latest Shopify Products",
+            "lazy loaded",
+            "Fast mode",
+            "Technical detail",
+        )
+        for phrase in blocked_phrases:
+            self.assertNotIn(phrase, source)
+
+    def test_certificate_schema_uses_uuid_safe_related_column(self):
+        source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
+
+        self.assertIn("related_edition_order_id uuid NULL", source)
+        self.assertIn("certificates_related_edition_order_id_fkey", source)
+        self.assertIn("DROP CONSTRAINT IF EXISTS certificates_edition_order_id_fkey", source)
+        self.assertNotIn("FOREIGN KEY (edition_order_id)", source)
+
+
+if __name__ == "__main__":
+    unittest.main()
