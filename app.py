@@ -3313,6 +3313,72 @@ def get_product_upload_prompt(metadata, update_existing=False):
     return UPDATE_EXISTING_PRODUCT_PROMPT if update_existing else NEW_SHOPIFY_PRODUCT_PROMPT
 
 
+PRODUCT_UPLOAD_ALT_TEXT_PROMPT = """
+Create unique Shopify image alt text for every Sports Cave product image I upload.
+
+Inputs:
+- Product title
+- Sport / athlete / team / moment if known
+- Image filenames or image order
+- Screenshot/product preview if supplied
+
+Rules:
+- Write one unique alt text line per image.
+- Keep it natural, descriptive, and buyer-friendly.
+- Include the product title or sport context only when true.
+- Do not keyword stuff.
+- Do not repeat the same wording across every image.
+- Do not invent athletes, teams, trophies, or events that are not visible/provided.
+
+Output:
+Image/file | Alt text
+"""
+
+
+PRODUCT_UPLOAD_META_PROMPT = """
+Write Shopify SEO metadata for this Sports Cave product.
+
+Inputs:
+- Product title
+- Sport/category
+- Product description or artwork context
+- Target market if known
+
+Output:
+1. SEO title, maximum 60 characters
+2. SEO meta description, maximum 155 characters
+3. URL handle suggestion
+4. 10 Shopify tags
+
+Rules:
+- Premium sports wall art tone.
+- Clear collector/man cave intent.
+- No fake scarcity unless the edition limit is provided.
+- No keyword stuffing.
+- Make the meta description sound human, not robotic.
+"""
+
+
+PRODUCT_UPLOAD_QA_CHECKLIST_PROMPT = """
+Review this Shopify product draft before publishing.
+
+Check:
+- Product title is clean and accurate.
+- Description sounds like Sports Cave and does not overpromise.
+- All uploaded images are in the correct order.
+- Each image has unique alt text.
+- Variant names, SKUs, prices, and compare-at prices are correct.
+- Frame/size variant image mapping is correct.
+- SEO title and meta description are filled in.
+- Tags are relevant and not spammy.
+- Limited edition wording is accurate.
+- Product is saved as Draft until manually approved.
+
+Output:
+Pass / Needs Fix table with exact fixes.
+"""
+
+
 def validate_uploaded_artwork(uploaded_file):
     if uploaded_file is None:
         raise ValueError("Please upload an artwork image first.")
@@ -4637,19 +4703,20 @@ def render_product_uploads_page():
         "This page does not scan local runs. Attach your own `shopify-uploads` WEBP files and HTML preview in ChatGPT, then copy one of the prompts below."
     )
 
-    st.markdown(
-        "1. Drag every WEBP file from your `shopify-uploads` folder into ChatGPT.\n"
-        "2. Drag the matching HTML preview into ChatGPT if you have it.\n"
-        "3. Click the copy button on the prompt you need, then paste it into ChatGPT.\n"
-        "4. Review the draft Shopify product carefully before publishing.\n"
-        "\n"
-        "- `New Shopify product` will generate a prompt for creating a brand new product in Shopify.\n"
-        "- `Update existing product` will generate a prompt for replacing the images on an existing Shopify product.\n"
-        "- This page stays manual on purpose so it remains fast and lightweight on Render."
-    )
+    with st.container(border=True):
+        st.markdown("**Upload checklist**")
+        st.markdown(
+            "1. Drag every WEBP file from your `shopify-uploads` folder into ChatGPT.\n"
+            "2. Drag the matching HTML preview into ChatGPT if you have it.\n"
+            "3. Copy the product prompt you need.\n"
+            "4. Copy the alt text and meta prompts when the draft needs them.\n"
+            "5. Run the final QA checklist before publishing.\n"
+            "\n"
+            "This page stays manual on purpose so it remains fast and lightweight on Render."
+        )
 
     st.divider()
-    st.write("Both prompts are ready below. Copy the one you need and paste it into ChatGPT under your uploaded files.")
+    st.write("Copy only the prompt you need. Nothing on this page queries products, Shopify, or generated runs.")
 
     render_copyable_prompt(
         "New Shopify Product Prompt",
@@ -4663,6 +4730,27 @@ def render_product_uploads_page():
         "Update Existing Product Prompt",
         get_product_upload_prompt({}, update_existing=True),
         "update-existing-shopify-product-prompt",
+    )
+
+    st.divider()
+    render_copyable_prompt(
+        "Image Alt Text Prompt",
+        PRODUCT_UPLOAD_ALT_TEXT_PROMPT,
+        "shopify-image-alt-text-prompt",
+    )
+
+    st.divider()
+    render_copyable_prompt(
+        "Meta Title / Description Prompt",
+        PRODUCT_UPLOAD_META_PROMPT,
+        "shopify-meta-title-description-prompt",
+    )
+
+    st.divider()
+    render_copyable_prompt(
+        "Final QA Checklist Prompt",
+        PRODUCT_UPLOAD_QA_CHECKLIST_PROMPT,
+        "shopify-final-qa-checklist-prompt",
     )
     safe_startup_print(f"PERF Product Uploads total={(time.perf_counter() - started):.3f}s")
 
@@ -4980,48 +5068,56 @@ def page_uses_local_database(current_page):
 
 
 def render_selected_page(current_page):
+    def os_route_pages():
+        import_started = time.perf_counter()
+        pages = get_os_pages()
+        safe_startup_print(
+            f"PERF route selected={current_page} import={(time.perf_counter() - import_started):.3f}s"
+        )
+        return pages
+
     if current_page == "Dashboard":
         render_lightweight_dashboard_page()
     elif current_page == "Products":
-        get_os_pages().render_products_page()
+        os_route_pages().render_products_page()
     elif current_page == "Mockups":
         render_mockups_page()
     elif current_page == "Limited Editions":
-        get_os_pages().render_limited_editions_page()
+        os_route_pages().render_limited_editions_page()
     elif current_page == "Orders":
-        get_os_pages().render_orders_page()
+        os_route_pages().render_orders_page()
     elif current_page == "Product Assets":
-        get_os_pages().render_product_assets_page()
+        os_route_pages().render_product_assets_page()
     elif current_page == "Prodigi":
-        get_os_pages().render_prodigi_page()
+        os_route_pages().render_prodigi_page()
     elif current_page == "Edition Orders":
-        get_os_pages().render_edition_orders_page()
+        os_route_pages().render_edition_orders_page()
     elif current_page == "Certificates":
-        get_os_pages().render_certificates_page()
+        os_route_pages().render_certificates_page()
     elif current_page == "Webhook Events":
-        get_os_pages().render_webhook_events_page()
+        os_route_pages().render_webhook_events_page()
     elif current_page == "Sync Runs":
-        get_os_pages().render_sync_runs_page()
+        os_route_pages().render_sync_runs_page()
     elif current_page == "App Errors":
-        get_os_pages().render_app_errors_page()
+        os_route_pages().render_app_errors_page()
     elif current_page == "Persistence Check":
-        get_os_pages().render_persistence_check_page()
+        os_route_pages().render_persistence_check_page()
     elif current_page == "Edition Integrity Check":
-        get_os_pages().render_edition_integrity_check_page()
+        os_route_pages().render_edition_integrity_check_page()
     elif current_page == "Product Uploads":
         render_product_uploads_page()
     elif current_page == "Files":
-        get_os_pages().render_files_page()
+        os_route_pages().render_files_page()
     elif current_page == "Marketing Factory":
-        get_os_pages().render_marketing_factory_page()
+        os_route_pages().render_marketing_factory_page()
     elif current_page in {"Settings", "Developer"}:
-        get_os_pages().render_settings_page(
+        os_route_pages().render_settings_page(
             app_version=APP_VERSION,
             database_path=get_db().DB_PATH,
             password_status=get_password_protection_status(),
         )
     else:
-        get_os_pages().render_placeholder_page(current_page)
+        os_route_pages().render_placeholder_page(current_page)
 
 
 def main():

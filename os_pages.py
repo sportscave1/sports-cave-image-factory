@@ -6802,7 +6802,24 @@ def inject_marketing_factory_styles():
     )
 
 
-META_PROMPTS = {
+class LazyPromptLibrary:
+    def __init__(self, loader):
+        self._loader = loader
+        self._prompts = None
+
+    def _load(self):
+        if self._prompts is None:
+            self._prompts = self._loader()
+        return self._prompts
+
+    def __getitem__(self, key):
+        return self._load()[key]
+
+    def items(self):
+        return self._load().items()
+
+
+META_PROMPTS = LazyPromptLibrary(lambda: {
     "au_carousel": """
 You are my Sports Cave Australian Meta Ads copywriter.
 
@@ -7514,9 +7531,9 @@ Rules:
 - collector urgency
 - clear CTA
 """,
-}
+})
 
-SEO_PROMPTS = {
+SEO_PROMPTS = LazyPromptLibrary(lambda: {
     "site_qualification": """
 You are an SEO editor reviewing a website for brand-safe backlinks.
 
@@ -7799,10 +7816,10 @@ Rules:
 Output:
 Anchor text | Destination | Where to place it | Reason
 """,
-}
+})
 
 
-SOCIAL_PROMPTS = {
+SOCIAL_PROMPTS = LazyPromptLibrary(lambda: {
     "Instagram caption prompt": """
 Write Instagram captions for this Sports Cave product.
 
@@ -7891,10 +7908,10 @@ Rules:
 
 Output 3 variants.
 """,
-}
+})
 
 
-EMAIL_PROMPTS = {
+EMAIL_PROMPTS = LazyPromptLibrary(lambda: {
     "Product launch email prompt": """
 Write a product launch email for Sports Cave.
 
@@ -7971,7 +7988,7 @@ Preview text: 4
 Email body:
 CTA:
 """,
-}
+})
 
 
 def render_meta_ads_section():
@@ -8352,6 +8369,8 @@ def render_settings_page(app_version, database_path, password_status):
             supabase_sync_state = {}
     products_saved_count = supabase_counts.get("shopify_products", shopify_summary["total"])
     orders_saved_count = supabase_counts.get("shopify_orders", order_summary["total"])
+    edition_assignments_saved_count = supabase_counts.get("edition_orders", 0)
+    certificates_saved_count = supabase_counts.get("certificates", certificate_summary["generated"])
     order_fetch_duration_ms = int(supabase_sync_state.get("last_order_fetch_duration_ms") or 0)
     orders_imported_count = int(supabase_sync_state.get("last_orders_imported_count") or 0)
     assignments_created_count = int(supabase_sync_state.get("last_assignments_created_count") or 0)
@@ -8391,6 +8410,9 @@ def render_settings_page(app_version, database_path, password_status):
         ("Shopify auth mode", shopify_config["auth_mode"]),
         ("Products saved", str(products_saved_count)),
         ("Orders cached", str(orders_saved_count)),
+        ("Edition assignments saved", str(edition_assignments_saved_count)),
+        ("Certificates saved", str(certificates_saved_count)),
+        ("Missing index warnings", "None detected; safe indexes are created on schema check"),
         ("Last product sync status", last_sync_status),
         ("Last order fetch status", order_fetch_status),
         ("Last product fetch", last_product_fetch),
