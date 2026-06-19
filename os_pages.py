@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import textwrap
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -4625,7 +4626,13 @@ def _render_shopify_orders_metrics(orders):
         """
         for label, value, subtle in metric_cards
     )
-    return f'<div class="sc-shopify-shell"><div class="sc-shopify-metrics">{cards_html}</div></div>'
+    return textwrap.dedent(
+        f"""
+        <div class="sc-shopify-shell">
+            <div class="sc-shopify-metrics">{cards_html}</div>
+        </div>
+        """
+    ).strip()
 
 
 def _render_shopify_orders_mirror_table(orders, assignment_snapshot):
@@ -4681,38 +4688,40 @@ def _render_shopify_orders_mirror_table(orders, assignment_snapshot):
             </tr>
             """
         )
-    return f"""
-    <div class="sc-shopify-shell">
-        <div class="sc-shopify-table-card">
-            <div class="sc-shopify-table-toolbar">
-                <span>Orders</span>
-                <span class="sc-shopify-batch-pill">Batch unfulfilled orders</span>
-            </div>
-            <div class="sc-shopify-table-wrap">
-                <table class="sc-shopify-table">
-                    <thead>
-                        <tr>
-                            <th></th>
-                            <th>Order</th>
-                            <th>Date</th>
-                            <th>Customer</th>
-                            <th>Fulfillment status</th>
-                            <th>Total</th>
-                            <th>Channel</th>
-                            <th>Payment status</th>
-                            <th>Items</th>
-                            <th>Delivery status</th>
-                            <th>Delivery method</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {''.join(rows_html)}
-                    </tbody>
-                </table>
+    return textwrap.dedent(
+        f"""
+        <div class="sc-shopify-shell">
+            <div class="sc-shopify-table-card">
+                <div class="sc-shopify-table-toolbar">
+                    <span>Orders</span>
+                    <span class="sc-shopify-batch-pill">Batch unfulfilled orders</span>
+                </div>
+                <div class="sc-shopify-table-wrap">
+                    <table class="sc-shopify-table">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>Order</th>
+                                <th>Date</th>
+                                <th>Customer</th>
+                                <th>Fulfillment status</th>
+                                <th>Total</th>
+                                <th>Channel</th>
+                                <th>Payment status</th>
+                                <th>Items</th>
+                                <th>Delivery status</th>
+                                <th>Delivery method</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {''.join(rows_html)}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
-    </div>
-    """
+        """
+    ).strip()
 
 
 def _sync_visible_shopify_orders_into_sports_cave(orders):

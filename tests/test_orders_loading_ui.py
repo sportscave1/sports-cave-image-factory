@@ -49,6 +49,7 @@ class OrdersLoadingUiTests(unittest.TestCase):
         self.assertIn("Search and filter", source)
         self.assertIn("Previous 50", source)
         self.assertIn("Next 50", source)
+        self.assertIn("textwrap.dedent", source)
 
 
 if __name__ == "__main__":
