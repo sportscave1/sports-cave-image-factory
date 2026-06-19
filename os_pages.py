@@ -23,6 +23,7 @@ CERTIFICATE_OUTPUT_DIR = db.BASE_DIR / "output" / "certificates"
 SUPABASE_PAGE_CACHE_TTL_SECONDS = int(os.getenv("SUPABASE_PAGE_CACHE_TTL_SECONDS", "45"))
 PRODUCT_CACHE_DISPLAY_LIMIT = 5000
 ORDER_SCREEN_CACHE_LIMIT = int(os.getenv("SUPABASE_ORDER_SCREEN_CACHE_LIMIT", "1500"))
+DEFAULT_PAGE_SIZE = 50
 
 QUICK_LINKS = (
     ("shopify_admin_url", "Open Shopify Admin"),
@@ -496,14 +497,29 @@ def render_supabase_load_warning(action, error, key_prefix, *, using_saved_scree
         st.warning(f"{action} could not be refreshed. Existing saved data is still kept.")
 
 
+def perf_log(message):
+    try:
+        print(message, flush=True)
+    except (OSError, ValueError):
+        pass
+
+
 @st.cache_data(ttl=SUPABASE_PAGE_CACHE_TTL_SECONDS, show_spinner=False)
 def cached_supabase_sync_state(cache_version):
     return supabase_backend.get_sync_state()
 
 
 @st.cache_data(ttl=SUPABASE_PAGE_CACHE_TTL_SECONDS, show_spinner=False)
-def cached_supabase_limited_products(search, limit, cache_version):
-    return supabase_backend.list_edition_products(search=search, limit=int(limit))
+def cached_supabase_limited_products(search, limit, offset, cache_version):
+    started = time.perf_counter()
+    rows = supabase_backend.list_edition_products(
+        search=search,
+        limit=int(limit),
+        offset=int(offset or 0),
+    )
+    elapsed = time.perf_counter() - started
+    perf_log(f"PERF LimitedEditions query rows={len(rows)} time={elapsed:.3f}s")
+    return rows
 
 
 @st.cache_data(ttl=SUPABASE_PAGE_CACHE_TTL_SECONDS, show_spinner=False)
@@ -553,6 +569,7 @@ def cached_supabase_orders_dataset(limit, cache_version, search="", status_filte
         "Assigned": "Assigned",
         "Product Missing": "Errors",
         "Sold Out Issue": "Errors",
+        "Errors": "Errors",
     }.get(str(status_filter or "").strip(), "All")
     filtered_summaries = []
     summary = {}
@@ -583,7 +600,8 @@ def cached_supabase_orders_dataset(limit, cache_version, search="", status_filte
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     visible_summaries = filtered_summaries[:requested_limit]
-    print(f"ACTION_ROWS_QUERY count={len(visible_summaries)} time={elapsed_ms}ms")
+    perf_log(f"ACTION_ROWS_QUERY count={len(visible_summaries)} time={elapsed_ms}ms")
+    perf_log(f"PERF Orders query rows={len(visible_summaries)} time={elapsed_ms / 1000:.3f}s")
     return {
         "summary": summary,
         "order_summaries": visible_summaries,
@@ -1401,7 +1419,100 @@ def render_product_row(product):
                         st.rerun()
 
 
+def render_supabase_products_page():
+    page_started = time.perf_counter()
+    render_page_intro(
+        "Products",
+        "Fast Supabase catalogue view for Sports Cave product records.",
+        "Search or page through saved products. Open Limited Editions for counter edits.",
+        "This page does not call Shopify unless you use sync tools elsewhere.",
+    )
+
+    controls = st.columns([2.4, 0.8, 0.8, 1.0])
+    search = controls[0].text_input(
+        "Search products",
+        placeholder="Product title, Shopify handle, or SKU",
+        key="supabase-products-search",
+    )
+    if "supabase-products-page" not in st.session_state:
+        st.session_state["supabase-products-page"] = 0
+    filter_signature = search.strip().lower()
+    if st.session_state.get("supabase-products-filter-signature") != filter_signature:
+        st.session_state["supabase-products-filter-signature"] = filter_signature
+        st.session_state["supabase-products-page"] = 0
+
+    page_size = DEFAULT_PAGE_SIZE
+    current_page = max(int(st.session_state.get("supabase-products-page", 0) or 0), 0)
+    offset = current_page * page_size
+    cache_version = supabase_cache_version("limited")
+
+    db_started = time.perf_counter()
+    try:
+        products = cached_supabase_limited_products(search, page_size + 1, offset, cache_version)
+    except Exception as error:
+        supabase_backend.log_app_error("products_page_load_failed", str(error), {"source": "products_page"})
+        st.error("Products are not available right now. The saved Supabase data was not changed.")
+        perf_log(f"PERF Products total={(time.perf_counter() - page_started):.3f}s db={(time.perf_counter() - db_started):.3f}s render=0.000s rows=0")
+        return
+    db_elapsed = time.perf_counter() - db_started
+    perf_log(f"PERF Products query rows={min(len(products), page_size)} time={db_elapsed:.3f}s")
+
+    has_next = len(products) > page_size
+    visible_products = products[:page_size]
+    controls[1].download_button(
+        "Export shown",
+        data=build_supabase_products_csv(visible_products, {}),
+        file_name="sports-cave-products-shown.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+    if controls[2].button("Limited Editions", use_container_width=True):
+        st.session_state.pending_page = "Limited Editions"
+        st.rerun()
+    controls[3].caption(f"Page {current_page + 1} | {len(visible_products)} shown")
+
+    render_started = time.perf_counter()
+    if not visible_products:
+        st.info("No saved Supabase products match this search yet.")
+    else:
+        header = st.columns([2.4, 1.35, 0.9, 0.9, 1.1, 0.9])
+        for column, label in zip(header, ("Product", "Handle", "Next", "Remaining", "Status", "Open")):
+            column.caption(label)
+        for index, product in enumerate(visible_products):
+            row = st.columns([2.4, 1.35, 0.9, 0.9, 1.1, 0.9])
+            row[0].write(product.get("product_title") or "Untitled product")
+            row[1].caption(product.get("shopify_handle") or "-")
+            row[2].write(product.get("next_edition_number") or "-")
+            row[3].write(product.get("remaining_count") if product.get("remaining_count") is not None else "-")
+            row[4].write(str(product.get("status") or product.get("edition_status") or "Active").replace("_", " ").title())
+            with row[5]:
+                if product.get("admin_url"):
+                    st.link_button("Shopify", product["admin_url"], use_container_width=True)
+                elif product.get("online_store_url"):
+                    st.link_button("Storefront", product["online_store_url"], use_container_width=True)
+                else:
+                    st.caption("Saved")
+
+    pager = st.columns([0.8, 0.8, 2.8])
+    if pager[0].button("Previous", disabled=current_page <= 0, use_container_width=True, key="supabase-products-prev"):
+        st.session_state["supabase-products-page"] = max(current_page - 1, 0)
+        st.rerun()
+    if pager[1].button("Next", disabled=not has_next, use_container_width=True, key="supabase-products-next"):
+        st.session_state["supabase-products-page"] = current_page + 1
+        st.rerun()
+    pager[2].caption("Products are read from Supabase/Postgres only. Shopify product sync stays manual.")
+    render_elapsed = time.perf_counter() - render_started
+    perf_log(
+        f"PERF Products total={(time.perf_counter() - page_started):.3f}s "
+        f"db={db_elapsed:.3f}s render={render_elapsed:.3f}s rows={len(visible_products)}"
+    )
+
+
 def render_products_page():
+    if supabase_backend.is_configured():
+        render_supabase_products_page()
+        return
+
     selected_product_id = st.session_state.get("selected_product_id")
     if selected_product_id:
         render_product_detail_page(selected_product_id)
@@ -2614,6 +2725,7 @@ def render_supabase_limited_editions_page():
     actions = st.columns([1.05, 1.05, 1.1, 1.1])
     if actions[0].button(sync_button_label, type="primary", disabled=not config["configured"], use_container_width=True):
         progress = st.progress(0, text=sync_progress_label)
+        sync_started = time.perf_counter()
         try:
             def update_product_progress(count):
                 progress.progress(
@@ -2625,6 +2737,11 @@ def render_supabase_limited_editions_page():
                 config,
                 progress_callback=update_product_progress,
                 mode="full" if initial_product_sync else "incremental",
+            )
+            perf_log(
+                f"PERF Shopify product fetch write time={(time.perf_counter() - sync_started):.3f}s "
+                f"mode={result.get('mode') or ('full' if initial_product_sync else 'incremental')} "
+                f"processed={int(result.get('products_processed', 0) or 0)}"
             )
             progress.progress(1.0, text=sync_complete_label)
             warning_suffix = ""
@@ -2645,6 +2762,7 @@ def render_supabase_limited_editions_page():
             bump_supabase_cache_version("limited", "sync-state")
             st.rerun()
         except Exception as error:
+            perf_log(f"PERF Shopify product fetch write time={(time.perf_counter() - sync_started):.3f}s status=failed")
             progress.empty()
             render_supabase_load_warning("Product sync", error, "limited-sync")
             supabase_backend.log_app_error(
@@ -2662,20 +2780,56 @@ def render_supabase_limited_editions_page():
 
     render_supabase_limited_edition_csv_import(uploaded_csv)
 
+    filter_signature = search.strip().lower()
+    if st.session_state.get("supabase-limited-filter-signature") != filter_signature:
+        st.session_state["supabase-limited-filter-signature"] = filter_signature
+        st.session_state["supabase-limited-page"] = 0
+    current_page = max(int(st.session_state.get("supabase-limited-page", 0) or 0), 0)
+    page_size = DEFAULT_PAGE_SIZE
+    offset = current_page * page_size
+    page_started = time.perf_counter()
+    db_started = time.perf_counter()
     try:
         with st.spinner("Loading edition products..."):
             cache_version = supabase_cache_version("limited")
+
+            def load_limited_page():
+                product_rows = cached_supabase_limited_products(
+                    search,
+                    page_size + 1,
+                    offset,
+                    cache_version,
+                )
+                visible_rows = product_rows[:page_size]
+                handles = tuple(
+                    product.get("shopify_handle")
+                    for product in visible_rows
+                    if product.get("shopify_handle")
+                )
+                return {
+                    "products": visible_rows,
+                    "has_next": len(product_rows) > page_size,
+                    "asset_map": cached_supabase_product_asset_map(handles, cache_version),
+                }
+
+            snapshot_key = f"supabase-limited-screen-{current_page}-{filter_signature}"
             dataset, reused_saved_dataset, dataset_error = load_supabase_screen_snapshot(
-                "supabase-limited-screen",
+                snapshot_key,
                 cache_version,
-                lambda: cached_supabase_limited_dataset(PRODUCT_CACHE_DISPLAY_LIMIT, cache_version),
+                load_limited_page,
             )
-            products = _filter_limited_products(dataset.get("products") or [], search)
+            products = dataset.get("products") or []
             asset_map = dataset.get("asset_map") or {}
+            has_next_page = bool(dataset.get("has_next"))
     except Exception as error:
         render_supabase_load_warning("Edition products", error, "limited-products")
         supabase_backend.log_app_error("limited_editions_load_failed", str(error), {"source": "limited_editions_page"})
+        perf_log(
+            f"PERF Limited Editions total={(time.perf_counter() - page_started):.3f}s "
+            f"db={(time.perf_counter() - db_started):.3f}s render=0.000s rows=0"
+        )
         return
+    db_elapsed = time.perf_counter() - db_started
     if dataset_error:
         render_supabase_load_warning(
             "Edition products",
@@ -2685,7 +2839,7 @@ def render_supabase_limited_editions_page():
         )
         supabase_backend.log_app_error("limited_editions_load_failed", str(dataset_error), {"source": "limited_editions_page"})
 
-    loaded_columns = st.columns([1.0, 1.0, 1.4])
+    loaded_columns = st.columns([1.0, 0.75, 0.75, 1.0, 1.4])
     loaded_columns[0].download_button(
         "Export shown rows",
         data=build_supabase_products_csv(products, asset_map),
@@ -2693,19 +2847,30 @@ def render_supabase_limited_editions_page():
         mime="text/csv",
         use_container_width=True,
     )
-    loaded_columns[1].caption(f"{len(products)} products shown")
-    loaded_columns[1].caption(
+    if loaded_columns[1].button("Previous", disabled=current_page <= 0, use_container_width=True, key="supabase-limited-prev"):
+        st.session_state["supabase-limited-page"] = max(current_page - 1, 0)
+        st.rerun()
+    if loaded_columns[2].button("Next", disabled=not has_next_page, use_container_width=True, key="supabase-limited-next"):
+        st.session_state["supabase-limited-page"] = current_page + 1
+        st.rerun()
+    loaded_columns[3].caption(f"Page {current_page + 1} | {len(products)} products shown")
+    loaded_columns[3].caption(
         "Last sync: " + (format_updated_at(last_product_sync) if last_product_sync else "Never")
     )
     if reused_saved_dataset:
-        loaded_columns[2].caption("Showing the last saved screen snapshot while the live refresh retries.")
+        loaded_columns[4].caption("Showing the last saved screen snapshot while the live refresh retries.")
     else:
-        loaded_columns[2].caption("Saved catalogue stays warm on screen until you manually sync again.")
+        loaded_columns[4].caption("Saved catalogue stays warm on screen until you manually sync again.")
 
+    render_started = time.perf_counter()
     st.subheader("Edition Products")
     st.caption("Edit the live Supabase counters directly. If Latest sent is changed, Next is saved as Latest + 1.")
     if not products:
         st.info("No edition products match the current search yet.")
+        perf_log(
+            f"PERF Limited Editions total={(time.perf_counter() - page_started):.3f}s "
+            f"db={db_elapsed:.3f}s render={(time.perf_counter() - render_started):.3f}s rows=0"
+        )
         return
 
     st.markdown(
@@ -2775,11 +2940,7 @@ def render_supabase_limited_editions_page():
 
         columns = st.columns([0.52, 2.0, 1.05, 0.62, 0.72, 0.62, 0.72, 0.78, 1.2, 1.2, 0.82, 0.7])
         with columns[0]:
-            render_product_thumbnail(
-                product.get("display_image_url") or product.get("featured_image_url"),
-                key=f"edition-thumb-{product_handle}",
-                width=44,
-            )
+            st.markdown('<div class="sc-product-thumb-empty">SC</div>', unsafe_allow_html=True)
         with columns[1]:
             st.markdown(
                 f'<div class="sc-limited-product-title">{html.escape(product.get("product_title") or "Untitled product")}</div>',
@@ -2889,6 +3050,11 @@ def render_supabase_limited_editions_page():
                 st.error("Could not save this edition row.")
                 supabase_backend.log_app_error("limited_editions_row_save_failed", str(error), {"source": "limited_editions_page", "handle": product_handle})
         st.divider()
+    render_elapsed = time.perf_counter() - render_started
+    perf_log(
+        f"PERF Limited Editions total={(time.perf_counter() - page_started):.3f}s "
+        f"db={db_elapsed:.3f}s render={render_elapsed:.3f}s rows={len(products)}"
+    )
 
 
 def render_limited_editions_page(dispatch_log_renderer=None):
@@ -3782,7 +3948,23 @@ def _order_summary_matches_status(order_summary, status_filter):
             {"Sold Out"},
         )
     if selected == "Assigned":
-        return _order_financial_status(order_summary) == "Assigned"
+        return any(
+            active_assignments(_coerce_assignments(line_item.get("assignments")))
+            for line_item in order_summary.get("line_items") or []
+        )
+    if selected == "Fulfilled":
+        fulfillment_status = _clean_order_text(order_summary.get("fulfillment_status")).casefold()
+        return "fulfilled" in fulfillment_status and "unfulfilled" not in fulfillment_status
+    if selected == "Cancelled / Refunded":
+        return bool(order_summary.get("cancelled_at")) or any(
+            token in _order_financial_status(order_summary).casefold()
+            for token in ("refund", "refunded", "void", "cancel")
+        )
+    if selected == "Errors":
+        return _order_summary_has_line_status(
+            order_summary,
+            {"Error", "Product Not Found", "Needs Edition Setup", "Sold Out"},
+        )
     return True
 
 
@@ -5039,9 +5221,16 @@ def _order_fetch_message_from_error(error):
     return ("caption", "Showing saved orders. Latest Shopify refresh failed.")
 
 
-def _log_orders_page_load(started, rows=0):
-    elapsed_ms = int((time.perf_counter() - started) * 1000)
-    print(f"ACTION_BOARD_LOAD total={elapsed_ms}ms rows={int(rows or 0)}")
+def _log_orders_page_load(started, rows=0, db_seconds=0.0, render_seconds=0.0, shopify_seconds=0.0):
+    total_seconds = time.perf_counter() - started
+    perf_log(f"ACTION_BOARD_LOAD total={int(total_seconds * 1000)}ms rows={int(rows or 0)}")
+    perf_log(
+        f"PERF Orders load total={total_seconds:.3f}s "
+        f"db={float(db_seconds or 0.0):.3f}s "
+        f"render={float(render_seconds or 0.0):.3f}s "
+        f"shopify={float(shopify_seconds or 0.0):.3f}s "
+        f"rows={int(rows or 0)}"
+    )
 
 
 def render_shopify_orders_mirror_page():
@@ -5225,6 +5414,9 @@ def render_supabase_orders_page():
         "Product Missing",
         "Sold Out Issue",
         "Assigned",
+        "Fulfilled",
+        "Cancelled / Refunded",
+        "Errors",
         "All Saved Orders",
     )
     if (
@@ -5288,6 +5480,7 @@ def render_supabase_orders_page():
     if fetch_new_clicked or deep_refresh_clicked:
         sync_message = st.empty()
         sync_message.info("Fetching Shopify orders into the saved Sports Cave OS cache...")
+        fetch_started = time.perf_counter()
         try:
             max_orders = 100 if fetch_new_clicked else 250
             query = None
@@ -5303,6 +5496,12 @@ def render_supabase_orders_page():
                 max_orders=max_orders,
                 generate_certificates=False,
                 sync_product_metafields=True,
+            )
+            perf_log(
+                f"PERF FETCH_NEW_ORDERS total={(time.perf_counter() - fetch_started):.3f}s "
+                f"orders_seen={int(result.get('orders_seen', 0) or 0)} "
+                f"imported={int(result.get('orders_imported', 0) or 0)} "
+                f"assigned={int(result.get('assignments_created', 0) or 0)}"
             )
             sync_message.empty()
             if result.get("orders_seen", 0) == 0:
@@ -5323,11 +5522,13 @@ def render_supabase_orders_page():
             bump_supabase_cache_version("orders", "order-summary", "sync-state")
             st.rerun()
         except Exception as error:
+            perf_log(f"PERF FETCH_NEW_ORDERS total={(time.perf_counter() - fetch_started):.3f}s status=failed")
             sync_message.empty()
             st.session_state.supabase_orders_status_message = _order_fetch_message_from_error(error)
             supabase_backend.log_app_error("orders_page_sync_failed", str(error), {"source": "orders_page"})
             st.rerun()
 
+    db_started = time.perf_counter()
     try:
         with st.spinner("Loading orders..."):
             cache_version = supabase_cache_version("orders")
@@ -5339,10 +5540,12 @@ def render_supabase_orders_page():
             )
             summary = dataset.get("summary") or {}
             filtered_order_summaries = dataset.get("order_summaries") or []
+            db_elapsed = time.perf_counter() - db_started
     except Exception as error:
+        db_elapsed = time.perf_counter() - db_started
         supabase_backend.log_app_error("orders_page_load_failed", str(error), {"source": "orders_page"})
         st.info("Orders are not available right now. Use Fetch New Orders to refresh the saved order list.")
-        _log_orders_page_load(page_started, 0)
+        _log_orders_page_load(page_started, 0, db_seconds=db_elapsed)
         return
     if dataset_error:
         st.caption("Showing saved orders. Latest Shopify refresh failed.")
@@ -5365,21 +5568,23 @@ def render_supabase_orders_page():
             st.info("No paid unfulfilled orders need Sports Cave action right now.")
         else:
             st.info("No saved orders match the current filters yet.")
-        _log_orders_page_load(page_started, 0)
+        _log_orders_page_load(page_started, 0, db_seconds=db_elapsed)
         return
 
+    render_started = time.perf_counter()
     st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
     if reused_saved_dataset:
         st.caption(f"Showing action rows from the last warm screen snapshot. {len(order_summaries)} currently visible.")
     else:
         st.caption("Showing fulfilment action rows from Supabase.")
     _render_shopify_style_cached_orders_table(order_summaries)
+    render_elapsed = time.perf_counter() - render_started
     if dataset.get("has_more"):
         if st.button("Load 50 More", key="supabase-orders-load-more", use_container_width=True):
             st.session_state["supabase-orders-visible-count"] = visible_count + 50
-            _log_orders_page_load(page_started, len(order_summaries))
+            _log_orders_page_load(page_started, len(order_summaries), db_seconds=db_elapsed, render_seconds=render_elapsed)
             st.rerun()
-    _log_orders_page_load(page_started, len(order_summaries))
+    _log_orders_page_load(page_started, len(order_summaries), db_seconds=db_elapsed, render_seconds=render_elapsed)
 
 
 def fetch_latest_orders(config):
@@ -8021,6 +8226,7 @@ def render_email_marketing_section():
 
 
 def render_marketing_factory_page():
+    started = time.perf_counter()
     inject_marketing_factory_styles()
     st.title("Marketing Factory")
     st.caption("Prompt and SOP hub for Sports Cave operators. No live AI generation.")
@@ -8035,6 +8241,7 @@ def render_marketing_factory_page():
         render_social_media_section()
     with email_tab:
         render_email_marketing_section()
+    perf_log(f"PERF MarketingFactory total={(time.perf_counter() - started):.3f}s prompt_load=rendered")
 
 
 def render_developer_widget_status(shopify_config):
@@ -8133,6 +8340,7 @@ def render_settings_page(app_version, database_path, password_status):
     latest_shopify_run = db.get_latest_shopify_sync_run()
     latest_order_run = db.get_latest_shopify_order_sync_run()
     supabase_enabled = supabase_backend.is_configured()
+    database_health = supabase_backend.database_status(run_schema_check=supabase_enabled)
     supabase_counts = {}
     supabase_sync_state = {}
     if supabase_enabled:
@@ -8171,7 +8379,12 @@ def render_settings_page(app_version, database_path, password_status):
     if not order_fetch_status:
         order_fetch_status = order_sync_status
     settings = (
-        ("Database mode", "Supabase/Postgres" if supabase_enabled else "SQLite fallback"),
+        ("Database mode", database_health.get("mode") or ("Supabase/Postgres" if supabase_enabled else "SQLite fallback")),
+        ("Database connected", "Yes" if database_health.get("connected") else "No"),
+        ("Database host/project", database_health.get("host_reference") or "Not configured"),
+        ("Database tables ready", "Yes" if database_health.get("tables_ready") else "No"),
+        ("Last database check", format_updated_at(database_health.get("checked_at")) if database_health.get("checked_at") else "Never"),
+        ("DATABASE_URL source", database_health.get("url_source") or "Missing"),
         ("Shopify connection", "Configured" if shopify_config["configured"] else "Not configured"),
         ("Shopify store domain", "Configured" if shopify_config["store_domain"] else "Missing"),
         ("Shopify API version", "Configured" if shopify_config["api_version"] else "Missing"),
@@ -8209,6 +8422,13 @@ def render_settings_page(app_version, database_path, password_status):
                 st.markdown(f"**{label}**")
                 st.caption(value)
 
+    if database_health.get("warning"):
+        st.warning(database_health["warning"])
+    if supabase_enabled and (shopify_summary.get("total") or order_summary.get("total")) and not (products_saved_count or orders_saved_count):
+        st.warning("Postgres is active but existing SQLite data has not been imported. Local SQLite data was left untouched.")
+    if database_health.get("error_type"):
+        st.caption(f"Database diagnostic error type: {database_health['error_type']}. No connection string or secret was displayed.")
+
     st.info(
         "Sports Cave OS reads Shopify products and orders only when a worker clicks Sync. "
         "Client credentials are exchanged for a temporary in-memory token only at that time. "
@@ -8229,7 +8449,7 @@ def render_settings_page(app_version, database_path, password_status):
                 st.caption(f"Server time: {result.get('server_time')}")
             except Exception as error:
                 st.error("Supabase connection failed.")
-                st.exception(error)
+                st.caption(f"Error type: {error.__class__.__name__}. Check Render DATABASE_URL, SSL mode, and Supabase network settings.")
         if test_columns[1].button("Test Shopify connection", disabled=not shopify_config["configured"], use_container_width=True):
             try:
                 result = shopify_sync.test_connection(config=shopify_config)

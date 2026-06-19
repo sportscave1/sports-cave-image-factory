@@ -56,6 +56,7 @@ DATABASE_URL_ENV_KEYS = (
 _SCHEMA_READY = False
 _ORDER_READ_SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
+_LAST_DATABASE_STATUS = {}
 DEFAULT_EDITION_NAME = "Original Edition"
 ACTIVE_RUN_STATUS = "active"
 SOLD_OUT_RUN_STATUS = "sold_out"
@@ -160,6 +161,18 @@ def is_configured():
     return bool(get_database_url())
 
 
+def safe_database_reference():
+    url = get_database_url()
+    if not url:
+        return "Local SQLite fallback"
+    parsed = urlparse(url)
+    return parsed.hostname or "Configured Postgres host"
+
+
+def _safe_error_type(error):
+    return error.__class__.__name__ if error else ""
+
+
 def _database_url_with_ssl():
     url = get_database_url()
     if not url:
@@ -190,6 +203,71 @@ def connect():
         prepare_threshold=None,
         options="-c statement_timeout=8000 -c idle_in_transaction_session_timeout=8000",
     )
+
+
+def database_status(run_schema_check=True):
+    """Return safe database diagnostics without exposing DATABASE_URL credentials."""
+    global _LAST_DATABASE_STATUS
+    checked_at = utc_now()
+    if not is_configured():
+        status = {
+            "mode": "SQLite fallback",
+            "configured": False,
+            "connected": False,
+            "tables_ready": False,
+            "host_reference": "Local SQLite fallback",
+            "url_source": "",
+            "checked_at": checked_at,
+            "connect_time_seconds": 0.0,
+            "migration_time_seconds": 0.0,
+            "error_type": "",
+            "warning": "DATABASE_URL is not configured. App is using local SQLite fallback.",
+        }
+        _LAST_DATABASE_STATUS = status
+        return status
+
+    connected = False
+    tables_ready = False
+    connect_time = 0.0
+    migration_time = 0.0
+    error_type = ""
+    try:
+        started = time.perf_counter()
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 AS ok")
+                connected = bool((cur.fetchone() or {}).get("ok"))
+        connect_time = time.perf_counter() - started
+        if run_schema_check:
+            migration_started = time.perf_counter()
+            ensure_schema()
+            migration_time = time.perf_counter() - migration_started
+            tables_ready = True
+        else:
+            tables_ready = _SCHEMA_READY
+    except Exception as error:
+        error_type = _safe_error_type(error)
+    print(
+        "PERF DB "
+        f"mode=postgres connected={str(connected).lower()} "
+        f"connect_time={connect_time:.3f}s migration_time={migration_time:.3f}s",
+        flush=True,
+    )
+    status = {
+        "mode": "Supabase/Postgres",
+        "configured": True,
+        "connected": connected,
+        "tables_ready": tables_ready,
+        "host_reference": safe_database_reference(),
+        "url_source": get_database_url_source(),
+        "checked_at": checked_at,
+        "connect_time_seconds": round(connect_time, 3),
+        "migration_time_seconds": round(migration_time, 3),
+        "error_type": error_type,
+        "warning": "",
+    }
+    _LAST_DATABASE_STATUS = status
+    return status
 
 
 def json_dumps(value):
@@ -224,6 +302,20 @@ def column_exists(cur, table_name, column_name):
         (table_name, column_name),
     )
     return bool((cur.fetchone() or {}).get("exists"))
+
+
+def _safe_create_index(cur, sql, index_name):
+    try:
+        cur.execute("SAVEPOINT sports_cave_index")
+        cur.execute(sql)
+        cur.execute("RELEASE SAVEPOINT sports_cave_index")
+    except Exception as error:
+        cur.execute("ROLLBACK TO SAVEPOINT sports_cave_index")
+        cur.execute("RELEASE SAVEPOINT sports_cave_index")
+        print(
+            f"WARN DB index skipped index={index_name} error_type={_safe_error_type(error)}",
+            flush=True,
+        )
 
 
 def _ensure_schema_uncached():
@@ -901,20 +993,23 @@ def _ensure_schema_uncached():
                         f"ALTER TABLE {table_name} ALTER COLUMN id SET DEFAULT gen_random_uuid()"
                     )
 
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_products_id_unique ON shopify_products(shopify_product_id)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_products_handle_unique ON shopify_products(handle)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_variants_id_unique ON shopify_variants(shopify_variant_id)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_products_handle_unique ON edition_products(shopify_handle)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_customers_id_unique ON shopify_customers(shopify_customer_id)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_orders_id_unique ON shopify_orders(shopify_order_id)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_order_lines_line_id_unique ON shopify_order_lines(shopify_line_item_id)")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_products_id_unique ON shopify_products(shopify_product_id)", "idx_shopify_products_id_unique")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_products_handle_unique ON shopify_products(handle)", "idx_shopify_products_handle_unique")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_variants_id_unique ON shopify_variants(shopify_variant_id)", "idx_shopify_variants_id_unique")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_products_handle_unique ON edition_products(shopify_handle)", "idx_edition_products_handle_unique")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_customers_id_unique ON shopify_customers(shopify_customer_id)", "idx_shopify_customers_id_unique")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_orders_id_unique ON shopify_orders(shopify_order_id)", "idx_shopify_orders_id_unique")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_order_lines_line_id_unique ON shopify_order_lines(shopify_line_item_id)", "idx_shopify_order_lines_line_id_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_order_lines_order_id ON shopify_order_lines(shopify_order_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_order_lines_handle ON shopify_order_lines(shopify_handle)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_order_lines_product_id ON shopify_order_lines(shopify_product_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_order_lines_sku ON shopify_order_lines(sku)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_variants_product_id ON shopify_variants(shopify_product_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_variants_sku ON shopify_variants(sku)")
             cur.execute("ALTER TABLE edition_orders DROP CONSTRAINT IF EXISTS edition_orders_shopify_handle_edition_number_key")
             cur.execute("DROP INDEX IF EXISTS idx_edition_orders_handle_number_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_handle_number ON edition_orders(shopify_handle, edition_number)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_line_allocation_unique ON edition_orders(shopify_line_item_id, allocation_index)")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_line_allocation_unique ON edition_orders(shopify_line_item_id, allocation_index)", "idx_edition_orders_line_allocation_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_run_id ON edition_orders(edition_run_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_line_item_id ON edition_orders(shopify_line_item_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_product_id ON edition_orders(shopify_product_id)")
@@ -928,29 +1023,34 @@ def _ensure_schema_uncached():
                 """
             )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_runs_handle_status ON edition_runs(shopify_handle, status)")
-            cur.execute(
+            _safe_create_index(
+                cur,
                 f"""
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_runs_one_active_per_handle
                 ON edition_runs(shopify_handle)
                 WHERE status='{ACTIVE_RUN_STATUS}'
-                """
+                """,
+                "idx_edition_runs_one_active_per_handle",
             )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_adjustments_handle ON edition_adjustments(shopify_handle, created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_adjustments_run ON edition_adjustments(edition_run_id, created_at DESC)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_certificates_edition_order_unique ON certificates(edition_order_id)")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_certificates_edition_order_unique ON certificates(edition_order_id)", "idx_certificates_edition_order_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_certificates_related_edition_order ON certificates(related_edition_order_id)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_unique ON product_assets(shopify_handle, asset_type)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_name_unique ON product_assets(shopify_handle, asset_type, asset_name)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_file_assets_bucket_key_unique ON file_assets(bucket, object_key)")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_unique ON product_assets(shopify_handle, asset_type)", "idx_product_assets_handle_type_unique")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_name_unique ON product_assets(shopify_handle, asset_type, asset_name)", "idx_product_assets_handle_type_name_unique")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_file_assets_bucket_key_unique ON file_assets(bucket, object_key)", "idx_file_assets_bucket_key_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_file_assets_handle ON file_assets(related_shopify_handle)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_file_assets_order ON file_assets(related_shopify_order_id)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_settings_key_unique ON app_settings(key)")
-            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_id_unique ON webhook_events(webhook_id)")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_app_settings_key_unique ON app_settings(key)", "idx_app_settings_key_unique")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_id_unique ON webhook_events(webhook_id)", "idx_webhook_events_id_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_title ON shopify_products(title)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_updated_at ON shopify_products(updated_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_product_type ON shopify_products(product_type)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_created_at ON shopify_orders(created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_updated_at ON shopify_orders(remote_updated_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_financial_fulfillment ON shopify_orders(financial_status, fulfillment_status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_financial_status ON shopify_orders(financial_status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_fulfillment_status ON shopify_orders(fulfillment_status)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_customer ON shopify_orders(customer_name)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_customer_email ON shopify_orders(customer_email)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_order_name ON shopify_orders(order_name)")
@@ -960,6 +1060,8 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_order_lines_assignment_status ON shopify_order_lines(assignment_status)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_products_product_id ON edition_products(shopify_product_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_products_title ON edition_products(product_title)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_products_edition_status ON edition_products(edition_status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_products_updated_at ON edition_products(updated_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_product_assets_handle ON product_assets(shopify_handle)")
             cur.execute(
                 f"""
@@ -1033,7 +1135,10 @@ def ensure_schema():
     with _SCHEMA_LOCK:
         if _SCHEMA_READY:
             return
+        started = time.perf_counter()
         _ensure_schema_uncached()
+        elapsed = time.perf_counter() - started
+        print(f"PERF DB migration time={elapsed:.3f}s", flush=True)
         _SCHEMA_READY = True
 
 
@@ -1829,9 +1934,11 @@ def _insert_edition_adjustment_with_cursor(
     )
 
 
-def list_edition_products(search="", limit=500):
+def list_edition_products(search="", limit=500, offset=0):
     ensure_schema()
     search_value = f"%{search.strip().lower()}%" if search.strip() else None
+    limit_value = max(min(int(limit or 500), 5000), 1)
+    offset_value = max(int(offset or 0), 0)
     with connect() as conn:
         with conn.cursor() as cur:
             _ensure_active_edition_runs_for_products(cur)
@@ -1893,10 +2000,16 @@ def list_edition_products(search="", limit=500):
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
                     WHERE LOWER(COALESCE(ep.product_title, '')) LIKE %s
                        OR LOWER(COALESCE(ep.shopify_handle, '')) LIKE %s
+                       OR EXISTS (
+                           SELECT 1
+                           FROM shopify_variants sv
+                           WHERE sv.shopify_product_id = ep.shopify_product_id
+                             AND LOWER(COALESCE(sv.sku, '')) LIKE %s
+                       )
                     ORDER BY ep.product_title NULLS LAST, ep.shopify_handle
-                    LIMIT %s
+                    LIMIT %s OFFSET %s
                     """,
-                    (search_value, search_value, limit),
+                    (search_value, search_value, search_value, limit_value, offset_value),
                 )
             else:
                 cur.execute(
@@ -1954,9 +2067,9 @@ def list_edition_products(search="", limit=500):
                     {active_run_join}
                     LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
                     ORDER BY ep.product_title NULLS LAST, ep.shopify_handle
-                    LIMIT %s
+                    LIMIT %s OFFSET %s
                     """,
-                    (limit,),
+                    (limit_value, offset_value),
                 )
             return _normalize_edition_product_rows(cur.fetchall())
 

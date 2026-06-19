@@ -58,6 +58,10 @@ def log_startup_stage(stage, extra=""):
     )
     safe_startup_print(message)
     logging.info(message)
+    if stage == "PAGE RENDER DONE":
+        perf_message = f"PERF startup total={total_elapsed:.3f}s page={extra}"
+        safe_startup_print(perf_message)
+        logging.info(perf_message)
     if stage_elapsed > 3:
         warning = f"WARNING startup stage slow: {stage} took {stage_elapsed:.3f}s"
         safe_startup_print(warning)
@@ -150,6 +154,17 @@ PASSWORD_ENV_KEYS = (
     "STREAMLIT_PASSWORD",
     "SPORTS_CAVE_PASSWORD",
     "SITE_PASSWORD",
+)
+DATABASE_URL_ENV_KEYS = (
+    "DATABASE_URL",
+    "SUPABASE_DATABASE_URL",
+    "SUPABASE_DB_URL",
+    "POSTGRES_URL",
+    "POSTGRES_PRISMA_URL",
+    "POSTGRES_URL_NON_POOLING",
+    "DATABASE_PRIVATE_URL",
+    "DATABASE_PUBLIC_URL",
+    "RENDER_DATABASE_URL",
 )
 LEGACY_BASE_ASSET_SPECS = [
     ("black", "Black Framed"),
@@ -4611,10 +4626,8 @@ def render_mockups_page():
 
 
 def render_product_uploads_page():
-    get_image_factory()
+    started = time.perf_counter()
     log_app_memory("Page load: Product Uploads")
-    get_os_pages().render_product_uploads_workflow()
-    st.divider()
     st.subheader("Shopify Prompt Tools")
     st.caption(
         "Use this lightweight prompt page when you already have your Shopify upload images and HTML preview ready to drag into ChatGPT."
@@ -4651,6 +4664,7 @@ def render_product_uploads_page():
         get_product_upload_prompt({}, update_existing=True),
         "update-existing-shopify-product-prompt",
     )
+    safe_startup_print(f"PERF Product Uploads total={(time.perf_counter() - started):.3f}s")
 
 
 def render_edition_dispatch_log(embedded=False):
@@ -4919,6 +4933,7 @@ def render_placeholder_page(title, body):
 
 
 def render_lightweight_dashboard_page():
+    started = time.perf_counter()
     st.title("Sports Cave OS")
     st.caption("Daily operating screen for orders, editions, products, and files.")
     with st.container(border=True):
@@ -4942,15 +4957,15 @@ def render_lightweight_dashboard_page():
         "when sync runs."
     )
     st.caption("Advanced tools are kept separate from the daily order workflow.")
+    safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 
 def page_uses_local_database(current_page):
     if current_page == "Dashboard":
         return False
-    pages = get_os_pages()
-    supabase_enabled = pages.supabase_backend.is_configured()
+    supabase_enabled = any(os.getenv(key, "").strip() for key in DATABASE_URL_ENV_KEYS)
     local_fallback_enabled = os.getenv("ENABLE_LOCAL_SQLITE_FALLBACK", "true").lower() == "true"
-    if current_page in {"Settings", "Developer", "Files", "Product Uploads"}:
+    if current_page in {"Settings", "Developer", "Files"}:
         return True
     if current_page in {"Limited Editions", "Orders"} and not supabase_enabled:
         return local_fallback_enabled
