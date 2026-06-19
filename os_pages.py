@@ -4318,226 +4318,155 @@ def _cached_order_badge_slug(value):
     return "unknown"
 
 
+def _badge_color_for_status(value):
+    slug = _cached_order_badge_slug(value)
+    if slug == "unfulfilled":
+        return "yellow"
+    if slug in {"fulfilled", "paid"}:
+        return "green"
+    if slug == "partial":
+        return "orange"
+    if slug == "refunded":
+        return "red"
+    return "gray"
+
+
+def _badge_color_for_assignment(class_name):
+    value = str(class_name or "")
+    if value == "assigned":
+        return "green"
+    if value in {"product-not-found", "sold-out-issue"}:
+        return "red"
+    return "yellow"
+
+
+def _badge_color_for_edition(value):
+    normalized = _clean_order_text(value).casefold()
+    if normalized.startswith("#") or normalized.startswith("edition"):
+        return "green"
+    if "historical" in normalized:
+        return "gray"
+    if "sold out" in normalized or "error" in normalized or "not found" in normalized:
+        return "red"
+    return "yellow"
+
+
+def _badge_color_for_certificate(label):
+    normalized = _clean_order_text(label).casefold()
+    if "open" in normalized or "cert" in normalized and "missing" not in normalized and "needs" not in normalized:
+        return "green"
+    if "missing" in normalized or "error" in normalized:
+        return "red"
+    return "yellow"
+
+
+def _render_muted_text(value, fallback=""):
+    cleaned = str(value or fallback or "").strip()
+    if cleaned:
+        st.caption(cleaned)
+
+
 def _render_shopify_style_cached_orders_table(order_summaries):
-    rows_html = []
-    for order_summary in order_summaries or []:
-        order_link = str(order_summary.get("order_link") or "").strip()
-        order_label = html.escape(str(order_summary.get("order_label") or "Order"))
-        product_text = html.escape(str(order_summary.get("product_summary") or "Product missing"))
-        customer_name = html.escape(str(order_summary.get("customer_name") or "Customer missing"))
-        customer_email = html.escape(str(order_summary.get("customer_email") or ""))
-        fulfillment_label = _humanize_shopify_status_text(order_summary.get("fulfillment_status"), "Unknown")
-        fulfillment_slug = _cached_order_badge_slug(fulfillment_label)
-        payment_label = _humanize_shopify_status_text(order_summary.get("financial_status"), "Unknown")
-        payment_slug = _cached_order_badge_slug(payment_label)
-        delivery_label = _cached_order_delivery_label(order_summary)
-        delivery_slug = _cached_order_badge_slug(delivery_label)
-        item_count = _cached_order_item_count(order_summary)
-        assignment_badge = _cached_order_assignment_badge(order_summary)
-        shipping_text = html.escape(str(order_summary.get("shipping_summary") or "-"))
-        total_text = html.escape(_format_shopify_total(order_summary))
-        order_label_html = (
-            f'<a class="sc-shopify-order-link" href="{html.escape(order_link, quote=True)}" target="_blank" rel="noreferrer">{order_label}</a>'
-            if order_link
-            else f'<span class="sc-shopify-order-link">{order_label}</span>'
-        )
-        rows_html.append(
-            textwrap.dedent(
-                f"""
-                <tr>
-                    <td><span class="sc-shopify-checkbox" aria-hidden="true"></span></td>
-                    <td>
-                        {order_label_html}
-                        <div class="sc-shopify-muted">{product_text}</div>
-                    </td>
-                    <td>{html.escape(str(order_summary.get("order_date") or "-"))}</td>
-                    <td>
-                        {customer_name}
-                        <div class="sc-shopify-muted">{customer_email or "Customer email hidden"}</div>
-                    </td>
-                    <td><span class="sc-shopify-pill sc-shopify-pill-{fulfillment_slug}">{html.escape(fulfillment_label)}</span></td>
-                    <td>{total_text}</td>
-                    <td>Online Store</td>
-                    <td><span class="sc-shopify-pill sc-shopify-pill-{payment_slug}">{html.escape(payment_label)}</span></td>
-                    <td>
-                        {html.escape(f"{item_count} item" + ("" if item_count == 1 else "s"))}
-                        <div class="sc-shopify-muted">
-                            <span class="sc-shopify-pill sc-shopify-pill-{html.escape(assignment_badge['class_name'])}">{html.escape(assignment_badge['label'])}</span>
-                        </div>
-                    </td>
-                    <td><span class="sc-shopify-pill sc-shopify-pill-{delivery_slug}">{html.escape(delivery_label)}</span></td>
-                    <td>{shipping_text}</td>
-                </tr>
-                """
-            ).strip()
-        )
-    html_table = textwrap.dedent(
-        f"""
-        <style>
-        .sc-shopify-table-shell {{
-            background: #FFFFFF;
-            border: 1px solid #E3E3E3;
-            border-radius: 22px;
-            overflow: hidden;
-            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.10);
-            font-family: Arial, sans-serif;
-            color: #202223;
-        }}
-        .sc-shopify-table-header {{
-            align-items: center;
-            background: #FFFFFF;
-            border-bottom: 1px solid #E3E3E3;
-            display: flex;
-            justify-content: space-between;
-            padding: 0.95rem 1.2rem;
-        }}
-        .sc-shopify-table-title {{
-            color: #202223;
-            font-size: 1rem;
-            font-weight: 800;
-        }}
-        .sc-shopify-table-pill {{
-            background: #FFFFFF;
-            border: 1px solid #D0D5DD;
-            border-radius: 999px;
-            color: #202223;
-            display: inline-flex;
-            font-size: 0.88rem;
-            font-weight: 700;
-            min-height: 2.2rem;
-            align-items: center;
-            padding: 0 0.95rem;
-        }}
-        .sc-shopify-table-wrap {{
-            overflow-x: auto;
-        }}
-        .sc-shopify-table {{
-            border-collapse: collapse;
-            min-width: 1280px;
-            width: 100%;
-        }}
-        .sc-shopify-table th {{
-            background: #FFFFFF;
-            border-bottom: 1px solid #E3E3E3;
-            color: #6D7175;
-            font-size: 0.83rem;
-            font-weight: 700;
-            padding: 0.85rem 1rem;
-            text-align: left;
-            white-space: nowrap;
-        }}
-        .sc-shopify-table td {{
-            border-bottom: 1px solid #E3E3E3;
-            color: #202223;
-            font-size: 0.95rem;
-            padding: 0.78rem 1rem;
-            vertical-align: top;
-        }}
-        .sc-shopify-table tr:hover td {{
-            background: #F6F6F7;
-        }}
-        .sc-shopify-order-link {{
-            color: #005BD3;
-            font-weight: 800;
-            text-decoration: none;
-        }}
-        .sc-shopify-order-link:hover {{
-            text-decoration: underline;
-        }}
-        .sc-shopify-muted {{
-            color: #6D7175;
-            font-size: 0.78rem;
-            line-height: 1.3;
-            margin-top: 0.2rem;
-        }}
-        .sc-shopify-checkbox {{
-            background: #FFFFFF;
-            border: 1.5px solid #8C9196;
-            border-radius: 6px;
-            box-sizing: border-box;
-            display: inline-block;
-            height: 20px;
-            width: 20px;
-        }}
-        .sc-shopify-pill {{
-            align-items: center;
-            border-radius: 999px;
-            display: inline-flex;
-            font-size: 0.83rem;
-            font-weight: 800;
-            gap: 0.35rem;
-            min-height: 1.9rem;
-            padding: 0.1rem 0.72rem;
-            white-space: nowrap;
-        }}
-        .sc-shopify-pill::before {{
-            background: currentColor;
-            border-radius: 50%;
-            content: "";
-            height: 8px;
-            opacity: 0.72;
-            width: 8px;
-        }}
-        .sc-shopify-pill-unfulfilled,
-        .sc-shopify-pill-needs-sync {{
-            background: #FFE58F;
-            color: #7A5A00;
-        }}
-        .sc-shopify-pill-fulfilled,
-        .sc-shopify-pill-paid,
-        .sc-shopify-pill-assigned {{
-            background: #DFF3E4;
-            color: #166534;
-        }}
-        .sc-shopify-pill-partial {{
-            background: #FED7AA;
-            color: #9A3412;
-        }}
-        .sc-shopify-pill-pending,
-        .sc-shopify-pill-unknown {{
-            background: #F1F2F3;
-            color: #4A4F55;
-        }}
-        .sc-shopify-pill-refunded,
-        .sc-shopify-pill-product-not-found,
-        .sc-shopify-pill-sold-out-issue {{
-            background: #FEE2E2;
-            color: #991B1B;
-        }}
-        </style>
-        <div class="sc-shopify-table-shell">
-            <div class="sc-shopify-table-header">
-                <div class="sc-shopify-table-title">Orders</div>
-                <div class="sc-shopify-table-pill">Batch unfulfilled orders</div>
-            </div>
-            <div class="sc-shopify-table-wrap">
-                <table class="sc-shopify-table">
-                    <thead>
-                        <tr>
-                            <th></th>
-                            <th>Order</th>
-                            <th>Date</th>
-                            <th>Customer</th>
-                            <th>Fulfillment status</th>
-                            <th>Total</th>
-                            <th>Channel</th>
-                            <th>Payment status</th>
-                            <th>Items</th>
-                            <th>Delivery status</th>
-                            <th>Delivery method</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {''.join(rows_html)}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        """
-    ).strip()
-    row_count = len(order_summaries or [])
-    height = min(max(240 + (row_count * 52), 420), 1800)
-    components.html(html_table, height=height, scrolling=True)
+    header_labels = (
+        "",
+        "Order",
+        "Date",
+        "Customer",
+        "Fulfillment",
+        "Total",
+        "Channel",
+        "Payment",
+        "Items",
+        "Delivery",
+        "Method",
+        "Edition",
+        "Certificate",
+        "PSD",
+        "Prodigi",
+    )
+    widths = [0.22, 0.75, 0.72, 1.0, 0.88, 0.58, 0.75, 0.82, 0.48, 0.78, 0.86, 0.9, 0.82, 0.58, 0.65]
+
+    with st.container(border=True):
+        header = st.columns(widths, gap="small", vertical_alignment="center")
+        for column, label in zip(header, header_labels):
+            column.caption(label)
+
+        for index, order_summary in enumerate(order_summaries or []):
+            key_prefix = f"cached-order-{index}-{_order_widget_token(order_summary.get('order_key') or index)}"
+            columns = st.columns(widths, gap="small", vertical_alignment="center")
+
+            columns[0].checkbox(
+                "",
+                value=False,
+                disabled=True,
+                key=f"{key_prefix}-select",
+                label_visibility="collapsed",
+            )
+
+            order_link = str(order_summary.get("order_link") or "").strip()
+            order_label = str(order_summary.get("order_label") or "Order").strip()
+            with columns[1]:
+                if order_link:
+                    st.link_button(order_label, order_link, use_container_width=True)
+                else:
+                    st.write(f"**{order_label}**")
+                _render_muted_text(order_summary.get("product_summary"), "Product missing")
+
+            columns[2].write(str(order_summary.get("order_date") or "-"))
+
+            with columns[3]:
+                st.write(str(order_summary.get("customer_name") or "Customer missing"))
+                _render_muted_text(order_summary.get("customer_email"), "Customer email hidden")
+
+            fulfillment_label = _humanize_shopify_status_text(order_summary.get("fulfillment_status"), "Unknown")
+            columns[4].badge(fulfillment_label, color=_badge_color_for_status(fulfillment_label))
+
+            columns[5].write(_format_shopify_total(order_summary))
+            columns[6].write("Online Store")
+
+            payment_label = _humanize_shopify_status_text(order_summary.get("financial_status"), "Unknown")
+            columns[7].badge(payment_label, color=_badge_color_for_status(payment_label))
+
+            item_count = _cached_order_item_count(order_summary)
+            columns[8].write(f"{item_count} item" + ("" if item_count == 1 else "s"))
+
+            delivery_label = _cached_order_delivery_label(order_summary)
+            columns[9].badge(delivery_label, color=_badge_color_for_status(delivery_label))
+
+            columns[10].write(str(order_summary.get("shipping_summary") or "-"))
+
+            with columns[11]:
+                edition_values = order_summary.get("edition_number_items") or []
+                if not edition_values:
+                    assignment_badge = _cached_order_assignment_badge(order_summary)
+                    st.badge(
+                        assignment_badge["label"],
+                        color=_badge_color_for_assignment(assignment_badge["class_name"]),
+                    )
+                else:
+                    for edition_value in edition_values[:3]:
+                        st.badge(str(edition_value), color=_badge_color_for_edition(edition_value))
+                    if len(edition_values) > 3:
+                        st.caption(f"+{len(edition_values) - 3} more")
+
+            certificate_label = _certificate_row_label(_order_assignments_for_certificates(order_summary))
+            columns[12].badge(certificate_label, color=_badge_color_for_certificate(certificate_label))
+
+            psd = order_summary.get("psd") or {}
+            psd_url = str(psd.get("url") or "").strip()
+            with columns[13]:
+                if psd_url:
+                    st.link_button("PSD", psd_url, use_container_width=True)
+                else:
+                    st.badge("No PSD", color="gray")
+
+            prodigi = order_summary.get("prodigi") or {}
+            prodigi_url = str(prodigi.get("url") or "").strip()
+            with columns[14]:
+                if prodigi_url:
+                    st.link_button("Prodigi", prodigi_url, use_container_width=True)
+                else:
+                    st.badge("No Prodigi", color="gray")
 
 
 def _shopify_orders_mirror_styles():
@@ -4924,92 +4853,7 @@ def _render_shopify_orders_metrics(orders):
 
 
 def _render_shopify_orders_mirror_table(orders, assignment_snapshot):
-    rows_html = []
-    for order in orders:
-        fulfillment_label = _humanize_shopify_status_text(order.get("fulfillment_status"), "Open")
-        payment_label = _humanize_shopify_status_text(order.get("financial_status"), "Pending")
-        fulfillment_slug = _status_slug(fulfillment_label)
-        payment_slug = _status_slug(payment_label)
-        delivery_label = (
-            "Delivered"
-            if "DELIVERED" in str(order.get("fulfillment_status") or "").upper()
-            else fulfillment_label
-        )
-        delivery_slug = _status_slug(delivery_label)
-        item_count = _live_order_item_count(order)
-        edition_summary = _live_order_assignment_summary(order, assignment_snapshot)
-        order_label = str(order.get("order_name") or order.get("shopify_order_id") or "Order").strip()
-        order_link = str(order.get("admin_url") or "").strip()
-        order_html = (
-            f'<a class="sc-shopify-order-link" href="{html.escape(order_link, quote=True)}" target="_blank" rel="noreferrer">{html.escape(order_label)}</a>'
-            if order_link
-            else f'<span class="sc-shopify-order-link">{html.escape(order_label)}</span>'
-        )
-        customer_text = customer_display_name(order.get("customer_name") or order.get("customer_email"))
-        channel_text = str(order.get("channel_name") or "Online Store").strip()
-        delivery_method = str(order.get("shipping_method") or order.get("shipping_title") or "Standard shipping").strip()
-        rows_html.append(
-            f"""
-            <tr>
-                <td><span class="sc-shopify-checkbox" aria-hidden="true"></span></td>
-                <td>
-                    {order_html}
-                    <div class="sc-shopify-cell-muted">{html.escape(_live_order_item_note(order))}</div>
-                </td>
-                <td>{html.escape(_format_shopify_mirror_date(order.get('processed_at') or order.get('created_at')))}</td>
-                <td>
-                    {html.escape(customer_text)}
-                    <div class="sc-shopify-cell-muted">{html.escape(str(order.get('customer_email') or '').strip() or 'Customer email hidden')}</div>
-                </td>
-                <td><span class="sc-shopify-badge sc-shopify-badge-fulfillment-{fulfillment_slug}">{html.escape(fulfillment_label)}</span></td>
-                <td>{html.escape(_format_shopify_total(order))}</td>
-                <td>{html.escape(channel_text)}</td>
-                <td><span class="sc-shopify-badge sc-shopify-badge-payment-{payment_slug}">{html.escape(payment_label)}</span></td>
-                <td>
-                    {html.escape(f"{item_count} item" + ("" if item_count == 1 else "s"))}
-                    <div class="sc-shopify-cell-muted">
-                        <span class="sc-shopify-badge sc-shopify-badge-edition-{html.escape(edition_summary['class_name'])}">{html.escape(edition_summary['label'])}</span>
-                    </div>
-                </td>
-                <td><span class="sc-shopify-badge sc-shopify-badge-delivery-{delivery_slug}">{html.escape(delivery_label)}</span></td>
-                <td>{html.escape(delivery_method)}</td>
-            </tr>
-            """
-        )
-    return textwrap.dedent(
-        f"""
-        <div class="sc-shopify-shell">
-            <div class="sc-shopify-table-card">
-                <div class="sc-shopify-table-toolbar">
-                    <span>Orders</span>
-                    <span class="sc-shopify-batch-pill">Batch unfulfilled orders</span>
-                </div>
-                <div class="sc-shopify-table-wrap">
-                    <table class="sc-shopify-table">
-                        <thead>
-                            <tr>
-                                <th></th>
-                                <th>Order</th>
-                                <th>Date</th>
-                                <th>Customer</th>
-                                <th>Fulfillment status</th>
-                                <th>Total</th>
-                                <th>Channel</th>
-                                <th>Payment status</th>
-                                <th>Items</th>
-                                <th>Delivery status</th>
-                                <th>Delivery method</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {''.join(rows_html)}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-        """
-    ).strip()
+    return ""
 
 
 def _sync_visible_shopify_orders_into_sports_cave(orders):

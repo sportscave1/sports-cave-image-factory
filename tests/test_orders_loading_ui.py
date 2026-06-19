@@ -41,13 +41,20 @@ class OrdersLoadingUiTests(unittest.TestCase):
 
     def test_orders_ui_uses_cached_shopify_style_copy(self):
         source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
+        renderer_start = source.index("def _render_shopify_style_cached_orders_table")
+        renderer_end = source.index("def _shopify_orders_mirror_styles", renderer_start)
+        renderer_source = source[renderer_start:renderer_end]
 
         self.assertIn("Fetch New Orders", source)
         self.assertIn("Deep Refresh 60 Days", source)
         self.assertIn("Load 50 More", source)
         self.assertIn("Paid + Unfulfilled", source)
-        self.assertIn("components.html(html_table", source)
-        self.assertIn("sc-shopify-table", source)
+        self.assertIn("st.columns", renderer_source)
+        self.assertIn(".badge(", renderer_source)
+        self.assertIn("st.link_button", renderer_source)
+        self.assertNotIn("components.html", renderer_source)
+        self.assertNotIn("<tr", renderer_source)
+        self.assertNotIn("<td", renderer_source)
         self.assertIn("render_supabase_orders_page()", source)
 
 
