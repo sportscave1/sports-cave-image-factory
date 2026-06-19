@@ -542,7 +542,7 @@ def cached_supabase_order_summaries(search, sort, status_filter, page_size, cach
 
 
 @st.cache_data(ttl=SUPABASE_PAGE_CACHE_TTL_SECONDS, show_spinner=False)
-def cached_supabase_orders_dataset(limit, cache_version, search="", status_filter="Paid + Unfulfilled"):
+def cached_supabase_orders_dataset(limit, cache_version, search="", status_filter="Needs Action"):
     started = time.perf_counter()
     requested_limit = max(int(limit or 50), 50)
     filter_target = requested_limit + 1
@@ -551,7 +551,8 @@ def cached_supabase_orders_dataset(limit, cache_version, search="", status_filte
     db_status_filter = {
         "Needs Edition": "Needs edition",
         "Assigned": "Assigned",
-        "Errors": "Errors",
+        "Product Missing": "Errors",
+        "Sold Out Issue": "Errors",
     }.get(str(status_filter or "").strip(), "All")
     filtered_summaries = []
     summary = {}
@@ -582,7 +583,7 @@ def cached_supabase_orders_dataset(limit, cache_version, search="", status_filte
 
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     visible_summaries = filtered_summaries[:requested_limit]
-    print(f"ORDERS_QUERY rows={len(visible_summaries)} time={elapsed_ms}ms")
+    print(f"ACTION_ROWS_QUERY count={len(visible_summaries)} time={elapsed_ms}ms")
     return {
         "summary": summary,
         "order_summaries": visible_summaries,
@@ -3711,30 +3712,77 @@ def _order_summary_matches_search(order_summary, search):
     return False
 
 
+def _order_summary_is_paid_unfulfilled(order_summary):
+    if _clean_order_text(order_summary.get("cancelled_at")):
+        return False
+    financial_status = _clean_order_text(order_summary.get("financial_status") or "").upper()
+    fulfillment_status = _clean_order_text(order_summary.get("fulfillment_status") or "").upper()
+    return financial_status in {"PAID", "PARTIALLY_PAID"} and fulfillment_status in {
+        "UNFULFILLED",
+        "PARTIALLY_FULFILLED",
+        "",
+    }
+
+
+def _order_summary_has_line_status(order_summary, statuses):
+    status_set = set(statuses or ())
+    return any(_line_assignment_status(item) in status_set for item in order_summary.get("line_items") or [])
+
+
+def _order_summary_certificate_needed(order_summary):
+    assignments = _order_assignments_for_certificates(order_summary)
+    if not assignments:
+        return False
+    return any(_assignment_certificate_status(assignment) != "Generated" for assignment in assignments)
+
+
+def _order_summary_missing_asset(order_summary, asset_key):
+    asset = order_summary.get(asset_key) or {}
+    return not str(asset.get("url") or "").strip()
+
+
+def _order_summary_needs_sports_cave_action(order_summary):
+    if not _order_summary_is_paid_unfulfilled(order_summary):
+        return False
+    if _order_summary_has_line_status(
+        order_summary,
+        {"Needs Edition", "Product Not Found", "Needs Edition Setup", "Sold Out", "Error"},
+    ):
+        return True
+    return (
+        _order_summary_certificate_needed(order_summary)
+        or _order_summary_missing_asset(order_summary, "psd")
+        or _order_summary_missing_asset(order_summary, "prodigi")
+    )
+
+
 def _order_summary_matches_status(order_summary, status_filter):
-    selected = str(status_filter or "Paid + Unfulfilled").strip()
+    selected = str(status_filter or "Needs Action").strip()
     if selected == "All Saved Orders":
         return True
-    line_items = order_summary.get("line_items") or []
+    if selected == "Needs Action":
+        return _order_summary_needs_sports_cave_action(order_summary)
     if selected == "Paid + Unfulfilled":
-        if _clean_order_text(order_summary.get("cancelled_at")):
-            return False
-        financial_status = _clean_order_text(order_summary.get("financial_status") or "").upper()
-        fulfillment_status = _clean_order_text(order_summary.get("fulfillment_status") or "").upper()
-        return financial_status in {"PAID", "PARTIALLY_PAID"} and fulfillment_status in {"UNFULFILLED", "PARTIALLY_FULFILLED", ""}
+        return _order_summary_is_paid_unfulfilled(order_summary)
     if selected == "Needs Edition":
-        return any(
-            _line_assignment_status(item) in {"Needs Edition", "Product Not Found", "Needs Edition Setup", "Error"}
-            for item in line_items
+        return _order_summary_is_paid_unfulfilled(order_summary) and _order_summary_has_line_status(
+            order_summary,
+            {"Needs Edition", "Needs Edition Setup", "Error"},
+        )
+    if selected == "Certificate Needed":
+        return _order_summary_is_paid_unfulfilled(order_summary) and _order_summary_certificate_needed(order_summary)
+    if selected == "Product Missing":
+        return _order_summary_is_paid_unfulfilled(order_summary) and _order_summary_has_line_status(
+            order_summary,
+            {"Product Not Found", "Needs Edition Setup"},
+        )
+    if selected == "Sold Out Issue":
+        return _order_summary_is_paid_unfulfilled(order_summary) and _order_summary_has_line_status(
+            order_summary,
+            {"Sold Out"},
         )
     if selected == "Assigned":
         return _order_financial_status(order_summary) == "Assigned"
-    if selected == "Fulfilled":
-        return _order_financial_status(order_summary) == "Fulfilled"
-    if selected == "Cancelled / Refunded":
-        return _order_financial_status(order_summary) == "Cancelled / Refunded"
-    if selected == "Errors":
-        return _order_financial_status(order_summary) == "Error"
     return True
 
 
@@ -4488,10 +4536,9 @@ def _render_shopify_style_cached_orders_table(order_summaries):
         "Certificate",
         "PSD",
         "Prodigi",
-        "Status",
-        "Open",
+        "Shopify",
     )
-    widths = [0.85, 1.12, 1.65, 1.1, 0.9, 0.95, 0.7, 0.82, 0.92, 1.05]
+    widths = [0.9, 1.15, 1.75, 1.15, 0.95, 0.95, 0.75, 0.85, 1.05]
 
     with st.container(border=True):
         header = st.columns(widths, gap="small", vertical_alignment="center")
@@ -4550,16 +4597,13 @@ def _render_shopify_style_cached_orders_table(order_summaries):
             prodigi_url = str(prodigi.get("url") or "").strip()
             with columns[7]:
                 if prodigi_url:
-                    st.link_button("Prodigi", prodigi_url, use_container_width=True)
+                    st.link_button("Open Prodigi", prodigi_url, use_container_width=True)
                 else:
                     st.badge("Missing", color="gray")
 
-            status_label = str(order_summary.get("status_label") or "Saved")
-            columns[8].badge(status_label, color=_badge_color_for_helper_status(status_label))
-
-            with columns[9]:
+            with columns[8]:
                 if order_link:
-                    st.link_button("Open Shopify Order", order_link, use_container_width=True)
+                    st.link_button("Open Order", order_link, use_container_width=True)
                 else:
                     st.badge("Missing link", color="gray")
 
@@ -4997,7 +5041,7 @@ def _order_fetch_message_from_error(error):
 
 def _log_orders_page_load(started, rows=0):
     elapsed_ms = int((time.perf_counter() - started) * 1000)
-    print(f"ORDERS_PAGE_LOAD total={elapsed_ms}ms rows={int(rows or 0)}")
+    print(f"ACTION_BOARD_LOAD total={elapsed_ms}ms rows={int(rows or 0)}")
 
 
 def render_shopify_orders_mirror_page():
@@ -5158,9 +5202,7 @@ def render_shopify_orders_mirror_page():
 def render_supabase_orders_page():
     page_started = time.perf_counter()
     st.title("Orders")
-    st.caption(
-        "Saved Sports Cave OS orders load from cache first. Fetch New Orders only when Shopify has new paid orders."
-    )
+    st.caption("Sports Cave fulfilment actions. Shopify remains the full order dashboard.")
     st.markdown(_orders_page_styles(), unsafe_allow_html=True)
 
     notice = st.session_state.pop("supabase_orders_notice", None)
@@ -5175,10 +5217,23 @@ def render_supabase_orders_page():
             st.caption(text)
 
     config = shopify_sync.get_config()
-    if not st.session_state.get("supabase-orders-defaults-v3-applied"):
-        st.session_state["supabase-orders-status-filter"] = "Paid + Unfulfilled"
+    action_board_filters = (
+        "Needs Action",
+        "Paid + Unfulfilled",
+        "Needs Edition",
+        "Certificate Needed",
+        "Product Missing",
+        "Sold Out Issue",
+        "Assigned",
+        "All Saved Orders",
+    )
+    if (
+        not st.session_state.get("supabase-orders-defaults-v4-applied")
+        or st.session_state.get("supabase-orders-status-filter") not in action_board_filters
+    ):
+        st.session_state["supabase-orders-status-filter"] = "Needs Action"
         st.session_state["supabase-orders-visible-count"] = 50
-        st.session_state["supabase-orders-defaults-v3-applied"] = True
+        st.session_state["supabase-orders-defaults-v4-applied"] = True
 
     try:
         sync_state = cached_supabase_sync_state(supabase_cache_version("sync-state"))
@@ -5198,7 +5253,9 @@ def render_supabase_orders_page():
         disabled=not config["configured"],
         use_container_width=True,
     )
-    action_toolbar[2].caption("Fetch uses Shopify only when you click. Cached Sports Cave OS records stay on screen.")
+    action_toolbar[2].caption(
+        "Fetch uses Shopify only when clicked. Deep Refresh is slower and only for catch-up."
+    )
 
     search = st.text_input(
         "Search orders",
@@ -5209,10 +5266,10 @@ def render_supabase_orders_page():
     filter_toolbar = st.columns([1.2, 1.8])
     status_filter = filter_toolbar[0].selectbox(
         "View",
-        ("Paid + Unfulfilled", "Needs Edition", "Assigned", "Fulfilled", "Cancelled / Refunded", "Errors", "All Saved Orders"),
+        action_board_filters,
         key="supabase-orders-status-filter",
     )
-    filter_toolbar[1].caption("Latest saved orders show first. Use Load 50 More for older cached orders.")
+    filter_toolbar[1].caption("Default shows paid unfulfilled orders needing Sports Cave action.")
 
     filter_signature = json.dumps({"search": search.strip().lower(), "status": status_filter})
     if st.session_state.get("supabase-orders-filter-signature") != filter_signature:
@@ -5304,6 +5361,8 @@ def render_supabase_orders_page():
     if not order_summaries:
         if not summary.get("orders_synced"):
             st.info("No saved orders yet. Use Fetch New Orders or wait for Shopify webhook.")
+        elif status_filter == "Needs Action":
+            st.info("No paid unfulfilled orders need Sports Cave action right now.")
         else:
             st.info("No saved orders match the current filters yet.")
         _log_orders_page_load(page_started, 0)
@@ -5311,9 +5370,9 @@ def render_supabase_orders_page():
 
     st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
     if reused_saved_dataset:
-        st.caption(f"Showing saved orders from the last warm screen snapshot. {len(order_summaries)} currently visible.")
+        st.caption(f"Showing action rows from the last warm screen snapshot. {len(order_summaries)} currently visible.")
     else:
-        st.caption("Showing saved orders.")
+        st.caption("Showing fulfilment action rows from Supabase.")
     _render_shopify_style_cached_orders_table(order_summaries)
     if dataset.get("has_more"):
         if st.button("Load 50 More", key="supabase-orders-load-more", use_container_width=True):

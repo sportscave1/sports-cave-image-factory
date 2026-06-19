@@ -5125,6 +5125,8 @@ def process_shopify_order_for_editions(
     """Persist one Shopify order and assign editions from Sports Cave OS state only.
 
     TODO: Future Shopify orders/paid webhook should call process_shopify_order_for_editions.
+    Order-level Shopify edition mirrors are intentionally not written here because
+    they need safe write_orders scope and should never slow or block local assignment.
     """
     order = dict(order_payload or {})
     if not order.get("shopify_order_id") and order.get("id") and isinstance(order.get("line_items"), list):
