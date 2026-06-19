@@ -3345,6 +3345,29 @@ def _order_psd_summary(line_items):
     }
 
 
+def _order_prodigi_summary(line_items):
+    urls = []
+    seen = set()
+    for line_item in line_items or []:
+        url = _clean_order_text(line_item.get("prodigi_url"))
+        if not url:
+            continue
+        token = url.casefold()
+        if token in seen:
+            continue
+        seen.add(token)
+        urls.append(url)
+    if not urls:
+        return {"url": "", "label": "No Prodigi", "title": "Prodigi link missing"}
+    if len(urls) == 1:
+        return {"url": urls[0], "label": "Open Prodigi", "title": "Open Prodigi link"}
+    return {
+        "url": urls[0],
+        "label": f"Prodigi x{len(urls)}",
+        "title": f"Open the first of {len(urls)} Prodigi links on this order",
+    }
+
+
 def _jsonish(value):
     if isinstance(value, (dict, list)):
         return value
@@ -3428,6 +3451,31 @@ def _assignment_certificate_status(assignment):
     return "Not generated"
 
 
+def _order_financial_status(order_summary):
+    line_items = order_summary.get("line_items") or []
+    for line_item in line_items:
+        if _line_assignment_status(line_item) == "Error":
+            return "Error"
+    if _clean_order_text(order_summary.get("cancelled_at")):
+        return "Cancelled / Refunded"
+    financial_status = _clean_order_text(order_summary.get("financial_status") or "").upper()
+    if "REFUND" in financial_status or "VOID" in financial_status:
+        return "Cancelled / Refunded"
+    fulfillment_status = _clean_order_text(order_summary.get("fulfillment_status") or "").upper()
+    if "FULFILLED" in fulfillment_status and "UNFULFILLED" not in fulfillment_status:
+        return "Fulfilled"
+    if any(
+        _line_assignment_status(item) in {"Needs Edition", "Product Not Found", "Needs Edition Setup"}
+        for item in line_items
+    ):
+        return "Needs Edition"
+    if any(active_assignments(_coerce_assignments(item.get("assignments"))) for item in line_items):
+        return "Assigned"
+    if financial_status in {"PAID", "PARTIALLY_PAID"} and fulfillment_status in {"UNFULFILLED", "PARTIALLY_FULFILLED", ""}:
+        return "Paid + Unfulfilled"
+    return "Saved"
+
+
 def _r2_temporary_url(bucket, key):
     if not bucket or not key:
         return ""
@@ -3478,7 +3526,7 @@ def _build_compact_order_summary(order_row, line_items):
         for assignment in item.get("assignments") or []
         if assignment.get("edition_number") not in (None, "")
     )
-    return {
+    summary = {
         "order_key": str(order_row.get("shopify_order_id") or order_row.get("order_name") or ""),
         "order_label": order_row.get("order_name") or order_row.get("order_number") or "Order",
         "order_number": _clean_order_text(order_row.get("order_number")),
@@ -3490,6 +3538,9 @@ def _build_compact_order_summary(order_row, line_items):
         "processed_at": order_row.get("processed_at") or "",
         "remote_updated_at": order_row.get("remote_updated_at") or "",
         "synced_at": order_row.get("synced_at") or "",
+        "financial_status": _clean_order_text(order_row.get("financial_status")),
+        "fulfillment_status": _clean_order_text(order_row.get("fulfillment_status")),
+        "cancelled_at": order_row.get("cancelled_at") or "",
         "shipping_summary": _shipping_speed_label(order_row),
         "product_summary": _compact_text_list(
             product_items,
@@ -3510,9 +3561,13 @@ def _build_compact_order_summary(order_row, line_items):
         "edition_number_items": edition_number_items,
         "first_edition_number": assigned_numbers[0] if assigned_numbers else None,
         "status": _overall_order_status(normalized_items),
+        "status_label": "",
         "psd": _order_psd_summary(normalized_items),
+        "prodigi": _order_prodigi_summary(normalized_items),
         "line_items": normalized_items,
     }
+    summary["status_label"] = _order_financial_status(summary)
+    return summary
 
 
 def _group_supabase_order_rows(rows):
@@ -3592,38 +3647,29 @@ def _order_summary_matches_search(order_summary, search):
 
 
 def _order_summary_matches_status(order_summary, status_filter):
-    selected = str(status_filter or "All").strip()
-    if selected == "All":
+    selected = str(status_filter or "Paid + Unfulfilled").strip()
+    if selected == "All Saved Orders":
         return True
     line_items = order_summary.get("line_items") or []
-    if selected == "Needs edition":
+    if selected == "Paid + Unfulfilled":
+        if _clean_order_text(order_summary.get("cancelled_at")):
+            return False
+        financial_status = _clean_order_text(order_summary.get("financial_status") or "").upper()
+        fulfillment_status = _clean_order_text(order_summary.get("fulfillment_status") or "").upper()
+        return financial_status in {"PAID", "PARTIALLY_PAID"} and fulfillment_status in {"UNFULFILLED", "PARTIALLY_FULFILLED", ""}
+    if selected == "Needs Edition":
         return any(
             _line_assignment_status(item) in {"Needs Edition", "Product Not Found", "Needs Edition Setup", "Error"}
             for item in line_items
         )
     if selected == "Assigned":
-        return any(active_assignments(_coerce_assignments(item.get("assignments"))) for item in line_items)
-    if selected == "Historical":
-        return any(
-            _line_assignment_status(item) == supabase_backend.HISTORICAL_ORDER_STATUS
-            and not active_assignments(_coerce_assignments(item.get("assignments")))
-            for item in line_items
-        )
-    if selected == "Certificates missing":
-        return any(
-            _assignment_certificate_status(assignment) != "Generated"
-            for item in line_items
-            for assignment in active_assignments(_coerce_assignments(item.get("assignments")))
-        )
-    if selected == "PSD missing":
-        return any(_clean_order_text(item.get("shopify_handle")) and not _clean_order_text(item.get("psd_url")) for item in line_items)
-    if selected == "Prodigi missing":
-        return any(_clean_order_text(item.get("shopify_handle")) and not _clean_order_text(item.get("prodigi_url")) for item in line_items)
+        return _order_financial_status(order_summary) == "Assigned"
+    if selected == "Fulfilled":
+        return _order_financial_status(order_summary) == "Fulfilled"
+    if selected == "Cancelled / Refunded":
+        return _order_financial_status(order_summary) == "Cancelled / Refunded"
     if selected == "Errors":
-        return any(
-            _line_assignment_status(item) in {"Error", "Product Not Found", "Needs Edition Setup", "Sold Out"}
-            for item in line_items
-        )
+        return _order_financial_status(order_summary) == "Error"
     return True
 
 
@@ -3672,8 +3718,7 @@ def _filter_supabase_order_summaries(order_summaries, *, search, sort, status_fi
         if _order_summary_matches_search(order_summary, search)
         and _order_summary_matches_status(order_summary, status_filter)
     ]
-    sorted_rows = _sort_supabase_order_summaries(filtered, sort)
-    return sorted_rows[: min(max(int(page_size or 60), 1), 100)]
+    return _sort_supabase_order_summaries(filtered, sort)
 
 
 def _build_local_order_summaries(orders):
@@ -4052,6 +4097,48 @@ def _render_compact_orders_feed(order_summaries):
             line-height: 1.18;
             overflow-wrap: anywhere;
         }
+        .sc-order-status-pill {
+            align-items: center;
+            border-radius: 999px;
+            display: inline-flex;
+            font-size: 0.7rem;
+            font-weight: 820;
+            line-height: 1;
+            min-height: 1.85rem;
+            padding: 0.16rem 0.58rem;
+            white-space: nowrap;
+        }
+        .sc-order-status-paid-unfulfilled {
+            background: #FFF7E6;
+            border: 1px solid #F2C66D;
+            color: #8A5B00;
+        }
+        .sc-order-status-needs-edition {
+            background: #FEF2F2;
+            border: 1px solid #F5A8A8;
+            color: #991B1B;
+        }
+        .sc-order-status-assigned {
+            background: #ECFDF3;
+            border: 1px solid #86E0A3;
+            color: #166534;
+        }
+        .sc-order-status-fulfilled {
+            background: #EFF6FF;
+            border: 1px solid #93C5FD;
+            color: #1D4ED8;
+        }
+        .sc-order-status-cancelled-refunded,
+        .sc-order-status-saved {
+            background: #F3F4F6;
+            border: 1px solid #D1D5DB;
+            color: #374151;
+        }
+        .sc-order-status-error {
+            background: #111827;
+            border: 1px solid #111827;
+            color: #FFFFFF;
+        }
         .sc-order-row-marker,
         .sc-order-header-marker {
             display: none;
@@ -4082,176 +4169,145 @@ def _render_compact_orders_feed(order_summaries):
         """,
         unsafe_allow_html=True,
     )
-    header = st.columns([0.72, 0.95, 1.68, 0.78, 1.28, 0.62, 0.92, 0.64], gap="small")
+    header = st.columns([0.72, 0.74, 0.96, 1.44, 1.12, 0.82, 0.86, 0.62, 0.66, 0.82], gap="small")
     for column, label in zip(
         header,
-        ("Order", "Name", "Product", "Edition", "Variant", "PSD", "Certificate", "Shipping"),
+        ("Order", "Date", "Customer", "Product", "Variant", "Edition", "Certificate", "PSD", "Prodigi", "Status"),
     ):
         marker = '<span class="sc-order-header-marker"></span>' if label == "Order" else ""
         column.markdown(f'{marker}<div class="sc-order-stream-header">{label}</div>', unsafe_allow_html=True)
     for index, item in enumerate(order_summaries or []):
         key_prefix = f"orders-row-{index}-{_order_widget_token(item.get('order_key') or index)}"
-        columns = st.columns([0.72, 0.95, 1.68, 0.78, 1.28, 0.62, 0.92, 0.64], gap="small")
+        columns = st.columns([0.72, 0.74, 0.96, 1.44, 1.12, 0.82, 0.86, 0.62, 0.66, 0.82], gap="small")
         order_label = html.escape(str(item.get("order_label") or "Order"))
         columns[0].markdown(
             f'<span class="sc-order-row-marker"></span><div class="sc-order-stream-cell">{order_label}</div>',
             unsafe_allow_html=True,
         )
         columns[1].markdown(
-            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("customer_name") or "Customer missing"))}</div>',
+            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("order_date") or "-"))}</div>',
             unsafe_allow_html=True,
         )
         columns[2].markdown(
+            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("customer_name") or "Customer missing"))}</div>',
+            unsafe_allow_html=True,
+        )
+        columns[3].markdown(
             f'<div class="sc-order-stream-cell">{html.escape(str(item.get("product_summary") or "Product missing"))}</div>',
             unsafe_allow_html=True,
         )
-        with columns[3]:
+        columns[4].markdown(
+            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("variant_summary") or "Variant missing"))}</div>',
+            unsafe_allow_html=True,
+        )
+        with columns[5]:
             for edition_value in item.get("edition_number_items") or [item.get("edition_summary") or "Needs Edition"]:
                 st.markdown(
                     f'<span class="{_edition_chip_class(edition_value)}">{html.escape(str(edition_value))}</span>',
                     unsafe_allow_html=True,
                 )
-        columns[4].markdown(
-            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("variant_summary") or "Variant missing"))}</div>',
-            unsafe_allow_html=True,
-        )
         psd = item.get("psd") or {}
         psd_url = str(psd.get("url") or "").strip()
+        prodigi = item.get("prodigi") or {}
+        prodigi_url = str(prodigi.get("url") or "").strip()
+        with columns[6]:
+            _render_certificate_popover(item, key_prefix)
         if psd_url:
-            columns[5].markdown(
+            columns[7].markdown(
                 f'<a class="sc-order-link-pill" href="{html.escape(psd_url, quote=True)}" target="_blank" rel="noreferrer">{html.escape(str(psd.get("label") or "PSD"))}</a>',
                 unsafe_allow_html=True,
             )
         else:
-            columns[5].markdown('<span class="sc-order-muted-pill">No PSD</span>', unsafe_allow_html=True)
-        with columns[6]:
-            _render_certificate_popover(item, key_prefix)
-        columns[7].markdown(
-            f'<div class="sc-order-stream-cell">{html.escape(str(item.get("shipping_summary") or "-"))}</div>',
+            columns[7].markdown('<span class="sc-order-muted-pill">No PSD</span>', unsafe_allow_html=True)
+        if prodigi_url:
+            columns[8].markdown(
+                f'<a class="sc-order-link-pill" href="{html.escape(prodigi_url, quote=True)}" target="_blank" rel="noreferrer">{html.escape(str(prodigi.get("label") or "Prodigi"))}</a>',
+                unsafe_allow_html=True,
+            )
+        else:
+            columns[8].markdown('<span class="sc-order-muted-pill">No Prodigi</span>', unsafe_allow_html=True)
+        status_label = str(item.get("status_label") or "Saved")
+        status_class = re.sub(r"[^a-z0-9]+", "-", status_label.lower()).strip("-")
+        columns[9].markdown(
+            f'<span class="sc-order-status-pill sc-order-status-{status_class}">{html.escape(status_label)}</span>',
             unsafe_allow_html=True,
         )
+
+
+def _order_fetch_message_from_error(error):
+    message = str(error or "").strip()
+    lowered = message.lower()
+    if (
+        "read_orders" in lowered
+        or ("scope" in lowered and "order" in lowered)
+        or "access denied" in lowered
+        or "forbidden" in lowered
+        or "not authorized" in lowered
+    ):
+        return (
+            "warning",
+            "Orders require read_orders scope. Add read_orders in Shopify Dev Dashboard, release the app version, approve permissions, then redeploy Render.",
+        )
+    return ("caption", "Showing saved orders. Latest Shopify refresh failed.")
 
 
 def render_supabase_orders_page():
     st.title("Orders")
     st.caption(
-        "Synced Shopify orders appear here automatically. Use sync only when new paid orders are missing."
+        "Saved Sports Cave OS orders load from cache first. Fetch New Orders only when Shopify has new paid orders."
     )
     st.markdown(_orders_page_styles(), unsafe_allow_html=True)
 
     notice = st.session_state.pop("supabase_orders_notice", None)
     if notice:
         st.success(notice)
+    status_message = st.session_state.pop("supabase_orders_status_message", None)
+    if status_message:
+        level, text = status_message
+        if level == "warning":
+            st.warning(text)
+        else:
+            st.caption(text)
 
     config = shopify_sync.get_config()
     if not st.session_state.get("supabase-orders-defaults-v3-applied"):
-        st.session_state["supabase-orders-sort"] = "Date newest"
-        st.session_state["supabase-orders-page-size"] = 60
+        st.session_state["supabase-orders-status-filter"] = "Paid + Unfulfilled"
+        st.session_state["supabase-orders-visible-count"] = 50
         st.session_state["supabase-orders-defaults-v3-applied"] = True
 
     try:
         sync_state = cached_supabase_sync_state(supabase_cache_version("sync-state"))
-        last_order_sync = sync_state.get("last_successful_order_sync_at")
+        last_order_sync = sync_state.get("last_successful_order_fetch_at") or sync_state.get("last_successful_order_sync_at")
     except Exception:
         sync_state = {}
         last_order_sync = ""
-    initial_order_sync = not bool(last_order_sync)
-    sync_button_label = "Load recent paid orders" if initial_order_sync else "Sync latest orders"
-    sync_message_label = "Loading recent paid Shopify orders..." if initial_order_sync else "Syncing paid Shopify orders..."
+    action_toolbar = st.columns([0.9, 0.9, 1.6])
+    fetch_new_clicked = action_toolbar[0].button(
+        "Fetch New Orders",
+        disabled=not config["configured"],
+        type="primary",
+        use_container_width=True,
+    )
+    deep_refresh_clicked = action_toolbar[1].button(
+        "Deep Refresh 60 Days",
+        disabled=not config["configured"],
+        use_container_width=True,
+    )
+    action_toolbar[2].caption("Fetch uses Shopify only when you click. Cached Sports Cave OS records stay on screen.")
 
-    top_toolbar = st.columns([0.85, 1.9])
-    if top_toolbar[0].button(sync_button_label, disabled=not config["configured"], type="primary", use_container_width=True):
-        sync_message = st.empty()
-        sync_message.info(sync_message_label)
-        try:
-            result = supabase_backend.sync_shopify_orders_to_supabase(
-                config,
-                generate_certificates=True,
-                sync_product_metafields=False,
-            )
-            repair_result = supabase_backend.reprocess_cached_problem_orders(
-                limit=150,
-                generate_certificates=True,
-            )
-            sync_message.empty()
-            warning_count = len(result.get("errors") or []) + len(repair_result.get("errors") or [])
-            warning_suffix = (
-                f" {warning_count} warning{'s' if warning_count != 1 else ''} logged."
-                if warning_count
-                else ""
-            )
-            historical_suffix = (
-                f" Preserved {result.get('historical_orders_synced', 0)} historical paid order update"
-                f"{'s' if result.get('historical_orders_synced', 0) != 1 else ''} without assigning editions."
-                if result.get("historical_orders_synced")
-                else ""
-            )
-            certificate_suffix = (
-                f" Generated {result.get('generated_certificates', 0) + repair_result.get('generated_certificates', 0)} certificate PDF"
-                f"{'s' if (result.get('generated_certificates', 0) + repair_result.get('generated_certificates', 0)) != 1 else ''}."
-                if result.get("generated_certificates") or repair_result.get("generated_certificates")
-                else ""
-            )
-            repair_suffix = ""
-            if repair_result.get("orders_reprocessed"):
-                repair_suffix = (
-                    f" Rechecked {repair_result.get('orders_reprocessed', 0)} saved issue order"
-                    f"{'s' if repair_result.get('orders_reprocessed', 0) != 1 else ''}"
-                )
-                if repair_result.get("assignments_created"):
-                    repair_suffix += (
-                        f" and recovered {repair_result.get('assignments_created', 0)} extra edition allocation"
-                        f"{'s' if repair_result.get('assignments_created', 0) != 1 else ''}"
-                    )
-                repair_suffix += "."
-            if result.get("bootstrap_recent_orders"):
-                st.session_state.supabase_orders_notice = (
-                    f"Loaded {result['orders_seen']} recent paid Shopify orders into the saved workspace. "
-                    f"Assigned {result['assignments_created']} new editions from the current tracking window and preserved "
-                    f"{result.get('historical_orders_synced', 0)} older paid order update"
-                    f"{'s' if result.get('historical_orders_synced', 0) != 1 else ''} as historical."
-                    f"{certificate_suffix}{repair_suffix}{warning_suffix}"
-                )
-            else:
-                st.session_state.supabase_orders_notice = (
-                    f"Synced {result['orders_seen']} paid Shopify order updates. "
-                    f"Processed {result.get('orders_processed', 0)}. "
-                    f"Assigned {result['assignments_created']} new editions. "
-                    f"Skipped {result.get('existing_assignments_skipped', 0)} existing allocations. "
-                    f"Certificates generate automatically for new assignments."
-                    f"{certificate_suffix}{historical_suffix}{repair_suffix}{warning_suffix}"
-                )
-            bump_supabase_cache_version("orders", "order-summary", "sync-state")
-            st.rerun()
-        except Exception as error:
-            sync_message.empty()
-            render_supabase_load_warning("Order sync", error, "orders-sync")
-            supabase_backend.log_app_error("orders_page_sync_failed", str(error), {"source": "orders_page"})
-
-    search = top_toolbar[1].text_input(
+    search = st.text_input(
         "Search orders",
         placeholder="Search order, customer, email, handle, SKU, or edition",
         key="supabase-orders-search",
     )
 
-    filter_toolbar = st.columns([1.1, 1.1, 0.9])
+    filter_toolbar = st.columns([1.2, 1.8])
     status_filter = filter_toolbar[0].selectbox(
         "View",
-        ("All", "Needs edition", "Historical", "Assigned", "Certificates missing", "PSD missing", "Prodigi missing", "Errors"),
+        ("Paid + Unfulfilled", "Needs Edition", "Assigned", "Fulfilled", "Cancelled / Refunded", "Errors", "All Saved Orders"),
         key="supabase-orders-status-filter",
     )
-    sort = filter_toolbar[1].selectbox(
-        "Sort",
-        ("Date newest", "Shopify updated", "Date oldest", "Customer", "Edition number"),
-        index=0,
-        key="supabase-orders-sort",
-    )
-    page_size = filter_toolbar[2].selectbox(
-        "Rows",
-        (60, 80, 100),
-        index=0,
-        key="supabase-orders-page-size",
-    )
+    filter_toolbar[1].caption("Latest saved orders show first. Use Load 50 More for older cached orders.")
 
     if not config["configured"]:
         st.caption("Shopify sync is not configured. Saved orders remain visible.")
@@ -4260,6 +4316,43 @@ def render_supabase_orders_page():
             "Last synced: "
             + (format_updated_at(last_order_sync) if last_order_sync else "Never")
         )
+
+    if fetch_new_clicked or deep_refresh_clicked:
+        sync_message = st.empty()
+        sync_message.info("Fetching Shopify orders into the saved Sports Cave OS cache...")
+        try:
+            max_orders = 100 if fetch_new_clicked else 250
+            query = None
+            if deep_refresh_clicked:
+                refresh_from = datetime.now(timezone.utc) - timedelta(days=60)
+                query = (
+                    "financial_status:paid fulfillment_status:unfulfilled "
+                    f"updated_at:>='{refresh_from.isoformat(timespec='seconds').replace('+00:00', 'Z')}'"
+                )
+            result = supabase_backend.sync_shopify_orders_to_supabase(
+                config,
+                query=query,
+                max_orders=max_orders,
+                generate_certificates=False,
+                sync_product_metafields=False,
+            )
+            sync_message.empty()
+            if result.get("orders_seen", 0) == 0:
+                st.session_state.supabase_orders_notice = "No new paid unfulfilled orders found."
+            else:
+                st.session_state.supabase_orders_notice = (
+                    f"Fetched {result.get('orders_seen', 0)} orders. "
+                    f"Imported {result.get('orders_imported', 0)} new orders. "
+                    f"Created {result.get('assignments_created', 0)} edition assignments."
+                )
+            st.session_state.supabase_orders_status_message = ("caption", "Showing saved orders.")
+            bump_supabase_cache_version("orders", "order-summary", "sync-state")
+            st.rerun()
+        except Exception as error:
+            sync_message.empty()
+            st.session_state.supabase_orders_status_message = _order_fetch_message_from_error(error)
+            supabase_backend.log_app_error("orders_page_sync_failed", str(error), {"source": "orders_page"})
+            st.rerun()
 
     try:
         with st.spinner("Loading orders..."):
@@ -4270,24 +4363,19 @@ def render_supabase_orders_page():
                 lambda: cached_supabase_orders_dataset(ORDER_SCREEN_CACHE_LIMIT, cache_version),
             )
             summary = dataset.get("summary") or {}
-            order_summaries = _filter_supabase_order_summaries(
+            filtered_order_summaries = _filter_supabase_order_summaries(
                 dataset.get("order_summaries") or [],
                 search=search,
-                sort=sort,
+                sort="Date newest",
                 status_filter=status_filter,
-                page_size=page_size,
+                page_size=50,
             )
     except Exception as error:
         supabase_backend.log_app_error("orders_page_load_failed", str(error), {"source": "orders_page"})
-        st.info("Orders are not available right now. Use Sync latest orders to refresh the saved order list.")
+        st.info("Orders are not available right now. Use Fetch New Orders to refresh the saved order list.")
         return
     if dataset_error:
-        render_supabase_load_warning(
-            "Orders",
-            dataset_error,
-            "orders-load",
-            using_saved_screen_data=True,
-        )
+        st.caption("Showing saved orders. Latest Shopify refresh failed.")
         supabase_backend.log_app_error("orders_page_load_failed", str(dataset_error), {"source": "orders_page"})
 
     if summary:
@@ -4298,16 +4386,30 @@ def render_supabase_orders_page():
             f"{summary.get('assigned_today', 0)} assigned today"
         )
 
+    filter_signature = json.dumps({"search": search.strip().lower(), "status": status_filter})
+    if st.session_state.get("supabase-orders-filter-signature") != filter_signature:
+        st.session_state["supabase-orders-filter-signature"] = filter_signature
+        st.session_state["supabase-orders-visible-count"] = 50
+    visible_count = max(int(st.session_state.get("supabase-orders-visible-count", 50) or 50), 50)
+    order_summaries = filtered_order_summaries[:visible_count]
+
     if not order_summaries:
-        st.info("No saved orders match the current filters yet.")
+        if not summary.get("orders_synced"):
+            st.info("No saved orders yet. Click Fetch New Orders to import recent paid unfulfilled Shopify orders.")
+        else:
+            st.info("No saved orders match the current filters yet.")
         return
 
     st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
     if reused_saved_dataset:
-        st.caption(f"Showing {len(order_summaries)} saved orders from the last warm screen snapshot.")
+        st.caption(f"Showing saved orders from the last warm screen snapshot. {len(order_summaries)} currently visible.")
     else:
-        st.caption(f"Showing {len(order_summaries)} saved orders. Sync only when Shopify has new paid orders.")
+        st.caption("Showing saved orders.")
     _render_compact_orders_feed(order_summaries)
+    if len(filtered_order_summaries) > len(order_summaries):
+        if st.button("Load 50 More", key="supabase-orders-load-more", use_container_width=True):
+            st.session_state["supabase-orders-visible-count"] = visible_count + 50
+            st.rerun()
 
 
 def fetch_latest_orders(config):
@@ -7159,7 +7261,6 @@ def render_settings_page(app_version, database_path, password_status):
     latest_shopify_run = db.get_latest_shopify_sync_run()
     latest_order_run = db.get_latest_shopify_order_sync_run()
     supabase_enabled = supabase_backend.is_configured()
-    supabase_status = "Configured" if supabase_enabled else "Missing"
     supabase_counts = {}
     supabase_sync_state = {}
     if supabase_enabled:
@@ -7171,14 +7272,17 @@ def render_settings_page(app_version, database_path, password_status):
             supabase_sync_state = {}
     products_saved_count = supabase_counts.get("shopify_products", shopify_summary["total"])
     orders_saved_count = supabase_counts.get("shopify_orders", order_summary["total"])
+    order_fetch_duration_ms = int(supabase_sync_state.get("last_order_fetch_duration_ms") or 0)
+    orders_imported_count = int(supabase_sync_state.get("last_orders_imported_count") or 0)
+    assignments_created_count = int(supabase_sync_state.get("last_assignments_created_count") or 0)
     last_product_fetch = (
         format_updated_at(supabase_sync_state.get("last_successful_product_sync_at"))
         if supabase_sync_state.get("last_successful_product_sync_at")
         else format_updated_at(shopify_summary["last_synced_at"]) if shopify_summary["last_synced_at"] else "Never"
     )
     last_order_fetch = (
-        format_updated_at(supabase_sync_state.get("last_successful_order_sync_at"))
-        if supabase_sync_state.get("last_successful_order_sync_at")
+        format_updated_at(supabase_sync_state.get("last_successful_order_fetch_at") or supabase_sync_state.get("last_successful_order_sync_at"))
+        if (supabase_sync_state.get("last_successful_order_fetch_at") or supabase_sync_state.get("last_successful_order_sync_at"))
         else format_updated_at(order_summary["last_synced_at"]) if order_summary["last_synced_at"] else "Never"
     )
     last_sync_status = "Never"
@@ -7191,19 +7295,25 @@ def render_settings_page(app_version, database_path, password_status):
     order_sync_status = "Never"
     if latest_order_run:
         order_sync_status = "Success" if latest_order_run["status"] == "Complete" else latest_order_run["status"]
+    order_fetch_status = supabase_sync_state.get("last_order_fetch_status") or order_sync_status or "Never"
+    if not order_fetch_status:
+        order_fetch_status = order_sync_status
     settings = (
+        ("Database mode", "Supabase/Postgres" if supabase_enabled else "SQLite fallback"),
         ("Shopify connection", "Configured" if shopify_config["configured"] else "Not configured"),
         ("Shopify store domain", "Configured" if shopify_config["store_domain"] else "Missing"),
         ("Shopify API version", "Configured" if shopify_config["api_version"] else "Missing"),
         ("Shopify auth mode", shopify_config["auth_mode"]),
         ("Products saved", str(products_saved_count)),
-        ("Orders saved", str(orders_saved_count)),
+        ("Orders cached", str(orders_saved_count)),
         ("Last product sync status", last_sync_status),
-        ("Last order sync status", order_sync_status),
+        ("Last order fetch status", order_fetch_status),
         ("Last product fetch", last_product_fetch),
         ("Last order fetch", last_order_fetch),
+        ("Last fetch duration", f"{order_fetch_duration_ms} ms" if order_fetch_duration_ms else "Never"),
+        ("Last imported count", str(orders_imported_count)),
+        ("Last assignments created", str(assignments_created_count)),
         ("Certificate PDFs generated", str(certificate_summary["generated"])),
-        ("Supabase DATABASE_URL", supabase_status),
         (
             "Limited edition backend",
             "Supabase/Postgres active" if supabase_enabled else "Local cache fallback",

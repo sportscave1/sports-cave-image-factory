@@ -671,7 +671,7 @@ query SportsCaveMetafieldsByOwner($id: ID!, $namespace: String!) {
 
 ORDERS_QUERY = """
 query SportsCaveOrders($first: Int!, $after: String, $query: String) {
-  orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+  orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
     pageInfo {
       hasNextPage
       endCursor
@@ -721,6 +721,11 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
           quantity
           variantTitle
           sku
+          variant {
+            id
+            title
+            sku
+          }
           product {
             id
             title
@@ -735,7 +740,7 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
 
 ORDERS_SAFE_QUERY = """
 query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
-  orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
+  orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
     pageInfo {
       hasNextPage
       endCursor
@@ -781,6 +786,11 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
           quantity
           variantTitle
           sku
+          variant {
+            id
+            title
+            sku
+          }
           product {
             id
             title
@@ -1088,14 +1098,16 @@ def normalize_order(node, store_domain):
     line_items = []
     for item in (node.get("lineItems") or {}).get("nodes") or []:
         product = item.get("product") or {}
+        variant = item.get("variant") or {}
         line_items.append(
             {
                 "shopify_line_item_id": item.get("id") or "",
                 "shopify_product_id": product.get("id") or "",
                 "product_title": product.get("title") or item.get("title") or "",
                 "product_handle": product.get("handle") or "",
-                "variant_title": item.get("variantTitle") or "",
-                "sku": item.get("sku") or "",
+                "variant_title": item.get("variantTitle") or variant.get("title") or "",
+                "variant_id": variant.get("id") or "",
+                "sku": item.get("sku") or variant.get("sku") or "",
                 "quantity": int(item.get("quantity") or 1),
             }
         )
@@ -1139,7 +1151,7 @@ def fetch_orders_page(
     first = min(max(int(page_size), 1), 100)
     if query is None:
         created_after = (datetime.now(timezone.utc) - timedelta(days=max(int(days), 1))).date().isoformat()
-        query = f"created_at:>={created_after}"
+        query = f"financial_status:paid fulfillment_status:unfulfilled updated_at:>={created_after}"
     variables = {"first": first, "after": after, "query": query}
     try:
         data, served_version = graphql_request(

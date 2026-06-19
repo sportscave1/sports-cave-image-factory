@@ -39,6 +39,14 @@ class OrdersLoadingUiTests(unittest.TestCase):
         self.assertIn("def get_order_summary", source)
         self.assertIn("ensure_order_read_schema()", source)
 
+    def test_orders_ui_uses_cached_fetch_workflow_copy(self):
+        source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
+
+        self.assertIn("Fetch New Orders", source)
+        self.assertIn("Deep Refresh 60 Days", source)
+        self.assertIn("Load 50 More", source)
+        self.assertIn("Paid + Unfulfilled", source)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -512,10 +512,14 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
     )
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(supabase_backend.shopify_sync, "iter_order_pages")
+    @patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set())
+    @patch.object(supabase_backend, "_record_order_fetch_metrics")
     @patch.object(supabase_backend, "process_paid_order")
     def test_initial_order_sync_bootstraps_recent_orders_window(
         self,
         process_paid_order,
+        _record_order_fetch_metrics,
+        _existing_order_ids,
         iter_order_pages,
         _ensure_schema,
         _tracking_start,
@@ -553,8 +557,10 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             datetime(2026, 5, 21, 0, 0, tzinfo=timezone.utc)
         )
         self.assertIn(expected_sync_from, iter_order_pages.call_args.kwargs["query"])
+        self.assertIn("fulfillment_status:unfulfilled", iter_order_pages.call_args.kwargs["query"])
         _, kwargs = process_paid_order.call_args
         self.assertTrue(kwargs["assign_editions"])
+        self.assertFalse(kwargs["generate_certificates"])
         self.assertEqual(kwargs["allocation_skip_reason"], "")
         set_app_setting.assert_any_call(
             supabase_backend.EDITION_TRACKING_START_KEY,
@@ -565,6 +571,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
     @patch.object(supabase_backend, "start_sync_run", return_value="run-1")
     @patch.object(supabase_backend, "_set_sync_success")
     @patch.object(supabase_backend, "_set_sync_attempt")
+    @patch.object(supabase_backend, "set_app_setting")
     @patch.object(
         supabase_backend,
         "get_sync_state",
@@ -581,14 +588,19 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
     )
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(supabase_backend.shopify_sync, "iter_order_pages")
+    @patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set())
+    @patch.object(supabase_backend, "_record_order_fetch_metrics")
     @patch.object(supabase_backend, "process_paid_order")
     def test_incremental_sync_keeps_historical_updates_but_skips_auto_assignment(
         self,
         process_paid_order,
+        _record_order_fetch_metrics,
+        _existing_order_ids,
         iter_order_pages,
         _ensure_schema,
         _tracking_start,
         _sync_state,
+        _set_app_setting,
         _set_attempt,
         _set_success,
         _start_run,
@@ -613,8 +625,10 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["orders_seen"], 1)
         self.assertEqual(result["orders_processed"], 1)
         self.assertEqual(result["historical_orders_synced"], 1)
+        self.assertIn("fulfillment_status:unfulfilled", iter_order_pages.call_args.kwargs["query"])
         _, kwargs = process_paid_order.call_args
         self.assertFalse(kwargs["assign_editions"])
+        self.assertFalse(kwargs["generate_certificates"])
         self.assertEqual(kwargs["allocation_skip_reason"], supabase_backend.HISTORICAL_ORDER_NOTE)
 
     def test_manual_edition_counter_ahead_of_history_is_respected(self):

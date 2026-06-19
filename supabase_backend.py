@@ -5,6 +5,7 @@ import json
 import os
 import re
 import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -19,6 +20,11 @@ CERTIFICATE_OUTPUT_DIR = BASE_DIR / "output" / "certificates"
 PSD_MASTER_FOLDER_SETTING_KEY = "psd_master_folder_url"
 LAST_SUCCESSFUL_ORDER_SYNC_KEY = "last_successful_order_sync_at"
 LAST_ATTEMPTED_ORDER_SYNC_KEY = "last_attempted_order_sync_at"
+LAST_SUCCESSFUL_ORDER_FETCH_KEY = "last_successful_order_fetch_at"
+LAST_ORDER_FETCH_STATUS_KEY = "last_order_fetch_status"
+LAST_ORDER_FETCH_DURATION_KEY = "last_order_fetch_duration_ms"
+LAST_ORDERS_IMPORTED_COUNT_KEY = "last_orders_imported_count"
+LAST_ASSIGNMENTS_CREATED_COUNT_KEY = "last_assignments_created_count"
 EDITION_TRACKING_START_KEY = "edition_tracking_start_at"
 LAST_SUCCESSFUL_PRODUCT_SYNC_KEY = "last_successful_product_sync_at"
 LAST_ATTEMPTED_PRODUCT_SYNC_KEY = "last_attempted_product_sync_at"
@@ -26,6 +32,7 @@ SYNC_LOOKBACK_BUFFER_KEY = "sync_lookback_buffer_minutes"
 DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES = 10
 DEFAULT_INITIAL_ORDER_BOOTSTRAP_DAYS = 30
 DEFAULT_INITIAL_ORDER_ASSIGNMENT_WINDOW_DAYS = 7
+DEFAULT_INCREMENTAL_ORDER_FETCH_LIMIT = 100
 DEFAULT_PSD_MASTER_FOLDER_SETTING = {
     "url": "https://drive.google.com/drive/folders/1UCs_EsyjVXZUNclAfnmO7y2x7rKutwhH",
     "name": "Sports Cave PSD Master Folder",
@@ -903,11 +910,15 @@ def _ensure_schema_uncached():
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_order_lines_line_id_unique ON shopify_order_lines(shopify_line_item_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_order_lines_order_id ON shopify_order_lines(shopify_order_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_order_lines_handle ON shopify_order_lines(shopify_handle)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_order_lines_product_id ON shopify_order_lines(shopify_product_id)")
             cur.execute("ALTER TABLE edition_orders DROP CONSTRAINT IF EXISTS edition_orders_shopify_handle_edition_number_key")
             cur.execute("DROP INDEX IF EXISTS idx_edition_orders_handle_number_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_handle_number ON edition_orders(shopify_handle, edition_number)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_line_allocation_unique ON edition_orders(shopify_line_item_id, allocation_index)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_run_id ON edition_orders(edition_run_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_line_item_id ON edition_orders(shopify_line_item_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_product_id ON edition_orders(shopify_product_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_assigned_at ON edition_orders(assigned_at DESC)")
             cur.execute("DROP INDEX IF EXISTS idx_edition_orders_run_number_unique")
             cur.execute(
                 """
@@ -936,10 +947,16 @@ def _ensure_schema_uncached():
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_settings_key_unique ON app_settings(key)")
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_id_unique ON webhook_events(webhook_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_title ON shopify_products(title)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_product_type ON shopify_products(product_type)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_created_at ON shopify_orders(created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_updated_at ON shopify_orders(remote_updated_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_customer ON shopify_orders(customer_name)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_customer_email ON shopify_orders(customer_email)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_order_name ON shopify_orders(order_name)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_order_id ON edition_orders(shopify_order_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_handle ON edition_orders(shopify_handle)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_products_product_id ON edition_products(shopify_product_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_products_title ON edition_products(product_title)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_product_assets_handle ON product_assets(shopify_handle)")
             cur.execute(
                 f"""
@@ -2680,6 +2697,20 @@ def count_shopify_orders():
             return int((cur.fetchone() or {}).get("count") or 0)
 
 
+def list_existing_shopify_order_ids(order_ids):
+    ensure_schema()
+    values = [str(order_id or "").strip() for order_id in (order_ids or []) if str(order_id or "").strip()]
+    if not values:
+        return set()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT shopify_order_id FROM shopify_orders WHERE shopify_order_id = ANY(%s)",
+                (values,),
+            )
+            return {str(row.get("shopify_order_id") or "").strip() for row in cur.fetchall() if row.get("shopify_order_id")}
+
+
 def get_app_setting(key, default=None):
     ensure_schema()
     with connect() as conn:
@@ -2717,6 +2748,10 @@ def get_sync_setting(key, default=""):
     return value
 
 
+def get_sync_setting_int(key, default=0):
+    return _int_value(get_sync_setting(key, default), default)
+
+
 def _sync_lookback_minutes():
     raw = get_sync_setting(SYNC_LOOKBACK_BUFFER_KEY, DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES)
     try:
@@ -2749,6 +2784,11 @@ def get_sync_state():
     return {
         "last_successful_order_sync_at": get_sync_setting(LAST_SUCCESSFUL_ORDER_SYNC_KEY, ""),
         "last_attempted_order_sync_at": get_sync_setting(LAST_ATTEMPTED_ORDER_SYNC_KEY, ""),
+        "last_successful_order_fetch_at": get_sync_setting(LAST_SUCCESSFUL_ORDER_FETCH_KEY, ""),
+        "last_order_fetch_status": get_sync_setting(LAST_ORDER_FETCH_STATUS_KEY, ""),
+        "last_order_fetch_duration_ms": get_sync_setting_int(LAST_ORDER_FETCH_DURATION_KEY, 0),
+        "last_orders_imported_count": get_sync_setting_int(LAST_ORDERS_IMPORTED_COUNT_KEY, 0),
+        "last_assignments_created_count": get_sync_setting_int(LAST_ASSIGNMENTS_CREATED_COUNT_KEY, 0),
         "edition_tracking_start_at": get_sync_setting(EDITION_TRACKING_START_KEY, ""),
         "last_successful_product_sync_at": get_sync_setting(LAST_SUCCESSFUL_PRODUCT_SYNC_KEY, ""),
         "last_attempted_product_sync_at": get_sync_setting(LAST_ATTEMPTED_PRODUCT_SYNC_KEY, ""),
@@ -2768,15 +2808,52 @@ def _set_sync_success(key):
     return timestamp
 
 
+def _record_order_fetch_metrics(
+    *,
+    status,
+    duration_ms=0,
+    imported_count=0,
+    assignments_created=0,
+    success_timestamp="",
+):
+    set_app_setting(LAST_ORDER_FETCH_STATUS_KEY, str(status or "Unknown"))
+    set_app_setting(LAST_ORDER_FETCH_DURATION_KEY, int(duration_ms or 0))
+    set_app_setting(LAST_ORDERS_IMPORTED_COUNT_KEY, int(imported_count or 0))
+    set_app_setting(LAST_ASSIGNMENTS_CREATED_COUNT_KEY, int(assignments_created or 0))
+    if success_timestamp:
+        set_app_setting(LAST_SUCCESSFUL_ORDER_FETCH_KEY, str(success_timestamp))
+
+
+def _log_order_fetch_timing(*, total_ms, shopify_ms, pages, orders, db_load_ms, assign_ms, db_write_ms):
+    print(
+        "ORDER_FETCH "
+        f"total={int(total_ms)}ms "
+        f"shopify={int(shopify_ms)}ms "
+        f"pages={int(pages)} "
+        f"orders={int(orders)} "
+        f"db_load={int(db_load_ms)}ms "
+        f"assign={int(assign_ms)}ms "
+        f"db_write={int(db_write_ms)}ms"
+    )
+
+
 def reset_incremental_sync_timestamps():
     ensure_sync_defaults()
     for key in (
         LAST_SUCCESSFUL_ORDER_SYNC_KEY,
         LAST_ATTEMPTED_ORDER_SYNC_KEY,
+        LAST_SUCCESSFUL_ORDER_FETCH_KEY,
         LAST_SUCCESSFUL_PRODUCT_SYNC_KEY,
         LAST_ATTEMPTED_PRODUCT_SYNC_KEY,
     ):
         set_app_setting(key, "")
+    _record_order_fetch_metrics(
+        status="Never",
+        duration_ms=0,
+        imported_count=0,
+        assignments_created=0,
+        success_timestamp="",
+    )
     set_app_setting(EDITION_TRACKING_START_KEY, _datetime_to_setting(utc_now_datetime()))
     return get_sync_state()
 
@@ -4032,18 +4109,7 @@ def _backfill_edition_customer_details(cur, order):
 def _lookup_product_by_handle_or_id(cur, line_item):
     handle = line_item.get("product_handle") or ""
     product_id = line_item.get("shopify_product_id") or ""
-    if handle:
-        cur.execute(
-            """
-            SELECT sp.shopify_product_id, sp.handle, sp.title
-            FROM shopify_products sp
-            WHERE sp.handle=%s
-            """,
-            (handle,),
-        )
-        row = cur.fetchone()
-        if row:
-            return row
+    title = str(line_item.get("product_title") or "").strip()
     if product_id:
         cur.execute(
             """
@@ -4056,6 +4122,31 @@ def _lookup_product_by_handle_or_id(cur, line_item):
         row = cur.fetchone()
         if row:
             return row
+    if handle:
+        cur.execute(
+            """
+            SELECT sp.shopify_product_id, sp.handle, sp.title
+            FROM shopify_products sp
+            WHERE sp.handle=%s
+            """,
+            (handle,),
+        )
+        row = cur.fetchone()
+        if row:
+            return row
+    if title:
+        cur.execute(
+            """
+            SELECT sp.shopify_product_id, sp.handle, sp.title
+            FROM shopify_products sp
+            WHERE LOWER(COALESCE(sp.title, '')) = LOWER(%s)
+            LIMIT 2
+            """,
+            (title,),
+        )
+        rows = cur.fetchall()
+        if len(rows) == 1:
+            return rows[0]
     return None
 
 
@@ -5178,7 +5269,7 @@ def sync_shopify_orders_to_supabase(
     config=None,
     *,
     query=None,
-    max_orders=250,
+    max_orders=DEFAULT_INCREMENTAL_ORDER_FETCH_LIMIT,
     historical_backfill=False,
     days=365,
     generate_certificates=False,
@@ -5198,8 +5289,18 @@ def sync_shopify_orders_to_supabase(
     errors = []
     sync_from = None
     bootstrap_recent_orders = False
+    imported_orders = 0
+    pages_fetched = 0
+    total_started = time.perf_counter()
+    db_load_ms = 0.0
+    shopify_ms = 0.0
+    assign_ms = 0.0
+    db_write_ms = 0.0
     try:
         _set_sync_attempt(LAST_ATTEMPTED_ORDER_SYNC_KEY)
+        if not historical_backfill:
+            set_app_setting(LAST_ORDER_FETCH_STATUS_KEY, "Running")
+        db_phase_started = time.perf_counter()
         if historical_backfill:
             effective_query = query or "financial_status:paid"
             allocation_status = "backfilled"
@@ -5211,7 +5312,9 @@ def sync_shopify_orders_to_supabase(
             tracking_start = _parse_datetime(state.get("edition_tracking_start_at"))
             if not tracking_start:
                 tracking_start = ensure_edition_tracking_start()
-            last_success = _parse_datetime(state.get("last_successful_order_sync_at"))
+            last_success = _parse_datetime(
+                state.get("last_successful_order_fetch_at") or state.get("last_successful_order_sync_at")
+            )
             if not last_success and count_shopify_orders() == 0:
                 bootstrap_recent_orders = True
                 bootstrap_now = utc_now_datetime()
@@ -5224,20 +5327,44 @@ def sync_shopify_orders_to_supabase(
                 sync_from = last_success - timedelta(
                     minutes=state.get("sync_lookback_buffer_minutes") or DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES
                 )
-            effective_query = query or f"financial_status:paid updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
+            effective_query = query or (
+                f"financial_status:paid fulfillment_status:unfulfilled "
+                f"updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
+            )
             allocation_status = "assigned"
             generate_certificates_now = bool(generate_certificates)
             sync_product_metafields_now = bool(sync_product_metafields)
+        db_load_ms = (time.perf_counter() - db_phase_started) * 1000
 
         sync_config = dict(config)
-        sync_config["max_orders"] = max(int(max_orders or 50), 1)
-        for page in shopify_sync.iter_order_pages(
+        sync_limit = max(int(max_orders or DEFAULT_INCREMENTAL_ORDER_FETCH_LIMIT), 1)
+        sync_config["max_orders"] = sync_limit
+        page_iterator = iter(
+            shopify_sync.iter_order_pages(
             query=effective_query,
             days=days,
-            max_orders=max_orders,
+            max_orders=sync_limit,
             page_size=50,
             config=sync_config,
-        ):
+            )
+        )
+        while True:
+            page_fetch_started = time.perf_counter()
+            try:
+                page = next(page_iterator)
+            except StopIteration:
+                break
+            shopify_ms += (time.perf_counter() - page_fetch_started) * 1000
+            pages_fetched += 1
+            page_orders = page["orders"]
+            existing_order_ids = list_existing_shopify_order_ids(
+                order.get("shopify_order_id") for order in page_orders
+            )
+            imported_orders += sum(
+                1 for order in page_orders if str(order.get("shopify_order_id") or "").strip() not in existing_order_ids
+            )
+            page_processing_started = time.perf_counter()
+            assign_before_page = assign_ms
             for order in page["orders"]:
                 should_assign_editions = True
                 allocation_skip_reason = ""
@@ -5246,6 +5373,7 @@ def sync_shopify_orders_to_supabase(
                     if order_datetime and tracking_start and order_datetime < tracking_start:
                         should_assign_editions = False
                         allocation_skip_reason = HISTORICAL_ORDER_NOTE
+                order_assign_started = time.perf_counter()
                 result = process_paid_order(
                     order,
                     allocation_status=allocation_status,
@@ -5254,6 +5382,7 @@ def sync_shopify_orders_to_supabase(
                     assign_editions=should_assign_editions,
                     allocation_skip_reason=allocation_skip_reason,
                 )
+                assign_ms += (time.perf_counter() - order_assign_started) * 1000
                 processed_orders += 1
                 if not should_assign_editions:
                     historical_orders_synced += 1
@@ -5263,16 +5392,36 @@ def sync_shopify_orders_to_supabase(
                 historical_lines_marked += int(result.get("historical_lines_marked") or 0)
                 changed_handles.update(result.get("changed_handles") or [])
                 errors.extend(result.get("errors") or [])
-            seen += len(page["orders"])
+            page_processing_ms = (time.perf_counter() - page_processing_started) * 1000
+            db_write_ms += max(page_processing_ms - (assign_ms - assign_before_page), 0)
+            seen += len(page_orders)
             del page
             gc.collect()
         if not historical_backfill:
-            _set_sync_success(LAST_SUCCESSFUL_ORDER_SYNC_KEY)
+            success_timestamp = _set_sync_success(LAST_SUCCESSFUL_ORDER_SYNC_KEY)
+            last_fetch_status = "No New Orders" if seen == 0 else ("Success With Warnings" if errors else "Success")
+            _record_order_fetch_metrics(
+                status=last_fetch_status,
+                duration_ms=int((time.perf_counter() - total_started) * 1000),
+                imported_count=imported_orders,
+                assignments_created=assignments,
+                success_timestamp=success_timestamp,
+            )
         finish_sync_run(run_id, "Complete" if not errors else "Complete With Warnings", seen, processed_orders)
+        _log_order_fetch_timing(
+            total_ms=(time.perf_counter() - total_started) * 1000,
+            shopify_ms=shopify_ms,
+            pages=pages_fetched,
+            orders=seen,
+            db_load_ms=db_load_ms,
+            assign_ms=assign_ms,
+            db_write_ms=db_write_ms,
+        )
         return {
             "orders_seen": seen,
             "orders_processed": processed_orders,
             "orders_inserted_or_updated": processed_orders,
+            "orders_imported": imported_orders,
             "assignments_created": assignments,
             "existing_assignments_skipped": existing_skipped,
             "generated_certificates": generated_certificates,
@@ -5283,11 +5432,31 @@ def sync_shopify_orders_to_supabase(
             "skipped_historical": historical_orders_synced,
             "sync_from": _datetime_to_setting(sync_from) if sync_from else "",
             "bootstrap_recent_orders": bootstrap_recent_orders,
+            "pages_fetched": pages_fetched,
+            "fetch_duration_ms": int((time.perf_counter() - total_started) * 1000),
+            "last_order_fetch_status": "No New Orders" if seen == 0 else ("Success With Warnings" if errors else "Success"),
             "mode": "historical_backfill" if historical_backfill else "incremental",
             "errors": errors[:10],
         }
     except Exception as error:
-        finish_sync_run(run_id, "Failed", seen, assignments, "Shopify order sync failed.")
+        if not historical_backfill:
+            _record_order_fetch_metrics(
+                status="Failed",
+                duration_ms=int((time.perf_counter() - total_started) * 1000),
+                imported_count=imported_orders,
+                assignments_created=assignments,
+                success_timestamp="",
+            )
+        _log_order_fetch_timing(
+            total_ms=(time.perf_counter() - total_started) * 1000,
+            shopify_ms=shopify_ms,
+            pages=pages_fetched,
+            orders=seen,
+            db_load_ms=db_load_ms,
+            assign_ms=assign_ms,
+            db_write_ms=db_write_ms,
+        )
+        finish_sync_run(run_id, "Failed", seen, processed_orders, "Shopify order sync failed.")
         log_app_error("shopify_order_sync_failed", str(error), {"records_seen": seen})
         raise
 
