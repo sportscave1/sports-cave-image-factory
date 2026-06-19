@@ -3558,6 +3558,8 @@ def _build_compact_order_summary(order_row, line_items):
         "synced_at": order_row.get("synced_at") or "",
         "financial_status": _clean_order_text(order_row.get("financial_status")),
         "fulfillment_status": _clean_order_text(order_row.get("fulfillment_status")),
+        "total_price": _clean_order_text(order_row.get("total_price")),
+        "currency": _clean_order_text(order_row.get("currency")),
         "cancelled_at": order_row.get("cancelled_at") or "",
         "shipping_summary": _shipping_speed_label(order_row),
         "product_summary": _compact_text_list(
@@ -4250,6 +4252,292 @@ def _render_compact_orders_feed(order_summaries):
             f'<span class="sc-order-status-pill sc-order-status-{status_class}">{html.escape(status_label)}</span>',
             unsafe_allow_html=True,
         )
+
+
+def _cached_order_item_count(order_summary):
+    total = 0
+    for line_item in order_summary.get("line_items") or []:
+        total += max(1, int(line_item.get("quantity") or 1))
+    return total
+
+
+def _cached_order_assignment_badge(order_summary):
+    line_items = order_summary.get("line_items") or []
+    assigned_count = sum(
+        len(active_assignments(_coerce_assignments(line_item.get("assignments"))))
+        for line_item in line_items
+    )
+    issue_statuses = {_line_assignment_status(line_item) for line_item in line_items}
+    total_items = _cached_order_item_count(order_summary)
+    pending_count = max(total_items - assigned_count, 0)
+    if "Product Not Found" in issue_statuses:
+        return {"label": "Product not found", "class_name": "product-not-found"}
+    if "Sold Out" in issue_statuses:
+        return {"label": "Sold out issue", "class_name": "sold-out-issue"}
+    if assigned_count and pending_count == 0:
+        return {"label": f"Editions assigned x{assigned_count}", "class_name": "assigned"}
+    if "Error" in issue_statuses or "Needs Edition Setup" in issue_statuses:
+        return {
+            "label": f"Needs Sports Cave sync x{max(pending_count, 1)}",
+            "class_name": "needs-sync",
+        }
+    if pending_count:
+        return {
+            "label": f"Needs Sports Cave sync x{pending_count}",
+            "class_name": "needs-sync",
+        }
+    return {"label": "Needs Sports Cave sync", "class_name": "needs-sync"}
+
+
+def _cached_order_delivery_label(order_summary):
+    fulfillment = _humanize_shopify_status_text(order_summary.get("fulfillment_status"), "Unknown")
+    normalized = str(order_summary.get("fulfillment_status") or "").upper()
+    if "UNFULFILLED" in normalized:
+        return "Unfulfilled"
+    if "PARTIALLY" in normalized:
+        return "Partial"
+    if "FULFILLED" in normalized:
+        return "Fulfilled"
+    return fulfillment
+
+
+def _cached_order_badge_slug(value):
+    normalized = str(value or "").strip().lower()
+    if "unfulfilled" in normalized:
+        return "unfulfilled"
+    if "partial" in normalized:
+        return "partial"
+    if "paid" == normalized:
+        return "paid"
+    if "pending" in normalized:
+        return "pending"
+    if "refund" in normalized or "void" in normalized or "cancel" in normalized:
+        return "refunded"
+    if "fulfilled" in normalized:
+        return "fulfilled"
+    return "unknown"
+
+
+def _render_shopify_style_cached_orders_table(order_summaries):
+    rows_html = []
+    for order_summary in order_summaries or []:
+        order_link = str(order_summary.get("order_link") or "").strip()
+        order_label = html.escape(str(order_summary.get("order_label") or "Order"))
+        product_text = html.escape(str(order_summary.get("product_summary") or "Product missing"))
+        customer_name = html.escape(str(order_summary.get("customer_name") or "Customer missing"))
+        customer_email = html.escape(str(order_summary.get("customer_email") or ""))
+        fulfillment_label = _humanize_shopify_status_text(order_summary.get("fulfillment_status"), "Unknown")
+        fulfillment_slug = _cached_order_badge_slug(fulfillment_label)
+        payment_label = _humanize_shopify_status_text(order_summary.get("financial_status"), "Unknown")
+        payment_slug = _cached_order_badge_slug(payment_label)
+        delivery_label = _cached_order_delivery_label(order_summary)
+        delivery_slug = _cached_order_badge_slug(delivery_label)
+        item_count = _cached_order_item_count(order_summary)
+        assignment_badge = _cached_order_assignment_badge(order_summary)
+        shipping_text = html.escape(str(order_summary.get("shipping_summary") or "-"))
+        total_text = html.escape(_format_shopify_total(order_summary))
+        order_label_html = (
+            f'<a class="sc-shopify-order-link" href="{html.escape(order_link, quote=True)}" target="_blank" rel="noreferrer">{order_label}</a>'
+            if order_link
+            else f'<span class="sc-shopify-order-link">{order_label}</span>'
+        )
+        rows_html.append(
+            textwrap.dedent(
+                f"""
+                <tr>
+                    <td><span class="sc-shopify-checkbox" aria-hidden="true"></span></td>
+                    <td>
+                        {order_label_html}
+                        <div class="sc-shopify-muted">{product_text}</div>
+                    </td>
+                    <td>{html.escape(str(order_summary.get("order_date") or "-"))}</td>
+                    <td>
+                        {customer_name}
+                        <div class="sc-shopify-muted">{customer_email or "Customer email hidden"}</div>
+                    </td>
+                    <td><span class="sc-shopify-pill sc-shopify-pill-{fulfillment_slug}">{html.escape(fulfillment_label)}</span></td>
+                    <td>{total_text}</td>
+                    <td>Online Store</td>
+                    <td><span class="sc-shopify-pill sc-shopify-pill-{payment_slug}">{html.escape(payment_label)}</span></td>
+                    <td>
+                        {html.escape(f"{item_count} item" + ("" if item_count == 1 else "s"))}
+                        <div class="sc-shopify-muted">
+                            <span class="sc-shopify-pill sc-shopify-pill-{html.escape(assignment_badge['class_name'])}">{html.escape(assignment_badge['label'])}</span>
+                        </div>
+                    </td>
+                    <td><span class="sc-shopify-pill sc-shopify-pill-{delivery_slug}">{html.escape(delivery_label)}</span></td>
+                    <td>{shipping_text}</td>
+                </tr>
+                """
+            ).strip()
+        )
+    html_table = textwrap.dedent(
+        f"""
+        <style>
+        .sc-shopify-table-shell {{
+            background: #FFFFFF;
+            border: 1px solid #E3E3E3;
+            border-radius: 22px;
+            overflow: hidden;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.10);
+            font-family: Arial, sans-serif;
+            color: #202223;
+        }}
+        .sc-shopify-table-header {{
+            align-items: center;
+            background: #FFFFFF;
+            border-bottom: 1px solid #E3E3E3;
+            display: flex;
+            justify-content: space-between;
+            padding: 0.95rem 1.2rem;
+        }}
+        .sc-shopify-table-title {{
+            color: #202223;
+            font-size: 1rem;
+            font-weight: 800;
+        }}
+        .sc-shopify-table-pill {{
+            background: #FFFFFF;
+            border: 1px solid #D0D5DD;
+            border-radius: 999px;
+            color: #202223;
+            display: inline-flex;
+            font-size: 0.88rem;
+            font-weight: 700;
+            min-height: 2.2rem;
+            align-items: center;
+            padding: 0 0.95rem;
+        }}
+        .sc-shopify-table-wrap {{
+            overflow-x: auto;
+        }}
+        .sc-shopify-table {{
+            border-collapse: collapse;
+            min-width: 1280px;
+            width: 100%;
+        }}
+        .sc-shopify-table th {{
+            background: #FFFFFF;
+            border-bottom: 1px solid #E3E3E3;
+            color: #6D7175;
+            font-size: 0.83rem;
+            font-weight: 700;
+            padding: 0.85rem 1rem;
+            text-align: left;
+            white-space: nowrap;
+        }}
+        .sc-shopify-table td {{
+            border-bottom: 1px solid #E3E3E3;
+            color: #202223;
+            font-size: 0.95rem;
+            padding: 0.78rem 1rem;
+            vertical-align: top;
+        }}
+        .sc-shopify-table tr:hover td {{
+            background: #F6F6F7;
+        }}
+        .sc-shopify-order-link {{
+            color: #005BD3;
+            font-weight: 800;
+            text-decoration: none;
+        }}
+        .sc-shopify-order-link:hover {{
+            text-decoration: underline;
+        }}
+        .sc-shopify-muted {{
+            color: #6D7175;
+            font-size: 0.78rem;
+            line-height: 1.3;
+            margin-top: 0.2rem;
+        }}
+        .sc-shopify-checkbox {{
+            background: #FFFFFF;
+            border: 1.5px solid #8C9196;
+            border-radius: 6px;
+            box-sizing: border-box;
+            display: inline-block;
+            height: 20px;
+            width: 20px;
+        }}
+        .sc-shopify-pill {{
+            align-items: center;
+            border-radius: 999px;
+            display: inline-flex;
+            font-size: 0.83rem;
+            font-weight: 800;
+            gap: 0.35rem;
+            min-height: 1.9rem;
+            padding: 0.1rem 0.72rem;
+            white-space: nowrap;
+        }}
+        .sc-shopify-pill::before {{
+            background: currentColor;
+            border-radius: 50%;
+            content: "";
+            height: 8px;
+            opacity: 0.72;
+            width: 8px;
+        }}
+        .sc-shopify-pill-unfulfilled,
+        .sc-shopify-pill-needs-sync {{
+            background: #FFE58F;
+            color: #7A5A00;
+        }}
+        .sc-shopify-pill-fulfilled,
+        .sc-shopify-pill-paid,
+        .sc-shopify-pill-assigned {{
+            background: #DFF3E4;
+            color: #166534;
+        }}
+        .sc-shopify-pill-partial {{
+            background: #FED7AA;
+            color: #9A3412;
+        }}
+        .sc-shopify-pill-pending,
+        .sc-shopify-pill-unknown {{
+            background: #F1F2F3;
+            color: #4A4F55;
+        }}
+        .sc-shopify-pill-refunded,
+        .sc-shopify-pill-product-not-found,
+        .sc-shopify-pill-sold-out-issue {{
+            background: #FEE2E2;
+            color: #991B1B;
+        }}
+        </style>
+        <div class="sc-shopify-table-shell">
+            <div class="sc-shopify-table-header">
+                <div class="sc-shopify-table-title">Orders</div>
+                <div class="sc-shopify-table-pill">Batch unfulfilled orders</div>
+            </div>
+            <div class="sc-shopify-table-wrap">
+                <table class="sc-shopify-table">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Order</th>
+                            <th>Date</th>
+                            <th>Customer</th>
+                            <th>Fulfillment status</th>
+                            <th>Total</th>
+                            <th>Channel</th>
+                            <th>Payment status</th>
+                            <th>Items</th>
+                            <th>Delivery status</th>
+                            <th>Delivery method</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {''.join(rows_html)}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        """
+    ).strip()
+    row_count = len(order_summaries or [])
+    height = min(max(240 + (row_count * 52), 420), 1800)
+    components.html(html_table, height=height, scrolling=True)
 
 
 def _shopify_orders_mirror_styles():
@@ -5077,7 +5365,7 @@ def render_supabase_orders_page():
         st.caption(f"Showing saved orders from the last warm screen snapshot. {len(order_summaries)} currently visible.")
     else:
         st.caption("Showing saved orders.")
-    _render_compact_orders_feed(order_summaries)
+    _render_shopify_style_cached_orders_table(order_summaries)
     if len(filtered_order_summaries) > len(order_summaries):
         if st.button("Load 50 More", key="supabase-orders-load-more", use_container_width=True):
             st.session_state["supabase-orders-visible-count"] = visible_count + 50
@@ -5212,7 +5500,7 @@ def render_certificate_actions(assignments, key_prefix):
 
 
 def render_orders_page():
-    render_shopify_orders_mirror_page()
+    render_supabase_orders_page()
 
 
 def normalize_psd_handle_guess(value):
