@@ -39,7 +39,7 @@ class OrdersLoadingUiTests(unittest.TestCase):
         self.assertIn("def get_order_summary", source)
         self.assertIn("ensure_order_read_schema()", source)
 
-    def test_orders_ui_uses_cached_shopify_style_copy(self):
+    def test_orders_ui_uses_cached_fulfilment_helper_copy(self):
         source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
         renderer_start = source.index("def _render_shopify_style_cached_orders_table")
         renderer_end = source.index("def _shopify_orders_mirror_styles", renderer_start)
@@ -52,6 +52,12 @@ class OrdersLoadingUiTests(unittest.TestCase):
         self.assertIn("st.columns", renderer_source)
         self.assertIn(".badge(", renderer_source)
         self.assertIn("st.link_button", renderer_source)
+        for label in ("Order", "Customer", "Product", "Variant", "Edition", "Certificate", "PSD", "Prodigi", "Status", "Open"):
+            self.assertIn(label, renderer_source)
+        self.assertIn("Open Shopify Order", renderer_source)
+        self.assertNotIn('"Date"', renderer_source)
+        self.assertNotIn('"Total"', renderer_source)
+        self.assertNotIn('"Channel"', renderer_source)
         self.assertNotIn("components.html", renderer_source)
         self.assertNotIn("<tr", renderer_source)
         self.assertNotIn("<td", renderer_source)

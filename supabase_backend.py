@@ -950,11 +950,14 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_product_type ON shopify_products(product_type)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_created_at ON shopify_orders(created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_updated_at ON shopify_orders(remote_updated_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_financial_fulfillment ON shopify_orders(financial_status, fulfillment_status)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_customer ON shopify_orders(customer_name)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_customer_email ON shopify_orders(customer_email)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_orders_order_name ON shopify_orders(order_name)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_order_id ON edition_orders(shopify_order_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_handle ON edition_orders(shopify_handle)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_edition_number ON edition_orders(edition_number)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_order_lines_assignment_status ON shopify_order_lines(assignment_status)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_products_product_id ON edition_products(shopify_product_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_products_title ON edition_products(product_title)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_product_assets_handle ON product_assets(shopify_handle)")
@@ -2873,6 +2876,7 @@ def _record_order_fetch_metrics(
 
 
 def _log_order_fetch_timing(*, total_ms, shopify_ms, pages, orders, db_load_ms, assign_ms, db_write_ms):
+    db_ms = int((db_load_ms or 0) + (db_write_ms or 0))
     print(
         "ORDER_FETCH "
         f"total={int(total_ms)}ms "
@@ -2882,6 +2886,13 @@ def _log_order_fetch_timing(*, total_ms, shopify_ms, pages, orders, db_load_ms, 
         f"db_load={int(db_load_ms)}ms "
         f"assign={int(assign_ms)}ms "
         f"db_write={int(db_write_ms)}ms"
+    )
+    print(
+        "FETCH_NEW_ORDERS "
+        f"total={int(total_ms)}ms "
+        f"shopify={int(shopify_ms)}ms "
+        f"db={db_ms}ms "
+        f"assign={int(assign_ms)}ms"
     )
 
 
@@ -5100,6 +5111,35 @@ def process_paid_order(
         "errors": errors,
     }
 
+
+def process_shopify_order_for_editions(
+    order_payload,
+    *,
+    fetch_missing_products=True,
+    allocation_status="assigned",
+    generate_certificates=False,
+    sync_product_metafields=False,
+    assign_editions=True,
+    allocation_skip_reason="",
+):
+    """Persist one Shopify order and assign editions from Sports Cave OS state only.
+
+    TODO: Future Shopify orders/paid webhook should call process_shopify_order_for_editions.
+    """
+    order = dict(order_payload or {})
+    if not order.get("shopify_order_id") and order.get("id") and isinstance(order.get("line_items"), list):
+        order = normalize_rest_order(order)
+    return process_paid_order(
+        order,
+        fetch_missing_products=fetch_missing_products,
+        allocation_status=allocation_status,
+        generate_certificates=generate_certificates,
+        sync_product_metafields=sync_product_metafields,
+        assign_editions=assign_editions,
+        allocation_skip_reason=allocation_skip_reason,
+    )
+
+
 def _name_from_address(address):
     if not isinstance(address, dict):
         return ""
@@ -5187,7 +5227,7 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid"):
     if not inserted:
         return {"duplicate": True, "assignments_created": 0}
     try:
-        result = process_paid_order(normalize_rest_order(payload))
+        result = process_shopify_order_for_editions(normalize_rest_order(payload))
         status = "Processed" if not result.get("errors") else "Processed With Warnings"
         with connect() as conn:
             with conn.cursor() as cur:
@@ -5422,7 +5462,7 @@ def sync_shopify_orders_to_supabase(
                         should_assign_editions = False
                         allocation_skip_reason = HISTORICAL_ORDER_NOTE
                 order_assign_started = time.perf_counter()
-                result = process_paid_order(
+                result = process_shopify_order_for_editions(
                     order,
                     allocation_status=allocation_status,
                     generate_certificates=generate_certificates_now,
