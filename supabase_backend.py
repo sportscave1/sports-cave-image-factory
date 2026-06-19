@@ -24,6 +24,8 @@ LAST_SUCCESSFUL_PRODUCT_SYNC_KEY = "last_successful_product_sync_at"
 LAST_ATTEMPTED_PRODUCT_SYNC_KEY = "last_attempted_product_sync_at"
 SYNC_LOOKBACK_BUFFER_KEY = "sync_lookback_buffer_minutes"
 DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES = 10
+DEFAULT_INITIAL_ORDER_BOOTSTRAP_DAYS = 30
+DEFAULT_INITIAL_ORDER_ASSIGNMENT_WINDOW_DAYS = 7
 DEFAULT_PSD_MASTER_FOLDER_SETTING = {
     "url": "https://drive.google.com/drive/folders/1UCs_EsyjVXZUNclAfnmO7y2x7rKutwhH",
     "name": "Sports Cave PSD Master Folder",
@@ -1442,7 +1444,14 @@ def upsert_products(products):
 def sync_shopify_products_to_supabase(config=None, progress_callback=None, *, mode="incremental"):
     ensure_schema()
     config = config or shopify_sync.get_config()
-    full_sync = str(mode or "").lower() in {"full", "initial_full", "initial"}
+    requested_full_sync = str(mode or "").lower() in {"full", "initial_full", "initial"}
+    bootstrap_full_sync = False
+    if not requested_full_sync:
+        state = get_sync_state()
+        last_success = _parse_datetime(state.get("last_successful_product_sync_at"))
+        if not last_success and count_shopify_products() == 0:
+            bootstrap_full_sync = True
+    full_sync = requested_full_sync or bootstrap_full_sync
     sync_type = "shopify_products_full" if full_sync else "shopify_products_incremental"
     run_id = start_sync_run(sync_type)
     seen = 0
@@ -1459,23 +1468,6 @@ def sync_shopify_products_to_supabase(config=None, progress_callback=None, *, mo
             state = get_sync_state()
             last_success = _parse_datetime(state.get("last_successful_product_sync_at"))
             if not last_success:
-                if count_shopify_products() == 0:
-                    finish_sync_run(
-                        run_id,
-                        "Skipped",
-                        0,
-                        0,
-                        "No products synced yet. Run the initial full product sync first.",
-                    )
-                    return {
-                        "products_seen": 0,
-                        "products_processed": 0,
-                        "metafields_attempted": 0,
-                        "metafields_synced": 0,
-                        "metafield_errors": [],
-                        "skipped": True,
-                        "message": "No products synced yet. Run the initial full product sync first.",
-                    }
                 last_success = utc_now_datetime()
             sync_from = last_success - timedelta(minutes=state.get("sync_lookback_buffer_minutes") or DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES)
             search = f"status:active updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
@@ -1511,6 +1503,7 @@ def sync_shopify_products_to_supabase(config=None, progress_callback=None, *, mo
             "metafield_errors": metafield_result.get("errors", []),
             "sync_from": _datetime_to_setting(sync_from) if sync_from else "",
             "mode": "full" if full_sync else "incremental",
+            "bootstrap_full_sync": bootstrap_full_sync,
         }
     except Exception as error:
         finish_sync_run(run_id, "Failed", seen, processed, "Shopify product sync failed.")
@@ -2676,6 +2669,14 @@ def count_shopify_products():
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT COUNT(*) AS count FROM shopify_products")
+            return int((cur.fetchone() or {}).get("count") or 0)
+
+
+def count_shopify_orders():
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS count FROM shopify_orders")
             return int((cur.fetchone() or {}).get("count") or 0)
 
 
@@ -5196,6 +5197,7 @@ def sync_shopify_orders_to_supabase(
     changed_handles = set()
     errors = []
     sync_from = None
+    bootstrap_recent_orders = False
     try:
         _set_sync_attempt(LAST_ATTEMPTED_ORDER_SYNC_KEY)
         if historical_backfill:
@@ -5205,12 +5207,23 @@ def sync_shopify_orders_to_supabase(
             sync_product_metafields_now = False
             tracking_start = None
         else:
-            tracking_start = ensure_edition_tracking_start()
             state = get_sync_state()
-            last_success = _parse_datetime(state.get("last_successful_order_sync_at")) or tracking_start
-            sync_from = last_success - timedelta(
-                minutes=state.get("sync_lookback_buffer_minutes") or DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES
-            )
+            tracking_start = _parse_datetime(state.get("edition_tracking_start_at"))
+            if not tracking_start:
+                tracking_start = ensure_edition_tracking_start()
+            last_success = _parse_datetime(state.get("last_successful_order_sync_at"))
+            if not last_success and count_shopify_orders() == 0:
+                bootstrap_recent_orders = True
+                bootstrap_now = utc_now_datetime()
+                sync_from = bootstrap_now - timedelta(days=DEFAULT_INITIAL_ORDER_BOOTSTRAP_DAYS)
+                if not state.get("edition_tracking_start_at"):
+                    tracking_start = bootstrap_now - timedelta(days=DEFAULT_INITIAL_ORDER_ASSIGNMENT_WINDOW_DAYS)
+                    set_app_setting(EDITION_TRACKING_START_KEY, _datetime_to_setting(tracking_start))
+            else:
+                last_success = last_success or tracking_start
+                sync_from = last_success - timedelta(
+                    minutes=state.get("sync_lookback_buffer_minutes") or DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES
+                )
             effective_query = query or f"financial_status:paid updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
             allocation_status = "assigned"
             generate_certificates_now = bool(generate_certificates)
@@ -5269,6 +5282,7 @@ def sync_shopify_orders_to_supabase(
             "historical_lines_marked": historical_lines_marked,
             "skipped_historical": historical_orders_synced,
             "sync_from": _datetime_to_setting(sync_from) if sync_from else "",
+            "bootstrap_recent_orders": bootstrap_recent_orders,
             "mode": "historical_backfill" if historical_backfill else "incremental",
             "errors": errors[:10],
         }

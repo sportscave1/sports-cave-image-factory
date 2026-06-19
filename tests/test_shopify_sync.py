@@ -381,6 +381,74 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertIn("totalPriceSet", shopify_sync.ORDERS_SAFE_QUERY)
 
 
+class SupabaseProductSyncLogicTests(unittest.TestCase):
+    def setUp(self):
+        self.config = {
+            "store_domain": "sports-cave.myshopify.com",
+            "access_token": "test-token",
+            "client_id": "",
+            "client_secret": "",
+            "api_version": "2026-04",
+            "max_products": 25,
+            "auth_mode": "Admin access token mode",
+            "configured": True,
+        }
+
+    @patch.object(supabase_backend, "finish_sync_run")
+    @patch.object(supabase_backend, "start_sync_run", return_value="run-1")
+    @patch.object(supabase_backend, "_set_sync_success")
+    @patch.object(supabase_backend, "_set_sync_attempt")
+    @patch.object(supabase_backend, "count_shopify_products", return_value=0)
+    @patch.object(
+        supabase_backend,
+        "get_sync_state",
+        return_value={
+            "last_successful_product_sync_at": "",
+            "sync_lookback_buffer_minutes": 10,
+        },
+    )
+    @patch.object(supabase_backend, "ensure_schema")
+    @patch.object(supabase_backend.shopify_sync, "iter_catalog_pages")
+    @patch.object(supabase_backend, "upsert_products", return_value=1)
+    @patch.object(
+        supabase_backend,
+        "sync_product_edition_metafields_for_handles",
+        return_value={"attempted": 1, "synced": 1, "skipped": 0, "errors": []},
+    )
+    def test_incremental_product_sync_bootstraps_full_catalog_when_empty(
+        self,
+        metafield_sync,
+        upsert_products,
+        iter_catalog_pages,
+        _ensure_schema,
+        _sync_state,
+        _count_products,
+        _set_attempt,
+        _set_success,
+        start_sync_run,
+        _finish_run,
+    ):
+        iter_catalog_pages.return_value = [
+            {
+                "products": [
+                    {
+                        "handle": "messi-the-final-crown-wall-art",
+                        "title": "Messi The Final Crown Wall Art",
+                    }
+                ]
+            }
+        ]
+
+        result = supabase_backend.sync_shopify_products_to_supabase(config=self.config, mode="incremental")
+
+        self.assertEqual(result["mode"], "full")
+        self.assertTrue(result["bootstrap_full_sync"])
+        start_sync_run.assert_called_once_with("shopify_products_full")
+        self.assertEqual(iter_catalog_pages.call_args.kwargs["search"], "status:active")
+        upsert_products.assert_called_once()
+        metafield_sync.assert_called_once()
+
+
 class SupabaseOrderSyncLogicTests(unittest.TestCase):
     def setUp(self):
         self.config = {
@@ -425,11 +493,84 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
     @patch.object(supabase_backend, "start_sync_run", return_value="run-1")
     @patch.object(supabase_backend, "_set_sync_success")
     @patch.object(supabase_backend, "_set_sync_attempt")
+    @patch.object(supabase_backend, "set_app_setting")
+    @patch.object(supabase_backend, "utc_now_datetime", return_value=datetime(2026, 6, 20, 0, 0, tzinfo=timezone.utc))
+    @patch.object(supabase_backend, "count_shopify_orders", return_value=0)
+    @patch.object(
+        supabase_backend,
+        "get_sync_state",
+        return_value={
+            "last_successful_order_sync_at": "",
+            "edition_tracking_start_at": "",
+            "sync_lookback_buffer_minutes": 10,
+        },
+    )
+    @patch.object(
+        supabase_backend,
+        "ensure_edition_tracking_start",
+        return_value=datetime(2026, 6, 20, 0, 0, tzinfo=timezone.utc),
+    )
+    @patch.object(supabase_backend, "ensure_schema")
+    @patch.object(supabase_backend.shopify_sync, "iter_order_pages")
+    @patch.object(supabase_backend, "process_paid_order")
+    def test_initial_order_sync_bootstraps_recent_orders_window(
+        self,
+        process_paid_order,
+        iter_order_pages,
+        _ensure_schema,
+        _tracking_start,
+        _sync_state,
+        _count_orders,
+        _utc_now,
+        set_app_setting,
+        _set_attempt,
+        _set_success,
+        start_run,
+        _finish_run,
+    ):
+        recent_order = self.paid_order(
+            processed_at="2026-06-19T00:05:00Z",
+            remote_updated_at="2026-06-19T02:05:00Z",
+        )
+        iter_order_pages.return_value = [{"orders": [recent_order]}]
+        process_paid_order.return_value = {
+            "assignments_created": 1,
+            "existing_assignments_skipped": 0,
+            "generated_certificates": 0,
+            "historical_lines_marked": 0,
+            "changed_handles": [],
+            "errors": [],
+        }
+
+        result = supabase_backend.sync_shopify_orders_to_supabase(config=self.config, max_orders=25)
+
+        self.assertTrue(result["bootstrap_recent_orders"])
+        self.assertEqual(result["orders_seen"], 1)
+        self.assertEqual(result["orders_processed"], 1)
+        self.assertEqual(result["historical_orders_synced"], 0)
+        self.assertEqual(start_run.call_args.args[0], "shopify_orders_incremental")
+        expected_sync_from = supabase_backend._datetime_to_shopify_query(
+            datetime(2026, 5, 21, 0, 0, tzinfo=timezone.utc)
+        )
+        self.assertIn(expected_sync_from, iter_order_pages.call_args.kwargs["query"])
+        _, kwargs = process_paid_order.call_args
+        self.assertTrue(kwargs["assign_editions"])
+        self.assertEqual(kwargs["allocation_skip_reason"], "")
+        set_app_setting.assert_any_call(
+            supabase_backend.EDITION_TRACKING_START_KEY,
+            supabase_backend._datetime_to_setting(datetime(2026, 6, 13, 0, 0, tzinfo=timezone.utc)),
+        )
+
+    @patch.object(supabase_backend, "finish_sync_run")
+    @patch.object(supabase_backend, "start_sync_run", return_value="run-1")
+    @patch.object(supabase_backend, "_set_sync_success")
+    @patch.object(supabase_backend, "_set_sync_attempt")
     @patch.object(
         supabase_backend,
         "get_sync_state",
         return_value={
             "last_successful_order_sync_at": "2026-06-16T02:00:00Z",
+            "edition_tracking_start_at": "2026-06-16T01:00:00Z",
             "sync_lookback_buffer_minutes": 10,
         },
     )
