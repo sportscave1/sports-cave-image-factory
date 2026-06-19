@@ -1069,6 +1069,13 @@ def build_order_admin_url(store_domain, legacy_resource_id):
     return f"https://admin.shopify.com/store/{store_slug}/orders/{legacy_resource_id}"
 
 
+def build_orders_admin_url(store_domain):
+    if not store_domain:
+        return ""
+    store_slug = store_domain.split(".", 1)[0]
+    return f"https://admin.shopify.com/store/{store_slug}/orders"
+
+
 def normalize_order(node, store_domain):
     customer = node.get("customer") or {}
     shipping_address = node.get("shippingAddress") or {}
@@ -1146,12 +1153,15 @@ def fetch_orders_page(
     config=None,
     request_post=None,
     query=None,
+    default_paid_unfulfilled_filter=True,
 ):
     config = config or get_config()
     first = min(max(int(page_size), 1), 100)
-    if query is None:
+    if query is None and default_paid_unfulfilled_filter:
         created_after = (datetime.now(timezone.utc) - timedelta(days=max(int(days), 1))).date().isoformat()
         query = f"financial_status:paid fulfillment_status:unfulfilled updated_at:>={created_after}"
+    elif query is not None:
+        query = str(query).strip() or None
     variables = {"first": first, "after": after, "query": query}
     try:
         data, served_version = graphql_request(
@@ -1179,7 +1189,15 @@ def fetch_orders_page(
     }
 
 
-def iter_order_pages(days=60, page_size=DEFAULT_PAGE_SIZE, config=None, request_post=None, query=None, max_orders=None):
+def iter_order_pages(
+    days=60,
+    page_size=DEFAULT_PAGE_SIZE,
+    config=None,
+    request_post=None,
+    query=None,
+    max_orders=None,
+    default_paid_unfulfilled_filter=True,
+):
     config = config or get_config()
     after = None
     orders_seen = 0
@@ -1192,6 +1210,7 @@ def iter_order_pages(days=60, page_size=DEFAULT_PAGE_SIZE, config=None, request_
             config=config,
             request_post=request_post,
             query=query,
+            default_paid_unfulfilled_filter=default_paid_unfulfilled_filter,
         )
         if not page["orders"]:
             break

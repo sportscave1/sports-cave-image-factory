@@ -5,7 +5,7 @@ import io
 import json
 import os
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import streamlit as st
@@ -569,6 +569,23 @@ def load_supabase_screen_snapshot(snapshot_key, cache_version, loader):
     st.session_state[data_key] = snapshot
     st.session_state[version_key] = current_version
     return snapshot, False, None
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def cached_shopify_orders_mirror_page(search_query, after_cursor, refresh_key):
+    config = shopify_sync.get_config()
+    return shopify_sync.fetch_orders_page(
+        after=after_cursor or None,
+        page_size=50,
+        config=config,
+        query=search_query,
+        default_paid_unfulfilled_filter=False,
+    )
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def cached_order_line_assignment_snapshot(line_item_ids, refresh_key):
+    return supabase_backend.get_order_line_assignment_snapshot(list(line_item_ids or ()))
 
 
 def render_local_cache_notice():
@@ -4234,6 +4251,497 @@ def _render_compact_orders_feed(order_summaries):
         )
 
 
+def _shopify_orders_mirror_styles():
+    return """
+    <style>
+    .sc-shopify-shell {
+        background: linear-gradient(180deg, #f3f3f4 0%, #eeeeef 100%);
+        border-radius: 22px;
+        padding: 1rem;
+        border: 1px solid rgba(12, 12, 13, 0.08);
+    }
+    .sc-shopify-metrics {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 0.85rem;
+        margin-bottom: 1rem;
+    }
+    .sc-shopify-metric {
+        background: #ffffff;
+        border-radius: 18px;
+        padding: 1rem 1.1rem;
+        border: 1px solid rgba(12, 12, 13, 0.08);
+        box-shadow: 0 8px 22px rgba(12, 12, 13, 0.06);
+    }
+    .sc-shopify-metric-label {
+        color: #6d7175;
+        font-size: 0.82rem;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+        margin-bottom: 0.35rem;
+    }
+    .sc-shopify-metric-value {
+        color: #202223;
+        font-size: 1.5rem;
+        font-weight: 800;
+        line-height: 1.1;
+    }
+    .sc-shopify-metric-subtle {
+        color: #6d7175;
+        font-size: 0.78rem;
+        margin-top: 0.3rem;
+    }
+    .sc-shopify-table-card {
+        background: #ffffff;
+        border-radius: 18px;
+        border: 1px solid rgba(12, 12, 13, 0.08);
+        box-shadow: 0 8px 22px rgba(12, 12, 13, 0.06);
+        overflow: hidden;
+    }
+    .sc-shopify-table-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0.9rem 1rem;
+        border-bottom: 1px solid rgba(12, 12, 13, 0.08);
+        color: #202223;
+        font-weight: 700;
+    }
+    .sc-shopify-batch-pill {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid rgba(12, 12, 13, 0.1);
+        border-radius: 999px;
+        padding: 0.45rem 0.9rem;
+        background: #ffffff;
+        color: #202223;
+        font-size: 0.9rem;
+        font-weight: 700;
+    }
+    .sc-shopify-table-wrap {
+        overflow-x: auto;
+    }
+    table.sc-shopify-table {
+        width: 100%;
+        min-width: 1180px;
+        border-collapse: collapse;
+        color: #202223;
+    }
+    table.sc-shopify-table thead th {
+        text-align: left;
+        padding: 0.9rem 1rem;
+        color: #6d7175;
+        font-size: 0.84rem;
+        font-weight: 700;
+        border-bottom: 1px solid rgba(12, 12, 13, 0.08);
+        background: #ffffff;
+        white-space: nowrap;
+    }
+    table.sc-shopify-table tbody td {
+        padding: 0.95rem 1rem;
+        border-bottom: 1px solid rgba(12, 12, 13, 0.08);
+        vertical-align: top;
+        font-size: 0.96rem;
+    }
+    table.sc-shopify-table tbody tr:hover {
+        background: #f6f6f7;
+    }
+    .sc-shopify-cell-muted {
+        color: #6d7175;
+        font-size: 0.78rem;
+        margin-top: 0.28rem;
+        line-height: 1.35;
+    }
+    .sc-shopify-checkbox {
+        width: 20px;
+        height: 20px;
+        border-radius: 6px;
+        border: 1.5px solid #8c9196;
+        display: inline-block;
+        box-sizing: border-box;
+        background: #ffffff;
+    }
+    .sc-shopify-order-link {
+        color: #005bd3;
+        text-decoration: none;
+        font-weight: 800;
+    }
+    .sc-shopify-order-link:hover {
+        text-decoration: underline;
+    }
+    .sc-shopify-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.38rem;
+        border-radius: 999px;
+        padding: 0.24rem 0.72rem;
+        font-size: 0.84rem;
+        font-weight: 800;
+        white-space: nowrap;
+    }
+    .sc-shopify-badge::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.7;
+    }
+    .sc-shopify-badge-fulfillment-unfulfilled,
+    .sc-shopify-badge-delivery-unfulfilled {
+        background: #ffe066;
+        color: #6b5400;
+    }
+    .sc-shopify-badge-fulfillment-fulfilled,
+    .sc-shopify-badge-delivery-delivered,
+    .sc-shopify-badge-delivery-fulfilled {
+        background: #d8f5d0;
+        color: #0c5132;
+    }
+    .sc-shopify-badge-fulfillment-partially-fulfilled,
+    .sc-shopify-badge-delivery-partially-fulfilled {
+        background: #d9ecff;
+        color: #0a4a8a;
+    }
+    .sc-shopify-badge-payment-paid {
+        background: #ececec;
+        color: #3f4449;
+    }
+    .sc-shopify-badge-payment-partially-paid {
+        background: #d9ecff;
+        color: #0a4a8a;
+    }
+    .sc-shopify-badge-payment-refunded,
+    .sc-shopify-badge-payment-voided,
+    .sc-shopify-badge-fulfillment-cancelled,
+    .sc-shopify-badge-delivery-cancelled {
+        background: #ffe0e0;
+        color: #8a1f1f;
+    }
+    .sc-shopify-badge-fulfillment-open,
+    .sc-shopify-badge-payment-pending,
+    .sc-shopify-badge-delivery-open {
+        background: #f1f2f3;
+        color: #4a4f55;
+    }
+    .sc-shopify-badge-edition-assigned {
+        background: #d8f5d0;
+        color: #0c5132;
+    }
+    .sc-shopify-badge-edition-needs-attention,
+    .sc-shopify-badge-edition-needs-sync {
+        background: #fff0c2;
+        color: #6b5400;
+    }
+    .sc-shopify-pagination-note {
+        color: #6d7175;
+        font-size: 0.82rem;
+        text-align: center;
+        padding-top: 0.4rem;
+    }
+    @media (max-width: 1100px) {
+        .sc-shopify-metrics {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+    </style>
+    """
+
+
+def _shopify_orders_mirror_query(search_text, quick_filter):
+    tokens = []
+    filter_token = {
+        "All": "",
+        "Unfulfilled": "fulfillment_status:unfulfilled",
+        "Paid": "financial_status:paid",
+        "Fulfilled": "fulfillment_status:fulfilled",
+        "Cancelled": "status:cancelled",
+    }.get(str(quick_filter or "All"), "")
+    if filter_token:
+        tokens.append(filter_token)
+    cleaned_search = str(search_text or "").strip()
+    if cleaned_search:
+        tokens.append(cleaned_search)
+    return " ".join(token for token in tokens if token).strip()
+
+
+def _parse_iso_datetime(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _format_shopify_mirror_date(value):
+    parsed = _parse_iso_datetime(value)
+    if not parsed:
+        return "-"
+    local_value = parsed.astimezone()
+    today = datetime.now().astimezone().date()
+    if local_value.date() == today:
+        prefix = "Today"
+    elif local_value.date() == today - timedelta(days=1):
+        prefix = "Yesterday"
+    else:
+        prefix = local_value.strftime("%d %b")
+    return f"{prefix} at {local_value.strftime('%I:%M %p').lstrip('0').lower()}"
+
+
+def _humanize_shopify_status_text(value, fallback="-"):
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return fallback
+    return cleaned.replace("_", " ").replace("-", " ").title()
+
+
+def _status_slug(value):
+    return re.sub(r"[^a-z0-9]+", "-", str(value or "").lower()).strip("-") or "open"
+
+
+def _live_order_line_item_id(order, line_item, index):
+    return str(
+        line_item.get("shopify_line_item_id")
+        or line_item.get("id")
+        or f"{order.get('shopify_order_id') or 'order'}:line:{index}"
+    ).strip()
+
+
+def _live_order_item_count(order):
+    total = 0
+    for line_item in order.get("line_items") or []:
+        total += max(1, int(line_item.get("quantity") or 1))
+    return total
+
+
+def _live_order_item_note(order):
+    titles = []
+    seen = set()
+    for line_item in order.get("line_items") or []:
+        title = str(line_item.get("product_title") or line_item.get("title") or "").strip()
+        if not title:
+            continue
+        token = title.casefold()
+        if token in seen:
+            continue
+        seen.add(token)
+        titles.append(title)
+    if not titles:
+        return "No product titles"
+    if len(titles) == 1:
+        return titles[0]
+    return f"{titles[0]} +{len(titles) - 1} more"
+
+
+def _live_order_assignment_summary(order, assignment_snapshot):
+    assigned = 0
+    needs_attention = 0
+    pending_sync = 0
+    for index, line_item in enumerate(order.get("line_items") or [], start=1):
+        line_item_id = _live_order_line_item_id(order, line_item, index)
+        snapshot = assignment_snapshot.get(line_item_id) or {}
+        assignments = snapshot.get("assignments") or []
+        if assignments:
+            assigned += len(assignments)
+            continue
+        status = str(snapshot.get("assignment_status") or "").strip()
+        if status in {"Error", "Product Not Found", "Needs Edition Setup", "Sold Out"}:
+            needs_attention += max(1, int(line_item.get("quantity") or 1))
+        else:
+            pending_sync += max(1, int(line_item.get("quantity") or 1))
+    if assigned and not needs_attention and not pending_sync:
+        return {
+            "label": f"Editions assigned x{assigned}",
+            "class_name": "assigned",
+        }
+    if needs_attention:
+        return {
+            "label": f"Needs attention x{needs_attention}",
+            "class_name": "needs-attention",
+        }
+    if pending_sync:
+        return {
+            "label": f"Needs Sports Cave sync x{pending_sync}",
+            "class_name": "needs-sync",
+        }
+    return {
+        "label": "No edition checks yet",
+        "class_name": "needs-sync",
+    }
+
+
+def _format_shopify_total(order):
+    amount = str(order.get("total_price") or "").strip()
+    if not amount:
+        return "-"
+    currency = str(order.get("currency") or "").strip().upper()
+    symbol = "$" if currency in {"AUD", "USD", "CAD", "NZD", "SGD"} else f"{currency} "
+    try:
+        return f"{symbol}{float(amount):,.2f}"
+    except ValueError:
+        return f"{symbol}{amount}"
+
+
+def _shopify_orders_visible_metrics(orders):
+    orders_total = len(orders)
+    items_total = sum(_live_order_item_count(order) for order in orders)
+    refunded_total = sum(
+        1
+        for order in orders
+        if any(token in str(order.get("financial_status") or "").upper() for token in ("REFUND", "VOID"))
+    )
+    fulfilled_total = sum(
+        1 for order in orders if "FULFILLED" in str(order.get("fulfillment_status") or "").upper()
+    )
+    delivered_total = sum(
+        1 for order in orders if "DELIVERED" in str(order.get("fulfillment_status") or "").upper()
+    ) or fulfilled_total
+    return {
+        "orders": orders_total,
+        "items": items_total,
+        "returns": refunded_total,
+        "fulfilled": fulfilled_total,
+        "delivered": delivered_total,
+    }
+
+
+def _render_shopify_orders_metrics(orders):
+    metrics = _shopify_orders_visible_metrics(orders)
+    metric_cards = [
+        ("Live window", "50 orders", "Direct from Shopify"),
+        ("Orders", str(metrics["orders"]), "Visible on this page"),
+        ("Items ordered", str(metrics["items"]), "Current page total"),
+        ("Returns", str(metrics["returns"]), "Refunded / voided"),
+        ("Orders fulfilled", str(metrics["fulfilled"]), f"Delivered {metrics['delivered']}"),
+    ]
+    cards_html = "".join(
+        f"""
+        <div class="sc-shopify-metric">
+            <div class="sc-shopify-metric-label">{html.escape(label)}</div>
+            <div class="sc-shopify-metric-value">{html.escape(value)}</div>
+            <div class="sc-shopify-metric-subtle">{html.escape(subtle)}</div>
+        </div>
+        """
+        for label, value, subtle in metric_cards
+    )
+    return f'<div class="sc-shopify-shell"><div class="sc-shopify-metrics">{cards_html}</div></div>'
+
+
+def _render_shopify_orders_mirror_table(orders, assignment_snapshot):
+    rows_html = []
+    for order in orders:
+        fulfillment_label = _humanize_shopify_status_text(order.get("fulfillment_status"), "Open")
+        payment_label = _humanize_shopify_status_text(order.get("financial_status"), "Pending")
+        fulfillment_slug = _status_slug(fulfillment_label)
+        payment_slug = _status_slug(payment_label)
+        delivery_label = (
+            "Delivered"
+            if "DELIVERED" in str(order.get("fulfillment_status") or "").upper()
+            else fulfillment_label
+        )
+        delivery_slug = _status_slug(delivery_label)
+        item_count = _live_order_item_count(order)
+        edition_summary = _live_order_assignment_summary(order, assignment_snapshot)
+        order_label = str(order.get("order_name") or order.get("shopify_order_id") or "Order").strip()
+        order_link = str(order.get("admin_url") or "").strip()
+        order_html = (
+            f'<a class="sc-shopify-order-link" href="{html.escape(order_link, quote=True)}" target="_blank" rel="noreferrer">{html.escape(order_label)}</a>'
+            if order_link
+            else f'<span class="sc-shopify-order-link">{html.escape(order_label)}</span>'
+        )
+        customer_text = customer_display_name(order.get("customer_name") or order.get("customer_email"))
+        channel_text = str(order.get("channel_name") or "Online Store").strip()
+        delivery_method = str(order.get("shipping_method") or order.get("shipping_title") or "Standard shipping").strip()
+        rows_html.append(
+            f"""
+            <tr>
+                <td><span class="sc-shopify-checkbox" aria-hidden="true"></span></td>
+                <td>
+                    {order_html}
+                    <div class="sc-shopify-cell-muted">{html.escape(_live_order_item_note(order))}</div>
+                </td>
+                <td>{html.escape(_format_shopify_mirror_date(order.get('processed_at') or order.get('created_at')))}</td>
+                <td>
+                    {html.escape(customer_text)}
+                    <div class="sc-shopify-cell-muted">{html.escape(str(order.get('customer_email') or '').strip() or 'Customer email hidden')}</div>
+                </td>
+                <td><span class="sc-shopify-badge sc-shopify-badge-fulfillment-{fulfillment_slug}">{html.escape(fulfillment_label)}</span></td>
+                <td>{html.escape(_format_shopify_total(order))}</td>
+                <td>{html.escape(channel_text)}</td>
+                <td><span class="sc-shopify-badge sc-shopify-badge-payment-{payment_slug}">{html.escape(payment_label)}</span></td>
+                <td>
+                    {html.escape(f"{item_count} item" + ("" if item_count == 1 else "s"))}
+                    <div class="sc-shopify-cell-muted">
+                        <span class="sc-shopify-badge sc-shopify-badge-edition-{html.escape(edition_summary['class_name'])}">{html.escape(edition_summary['label'])}</span>
+                    </div>
+                </td>
+                <td><span class="sc-shopify-badge sc-shopify-badge-delivery-{delivery_slug}">{html.escape(delivery_label)}</span></td>
+                <td>{html.escape(delivery_method)}</td>
+            </tr>
+            """
+        )
+    return f"""
+    <div class="sc-shopify-shell">
+        <div class="sc-shopify-table-card">
+            <div class="sc-shopify-table-toolbar">
+                <span>Orders</span>
+                <span class="sc-shopify-batch-pill">Batch unfulfilled orders</span>
+            </div>
+            <div class="sc-shopify-table-wrap">
+                <table class="sc-shopify-table">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th>Order</th>
+                            <th>Date</th>
+                            <th>Customer</th>
+                            <th>Fulfillment status</th>
+                            <th>Total</th>
+                            <th>Channel</th>
+                            <th>Payment status</th>
+                            <th>Items</th>
+                            <th>Delivery status</th>
+                            <th>Delivery method</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {''.join(rows_html)}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    """
+
+
+def _sync_visible_shopify_orders_into_sports_cave(orders):
+    orders_checked = 0
+    assignments_created = 0
+    already_assigned = 0
+    errors = []
+    for order in orders or []:
+        try:
+            result = supabase_backend.process_paid_order(
+                order,
+                generate_certificates=False,
+                sync_product_metafields=False,
+            )
+            orders_checked += 1
+            assignments_created += int(result.get("assignments_created") or 0)
+            already_assigned += int(result.get("existing_assignments_skipped") or 0)
+            if result.get("errors"):
+                errors.extend(result["errors"])
+        except Exception as error:
+            errors.append(str(error))
+    return {
+        "orders_checked": orders_checked,
+        "assignments_created": assignments_created,
+        "already_assigned": already_assigned,
+        "errors": errors,
+    }
+
+
 def _order_fetch_message_from_error(error):
     message = str(error or "").strip()
     lowered = message.lower()
@@ -4249,6 +4757,161 @@ def _order_fetch_message_from_error(error):
             "Orders require read_orders scope. Add read_orders in Shopify Dev Dashboard, release the app version, approve permissions, then redeploy Render.",
         )
     return ("caption", "Showing saved orders. Latest Shopify refresh failed.")
+
+
+def render_shopify_orders_mirror_page():
+    st.title("Orders")
+    st.caption("Live mirror from Shopify. Sports Cave only overlays edition allocation state from Limited Editions.")
+    st.markdown(_shopify_orders_mirror_styles(), unsafe_allow_html=True)
+
+    config = shopify_sync.get_config()
+    if not st.session_state.get("shopify-orders-mirror-defaults-v1"):
+        st.session_state["shopify-orders-mirror-defaults-v1"] = True
+        st.session_state["shopify-orders-mirror-search"] = ""
+        st.session_state["shopify-orders-mirror-filter"] = "All"
+        st.session_state["shopify-orders-mirror-cursor"] = ""
+        st.session_state["shopify-orders-mirror-cursor-stack"] = []
+        st.session_state["shopify-orders-mirror-refresh"] = 0
+        st.session_state["shopify-orders-mirror-overlay-refresh"] = 0
+
+    notice = st.session_state.pop("shopify_orders_mirror_notice", None)
+    if notice:
+        st.success(notice)
+    warning = st.session_state.pop("shopify_orders_mirror_warning", None)
+    if warning:
+        st.warning(warning)
+
+    if not config["configured"]:
+        st.warning("Shopify Orders mirror is not configured yet.")
+        render_shopify_scope_diagnostics(config, "orders-mirror")
+        return
+
+    admin_orders_url = shopify_sync.build_orders_admin_url(config.get("store_domain"))
+    actions = st.columns([0.95, 1.1, 1.2, 1.6])
+    refresh_clicked = actions[0].button("Refresh Shopify Mirror", type="primary", use_container_width=True)
+    sync_visible_clicked = actions[1].button(
+        "Sync Sports Cave Editions",
+        disabled=not supabase_backend.is_configured(),
+        use_container_width=True,
+    )
+    if admin_orders_url:
+        actions[2].link_button("Open Real Shopify Orders", admin_orders_url, use_container_width=True)
+    else:
+        actions[2].caption("Shopify admin link unavailable.")
+    actions[3].caption("Use the real Shopify admin button for the exact Shopify page. This screen mirrors it live inside Sports Cave OS.")
+
+    filters = st.columns([0.7, 2.4])
+    quick_filter = filters[0].selectbox(
+        "View",
+        ("All", "Unfulfilled", "Paid", "Fulfilled", "Cancelled"),
+        key="shopify-orders-mirror-filter",
+    )
+    search_text = filters[1].text_input(
+        "Search and filter",
+        placeholder="Search and filter",
+        key="shopify-orders-mirror-search",
+    )
+
+    filter_signature = json.dumps({"search": search_text.strip().lower(), "filter": quick_filter})
+    if st.session_state.get("shopify-orders-mirror-filter-signature") != filter_signature:
+        st.session_state["shopify-orders-mirror-filter-signature"] = filter_signature
+        st.session_state["shopify-orders-mirror-cursor"] = ""
+        st.session_state["shopify-orders-mirror-cursor-stack"] = []
+
+    if refresh_clicked:
+        st.session_state["shopify-orders-mirror-refresh"] = int(
+            st.session_state.get("shopify-orders-mirror-refresh", 0)
+        ) + 1
+        st.session_state["shopify-orders-mirror-cursor"] = ""
+        st.session_state["shopify-orders-mirror-cursor-stack"] = []
+
+    current_cursor = st.session_state.get("shopify-orders-mirror-cursor") or ""
+    search_query = _shopify_orders_mirror_query(search_text, quick_filter)
+    try:
+        with st.spinner("Loading live Shopify orders..."):
+            live_page = cached_shopify_orders_mirror_page(
+                search_query,
+                current_cursor,
+                int(st.session_state.get("shopify-orders-mirror-refresh", 0) or 0),
+            )
+            orders = live_page.get("orders") or []
+    except Exception as error:
+        level, text = _order_fetch_message_from_error(error)
+        if level == "warning":
+            st.warning(text)
+        else:
+            st.warning("Live Shopify orders could not be loaded right now.")
+            st.caption(text)
+        render_shopify_scope_diagnostics(config, "orders-mirror")
+        return
+
+    if sync_visible_clicked and orders:
+        with st.spinner("Syncing visible Shopify orders into Sports Cave editions..."):
+            result = _sync_visible_shopify_orders_into_sports_cave(orders)
+        st.session_state["shopify-orders-mirror-overlay-refresh"] = int(
+            st.session_state.get("shopify-orders-mirror-overlay-refresh", 0)
+        ) + 1
+        bump_supabase_cache_version("orders", "order-summary", "sync-state")
+        st.session_state.shopify_orders_mirror_notice = (
+            f"Checked {result['orders_checked']} live Shopify orders. "
+            f"Created {result['assignments_created']} new edition assignments. "
+            f"Skipped {result['already_assigned']} assignments that were already saved."
+        )
+        if result["errors"]:
+            st.session_state.shopify_orders_mirror_warning = (
+                f"Live mirror synced with warnings. First issue: {result['errors'][0]}"
+            )
+        st.rerun()
+
+    if not orders:
+        st.info("No Shopify orders matched the current live filters.")
+        return
+
+    line_item_ids = tuple(
+        _live_order_line_item_id(order, line_item, index)
+        for order in orders
+        for index, line_item in enumerate(order.get("line_items") or [], start=1)
+    )
+    assignment_snapshot = {}
+    if supabase_backend.is_configured() and line_item_ids:
+        try:
+            assignment_snapshot = cached_order_line_assignment_snapshot(
+                line_item_ids,
+                int(st.session_state.get("shopify-orders-mirror-overlay-refresh", 0) or 0),
+            )
+        except Exception:
+            assignment_snapshot = {}
+
+    st.markdown(_render_shopify_orders_metrics(orders), unsafe_allow_html=True)
+    st.markdown(_render_shopify_orders_mirror_table(orders, assignment_snapshot), unsafe_allow_html=True)
+
+    pager = st.columns([0.9, 0.9, 2.2])
+    previous_clicked = pager[0].button(
+        "Previous 50",
+        disabled=not st.session_state.get("shopify-orders-mirror-cursor-stack"),
+        use_container_width=True,
+    )
+    next_clicked = pager[1].button(
+        "Next 50",
+        disabled=not live_page.get("has_next_page"),
+        use_container_width=True,
+    )
+    pager[2].caption(
+        f"Showing {len(orders)} live Shopify orders from this page. "
+        "Search and filter are sent straight to Shopify instead of loading saved order rows."
+    )
+
+    if previous_clicked:
+        cursor_stack = list(st.session_state.get("shopify-orders-mirror-cursor-stack") or [])
+        st.session_state["shopify-orders-mirror-cursor"] = cursor_stack.pop() if cursor_stack else ""
+        st.session_state["shopify-orders-mirror-cursor-stack"] = cursor_stack
+        st.rerun()
+    if next_clicked:
+        cursor_stack = list(st.session_state.get("shopify-orders-mirror-cursor-stack") or [])
+        cursor_stack.append(current_cursor)
+        st.session_state["shopify-orders-mirror-cursor-stack"] = cursor_stack
+        st.session_state["shopify-orders-mirror-cursor"] = live_page.get("end_cursor") or ""
+        st.rerun()
 
 
 def render_supabase_orders_page():
@@ -4540,105 +5203,7 @@ def render_certificate_actions(assignments, key_prefix):
 
 
 def render_orders_page():
-    if supabase_backend.is_configured():
-        render_supabase_orders_page()
-        return
-    if not allow_local_sqlite_fallback():
-        render_supabase_required_notice("Orders")
-        return
-    st.title("Orders")
-    render_local_cache_notice()
-    st.caption(
-        "Edition numbers now lead the page. Each order stays on one row, but the product name and required edition number are split so the edition is easy to spot."
-    )
-    st.markdown(_orders_page_styles(), unsafe_allow_html=True)
-    config = shopify_sync.get_config()
-    order_summary = db.get_shopify_order_summary()
-    notice = st.session_state.pop("orders_notice", None)
-    warning = st.session_state.pop("orders_warning", None)
-    if notice:
-        st.success(notice)
-    if warning:
-        st.warning(warning)
-    if not st.session_state.get("local-orders-defaults-v2-applied"):
-        st.session_state["local-orders-page-size"] = 60
-        st.session_state["local-orders-defaults-v2-applied"] = True
-
-    search = st.text_input(
-        "Search orders",
-        placeholder="Search order, customer, product, SKU, or edition number",
-        key="orders-search",
-        label_visibility="collapsed",
-    )
-
-    toolbar = st.columns([1.0, 1.05, 0.9])
-    fetch_clicked = toolbar[0].button(
-        "Sync New Orders",
-        type="primary",
-        disabled=not config["configured"],
-        use_container_width=True,
-    )
-    status_filter = toolbar[1].selectbox(
-        "Filter",
-        ["All", "Needs Edition", "Assigned", "Paid", "Unfulfilled", "Error", "Sold Out Issue"],
-    )
-    page_size = toolbar[2].selectbox(
-        "Rows",
-        (60, 80, 100),
-        index=0,
-        key="local-orders-page-size",
-    )
-
-    st.caption(
-        "Last fetched: "
-        + (format_updated_at(order_summary["last_synced_at"]) if order_summary["last_synced_at"] else "Never")
-        + f" | {order_summary['total']} saved | {order_summary['needs_assignment']} need editions | {order_summary['assigned_today']} assigned today"
-    )
-
-    if not config["configured"]:
-        st.caption("Order sync is not configured. Saved orders remain visible.")
-
-    if fetch_clicked:
-        try:
-            result = fetch_latest_orders(config)
-            st.session_state.orders_notice = (
-                f"Synced {result['orders_seen']} Shopify orders. Saved orders remain visible. Assigned "
-                f"{result['assignments_created']} edition number"
-                f"{'s' if result['assignments_created'] != 1 else ''}."
-            )
-            if result["sync_warning"]:
-                st.session_state.orders_warning = result["sync_warning"]
-            st.rerun()
-        except Exception:
-            if order_summary["total"]:
-                st.warning("Order sync failed. Saved orders are still shown.")
-            else:
-                st.warning("Order sync failed. Saved orders will appear here after the first successful sync.")
-            st.caption("Order sync is unavailable right now, so the saved order list is staying visible.")
-
-    with st.expander("Order totals", expanded=False):
-        metrics = st.columns(3)
-        metrics[0].metric("Saved orders", order_summary["total"])
-        metrics[1].metric("Needs edition", order_summary["needs_assignment"])
-        metrics[2].metric("Assigned today", order_summary["assigned_today"])
-
-    orders = db.list_shopify_orders(
-        search=search,
-        status_filter=status_filter,
-        limit=page_size,
-    )
-    if not orders:
-        if not order_summary["last_synced_at"]:
-            st.info("No saved orders yet. Use Sync New Orders to bring in recent Shopify orders.")
-        else:
-            st.info("No saved orders match these filters. Use Sync New Orders when you are ready.")
-        return
-
-    st.markdown('<div class="sc-orders-section-label">Order workspace</div>', unsafe_allow_html=True)
-    st.caption(
-        f"Showing {len(orders)} saved orders. The edition number has its own column so you can scan the required allocation first."
-    )
-    _render_compact_orders_feed(_build_local_order_summaries(orders))
+    render_shopify_orders_mirror_page()
 
 
 def normalize_psd_handle_guess(value):

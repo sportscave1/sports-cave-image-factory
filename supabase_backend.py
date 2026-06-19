@@ -2711,6 +2711,54 @@ def list_existing_shopify_order_ids(order_ids):
             return {str(row.get("shopify_order_id") or "").strip() for row in cur.fetchall() if row.get("shopify_order_id")}
 
 
+def get_order_line_assignment_snapshot(line_item_ids):
+    ensure_order_read_schema()
+    values = [str(line_item_id or "").strip() for line_item_id in (line_item_ids or []) if str(line_item_id or "").strip()]
+    if not values:
+        return {}
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    li.shopify_line_item_id,
+                    COALESCE(li.assignment_status, '') AS assignment_status,
+                    COALESCE(li.last_error, '') AS last_error,
+                    COALESCE(
+                        json_agg(
+                            json_build_object(
+                                'id', eo.id,
+                                'edition_order_id', eo.id,
+                                'edition_number', eo.edition_number,
+                                'allocation_index', eo.allocation_index,
+                                'shopify_handle', eo.shopify_handle,
+                                'product_title', eo.product_title,
+                                'certificate_status', COALESCE(c.status, eo.certificate_status, '')
+                            )
+                            ORDER BY eo.allocation_index
+                        ) FILTER (WHERE eo.id IS NOT NULL),
+                        '[]'::json
+                    ) AS assignments
+                FROM shopify_order_lines li
+                LEFT JOIN edition_orders eo ON eo.shopify_line_item_id = li.shopify_line_item_id
+                LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
+                WHERE li.shopify_line_item_id = ANY(%s)
+                GROUP BY li.shopify_line_item_id, li.assignment_status, li.last_error
+                """,
+                (values,),
+            )
+            rows = cur.fetchall()
+    return {
+        str(row.get("shopify_line_item_id") or "").strip(): {
+            "assignment_status": str(row.get("assignment_status") or "").strip(),
+            "last_error": str(row.get("last_error") or "").strip(),
+            "assignments": row.get("assignments") or [],
+        }
+        for row in rows
+        if str(row.get("shopify_line_item_id") or "").strip()
+    }
+
+
 def get_app_setting(key, default=None):
     ensure_schema()
     with connect() as conn:

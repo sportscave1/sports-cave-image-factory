@@ -332,6 +332,12 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(order["customer_email"], "fallback@example.com")
         self.assertEqual(order["customer_id"], "fallback@example.com")
 
+    def test_build_orders_admin_url_targets_shopify_orders_index(self):
+        self.assertEqual(
+            shopify_sync.build_orders_admin_url("sports-cave.myshopify.com"),
+            "https://admin.shopify.com/store/sports-cave/orders",
+        )
+
     def test_normalize_order_prefers_shopify_customer_identity(self):
         order = shopify_sync.normalize_order(
             {
