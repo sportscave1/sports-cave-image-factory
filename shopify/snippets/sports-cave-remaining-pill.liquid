@@ -1,32 +1,52 @@
 {%- liquid
-  assign sc_enabled = product.metafields.sports_cave.edition_enabled.value
-  assign sc_enabled_text = sc_enabled | append: ''
+  assign sc_enabled_raw = product.metafields.sports_cave.edition_enabled.value
+  assign sc_enabled_text = sc_enabled_raw | append: '' | downcase | strip
+  assign sc_is_enabled = false
+  assign sc_placement_mode = placement_mode | default: block.settings.placement_mode | default: 'inline' | downcase | strip
+
+  if sc_placement_mode != 'overlay_price'
+    assign sc_placement_mode = 'inline'
+  endif
+
+  if sc_enabled_raw == true or sc_enabled_text == 'true' or sc_enabled_text == '1' or sc_enabled_text == 'yes'
+    assign sc_is_enabled = true
+  endif
+
   assign edition_total = product.metafields.sports_cave.edition_total.value | default: 0 | plus: 0
-  assign qty = product.metafields.sports_cave.edition_remaining.value | default: 0 | plus: 0
+  assign edition_next_number = product.metafields.sports_cave.edition_next_number.value | default: 0 | plus: 0
+  assign edition_remaining_raw = product.metafields.sports_cave.edition_remaining.value | default: blank
+  assign qty = edition_remaining_raw | default: 0 | plus: 0
+
+  if qty <= 0 and edition_total > 0 and edition_next_number > 0
+    assign qty = edition_total | minus: edition_next_number | plus: 1
+  endif
+
+  if qty < 0
+    assign qty = 0
+  endif
+
   assign label = ''
   assign state = 'hidden'
   assign sc_section_id = section.id | default: 'section'
   assign sc_product_id = product.id | default: 'product'
   assign sc_urg_id = 'scx-urg-' | append: sc_section_id | append: '-' | append: sc_product_id
 
-  if sc_enabled == true or sc_enabled_text == 'true'
-    if edition_total > 0 and qty > 0
-      if qty == 1
-        assign label = 'Final 1 of ' | append: edition_total | append: ' remaining'
-        assign state = 'final'
-      elsif qty >= 2 and qty <= 3
-        assign label = 'Final ' | append: qty | append: ' of ' | append: edition_total | append: ' remaining'
-        assign state = 'final'
-      elsif qty >= 4 and qty <= 6
-        assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
-        assign state = 'low'
-      elsif qty >= 7 and qty <= 12
-        assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
-        assign state = 'count'
-      elsif qty >= 13
-        assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
-        assign state = 'standard'
-      endif
+  if sc_is_enabled and edition_total > 0 and qty > 0
+    if qty == 1
+      assign label = 'Final 1 of ' | append: edition_total | append: ' remaining'
+      assign state = 'final'
+    elsif qty >= 2 and qty <= 3
+      assign label = 'Final ' | append: qty | append: ' of ' | append: edition_total | append: ' remaining'
+      assign state = 'final'
+    elsif qty >= 4 and qty <= 6
+      assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
+      assign state = 'low'
+    elsif qty >= 7 and qty <= 12
+      assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
+      assign state = 'count'
+    elsif qty >= 13
+      assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
+      assign state = 'standard'
     endif
   endif
 -%}
@@ -34,10 +54,11 @@
 {%- if state != 'hidden' -%}
   <div
     id="{{ sc_urg_id }}"
-    class="scx-urg-rail"
+    class="scx-urg-rail scx-urg-rail--{{ sc_placement_mode }}"
     aria-label="Limited run availability"
     data-urg-state="{{ state }}"
     data-edition-total="{{ edition_total }}"
+    data-placement-mode="{{ sc_placement_mode }}"
   >
     <div class="scx-urg" aria-live="off">
       <span class="scx-urg__badge" data-scx-urg-badge>
@@ -62,15 +83,38 @@
       --urg-inset-x:6px;
       --urg-top:-2px;
       position:relative!important;
-      height:0!important;
       overflow:visible!important;
-      pointer-events:none!important;
       z-index:20!important;
       font-family:"Montserrat",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
       -webkit-font-smoothing:antialiased;
     }
 
-    #{{ sc_urg_id }} .scx-urg{
+    #{{ sc_urg_id }}.scx-urg-rail--inline{
+      display:flex!important;
+      justify-content:flex-start!important;
+      width:100%!important;
+      height:auto!important;
+      min-height:36px!important;
+      margin:8px 0 14px!important;
+      pointer-events:auto!important;
+    }
+
+    #{{ sc_urg_id }}.scx-urg-rail--overlay_price{
+      height:0!important;
+      pointer-events:none!important;
+    }
+
+    #{{ sc_urg_id }}.scx-urg-rail--inline .scx-urg{
+      position:relative!important;
+      right:auto!important;
+      top:auto!important;
+      display:flex!important;
+      align-items:center!important;
+      justify-content:flex-start!important;
+      max-width:100%!important;
+    }
+
+    #{{ sc_urg_id }}.scx-urg-rail--overlay_price .scx-urg{
       position:absolute!important;
       right:var(--urg-inset-x)!important;
       top:var(--urg-top)!important;
@@ -186,7 +230,7 @@
         --urg-top:-2px;
       }
 
-      #{{ sc_urg_id }} .scx-urg{
+      #{{ sc_urg_id }}.scx-urg-rail--overlay_price .scx-urg{
         max-width:246px!important;
       }
 
@@ -209,7 +253,7 @@
     }
 
     @media(max-width:390px){
-      #{{ sc_urg_id }} .scx-urg{
+      #{{ sc_urg_id }}.scx-urg-rail--overlay_price .scx-urg{
         max-width:224px!important;
       }
 
@@ -226,7 +270,7 @@
     }
 
     @media(max-width:350px){
-      #{{ sc_urg_id }} .scx-urg{
+      #{{ sc_urg_id }}.scx-urg-rail--overlay_price .scx-urg{
         max-width:202px!important;
       }
 
@@ -255,8 +299,9 @@
       root.dataset.bound = '1';
       var badgeEl = root.querySelector('[data-scx-urg-badge]');
       var textEl = root.querySelector('[data-scx-urg-text]');
-      var anchor = root.closest('.price') || root.closest('.price__container') || root.closest('.price-item') || document.querySelector('.price') || document.querySelector('.price__container') || root.parentElement;
-      if(anchor){
+      var isOverlay = root.classList.contains('scx-urg-rail--overlay_price');
+      var anchor = isOverlay ? root.closest('.price') || root.closest('.price__container') || root.closest('.price-item') || document.querySelector('.price') || document.querySelector('.price__container') || root.parentElement : root.parentElement;
+      if(isOverlay && anchor){
         if(!anchor.style.position) anchor.style.position = 'relative';
         anchor.style.overflow = 'visible';
       }
