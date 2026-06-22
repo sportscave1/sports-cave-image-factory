@@ -500,8 +500,8 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(result["synced"], 7)
         self.assertEqual(result["failed"], 0)
         self.assertEqual(len(requests_seen), 2)
-        self.assertEqual(len(requests_seen[0]["variables"]["metafields"]), 25)
-        self.assertEqual(len(requests_seen[1]["variables"]["metafields"]), 10)
+        self.assertEqual(len(requests_seen[0]["variables"]["metafields"]), 20)
+        self.assertEqual(len(requests_seen[1]["variables"]["metafields"]), 8)
 
     def test_edition_ops_metafield_definition_check_and_create_missing(self):
         requests_seen = []
@@ -650,13 +650,11 @@ class ShopifySyncClientTests(unittest.TestCase):
                 "edition_enabled",
                 "edition_total",
                 "edition_next_number",
-                "edition_status_override",
                 "edition_label",
             },
         )
         self.assertEqual(keys["edition_enabled"]["type"], "boolean")
         self.assertEqual(keys["edition_enabled"]["value"], "true")
-        self.assertEqual(keys["edition_status_override"]["value"], " ")
         self.assertNotIn("remaining_count", keys)
         self.assertNotIn("sold_count", keys)
         self.assertEqual(result["edition"]["remaining"], 3)

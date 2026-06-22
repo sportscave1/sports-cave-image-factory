@@ -8520,7 +8520,7 @@ def render_settings_page(app_version, database_path, password_status):
     with st.expander("Developer Tools", expanded=False):
         dev_tabs = st.tabs([
             "Shopify Diagnostics",
-            "Edition Ops Setup",
+            "Shopify Limited Edition Setup",
             "Sync Tools",
             "Metafield Bridge",
             "Product Assets / PSD Links",
@@ -8530,10 +8530,11 @@ def render_settings_page(app_version, database_path, password_status):
             st.caption("Manual Shopify connection check. This only runs a token/API test when you click the button.")
             render_shopify_scope_diagnostics(shopify_config, "settings-dev")
         with dev_tabs[1]:
-            st.caption("Developer-only setup for the Shopify product fields used by Edition Ops.")
+            st.subheader("Shopify Limited Edition Setup")
+            st.caption("Developer-only setup for the Shopify product metafields used by Edition Ops.")
             setup_cols = st.columns([1, 1, 2])
             if setup_cols[0].button(
-                "Check Metafield Definitions",
+                "Check Product Metafield Definitions",
                 key="settings-edition-ops-check-definitions",
                 disabled=not shopify_config["configured"],
                 use_container_width=True,
@@ -8546,7 +8547,7 @@ def render_settings_page(app_version, database_path, password_status):
                     st.error("Could not check Edition Ops definitions.")
                     st.exception(error)
             if setup_cols[1].button(
-                "Create Missing Metafield Definitions",
+                "Create Missing Product Metafield Definitions",
                 key="settings-edition-ops-create-definitions",
                 disabled=not shopify_config["configured"],
                 use_container_width=True,

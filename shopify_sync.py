@@ -1233,7 +1233,7 @@ def limited_edition_metafield_inputs(product_id, values):
         1,
     )
     status_override = str(values.get("edition_status_override") or "").strip()
-    return [
+    inputs = [
         _metafield_input(
             owner_id,
             "edition_enabled",
@@ -1244,18 +1244,22 @@ def limited_edition_metafield_inputs(product_id, values):
         _metafield_input(owner_id, "edition_next_number", "number_integer", edition_next_number),
         _metafield_input(
             owner_id,
-            "edition_status_override",
-            "single_line_text_field",
-            status_override or " ",
-        ),
-        _metafield_input(
-            owner_id,
             "edition_label",
             "single_line_text_field",
             str(values.get("edition_label") or LIMITED_EDITION_DEFAULTS["edition_label"]).strip()
             or LIMITED_EDITION_DEFAULTS["edition_label"],
         ),
     ]
+    if status_override:
+        inputs.append(
+            _metafield_input(
+                owner_id,
+                "edition_status_override",
+                "single_line_text_field",
+                status_override,
+            )
+        )
+    return inputs
 
 
 def save_limited_edition_metafields(product_id, values, config=None, request_post=None):

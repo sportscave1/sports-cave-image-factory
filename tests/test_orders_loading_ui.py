@@ -2,6 +2,7 @@ from pathlib import Path
 import unittest
 
 import edition_ops
+import shopify_sync
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,9 +54,34 @@ class EditionOpsUiTests(unittest.TestCase):
     def test_developer_keeps_edition_ops_metafield_setup(self):
         source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
 
-        self.assertIn('"Edition Ops Setup"', source)
-        self.assertIn("Check Metafield Definitions", source)
-        self.assertIn("Create Missing Metafield Definitions", source)
+        self.assertIn('"Shopify Limited Edition Setup"', source)
+        self.assertIn("Check Product Metafield Definitions", source)
+        self.assertIn("Create Missing Product Metafield Definitions", source)
+
+    def test_blank_status_override_is_auto_and_not_written_to_shopify(self):
+        blank_inputs = shopify_sync.limited_edition_metafield_inputs(
+            "gid://shopify/Product/1",
+            {
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 65,
+                "edition_label": "Numbered Edition",
+                "edition_status_override": "",
+            },
+        )
+        override_inputs = shopify_sync.limited_edition_metafield_inputs(
+            "gid://shopify/Product/1",
+            {
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 65,
+                "edition_label": "Numbered Edition",
+                "edition_status_override": "Final Editions",
+            },
+        )
+
+        self.assertNotIn("edition_status_override", {item["key"] for item in blank_inputs})
+        self.assertIn("edition_status_override", {item["key"] for item in override_inputs})
 
     def test_edition_ops_export_uses_required_csv_columns(self):
         row = edition_ops._normalise_row(
