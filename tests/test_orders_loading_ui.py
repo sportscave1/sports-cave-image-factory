@@ -142,7 +142,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual([row["edition"] for row in rows], ["#050", "#051"])
         self.assertTrue(all("qty" not in {column.lower() for column in orders_page.VISIBLE_COLUMNS} for _ in rows))
 
-    def test_orders_page_uses_product_next_number_when_no_saved_allocation(self):
+    def test_orders_page_does_not_use_product_next_number_when_no_saved_allocation(self):
         order = {
             "order_name": "#SC1235",
             "processed_at": "2026-06-22T10:00:00Z",
@@ -161,7 +161,39 @@ class EditionOpsUiTests(unittest.TestCase):
 
         rows = orders_page._rows_from_order_line(order, line_item, {"edition_next_number": 91})
 
-        self.assertEqual([row["edition"] for row in rows], ["#091", "#092"])
+        self.assertEqual([row["edition"] for row in rows], ["Needs allocation", "Needs allocation"])
+        self.assertEqual([row["certificate"] for row in rows], ["Needs allocation", "Needs allocation"])
+
+    def test_orders_page_marks_unallocated_sold_out_rows_for_review(self):
+        order = {
+            "order_name": "#SC1235",
+            "processed_at": "2026-06-22T10:00:00Z",
+            "created_at": "2026-06-22T09:55:00Z",
+            "customer_name": "John",
+            "shipping_method": "Standard Shipping",
+            "metafields": [],
+        }
+        line_item = {
+            "shopify_line_item_id": "gid://shopify/LineItem/2",
+            "shopify_product_id": "gid://shopify/Product/1",
+            "product_title": "Shane Warne Tribute Wall Art",
+            "variant_title": "Black / XL",
+            "quantity": 1,
+        }
+
+        rows = orders_page._rows_from_order_line(
+            order,
+            line_item,
+            {
+                "edition_total": 100,
+                "edition_next_number": 100,
+                "edition_sold_count": 100,
+                "edition_remaining": 0,
+            },
+        )
+
+        self.assertEqual(rows[0]["edition"], "Needs Review - Sold Out")
+        self.assertEqual(rows[0]["certificate"], "Needs Review - Sold Out")
 
     def test_orders_page_restores_certificate_local_paths_from_saved_metafield(self):
         line_item_id = "gid://shopify/LineItem/1"

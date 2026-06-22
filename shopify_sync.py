@@ -821,9 +821,22 @@ def normalize_limited_edition_metafields(metafields):
         (by_key.get("edition_label") or {}).get("value")
         or LIMITED_EDITION_DEFAULTS["edition_label"]
     ).strip() or LIMITED_EDITION_DEFAULTS["edition_label"]
-    sold_count = calculate_limited_edition_sold_count(edition_next_number)
-    remaining = max(edition_total - sold_count, 0)
-    status = calculate_limited_edition_status(remaining)
+    sold_value = (by_key.get("edition_sold_count") or {}).get("value")
+    remaining_value = (by_key.get("edition_remaining") or {}).get("value")
+    sold_count = (
+        _parse_int_metafield(sold_value, calculate_limited_edition_sold_count(edition_next_number))
+        if sold_value not in (None, "")
+        else calculate_limited_edition_sold_count(edition_next_number)
+    )
+    sold_count = min(max(sold_count, 0), edition_total)
+    remaining = (
+        _parse_int_metafield(remaining_value, max(edition_total - sold_count, 0))
+        if remaining_value not in (None, "")
+        else max(edition_total - sold_count, 0)
+    )
+    remaining = min(max(remaining, 0), edition_total)
+    status_value = str((by_key.get("edition_status") or {}).get("value") or "").strip()
+    status = status_value or calculate_limited_edition_status(remaining)
     enabled = _parse_bool_metafield(
         (by_key.get("edition_enabled") or {}).get("value"),
         LIMITED_EDITION_DEFAULTS["edition_enabled"],
@@ -1499,6 +1512,21 @@ def limited_edition_metafield_inputs(product_id, values):
     owner_id = shopify_gid("Product", product_id)
     if not owner_id:
         raise ShopifyAPIError("Shopify product ID is missing.")
+    compare_digests = (
+        values.get("metafield_compare_digests")
+        or values.get("compare_digests")
+        or {}
+    )
+
+    def edition_input(key, metafield_type, value):
+        return _metafield_input(
+            owner_id,
+            key,
+            metafield_type,
+            value,
+            compare_digest=compare_digests.get(key),
+        )
+
     edition_total = max(
         _parse_int_metafield(values.get("edition_total"), LIMITED_EDITION_DEFAULTS["edition_total"]),
         1,
@@ -1507,23 +1535,35 @@ def limited_edition_metafield_inputs(product_id, values):
         _parse_int_metafield(values.get("edition_next_number"), LIMITED_EDITION_DEFAULTS["edition_next_number"]),
         1,
     )
-    edition_sold_count = calculate_limited_edition_sold_count(edition_next_number)
-    edition_remaining = max(edition_total - edition_sold_count, 0)
-    edition_status = calculate_limited_edition_status(edition_remaining)
+    derived_sold_count = calculate_limited_edition_sold_count(edition_next_number)
+    edition_sold_count = (
+        _parse_int_metafield(values.get("edition_sold_count"), derived_sold_count)
+        if "edition_sold_count" in values
+        else derived_sold_count
+    )
+    edition_sold_count = min(max(edition_sold_count, 0), edition_total)
+    derived_remaining = max(edition_total - edition_sold_count, 0)
+    edition_remaining = (
+        _parse_int_metafield(values.get("edition_remaining"), derived_remaining)
+        if "edition_remaining" in values
+        else derived_remaining
+    )
+    edition_remaining = min(max(edition_remaining, 0), edition_total)
+    edition_status = str(
+        values.get("edition_status") or calculate_limited_edition_status(edition_remaining)
+    ).strip() or calculate_limited_edition_status(edition_remaining)
     return [
-        _metafield_input(
-            owner_id,
+        edition_input(
             "edition_enabled",
             "boolean",
             _bool_value(values.get("edition_enabled")),
         ),
-        _metafield_input(owner_id, "edition_total", "number_integer", edition_total),
-        _metafield_input(owner_id, "edition_next_number", "number_integer", edition_next_number),
-        _metafield_input(owner_id, "edition_sold_count", "number_integer", edition_sold_count),
-        _metafield_input(owner_id, "edition_remaining", "number_integer", edition_remaining),
-        _metafield_input(owner_id, "edition_status", "single_line_text_field", edition_status),
-        _metafield_input(
-            owner_id,
+        edition_input("edition_total", "number_integer", edition_total),
+        edition_input("edition_next_number", "number_integer", edition_next_number),
+        edition_input("edition_sold_count", "number_integer", edition_sold_count),
+        edition_input("edition_remaining", "number_integer", edition_remaining),
+        edition_input("edition_status", "single_line_text_field", edition_status),
+        edition_input(
             "edition_label",
             "single_line_text_field",
             str(values.get("edition_label") or LIMITED_EDITION_DEFAULTS["edition_label"]).strip()

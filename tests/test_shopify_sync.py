@@ -1,4 +1,5 @@
 import os
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
@@ -371,6 +372,386 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(allocation["edition_numbers"], [91])
         self.assertEqual(allocation["edition_display"], "#091/100")
         self.assertEqual(product_writes[0]["edition_next_number"], 92)
+        self.assertEqual(product_writes[0]["edition_sold_count"], 91)
+        self.assertEqual(product_writes[0]["edition_remaining"], 9)
+        unit = allocation["unit_allocations"][0]
+        self.assertEqual(unit["order_gid"], "gid://shopify/Order/1234")
+        self.assertEqual(unit["line_item_gid"], "gid://shopify/LineItem/555")
+        self.assertEqual(unit["line_item_unit_index"], 1)
+        self.assertEqual(unit["product_gid"], "gid://shopify/Product/777")
+        self.assertEqual(unit["edition_number"], 91)
+
+    def test_paid_order_allocator_splits_quantity_and_updates_product_totals(self):
+        order_payload = {
+            "id": 1234,
+            "name": "#SC9999",
+            "financial_status": "paid",
+            "line_items": [
+                {
+                    "id": 555,
+                    "product_id": 777,
+                    "title": "Justin Gaethje Undisputed Wall Art",
+                    "variant_title": "Black / XL",
+                    "quantity": 2,
+                }
+            ],
+        }
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id == "gid://shopify/Order/1234":
+                return {"metafields": [], "api_version": "2026-04"}
+            return {
+                "metafields": [
+                    {"namespace": "sports_cave", "key": "edition_enabled", "type": "boolean", "value": "true", "compareDigest": "enabled"},
+                    {"namespace": "sports_cave", "key": "edition_total", "type": "number_integer", "value": "100", "compareDigest": "total"},
+                    {"namespace": "sports_cave", "key": "edition_next_number", "type": "number_integer", "value": "13", "compareDigest": "next"},
+                    {"namespace": "sports_cave", "key": "edition_sold_count", "type": "number_integer", "value": "12", "compareDigest": "sold"},
+                    {"namespace": "sports_cave", "key": "edition_remaining", "type": "number_integer", "value": "88", "compareDigest": "remaining"},
+                    {"namespace": "sports_cave", "key": "edition_status", "type": "single_line_text_field", "value": "Limited Edition", "compareDigest": "status"},
+                    {"namespace": "sports_cave", "key": "edition_label", "type": "single_line_text_field", "value": "Numbered Edition", "compareDigest": "label"},
+                ],
+                "api_version": "2026-04",
+            }
+
+        order_writes = []
+        product_writes = []
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+            side_effect=lambda order_gid, allocations, compare_digest=None, config=None, request_post=None: order_writes.append(allocations),
+        ), patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+            side_effect=lambda products, config=None, request_post=None: product_writes.extend(products),
+        ):
+            result = order_allocator.process_shopify_order_for_editions(order_payload, config=self.config)
+
+        self.assertEqual(result["assignments_created"], 2)
+        allocation = order_writes[0]["line_items"]["gid://shopify/LineItem/555"]
+        self.assertEqual(allocation["edition_numbers"], [13, 14])
+        self.assertEqual(product_writes[0]["edition_next_number"], 15)
+        self.assertEqual(product_writes[0]["edition_sold_count"], 14)
+        self.assertEqual(product_writes[0]["edition_remaining"], 86)
+
+    def test_paid_order_allocator_processes_batch_oldest_to_newest(self):
+        product_state = {"next": 13, "sold": 12, "remaining": 88}
+        order_payloads = [
+            {
+                "id": 2000,
+                "name": "#SC2000",
+                "financial_status": "paid",
+                "processed_at": "2026-06-22T10:00:00Z",
+                "created_at": "2026-06-22T09:55:00Z",
+                "line_items": [{"id": 20, "product_id": 777, "title": "Justin Gaethje", "quantity": 1}],
+            },
+            {
+                "id": 1000,
+                "name": "#SC1000",
+                "financial_status": "paid",
+                "processed_at": "2026-06-21T10:00:00Z",
+                "created_at": "2026-06-21T09:55:00Z",
+                "line_items": [{"id": 10, "product_id": 777, "title": "Justin Gaethje", "quantity": 1}],
+            },
+        ]
+        order_writes = {}
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id.startswith("gid://shopify/Order/"):
+                payload = order_writes.get(owner_id)
+                metafields = []
+                if payload:
+                    metafields.append(
+                        {
+                            "namespace": "sports_cave",
+                            "key": "edition_allocations",
+                            "type": "json",
+                            "value": json.dumps(payload),
+                            "compareDigest": f"digest-{owner_id}",
+                        }
+                    )
+                return {"metafields": metafields, "api_version": "2026-04"}
+            return {
+                "metafields": [
+                    {"namespace": "sports_cave", "key": "edition_enabled", "type": "boolean", "value": "true"},
+                    {"namespace": "sports_cave", "key": "edition_total", "type": "number_integer", "value": "100"},
+                    {"namespace": "sports_cave", "key": "edition_next_number", "type": "number_integer", "value": str(product_state["next"])},
+                    {"namespace": "sports_cave", "key": "edition_sold_count", "type": "number_integer", "value": str(product_state["sold"])},
+                    {"namespace": "sports_cave", "key": "edition_remaining", "type": "number_integer", "value": str(product_state["remaining"])},
+                    {"namespace": "sports_cave", "key": "edition_label", "type": "single_line_text_field", "value": "Numbered Edition"},
+                ],
+                "api_version": "2026-04",
+            }
+
+        def fake_product_sync(products, config=None, request_post=None):
+            row = products[0]
+            product_state["next"] = row["edition_next_number"]
+            product_state["sold"] = row["edition_sold_count"]
+            product_state["remaining"] = row["edition_remaining"]
+
+        def fake_order_sync(order_gid, allocations, compare_digest=None, config=None, request_post=None):
+            order_writes[order_gid] = allocations
+
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+            side_effect=fake_product_sync,
+        ), patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+            side_effect=fake_order_sync,
+        ):
+            result = order_allocator.process_shopify_orders_for_editions(order_payloads, config=self.config)
+
+        self.assertEqual(result["assignments_created"], 2)
+        self.assertEqual(
+            order_writes["gid://shopify/Order/1000"]["line_items"]["gid://shopify/LineItem/10"]["edition_numbers"],
+            [13],
+        )
+        self.assertEqual(
+            order_writes["gid://shopify/Order/2000"]["line_items"]["gid://shopify/LineItem/20"]["edition_numbers"],
+            [14],
+        )
+        self.assertEqual(product_state["next"], 15)
+
+    def test_paid_order_allocator_retry_skips_existing_order_allocation(self):
+        existing_payload = {
+            "line_items": {
+                "gid://shopify/LineItem/555": {
+                    "line_item_id": "gid://shopify/LineItem/555",
+                    "product_id": "gid://shopify/Product/777",
+                    "quantity": 1,
+                    "edition_numbers": [13],
+                    "edition_total": 100,
+                }
+            }
+        }
+        order_payload = {
+            "id": 1234,
+            "name": "#SC9999",
+            "financial_status": "paid",
+            "line_items": [{"id": 555, "product_id": 777, "title": "Justin Gaethje", "quantity": 1}],
+        }
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id == "gid://shopify/Order/1234":
+                return {
+                    "metafields": [
+                        {
+                            "namespace": "sports_cave",
+                            "key": "edition_allocations",
+                            "type": "json",
+                            "value": json.dumps(existing_payload),
+                            "compareDigest": "order-digest",
+                        }
+                    ],
+                    "api_version": "2026-04",
+                }
+            self.fail("Product metafields should not be read when the exact unit is already allocated.")
+
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+        ) as product_sync, patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+        ) as order_sync:
+            result = order_allocator.process_shopify_order_for_editions(order_payload, config=self.config)
+
+        self.assertEqual(result["assignments_created"], 0)
+        self.assertEqual(result["skipped_existing"], 1)
+        product_sync.assert_not_called()
+        order_sync.assert_not_called()
+
+    def test_paid_order_allocator_retries_product_compare_digest_failures(self):
+        order_payload = {
+            "id": 1234,
+            "name": "#SC9999",
+            "financial_status": "paid",
+            "line_items": [{"id": 555, "product_id": 777, "title": "Justin Gaethje", "quantity": 1}],
+        }
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id == "gid://shopify/Order/1234":
+                return {"metafields": [], "api_version": "2026-04"}
+            return {
+                "metafields": [
+                    {"namespace": "sports_cave", "key": "edition_enabled", "type": "boolean", "value": "true", "compareDigest": "enabled"},
+                    {"namespace": "sports_cave", "key": "edition_total", "type": "number_integer", "value": "100", "compareDigest": "total"},
+                    {"namespace": "sports_cave", "key": "edition_next_number", "type": "number_integer", "value": "13", "compareDigest": "next"},
+                    {"namespace": "sports_cave", "key": "edition_sold_count", "type": "number_integer", "value": "12", "compareDigest": "sold"},
+                    {"namespace": "sports_cave", "key": "edition_remaining", "type": "number_integer", "value": "88", "compareDigest": "remaining"},
+                    {"namespace": "sports_cave", "key": "edition_label", "type": "single_line_text_field", "value": "Numbered Edition", "compareDigest": "label"},
+                ],
+                "api_version": "2026-04",
+            }
+
+        product_attempts = []
+        order_writes = []
+
+        def fake_product_sync(products, config=None, request_post=None):
+            product_attempts.append(products[0])
+            if len(product_attempts) == 1:
+                raise shopify_sync.ShopifyAPIError("compareDigest mismatch")
+
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+            side_effect=fake_product_sync,
+        ), patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+            side_effect=lambda order_gid, allocations, compare_digest=None, config=None, request_post=None: order_writes.append(allocations),
+        ):
+            result = order_allocator.process_shopify_order_for_editions(order_payload, config=self.config)
+
+        self.assertEqual(result["assignments_created"], 1)
+        self.assertEqual(len(product_attempts), 2)
+        self.assertEqual(len(order_writes), 1)
+        self.assertEqual(order_writes[0]["line_items"]["gid://shopify/LineItem/555"]["edition_numbers"], [13])
+
+    def test_paid_order_allocator_never_overwrites_existing_unit_allocation(self):
+        existing_payload = {
+            "line_items": {
+                "gid://shopify/LineItem/555": {
+                    "line_item_id": "gid://shopify/LineItem/555",
+                    "product_id": "gid://shopify/Product/777",
+                    "quantity": 2,
+                    "edition_numbers": [50, None],
+                    "edition_total": 100,
+                }
+            }
+        }
+        order_payload = {
+            "id": 1234,
+            "name": "#SC9999",
+            "financial_status": "paid",
+            "line_items": [{"id": 555, "product_id": 777, "title": "Justin Gaethje", "quantity": 2}],
+        }
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id == "gid://shopify/Order/1234":
+                return {
+                    "metafields": [
+                        {
+                            "namespace": "sports_cave",
+                            "key": "edition_allocations",
+                            "type": "json",
+                            "value": json.dumps(existing_payload),
+                            "compareDigest": "order-digest",
+                        }
+                    ],
+                    "api_version": "2026-04",
+                }
+            return {
+                "metafields": [
+                    {"namespace": "sports_cave", "key": "edition_enabled", "type": "boolean", "value": "true"},
+                    {"namespace": "sports_cave", "key": "edition_total", "type": "number_integer", "value": "100"},
+                    {"namespace": "sports_cave", "key": "edition_next_number", "type": "number_integer", "value": "51"},
+                    {"namespace": "sports_cave", "key": "edition_sold_count", "type": "number_integer", "value": "50"},
+                    {"namespace": "sports_cave", "key": "edition_remaining", "type": "number_integer", "value": "50"},
+                    {"namespace": "sports_cave", "key": "edition_label", "type": "single_line_text_field", "value": "Numbered Edition"},
+                ],
+                "api_version": "2026-04",
+            }
+
+        order_writes = []
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+        ), patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+            side_effect=lambda order_gid, allocations, compare_digest=None, config=None, request_post=None: order_writes.append(allocations),
+        ):
+            result = order_allocator.process_shopify_order_for_editions(order_payload, config=self.config)
+
+        self.assertEqual(result["assignments_created"], 1)
+        allocation = order_writes[0]["line_items"]["gid://shopify/LineItem/555"]
+        self.assertEqual(allocation["edition_numbers"], [50, 51])
+
+    def test_paid_order_allocator_final_edition_does_not_advance_to_101(self):
+        order_payload = {
+            "id": 1234,
+            "name": "#SC9999",
+            "financial_status": "paid",
+            "line_items": [{"id": 555, "product_id": 777, "title": "Justin Gaethje", "quantity": 1}],
+        }
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id == "gid://shopify/Order/1234":
+                return {"metafields": [], "api_version": "2026-04"}
+            return {
+                "metafields": [
+                    {"namespace": "sports_cave", "key": "edition_enabled", "type": "boolean", "value": "true"},
+                    {"namespace": "sports_cave", "key": "edition_total", "type": "number_integer", "value": "100"},
+                    {"namespace": "sports_cave", "key": "edition_next_number", "type": "number_integer", "value": "100"},
+                    {"namespace": "sports_cave", "key": "edition_sold_count", "type": "number_integer", "value": "99"},
+                    {"namespace": "sports_cave", "key": "edition_remaining", "type": "number_integer", "value": "1"},
+                    {"namespace": "sports_cave", "key": "edition_label", "type": "single_line_text_field", "value": "Numbered Edition"},
+                ],
+                "api_version": "2026-04",
+            }
+
+        product_writes = []
+        order_writes = []
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+            side_effect=lambda products, config=None, request_post=None: product_writes.extend(products),
+        ), patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+            side_effect=lambda order_gid, allocations, compare_digest=None, config=None, request_post=None: order_writes.append(allocations),
+        ):
+            result = order_allocator.process_shopify_order_for_editions(order_payload, config=self.config)
+
+        self.assertEqual(result["assignments_created"], 1)
+        self.assertEqual(order_writes[0]["line_items"]["gid://shopify/LineItem/555"]["edition_numbers"], [100])
+        self.assertEqual(product_writes[0]["edition_next_number"], 100)
+        self.assertEqual(product_writes[0]["edition_sold_count"], 100)
+        self.assertEqual(product_writes[0]["edition_remaining"], 0)
+        self.assertEqual(product_writes[0]["edition_status"], "Sold Out Archive")
+
+    def test_paid_order_allocator_sold_out_marks_review_without_duplicate_final_number(self):
+        order_payload = {
+            "id": 1234,
+            "name": "#SC9999",
+            "financial_status": "paid",
+            "line_items": [{"id": 555, "product_id": 777, "title": "Justin Gaethje", "quantity": 1}],
+        }
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id == "gid://shopify/Order/1234":
+                return {"metafields": [], "api_version": "2026-04"}
+            return {
+                "metafields": [
+                    {"namespace": "sports_cave", "key": "edition_enabled", "type": "boolean", "value": "true"},
+                    {"namespace": "sports_cave", "key": "edition_total", "type": "number_integer", "value": "100"},
+                    {"namespace": "sports_cave", "key": "edition_next_number", "type": "number_integer", "value": "100"},
+                    {"namespace": "sports_cave", "key": "edition_sold_count", "type": "number_integer", "value": "100"},
+                    {"namespace": "sports_cave", "key": "edition_remaining", "type": "number_integer", "value": "0"},
+                    {"namespace": "sports_cave", "key": "edition_label", "type": "single_line_text_field", "value": "Numbered Edition"},
+                ],
+                "api_version": "2026-04",
+            }
+
+        order_writes = []
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+        ) as product_sync, patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+            side_effect=lambda order_gid, allocations, compare_digest=None, config=None, request_post=None: order_writes.append(allocations),
+        ):
+            result = order_allocator.process_shopify_order_for_editions(order_payload, config=self.config)
+
+        self.assertEqual(result["assignments_created"], 0)
+        product_sync.assert_not_called()
+        allocation = order_writes[0]["line_items"]["gid://shopify/LineItem/555"]
+        self.assertEqual(allocation["edition_numbers"], [None])
+        self.assertEqual(allocation["edition_number"], None)
+        self.assertEqual(allocation["status"], "Needs Review - Sold Out")
 
     def test_connection_and_product_page_parsing(self):
         responses = [

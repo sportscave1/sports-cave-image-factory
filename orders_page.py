@@ -91,6 +91,8 @@ def _certificate_label(row):
     if row.get("certificate_pdf_url"):
         return "Uploaded"
     status = str(row.get("certificate_status") or "").strip()
+    if status in {"Needs allocation", "Needs Review - Sold Out"}:
+        return status
     if status in {"Generated", "Uploaded", "Error", "Template missing", "Upload error"}:
         return "Error" if status in {"Template missing", "Upload error"} else status
     if row.get("certificate_pdf_path"):
@@ -99,6 +101,25 @@ def _certificate_label(row):
 
 
 def _allocation_numbers(allocation):
+    unit_allocations = allocation.get("unit_allocations")
+    if isinstance(unit_allocations, list) and unit_allocations:
+        quantity = max(int(allocation.get("quantity") or 0), len(unit_allocations))
+        numbers = [None] * quantity
+        for unit in unit_allocations:
+            if not isinstance(unit, dict):
+                continue
+            try:
+                unit_index = int(unit.get("line_item_unit_index") or 0)
+            except (TypeError, ValueError):
+                unit_index = 0
+            number = _normalise_edition_number(unit.get("edition_number"))
+            if unit_index <= 0 or not number:
+                continue
+            while len(numbers) < unit_index:
+                numbers.append(None)
+            numbers[unit_index - 1] = number
+        if any(numbers):
+            return numbers
     values = allocation.get("edition_numbers")
     if isinstance(values, list):
         numbers = []
@@ -115,6 +136,7 @@ def _allocation_numbers(allocation):
 
 def _normalise_row(row):
     updated = dict(row or {})
+    raw_edition = str(updated.get("edition") or "").strip()
     edition_number = _normalise_edition_number(
         updated.get("edition_number")
         or updated.get("edition")
@@ -127,7 +149,7 @@ def _normalise_row(row):
     updated["product"] = str(updated.get("product") or "")
     updated["variant"] = str(updated.get("variant") or "")
     updated["edition_number"] = edition_number
-    updated["edition"] = _format_edition(edition_number)
+    updated["edition"] = _format_edition(edition_number) if edition_number else raw_edition
     updated["edition_total"] = int(updated.get("edition_total") or 100)
     updated["has_saved_allocation"] = bool(updated.get("has_saved_allocation"))
     updated["edition_offset"] = int(updated.get("edition_offset") or 0)
@@ -264,19 +286,7 @@ def _edition_ops_next_numbers():
 
 
 def _apply_latest_product_numbers(rows):
-    next_numbers = _edition_ops_next_numbers()
-    if not next_numbers:
-        return _sort_rows(rows)
-    refreshed = []
-    for row in rows:
-        updated = _normalise_row(row)
-        if not updated.get("has_saved_allocation"):
-            product_next = next_numbers.get(updated.get("shopify_product_id"))
-            if product_next:
-                updated["edition_number"] = product_next + int(updated.get("edition_offset") or 0)
-                updated["edition"] = _format_edition(updated["edition_number"])
-        refreshed.append(updated)
-    return _sort_rows(refreshed)
+    return _sort_rows(rows)
 
 
 def _allocation_for_line(order, line_item):
@@ -315,16 +325,40 @@ def _product_edition(product_id, cache, config):
     return edition
 
 
+def _product_is_sold_out(edition):
+    try:
+        total = int(edition.get("edition_total") or 100)
+        sold = int(edition.get("edition_sold_count") or 0)
+        remaining = int(edition.get("edition_remaining") if edition.get("edition_remaining") is not None else total - sold)
+    except (TypeError, ValueError):
+        return False
+    return remaining <= 0 or sold >= total
+
+
+def _allocation_status_for_unit(allocation, unit_index):
+    unit_statuses = allocation.get("unit_statuses")
+    if isinstance(unit_statuses, list) and unit_index - 1 < len(unit_statuses):
+        status = str(unit_statuses[unit_index - 1] or "").strip()
+        if status:
+            return status
+    return str(allocation.get("status") or "").strip()
+
+
 def _rows_from_order_line(order, line_item, edition):
     quantity = max(int(line_item.get("quantity") or 1), 1)
     allocation = _allocation_for_line(order, line_item)
     allocation_numbers = _allocation_numbers(allocation)
-    product_next_number = _normalise_edition_number(edition.get("edition_next_number"))
     edition_total = int(allocation.get("edition_total") or edition.get("edition_total") or 100)
     rows = []
     for index in range(quantity):
         saved_number = allocation_numbers[index] if index < len(allocation_numbers) else None
-        edition_number = saved_number or (product_next_number + index if product_next_number else None)
+        edition_number = saved_number
+        allocation_status = _allocation_status_for_unit(allocation, index + 1)
+        if not saved_number:
+            allocation_status = allocation_status if allocation_status != "Allocated" else ""
+            allocation_status = allocation_status or (
+                "Needs Review - Sold Out" if _product_is_sold_out(edition) else "Needs allocation"
+            )
         certificate = _certificate_for_unit(
             order,
             line_item.get("shopify_line_item_id"),
@@ -342,6 +376,7 @@ def _rows_from_order_line(order, line_item, edition):
                     "product": line_item.get("product_title") or "",
                     "variant": line_item.get("variant_title") or "",
                     "edition_number": edition_number,
+                    "edition": _format_edition(edition_number) if edition_number else allocation_status,
                     "edition_total": edition_total,
                     "has_saved_allocation": bool(saved_number),
                     "edition_offset": index,
@@ -356,7 +391,11 @@ def _rows_from_order_line(order, line_item, edition):
                     "created_at": order.get("created_at") or "",
                     "order_number_sort": _parse_order_number(order.get("order_name")),
                     "certificate_id": certificate.get("certificate_id") or "",
-                    "certificate_status": "Uploaded" if certificate.get("pdf_url") else certificate.get("status") or "",
+                    "certificate_status": (
+                        "Uploaded"
+                        if certificate.get("pdf_url")
+                        else certificate.get("status") or ("" if saved_number else allocation_status)
+                    ),
                     "certificate_pdf_path": certificate.get("local_pdf_path") or "",
                     "certificate_pdf_url": certificate.get("pdf_url") or certificate.get("certificate_url") or "",
                     "certificate_shopify_file_id": certificate.get("pdf_shopify_file_id") or "",
@@ -369,6 +408,41 @@ def _rows_from_order_line(order, line_item, edition):
     return rows
 
 
+def _order_identity(order):
+    return order_allocator.order_gid(order.get("shopify_order_id") or order.get("admin_graphql_api_id") or order.get("id"))
+
+
+def _replace_allocation_metafield(order, allocation_payload):
+    if not allocation_payload:
+        return order
+    updated = dict(order or {})
+    metafields = []
+    replaced = False
+    for metafield in updated.get("metafields") or []:
+        if metafield.get("namespace") == "sports_cave" and metafield.get("key") == "edition_allocations":
+            metafields.append(
+                {
+                    **metafield,
+                    "type": "json",
+                    "value": json.dumps(allocation_payload, ensure_ascii=True, separators=(",", ":")),
+                }
+            )
+            replaced = True
+        else:
+            metafields.append(metafield)
+    if not replaced:
+        metafields.append(
+            {
+                "namespace": "sports_cave",
+                "key": "edition_allocations",
+                "type": "json",
+                "value": json.dumps(allocation_payload, ensure_ascii=True, separators=(",", ":")),
+            }
+        )
+    updated["metafields"] = metafields
+    return updated
+
+
 def _refresh_orders():
     config = shopify_sync.get_config()
     if not config.get("configured"):
@@ -377,6 +451,7 @@ def _refresh_orders():
     existing_rows = st.session_state.get(ROWS_KEY, [])
     rows = []
     product_cache = {}
+    orders = []
     for page in shopify_sync.iter_order_pages(
         days=30,
         page_size=50,
@@ -385,15 +460,37 @@ def _refresh_orders():
         default_paid_unfulfilled_filter=False,
         config=config,
     ):
-        for order in page.get("orders") or []:
-            for line_item in order.get("line_items") or []:
-                edition = _product_edition(line_item.get("shopify_product_id"), product_cache, config)
-                rows.extend(_rows_from_order_line(order, line_item, edition))
+        orders.extend(page.get("orders") or [])
+
+    allocation_results = order_allocator.process_shopify_orders_for_editions(
+        orders,
+        config=config,
+    )
+    allocation_payloads = {
+        result.get("order_id"): result.get("allocation_payload")
+        for result in allocation_results.get("results") or []
+        if result.get("allocation_payload")
+    }
+    for order in orders:
+        order = _replace_allocation_metafield(order, allocation_payloads.get(_order_identity(order)))
+        for line_item in order.get("line_items") or []:
+            edition = _product_edition(line_item.get("shopify_product_id"), product_cache, config)
+            rows.extend(_rows_from_order_line(order, line_item, edition))
     refreshed_at = _now_iso()
     sorted_rows = _sort_rows(_merge_local_certificate_fields(rows, existing_rows))
     st.session_state[ROWS_KEY] = sorted_rows
     _write_snapshot(sorted_rows, meta={"last_refreshed": refreshed_at})
-    st.session_state[NOTICE_KEY] = f"Refreshed {len(sorted_rows)} artwork rows."
+    errors = allocation_results.get("errors") or []
+    if errors:
+        st.session_state[NOTICE_KEY] = (
+            f"Refreshed {len(sorted_rows)} artwork rows. "
+            f"{len(errors)} order(s) need allocation review."
+        )
+    else:
+        st.session_state[NOTICE_KEY] = (
+            f"Refreshed {len(sorted_rows)} artwork rows. "
+            f"Allocated {allocation_results.get('assignments_created') or 0} edition number(s)."
+        )
 
 
 def _display_rows(rows):
@@ -516,8 +613,7 @@ def _generate_certificate_for_row(row):
     row = _normalise_row(row)
     try:
         if not row.get("has_saved_allocation"):
-            _lock_allocation_for_row(row, config)
-            row["has_saved_allocation"] = True
+            raise ValueError("Refresh Orders to allocate this row before generating a certificate.")
         existing = _existing_uploaded_certificate(row, config)
         if existing:
             record = {**certificate_engine.certificate_record_from_order_row(row), **existing, "status": "Uploaded"}
@@ -543,6 +639,8 @@ def _upload_certificate_for_row(row):
         return
     row = _normalise_row(row)
     try:
+        if not row.get("has_saved_allocation"):
+            raise ValueError("Refresh Orders to allocate this row before uploading a certificate.")
         existing = _existing_uploaded_certificate(row, config)
         if existing:
             record = {**certificate_engine.certificate_record_from_order_row(row), **existing, "status": "Uploaded"}
