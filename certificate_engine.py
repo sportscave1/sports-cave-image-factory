@@ -277,7 +277,19 @@ def generate_local_certificate_for_record(record, output_dir=None):
             shopify_handle=updated.get("handle"),
             filename=filename,
         )
+        try:
+            preview_path = certificate_service.generate_certificate_preview_png(
+                output_dir,
+                product_title=updated.get("product_title"),
+                edition_number=updated.get("edition_number"),
+                edition_total=updated.get("edition_total"),
+                order_name=updated.get("order_name"),
+                shopify_handle=updated.get("handle"),
+            )
+        except Exception:
+            preview_path = ""
         updated["local_pdf_path"] = pdf_path
+        updated["preview_path"] = preview_path
         updated["generated_at"] = now_iso()
         updated["status"] = "Generated"
         updated["sync_error"] = ""

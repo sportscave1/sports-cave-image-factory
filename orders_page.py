@@ -149,6 +149,7 @@ def _normalise_row(row):
     updated["certificate_shopify_file_id"] = str(updated.get("certificate_shopify_file_id") or "")
     updated["certificate_generated_at"] = str(updated.get("certificate_generated_at") or "")
     updated["certificate_error"] = str(updated.get("certificate_error") or "")
+    updated["certificate_preview_path"] = str(updated.get("certificate_preview_path") or updated.get("preview_path") or "")
     return updated
 
 
@@ -186,6 +187,7 @@ def _certificate_fields(row):
         "certificate_shopify_file_id": normalised.get("certificate_shopify_file_id") or "",
         "certificate_generated_at": normalised.get("certificate_generated_at") or "",
         "certificate_error": normalised.get("certificate_error") or "",
+        "certificate_preview_path": normalised.get("certificate_preview_path") or "",
     }
 
 
@@ -350,10 +352,12 @@ def _rows_from_order_line(order, line_item, edition):
                     "order_number_sort": _parse_order_number(order.get("order_name")),
                     "certificate_id": certificate.get("certificate_id") or "",
                     "certificate_status": "Uploaded" if certificate.get("pdf_url") else certificate.get("status") or "",
+                    "certificate_pdf_path": certificate.get("local_pdf_path") or "",
                     "certificate_pdf_url": certificate.get("pdf_url") or certificate.get("certificate_url") or "",
                     "certificate_shopify_file_id": certificate.get("pdf_shopify_file_id") or "",
                     "certificate_generated_at": certificate.get("generated_at") or "",
                     "certificate_error": certificate.get("sync_error") or "",
+                    "certificate_preview_path": certificate.get("preview_path") or "",
                 }
             )
         )
@@ -484,6 +488,7 @@ def _update_row_from_certificate(row, record):
         "certificate_shopify_file_id": record.get("pdf_shopify_file_id") or "",
         "certificate_generated_at": record.get("generated_at") or "",
         "certificate_error": record.get("sync_error") or "",
+        "certificate_preview_path": record.get("preview_path") or "",
     }
     updates["certificate"] = _certificate_label(updates)
     _update_matching_row(row, updates)
@@ -563,53 +568,110 @@ def _file_link(path):
     return ""
 
 
-def _render_certificate_actions(row, index):
+def _pdf_bytes(path):
+    try:
+        pdf_path = Path(path)
+        if pdf_path.exists() and pdf_path.is_file():
+            return pdf_path.read_bytes()
+    except Exception:
+        return b""
+    return b""
+
+
+def _selected_row_from_event(event, rows):
+    try:
+        selected_rows = list(event.selection.rows or [])
+    except Exception:
+        selected_rows = []
+    if not selected_rows:
+        return _normalise_row(rows[0]) if rows else {}
+    index = int(selected_rows[0])
+    if index < 0 or index >= len(rows):
+        return _normalise_row(rows[0]) if rows else {}
+    return _normalise_row(rows[index])
+
+
+def _certificate_filename(row):
+    record = certificate_engine.certificate_record_from_order_row(row)
+    return f"{record.get('certificate_id') or 'sports-cave-certificate'}.pdf".lower()
+
+
+def _render_certificate_actions(row):
     row = _normalise_row(row)
-    key_base = f"order-cert-{row.get('shopify_order_id')}-{row.get('shopify_line_item_id')}-{row.get('edition_offset')}-{index}"
+    key_base = f"order-cert-{row.get('shopify_order_id')}-{row.get('shopify_line_item_id')}-{row.get('edition_offset')}"
+    st.subheader("Selected Order")
+    st.caption(
+        f"{row.get('order') or 'Order'} | {row.get('customer') or 'Customer'} | "
+        f"{row.get('product') or 'Artwork'} | {row.get('edition') or 'No edition'}"
+    )
+    if row.get("certificate_preview_path") and Path(row.get("certificate_preview_path")).exists():
+        st.image(row.get("certificate_preview_path"), caption="Certificate preview", use_container_width=True)
+
+    action_cols = st.columns(4)
     if row.get("certificate_pdf_url"):
-        st.write("Uploaded")
-        st.markdown(f"[Open PDF]({row['certificate_pdf_url']})")
+        action_cols[0].success("Uploaded")
+        if row.get("certificate_pdf_path") and Path(row.get("certificate_pdf_path")).exists():
+            action_cols[1].download_button(
+                "Download PDF",
+                data=_pdf_bytes(row.get("certificate_pdf_path")),
+                file_name=_certificate_filename(row),
+                mime="application/pdf",
+                use_container_width=True,
+                key=f"{key_base}-download-uploaded",
+            )
+        action_cols[2].link_button("Open PDF", row["certificate_pdf_url"], use_container_width=True)
         return
     if row.get("certificate_pdf_path") and Path(row.get("certificate_pdf_path")).exists():
-        st.write("Generated")
-        if st.button("Upload to Shopify", key=f"{key_base}-upload", use_container_width=True):
+        action_cols[0].success("Generated")
+        action_cols[1].download_button(
+            "Download PDF",
+            data=_pdf_bytes(row.get("certificate_pdf_path")),
+            file_name=_certificate_filename(row),
+            mime="application/pdf",
+            use_container_width=True,
+            key=f"{key_base}-download-generated",
+        )
+        if action_cols[2].button("Upload", key=f"{key_base}-upload", use_container_width=True):
             _upload_certificate_for_row(row)
             st.rerun()
         local_link = _file_link(row.get("certificate_pdf_path"))
         if local_link:
-            st.markdown(f"[Open PDF]({local_link})")
+            action_cols[3].link_button("Open PDF", local_link, use_container_width=True)
         return
     if str(row.get("certificate_status") or "").casefold() in {"error", "template missing", "upload error"}:
-        st.write("Error")
+        action_cols[0].error("Error")
         if row.get("certificate_error"):
             st.caption(row.get("certificate_error"))
-        if st.button("Retry", key=f"{key_base}-retry", use_container_width=True):
+        if action_cols[1].button("Retry", key=f"{key_base}-retry", use_container_width=True):
             _generate_certificate_for_row(row)
             st.rerun()
         return
-    if st.button("Generate", key=f"{key_base}-generate", use_container_width=True, disabled=not bool(row.get("edition_number"))):
+    if action_cols[0].button("Generate", key=f"{key_base}-generate", use_container_width=True, disabled=not bool(row.get("edition_number"))):
         _generate_certificate_for_row(row)
         st.rerun()
+    if not row.get("edition_number"):
+        st.caption("This row needs an edition before a certificate can be generated.")
 
 
 def _render_orders_table(rows):
-    widths = [0.8, 0.9, 1.45, 1.35, 2.4, 1.7, 0.7, 1.35]
-    headers = ("Order", "Date", "Customer", "Shipping", "Product", "Variant", "Edition", "Certificate")
-    header_cols = st.columns(widths)
-    for col, header in zip(header_cols, headers):
-        col.caption(header)
-    for index, row in enumerate(rows):
-        row = _normalise_row(row)
-        cols = st.columns(widths)
-        cols[0].write(row.get("order") or "")
-        cols[1].write(row.get("date") or "")
-        cols[2].write(row.get("customer") or "")
-        cols[3].write(row.get("shipping") or "")
-        cols[4].write(row.get("product") or "")
-        cols[5].write(row.get("variant") or "")
-        cols[6].write(row.get("edition") or "")
-        with cols[7]:
-            _render_certificate_actions(row, index)
+    rows = [_normalise_row(row) for row in rows]
+    with st.container(border=True):
+        event = st.dataframe(
+            _display_rows(rows),
+            hide_index=True,
+            use_container_width=True,
+            height=min(720, max(320, 42 * (len(rows) + 1))),
+            column_order=VISIBLE_COLUMNS,
+            column_config=_column_config(),
+            selection_mode="single-row",
+            on_select="rerun",
+            key="orders-fulfilment-grid",
+        )
+    if rows:
+        st.caption("Select an order row above to generate, upload, download, or open its certificate.")
+        selected = _selected_row_from_event(event, rows)
+        with st.container(border=True):
+            _render_certificate_actions(selected)
 
 
 def render_page():

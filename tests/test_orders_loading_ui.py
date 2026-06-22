@@ -85,8 +85,11 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("orders_allocation_snapshot.json", source)
         self.assertIn("Refresh Orders", source)
         self.assertIn("_render_orders_table", source)
+        self.assertIn("st.dataframe", source)
+        self.assertIn("selection_mode=\"single-row\"", source)
         self.assertIn("Generate", source)
-        self.assertIn("Upload to Shopify", source)
+        self.assertIn("Download PDF", source)
+        self.assertIn("Upload", source)
         self.assertNotIn("Save Changed Order Editions", source)
         self.assertNotIn("Allocate Selected From Product Counter", source)
         self.assertNotIn("Overwrite Selected Order Allocation", source)
@@ -156,6 +159,54 @@ class EditionOpsUiTests(unittest.TestCase):
         rows = orders_page._rows_from_order_line(order, line_item, {"edition_next_number": 91})
 
         self.assertEqual([row["edition"] for row in rows], ["#091", "#092"])
+
+    def test_orders_page_restores_certificate_local_paths_from_saved_metafield(self):
+        line_item_id = "gid://shopify/LineItem/1"
+        order = {
+            "order_name": "#SC1234",
+            "processed_at": "2026-06-22T10:00:00Z",
+            "created_at": "2026-06-22T09:55:00Z",
+            "customer_name": "John",
+            "shipping_method": "Express Shipping",
+            "metafields": [
+                {
+                    "namespace": "sports_cave",
+                    "key": "edition_allocations",
+                    "value": json.dumps({"line_items": {line_item_id: {"edition_numbers": [50]}}}),
+                },
+                {
+                    "namespace": "sports_cave",
+                    "key": "certificates",
+                    "value": json.dumps(
+                        [
+                            {
+                                "line_item_id": line_item_id,
+                                "line_item_unit_index": 1,
+                                "edition_number": 50,
+                                "status": "Ready",
+                                "pdf_url": "https://cdn.example/certificate.pdf",
+                                "local_pdf_path": "C:/certificates/certificate.pdf",
+                                "preview_path": "C:/certificates/certificate.png",
+                            }
+                        ]
+                    ),
+                },
+            ],
+        }
+        line_item = {
+            "shopify_line_item_id": line_item_id,
+            "shopify_product_id": "gid://shopify/Product/1",
+            "product_title": "Shane Warne Tribute Wall Art",
+            "variant_title": "Black / XL",
+            "quantity": 1,
+        }
+
+        rows = orders_page._rows_from_order_line(order, line_item, {"edition_next_number": 91})
+
+        self.assertEqual(rows[0]["certificate"], "Uploaded")
+        self.assertEqual(rows[0]["certificate_pdf_url"], "https://cdn.example/certificate.pdf")
+        self.assertEqual(rows[0]["certificate_pdf_path"], "C:/certificates/certificate.pdf")
+        self.assertEqual(rows[0]["certificate_preview_path"], "C:/certificates/certificate.png")
 
     def test_orders_page_certificate_record_uses_exact_visible_row_edition(self):
         row = orders_page._normalise_row(
