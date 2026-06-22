@@ -3,6 +3,7 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
@@ -170,6 +171,7 @@ def _scope_status(scopes):
         "read_products": "read_products" in scope_set,
         "write_products": "write_products" in scope_set,
         "read_customers": "read_customers" in scope_set,
+        "read_files": "read_files" in scope_set,
         "write_files": "write_files" in scope_set,
     }
 
@@ -739,6 +741,13 @@ ORDER_ALLOCATION_METAFIELD_DEFINITIONS = [
         "type": "json",
         "ownerType": "ORDER",
     },
+    {
+        "name": "Sports Cave Certificates",
+        "namespace": "sports_cave",
+        "key": "certificates",
+        "type": "json",
+        "ownerType": "ORDER",
+    },
 ]
 
 
@@ -994,6 +1003,62 @@ query SportsCaveMetafieldsByOwner($id: ID!, $namespace: String!) {
 """
 
 
+STAGED_UPLOADS_CREATE_MUTATION = """
+mutation SportsCaveStagedUploadsCreate($input: [StagedUploadInput!]!) {
+  stagedUploadsCreate(input: $input) {
+    stagedTargets {
+      url
+      resourceUrl
+      parameters {
+        name
+        value
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+"""
+
+
+FILE_CREATE_MUTATION = """
+mutation SportsCaveFileCreate($files: [FileCreateInput!]!) {
+  fileCreate(files: $files) {
+    files {
+      id
+      alt
+      fileStatus
+      createdAt
+      ... on GenericFile {
+        url
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+"""
+
+
+FILE_BY_ID_QUERY = """
+query SportsCaveFileById($id: ID!) {
+  node(id: $id) {
+    ... on GenericFile {
+      id
+      alt
+      fileStatus
+      createdAt
+      url
+    }
+  }
+}
+"""
+
+
 ORDERS_QUERY = """
 query SportsCaveOrders($first: Int!, $after: String, $query: String) {
   orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
@@ -1228,6 +1293,130 @@ def fetch_metafields(owner_id, namespace="sports_cave", config=None, request_pos
     node = data.get("node") or {}
     metafields = ((node.get("metafields") or {}).get("nodes") or [])
     return {"metafields": metafields, "api_version": served_version or (config or get_config()).get("api_version")}
+
+
+def create_staged_upload(filename, mime_type="application/pdf", config=None, request_post=None):
+    config = config or get_config()
+    data, served_version = graphql_request(
+        STAGED_UPLOADS_CREATE_MUTATION,
+        variables={
+            "input": [
+                {
+                    "resource": "FILE",
+                    "filename": filename,
+                    "mimeType": mime_type,
+                    "httpMethod": "POST",
+                }
+            ]
+        },
+        config=config,
+        request_post=request_post,
+    )
+    result = data.get("stagedUploadsCreate") or {}
+    if result.get("userErrors"):
+        raise ShopifyAPIError(_metafields_user_error_text(result.get("userErrors")))
+    targets = result.get("stagedTargets") or []
+    if not targets:
+        raise ShopifyAPIError("Shopify did not return a staged upload target.")
+    return {"target": targets[0], "api_version": served_version or config.get("api_version")}
+
+
+def upload_to_staged_target(target, file_path, mime_type="application/pdf", upload_post=None):
+    upload_post = upload_post or requests.post
+    file_path = Path(file_path)
+    if not file_path.exists():
+        raise ShopifyAPIError(f"Upload file is missing: {file_path}")
+    parameters = {item.get("name"): item.get("value") for item in target.get("parameters") or [] if item.get("name")}
+    with file_path.open("rb") as file_handle:
+        response = upload_post(
+            target.get("url"),
+            data=parameters,
+            files={"file": (file_path.name, file_handle, mime_type)},
+        )
+    if getattr(response, "status_code", 200) >= 400:
+        raise ShopifyAPIError(f"Shopify staged upload failed with HTTP {response.status_code}.")
+    if hasattr(response, "raise_for_status"):
+        response.raise_for_status()
+    return {"resource_url": target.get("resourceUrl") or "", "filename": file_path.name}
+
+
+def create_shopify_file(original_source, filename, alt="", config=None, request_post=None):
+    config = config or get_config()
+    data, served_version = graphql_request(
+        FILE_CREATE_MUTATION,
+        variables={
+            "files": [
+                {
+                    "originalSource": original_source,
+                    "contentType": "FILE",
+                    "filename": filename,
+                    "alt": alt or filename,
+                }
+            ]
+        },
+        config=config,
+        request_post=request_post,
+    )
+    result = data.get("fileCreate") or {}
+    if result.get("userErrors"):
+        raise ShopifyAPIError(_metafields_user_error_text(result.get("userErrors")))
+    files = result.get("files") or []
+    if not files:
+        raise ShopifyAPIError("Shopify did not create a file record.")
+    return {"file": files[0], "api_version": served_version or config.get("api_version")}
+
+
+def fetch_shopify_file(file_id, config=None, request_post=None):
+    if not file_id:
+        raise ShopifyAPIError("Shopify file ID is missing.")
+    config = config or get_config()
+    data, served_version = graphql_request(
+        FILE_BY_ID_QUERY,
+        variables={"id": file_id},
+        config=config,
+        request_post=request_post,
+    )
+    node = data.get("node") or {}
+    return {"file": node, "api_version": served_version or config.get("api_version")}
+
+
+def upload_pdf_to_shopify_files(
+    pdf_path,
+    *,
+    filename="",
+    alt="",
+    config=None,
+    request_post=None,
+    upload_post=None,
+    poll_attempts=5,
+    poll_sleep_seconds=0.5,
+):
+    pdf_path = Path(pdf_path)
+    filename = filename or pdf_path.name
+    staged = create_staged_upload(filename, "application/pdf", config=config, request_post=request_post)
+    upload_to_staged_target(staged["target"], pdf_path, "application/pdf", upload_post=upload_post)
+    created = create_shopify_file(
+        staged["target"].get("resourceUrl") or "",
+        filename,
+        alt=alt or filename,
+        config=config,
+        request_post=request_post,
+    )
+    file_node = created.get("file") or {}
+    file_id = file_node.get("id") or ""
+    for _ in range(max(int(poll_attempts or 0), 0)):
+        if file_node.get("url") and str(file_node.get("fileStatus") or "").upper() in {"READY", "UPLOADED"}:
+            break
+        if not file_id:
+            break
+        time.sleep(max(float(poll_sleep_seconds or 0), 0))
+        file_node = fetch_shopify_file(file_id, config=config, request_post=request_post).get("file") or file_node
+    return {
+        "file_id": file_id,
+        "url": file_node.get("url") or "",
+        "status": file_node.get("fileStatus") or "",
+        "filename": filename,
+    }
 
 
 def fetch_limited_edition_products_page(after=None, search="", page_size=25, config=None, request_post=None):
@@ -1765,44 +1954,34 @@ def sync_order_allocation_metafield(order_gid, allocations, compare_digest=None,
         ) from error
 
 
-def order_certificate_metafield_inputs(order_gid, certificates):
+def order_certificate_metafield_input(order_gid, certificates, compare_digest=None):
     owner_id = shopify_gid("Order", order_gid)
     items = []
     for certificate in certificates or []:
-        items.append(
-            {
-                "product_title": certificate.get("product_title") or "",
-                "shopify_handle": certificate.get("shopify_handle") or "",
-                "edition_number": int(certificate.get("edition_number") or 0),
-                "edition_total": int(certificate.get("edition_total") or 100),
-                "edition_display": certificate.get("edition_display") or _certificate_display(certificate),
-                "certificate_id": certificate.get("certificate_id") or "",
-                "certificate_url": certificate.get("certificate_url") or "",
-                "generated_at": certificate.get("generated_at") or "",
-            }
-        )
-    metafields = [
-        _metafield_input(owner_id, "certificates", "json", json.dumps(items, ensure_ascii=True, separators=(",", ":")))
-    ]
-    if len(items) == 1:
-        item = items[0]
-        certificate_url = str(item.get("certificate_url") or "").strip()
-        if certificate_url.startswith(("http://", "https://")):
-            metafields.append(_metafield_input(owner_id, "certificate_url", "url", certificate_url))
-        metafields.extend(
-            [
-                _metafield_input(owner_id, "certificate_id", "single_line_text_field", item.get("certificate_id") or ""),
-                _metafield_input(owner_id, "edition_number", "single_line_text_field", item.get("edition_display") or ""),
-                _metafield_input(owner_id, "product_title", "single_line_text_field", item.get("product_title") or ""),
-            ]
-        )
-    return metafields
+        record = dict(certificate or {})
+        if record.get("edition_number"):
+            record["edition_number"] = int(record.get("edition_number") or 0)
+        if record.get("edition_total"):
+            record["edition_total"] = int(record.get("edition_total") or 0)
+        record.setdefault("edition_display", _certificate_display(record))
+        items.append(record)
+    return _metafield_input(
+        owner_id,
+        "certificates",
+        "json",
+        json.dumps(items, ensure_ascii=True, separators=(",", ":")),
+        compare_digest=compare_digest,
+    )
 
 
-def sync_order_certificate_metafields(order_gid, certificates, config=None, request_post=None):
+def order_certificate_metafield_inputs(order_gid, certificates, compare_digest=None):
+    return [order_certificate_metafield_input(order_gid, certificates, compare_digest=compare_digest)]
+
+
+def sync_order_certificate_metafields(order_gid, certificates, compare_digest=None, config=None, request_post=None):
     try:
         return metafields_set(
-            order_certificate_metafield_inputs(order_gid, certificates),
+            order_certificate_metafield_inputs(order_gid, certificates, compare_digest=compare_digest),
             config=config,
             request_post=request_post,
         )

@@ -16,13 +16,15 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn('"Edition Ops"', source)
         self.assertIn('"Orders"', source)
+        self.assertIn('"Certificates"', source)
         self.assertIn("get_edition_ops().render_page()", source)
         self.assertIn("get_orders_page().render_page()", source)
+        self.assertIn("get_certificates_page().render_page()", source)
         self.assertNotIn('"Limited Editions",', source)
         self.assertNotIn("render_limited_editions_page", source)
         self.assertNotIn("render_edition_orders_page", source)
         self.assertNotIn("render_edition_integrity_check_page", source)
-        self.assertIn('current_page in {"Dashboard", "Products", "Edition Ops", "Orders", "Developer", "Settings"}', source)
+        self.assertIn('current_page in {"Dashboard", "Products", "Edition Ops", "Orders", "Certificates", "Developer", "Settings"}', source)
         self.assertIn("DEVELOPER_PAGE_PASSWORD", source)
         self.assertIn("developer_unlocked", source)
 

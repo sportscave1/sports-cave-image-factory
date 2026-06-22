@@ -54,6 +54,24 @@ async def shopify_orders_paid_webhook(request: Request):
         import order_allocator
 
         result = order_allocator.process_shopify_order_for_editions(payload)
+        certificate_result = {}
+        try:
+            import certificate_engine
+
+            certificate_result = certificate_engine.generate_missing_certificates_for_order(payload)
+        except Exception as certificate_error:
+            certificate_result = {"errors": [str(certificate_error)], "generated": 0}
+            print(
+                json.dumps(
+                    {
+                        "event": "shopify_certificate_generation_failed",
+                        "error": str(certificate_error),
+                        "webhook_id": webhook_id,
+                        "topic": topic,
+                    }
+                ),
+                flush=True,
+            )
     except Exception as error:
         print(
             json.dumps(
@@ -68,7 +86,13 @@ async def shopify_orders_paid_webhook(request: Request):
         )
         return Response("Webhook accepted but processing failed.", status_code=500)
     status = "processed" if result.get("processed") else "skipped"
-    return {"ok": True, "status": status, "assignments_created": result.get("assignments_created", 0)}
+    return {
+        "ok": True,
+        "status": status,
+        "assignments_created": result.get("assignments_created", 0),
+        "certificates_generated": certificate_result.get("generated", 0),
+        "certificate_errors": certificate_result.get("errors", []),
+    }
 
 
 def _filtered_proxy_headers(headers):

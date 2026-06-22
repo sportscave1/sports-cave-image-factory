@@ -173,11 +173,15 @@ def _allocation_record(order_payload, line_item, product_id, edition_numbers, ed
     line_id = _line_identity(line_item)
     quantity = _coerce_quantity(line_item.get("quantity"))
     display = format_edition_numbers(edition_numbers, edition_total)
+    product = line_item.get("product") if isinstance(line_item.get("product"), dict) else {}
+    variant = line_item.get("variant") if isinstance(line_item.get("variant"), dict) else {}
     return {
         "line_item_id": line_id,
         "product_id": product_id,
-        "product_title": line_item.get("title") or line_item.get("name") or "",
-        "variant_title": line_item.get("variant_title") or line_item.get("variantTitle") or "",
+        "variant_id": line_item.get("variant_id") or line_item.get("variantId") or variant.get("id") or "",
+        "handle": line_item.get("product_handle") or line_item.get("handle") or product.get("handle") or "",
+        "product_title": line_item.get("title") or line_item.get("name") or product.get("title") or "",
+        "variant_title": line_item.get("variant_title") or line_item.get("variantTitle") or variant.get("title") or "",
         "quantity": quantity,
         "edition_numbers": edition_numbers,
         "edition_number": edition_numbers[0] if edition_numbers else None,

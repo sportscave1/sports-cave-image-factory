@@ -67,13 +67,33 @@ def write_simple_certificate_pdf(path, lines):
     path.write_bytes(bytes(pdf))
 
 
-def certificate_id(order_name, edition_number):
+def certificate_id(order_name, edition_number, handle=""):
     cleaned_order = safe_filename_part(str(order_name or "order").replace("#", ""))
+    if handle:
+        cleaned_handle = safe_filename_part(handle).upper()
+        return f"SC-{cleaned_order.upper()}-{cleaned_handle}-EDITION-{int(edition_number):03d}"
     return f"SC-{cleaned_order.upper()}-{int(edition_number):04d}"
 
 
 def format_edition_number(edition_number, edition_total):
     return f"#{int(edition_number):03d}/{int(edition_total)}"
+
+
+def certificate_pdf_filename(order_name, handle, edition_number, edition_total):
+    return (
+        f"sports-cave-certificate-{safe_filename_part(order_name)}-"
+        f"{safe_filename_part(handle)}-edition-{int(edition_number):03d}-"
+        f"of-{int(edition_total or 0)}.pdf"
+    )
+
+
+def certificate_template_status():
+    return {
+        "print_template_path": str(CERTIFICATE_TEMPLATE_PRINT_PATH),
+        "preview_template_path": str(CERTIFICATE_TEMPLATE_PREVIEW_PATH),
+        "print_template_found": CERTIFICATE_TEMPLATE_PRINT_PATH.exists(),
+        "preview_template_found": CERTIFICATE_TEMPLATE_PREVIEW_PATH.exists(),
+    }
 
 
 def font_candidates():
@@ -139,6 +159,7 @@ def generate_template_certificate_pdf(
     edition_total,
     order_name,
     shopify_handle="",
+    filename="",
 ):
     from PIL import Image, ImageDraw
 
@@ -148,10 +169,7 @@ def generate_template_certificate_pdf(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     handle_part = safe_filename_part(shopify_handle or product_title)
-    filename = (
-        f"certificate_{safe_filename_part(order_name)}_{handle_part}"
-        f"_edition_{int(edition_number):03d}.pdf"
-    )
+    filename = filename or certificate_pdf_filename(order_name, handle_part, edition_number, edition_total)
     pdf_path = output_dir / filename
 
     with Image.open(CERTIFICATE_TEMPLATE_PRINT_PATH) as template:
@@ -254,6 +272,8 @@ def generate_certificate_pdf(
     customer_name="",
     assigned_at="",
     shopify_handle="",
+    filename="",
+    allow_fallback=False,
 ):
     try:
         return generate_template_certificate_pdf(
@@ -263,9 +283,11 @@ def generate_certificate_pdf(
             edition_total=edition_total,
             order_name=order_name,
             shopify_handle=shopify_handle,
+            filename=filename,
         )
-    except Exception:
-        # Keep certificate generation resilient if the template asset is unavailable.
+    except FileNotFoundError:
+        if not allow_fallback:
+            raise
         return generate_simple_certificate_pdf(
             output_dir,
             product_title=product_title,
@@ -274,14 +296,24 @@ def generate_certificate_pdf(
             order_name=order_name,
             customer_name=customer_name,
             assigned_at=assigned_at,
+            filename=filename,
         )
+    except Exception:
+        raise
 
 
-def generate_simple_certificate_pdf(output_dir, *, product_title, edition_number, edition_total, order_name, customer_name, assigned_at):
-    filename = (
-        f"certificate_{safe_filename_part(order_name)}_{safe_filename_part(product_title)}"
-        f"_edition_{int(edition_number):03d}.pdf"
-    )
+def generate_simple_certificate_pdf(
+    output_dir,
+    *,
+    product_title,
+    edition_number,
+    edition_total,
+    order_name,
+    customer_name,
+    assigned_at,
+    filename="",
+):
+    filename = filename or certificate_pdf_filename(order_name, product_title, edition_number, edition_total)
     pdf_path = Path(output_dir) / filename
     edition_text = f"{int(edition_number):03d}/{int(edition_total):03d}"
     lines = [

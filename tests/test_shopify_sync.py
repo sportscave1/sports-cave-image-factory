@@ -240,6 +240,87 @@ class ShopifySyncClientTests(unittest.TestCase):
             shopify_sync.validate_config(config)
         self.assertIn("Missing Shopify authentication", str(context.exception))
 
+    def test_pdf_upload_uses_staged_upload_file_create_and_poll(self):
+        requests_seen = []
+        upload_calls = []
+        responses = [
+            FakeResponse(
+                {
+                    "data": {
+                        "stagedUploadsCreate": {
+                            "stagedTargets": [
+                                {
+                                    "url": "https://upload.example",
+                                    "resourceUrl": "https://resource.example/certificate.pdf",
+                                    "parameters": [{"name": "key", "value": "certificate-key"}],
+                                }
+                            ],
+                            "userErrors": [],
+                        }
+                    }
+                }
+            ),
+            FakeResponse(
+                {
+                    "data": {
+                        "fileCreate": {
+                            "files": [
+                                {
+                                    "id": "gid://shopify/GenericFile/1",
+                                    "fileStatus": "PROCESSING",
+                                    "url": "",
+                                }
+                            ],
+                            "userErrors": [],
+                        }
+                    }
+                }
+            ),
+            FakeResponse(
+                {
+                    "data": {
+                        "node": {
+                            "id": "gid://shopify/GenericFile/1",
+                            "fileStatus": "READY",
+                            "url": "https://cdn.example/certificate.pdf",
+                        }
+                    }
+                }
+            ),
+        ]
+
+        def fake_post(*args, **kwargs):
+            requests_seen.append(kwargs["json"])
+            return responses.pop(0)
+
+        class UploadResponse:
+            status_code = 201
+
+            def raise_for_status(self):
+                return None
+
+        def fake_upload_post(url, **kwargs):
+            upload_calls.append({"url": url, **kwargs})
+            return UploadResponse()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pdf_path = Path(tmpdir) / "certificate.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+            result = shopify_sync.upload_pdf_to_shopify_files(
+                pdf_path,
+                config=self.config,
+                request_post=fake_post,
+                upload_post=fake_upload_post,
+                poll_sleep_seconds=0,
+            )
+
+        self.assertEqual(result["file_id"], "gid://shopify/GenericFile/1")
+        self.assertEqual(result["url"], "https://cdn.example/certificate.pdf")
+        self.assertEqual(upload_calls[0]["url"], "https://upload.example")
+        self.assertEqual(upload_calls[0]["data"]["key"], "certificate-key")
+        self.assertEqual(requests_seen[0]["variables"]["input"][0]["resource"], "FILE")
+        self.assertEqual(requests_seen[1]["variables"]["files"][0]["contentType"], "FILE")
+
     def test_paid_order_allocator_assigns_current_next_number_and_advances_product(self):
         order_payload = {
             "id": 1234,

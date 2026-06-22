@@ -43,6 +43,7 @@ os_pages = None
 shopify_sync = None
 edition_ops_module = None
 orders_page_module = None
+certificates_page_module = None
 
 
 load_dotenv()
@@ -128,6 +129,15 @@ def get_orders_page():
     return orders_page_module
 
 
+def get_certificates_page():
+    global certificates_page_module
+    if certificates_page_module is None:
+        log_startup_stage("CERTIFICATES PAGE IMPORT START")
+        certificates_page_module = importlib.import_module("certificates_page")
+        log_startup_stage("CERTIFICATES PAGE IMPORT DONE")
+    return certificates_page_module
+
+
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
 UPLOAD_PREVIEW_DIR = BASE_DIR / "output" / "_ui-upload-previews"
@@ -154,6 +164,7 @@ MENU_OPTIONS = [
     "Product Uploads",
     "Edition Ops",
     "Orders",
+    "Certificates",
     "Prodigi",
     "Files",
     "Marketing Factory",
@@ -163,7 +174,6 @@ MENU_OPTIONS = [
 HIDDEN_PAGE_OPTIONS = [
     "Products",
     "Product Assets",
-    "Certificates",
     "Webhook Events",
     "Sync Runs",
     "App Errors",
@@ -4512,8 +4522,15 @@ def render_sidebar():
         st.sidebar.subheader("Orders")
         st.sidebar.write("1. Shows the saved order allocation snapshot immediately.")
         st.sidebar.write("2. Refresh recent paid orders only when needed.")
-        st.sidebar.write("3. Manual edits update order edition fields only.")
-        st.sidebar.write("4. Product counters stay controlled from Edition Ops unless explicitly allocated.")
+        st.sidebar.write("3. Edition numbers are read-only here.")
+        st.sidebar.write("4. Change product edition numbers only from Edition Ops.")
+    elif st.session_state.selected_page == "Certificates":
+        st.sidebar.divider()
+        st.sidebar.subheader("Certificates")
+        st.sidebar.write("1. Shows the saved certificate snapshot immediately.")
+        st.sidebar.write("2. Generate PDFs only from saved order allocations.")
+        st.sidebar.write("3. Retry upload errors from this page.")
+        st.sidebar.write("4. Open ready certificate PDFs when needed.")
     elif st.session_state.selected_page == "Prodigi":
         st.sidebar.divider()
         st.sidebar.subheader("Prodigi")
@@ -4545,7 +4562,7 @@ def render_sidebar():
     st.sidebar.divider()
     st.sidebar.subheader("MVP Mode")
     st.sidebar.caption(
-        "Edition Ops controls product edition fields. Orders uses a lightweight saved allocation snapshot."
+        "Edition Ops controls product edition fields. Orders and Certificates use lightweight saved snapshots."
     )
 
 
@@ -5042,6 +5059,15 @@ def render_settings_page():
                     use_container_width=True,
                 )
 
+    with st.expander("Certificate Templates", expanded=False):
+        if _developer_section_enabled("developer-load-certificate-template-check", "Check Certificate Templates"):
+            certificates = importlib.import_module("certificate_service")
+            status = certificates.certificate_template_status()
+            st.write(f"**Certificate print template:** {'Found' if status['print_template_found'] else 'Missing'}")
+            st.caption(status["print_template_path"])
+            st.write(f"**Certificate preview template:** {'Found' if status['preview_template_found'] else 'Missing'}")
+            st.caption(status["preview_template_path"])
+
     with st.expander("Database / Supabase", expanded=False):
         st.write(f"**DATABASE_URL present:** {'Yes' if any(os.getenv(key, '').strip() for key in DATABASE_URL_ENV_KEYS) else 'No'}")
         if st.button("Run Database Connection Test", key="developer-test-database", use_container_width=True):
@@ -5106,7 +5132,7 @@ def render_lightweight_dashboard_page():
     with focus_columns[0]:
         st.info("Use Edition Ops to refresh active products only when you need to edit edition fields.")
     with focus_columns[1]:
-        st.info("Orders, Supabase sync, product sync, CSV imports, and certificates are paused for this MVP.")
+        st.info("Orders and Certificates use saved snapshots first. Refresh only when you need current store data.")
     with focus_columns[2]:
         st.info("Use Mockups only when artwork is ready. Keep generated ZIPs saved in the right Drive folder.")
 
@@ -5120,7 +5146,7 @@ def render_lightweight_dashboard_page():
 
 
 def page_uses_local_database(current_page):
-    if current_page in {"Dashboard", "Products", "Edition Ops", "Orders", "Developer", "Settings"}:
+    if current_page in {"Dashboard", "Products", "Edition Ops", "Orders", "Certificates", "Developer", "Settings"}:
         return False
     supabase_enabled = any(os.getenv(key, "").strip() for key in DATABASE_URL_ENV_KEYS)
     if current_page in {"Files"}:
@@ -5152,12 +5178,12 @@ def render_selected_page(current_page):
         get_edition_ops().render_page()
     elif current_page == "Orders":
         get_orders_page().render_page()
+    elif current_page == "Certificates":
+        get_certificates_page().render_page()
     elif current_page == "Product Assets":
         os_route_pages().render_product_assets_page()
     elif current_page == "Prodigi":
         os_route_pages().render_prodigi_page()
-    elif current_page == "Certificates":
-        os_route_pages().render_certificates_page()
     elif current_page == "Webhook Events":
         os_route_pages().render_webhook_events_page()
     elif current_page == "Sync Runs":
