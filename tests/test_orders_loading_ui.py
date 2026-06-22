@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import edition_ops
@@ -89,6 +90,16 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("selection_mode=\"multi-row\"", source)
         self.assertIn("Generate Selected Certificates", source)
         self.assertIn("Upload Selected to Shopify", source)
+        self.assertIn("Allocate Missing Paid Orders", source)
+        self.assertIn("Enable Live Allocation From Now", source)
+        self.assertIn("Capture Product Baselines", source)
+        self.assertIn("Historical Backfill Selected Orders", source)
+        self.assertIn("Confirm allocation repair", source)
+        self.assertIn("Confirm historical backfill", source)
+        self.assertIn("PERF Orders", source)
+        self.assertIn('"load snapshot"', source)
+        self.assertIn('"render table"', source)
+        self.assertIn('"refresh Shopify"', source)
         self.assertIn("Generate + Upload Selected", source)
         self.assertIn("Open Selected PDF", source)
         self.assertIn("Upload", source)
@@ -105,6 +116,171 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn('"sync_status"', source)
         self.assertNotIn('"admin_url"', source)
         self.assertNotIn("supabase_backend", source)
+
+    def test_orders_page_open_renders_snapshot_without_shopify_or_allocation_work(self):
+        class FakeContainer:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeColumn:
+            def button(self, *args, **kwargs):
+                return False
+
+            def link_button(self, *args, **kwargs):
+                return None
+
+            def checkbox(self, *args, **kwargs):
+                return False
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {}
+                self.column_config = SimpleNamespace(TextColumn=lambda *args, **kwargs: None)
+                self.rendered_rows = None
+
+            def columns(self, spec):
+                return [FakeColumn() for _ in spec]
+
+            def container(self, *args, **kwargs):
+                return FakeContainer()
+
+            def dataframe(self, rows, **kwargs):
+                self.rendered_rows = rows
+
+            def title(self, *args, **kwargs):
+                return None
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def success(self, *args, **kwargs):
+                return None
+
+            def info(self, *args, **kwargs):
+                return None
+
+        fake_st = FakeStreamlit()
+        snapshot = {
+            "rows": [
+                {
+                    "order": "#SC1234",
+                    "date": "2026-06-22",
+                    "customer": "John",
+                    "edition": "#013",
+                    "certificate": "Generate",
+                    "shipping": "Standard",
+                    "product": "Justin Gaethje",
+                    "variant": "Black",
+                    "shopify_order_id": "gid://shopify/Order/1",
+                    "shopify_line_item_id": "gid://shopify/LineItem/1",
+                    "shopify_product_id": "gid://shopify/Product/1",
+                }
+            ],
+            "last_refreshed": "2026-06-22T10:00:00Z",
+            "saved_at": "2026-06-22T10:00:01Z",
+        }
+
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page.order_allocator,
+            "load_orders_snapshot",
+            return_value=snapshot,
+        ), patch.object(
+            orders_page.shopify_sync,
+            "iter_order_pages",
+            side_effect=AssertionError("Orders page open must not fetch Shopify orders."),
+        ), patch.object(
+            orders_page.shopify_sync,
+            "fetch_metafields",
+            side_effect=AssertionError("Orders page open must not fetch metafields."),
+        ), patch.object(
+            orders_page.order_allocator,
+            "process_shopify_orders_for_editions",
+            side_effect=AssertionError("Orders page open must not allocate."),
+        ), patch.object(
+            orders_page.certificate_engine,
+            "read_order_certificate_state",
+            side_effect=AssertionError("Orders page open must not fetch certificates."),
+        ):
+            orders_page.render_page()
+
+        self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC1234")
+        self.assertEqual(set(fake_st.rendered_rows[0]), set(orders_page.VISIBLE_COLUMNS))
+
+    def test_refresh_orders_fetches_shopify_without_allocation_or_product_metafields(self):
+        fake_st = SimpleNamespace(
+            session_state={
+                orders_page.ROWS_KEY: [],
+                orders_page.META_KEY: {"last_refreshed": "", "saved_at": ""},
+                orders_page.NOTICE_KEY: "",
+            }
+        )
+        line_item_id = "gid://shopify/LineItem/555"
+        order_payload = {
+            "shopify_order_id": "gid://shopify/Order/1234",
+            "order_name": "#SC1234",
+            "processed_at": "2026-06-23T10:00:00Z",
+            "created_at": "2026-06-23T09:55:00Z",
+            "customer_name": "Justin Collector",
+            "shipping_method": "US Standard Tracked Shipping",
+            "metafields": [
+                {
+                    "namespace": "sports_cave",
+                    "key": "edition_allocations",
+                    "value": json.dumps({"line_items": {line_item_id: {"edition_numbers": [13], "edition_total": 100}}}),
+                }
+            ],
+            "line_items": [
+                {
+                    "shopify_line_item_id": line_item_id,
+                    "shopify_product_id": "gid://shopify/Product/777",
+                    "product_title": "Justin Gaethje Undisputed Wall Art",
+                    "variant_title": "Black / XL",
+                    "quantity": 1,
+                }
+            ],
+        }
+
+        saved_payloads = []
+
+        def fake_save_snapshot(rows, meta=None):
+            payload = {
+                "rows": rows,
+                "last_refreshed": (meta or {}).get("last_refreshed") or "",
+                "saved_at": "2026-06-23T10:00:01Z",
+            }
+            saved_payloads.append(payload)
+            return payload
+
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page.shopify_sync,
+            "get_config",
+            return_value={"configured": True},
+        ), patch.object(
+            orders_page.shopify_sync,
+            "iter_order_pages",
+            return_value=[{"orders": [order_payload]}],
+        ), patch.object(
+            orders_page.shopify_sync,
+            "fetch_metafields",
+            side_effect=AssertionError("Refresh Orders must not fetch per-row metafields."),
+        ), patch.object(
+            orders_page.order_allocator,
+            "process_shopify_orders_for_editions",
+            side_effect=AssertionError("Refresh Orders must not allocate editions."),
+        ), patch.object(
+            orders_page.order_allocator,
+            "save_orders_snapshot",
+            side_effect=fake_save_snapshot,
+        ):
+            orders_page._refresh_orders()
+
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY][0]["edition"], "#013")
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY][0]["certificate"], "Generate")
+        self.assertIn("Refreshed 1 artwork rows", fake_st.session_state[orders_page.NOTICE_KEY])
+        self.assertEqual(saved_payloads[0]["rows"][0]["shopify_product_id"], "gid://shopify/Product/777")
 
     def test_orders_page_formats_single_edition_numbers(self):
         self.assertEqual(orders_page._format_edition("50"), "#050")

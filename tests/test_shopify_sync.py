@@ -354,20 +354,28 @@ class ShopifySyncClientTests(unittest.TestCase):
 
         order_writes = []
         product_writes = []
+        events = []
 
         with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
             shopify_sync,
             "sync_order_allocation_metafield",
-            side_effect=lambda order_gid, allocations, compare_digest=None, config=None, request_post=None: order_writes.append(allocations),
+            side_effect=lambda order_gid, allocations, compare_digest=None, config=None, request_post=None: (
+                events.append("order"),
+                order_writes.append(allocations),
+            ),
         ), patch.object(
             shopify_sync,
             "sync_limited_edition_metafields_for_products",
-            side_effect=lambda products, config=None, request_post=None: product_writes.extend(products),
+            side_effect=lambda products, config=None, request_post=None: (
+                events.append("product"),
+                product_writes.extend(products),
+            ),
         ):
             result = order_allocator.process_shopify_order_for_editions(order_payload, config=self.config)
 
         self.assertTrue(result["processed"])
         self.assertEqual(result["assignments_created"], 1)
+        self.assertEqual(events, ["order", "product"])
         allocation = order_writes[0]["line_items"]["gid://shopify/LineItem/555"]
         self.assertEqual(allocation["edition_numbers"], [91])
         self.assertEqual(allocation["edition_display"], "#091/100")
@@ -752,6 +760,265 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(allocation["edition_numbers"], [None])
         self.assertEqual(allocation["edition_number"], None)
         self.assertEqual(allocation["status"], "Needs Review - Sold Out")
+
+    def test_paid_order_allocator_requires_cutover_when_requested(self):
+        order_payload = {
+            "id": 1234,
+            "name": "#SC9999",
+            "financial_status": "paid",
+            "processed_at": "2026-06-23T10:00:00Z",
+            "line_items": [{"id": 555, "product_id": 777, "title": "Justin Gaethje", "quantity": 1}],
+        }
+
+        with patch.object(
+            shopify_sync,
+            "fetch_metafields",
+            side_effect=AssertionError("Cutover guard should return before Shopify metafield reads."),
+        ), patch.object(shopify_sync, "sync_order_allocation_metafield") as order_sync, patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+        ) as product_sync:
+            result = order_allocator.process_shopify_order_for_editions(
+                order_payload,
+                config=self.config,
+                require_cutover=True,
+                cutover_state={"automation_started_at": "", "baselines": {}},
+            )
+
+        self.assertFalse(result["processed"])
+        self.assertEqual(result["assignments_created"], 0)
+        self.assertIn("Live allocation is not enabled", result["reason"])
+        order_sync.assert_not_called()
+        product_sync.assert_not_called()
+
+    def test_paid_order_allocator_skips_pre_cutover_orders_for_historical_backfill(self):
+        order_payload = {
+            "id": 1234,
+            "name": "#SC9999",
+            "financial_status": "paid",
+            "processed_at": "2026-06-22T10:00:00Z",
+            "created_at": "2026-06-22T09:55:00Z",
+            "line_items": [{"id": 555, "product_id": 777, "title": "Justin Gaethje", "quantity": 1}],
+        }
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id == "gid://shopify/Order/1234":
+                return {"metafields": [], "api_version": "2026-04"}
+            self.fail("Pre-cutover orders must not read product metafields or allocate forward.")
+
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+        ) as order_sync, patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+        ) as product_sync:
+            result = order_allocator.process_shopify_order_for_editions(
+                order_payload,
+                config=self.config,
+                require_cutover=True,
+                cutover_state={
+                    "automation_started_at": "2026-06-23T00:00:00Z",
+                    "baselines": {},
+                },
+            )
+
+        self.assertTrue(result["processed"])
+        self.assertEqual(result["assignments_created"], 0)
+        self.assertEqual(result["issues"][0]["status"], "Historical - Backfill required")
+        self.assertIn("before the live allocation cutover", result["reason"])
+        order_sync.assert_not_called()
+        product_sync.assert_not_called()
+
+    def test_paid_order_allocator_allocates_after_cutover_when_requested(self):
+        order_payload = {
+            "id": 1234,
+            "name": "#SC9999",
+            "financial_status": "paid",
+            "processed_at": "2026-06-23T10:00:00Z",
+            "created_at": "2026-06-23T09:55:00Z",
+            "line_items": [{"id": 555, "product_id": 777, "title": "Justin Gaethje", "quantity": 1}],
+        }
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id == "gid://shopify/Order/1234":
+                return {"metafields": [], "api_version": "2026-04"}
+            return {
+                "metafields": [
+                    {"namespace": "sports_cave", "key": "edition_enabled", "type": "boolean", "value": "true"},
+                    {"namespace": "sports_cave", "key": "edition_total", "type": "number_integer", "value": "100"},
+                    {"namespace": "sports_cave", "key": "edition_next_number", "type": "number_integer", "value": "13"},
+                    {"namespace": "sports_cave", "key": "edition_sold_count", "type": "number_integer", "value": "12"},
+                    {"namespace": "sports_cave", "key": "edition_remaining", "type": "number_integer", "value": "88"},
+                    {"namespace": "sports_cave", "key": "edition_label", "type": "single_line_text_field", "value": "Numbered Edition"},
+                ],
+                "api_version": "2026-04",
+            }
+
+        order_writes = []
+        product_writes = []
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+            side_effect=lambda order_gid, allocations, compare_digest=None, config=None, request_post=None: order_writes.append(allocations),
+        ), patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+            side_effect=lambda products, config=None, request_post=None: product_writes.extend(products),
+        ):
+            result = order_allocator.process_shopify_order_for_editions(
+                order_payload,
+                config=self.config,
+                require_cutover=True,
+                cutover_state={
+                    "automation_started_at": "2026-06-23T00:00:00Z",
+                    "baselines": {},
+                },
+            )
+
+        self.assertEqual(result["assignments_created"], 1)
+        self.assertEqual(order_writes[0]["line_items"]["gid://shopify/LineItem/555"]["edition_numbers"], [13])
+        self.assertEqual(product_writes[0]["edition_next_number"], 14)
+
+    def test_historical_backfill_assigns_backwards_without_product_counter_updates(self):
+        rows = [
+            {
+                "order": "#SC2832",
+                "processed_at": "2026-06-20T10:00:00Z",
+                "created_at": "2026-06-20T09:55:00Z",
+                "shopify_order_id": "gid://shopify/Order/2832",
+                "shopify_line_item_id": "gid://shopify/LineItem/832",
+                "shopify_product_id": "gid://shopify/Product/777",
+                "product": "Justin Gaethje Undisputed Wall Art",
+                "variant": "Black / XL",
+                "line_quantity": 1,
+                "edition_offset": 0,
+                "edition": "Needs allocation",
+            },
+            {
+                "order": "#SC2834",
+                "processed_at": "2026-06-20T12:00:00Z",
+                "created_at": "2026-06-20T11:55:00Z",
+                "shopify_order_id": "gid://shopify/Order/2834",
+                "shopify_line_item_id": "gid://shopify/LineItem/834",
+                "shopify_product_id": "gid://shopify/Product/777",
+                "product": "Justin Gaethje Undisputed Wall Art",
+                "variant": "Black / XL",
+                "line_quantity": 1,
+                "edition_offset": 0,
+                "edition": "Needs allocation",
+            },
+            {
+                "order": "#SC2837",
+                "processed_at": "2026-06-21T10:00:00Z",
+                "created_at": "2026-06-21T09:55:00Z",
+                "shopify_order_id": "gid://shopify/Order/2837",
+                "shopify_line_item_id": "gid://shopify/LineItem/837",
+                "shopify_product_id": "gid://shopify/Product/777",
+                "product": "Justin Gaethje Undisputed Wall Art",
+                "variant": "Black / XL",
+                "line_quantity": 1,
+                "edition_offset": 0,
+                "edition": "Needs allocation",
+            },
+        ]
+        order_writes = {}
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id.startswith("gid://shopify/Order/"):
+                return {"metafields": [], "api_version": "2026-04"}
+            self.fail("Historical backfill must not fetch product metafields.")
+
+        def fake_order_sync(order_gid, allocations, compare_digest=None, config=None, request_post=None):
+            order_writes[order_gid] = allocations
+
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+            side_effect=fake_order_sync,
+        ), patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+        ) as product_sync:
+            result = order_allocator.historical_backfill_order_rows(
+                rows,
+                config=self.config,
+                cutover_state={
+                    "automation_started_at": "2026-06-23T00:00:00Z",
+                    "baselines": {
+                        "gid://shopify/Product/777": {
+                            "product_gid": "gid://shopify/Product/777",
+                            "baseline_next_number": 14,
+                            "baseline_sold_count": 13,
+                            "baseline_remaining": 87,
+                        }
+                    },
+                },
+            )
+
+        self.assertEqual(result["assignments_created"], 3)
+        self.assertEqual([row["edition_number"] for row in result["assigned_rows"]], [11, 12, 13])
+        self.assertEqual(
+            order_writes["gid://shopify/Order/2832"]["line_items"]["gid://shopify/LineItem/832"]["edition_numbers"],
+            [11],
+        )
+        self.assertEqual(
+            order_writes["gid://shopify/Order/2834"]["line_items"]["gid://shopify/LineItem/834"]["edition_numbers"],
+            [12],
+        )
+        self.assertEqual(
+            order_writes["gid://shopify/Order/2837"]["line_items"]["gid://shopify/LineItem/837"]["edition_numbers"],
+            [13],
+        )
+        product_sync.assert_not_called()
+
+    def test_historical_backfill_skips_post_cutover_rows(self):
+        rows = [
+            {
+                "order": "#SC2999",
+                "processed_at": "2026-06-23T10:00:00Z",
+                "created_at": "2026-06-23T09:55:00Z",
+                "shopify_order_id": "gid://shopify/Order/2999",
+                "shopify_line_item_id": "gid://shopify/LineItem/999",
+                "shopify_product_id": "gid://shopify/Product/777",
+                "product": "Justin Gaethje Undisputed Wall Art",
+                "variant": "Black / XL",
+                "line_quantity": 1,
+                "edition_offset": 0,
+                "edition": "Needs allocation",
+            }
+        ]
+
+        with patch.object(
+            shopify_sync,
+            "fetch_metafields",
+            return_value={"metafields": [], "api_version": "2026-04"},
+        ), patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+        ) as order_sync, patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+        ) as product_sync:
+            result = order_allocator.historical_backfill_order_rows(
+                rows,
+                config=self.config,
+                cutover_state={
+                    "automation_started_at": "2026-06-23T00:00:00Z",
+                    "baselines": {
+                        "gid://shopify/Product/777": {
+                            "product_gid": "gid://shopify/Product/777",
+                            "baseline_next_number": 14,
+                        }
+                    },
+                },
+            )
+
+        self.assertEqual(result["assignments_created"], 0)
+        self.assertEqual(result["skipped_not_historical"], 1)
+        self.assertEqual(result["assigned_rows"], [])
+        order_sync.assert_not_called()
+        product_sync.assert_not_called()
 
     def test_connection_and_product_page_parsing(self):
         responses = [

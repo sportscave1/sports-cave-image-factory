@@ -53,7 +53,7 @@ async def shopify_orders_paid_webhook(request: Request):
     try:
         import order_allocator
 
-        result = order_allocator.process_shopify_order_for_editions(payload)
+        result = order_allocator.process_shopify_order_for_editions(payload, require_cutover=True)
         certificate_result = {}
         try:
             import certificate_engine

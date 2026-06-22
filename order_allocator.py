@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import re
 
@@ -8,11 +9,21 @@ import shopify_sync
 
 BASE_DIR = Path(__file__).resolve().parent
 SNAPSHOT_PATH = BASE_DIR / "output" / "_cache" / "orders_allocation_snapshot.json"
+CUTOVER_PATH = BASE_DIR / "output" / "_cache" / "limited_edition_cutover.json"
 SNAPSHOT_VERSION = 1
+CUTOVER_VERSION = 1
+AUTOMATION_STARTED_ENV = "LIMITED_EDITION_AUTOMATION_STARTED_AT"
 
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _safe_iso(value):
+    parsed = _parse_datetime(value)
+    if parsed == datetime.min.replace(tzinfo=timezone.utc):
+        return ""
+    return parsed.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def format_edition_numbers(numbers, total):
@@ -173,6 +184,13 @@ def allocation_order_key(order_payload):
     )
 
 
+def _order_processed_datetime(order_payload):
+    processed = _parse_datetime(order_payload.get("processedAt") or order_payload.get("processed_at"))
+    if processed != datetime.min.replace(tzinfo=timezone.utc):
+        return processed
+    return _parse_datetime(order_payload.get("createdAt") or order_payload.get("created_at"))
+
+
 def _line_position(line_item, fallback):
     for key in ("position", "line_item_position", "index"):
         try:
@@ -182,6 +200,133 @@ def _line_position(line_item, fallback):
         if value > 0:
             return value
     return fallback
+
+
+def _empty_cutover_state():
+    return {
+        "version": CUTOVER_VERSION,
+        "automation_started_at": "",
+        "baselines": {},
+        "updated_at": "",
+    }
+
+
+def load_cutover_state():
+    state = _empty_cutover_state()
+    if CUTOVER_PATH.exists():
+        try:
+            loaded = json.loads(CUTOVER_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            loaded = {}
+        if isinstance(loaded, dict):
+            state.update(loaded)
+    state["version"] = CUTOVER_VERSION
+    state.setdefault("baselines", {})
+    env_started_at = _safe_iso(os.getenv(AUTOMATION_STARTED_ENV, ""))
+    if env_started_at:
+        state["automation_started_at"] = env_started_at
+    return state
+
+
+def save_cutover_state(state):
+    payload = _empty_cutover_state()
+    payload.update(state or {})
+    payload["version"] = CUTOVER_VERSION
+    payload["automation_started_at"] = _safe_iso(payload.get("automation_started_at")) or ""
+    payload["baselines"] = payload.get("baselines") or {}
+    payload["updated_at"] = now_iso()
+    CUTOVER_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CUTOVER_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return payload
+
+
+def enable_live_allocation_from_now(started_at=None):
+    state = load_cutover_state()
+    state["automation_started_at"] = _safe_iso(started_at or now_iso())
+    return save_cutover_state(state)
+
+
+def _baseline_product_gid(row):
+    return product_gid(
+        row.get("shopify_product_gid")
+        or row.get("shopify_product_id")
+        or row.get("product_gid")
+        or row.get("product_id")
+    )
+
+
+def _baseline_from_product_row(row, captured_at):
+    product_id = _baseline_product_gid(row)
+    if not product_id:
+        return None
+    next_number = _positive_int(row.get("edition_next_number"), 1)
+    total = _positive_int(row.get("edition_total"), 100)
+    sold = _positive_int(row.get("edition_sold_count"), max(next_number - 1, 0))
+    remaining = max(total - sold, 0)
+    if row.get("edition_remaining") not in (None, ""):
+        remaining = max(_positive_int(row.get("edition_remaining"), remaining), 0)
+    return {
+        "product_gid": product_id,
+        "shopify_handle": str(row.get("handle") or row.get("shopify_handle") or "").strip(),
+        "product_title": str(row.get("product_title") or row.get("title") or "").strip(),
+        "baseline_next_number": next_number,
+        "baseline_sold_count": sold,
+        "baseline_remaining": remaining,
+        "baseline_total": total,
+        "baseline_captured_at": captured_at,
+    }
+
+
+def capture_product_baselines(product_rows, captured_at=None):
+    captured = _safe_iso(captured_at or now_iso())
+    state = load_cutover_state()
+    baselines = dict(state.get("baselines") or {})
+    count = 0
+    for row in product_rows or []:
+        if not isinstance(row, dict):
+            continue
+        baseline = _baseline_from_product_row(row, captured)
+        if not baseline:
+            continue
+        baselines[baseline["product_gid"]] = baseline
+        count += 1
+    state["baselines"] = baselines
+    state.setdefault("automation_started_at", "")
+    saved = save_cutover_state(state)
+    saved["captured_count"] = count
+    return saved
+
+
+def automation_started_at(cutover_state=None):
+    state = cutover_state or load_cutover_state()
+    started_at = _safe_iso((state or {}).get("automation_started_at") or os.getenv(AUTOMATION_STARTED_ENV, ""))
+    return started_at
+
+
+def _automation_started_datetime(cutover_state=None):
+    started_at = automation_started_at(cutover_state)
+    if not started_at:
+        return None
+    parsed = _parse_datetime(started_at)
+    if parsed == datetime.min.replace(tzinfo=timezone.utc):
+        return None
+    return parsed
+
+
+def _is_before_automation_start(order_payload, cutover_state=None):
+    started = _automation_started_datetime(cutover_state)
+    if not started:
+        return False
+    return _order_processed_datetime(order_payload) < started
+
+
+def _allocated_unit_count(payload):
+    total = 0
+    for allocation in (parse_allocation_payload(payload).get("line_items") or {}).values():
+        if not isinstance(allocation, dict):
+            continue
+        total += sum(1 for number in _allocation_numbers(allocation, _coerce_quantity(allocation.get("quantity"))) if number)
+    return total
 
 
 def _financial_status(order_payload):
@@ -493,6 +638,87 @@ def _product_update_from_state(product_state, line_item):
     }
 
 
+def _apply_allocated_numbers_to_product_state(product_state, edition_numbers):
+    before = (
+        int(product_state.get("next_number") or 1),
+        int(product_state.get("sold_count") or 0),
+        int(product_state.get("remaining") or 0),
+        product_state.get("status") or "",
+    )
+    edition_total = int(product_state.get("edition_total") or 100)
+    for number in sorted(number for number in edition_numbers or [] if number):
+        sold_count = min(max(int(product_state.get("sold_count") or 0), int(number)), edition_total)
+        remaining = max(edition_total - sold_count, 0)
+        if remaining <= 0:
+            next_number = edition_total
+        else:
+            next_number = min(max(int(product_state.get("next_number") or 1), int(number) + 1), edition_total)
+        product_state["sold_count"] = sold_count
+        product_state["remaining"] = remaining
+        product_state["next_number"] = max(next_number, 1)
+        product_state["status"] = shopify_sync.calculate_limited_edition_status(remaining)
+    after = (
+        int(product_state.get("next_number") or 1),
+        int(product_state.get("sold_count") or 0),
+        int(product_state.get("remaining") or 0),
+        product_state.get("status") or "",
+    )
+    return after != before
+
+
+def _product_updates_from_allocation_records(allocation_records, config=None, request_post=None):
+    product_state_cache = {}
+    product_updates = {}
+    for allocation in allocation_records or []:
+        if not isinstance(allocation, dict):
+            continue
+        product_id = product_gid(allocation.get("product_id") or allocation.get("shopify_product_id"))
+        if not product_id:
+            continue
+        numbers = [
+            number
+            for number in _allocation_numbers(allocation, _coerce_quantity(allocation.get("quantity")))
+            if number
+        ]
+        if not numbers:
+            continue
+        product_state = _fetch_product_state(
+            product_id,
+            product_state_cache,
+            config=config,
+            request_post=request_post,
+        )
+        if _apply_allocated_numbers_to_product_state(product_state, numbers):
+            product_updates[product_id] = _product_update_from_state(product_state, allocation)
+    return product_updates
+
+
+def _sync_product_updates_with_retry(product_updates, allocation_records, config=None, request_post=None):
+    updates = dict(product_updates or {})
+    last_error = None
+    for attempt in range(3):
+        if not updates:
+            return 0
+        try:
+            shopify_sync.sync_limited_edition_metafields_for_products(
+                list(updates.values()),
+                config=config,
+                request_post=request_post,
+            )
+            return len(updates)
+        except shopify_sync.ShopifyAPIError as error:
+            last_error = error
+            if attempt < 2 and _is_compare_error(error):
+                updates = _product_updates_from_allocation_records(
+                    allocation_records,
+                    config=config,
+                    request_post=request_post,
+                )
+                continue
+            raise
+    raise last_error
+
+
 def _fetch_product_state(product_id, product_state_cache, config=None, request_post=None):
     if product_id not in product_state_cache:
         product_metafields = shopify_sync.fetch_metafields(
@@ -619,7 +845,14 @@ def _sync_order_allocations_with_retry(
     raise last_error
 
 
-def process_shopify_order_for_editions(order_payload, config=None, request_post=None):
+def process_shopify_order_for_editions(
+    order_payload,
+    config=None,
+    request_post=None,
+    *,
+    require_cutover=False,
+    cutover_state=None,
+):
     config = config or shopify_sync.get_config()
     if not _is_paid_order(order_payload):
         return {"processed": False, "reason": "Order is not paid.", "assignments_created": 0, "issues": []}
@@ -627,6 +860,30 @@ def process_shopify_order_for_editions(order_payload, config=None, request_post=
     shopify_order_id = _order_identity(order_payload)
     if not shopify_order_id:
         raise shopify_sync.ShopifyAPIError("Order ID is missing from webhook payload.")
+
+    cutover = cutover_state or load_cutover_state()
+    started_at = automation_started_at(cutover)
+    if require_cutover and not started_at:
+        return {
+            "processed": False,
+            "reason": "Live allocation is not enabled. Set the automation start time first.",
+            "assignments_created": 0,
+            "issues": [{"order_id": shopify_order_id, "status": "Live allocation not enabled"}],
+            "order_id": shopify_order_id,
+        }
+
+    if started_at and _is_before_automation_start(order_payload, cutover):
+        state = read_order_allocation_state(shopify_order_id, config=config, request_post=request_post)
+        existing_payload = state.get("payload") or {}
+        return {
+            "processed": True,
+            "assignments_created": 0,
+            "issues": [{"order_id": shopify_order_id, "status": "Historical - Backfill required"}],
+            "skipped_existing": _allocated_unit_count(existing_payload),
+            "allocation_payload": existing_payload,
+            "order_id": shopify_order_id,
+            "reason": "Order is before the live allocation cutover.",
+        }
 
     last_compare_error = None
     for attempt in range(3):
@@ -643,6 +900,18 @@ def process_shopify_order_for_editions(order_payload, config=None, request_post=
         product_updates = plan["product_updates"]
 
         if not new_allocations:
+            updated_products = 0
+            if require_cutover and plan["skipped_existing"]:
+                updated_products = _sync_product_updates_with_retry(
+                    _product_updates_from_allocation_records(
+                        (existing_payload.get("line_items") or {}).values(),
+                        config=config,
+                        request_post=request_post,
+                    ),
+                    (existing_payload.get("line_items") or {}).values(),
+                    config=config,
+                    request_post=request_post,
+                )
             return {
                 "processed": True,
                 "assignments_created": 0,
@@ -650,20 +919,8 @@ def process_shopify_order_for_editions(order_payload, config=None, request_post=
                 "skipped_existing": plan["skipped_existing"],
                 "allocation_payload": existing_payload,
                 "order_id": shopify_order_id,
+                "updated_products": updated_products,
             }
-
-        try:
-            if product_updates:
-                shopify_sync.sync_limited_edition_metafields_for_products(
-                    list(product_updates.values()),
-                    config=config,
-                    request_post=request_post,
-                )
-        except shopify_sync.ShopifyAPIError as error:
-            if attempt < 2 and _is_compare_error(error):
-                last_compare_error = error
-                continue
-            raise
 
         payload = _sync_order_allocations_with_retry(
             shopify_order_id,
@@ -673,12 +930,24 @@ def process_shopify_order_for_editions(order_payload, config=None, request_post=
             config=config,
             request_post=request_post,
         )
+        try:
+            updated_products = _sync_product_updates_with_retry(
+                product_updates,
+                new_allocations.values(),
+                config=config,
+                request_post=request_post,
+            )
+        except shopify_sync.ShopifyAPIError as error:
+            if attempt < 2 and _is_compare_error(error):
+                last_compare_error = error
+                continue
+            raise
         return {
             "processed": True,
             "assignments_created": plan["assignments_created"],
             "issues": plan["issues"],
             "skipped_existing": plan["skipped_existing"],
-            "updated_products": len(product_updates),
+            "updated_products": updated_products,
             "allocation_payload": payload,
             "order_id": shopify_order_id,
         }
@@ -686,16 +955,26 @@ def process_shopify_order_for_editions(order_payload, config=None, request_post=
     raise last_compare_error or shopify_sync.ShopifyAPIError("Could not allocate editions after compareDigest retries.")
 
 
-def process_shopify_orders_for_editions(orders, config=None, request_post=None):
+def process_shopify_orders_for_editions(
+    orders,
+    config=None,
+    request_post=None,
+    *,
+    require_cutover=False,
+    cutover_state=None,
+):
     results = []
     errors = []
     assignments_created = 0
+    cutover = cutover_state or load_cutover_state()
     for order_payload in sorted(orders or [], key=allocation_order_key):
         try:
             result = process_shopify_order_for_editions(
                 order_payload,
                 config=config,
                 request_post=request_post,
+                require_cutover=require_cutover,
+                cutover_state=cutover,
             )
         except Exception as error:
             order_id = _order_identity(order_payload)
@@ -714,6 +993,216 @@ def process_shopify_orders_for_editions(orders, config=None, request_post=None):
         "assignments_created": assignments_created,
         "errors": errors,
         "results": results,
+    }
+
+
+def _row_unit_index(row):
+    try:
+        return int(row.get("line_item_unit_index") or int(row.get("edition_offset") or 0) + 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _row_quantity(row):
+    return _coerce_quantity(row.get("line_quantity") or row.get("quantity"))
+
+
+def _row_allocation_key(row):
+    return (
+        _parse_datetime(row.get("processed_at") or row.get("processedAt")),
+        _parse_datetime(row.get("created_at") or row.get("createdAt")),
+        _parse_order_number(row.get("order") or row.get("order_name") or row.get("order_number")),
+        str(row.get("shopify_line_item_id") or row.get("line_item_id") or ""),
+        _row_unit_index(row),
+    )
+
+
+def _row_order_payload(row):
+    return {
+        "shopify_order_id": order_gid(row.get("shopify_order_id") or row.get("order_gid")),
+        "id": order_gid(row.get("shopify_order_id") or row.get("order_gid")),
+        "order_name": row.get("order") or row.get("order_name") or "",
+        "name": row.get("order") or row.get("order_name") or "",
+        "processed_at": row.get("processed_at") or "",
+        "created_at": row.get("created_at") or "",
+    }
+
+
+def _row_line_item(row):
+    return {
+        "shopify_line_item_id": line_item_gid(row.get("shopify_line_item_id") or row.get("line_item_gid")),
+        "id": line_item_gid(row.get("shopify_line_item_id") or row.get("line_item_gid")),
+        "shopify_product_id": product_gid(row.get("shopify_product_id") or row.get("product_gid")),
+        "product_id": product_gid(row.get("shopify_product_id") or row.get("product_gid")),
+        "variant_id": row.get("variant_id") or row.get("variant_gid") or "",
+        "product_handle": row.get("product_handle") or row.get("handle") or "",
+        "product_title": row.get("product") or row.get("product_title") or "",
+        "title": row.get("product") or row.get("product_title") or "",
+        "variant_title": row.get("variant") or row.get("variant_title") or "",
+        "quantity": _row_quantity(row),
+    }
+
+
+def _existing_unit_number(payload, row):
+    line_id = line_item_gid(row.get("shopify_line_item_id") or row.get("line_item_gid"))
+    allocation = (parse_allocation_payload(payload).get("line_items") or {}).get(line_id) or {}
+    numbers = _allocation_numbers(allocation, _row_quantity(row))
+    unit_index = _row_unit_index(row)
+    if unit_index <= len(numbers):
+        return numbers[unit_index - 1]
+    return None
+
+
+def _row_is_before_automation_start(row, cutover_state):
+    started = _automation_started_datetime(cutover_state)
+    if not started:
+        return False
+    return _order_processed_datetime(_row_order_payload(row)) < started
+
+
+def _historical_candidate_rows(rows, order_states, cutover_state):
+    candidates = []
+    skipped_existing = 0
+    skipped_not_historical = 0
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if row.get("has_saved_allocation") or _positive_int(row.get("edition_number")):
+            skipped_existing += 1
+            continue
+        if not _row_is_before_automation_start(row, cutover_state):
+            skipped_not_historical += 1
+            continue
+        order_id = order_gid(row.get("shopify_order_id") or row.get("order_gid"))
+        line_id = line_item_gid(row.get("shopify_line_item_id") or row.get("line_item_gid"))
+        product_id = product_gid(row.get("shopify_product_id") or row.get("product_gid"))
+        if not order_id or not line_id or not product_id:
+            continue
+        state = order_states.get(order_id) or {}
+        if _existing_unit_number(state.get("payload") or {}, row):
+            skipped_existing += 1
+            continue
+        candidates.append({**row, "shopify_order_id": order_id, "shopify_line_item_id": line_id, "shopify_product_id": product_id})
+    return candidates, skipped_existing, skipped_not_historical
+
+
+def historical_backfill_order_rows(rows, config=None, request_post=None, cutover_state=None):
+    config = config or shopify_sync.get_config()
+    cutover = cutover_state or load_cutover_state()
+    baselines = cutover.get("baselines") or {}
+    if not _automation_started_datetime(cutover):
+        return {
+            "assignments_created": 0,
+            "skipped_existing": 0,
+            "skipped_not_historical": 0,
+            "errors": [{"status": "Missing automation start"}],
+            "order_payloads": {},
+            "assigned_rows": [],
+        }
+    order_ids = sorted(
+        {
+            order_gid(row.get("shopify_order_id") or row.get("order_gid"))
+            for row in rows or []
+            if isinstance(row, dict) and (row.get("shopify_order_id") or row.get("order_gid"))
+        }
+    )
+    order_states = {
+        order_id: read_order_allocation_state(order_id, config=config, request_post=request_post)
+        for order_id in order_ids
+    }
+    candidates, skipped_existing, skipped_not_historical = _historical_candidate_rows(rows, order_states, cutover)
+    by_product = {}
+    for row in candidates:
+        by_product.setdefault(product_gid(row.get("shopify_product_id") or row.get("product_gid")), []).append(row)
+
+    assignments = []
+    errors = []
+    for product_id, product_rows in sorted(by_product.items()):
+        baseline = baselines.get(product_id) or {}
+        baseline_next = _positive_int(baseline.get("baseline_next_number"))
+        if not baseline_next:
+            errors.append({"product_id": product_id, "status": "Missing baseline"})
+            continue
+        sorted_rows = sorted(product_rows, key=_row_allocation_key)
+        start_number = baseline_next - len(sorted_rows)
+        if start_number < 1:
+            errors.append({"product_id": product_id, "status": "Baseline does not have enough historical numbers"})
+            continue
+        for offset, row in enumerate(sorted_rows):
+            assignments.append(
+                {
+                    "row": row,
+                    "edition_number": start_number + offset,
+                    "baseline_next_number": baseline_next,
+                }
+            )
+
+    by_order = {}
+    for assignment in assignments:
+        row = assignment["row"]
+        by_order.setdefault(order_gid(row.get("shopify_order_id")), []).append(assignment)
+
+    synced_payloads = {}
+    created = 0
+    for order_id, order_assignments in sorted(by_order.items()):
+        state = order_states.get(order_id) or read_order_allocation_state(order_id, config=config, request_post=request_post)
+        new_allocations = {}
+        order_payload = _row_order_payload(order_assignments[0]["row"])
+        for assignment in order_assignments:
+            row = assignment["row"]
+            if _existing_unit_number(state.get("payload") or {}, row):
+                skipped_existing += 1
+                continue
+            line_item = _row_line_item(row)
+            quantity = _row_quantity(row)
+            numbers = [None] * quantity
+            unit_index = _row_unit_index(row)
+            while len(numbers) < unit_index:
+                numbers.append(None)
+            numbers[unit_index - 1] = assignment["edition_number"]
+            line_id = _line_identity(line_item)
+            incoming = _allocation_record(
+                order_payload,
+                line_item,
+                _line_product_gid(line_item),
+                numbers,
+                row.get("edition_total") or 100,
+                status="Historical Backfill",
+            )
+            new_allocations[line_id] = _merge_line_allocation(new_allocations.get(line_id) or {}, incoming)
+        if not new_allocations:
+            continue
+        payload = _sync_order_allocations_with_retry(
+            order_id,
+            order_payload,
+            new_allocations,
+            state,
+            config=config,
+            request_post=request_post,
+        )
+        synced_payloads[order_id] = payload
+        created += sum(
+            1
+            for allocation in new_allocations.values()
+            for number in allocation.get("edition_numbers") or []
+            if number
+        )
+
+    return {
+        "assignments_created": created,
+        "skipped_existing": skipped_existing,
+        "skipped_not_historical": skipped_not_historical,
+        "errors": errors,
+        "order_payloads": synced_payloads,
+        "assigned_rows": [
+            {
+                **assignment["row"],
+                "edition_number": assignment["edition_number"],
+                "edition_display": f"#{assignment['edition_number']:03d}",
+            }
+            for assignment in assignments
+            if order_gid(assignment["row"].get("shopify_order_id")) in synced_payloads
+        ],
     }
 
 

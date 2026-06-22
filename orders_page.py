@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+import time
 
 import streamlit as st
 
@@ -19,6 +20,8 @@ SNAPSHOT_LOADED_KEY = "orders_allocation_snapshot_loaded"
 NOTICE_KEY = "orders_allocation_notice"
 SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
 GRID_KEY = "orders-fulfilment-grid"
+ALLOCATE_CONFIRM_KEY = "orders_allocate_confirm"
+BACKFILL_CONFIRM_KEY = "orders_backfill_confirm"
 
 VISIBLE_COLUMNS = (
     "order",
@@ -44,6 +47,13 @@ def _format_time(value):
 
 def _now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _perf_log(label, start_time, **extra):
+    elapsed = time.perf_counter() - start_time
+    details = " ".join(f"{key}={value}" for key, value in extra.items())
+    suffix = f" {details}" if details else ""
+    print(f"PERF Orders {label} {elapsed:.3f}s{suffix}", flush=True)
 
 
 def _ensure_state():
@@ -246,6 +256,7 @@ def _update_matching_row(target_row, updates):
 def _load_snapshot_once():
     if st.session_state.get(SNAPSHOT_LOADED_KEY):
         return
+    start = time.perf_counter()
     payload = order_allocator.load_orders_snapshot()
     st.session_state[ROWS_KEY] = _sort_rows(payload.get("rows") or [])
     st.session_state[META_KEY] = {
@@ -253,6 +264,7 @@ def _load_snapshot_once():
         "saved_at": payload.get("saved_at") or "",
     }
     st.session_state[SNAPSHOT_LOADED_KEY] = True
+    _perf_log("load snapshot", start, rows=len(st.session_state[ROWS_KEY]))
 
 
 def _write_snapshot(rows, meta=None):
@@ -267,22 +279,14 @@ def _write_snapshot(rows, meta=None):
     }
 
 
-def _edition_ops_next_numbers():
+def _edition_ops_snapshot_rows():
     if not EDITION_OPS_SNAPSHOT_PATH.exists():
-        return {}
+        return []
     try:
         payload = json.loads(EDITION_OPS_SNAPSHOT_PATH.read_text(encoding="utf-8"))
     except Exception:
-        return {}
-    lookup = {}
-    for row in payload.get("rows") or []:
-        product_id = str(row.get("shopify_product_gid") or row.get("shopify_product_id") or "").strip()
-        if not product_id:
-            continue
-        next_number = _normalise_edition_number(row.get("edition_next_number"))
-        if next_number:
-            lookup[product_id] = next_number
-    return lookup
+        return []
+    return [row for row in payload.get("rows") or [] if isinstance(row, dict)]
 
 
 def _apply_latest_product_numbers(rows):
@@ -305,24 +309,6 @@ def _certificate_for_unit(order, line_id, edition_number, unit_index):
             continue
         return certificate
     return {}
-
-
-def _product_edition(product_id, cache, config):
-    if not product_id:
-        return {}
-    if product_id in cache:
-        return cache[product_id]
-    try:
-        metafields = shopify_sync.fetch_metafields(
-            product_id,
-            namespace="sports_cave",
-            config=config,
-        ).get("metafields") or []
-        edition = shopify_sync.normalize_limited_edition_metafields(metafields)
-    except Exception:
-        edition = {}
-    cache[product_id] = edition
-    return edition
 
 
 def _product_is_sold_out(edition):
@@ -443,14 +429,8 @@ def _replace_allocation_metafield(order, allocation_payload):
     return updated
 
 
-def _refresh_orders():
-    config = shopify_sync.get_config()
-    if not config.get("configured"):
-        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before refreshing orders."
-        return
-    existing_rows = st.session_state.get(ROWS_KEY, [])
-    rows = []
-    product_cache = {}
+def _fetch_recent_paid_orders(config):
+    start = time.perf_counter()
     orders = []
     for page in shopify_sync.iter_order_pages(
         days=30,
@@ -461,35 +441,169 @@ def _refresh_orders():
         config=config,
     ):
         orders.extend(page.get("orders") or [])
+    _perf_log("refresh Shopify", start, orders=len(orders))
+    _perf_log("fetch allocations", start, source="orders_query")
+    _perf_log("fetch certificates", start, source="orders_query")
+    return orders
 
+
+def _rows_from_orders(orders, allocation_payloads=None):
+    rows = []
+    allocation_payloads = allocation_payloads or {}
+    for order in orders or []:
+        order = _replace_allocation_metafield(order, allocation_payloads.get(_order_identity(order)))
+        for line_item in order.get("line_items") or []:
+            rows.extend(_rows_from_order_line(order, line_item, {}))
+    return rows
+
+
+def _save_refreshed_rows(rows, existing_rows, refreshed_at=None):
+    refreshed_at = refreshed_at or _now_iso()
+    sorted_rows = _sort_rows(_merge_local_certificate_fields(rows, existing_rows))
+    st.session_state[ROWS_KEY] = sorted_rows
+    _write_snapshot(sorted_rows, meta={"last_refreshed": refreshed_at})
+    return sorted_rows
+
+
+def _refresh_orders():
+    config = shopify_sync.get_config()
+    if not config.get("configured"):
+        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before refreshing orders."
+        return
+    existing_rows = st.session_state.get(ROWS_KEY, [])
+    orders = _fetch_recent_paid_orders(config)
+    rows = _rows_from_orders(orders)
+    sorted_rows = _save_refreshed_rows(rows, existing_rows)
+    st.session_state[NOTICE_KEY] = f"Refreshed {len(sorted_rows)} artwork rows from Shopify."
+
+
+def _allocate_missing_paid_orders():
+    config = shopify_sync.get_config()
+    if not config.get("configured"):
+        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before allocating orders."
+        return
+    if not st.session_state.get(ALLOCATE_CONFIRM_KEY):
+        st.session_state[NOTICE_KEY] = "Confirm allocation repair before running Allocate Missing Paid Orders."
+        return
+    cutover = order_allocator.load_cutover_state()
+    if not order_allocator.automation_started_at(cutover):
+        st.session_state[NOTICE_KEY] = "Enable Live Allocation From Now before allocating missing paid orders."
+        return
+    existing_rows = st.session_state.get(ROWS_KEY, [])
+    orders = _fetch_recent_paid_orders(config)
+    product_start = time.perf_counter()
     allocation_results = order_allocator.process_shopify_orders_for_editions(
         orders,
         config=config,
+        require_cutover=True,
+        cutover_state=cutover,
     )
+    _perf_log("fetch product metafields", product_start, source="live_allocation")
     allocation_payloads = {
         result.get("order_id"): result.get("allocation_payload")
         for result in allocation_results.get("results") or []
         if result.get("allocation_payload")
     }
-    for order in orders:
-        order = _replace_allocation_metafield(order, allocation_payloads.get(_order_identity(order)))
-        for line_item in order.get("line_items") or []:
-            edition = _product_edition(line_item.get("shopify_product_id"), product_cache, config)
-            rows.extend(_rows_from_order_line(order, line_item, edition))
-    refreshed_at = _now_iso()
-    sorted_rows = _sort_rows(_merge_local_certificate_fields(rows, existing_rows))
-    st.session_state[ROWS_KEY] = sorted_rows
-    _write_snapshot(sorted_rows, meta={"last_refreshed": refreshed_at})
+    rows = _rows_from_orders(orders, allocation_payloads)
+    sorted_rows = _save_refreshed_rows(rows, existing_rows)
     errors = allocation_results.get("errors") or []
     if errors:
         st.session_state[NOTICE_KEY] = (
-            f"Refreshed {len(sorted_rows)} artwork rows. "
+            f"Allocated {allocation_results.get('assignments_created') or 0} edition number(s). "
             f"{len(errors)} order(s) need allocation review."
         )
     else:
         st.session_state[NOTICE_KEY] = (
-            f"Refreshed {len(sorted_rows)} artwork rows. "
-            f"Allocated {allocation_results.get('assignments_created') or 0} edition number(s)."
+            f"Allocated {allocation_results.get('assignments_created') or 0} edition number(s). "
+            f"{len(sorted_rows)} artwork rows saved."
+        )
+
+
+def _enable_live_allocation_from_now():
+    state = order_allocator.enable_live_allocation_from_now()
+    st.session_state[NOTICE_KEY] = (
+        f"Live allocation enabled from {_format_time(state.get('automation_started_at'))}."
+    )
+
+
+def _capture_product_baselines():
+    rows = _edition_ops_snapshot_rows()
+    if not rows:
+        st.session_state[NOTICE_KEY] = "No Edition Ops product snapshot was found. Refresh Edition Ops first."
+        return
+    state = order_allocator.capture_product_baselines(rows)
+    st.session_state[NOTICE_KEY] = (
+        f"Captured {state.get('captured_count') or 0} product baseline(s)."
+    )
+
+
+def _assignment_result_key(row):
+    normalised = _normalise_row(row)
+    return "|".join(
+        [
+            order_allocator.order_gid(normalised.get("shopify_order_id")),
+            order_allocator.line_item_gid(normalised.get("shopify_line_item_id")),
+            str(int(normalised.get("edition_offset") or 0)),
+        ]
+    )
+
+
+def _apply_backfill_assignments(assigned_rows):
+    assignment_by_key = {
+        _assignment_result_key(row): _normalise_edition_number(row.get("edition_number"))
+        for row in assigned_rows or []
+    }
+    if not assignment_by_key:
+        return
+    rows = []
+    for row in st.session_state.get(ROWS_KEY, []):
+        updated = _normalise_row(row)
+        edition_number = assignment_by_key.get(_assignment_result_key(updated))
+        if edition_number:
+            updated["edition_number"] = edition_number
+            updated["edition"] = _format_edition(edition_number)
+            updated["has_saved_allocation"] = True
+            if updated.get("certificate") in {"Needs allocation", "Needs Review - Sold Out"}:
+                updated["certificate_status"] = ""
+                updated["certificate"] = "Generate"
+        rows.append(_normalise_row(updated))
+    st.session_state[ROWS_KEY] = _sort_rows(rows)
+    _write_snapshot(st.session_state[ROWS_KEY], meta=st.session_state.get(META_KEY) or {})
+
+
+def _historical_backfill_selected_orders(rows):
+    if not rows:
+        st.session_state[NOTICE_KEY] = "Select one or more order rows first."
+        return
+    if not st.session_state.get(BACKFILL_CONFIRM_KEY):
+        st.session_state[NOTICE_KEY] = "Confirm historical backfill before assigning selected rows."
+        return
+    config = shopify_sync.get_config()
+    if not config.get("configured"):
+        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before historical backfill."
+        return
+    start = time.perf_counter()
+    result = order_allocator.historical_backfill_order_rows(
+        rows,
+        config=config,
+    )
+    _perf_log("fetch allocations", start, source="historical_backfill")
+    _apply_backfill_assignments(result.get("assigned_rows") or [])
+    errors = result.get("errors") or []
+    skipped_not_historical = int(result.get("skipped_not_historical") or 0)
+    if skipped_not_historical and not result.get("assignments_created"):
+        st.session_state[NOTICE_KEY] = (
+            f"Skipped {skipped_not_historical} post-cutover row(s). "
+            "Use Allocate Missing Paid Orders for new orders."
+        )
+    elif errors:
+        st.session_state[NOTICE_KEY] = (
+            f"Historical backfill assigned {result.get('assignments_created') or 0} row(s). "
+            f"{len(errors)} product group(s) need baseline review."
+        )
+    else:
+        st.session_state[NOTICE_KEY] = (
+            f"Historical backfill assigned {result.get('assignments_created') or 0} selected row(s)."
         )
 
 
@@ -598,7 +712,9 @@ def _update_row_from_certificate(row, record):
 
 def _existing_uploaded_certificate(row, config):
     record = certificate_engine.certificate_record_from_order_row(row)
+    start = time.perf_counter()
     state = certificate_engine.read_order_certificate_state(row.get("shopify_order_id"), config=config)
+    _perf_log("fetch certificates", start, source="certificate_action")
     existing = certificate_engine.find_existing_certificate(state.get("certificates") or [], record)
     if existing and (existing.get("pdf_url") or existing.get("certificate_url")):
         return existing
@@ -721,8 +837,10 @@ def _generate_selected_certificates(rows):
     if not rows:
         st.session_state[NOTICE_KEY] = "Select one or more order rows first."
         return
+    start = time.perf_counter()
     for row in rows:
         _generate_certificate_for_row(row)
+    _perf_log("generate selected certificates", start, rows=len(rows))
     st.session_state[NOTICE_KEY] = f"Generated or checked {len(rows)} selected certificate(s)."
 
 
@@ -730,8 +848,10 @@ def _upload_selected_certificates(rows):
     if not rows:
         st.session_state[NOTICE_KEY] = "Select one or more order rows first."
         return
+    start = time.perf_counter()
     for row in rows:
         _upload_certificate_for_row(row)
+    _perf_log("upload selected certificates", start, rows=len(rows))
     st.session_state[NOTICE_KEY] = f"Uploaded or checked {len(rows)} selected certificate(s)."
 
 
@@ -739,9 +859,12 @@ def _generate_upload_selected_certificates(rows):
     if not rows:
         st.session_state[NOTICE_KEY] = "Select one or more order rows first."
         return
+    start = time.perf_counter()
     for row in rows:
         _generate_certificate_for_row(row)
         _upload_certificate_for_row(_current_row_for(row))
+    _perf_log("generate selected certificates", start, rows=len(rows), mode="generate_upload")
+    _perf_log("upload selected certificates", start, rows=len(rows), mode="generate_upload")
     st.session_state[NOTICE_KEY] = f"Generated and uploaded {len(rows)} selected certificate(s)."
 
 
@@ -750,12 +873,16 @@ def _render_top_actions(rows):
     selected_count = len(selected_rows)
     open_url = _first_pdf_url(selected_rows)
 
-    action_cols = st.columns([1.1, 1.5, 1.45, 1.55, 1.2])
+    action_cols = st.columns([1.1, 1.35, 1.5, 1.45, 1.55, 1.2])
     if action_cols[0].button("Refresh Orders", type="primary", use_container_width=True):
         with st.spinner("Refreshing recent paid orders..."):
             _refresh_orders()
         st.rerun()
-    if action_cols[1].button(
+    if action_cols[1].button("Allocate Missing Paid Orders", use_container_width=True):
+        with st.spinner("Allocating missing paid orders..."):
+            _allocate_missing_paid_orders()
+        st.rerun()
+    if action_cols[2].button(
         "Generate Selected Certificates",
         use_container_width=True,
         disabled=selected_count == 0,
@@ -763,7 +890,7 @@ def _render_top_actions(rows):
         with st.spinner("Generating selected certificates..."):
             _generate_selected_certificates(selected_rows)
         st.rerun()
-    if action_cols[2].button(
+    if action_cols[3].button(
         "Upload Selected to Shopify",
         use_container_width=True,
         disabled=selected_count == 0,
@@ -771,7 +898,7 @@ def _render_top_actions(rows):
         with st.spinner("Uploading selected certificates..."):
             _upload_selected_certificates(selected_rows)
         st.rerun()
-    if action_cols[3].button(
+    if action_cols[4].button(
         "Generate + Upload Selected",
         use_container_width=True,
         disabled=selected_count == 0,
@@ -780,13 +907,31 @@ def _render_top_actions(rows):
             _generate_upload_selected_certificates(selected_rows)
         st.rerun()
     if open_url:
-        action_cols[4].link_button("Open Selected PDF", open_url, use_container_width=True)
+        action_cols[5].link_button("Open Selected PDF", open_url, use_container_width=True)
     else:
-        action_cols[4].button("Open Selected PDF", use_container_width=True, disabled=True)
+        action_cols[5].button("Open Selected PDF", use_container_width=True, disabled=True)
+    setup_cols = st.columns([1.3, 1.25, 1.6, 1.2, 1.2])
+    if setup_cols[0].button("Enable Live Allocation From Now", use_container_width=True):
+        _enable_live_allocation_from_now()
+        st.rerun()
+    if setup_cols[1].button("Capture Product Baselines", use_container_width=True):
+        _capture_product_baselines()
+        st.rerun()
+    if setup_cols[2].button(
+        "Historical Backfill Selected Orders",
+        use_container_width=True,
+        disabled=selected_count == 0,
+    ):
+        with st.spinner("Backfilling selected historical orders..."):
+            _historical_backfill_selected_orders(selected_rows)
+        st.rerun()
+    setup_cols[3].checkbox("Confirm allocation repair", key=ALLOCATE_CONFIRM_KEY)
+    setup_cols[4].checkbox("Confirm historical backfill", key=BACKFILL_CONFIRM_KEY)
     st.caption(f"{selected_count} row(s) selected. Tip: scroll sideways to view all fulfilment fields.")
 
 
 def _render_orders_table(rows):
+    start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
     with st.container(border=True):
         st.dataframe(
@@ -801,6 +946,7 @@ def _render_orders_table(rows):
             row_height=30,
             key=GRID_KEY,
         )
+    _perf_log("render table", start, rows=len(rows))
 
 
 def render_page():
