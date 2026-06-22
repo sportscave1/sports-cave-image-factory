@@ -805,7 +805,8 @@ class ShopifySyncClientTests(unittest.TestCase):
     def test_orders_safe_query_still_requests_customer_fields(self):
         self.assertIn("customer {", shopify_sync.ORDERS_SAFE_QUERY)
         self.assertIn("shippingLine", shopify_sync.ORDERS_QUERY)
-        self.assertNotIn("shippingLine", shopify_sync.ORDERS_SAFE_QUERY)
+        self.assertIn("shippingLine", shopify_sync.ORDERS_SAFE_QUERY)
+        self.assertIn("shippingLines(first: 1)", shopify_sync.ORDERS_SAFE_QUERY)
         self.assertIn("shippingAddress", shopify_sync.ORDERS_SAFE_QUERY)
         self.assertIn("billingAddress", shopify_sync.ORDERS_SAFE_QUERY)
         self.assertIn("email", shopify_sync.ORDERS_SAFE_QUERY)

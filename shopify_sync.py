@@ -1034,6 +1034,12 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
         title
         code
       }
+      shippingLines(first: 1) {
+        nodes {
+          title
+          code
+        }
+      }
       billingAddress {
         name
         firstName
@@ -1112,6 +1118,16 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
         name
         firstName
         lastName
+      }
+      shippingLine {
+        title
+        code
+      }
+      shippingLines(first: 1) {
+        nodes {
+          title
+          code
+        }
       }
       metafields(first: 20, namespace: "sports_cave") {
         nodes {
@@ -1813,7 +1829,8 @@ def build_orders_admin_url(store_domain):
 def normalize_order(node, store_domain):
     customer = node.get("customer") or {}
     shipping_address = node.get("shippingAddress") or {}
-    shipping_line = node.get("shippingLine") or {}
+    shipping_lines = ((node.get("shippingLines") or {}).get("nodes") or [])
+    shipping_line = node.get("shippingLine") or (shipping_lines[0] if shipping_lines else {})
     billing_address = node.get("billingAddress") or {}
     total_price = ((node.get("totalPriceSet") or {}).get("shopMoney") or {})
     customer_full_name = " ".join(

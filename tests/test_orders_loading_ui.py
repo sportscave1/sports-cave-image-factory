@@ -1,7 +1,9 @@
 from pathlib import Path
+import json
 import unittest
 
 import edition_ops
+import orders_page
 import shopify_sync
 
 
@@ -72,14 +74,83 @@ class EditionOpsUiTests(unittest.TestCase):
     def test_orders_page_is_snapshot_based_and_lightweight(self):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
 
+        self.assertEqual(
+            orders_page.VISIBLE_COLUMNS,
+            ("order", "date", "customer", "shipping", "product", "variant", "edition"),
+        )
         self.assertIn("orders_allocation_snapshot.json", source)
         self.assertIn("Refresh Orders", source)
-        self.assertIn("Save Changed Order Editions", source)
-        self.assertIn("Allocate Selected From Product Counter", source)
-        self.assertIn("Overwrite Selected Order Allocation", source)
-        self.assertIn("st.data_editor", source)
+        self.assertIn("st.dataframe", source)
+        self.assertNotIn("Save Changed Order Editions", source)
+        self.assertNotIn("Allocate Selected From Product Counter", source)
+        self.assertNotIn("Overwrite Selected Order Allocation", source)
+        self.assertNotIn("Override Selected Order Allocation", source)
+        self.assertNotIn("Manual Allocation", source)
+        self.assertNotIn("st.data_editor", source)
+        self.assertNotIn("sync_order_allocation_metafield", source)
+        self.assertNotIn('"qty"', source)
+        self.assertNotIn('"allocation_status"', source)
+        self.assertNotIn('"sync_status"', source)
+        self.assertNotIn('"admin_url"', source)
         self.assertNotIn("supabase_backend", source)
         self.assertNotIn("certificate", source.casefold())
+
+    def test_orders_page_formats_single_edition_numbers(self):
+        self.assertEqual(orders_page._format_edition("50"), "#050")
+        self.assertEqual(orders_page._format_edition("#50"), "#050")
+        self.assertEqual(orders_page._format_edition("050"), "#050")
+        self.assertEqual(orders_page._format_edition("#050/100"), "#050")
+        self.assertEqual(orders_page._format_edition(""), "")
+
+    def test_orders_page_splits_quantity_rows_into_one_artwork_per_edition(self):
+        line_item_id = "gid://shopify/LineItem/1"
+        order = {
+            "order_name": "#SC1234",
+            "processed_at": "2026-06-22T10:00:00Z",
+            "created_at": "2026-06-22T09:55:00Z",
+            "customer_name": "John",
+            "shipping_method": "Express Shipping",
+            "metafields": [
+                {
+                    "namespace": "sports_cave",
+                    "key": "edition_allocations",
+                    "value": json.dumps({"line_items": {line_item_id: {"edition_numbers": [50, 51]}}}),
+                }
+            ],
+        }
+        line_item = {
+            "shopify_line_item_id": line_item_id,
+            "shopify_product_id": "gid://shopify/Product/1",
+            "product_title": "Shane Warne Tribute Wall Art",
+            "variant_title": "Black / XL",
+            "quantity": 2,
+        }
+
+        rows = orders_page._rows_from_order_line(order, line_item, {"edition_next_number": 91})
+
+        self.assertEqual([row["edition"] for row in rows], ["#050", "#051"])
+        self.assertTrue(all("qty" not in {column.lower() for column in orders_page.VISIBLE_COLUMNS} for _ in rows))
+
+    def test_orders_page_uses_product_next_number_when_no_saved_allocation(self):
+        order = {
+            "order_name": "#SC1235",
+            "processed_at": "2026-06-22T10:00:00Z",
+            "created_at": "2026-06-22T09:55:00Z",
+            "customer_name": "John",
+            "shipping_method": "Standard Shipping",
+            "metafields": [],
+        }
+        line_item = {
+            "shopify_line_item_id": "gid://shopify/LineItem/2",
+            "shopify_product_id": "gid://shopify/Product/1",
+            "product_title": "Shane Warne Tribute Wall Art",
+            "variant_title": "Black / XL",
+            "quantity": 2,
+        }
+
+        rows = orders_page._rows_from_order_line(order, line_item, {"edition_next_number": 91})
+
+        self.assertEqual([row["edition"] for row in rows], ["#091", "#092"])
 
     def test_limited_edition_inputs_use_only_calculated_mvp_metafields(self):
         inputs = shopify_sync.limited_edition_metafield_inputs(
