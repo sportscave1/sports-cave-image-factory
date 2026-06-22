@@ -159,7 +159,7 @@ HIDDEN_PAGE_OPTIONS = [
     "Persistence Check",
 ]
 ALL_PAGE_OPTIONS = [*MENU_OPTIONS, *HIDDEN_PAGE_OPTIONS]
-APP_VERSION = "Sports Cave OS Shopify Metafields MVP - 2026-06-22"
+APP_VERSION = "Sports Cave OS Edition Fields MVP - 2026-06-22"
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
     "edition_ops": "Edition Ops",
@@ -4491,10 +4491,10 @@ def render_sidebar():
     elif st.session_state.selected_page == "Edition Ops":
         st.sidebar.divider()
         st.sidebar.subheader("Edition Ops")
-        st.sidebar.write("1. Load ACTIVE Shopify products only when needed.")
+        st.sidebar.write("1. Refresh active products only when needed.")
         st.sidebar.write("2. Edit edition totals and next numbers in one chart.")
-        st.sidebar.write("3. Save changed rows to Shopify metafields.")
-        st.sidebar.write("4. Open Shopify Orders from the shortcut panel.")
+        st.sidebar.write("3. Save changed rows to product fields.")
+        st.sidebar.write("4. Use CSV import only when replacing the table.")
     elif st.session_state.selected_page == "Prodigi":
         st.sidebar.divider()
         st.sidebar.subheader("Prodigi")
@@ -4505,7 +4505,7 @@ def render_sidebar():
     elif st.session_state.selected_page == "Dashboard":
         st.sidebar.divider()
         st.sidebar.subheader("Today's Focus")
-        st.sidebar.write("Open Edition Ops only when Shopify product edition metafields need a manual update.")
+        st.sidebar.write("Open Edition Ops only when product edition fields need a manual update.")
     elif st.session_state.selected_page == "Files":
         st.sidebar.divider()
         st.sidebar.subheader("Asset Control")
@@ -4526,7 +4526,7 @@ def render_sidebar():
     st.sidebar.divider()
     st.sidebar.subheader("MVP Mode")
     st.sidebar.caption(
-        "Edition Ops uses Shopify product metafields only. Order sync, Supabase sync, product sync, and certificates are paused."
+        "Edition Ops uses product edition fields only. Order sync, Supabase sync, product sync, and certificates are paused."
     )
 
 
@@ -4888,21 +4888,21 @@ def render_lightweight_dashboard_page():
     with st.container(border=True):
         st.markdown("**Today**")
         st.caption(
-            "Open Edition Ops only when Shopify product edition metafields need configuration."
+            "Open Edition Ops only when product edition fields need configuration."
         )
 
     st.subheader("Today's Focus")
     focus_columns = st.columns(3)
     with focus_columns[0]:
-        st.info("Use Edition Ops to load ACTIVE Shopify products only when you need to edit edition metafields.")
+        st.info("Use Edition Ops to refresh active products only when you need to edit edition fields.")
     with focus_columns[1]:
         st.info("Orders, Supabase sync, product sync, CSV imports, and certificates are paused for this MVP.")
     with focus_columns[2]:
         st.info("Use Mockups only when artwork is ready. Keep generated ZIPs saved in the right Drive folder.")
 
-    st.subheader("Shopify Data")
+    st.subheader("Edition Data")
     st.write(
-        "Shopify product metafields are the source of truth for edition display data. This dashboard does not fetch Shopify, "
+        "Product edition fields are the source of truth for edition display data. This dashboard does not fetch store data, "
         "Supabase, orders, certificates, Google Drive, CSV files, or product sync data."
     )
     st.caption("Advanced legacy tools stay separate from this MVP flow.")
@@ -4935,7 +4935,7 @@ def render_selected_page(current_page):
     if current_page == "Dashboard":
         render_lightweight_dashboard_page()
     elif current_page == "Products":
-        render_placeholder_page("Products", "Full product sync is paused. Use Edition Ops for Shopify edition metafields.")
+        render_placeholder_page("Products", "Full product sync is paused. Use Edition Ops for product edition fields.")
     elif current_page == "Mockups":
         render_mockups_page()
     elif current_page == "Edition Ops":

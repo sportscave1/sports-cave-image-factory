@@ -8,14 +8,11 @@ import re
 
 import streamlit as st
 
-import certificate_service
 import shopify_sync
 
 
 BASE_DIR = Path(__file__).resolve().parent
 SNAPSHOT_PATH = BASE_DIR / "output" / "_cache" / "edition_ops_products_snapshot.json"
-ORDERS_SNAPSHOT_PATH = BASE_DIR / "output" / "_cache" / "edition_ops_orders_snapshot.json"
-CERTIFICATE_OUTPUT_DIR = BASE_DIR / "output" / "certificates" / "edition_ops"
 SNAPSHOT_VERSION = 1
 
 ROWS_KEY = "edition_ops_rows"
@@ -26,11 +23,6 @@ NOTICE_KEY = "edition_ops_notice"
 IMPORT_WARNINGS_KEY = "edition_ops_import_warnings"
 EDITOR_VERSION_KEY = "edition_ops_editor_version"
 SNAPSHOT_LOADED_KEY = "edition_ops_snapshot_loaded"
-ORDER_ROWS_KEY = "edition_ops_unfulfilled_order_rows"
-ORDER_META_KEY = "edition_ops_unfulfilled_order_snapshot_meta"
-ORDER_NOTICE_KEY = "edition_ops_unfulfilled_order_notice"
-ORDER_EDITOR_VERSION_KEY = "edition_ops_unfulfilled_order_editor_version"
-ORDER_SNAPSHOT_LOADED_KEY = "edition_ops_unfulfilled_order_snapshot_loaded"
 
 EDITABLE_FIELDS = (
     "edition_enabled",
@@ -45,26 +37,12 @@ VISIBLE_COLUMNS = (
     "edition_enabled",
     "edition_total",
     "edition_next_number",
-    "remaining",
-    "widget_status",
+    "edition_sold_count",
+    "edition_remaining",
+    "edition_status",
     "sync_status",
     "admin_url",
     "online_store_url",
-)
-
-ORDER_VISIBLE_COLUMNS = (
-    "order_name",
-    "created_at_display",
-    "customer_name",
-    "product_title",
-    "variant_title",
-    "quantity",
-    "shipping_method",
-    "edition_display",
-    "certificate_display",
-    "edition_status",
-    "fulfillment_status",
-    "financial_status",
 )
 
 CSV_COLUMNS = (
@@ -76,9 +54,10 @@ CSV_COLUMNS = (
     "edition_enabled",
     "edition_total",
     "edition_next_number",
+    "edition_sold_count",
+    "edition_remaining",
+    "edition_status",
     "edition_label",
-    "remaining",
-    "widget_status",
     "online_store_url",
     "admin_url",
     "last_synced_at",
@@ -101,16 +80,6 @@ def _format_time(value):
         return str(value)
 
 
-def _format_shopify_time(value):
-    if not value:
-        return ""
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        return parsed.astimezone().strftime("%d %b %I:%M %p")
-    except ValueError:
-        return str(value)
-
-
 def _remaining(total, next_number):
     try:
         total_value = max(int(total), 1)
@@ -121,6 +90,14 @@ def _remaining(total, next_number):
     except (TypeError, ValueError):
         next_value = 1
     return max(total_value - next_value + 1, 0)
+
+
+def _sold_count(next_number):
+    return max(_coerce_int(next_number, 1) - 1, 0)
+
+
+def _remaining_from_sold(total, sold_count):
+    return max(_coerce_int(total, 100) - _coerce_nonnegative_int(sold_count, 0), 0)
 
 
 def _widget_status(remaining):
@@ -146,6 +123,31 @@ def _coerce_int(value, default):
         return default
 
 
+def _coerce_nonnegative_int(value, default):
+    text = "" if value is None else str(value).strip().replace(",", "")
+    if text == "":
+        return default
+    try:
+        numeric = float(text)
+    except ValueError:
+        return default
+    if not numeric.is_integer() or numeric < 0:
+        return default
+    return int(numeric)
+
+
+def _normalise_title(value):
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+
+def _first_present(mapping, *keys):
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None and str(value).strip() != "":
+            return value
+    return ""
+
+
 def _normalise_csv_header(value):
     return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
 
@@ -161,6 +163,13 @@ def _csv_value(row, *aliases):
     return ""
 
 
+def _csv_has(row, *aliases):
+    if not row:
+        return False
+    headers = {_normalise_csv_header(key) for key in row}
+    return any(_normalise_csv_header(alias) in headers for alias in aliases)
+
+
 def _parse_positive_int(raw_value):
     text = str(raw_value or "").strip().replace(",", "")
     if text == "":
@@ -174,7 +183,7 @@ def _parse_positive_int(raw_value):
     return int(numeric)
 
 
-def _normalise_row(row):
+def _normalise_row(row, *, preserve_derived=True):
     updated = dict(row or {})
     updated["shopify_product_gid"] = str(
         updated.get("shopify_product_gid")
@@ -184,7 +193,7 @@ def _normalise_row(row):
     )
     updated["legacy_resource_id"] = str(updated.get("legacy_resource_id") or updated.get("Legacy ID") or "")
     updated["thumbnail_url"] = str(updated.get("thumbnail_url") or updated.get("Thumbnail") or "")
-    updated["product_title"] = str(updated.get("product_title") or updated.get("Product title") or "Untitled Shopify Product")
+    updated["product_title"] = str(updated.get("product_title") or updated.get("Product title") or "Untitled Product")
     updated["handle"] = str(updated.get("handle") or updated.get("Handle") or "")
     updated["status"] = str(updated.get("status") or updated.get("Status") or "ACTIVE")
     updated["edition_enabled"] = _coerce_bool(updated.get("edition_enabled", updated.get("Enabled")))
@@ -197,11 +206,26 @@ def _normalise_row(row):
         str(updated.get("edition_label") or updated.get("Edition label") or "Numbered Edition").strip()
         or "Numbered Edition"
     )
-    updated["remaining"] = _remaining(updated["edition_total"], updated["edition_next_number"])
-    updated["widget_status"] = _widget_status(updated["remaining"])
-    updated["edition_status"] = updated["widget_status"]
+    default_sold = _sold_count(updated["edition_next_number"])
+    default_remaining = _remaining_from_sold(updated["edition_total"], default_sold)
+    if preserve_derived:
+        sold_source = _first_present(updated, "edition_sold_count", "Sold count")
+        remaining_source = _first_present(updated, "edition_remaining", "Edition remaining", "remaining", "Remaining")
+        status_source = _first_present(updated, "edition_status", "Edition status", "widget_status", "Widget status")
+        updated["edition_sold_count"] = _coerce_nonnegative_int(sold_source, default_sold)
+        updated["edition_remaining"] = _coerce_nonnegative_int(
+            remaining_source,
+            _remaining_from_sold(updated["edition_total"], updated["edition_sold_count"]),
+        )
+        updated["edition_status"] = str(status_source or _widget_status(updated["edition_remaining"])).strip()
+    else:
+        updated["edition_sold_count"] = default_sold
+        updated["edition_remaining"] = default_remaining
+        updated["edition_status"] = _widget_status(default_remaining)
+    updated["remaining"] = updated["edition_remaining"]
+    updated["widget_status"] = updated["edition_status"]
     updated["online_store_url"] = str(updated.get("online_store_url") or updated.get("Open live product") or "")
-    updated["admin_url"] = str(updated.get("admin_url") or updated.get("Open Shopify") or "")
+    updated["admin_url"] = str(updated.get("admin_url") or updated.get("Open Admin") or "")
     updated["last_synced_at"] = str(updated.get("last_synced_at") or "")
     updated["sync_status"] = str(updated.get("sync_status") or updated.get("Last saved / Synced") or "Loaded").strip() or "Loaded"
     updated["sync_error"] = str(updated.get("sync_error") or "")
@@ -214,301 +238,23 @@ def _row_from_product(product):
         "shopify_product_gid": product.get("shopify_product_id") or "",
         "legacy_resource_id": product.get("legacy_resource_id") or "",
         "thumbnail_url": product.get("thumbnail_url") or "",
-        "product_title": product.get("title") or "Untitled Shopify Product",
+        "product_title": product.get("title") or "Untitled Product",
         "handle": product.get("handle") or "",
         "status": product.get("status") or "ACTIVE",
         "edition_enabled": _coerce_bool(edition.get("edition_enabled")),
         "edition_total": _coerce_int(edition.get("edition_total"), 100),
         "edition_next_number": _coerce_int(edition.get("edition_next_number"), 1),
+        "edition_sold_count": _coerce_nonnegative_int(edition.get("edition_sold_count"), 0),
+        "edition_remaining": _coerce_nonnegative_int(edition.get("edition_remaining"), 0),
+        "edition_status": edition.get("edition_status") or "",
         "edition_label": edition.get("edition_label") or "Numbered Edition",
         "online_store_url": product.get("online_store_url") or "",
         "admin_url": product.get("admin_url") or "",
         "last_synced_at": "",
-        "sync_status": "Loaded from Shopify",
+        "sync_status": "Loaded",
         "sync_error": "",
     }
     return _normalise_row(row)
-
-
-def _normalise_order_row(row):
-    updated = dict(row or {})
-    updated["shopify_order_id"] = str(updated.get("shopify_order_id") or "")
-    updated["legacy_resource_id"] = str(updated.get("legacy_resource_id") or "")
-    updated["shopify_line_item_id"] = str(updated.get("shopify_line_item_id") or "")
-    updated["shopify_product_gid"] = str(updated.get("shopify_product_gid") or updated.get("shopify_product_id") or "")
-    updated["product_handle"] = str(updated.get("product_handle") or "")
-    updated["order_name"] = str(updated.get("order_name") or "")
-    updated["created_at"] = str(updated.get("created_at") or "")
-    updated["created_at_display"] = _format_shopify_time(updated["created_at"])
-    updated["customer_name"] = str(updated.get("customer_name") or updated.get("customer_email") or "")
-    updated["customer_email"] = str(updated.get("customer_email") or "")
-    updated["product_title"] = str(updated.get("product_title") or "")
-    updated["variant_title"] = str(updated.get("variant_title") or "")
-    updated["sku"] = str(updated.get("sku") or "")
-    updated["quantity"] = _coerce_int(updated.get("quantity"), 1)
-    updated["shipping_method"] = str(updated.get("shipping_method") or updated.get("shipping_title") or "")
-    updated["edition_display"] = str(updated.get("edition_display") or "")
-    updated["edition_status"] = str(updated.get("edition_status") or "")
-    updated["certificate_display"] = str(updated.get("certificate_display") or "")
-    updated["certificate_ids"] = str(updated.get("certificate_ids") or "")
-    updated["certificate_file_paths"] = str(updated.get("certificate_file_paths") or "")
-    updated["financial_status"] = str(updated.get("financial_status") or "")
-    updated["fulfillment_status"] = str(updated.get("fulfillment_status") or "")
-    updated["admin_url"] = str(updated.get("admin_url") or "")
-    return updated
-
-
-def _edition_numbers_from_display(value):
-    text = str(value or "").strip()
-    match = re.match(r"#(\d+)(?:-(\d+))?/(\d+)", text)
-    if not match:
-        return [], 0
-    start = int(match.group(1))
-    end = int(match.group(2) or start)
-    total = int(match.group(3))
-    return list(range(start, end + 1)), total
-
-
-def _assign_certificates_for_order_row(row, *, generate_files=False):
-    updated = _normalise_order_row(row)
-    edition_numbers, edition_total = _edition_numbers_from_display(updated.get("edition_display"))
-    if not edition_numbers:
-        updated["certificate_display"] = "Needs edition"
-        updated["certificate_ids"] = ""
-        updated["certificate_file_paths"] = ""
-        return updated
-
-    certificate_ids = [
-        certificate_service.certificate_id(updated.get("order_name"), edition_number)
-        for edition_number in edition_numbers
-    ]
-    certificate_paths = []
-    if generate_files:
-        for edition_number in edition_numbers:
-            try:
-                certificate_paths.append(
-                    certificate_service.generate_certificate_pdf(
-                        CERTIFICATE_OUTPUT_DIR,
-                        product_title=updated.get("product_title") or "Sports Cave Artwork",
-                        edition_number=edition_number,
-                        edition_total=edition_total,
-                        order_name=updated.get("order_name") or "Shopify Order",
-                        customer_name=updated.get("customer_name") or "",
-                        assigned_at=updated.get("created_at_display") or "",
-                        shopify_handle=updated.get("product_handle") or "",
-                    )
-                )
-            except Exception as error:
-                updated["certificate_display"] = f"Certificate error: {error}"
-                updated["certificate_ids"] = ", ".join(certificate_ids)
-                updated["certificate_file_paths"] = ";".join(certificate_paths)
-                return updated
-
-    if len(certificate_ids) == 1:
-        updated["certificate_display"] = certificate_ids[0]
-    else:
-        updated["certificate_display"] = f"{certificate_ids[0]} +{len(certificate_ids) - 1}"
-    updated["certificate_ids"] = ", ".join(certificate_ids)
-    updated["certificate_file_paths"] = ";".join(certificate_paths) if certificate_paths else ""
-    return updated
-
-
-def _product_lookup(product_rows):
-    by_gid = {}
-    by_handle = {}
-    for row in product_rows:
-        product = _normalise_row(row)
-        if product.get("shopify_product_gid"):
-            by_gid[product["shopify_product_gid"]] = product
-        if product.get("handle"):
-            by_handle[product["handle"]] = product
-    return by_gid, by_handle
-
-
-def _order_line_key(row):
-    normalised = _normalise_order_row(row)
-    if normalised.get("shopify_line_item_id"):
-        return normalised["shopify_line_item_id"]
-    return "::".join(
-        [
-            normalised.get("shopify_order_id") or normalised.get("order_name"),
-            normalised.get("shopify_product_gid") or normalised.get("product_handle"),
-            normalised.get("variant_title"),
-            normalised.get("sku"),
-        ]
-    )
-
-
-def _product_for_order_line(order_row, products_by_gid, products_by_handle):
-    return products_by_gid.get(order_row.get("shopify_product_gid")) or products_by_handle.get(
-        order_row.get("product_handle")
-    )
-
-
-def _product_key(product):
-    return (product or {}).get("shopify_product_gid") or (product or {}).get("handle") or ""
-
-
-def _edition_for_order_line(order_row, products_by_gid, products_by_handle, cursors):
-    product = _product_for_order_line(order_row, products_by_gid, products_by_handle)
-    if not product:
-        return "", "Product not in table"
-    product_key = _product_key(product)
-    if not product.get("edition_enabled"):
-        return "", "Edition not enabled"
-
-    total = _coerce_int(product.get("edition_total"), 100)
-    next_number = _coerce_int(product.get("edition_next_number"), 1)
-    start = cursors.get(product_key, next_number)
-    quantity = _coerce_int(order_row.get("quantity"), 1)
-    end = start + quantity - 1
-    cursors[product_key] = end + 1
-
-    if start > total:
-        return "", "Sold out"
-    if end > total:
-        return f"#{start}-{total}/{total}", "Sold out issue"
-    if quantity == 1:
-        return f"#{start}/{total}", "Ready"
-    return f"#{start}-{end}/{total}", "Ready"
-
-
-def _recalculate_order_editions(order_rows, product_rows, *, generate_certificates=False, preserve_existing=True):
-    products_by_gid, products_by_handle = _product_lookup(product_rows)
-    cursors = {}
-    normalised_rows = [_normalise_order_row(row) for row in order_rows]
-
-    if preserve_existing:
-        for row in normalised_rows:
-            assigned_numbers, _edition_total = _edition_numbers_from_display(row.get("edition_display"))
-            if not assigned_numbers:
-                continue
-            product = _product_for_order_line(row, products_by_gid, products_by_handle)
-            product_key = _product_key(product)
-            if not product_key:
-                continue
-            product_next = _coerce_int((product or {}).get("edition_next_number"), 1)
-            cursors[product_key] = max(cursors.get(product_key, product_next), max(assigned_numbers) + 1)
-
-    allocation_order = sorted(
-        normalised_rows,
-        key=lambda row: (
-            row.get("created_at") or "",
-            row.get("order_name") or "",
-            row.get("shopify_line_item_id") or "",
-        ),
-    )
-    calculated_by_line = {}
-    for row in allocation_order:
-        assigned_numbers = []
-        if preserve_existing:
-            assigned_numbers, _edition_total = _edition_numbers_from_display(row.get("edition_display"))
-        if assigned_numbers:
-            edition_display = row.get("edition_display") or ""
-            edition_status = row.get("edition_status") or "Ready"
-        else:
-            edition_display, edition_status = _edition_for_order_line(row, products_by_gid, products_by_handle, cursors)
-        calculated_by_line[_order_line_key(row)] = (
-            edition_display,
-            edition_status,
-        )
-
-    recalculated = []
-    for row in normalised_rows:
-        key = _order_line_key(row)
-        edition_display, edition_status = calculated_by_line.get(key, ("", ""))
-        row["edition_display"] = edition_display
-        row["edition_status"] = edition_status
-        recalculated.append(_assign_certificates_for_order_row(row, generate_files=generate_certificates))
-    return sorted(recalculated, key=lambda row: row.get("created_at") or "", reverse=True)
-
-
-def _recalculate_saved_orders_from_product_baseline(product_rows):
-    order_rows = [_normalise_order_row(row) for row in st.session_state.get(ORDER_ROWS_KEY, [])]
-    if not order_rows:
-        return 0
-    recalculated = _recalculate_order_editions(
-        order_rows,
-        product_rows,
-        generate_certificates=False,
-        preserve_existing=False,
-    )
-    st.session_state[ORDER_ROWS_KEY] = recalculated
-    _write_orders_snapshot(recalculated)
-    st.session_state[ORDER_EDITOR_VERSION_KEY] = int(st.session_state.get(ORDER_EDITOR_VERSION_KEY) or 0) + 1
-    return len(recalculated)
-
-
-def _order_rows_from_shopify_orders(orders, product_rows, *, existing_order_rows=None, generate_certificates=False):
-    existing_by_key = {
-        _order_line_key(row): _normalise_order_row(row)
-        for row in (existing_order_rows or [])
-        if _order_line_key(row)
-    }
-    rows = []
-    for order in orders:
-        for item in order.get("line_items") or []:
-            row = _normalise_order_row(
-                {
-                    "shopify_order_id": order.get("shopify_order_id") or "",
-                    "legacy_resource_id": order.get("legacy_resource_id") or "",
-                    "shopify_line_item_id": item.get("shopify_line_item_id") or "",
-                    "shopify_product_gid": item.get("shopify_product_id") or "",
-                    "product_handle": item.get("product_handle") or "",
-                    "order_name": order.get("order_name") or "",
-                    "created_at": order.get("created_at") or order.get("processed_at") or "",
-                    "customer_name": order.get("customer_name") or "",
-                    "customer_email": order.get("customer_email") or "",
-                    "product_title": item.get("product_title") or "",
-                    "variant_title": item.get("variant_title") or "",
-                    "sku": item.get("sku") or "",
-                    "quantity": item.get("quantity") or 1,
-                    "shipping_method": order.get("shipping_method") or order.get("shipping_title") or "",
-                    "financial_status": order.get("financial_status") or "",
-                    "fulfillment_status": order.get("fulfillment_status") or "",
-                    "admin_url": order.get("admin_url") or "",
-                }
-            )
-            existing = existing_by_key.get(_order_line_key(row))
-            if existing and _edition_numbers_from_display(existing.get("edition_display"))[0]:
-                row["edition_display"] = existing.get("edition_display") or ""
-                row["edition_status"] = existing.get("edition_status") or "Ready"
-                row["certificate_display"] = existing.get("certificate_display") or ""
-                row["certificate_ids"] = existing.get("certificate_ids") or ""
-                row["certificate_file_paths"] = existing.get("certificate_file_paths") or ""
-            rows.append(row)
-    return _recalculate_order_editions(rows, product_rows, generate_certificates=generate_certificates)
-
-
-def _advance_product_rows_from_orders(product_rows, order_rows):
-    products_by_gid, products_by_handle = _product_lookup(product_rows)
-    highest_by_product = {}
-    for row in [_normalise_order_row(item) for item in order_rows]:
-        assigned_numbers, _edition_total = _edition_numbers_from_display(row.get("edition_display"))
-        if not assigned_numbers:
-            continue
-        product = _product_for_order_line(row, products_by_gid, products_by_handle)
-        product_key = _product_key(product)
-        if not product_key:
-            continue
-        highest_by_product[product_key] = max(highest_by_product.get(product_key, 0), max(assigned_numbers))
-
-    changed = []
-    updated_rows = []
-    for row in [_normalise_row(item) for item in product_rows]:
-        key = _product_key(row)
-        next_number = _coerce_int(row.get("edition_next_number"), 1)
-        required_next = highest_by_product.get(key, 0) + 1
-        if required_next > next_number:
-            row["edition_next_number"] = required_next
-            row["remaining"] = _remaining(row["edition_total"], row["edition_next_number"])
-            row["widget_status"] = _widget_status(row["remaining"])
-            row["edition_status"] = row["widget_status"]
-            row["sync_status"] = "Auto advanced"
-            row["sync_error"] = ""
-            changed.append(_normalise_row(row))
-        updated_rows.append(_normalise_row(row))
-    return updated_rows, changed
 
 
 def _ensure_state():
@@ -525,16 +271,6 @@ def _ensure_state():
     st.session_state.setdefault(IMPORT_WARNINGS_KEY, [])
     st.session_state.setdefault(NOTICE_KEY, "")
     st.session_state.setdefault(EDITOR_VERSION_KEY, 0)
-    st.session_state.setdefault(ORDER_ROWS_KEY, [])
-    st.session_state.setdefault(
-        ORDER_META_KEY,
-        {
-            "last_refreshed_from_shopify": "",
-            "saved_at": "",
-        },
-    )
-    st.session_state.setdefault(ORDER_NOTICE_KEY, "")
-    st.session_state.setdefault(ORDER_EDITOR_VERSION_KEY, 0)
 
 
 def _bump_editor_version():
@@ -582,39 +318,6 @@ def _write_snapshot(rows, originals=None, meta=None):
     }
 
 
-def _load_orders_snapshot():
-    if not ORDERS_SNAPSHOT_PATH.exists():
-        return None
-    try:
-        payload = json.loads(ORDERS_SNAPSHOT_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    return {
-        "version": payload.get("version") or SNAPSHOT_VERSION,
-        "rows": [_normalise_order_row(row) for row in payload.get("rows") or []],
-        "last_refreshed_from_shopify": payload.get("last_refreshed_from_shopify") or "",
-        "saved_at": payload.get("saved_at") or "",
-    }
-
-
-def _write_orders_snapshot(rows, meta=None):
-    ORDERS_SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    metadata = dict(st.session_state.get(ORDER_META_KEY) or {})
-    metadata.update(meta or {})
-    metadata["saved_at"] = _now_iso()
-    payload = {
-        "version": SNAPSHOT_VERSION,
-        "last_refreshed_from_shopify": metadata.get("last_refreshed_from_shopify") or "",
-        "saved_at": metadata["saved_at"],
-        "rows": [_normalise_order_row(row) for row in rows],
-    }
-    ORDERS_SNAPSHOT_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    st.session_state[ORDER_META_KEY] = {
-        "last_refreshed_from_shopify": payload["last_refreshed_from_shopify"],
-        "saved_at": payload["saved_at"],
-    }
-
-
 def _hydrate_from_snapshot_once():
     if st.session_state.get(SNAPSHOT_LOADED_KEY):
         return
@@ -627,19 +330,6 @@ def _hydrate_from_snapshot_once():
             "saved_at": snapshot.get("saved_at") or "",
         }
     st.session_state[SNAPSHOT_LOADED_KEY] = True
-
-
-def _hydrate_orders_snapshot_once():
-    if st.session_state.get(ORDER_SNAPSHOT_LOADED_KEY):
-        return
-    snapshot = _load_orders_snapshot()
-    if snapshot:
-        st.session_state[ORDER_ROWS_KEY] = snapshot["rows"]
-        st.session_state[ORDER_META_KEY] = {
-            "last_refreshed_from_shopify": snapshot.get("last_refreshed_from_shopify") or "",
-            "saved_at": snapshot.get("saved_at") or "",
-        }
-    st.session_state[ORDER_SNAPSHOT_LOADED_KEY] = True
 
 
 def _editable_snapshot(row):
@@ -658,6 +348,16 @@ def _changed_rows(rows, originals):
     return changed
 
 
+def _rows_to_save(rows, originals):
+    by_product_id = {}
+    for row in _changed_rows(rows, originals):
+        by_product_id[row.get("shopify_product_gid")] = row
+    for row in rows:
+        if str(row.get("sync_status") or "").strip().casefold() == "needs sync":
+            by_product_id[row.get("shopify_product_gid")] = row
+    return list(by_product_id.values())
+
+
 def _mark_current_changes(rows, originals):
     original_by_id = {row.get("shopify_product_gid"): row for row in originals}
     updated_rows = []
@@ -665,7 +365,7 @@ def _mark_current_changes(rows, originals):
         updated = _normalise_row(row)
         original = original_by_id.get(updated.get("shopify_product_gid"))
         changed = not original or _editable_snapshot(updated) != _editable_snapshot(original)
-        if changed and updated.get("sync_status") != "Unsaved import":
+        if changed and updated.get("sync_status") not in {"Unsaved import", "Needs Sync"}:
             updated["sync_status"] = "Unsaved"
             updated["sync_error"] = ""
         elif not changed and updated.get("sync_status") in {"Unsaved", "Unsaved import"}:
@@ -676,7 +376,7 @@ def _mark_current_changes(rows, originals):
 
 
 def _shopify_values_from_row(row):
-    recalculated = _normalise_row(row)
+    recalculated = _normalise_row(row, preserve_derived=False)
     return {
         "shopify_product_id": recalculated.get("shopify_product_gid"),
         "title": recalculated.get("product_title"),
@@ -691,7 +391,7 @@ def _load_active_products_from_shopify():
     config = shopify_sync.get_config()
     if not config.get("configured"):
         raise ValueError(
-            "Shopify is not connected yet. Ask a developer to configure Shopify before refreshing products."
+            "Store connection is not configured yet. Ask a developer before refreshing products."
         )
     loaded = shopify_sync.fetch_edition_ops_active_products(
         max_products=config.get("edition_ops_max_products", 500),
@@ -709,59 +409,8 @@ def _load_active_products_from_shopify():
         deepcopy(rows),
         meta={"last_refreshed_from_shopify": refreshed_at},
     )
-    st.session_state[NOTICE_KEY] = f"Refreshed {len(rows)} ACTIVE Shopify products."
+    st.session_state[NOTICE_KEY] = f"Refreshed {len(rows)} active products."
     _bump_editor_version()
-
-
-def _refresh_orders_from_shopify(product_rows):
-    config = shopify_sync.get_config()
-    if not config.get("configured"):
-        raise ValueError(
-            "Shopify is not connected yet. Ask a developer to configure Shopify before refreshing orders."
-        )
-    orders = []
-    max_orders = min(int(config.get("max_orders") or shopify_sync.DEFAULT_MAX_ORDERS), 250)
-    for page in shopify_sync.iter_order_pages(
-        days=30,
-        page_size=50,
-        max_orders=max_orders,
-        config=config,
-        default_paid_unfulfilled_filter=False,
-    ):
-        orders.extend(page.get("orders") or [])
-    refreshed_at = _now_iso()
-    existing_order_rows = [_normalise_order_row(row) for row in st.session_state.get(ORDER_ROWS_KEY, [])]
-    rows = _order_rows_from_shopify_orders(
-        orders,
-        product_rows,
-        existing_order_rows=existing_order_rows,
-        generate_certificates=True,
-    )
-    updated_products, advanced_products = _advance_product_rows_from_orders(product_rows, rows)
-    st.session_state[ORDER_ROWS_KEY] = rows
-    if advanced_products:
-        st.session_state[ROWS_KEY] = updated_products
-        st.session_state[ORIGINAL_ROWS_KEY] = deepcopy(updated_products)
-        _write_snapshot(updated_products, deepcopy(updated_products))
-        if config.get("configured"):
-            try:
-                result = shopify_sync.sync_limited_edition_metafields_for_products(
-                    [_shopify_values_from_row(row) for row in advanced_products],
-                    config=config,
-                )
-                if result.get("failed"):
-                    st.session_state[IMPORT_WARNINGS_KEY] = [
-                        f"{result.get('failed')} product next number update could not sync to Shopify. Local values are still kept."
-                    ]
-            except Exception as error:
-                st.session_state[IMPORT_WARNINGS_KEY] = [
-                    f"Product next numbers were saved locally, but Shopify sync failed: {error}"
-                ]
-    st.session_state[ORDER_NOTICE_KEY] = (
-        f"Refreshed {len(rows)} order lines. Advanced {len(advanced_products)} product next numbers."
-    )
-    _write_orders_snapshot(rows, meta={"last_refreshed_from_shopify": refreshed_at})
-    st.session_state[ORDER_EDITOR_VERSION_KEY] = int(st.session_state.get(ORDER_EDITOR_VERSION_KEY) or 0) + 1
 
 
 def _mark_synced(rows, originals, results):
@@ -802,13 +451,16 @@ def _mark_synced(rows, originals, results):
 def _save_changed_rows():
     rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
     originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
-    changed = _changed_rows(rows, originals)
-    if not changed:
+    rows_to_save = _rows_to_save(rows, originals)
+    if not rows_to_save:
         st.session_state[NOTICE_KEY] = "No changed rows to save."
         return
     config = shopify_sync.get_config()
+    if not config.get("configured"):
+        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before saving rows."
+        return
     result = shopify_sync.sync_limited_edition_metafields_for_products(
-        [_shopify_values_from_row(row) for row in changed],
+        [_shopify_values_from_row(row) for row in rows_to_save],
         config=config,
     )
     _mark_synced(rows, originals, result.get("results") or [])
@@ -833,7 +485,7 @@ def _merge_visible_rows(edited_rows, source_rows):
         source = source_rows[index] if index < len(source_rows) else {}
         updated = dict(source)
         updated.update(row)
-        merged.append(_normalise_row(updated))
+        merged.append(_normalise_row(updated, preserve_derived=False))
     return merged
 
 
@@ -859,25 +511,65 @@ def _validate_import_int(raw_value, field_name, row_label, warnings):
     return value
 
 
+def _validate_import_nonnegative_int(raw_value, field_name, row_label, warnings):
+    if str(raw_value or "").strip() == "":
+        return None
+    value = _coerce_nonnegative_int(raw_value, None)
+    if value is None:
+        warnings.append(f"{row_label}: {field_name} must be 0 or higher.")
+        return "invalid"
+    return value
+
+
 def _apply_csv_updates_to_rows(rows, csv_text):
     rows = [_normalise_row(row) for row in rows]
     by_gid = {row.get("shopify_product_gid"): index for index, row in enumerate(rows) if row.get("shopify_product_gid")}
     by_handle = {row.get("handle"): index for index, row in enumerate(rows) if row.get("handle")}
+    by_title = {
+        _normalise_title(row.get("product_title")): index
+        for index, row in enumerate(rows)
+        if _normalise_title(row.get("product_title"))
+    }
     warnings = []
-    changed_count = 0
+    imported_count = 0
     changed_rows = []
+    allow_new_rows = not rows
 
     reader = csv.DictReader(io.StringIO(csv_text))
     for line_number, csv_row in enumerate(reader, start=2):
         gid = str(_csv_value(csv_row, "shopify_product_gid", "shopify product gid", "product id") or "").strip()
         handle = str(_csv_value(csv_row, "handle", "Handle") or "").strip()
+        product_title = str(_csv_value(csv_row, "product_title", "Product title", "title") or "").strip()
         match_index = by_gid.get(gid) if gid else None
         if match_index is None and handle:
             match_index = by_handle.get(handle)
-        row_label = handle or gid or f"CSV line {line_number}"
+        if match_index is None and product_title:
+            match_index = by_title.get(_normalise_title(product_title))
+        row_label = handle or product_title or gid or f"CSV line {line_number}"
         if match_index is None:
-            warnings.append(f"{row_label}: not in the loaded table, ignored.")
-            continue
+            if not allow_new_rows:
+                warnings.append(f"{row_label}: not in the loaded table, ignored.")
+                continue
+            match_index = len(rows)
+            rows.append(
+                _normalise_row(
+                    {
+                        "shopify_product_gid": gid,
+                        "legacy_resource_id": _csv_value(csv_row, "legacy_resource_id", "Legacy ID"),
+                        "product_title": product_title,
+                        "handle": handle,
+                        "status": _csv_value(csv_row, "status", "Status") or "ACTIVE",
+                        "online_store_url": _csv_value(csv_row, "online_store_url", "Open live product"),
+                        "admin_url": _csv_value(csv_row, "admin_url", "Open Admin"),
+                    }
+                )
+            )
+            if gid:
+                by_gid[gid] = match_index
+            if handle:
+                by_handle[handle] = match_index
+            if product_title:
+                by_title[_normalise_title(product_title)] = match_index
 
         total = _validate_import_int(
             _csv_value(csv_row, "edition_total", "Edition total", "edition total"),
@@ -893,27 +585,59 @@ def _apply_csv_updates_to_rows(rows, csv_text):
         )
         if total == "invalid" or next_number == "invalid":
             continue
+        enabled_value = _csv_value(csv_row, "edition_enabled", "Enabled", "edition enabled")
+        missing_required = []
+        if str(enabled_value or "").strip() == "":
+            missing_required.append("edition_enabled")
+        if total is None:
+            missing_required.append("edition_total")
+        if next_number is None:
+            missing_required.append("edition_next_number")
+        if missing_required:
+            warnings.append(f"{row_label}: missing required field(s): {', '.join(missing_required)}.")
+            continue
+
+        sold_count = _validate_import_nonnegative_int(
+            _csv_value(csv_row, "edition_sold_count", "Edition sold count", "Sold count", "sold_count"),
+            "edition_sold_count",
+            row_label,
+            warnings,
+        )
+        edition_remaining = _validate_import_nonnegative_int(
+            _csv_value(csv_row, "edition_remaining", "Edition remaining", "remaining", "Remaining"),
+            "edition_remaining",
+            row_label,
+            warnings,
+        )
+        if sold_count == "invalid" or edition_remaining == "invalid":
+            continue
+        if sold_count is None:
+            sold_count = max(next_number - 1, 0)
+        if edition_remaining is None:
+            edition_remaining = max(total - sold_count, 0)
+        edition_status = str(
+            _csv_value(csv_row, "edition_status", "Edition status", "widget_status", "Widget status")
+            or ""
+        ).strip() or _widget_status(edition_remaining)
 
         updated = dict(rows[match_index])
-        enabled_value = _csv_value(csv_row, "edition_enabled", "Enabled", "edition enabled")
-        if str(enabled_value or "").strip():
-            updated["edition_enabled"] = _coerce_bool(enabled_value)
-        if total is not None:
-            updated["edition_total"] = total
-        if next_number is not None:
-            updated["edition_next_number"] = next_number
+        updated["edition_enabled"] = _coerce_bool(enabled_value)
+        updated["edition_total"] = total
+        updated["edition_next_number"] = next_number
+        updated["edition_sold_count"] = sold_count
+        updated["edition_remaining"] = edition_remaining
+        updated["edition_status"] = edition_status
         label_value = _csv_value(csv_row, "edition_label", "Edition label", "edition label")
         if str(label_value or "").strip():
             updated["edition_label"] = str(label_value).strip()
-        updated["sync_status"] = "Imported"
+        updated["sync_status"] = "Needs Sync"
         updated["sync_error"] = ""
         normalised = _normalise_row(updated)
-        if _editable_snapshot(normalised) != _editable_snapshot(rows[match_index]):
-            changed_count += 1
-            changed_rows.append(normalised)
+        imported_count += 1
+        changed_rows.append(normalised)
         rows[match_index] = normalised
 
-    return rows, changed_rows, changed_count, warnings
+    return rows, changed_rows, imported_count, warnings
 
 
 def _apply_csv_import(uploaded_file):
@@ -927,50 +651,12 @@ def _apply_csv_import(uploaded_file):
         text,
     )
 
-    config = shopify_sync.get_config()
-    if changed_rows and config.get("configured"):
-        try:
-            result = shopify_sync.sync_limited_edition_metafields_for_products(
-                [_shopify_values_from_row(row) for row in changed_rows],
-                config=config,
-            )
-            ok_ids = {item.get("shopify_product_id") for item in result.get("results") or [] if item.get("ok")}
-            failures = {
-                item.get("shopify_product_id"): item.get("message") or "Sync failed"
-                for item in result.get("results") or []
-                if not item.get("ok")
-            }
-            synced_at = _now_iso()
-            updated_rows = []
-            for row in rows:
-                product_id = row.get("shopify_product_gid")
-                updated = dict(row)
-                if product_id in ok_ids:
-                    updated["sync_status"] = "Synced"
-                    updated["sync_error"] = ""
-                    updated["last_synced_at"] = synced_at
-                elif product_id in failures:
-                    updated["sync_status"] = "Error"
-                    updated["sync_error"] = failures[product_id]
-                updated_rows.append(_normalise_row(updated))
-            rows = updated_rows
-            if result.get("failed"):
-                warnings.append(f"{result.get('failed')} imported rows could not sync to Shopify. Local values are still kept.")
-        except Exception as error:
-            warnings.append(f"Imported values were saved locally, but Shopify sync failed: {error}")
-    elif changed_rows:
-        warnings.append("Shopify is not connected, so imported values were saved locally only.")
-
-    recalculated_order_count = _recalculate_saved_orders_from_product_baseline(rows)
-
+    originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
     st.session_state[ROWS_KEY] = rows
-    st.session_state[NOTICE_KEY] = (
-        f"Imported spreadsheet values for {changed_count} changed products. "
-        f"Recalculated {recalculated_order_count} saved order lines from the uploaded numbers."
-    )
+    st.session_state[NOTICE_KEY] = f"Imported and replaced edition fields for {changed_count} rows. Click Save Changed Rows to sync."
     st.session_state[IMPORT_WARNINGS_KEY] = warnings
-    st.session_state[ORIGINAL_ROWS_KEY] = deepcopy(rows)
-    _write_snapshot(rows, deepcopy(rows))
+    st.session_state[ORIGINAL_ROWS_KEY] = originals
+    _write_snapshot(rows, originals)
     _bump_editor_version()
 
 
@@ -981,94 +667,34 @@ def _column_config():
         "edition_enabled": st.column_config.CheckboxColumn("Enabled"),
         "edition_total": st.column_config.NumberColumn("Edition total", min_value=1, max_value=100000, step=1),
         "edition_next_number": st.column_config.NumberColumn("Next edition number", min_value=1, max_value=100000, step=1),
-        "remaining": st.column_config.NumberColumn("Remaining"),
-        "widget_status": st.column_config.TextColumn("Widget status"),
+        "edition_sold_count": st.column_config.NumberColumn("Sold count"),
+        "edition_remaining": st.column_config.NumberColumn("Remaining"),
+        "edition_status": st.column_config.TextColumn("Status"),
         "sync_status": st.column_config.TextColumn("Sync status"),
-        "admin_url": st.column_config.LinkColumn("Open Shopify", display_text="Open"),
+        "admin_url": st.column_config.LinkColumn("Open Admin", display_text="Open"),
         "online_store_url": st.column_config.LinkColumn("Open live product", display_text="Open"),
     }
-
-
-def _order_column_config():
-    return {
-        "order_name": st.column_config.TextColumn("Order"),
-        "created_at_display": st.column_config.TextColumn("Date"),
-        "customer_name": st.column_config.TextColumn("Customer"),
-        "product_title": st.column_config.TextColumn("Product"),
-        "variant_title": st.column_config.TextColumn("Variant"),
-        "quantity": st.column_config.NumberColumn("Qty", min_value=1, step=1),
-        "shipping_method": st.column_config.TextColumn("Shipping"),
-        "edition_display": st.column_config.TextColumn("Edition"),
-        "certificate_display": st.column_config.TextColumn("Certificate"),
-        "edition_status": st.column_config.TextColumn("Edition status"),
-        "fulfillment_status": st.column_config.TextColumn("Fulfillment"),
-        "financial_status": st.column_config.TextColumn("Payment"),
-    }
-
-
-def _render_orders_table(config, product_rows):
-    order_rows = [_normalise_order_row(row) for row in st.session_state.get(ORDER_ROWS_KEY, [])]
-    order_rows = _recalculate_order_editions(order_rows, product_rows)
-    order_meta = st.session_state.get(ORDER_META_KEY) or {}
-
-    st.divider()
-    st.subheader("Orders")
-    st.caption(f"Last refreshed from Shopify: {_format_time(order_meta.get('last_refreshed_from_shopify'))}")
-
-    order_notice = st.session_state.get(ORDER_NOTICE_KEY)
-    if order_notice:
-        st.success(order_notice)
-        st.session_state[ORDER_NOTICE_KEY] = ""
-
-    order_cols = st.columns([1, 3])
-    if order_cols[0].button(
-        "Refresh Orders From Shopify",
-        type="primary",
-        use_container_width=True,
-        disabled=not config.get("configured"),
-    ):
-        with st.spinner("Refreshing Shopify orders..."):
-            _refresh_orders_from_shopify(product_rows)
-        st.rerun()
-    order_cols[1].caption("Order rows are a fast saved copy. Fulfillment, shipping, editions, and certificates are shown together.")
-
-    if order_rows:
-        st.caption(f"{len(order_rows)} order lines shown.")
-        st.data_editor(
-            order_rows,
-            hide_index=True,
-            use_container_width=True,
-            num_rows="fixed",
-            key=f"edition-ops-orders-editor-{st.session_state[ORDER_EDITOR_VERSION_KEY]}",
-            column_order=ORDER_VISIBLE_COLUMNS,
-            column_config=_order_column_config(),
-            disabled=list(ORDER_VISIBLE_COLUMNS),
-        )
-    else:
-        st.info("No orders loaded yet. Refresh orders from Shopify when you are ready.")
 
 
 def render_page():
     started = datetime.now(timezone.utc)
     _ensure_state()
     _hydrate_from_snapshot_once()
-    _hydrate_orders_snapshot_once()
     config = shopify_sync.get_config()
     rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
     originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
-    changed = _changed_rows(rows, originals)
+    rows_to_save = _rows_to_save(rows, originals)
     meta = st.session_state.get(META_KEY) or {}
-    product_rows_for_orders = rows
 
     st.title("Edition Ops")
     st.caption("Use this page to manage limited edition numbers.")
     st.markdown(
-        "1. Refresh orders when Shopify orders change.\n"
-        "2. Refresh products when new products are added in Shopify.\n"
+        "1. Refresh products when new products are added.\n"
+        "2. Import CSV and Replace Table when you have a new spreadsheet.\n"
         "3. Edit Enabled, Edition Total, and Next Edition Number.\n"
         "4. Export a CSV backup after major edits."
     )
-    st.caption(f"Last refreshed from Shopify: {_format_time(meta.get('last_refreshed_from_shopify'))}")
+    st.caption(f"Last refreshed: {_format_time(meta.get('last_refreshed_from_shopify'))}")
 
     notice = st.session_state.get(NOTICE_KEY)
     if notice:
@@ -1080,16 +706,20 @@ def render_page():
         st.warning(warning)
     st.session_state[IMPORT_WARNINGS_KEY] = []
 
-    _render_orders_table(config, product_rows_for_orders)
-
-    st.divider()
-    st.subheader("Products")
-    action_cols = st.columns([1, 1, 1])
-    if action_cols[0].button("Refresh Products From Shopify", type="primary", use_container_width=True, disabled=not config.get("configured")):
-        with st.spinner("Refreshing active Shopify products..."):
+    action_cols = st.columns([1, 1, 1, 1])
+    if action_cols[0].button("Refresh Products", type="primary", use_container_width=True, disabled=not config.get("configured")):
+        with st.spinner("Refreshing active products..."):
             _load_active_products_from_shopify()
         st.rerun()
-    action_cols[1].download_button(
+    if action_cols[1].button(
+        "Save Changed Rows",
+        use_container_width=True,
+        disabled=not bool(rows_to_save),
+    ):
+        with st.spinner("Saving changed rows..."):
+            _save_changed_rows()
+        st.rerun()
+    action_cols[2].download_button(
         "Export CSV Backup",
         data=_export_csv(rows),
         file_name=f"edition-ops-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
@@ -1097,19 +727,20 @@ def render_page():
         use_container_width=True,
         disabled=not bool(rows),
     )
-    with action_cols[2].popover("Import CSV Updates", use_container_width=True):
-        st.caption("Imports update the visible table only.")
+    with action_cols[3].popover("Import CSV and Replace Table", use_container_width=True):
+        st.caption("CSV values replace the edition fields and mark rows Needs Sync. They are not saved until you click Save Changed Rows.")
         uploaded_csv = st.file_uploader(
             "Choose CSV backup",
             type=["csv"],
             key="edition-ops-import-csv",
         )
-        if st.button("Update Visible Table", use_container_width=True, disabled=uploaded_csv is None):
+        if st.button("Replace Table From CSV", use_container_width=True, disabled=uploaded_csv is None):
             _apply_csv_import(uploaded_csv)
             st.rerun()
 
     if rows:
-        st.caption(f"{len(rows)} saved products shown.")
+        rows_to_save = _rows_to_save(rows, originals)
+        st.caption(f"{len(rows)} saved products shown. {len(rows_to_save)} rows waiting to save.")
         edited = st.data_editor(
             rows,
             hide_index=True,
@@ -1121,8 +752,9 @@ def render_page():
             disabled=[
                 "product_title",
                 "handle",
-                "remaining",
-                "widget_status",
+                "edition_sold_count",
+                "edition_remaining",
+                "edition_status",
                 "sync_status",
                 "admin_url",
                 "online_store_url",
@@ -1131,7 +763,6 @@ def render_page():
         current_rows = _mark_current_changes(_merge_visible_rows(_rows_from_editor(edited), rows), originals)
         st.session_state[ROWS_KEY] = current_rows
         st.session_state[ORIGINAL_ROWS_KEY] = originals
-        product_rows_for_orders = current_rows
         if current_rows != rows:
             _write_snapshot(current_rows, originals)
 
@@ -1141,7 +772,7 @@ def render_page():
             for product_title, message in errors.items():
                 st.caption(f"{product_title}: {message}")
     else:
-        st.info("No products loaded yet. Refresh products from Shopify to build the first fast saved table.")
+        st.info("No products loaded yet. Refresh products to build the first fast saved table.")
 
     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
     print(f"PERF Edition Ops total={elapsed:.3f}s rows={len(st.session_state.get(ROWS_KEY, []))}", flush=True)

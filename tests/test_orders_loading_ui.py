@@ -26,20 +26,25 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn("st.data_editor", source)
         self.assertIn("edition_ops_products_snapshot.json", source)
-        self.assertIn("edition_ops_orders_snapshot.json", source)
-        self.assertIn("Refresh Products From Shopify", source)
-        self.assertIn("Refresh Orders From Shopify", source)
+        self.assertIn("Refresh Products", source)
+        self.assertIn("Save Changed Rows", source)
         self.assertIn("Export CSV Backup", source)
-        self.assertIn("Import CSV Updates", source)
-        self.assertIn("shipping_method", source)
-        self.assertIn("certificate_display", source)
-        self.assertIn("default_paid_unfulfilled_filter=False", source)
+        self.assertIn("Import CSV and Replace Table", source)
+        self.assertIn("edition_sold_count", source)
+        self.assertIn("edition_remaining", source)
+        self.assertIn("edition_status", source)
+        self.assertIn("_rows_to_save", source)
         self.assertIn("_hydrate_from_snapshot_once()", source)
-        self.assertIn("_hydrate_orders_snapshot_once()", source)
         self.assertIn("_write_snapshot", source)
-        self.assertLess(source.index('_render_orders_table(config, product_rows_for_orders)'), source.index('st.subheader("Products")'))
+        self.assertNotIn("edition_ops_orders_snapshot.json", source)
+        self.assertNotIn("Refresh Orders", source)
+        self.assertNotIn("Refresh Products From Shopify", source)
+        self.assertNotIn("shipping_method", source)
+        self.assertNotIn("certificate_display", source)
+        self.assertNotIn("default_paid_unfulfilled_filter=False", source)
+        self.assertNotIn("_hydrate_orders_snapshot_once", source)
+        self.assertNotIn("_render_orders_table", source)
         self.assertNotIn("Clear Table", source)
-        self.assertNotIn("Save Changed Rows", source)
         self.assertNotIn("Refresh Unfulfilled Orders", source)
         self.assertNotIn("Open Shopify Orders", source)
         self.assertNotIn("Shopify is the permanent record", source)
@@ -147,7 +152,10 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertTrue(updated_rows[0]["edition_enabled"])
         self.assertEqual(updated_rows[0]["edition_total"], 150)
         self.assertEqual(updated_rows[0]["edition_next_number"], 72)
-        self.assertEqual(updated_rows[0]["remaining"], 79)
+        self.assertEqual(updated_rows[0]["edition_sold_count"], 71)
+        self.assertEqual(updated_rows[0]["edition_remaining"], 79)
+        self.assertEqual(updated_rows[0]["edition_status"], "Limited Edition")
+        self.assertEqual(updated_rows[0]["sync_status"], "Needs Sync")
 
     def test_csv_import_overwrites_current_next_number_even_when_lower(self):
         rows = [
@@ -172,159 +180,99 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(changed_count, 1)
         self.assertEqual(len(changed_rows), 1)
         self.assertEqual(updated_rows[0]["edition_next_number"], 25)
-        self.assertEqual(updated_rows[0]["remaining"], 76)
+        self.assertEqual(updated_rows[0]["edition_sold_count"], 24)
+        self.assertEqual(updated_rows[0]["edition_remaining"], 76)
 
-    def test_order_editions_and_certificates_are_derived_from_product_table(self):
-        product = edition_ops._normalise_row(
-            {
-                "shopify_product_gid": "gid://shopify/Product/1",
-                "handle": "all-rise-wall-art",
-                "edition_enabled": True,
-                "edition_total": 100,
-                "edition_next_number": 53,
-            }
-        )
-        order_rows = [
-            edition_ops._normalise_order_row(
+    def test_csv_import_replaces_with_authoritative_derived_fields(self):
+        rows = [
+            edition_ops._normalise_row(
                 {
-                    "shopify_line_item_id": "gid://shopify/LineItem/old",
-                    "shopify_product_gid": "gid://shopify/Product/1",
-                    "order_name": "#SC1",
-                    "created_at": "2026-06-20T10:00:00Z",
-                    "quantity": 2,
+                    "shopify_product_gid": "gid://shopify/Product/99",
+                    "product_title": "Greg Murphy Lap of the Gods Wall Art",
+                    "handle": "greg-murphy-lap-of-the-gods-wall-art",
+                    "edition_enabled": True,
+                    "edition_total": 100,
+                    "edition_next_number": 32,
+                    "edition_sold_count": 31,
+                    "edition_remaining": 69,
                 }
-            ),
-            edition_ops._normalise_order_row(
-                {
-                    "shopify_line_item_id": "gid://shopify/LineItem/new",
-                    "shopify_product_gid": "gid://shopify/Product/1",
-                    "order_name": "#SC2",
-                    "created_at": "2026-06-21T10:00:00Z",
-                    "quantity": 1,
-                }
-            ),
+            )
         ]
-
-        recalculated = edition_ops._recalculate_order_editions(order_rows, [product])
-        by_id = {row["shopify_line_item_id"]: row for row in recalculated}
-
-        self.assertEqual(by_id["gid://shopify/LineItem/old"]["edition_display"], "#53-54/100")
-        self.assertEqual(by_id["gid://shopify/LineItem/old"]["certificate_display"], "SC-SC1-0053 +1")
-        self.assertEqual(by_id["gid://shopify/LineItem/new"]["edition_display"], "#55/100")
-        self.assertEqual(by_id["gid://shopify/LineItem/new"]["edition_status"], "Ready")
-        self.assertEqual(by_id["gid://shopify/LineItem/new"]["certificate_display"], "SC-SC2-0055")
-
-    def test_csv_baseline_recalculation_ignores_stale_saved_order_editions(self):
-        product = edition_ops._normalise_row(
-            {
-                "shopify_product_gid": "gid://shopify/Product/1",
-                "handle": "jalen-brunson-knicks-wall-art",
-                "edition_enabled": True,
-                "edition_total": 100,
-                "edition_next_number": 25,
-            }
+        csv_text = (
+            "product_title,handle,edition_enabled,edition_total,edition_next_number,"
+            "edition_sold_count,edition_remaining,edition_status\n"
+            "Greg Murphy Lap of the Gods Wall Art,greg-murphy-lap-of-the-gods-wall-art,"
+            "true,100,16,15,85,Limited Edition\n"
         )
-        stale_order_rows = [
-            edition_ops._normalise_order_row(
+
+        updated_rows, changed_rows, changed_count, warnings = edition_ops._apply_csv_updates_to_rows(rows, csv_text)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(changed_count, 1)
+        self.assertEqual(len(changed_rows), 1)
+        self.assertEqual(updated_rows[0]["edition_next_number"], 16)
+        self.assertEqual(updated_rows[0]["edition_sold_count"], 15)
+        self.assertEqual(updated_rows[0]["edition_remaining"], 85)
+        self.assertEqual(updated_rows[0]["edition_status"], "Limited Edition")
+        self.assertEqual(updated_rows[0]["sync_status"], "Needs Sync")
+
+    def test_csv_import_supports_old_remaining_and_widget_status_headers(self):
+        rows = [
+            edition_ops._normalise_row(
                 {
-                    "shopify_line_item_id": "gid://shopify/LineItem/old",
                     "shopify_product_gid": "gid://shopify/Product/1",
-                    "order_name": "#SC2830",
-                    "created_at": "2026-06-21T10:00:00Z",
-                    "quantity": 1,
-                    "edition_display": "#47/100",
-                    "certificate_display": "SC-SC2830-0047",
-                    "certificate_file_paths": "old-certificate.pdf",
+                    "product_title": "Legacy Wall Art",
+                    "handle": "legacy-wall-art",
                 }
-            ),
-            edition_ops._normalise_order_row(
-                {
-                    "shopify_line_item_id": "gid://shopify/LineItem/new",
-                    "shopify_product_gid": "gid://shopify/Product/1",
-                    "order_name": "#SC2833",
-                    "created_at": "2026-06-22T10:00:00Z",
-                    "quantity": 1,
-                    "edition_display": "#48/100",
-                    "certificate_display": "SC-SC2833-0048",
-                    "certificate_file_paths": "old-certificate-2.pdf",
-                }
-            ),
+            )
         ]
-
-        recalculated = edition_ops._recalculate_order_editions(
-            stale_order_rows,
-            [product],
-            preserve_existing=False,
+        csv_text = (
+            "Product title,Handle,Enabled,Edition total,Next edition number,remaining,widget_status\n"
+            "Legacy Wall Art,legacy-wall-art,true,100,96,5,Final Editions\n"
         )
-        by_id = {row["shopify_line_item_id"]: row for row in recalculated}
 
-        self.assertEqual(by_id["gid://shopify/LineItem/old"]["edition_display"], "#25/100")
-        self.assertEqual(by_id["gid://shopify/LineItem/old"]["certificate_display"], "SC-SC2830-0025")
-        self.assertEqual(by_id["gid://shopify/LineItem/old"]["certificate_file_paths"], "")
-        self.assertEqual(by_id["gid://shopify/LineItem/new"]["edition_display"], "#26/100")
-        self.assertEqual(by_id["gid://shopify/LineItem/new"]["certificate_display"], "SC-SC2833-0026")
+        updated_rows, changed_rows, changed_count, warnings = edition_ops._apply_csv_updates_to_rows(rows, csv_text)
 
-    def test_existing_order_editions_remain_and_new_orders_advance_product_next(self):
-        product = edition_ops._normalise_row(
+        self.assertEqual(warnings, [])
+        self.assertEqual(changed_count, 1)
+        self.assertEqual(len(changed_rows), 1)
+        self.assertEqual(updated_rows[0]["edition_next_number"], 96)
+        self.assertEqual(updated_rows[0]["edition_sold_count"], 95)
+        self.assertEqual(updated_rows[0]["edition_remaining"], 5)
+        self.assertEqual(updated_rows[0]["edition_status"], "Final Editions")
+
+    def test_rows_to_save_includes_needs_sync_even_without_edit_diff(self):
+        original = edition_ops._normalise_row(
             {
                 "shopify_product_gid": "gid://shopify/Product/1",
-                "handle": "all-rise-wall-art",
-                "edition_enabled": True,
                 "edition_total": 100,
-                "edition_next_number": 53,
+                "edition_next_number": 16,
+                "sync_status": "Synced",
             }
         )
-        existing = edition_ops._normalise_order_row(
+        imported = dict(original)
+        imported["sync_status"] = "Needs Sync"
+
+        self.assertEqual(edition_ops._rows_to_save([imported], [original]), [imported])
+
+    def test_editor_changes_recalculate_derived_fields_without_order_data(self):
+        source = edition_ops._normalise_row(
             {
-                "shopify_line_item_id": "gid://shopify/LineItem/old",
                 "shopify_product_gid": "gid://shopify/Product/1",
-                "order_name": "#SC1",
-                "created_at": "2026-06-20T10:00:00Z",
-                "quantity": 1,
-                "edition_display": "#53/100",
+                "edition_total": 100,
+                "edition_next_number": 16,
+                "edition_sold_count": 15,
+                "edition_remaining": 85,
             }
         )
-        orders = [
-            {
-                "shopify_order_id": "gid://shopify/Order/1",
-                "order_name": "#SC1",
-                "created_at": "2026-06-20T10:00:00Z",
-                "line_items": [
-                    {
-                        "shopify_line_item_id": "gid://shopify/LineItem/old",
-                        "shopify_product_id": "gid://shopify/Product/1",
-                        "product_handle": "all-rise-wall-art",
-                        "quantity": 1,
-                    }
-                ],
-            },
-            {
-                "shopify_order_id": "gid://shopify/Order/2",
-                "order_name": "#SC2",
-                "created_at": "2026-06-21T10:00:00Z",
-                "line_items": [
-                    {
-                        "shopify_line_item_id": "gid://shopify/LineItem/new",
-                        "shopify_product_id": "gid://shopify/Product/1",
-                        "product_handle": "all-rise-wall-art",
-                        "quantity": 1,
-                    }
-                ],
-            },
-        ]
 
-        order_rows = edition_ops._order_rows_from_shopify_orders(
-            orders,
-            [product],
-            existing_order_rows=[existing],
+        merged = edition_ops._merge_visible_rows(
+            [{"edition_total": 100, "edition_next_number": 20}],
+            [source],
         )
-        by_id = {row["shopify_line_item_id"]: row for row in order_rows}
-        updated_products, advanced_products = edition_ops._advance_product_rows_from_orders([product], order_rows)
 
-        self.assertEqual(by_id["gid://shopify/LineItem/old"]["edition_display"], "#53/100")
-        self.assertEqual(by_id["gid://shopify/LineItem/new"]["edition_display"], "#54/100")
-        self.assertEqual(updated_products[0]["edition_next_number"], 55)
-        self.assertEqual(advanced_products[0]["edition_next_number"], 55)
+        self.assertEqual(merged[0]["edition_sold_count"], 19)
+        self.assertEqual(merged[0]["edition_remaining"], 81)
 
     def test_certificate_schema_uses_uuid_safe_related_column_without_runtime_fk(self):
         source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
