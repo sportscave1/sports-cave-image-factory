@@ -25,14 +25,18 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn("st.data_editor", source)
         self.assertIn("edition_ops_products_snapshot.json", source)
+        self.assertIn("edition_ops_unfulfilled_orders_snapshot.json", source)
         self.assertIn("Refresh Products From Shopify", source)
-        self.assertIn("Clear Table", source)
+        self.assertIn("Refresh Unfulfilled Orders", source)
         self.assertIn("Save Changed Rows", source)
         self.assertIn("Export CSV Backup", source)
         self.assertIn("Import CSV Updates", source)
-        self.assertIn("Open Shopify Orders", source)
         self.assertIn("_hydrate_from_snapshot_once()", source)
+        self.assertIn("_hydrate_orders_snapshot_once()", source)
         self.assertIn("_write_snapshot", source)
+        self.assertNotIn("Clear Table", source)
+        self.assertNotIn("Open Shopify Orders", source)
+        self.assertNotIn("Shopify is the permanent record", source)
         self.assertNotIn("Shopify Metafield Setup", source)
         self.assertNotIn("Check Metafield Definitions", source)
         self.assertNotIn("Create Missing Metafield Definitions", source)
@@ -87,6 +91,44 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(edition_ops._changed_rows([changed], [original]), [changed])
         self.assertEqual(edition_ops._changed_rows([unchanged_status_only], [original]), [])
+
+    def test_unfulfilled_order_editions_are_derived_from_product_table(self):
+        product = edition_ops._normalise_row(
+            {
+                "shopify_product_gid": "gid://shopify/Product/1",
+                "handle": "all-rise-wall-art",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 53,
+            }
+        )
+        order_rows = [
+            edition_ops._normalise_order_row(
+                {
+                    "shopify_line_item_id": "gid://shopify/LineItem/old",
+                    "shopify_product_gid": "gid://shopify/Product/1",
+                    "order_name": "#SC1",
+                    "created_at": "2026-06-20T10:00:00Z",
+                    "quantity": 2,
+                }
+            ),
+            edition_ops._normalise_order_row(
+                {
+                    "shopify_line_item_id": "gid://shopify/LineItem/new",
+                    "shopify_product_gid": "gid://shopify/Product/1",
+                    "order_name": "#SC2",
+                    "created_at": "2026-06-21T10:00:00Z",
+                    "quantity": 1,
+                }
+            ),
+        ]
+
+        recalculated = edition_ops._recalculate_order_editions(order_rows, [product])
+        by_id = {row["shopify_line_item_id"]: row for row in recalculated}
+
+        self.assertEqual(by_id["gid://shopify/LineItem/old"]["edition_display"], "#53-54/100")
+        self.assertEqual(by_id["gid://shopify/LineItem/new"]["edition_display"], "#55/100")
+        self.assertEqual(by_id["gid://shopify/LineItem/new"]["edition_status"], "Ready")
 
     def test_certificate_schema_uses_uuid_safe_related_column_without_runtime_fk(self):
         source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
