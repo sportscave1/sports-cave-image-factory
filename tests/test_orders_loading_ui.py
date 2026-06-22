@@ -25,16 +25,21 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn("st.data_editor", source)
         self.assertIn("edition_ops_products_snapshot.json", source)
-        self.assertIn("edition_ops_unfulfilled_orders_snapshot.json", source)
+        self.assertIn("edition_ops_orders_snapshot.json", source)
         self.assertIn("Refresh Products From Shopify", source)
-        self.assertIn("Refresh Unfulfilled Orders", source)
-        self.assertIn("Save Changed Rows", source)
+        self.assertIn("Refresh Orders From Shopify", source)
         self.assertIn("Export CSV Backup", source)
         self.assertIn("Import CSV Updates", source)
+        self.assertIn("shipping_method", source)
+        self.assertIn("certificate_display", source)
+        self.assertIn("default_paid_unfulfilled_filter=False", source)
         self.assertIn("_hydrate_from_snapshot_once()", source)
         self.assertIn("_hydrate_orders_snapshot_once()", source)
         self.assertIn("_write_snapshot", source)
+        self.assertLess(source.index('_render_orders_table(config, product_rows_for_orders)'), source.index('st.subheader("Products")'))
         self.assertNotIn("Clear Table", source)
+        self.assertNotIn("Save Changed Rows", source)
+        self.assertNotIn("Refresh Unfulfilled Orders", source)
         self.assertNotIn("Open Shopify Orders", source)
         self.assertNotIn("Shopify is the permanent record", source)
         self.assertNotIn("Shopify Metafield Setup", source)
@@ -43,7 +48,6 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("import supabase", source.casefold())
         self.assertNotIn("supabase_backend", source.casefold())
         self.assertNotIn("import google", source.casefold())
-        self.assertNotIn("certificate", source.casefold())
         self.assertNotIn("fetch_orders", source)
 
     def test_developer_keeps_edition_ops_metafield_setup(self):
@@ -92,7 +96,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(edition_ops._changed_rows([changed], [original]), [changed])
         self.assertEqual(edition_ops._changed_rows([unchanged_status_only], [original]), [])
 
-    def test_unfulfilled_order_editions_are_derived_from_product_table(self):
+    def test_order_editions_and_certificates_are_derived_from_product_table(self):
         product = edition_ops._normalise_row(
             {
                 "shopify_product_gid": "gid://shopify/Product/1",
@@ -127,8 +131,10 @@ class EditionOpsUiTests(unittest.TestCase):
         by_id = {row["shopify_line_item_id"]: row for row in recalculated}
 
         self.assertEqual(by_id["gid://shopify/LineItem/old"]["edition_display"], "#53-54/100")
+        self.assertEqual(by_id["gid://shopify/LineItem/old"]["certificate_display"], "SC-SC1-0053 +1")
         self.assertEqual(by_id["gid://shopify/LineItem/new"]["edition_display"], "#55/100")
         self.assertEqual(by_id["gid://shopify/LineItem/new"]["edition_status"], "Ready")
+        self.assertEqual(by_id["gid://shopify/LineItem/new"]["certificate_display"], "SC-SC2-0055")
 
     def test_certificate_schema_uses_uuid_safe_related_column_without_runtime_fk(self):
         source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")

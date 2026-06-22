@@ -4,15 +4,18 @@ from datetime import datetime, timezone
 import io
 import json
 from pathlib import Path
+import re
 
 import streamlit as st
 
+import certificate_service
 import shopify_sync
 
 
 BASE_DIR = Path(__file__).resolve().parent
 SNAPSHOT_PATH = BASE_DIR / "output" / "_cache" / "edition_ops_products_snapshot.json"
-ORDERS_SNAPSHOT_PATH = BASE_DIR / "output" / "_cache" / "edition_ops_unfulfilled_orders_snapshot.json"
+ORDERS_SNAPSHOT_PATH = BASE_DIR / "output" / "_cache" / "edition_ops_orders_snapshot.json"
+CERTIFICATE_OUTPUT_DIR = BASE_DIR / "output" / "certificates" / "edition_ops"
 SNAPSHOT_VERSION = 1
 
 ROWS_KEY = "edition_ops_rows"
@@ -57,11 +60,12 @@ ORDER_VISIBLE_COLUMNS = (
     "product_title",
     "variant_title",
     "quantity",
+    "shipping_method",
     "edition_display",
+    "certificate_display",
     "edition_status",
     "fulfillment_status",
     "financial_status",
-    "admin_url",
 )
 
 CSV_COLUMNS = (
@@ -223,11 +227,71 @@ def _normalise_order_row(row):
     updated["variant_title"] = str(updated.get("variant_title") or "")
     updated["sku"] = str(updated.get("sku") or "")
     updated["quantity"] = _coerce_int(updated.get("quantity"), 1)
+    updated["shipping_method"] = str(updated.get("shipping_method") or updated.get("shipping_title") or "")
     updated["edition_display"] = str(updated.get("edition_display") or "")
     updated["edition_status"] = str(updated.get("edition_status") or "")
+    updated["certificate_display"] = str(updated.get("certificate_display") or "")
+    updated["certificate_ids"] = str(updated.get("certificate_ids") or "")
+    updated["certificate_file_paths"] = str(updated.get("certificate_file_paths") or "")
     updated["financial_status"] = str(updated.get("financial_status") or "")
     updated["fulfillment_status"] = str(updated.get("fulfillment_status") or "")
     updated["admin_url"] = str(updated.get("admin_url") or "")
+    return updated
+
+
+def _edition_numbers_from_display(value):
+    text = str(value or "").strip()
+    match = re.match(r"#(\d+)(?:-(\d+))?/(\d+)", text)
+    if not match:
+        return [], 0
+    start = int(match.group(1))
+    end = int(match.group(2) or start)
+    total = int(match.group(3))
+    return list(range(start, end + 1)), total
+
+
+def _assign_certificates_for_order_row(row, *, generate_files=False):
+    updated = _normalise_order_row(row)
+    edition_numbers, edition_total = _edition_numbers_from_display(updated.get("edition_display"))
+    if not edition_numbers:
+        updated["certificate_display"] = "Needs edition"
+        updated["certificate_ids"] = ""
+        updated["certificate_file_paths"] = ""
+        return updated
+
+    certificate_ids = [
+        certificate_service.certificate_id(updated.get("order_name"), edition_number)
+        for edition_number in edition_numbers
+    ]
+    certificate_paths = []
+    if generate_files:
+        for edition_number in edition_numbers:
+            try:
+                certificate_paths.append(
+                    certificate_service.generate_certificate_pdf(
+                        CERTIFICATE_OUTPUT_DIR,
+                        product_title=updated.get("product_title") or "Sports Cave Artwork",
+                        edition_number=edition_number,
+                        edition_total=edition_total,
+                        order_name=updated.get("order_name") or "Shopify Order",
+                        customer_name=updated.get("customer_name") or "",
+                        assigned_at=updated.get("created_at_display") or "",
+                        shopify_handle=updated.get("product_handle") or "",
+                    )
+                )
+            except Exception as error:
+                updated["certificate_display"] = f"Certificate error: {error}"
+                updated["certificate_ids"] = ", ".join(certificate_ids)
+                updated["certificate_file_paths"] = ";".join(certificate_paths)
+                return updated
+
+    if len(certificate_ids) == 1:
+        updated["certificate_display"] = certificate_ids[0]
+    else:
+        updated["certificate_display"] = f"{certificate_ids[0]} +{len(certificate_ids) - 1}"
+    updated["certificate_ids"] = ", ".join(certificate_ids)
+    if certificate_paths:
+        updated["certificate_file_paths"] = ";".join(certificate_paths)
     return updated
 
 
@@ -269,7 +333,7 @@ def _edition_for_order_line(order_row, products_by_gid, products_by_handle, curs
     return f"#{start}-{end}/{total}", "Ready"
 
 
-def _recalculate_order_editions(order_rows, product_rows):
+def _recalculate_order_editions(order_rows, product_rows, *, generate_certificates=False):
     products_by_gid, products_by_handle = _product_lookup(product_rows)
     cursors = {}
     allocation_order = sorted(
@@ -294,11 +358,11 @@ def _recalculate_order_editions(order_rows, product_rows):
         edition_display, edition_status = calculated_by_line.get(key, ("", ""))
         row["edition_display"] = edition_display
         row["edition_status"] = edition_status
-        recalculated.append(row)
+        recalculated.append(_assign_certificates_for_order_row(row, generate_files=generate_certificates))
     return sorted(recalculated, key=lambda row: row.get("created_at") or "", reverse=True)
 
 
-def _order_rows_from_shopify_orders(orders, product_rows):
+def _order_rows_from_shopify_orders(orders, product_rows, *, generate_certificates=False):
     rows = []
     for order in orders:
         for item in order.get("line_items") or []:
@@ -318,13 +382,14 @@ def _order_rows_from_shopify_orders(orders, product_rows):
                         "variant_title": item.get("variant_title") or "",
                         "sku": item.get("sku") or "",
                         "quantity": item.get("quantity") or 1,
+                        "shipping_method": order.get("shipping_method") or order.get("shipping_title") or "",
                         "financial_status": order.get("financial_status") or "",
                         "fulfillment_status": order.get("fulfillment_status") or "",
                         "admin_url": order.get("admin_url") or "",
                     }
                 )
             )
-    return _recalculate_order_editions(rows, product_rows)
+    return _recalculate_order_editions(rows, product_rows, generate_certificates=generate_certificates)
 
 
 def _ensure_state():
@@ -530,7 +595,7 @@ def _load_active_products_from_shopify():
     _bump_editor_version()
 
 
-def _refresh_unfulfilled_orders_from_shopify(product_rows):
+def _refresh_orders_from_shopify(product_rows):
     config = shopify_sync.get_config()
     if not config.get("configured"):
         raise ValueError(
@@ -543,13 +608,13 @@ def _refresh_unfulfilled_orders_from_shopify(product_rows):
         page_size=50,
         max_orders=max_orders,
         config=config,
-        default_paid_unfulfilled_filter=True,
+        default_paid_unfulfilled_filter=False,
     ):
         orders.extend(page.get("orders") or [])
     refreshed_at = _now_iso()
-    rows = _order_rows_from_shopify_orders(orders, product_rows)
+    rows = _order_rows_from_shopify_orders(orders, product_rows, generate_certificates=True)
     st.session_state[ORDER_ROWS_KEY] = rows
-    st.session_state[ORDER_NOTICE_KEY] = f"Refreshed {len(rows)} unfulfilled order lines."
+    st.session_state[ORDER_NOTICE_KEY] = f"Refreshed {len(rows)} order lines."
     _write_orders_snapshot(rows, meta={"last_refreshed_from_shopify": refreshed_at})
     st.session_state[ORDER_EDITOR_VERSION_KEY] = int(st.session_state.get(ORDER_EDITOR_VERSION_KEY) or 0) + 1
 
@@ -699,7 +764,7 @@ def _apply_csv_import(uploaded_file):
         changed_count += 1
 
     st.session_state[ROWS_KEY] = rows
-    st.session_state[NOTICE_KEY] = f"Imported updates for {changed_count} visible rows. Click Save Changed Rows to write them to Shopify."
+    st.session_state[NOTICE_KEY] = f"Imported updates for {changed_count} visible rows."
     st.session_state[IMPORT_WARNINGS_KEY] = warnings
     _write_snapshot(rows, st.session_state.get(ORIGINAL_ROWS_KEY, []))
     _bump_editor_version()
@@ -728,21 +793,22 @@ def _order_column_config():
         "product_title": st.column_config.TextColumn("Product"),
         "variant_title": st.column_config.TextColumn("Variant"),
         "quantity": st.column_config.NumberColumn("Qty", min_value=1, step=1),
+        "shipping_method": st.column_config.TextColumn("Shipping"),
         "edition_display": st.column_config.TextColumn("Edition"),
+        "certificate_display": st.column_config.TextColumn("Certificate"),
         "edition_status": st.column_config.TextColumn("Edition status"),
         "fulfillment_status": st.column_config.TextColumn("Fulfillment"),
         "financial_status": st.column_config.TextColumn("Payment"),
-        "admin_url": st.column_config.LinkColumn("Open Shopify", display_text="Open"),
     }
 
 
-def _render_unfulfilled_orders_table(config, product_rows):
+def _render_orders_table(config, product_rows):
     order_rows = [_normalise_order_row(row) for row in st.session_state.get(ORDER_ROWS_KEY, [])]
     order_rows = _recalculate_order_editions(order_rows, product_rows)
     order_meta = st.session_state.get(ORDER_META_KEY) or {}
 
     st.divider()
-    st.subheader("Unfulfilled Orders")
+    st.subheader("Orders")
     st.caption(f"Last refreshed from Shopify: {_format_time(order_meta.get('last_refreshed_from_shopify'))}")
 
     order_notice = st.session_state.get(ORDER_NOTICE_KEY)
@@ -752,18 +818,18 @@ def _render_unfulfilled_orders_table(config, product_rows):
 
     order_cols = st.columns([1, 3])
     if order_cols[0].button(
-        "Refresh Unfulfilled Orders",
+        "Refresh Orders From Shopify",
         type="primary",
         use_container_width=True,
         disabled=not config.get("configured"),
     ):
-        with st.spinner("Refreshing paid unfulfilled Shopify orders..."):
-            _refresh_unfulfilled_orders_from_shopify(product_rows)
+        with st.spinner("Refreshing Shopify orders..."):
+            _refresh_orders_from_shopify(product_rows)
         st.rerun()
-    order_cols[1].caption("Order rows are a fast saved copy. Edition numbers are calculated from the product table above.")
+    order_cols[1].caption("Order rows are a fast saved copy. Fulfillment, shipping, editions, and certificates are shown together.")
 
     if order_rows:
-        st.caption(f"{len(order_rows)} unfulfilled order lines shown.")
+        st.caption(f"{len(order_rows)} order lines shown.")
         st.data_editor(
             order_rows,
             hide_index=True,
@@ -775,7 +841,7 @@ def _render_unfulfilled_orders_table(config, product_rows):
             disabled=list(ORDER_VISIBLE_COLUMNS),
         )
     else:
-        st.info("No unfulfilled orders loaded yet. Refresh unfulfilled orders when you are ready.")
+        st.info("No orders loaded yet. Refresh orders from Shopify when you are ready.")
 
 
 def render_page():
@@ -793,9 +859,9 @@ def render_page():
     st.title("Edition Ops")
     st.caption("Use this page to manage limited edition numbers.")
     st.markdown(
-        "1. Refresh products when new products are added in Shopify.\n"
-        "2. Edit Enabled, Edition Total, and Next Edition Number.\n"
-        "3. Save changed rows.\n"
+        "1. Refresh orders when Shopify orders change.\n"
+        "2. Refresh products when new products are added in Shopify.\n"
+        "3. Edit Enabled, Edition Total, and Next Edition Number.\n"
         "4. Export a CSV backup after major edits."
     )
     st.caption(f"Last refreshed from Shopify: {_format_time(meta.get('last_refreshed_from_shopify'))}")
@@ -810,16 +876,16 @@ def render_page():
         st.warning(warning)
     st.session_state[IMPORT_WARNINGS_KEY] = []
 
-    action_cols = st.columns([1, 1, 1, 1])
+    _render_orders_table(config, product_rows_for_orders)
+
+    st.divider()
+    st.subheader("Products")
+    action_cols = st.columns([1, 1, 1])
     if action_cols[0].button("Refresh Products From Shopify", type="primary", use_container_width=True, disabled=not config.get("configured")):
         with st.spinner("Refreshing active Shopify products..."):
             _load_active_products_from_shopify()
         st.rerun()
-    if action_cols[1].button("Save Changed Rows", use_container_width=True, disabled=not bool(changed)):
-        with st.spinner("Saving changed rows to Shopify..."):
-            _save_changed_rows()
-        st.rerun()
-    action_cols[2].download_button(
+    action_cols[1].download_button(
         "Export CSV Backup",
         data=_export_csv(rows),
         file_name=f"edition-ops-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
@@ -827,8 +893,8 @@ def render_page():
         use_container_width=True,
         disabled=not bool(rows),
     )
-    with action_cols[3].popover("Import CSV Updates", use_container_width=True):
-        st.caption("Imports update the visible table only. Click Save Changed Rows afterwards to write to Shopify.")
+    with action_cols[2].popover("Import CSV Updates", use_container_width=True):
+        st.caption("Imports update the visible table only.")
         uploaded_csv = st.file_uploader(
             "Choose CSV backup",
             type=["csv"],
@@ -839,7 +905,7 @@ def render_page():
             st.rerun()
 
     if rows:
-        st.caption(f"{len(rows)} saved products shown. {len(changed)} changed rows waiting to save.")
+        st.caption(f"{len(rows)} saved products shown.")
         edited = st.data_editor(
             rows,
             hide_index=True,
@@ -872,8 +938,6 @@ def render_page():
                 st.caption(f"{product_title}: {message}")
     else:
         st.info("No products loaded yet. Refresh products from Shopify to build the first fast saved table.")
-
-    _render_unfulfilled_orders_table(config, product_rows_for_orders)
 
     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
     print(f"PERF Edition Ops total={elapsed:.3f}s rows={len(st.session_state.get(ROWS_KEY, []))}", flush=True)
