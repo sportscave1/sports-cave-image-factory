@@ -146,6 +146,31 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(updated_rows[0]["edition_next_number"], 72)
         self.assertEqual(updated_rows[0]["remaining"], 79)
 
+    def test_csv_import_overwrites_current_next_number_even_when_lower(self):
+        rows = [
+            edition_ops._normalise_row(
+                {
+                    "shopify_product_gid": "gid://shopify/Product/1",
+                    "handle": "jalen-brunson-knicks-wall-art",
+                    "edition_enabled": True,
+                    "edition_total": 100,
+                    "edition_next_number": 49,
+                }
+            )
+        ]
+        csv_text = (
+            "shopify_product_gid,handle,edition_enabled,edition_total,edition_next_number\n"
+            "gid://shopify/Product/1,jalen-brunson-knicks-wall-art,true,100,25\n"
+        )
+
+        updated_rows, changed_rows, changed_count, warnings = edition_ops._apply_csv_updates_to_rows(rows, csv_text)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(changed_count, 1)
+        self.assertEqual(len(changed_rows), 1)
+        self.assertEqual(updated_rows[0]["edition_next_number"], 25)
+        self.assertEqual(updated_rows[0]["remaining"], 76)
+
     def test_order_editions_and_certificates_are_derived_from_product_table(self):
         product = edition_ops._normalise_row(
             {
@@ -185,6 +210,56 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(by_id["gid://shopify/LineItem/new"]["edition_display"], "#55/100")
         self.assertEqual(by_id["gid://shopify/LineItem/new"]["edition_status"], "Ready")
         self.assertEqual(by_id["gid://shopify/LineItem/new"]["certificate_display"], "SC-SC2-0055")
+
+    def test_csv_baseline_recalculation_ignores_stale_saved_order_editions(self):
+        product = edition_ops._normalise_row(
+            {
+                "shopify_product_gid": "gid://shopify/Product/1",
+                "handle": "jalen-brunson-knicks-wall-art",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 25,
+            }
+        )
+        stale_order_rows = [
+            edition_ops._normalise_order_row(
+                {
+                    "shopify_line_item_id": "gid://shopify/LineItem/old",
+                    "shopify_product_gid": "gid://shopify/Product/1",
+                    "order_name": "#SC2830",
+                    "created_at": "2026-06-21T10:00:00Z",
+                    "quantity": 1,
+                    "edition_display": "#47/100",
+                    "certificate_display": "SC-SC2830-0047",
+                    "certificate_file_paths": "old-certificate.pdf",
+                }
+            ),
+            edition_ops._normalise_order_row(
+                {
+                    "shopify_line_item_id": "gid://shopify/LineItem/new",
+                    "shopify_product_gid": "gid://shopify/Product/1",
+                    "order_name": "#SC2833",
+                    "created_at": "2026-06-22T10:00:00Z",
+                    "quantity": 1,
+                    "edition_display": "#48/100",
+                    "certificate_display": "SC-SC2833-0048",
+                    "certificate_file_paths": "old-certificate-2.pdf",
+                }
+            ),
+        ]
+
+        recalculated = edition_ops._recalculate_order_editions(
+            stale_order_rows,
+            [product],
+            preserve_existing=False,
+        )
+        by_id = {row["shopify_line_item_id"]: row for row in recalculated}
+
+        self.assertEqual(by_id["gid://shopify/LineItem/old"]["edition_display"], "#25/100")
+        self.assertEqual(by_id["gid://shopify/LineItem/old"]["certificate_display"], "SC-SC2830-0025")
+        self.assertEqual(by_id["gid://shopify/LineItem/old"]["certificate_file_paths"], "")
+        self.assertEqual(by_id["gid://shopify/LineItem/new"]["edition_display"], "#26/100")
+        self.assertEqual(by_id["gid://shopify/LineItem/new"]["certificate_display"], "SC-SC2833-0026")
 
     def test_existing_order_editions_remain_and_new_orders_advance_product_next(self):
         product = edition_ops._normalise_row(

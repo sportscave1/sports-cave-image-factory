@@ -318,8 +318,7 @@ def _assign_certificates_for_order_row(row, *, generate_files=False):
     else:
         updated["certificate_display"] = f"{certificate_ids[0]} +{len(certificate_ids) - 1}"
     updated["certificate_ids"] = ", ".join(certificate_ids)
-    if certificate_paths:
-        updated["certificate_file_paths"] = ";".join(certificate_paths)
+    updated["certificate_file_paths"] = ";".join(certificate_paths) if certificate_paths else ""
     return updated
 
 
@@ -383,21 +382,22 @@ def _edition_for_order_line(order_row, products_by_gid, products_by_handle, curs
     return f"#{start}-{end}/{total}", "Ready"
 
 
-def _recalculate_order_editions(order_rows, product_rows, *, generate_certificates=False):
+def _recalculate_order_editions(order_rows, product_rows, *, generate_certificates=False, preserve_existing=True):
     products_by_gid, products_by_handle = _product_lookup(product_rows)
     cursors = {}
     normalised_rows = [_normalise_order_row(row) for row in order_rows]
 
-    for row in normalised_rows:
-        assigned_numbers, _edition_total = _edition_numbers_from_display(row.get("edition_display"))
-        if not assigned_numbers:
-            continue
-        product = _product_for_order_line(row, products_by_gid, products_by_handle)
-        product_key = _product_key(product)
-        if not product_key:
-            continue
-        product_next = _coerce_int((product or {}).get("edition_next_number"), 1)
-        cursors[product_key] = max(cursors.get(product_key, product_next), max(assigned_numbers) + 1)
+    if preserve_existing:
+        for row in normalised_rows:
+            assigned_numbers, _edition_total = _edition_numbers_from_display(row.get("edition_display"))
+            if not assigned_numbers:
+                continue
+            product = _product_for_order_line(row, products_by_gid, products_by_handle)
+            product_key = _product_key(product)
+            if not product_key:
+                continue
+            product_next = _coerce_int((product or {}).get("edition_next_number"), 1)
+            cursors[product_key] = max(cursors.get(product_key, product_next), max(assigned_numbers) + 1)
 
     allocation_order = sorted(
         normalised_rows,
@@ -409,7 +409,9 @@ def _recalculate_order_editions(order_rows, product_rows, *, generate_certificat
     )
     calculated_by_line = {}
     for row in allocation_order:
-        assigned_numbers, _edition_total = _edition_numbers_from_display(row.get("edition_display"))
+        assigned_numbers = []
+        if preserve_existing:
+            assigned_numbers, _edition_total = _edition_numbers_from_display(row.get("edition_display"))
         if assigned_numbers:
             edition_display = row.get("edition_display") or ""
             edition_status = row.get("edition_status") or "Ready"
@@ -428,6 +430,22 @@ def _recalculate_order_editions(order_rows, product_rows, *, generate_certificat
         row["edition_status"] = edition_status
         recalculated.append(_assign_certificates_for_order_row(row, generate_files=generate_certificates))
     return sorted(recalculated, key=lambda row: row.get("created_at") or "", reverse=True)
+
+
+def _recalculate_saved_orders_from_product_baseline(product_rows):
+    order_rows = [_normalise_order_row(row) for row in st.session_state.get(ORDER_ROWS_KEY, [])]
+    if not order_rows:
+        return 0
+    recalculated = _recalculate_order_editions(
+        order_rows,
+        product_rows,
+        generate_certificates=False,
+        preserve_existing=False,
+    )
+    st.session_state[ORDER_ROWS_KEY] = recalculated
+    _write_orders_snapshot(recalculated)
+    st.session_state[ORDER_EDITOR_VERSION_KEY] = int(st.session_state.get(ORDER_EDITOR_VERSION_KEY) or 0) + 1
+    return len(recalculated)
 
 
 def _order_rows_from_shopify_orders(orders, product_rows, *, existing_order_rows=None, generate_certificates=False):
@@ -962,8 +980,13 @@ def _apply_csv_import(uploaded_file):
     elif changed_rows:
         warnings.append("Shopify is not connected, so imported values were saved locally only.")
 
+    recalculated_order_count = _recalculate_saved_orders_from_product_baseline(rows)
+
     st.session_state[ROWS_KEY] = rows
-    st.session_state[NOTICE_KEY] = f"Imported updates for {changed_count} visible rows."
+    st.session_state[NOTICE_KEY] = (
+        f"Imported spreadsheet values for {changed_count} changed products. "
+        f"Recalculated {recalculated_order_count} saved order lines from the uploaded numbers."
+    )
     st.session_state[IMPORT_WARNINGS_KEY] = warnings
     st.session_state[ORIGINAL_ROWS_KEY] = deepcopy(rows)
     _write_snapshot(rows, deepcopy(rows))
