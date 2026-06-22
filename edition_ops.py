@@ -1,5 +1,9 @@
 from copy import deepcopy
+import csv
 from datetime import datetime, timezone
+import io
+import json
+from pathlib import Path
 from urllib.parse import quote_plus
 
 import streamlit as st
@@ -7,41 +11,73 @@ import streamlit as st
 import shopify_sync
 
 
+BASE_DIR = Path(__file__).resolve().parent
+SNAPSHOT_PATH = BASE_DIR / "output" / "_cache" / "edition_ops_products_snapshot.json"
+SNAPSHOT_VERSION = 1
+
 ROWS_KEY = "edition_ops_rows"
 ORIGINAL_ROWS_KEY = "edition_ops_original_rows"
+META_KEY = "edition_ops_snapshot_meta"
 ERRORS_KEY = "edition_ops_sync_errors"
 NOTICE_KEY = "edition_ops_notice"
-DEFINITIONS_KEY = "edition_ops_definition_status"
+IMPORT_WARNINGS_KEY = "edition_ops_import_warnings"
 EDITOR_VERSION_KEY = "edition_ops_editor_version"
+SNAPSHOT_LOADED_KEY = "edition_ops_snapshot_loaded"
 
 EDITABLE_FIELDS = (
-    "Enabled",
-    "Edition total",
-    "Next edition number",
-    "Edition label",
-    "Status override",
+    "edition_enabled",
+    "edition_total",
+    "edition_next_number",
+    "edition_label",
+    "edition_status_override",
 )
 
-TABLE_COLUMNS = (
-    "Thumbnail",
-    "Product title",
-    "Handle",
-    "Status",
-    "Enabled",
-    "Edition total",
-    "Next edition number",
-    "Edition label",
-    "Status override",
-    "Remaining",
-    "Widget status",
-    "Last saved / Synced",
-    "Open Shopify",
-    "Open live product",
+VISIBLE_COLUMNS = (
+    "product_title",
+    "handle",
+    "edition_enabled",
+    "edition_total",
+    "edition_next_number",
+    "remaining",
+    "widget_status",
+    "sync_status",
+    "admin_url",
+    "online_store_url",
+)
+
+CSV_COLUMNS = (
+    "shopify_product_gid",
+    "legacy_resource_id",
+    "product_title",
+    "handle",
+    "status",
+    "edition_enabled",
+    "edition_total",
+    "edition_next_number",
+    "edition_label",
+    "edition_status_override",
+    "remaining",
+    "widget_status",
+    "online_store_url",
+    "admin_url",
+    "last_synced_at",
+    "sync_status",
+    "sync_error",
 )
 
 
-def _now_label():
-    return datetime.now(timezone.utc).astimezone().strftime("%d %b %Y %I:%M %p")
+def _now_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _format_time(value):
+    if not value:
+        return "Never"
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed.astimezone().strftime("%d %b %Y %I:%M %p")
+    except ValueError:
+        return str(value)
 
 
 def _remaining(total, next_number):
@@ -72,22 +108,89 @@ def _widget_status(remaining, override=""):
 def _coerce_bool(value):
     if isinstance(value, bool):
         return value
-    return str(value or "").strip().lower() in {"true", "1", "yes", "on"}
+    return str(value or "").strip().lower() in {"true", "1", "yes", "on", "y"}
 
 
 def _coerce_int(value, default):
     try:
-        return max(int(value), 1)
+        return max(int(str(value).strip()), 1)
     except (TypeError, ValueError):
         return default
+
+
+def _normalise_row(row):
+    updated = dict(row or {})
+    updated["shopify_product_gid"] = str(
+        updated.get("shopify_product_gid")
+        or updated.get("Product ID")
+        or updated.get("shopify_product_id")
+        or ""
+    )
+    updated["legacy_resource_id"] = str(updated.get("legacy_resource_id") or updated.get("Legacy ID") or "")
+    updated["thumbnail_url"] = str(updated.get("thumbnail_url") or updated.get("Thumbnail") or "")
+    updated["product_title"] = str(updated.get("product_title") or updated.get("Product title") or "Untitled Shopify Product")
+    updated["handle"] = str(updated.get("handle") or updated.get("Handle") or "")
+    updated["status"] = str(updated.get("status") or updated.get("Status") or "ACTIVE")
+    updated["edition_enabled"] = _coerce_bool(updated.get("edition_enabled", updated.get("Enabled")))
+    updated["edition_total"] = _coerce_int(updated.get("edition_total", updated.get("Edition total")), 100)
+    updated["edition_next_number"] = _coerce_int(
+        updated.get("edition_next_number", updated.get("Next edition number")),
+        1,
+    )
+    updated["edition_label"] = (
+        str(updated.get("edition_label") or updated.get("Edition label") or "Numbered Edition").strip()
+        or "Numbered Edition"
+    )
+    updated["edition_status_override"] = str(
+        updated.get("edition_status_override", updated.get("Status override", ""))
+        or ""
+    ).strip()
+    updated["remaining"] = _remaining(updated["edition_total"], updated["edition_next_number"])
+    updated["widget_status"] = _widget_status(updated["remaining"], updated["edition_status_override"])
+    updated["online_store_url"] = str(updated.get("online_store_url") or updated.get("Open live product") or "")
+    updated["admin_url"] = str(updated.get("admin_url") or updated.get("Open Shopify") or "")
+    updated["last_synced_at"] = str(updated.get("last_synced_at") or "")
+    updated["sync_status"] = str(updated.get("sync_status") or updated.get("Last saved / Synced") or "Loaded").strip() or "Loaded"
+    updated["sync_error"] = str(updated.get("sync_error") or "")
+    return updated
+
+
+def _row_from_product(product):
+    edition = product.get("edition") or {}
+    row = {
+        "shopify_product_gid": product.get("shopify_product_id") or "",
+        "legacy_resource_id": product.get("legacy_resource_id") or "",
+        "thumbnail_url": product.get("thumbnail_url") or "",
+        "product_title": product.get("title") or "Untitled Shopify Product",
+        "handle": product.get("handle") or "",
+        "status": product.get("status") or "ACTIVE",
+        "edition_enabled": _coerce_bool(edition.get("edition_enabled")),
+        "edition_total": _coerce_int(edition.get("edition_total"), 100),
+        "edition_next_number": _coerce_int(edition.get("edition_next_number"), 1),
+        "edition_label": edition.get("edition_label") or "Numbered Edition",
+        "edition_status_override": edition.get("edition_status_override") or "",
+        "online_store_url": product.get("online_store_url") or "",
+        "admin_url": product.get("admin_url") or "",
+        "last_synced_at": "",
+        "sync_status": "Loaded from Shopify",
+        "sync_error": "",
+    }
+    return _normalise_row(row)
 
 
 def _ensure_state():
     st.session_state.setdefault(ROWS_KEY, [])
     st.session_state.setdefault(ORIGINAL_ROWS_KEY, [])
+    st.session_state.setdefault(
+        META_KEY,
+        {
+            "last_refreshed_from_shopify": "",
+            "saved_at": "",
+        },
+    )
     st.session_state.setdefault(ERRORS_KEY, {})
+    st.session_state.setdefault(IMPORT_WARNINGS_KEY, [])
     st.session_state.setdefault(NOTICE_KEY, "")
-    st.session_state.setdefault(DEFINITIONS_KEY, None)
     st.session_state.setdefault(EDITOR_VERSION_KEY, 0)
 
 
@@ -95,109 +198,156 @@ def _bump_editor_version():
     st.session_state[EDITOR_VERSION_KEY] = int(st.session_state.get(EDITOR_VERSION_KEY) or 0) + 1
 
 
-def _row_from_product(product):
-    edition = product.get("edition") or {}
-    total = _coerce_int(edition.get("edition_total"), 100)
-    next_number = _coerce_int(edition.get("edition_next_number"), 1)
-    remaining = _remaining(total, next_number)
+def _load_snapshot():
+    if not SNAPSHOT_PATH.exists():
+        return None
+    try:
+        payload = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    rows = [_normalise_row(row) for row in payload.get("rows") or []]
+    original_rows = payload.get("original_rows")
+    if isinstance(original_rows, list):
+        originals = [_normalise_row(row) for row in original_rows]
+    else:
+        originals = deepcopy(rows)
     return {
-        "Product ID": product.get("shopify_product_id") or "",
-        "Legacy ID": product.get("legacy_resource_id") or "",
-        "Thumbnail": product.get("thumbnail_url") or "",
-        "Product title": product.get("title") or "Untitled Shopify Product",
-        "Handle": product.get("handle") or "",
-        "Status": product.get("status") or "UNKNOWN",
-        "Enabled": _coerce_bool(edition.get("edition_enabled")),
-        "Edition total": total,
-        "Next edition number": next_number,
-        "Edition label": edition.get("edition_label") or "Numbered Edition",
-        "Status override": edition.get("edition_status_override") or "",
-        "Remaining": remaining,
-        "Widget status": _widget_status(remaining, edition.get("edition_status_override")),
-        "Last saved / Synced": "Loaded from Shopify",
-        "Open Shopify": product.get("admin_url") or "",
-        "Open live product": product.get("online_store_url") or "",
+        "version": payload.get("version") or SNAPSHOT_VERSION,
+        "rows": rows,
+        "original_rows": originals,
+        "last_refreshed_from_shopify": payload.get("last_refreshed_from_shopify") or "",
+        "saved_at": payload.get("saved_at") or "",
     }
 
 
-def _recalculate_row(row):
-    updated = dict(row)
-    updated["Enabled"] = _coerce_bool(updated.get("Enabled"))
-    updated["Edition total"] = _coerce_int(updated.get("Edition total"), 100)
-    updated["Next edition number"] = _coerce_int(updated.get("Next edition number"), 1)
-    updated["Edition label"] = str(updated.get("Edition label") or "Numbered Edition").strip() or "Numbered Edition"
-    updated["Status override"] = str(updated.get("Status override") or "").strip()
-    remaining = _remaining(updated["Edition total"], updated["Next edition number"])
-    updated["Remaining"] = remaining
-    updated["Widget status"] = _widget_status(remaining, updated["Status override"])
-    return updated
+def _write_snapshot(rows, originals=None, meta=None):
+    SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    metadata = dict(st.session_state.get(META_KEY) or {})
+    metadata.update(meta or {})
+    metadata["saved_at"] = _now_iso()
+    payload = {
+        "version": SNAPSHOT_VERSION,
+        "last_refreshed_from_shopify": metadata.get("last_refreshed_from_shopify") or "",
+        "saved_at": metadata["saved_at"],
+        "rows": [_normalise_row(row) for row in rows],
+        "original_rows": [_normalise_row(row) for row in (originals if originals is not None else rows)],
+    }
+    SNAPSHOT_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    st.session_state[META_KEY] = {
+        "last_refreshed_from_shopify": payload["last_refreshed_from_shopify"],
+        "saved_at": payload["saved_at"],
+    }
 
 
-def _rows_from_editor(value):
-    if hasattr(value, "to_dict"):
-        return [dict(row) for row in value.to_dict("records")]
-    return [dict(row) for row in (value or [])]
-
-
-def _merge_editor_rows(edited_rows, source_rows):
-    merged = []
-    for index, row in enumerate(edited_rows):
-        source = source_rows[index] if index < len(source_rows) else {}
-        updated = dict(source)
-        updated.update(row)
-        merged.append(updated)
-    return merged
+def _hydrate_from_snapshot_once():
+    if st.session_state.get(SNAPSHOT_LOADED_KEY):
+        return
+    snapshot = _load_snapshot()
+    if snapshot:
+        st.session_state[ROWS_KEY] = snapshot["rows"]
+        st.session_state[ORIGINAL_ROWS_KEY] = snapshot["original_rows"]
+        st.session_state[META_KEY] = {
+            "last_refreshed_from_shopify": snapshot.get("last_refreshed_from_shopify") or "",
+            "saved_at": snapshot.get("saved_at") or "",
+        }
+    st.session_state[SNAPSHOT_LOADED_KEY] = True
 
 
 def _editable_snapshot(row):
-    recalculated = _recalculate_row(row)
+    recalculated = _normalise_row(row)
     return {field: recalculated.get(field) for field in EDITABLE_FIELDS}
 
 
 def _changed_rows(rows, originals):
-    original_by_id = {row.get("Product ID"): row for row in originals}
+    original_by_id = {row.get("shopify_product_gid"): row for row in originals}
     changed = []
     for row in rows:
-        product_id = row.get("Product ID")
+        product_id = row.get("shopify_product_gid")
         original = original_by_id.get(product_id)
         if not original or _editable_snapshot(row) != _editable_snapshot(original):
             changed.append(row)
     return changed
 
 
+def _mark_current_changes(rows, originals):
+    original_by_id = {row.get("shopify_product_gid"): row for row in originals}
+    updated_rows = []
+    for row in rows:
+        updated = _normalise_row(row)
+        original = original_by_id.get(updated.get("shopify_product_gid"))
+        changed = not original or _editable_snapshot(updated) != _editable_snapshot(original)
+        if changed and updated.get("sync_status") != "Unsaved import":
+            updated["sync_status"] = "Unsaved"
+            updated["sync_error"] = ""
+        elif not changed and updated.get("sync_status") in {"Unsaved", "Unsaved import"}:
+            updated["sync_status"] = original.get("sync_status", "Loaded") if original else "Loaded"
+            updated["sync_error"] = original.get("sync_error", "") if original else ""
+        updated_rows.append(updated)
+    return updated_rows
+
+
 def _shopify_values_from_row(row):
-    recalculated = _recalculate_row(row)
+    recalculated = _normalise_row(row)
     return {
-        "shopify_product_id": recalculated.get("Product ID"),
-        "title": recalculated.get("Product title"),
-        "edition_enabled": recalculated.get("Enabled"),
-        "edition_total": recalculated.get("Edition total"),
-        "edition_next_number": recalculated.get("Next edition number"),
-        "edition_label": recalculated.get("Edition label"),
-        "edition_status_override": recalculated.get("Status override"),
+        "shopify_product_id": recalculated.get("shopify_product_gid"),
+        "title": recalculated.get("product_title"),
+        "edition_enabled": recalculated.get("edition_enabled"),
+        "edition_total": recalculated.get("edition_total"),
+        "edition_next_number": recalculated.get("edition_next_number"),
+        "edition_label": recalculated.get("edition_label"),
+        "edition_status_override": recalculated.get("edition_status_override"),
     }
 
 
+def _load_active_products_from_shopify():
+    config = shopify_sync.get_config()
+    if not config.get("configured"):
+        raise ValueError(
+            "Shopify is not connected yet. Ask a developer to configure Shopify before refreshing products."
+        )
+    loaded = shopify_sync.fetch_edition_ops_active_products(
+        max_products=config.get("edition_ops_max_products", 500),
+        page_size=50,
+        config=config,
+    )
+    refreshed_at = _now_iso()
+    rows = [_row_from_product(product) for product in loaded.get("products") or []]
+    st.session_state[ROWS_KEY] = rows
+    st.session_state[ORIGINAL_ROWS_KEY] = deepcopy(rows)
+    st.session_state[ERRORS_KEY] = {}
+    st.session_state[IMPORT_WARNINGS_KEY] = []
+    _write_snapshot(
+        rows,
+        deepcopy(rows),
+        meta={"last_refreshed_from_shopify": refreshed_at},
+    )
+    st.session_state[NOTICE_KEY] = f"Refreshed {len(rows)} ACTIVE Shopify products."
+    _bump_editor_version()
+
+
 def _mark_synced(rows, originals, results):
+    now = _now_iso()
     ok_ids = {result["shopify_product_id"] for result in results if result.get("ok")}
     failed = {
         result["shopify_product_id"]: result.get("message") or "Sync failed"
         for result in results
         if not result.get("ok")
     }
-    synced_label = f"Synced {_now_label()}"
+    original_by_id = {row.get("shopify_product_gid"): row for row in originals}
     new_rows = []
     new_originals = []
-    original_by_id = {row.get("Product ID"): row for row in originals}
 
     for row in rows:
-        product_id = row.get("Product ID")
-        updated = _recalculate_row(row)
+        product_id = row.get("shopify_product_gid")
+        updated = _normalise_row(row)
         if product_id in ok_ids:
-            updated["Last saved / Synced"] = synced_label
+            updated["sync_status"] = "Synced"
+            updated["sync_error"] = ""
+            updated["last_synced_at"] = now
             new_originals.append(deepcopy(updated))
         elif product_id in failed:
-            updated["Last saved / Synced"] = "Error"
+            updated["sync_status"] = "Error"
+            updated["sync_error"] = failed[product_id]
             new_originals.append(deepcopy(original_by_id.get(product_id, updated)))
         else:
             new_originals.append(deepcopy(original_by_id.get(product_id, updated)))
@@ -206,47 +356,124 @@ def _mark_synced(rows, originals, results):
     st.session_state[ROWS_KEY] = new_rows
     st.session_state[ORIGINAL_ROWS_KEY] = new_originals
     st.session_state[ERRORS_KEY] = failed
+    _write_snapshot(new_rows, new_originals)
     _bump_editor_version()
 
 
-def _load_active_products():
-    config = shopify_sync.get_config()
-    if not config.get("configured"):
-        raise ValueError(
-            "Shopify is not configured. Set SHOPIFY_STORE_DOMAIN, SHOPIFY_API_VERSION, "
-            "and Shopify admin credentials."
-        )
-    loaded = shopify_sync.fetch_edition_ops_active_products(
-        max_products=config.get("edition_ops_max_products", 500),
-        page_size=50,
-        config=config,
-    )
-    rows = [_recalculate_row(_row_from_product(product)) for product in loaded.get("products") or []]
-    st.session_state[ROWS_KEY] = rows
-    st.session_state[ORIGINAL_ROWS_KEY] = deepcopy(rows)
-    st.session_state[ERRORS_KEY] = {}
-    st.session_state[NOTICE_KEY] = f"Loaded {len(rows)} ACTIVE Shopify products."
-    _bump_editor_version()
-
-
-def _sync_rows(rows, success_prefix):
-    if not rows:
-        st.session_state[NOTICE_KEY] = "No rows selected for sync."
+def _save_changed_rows():
+    rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
+    originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
+    changed = _changed_rows(rows, originals)
+    if not changed:
+        st.session_state[NOTICE_KEY] = "No changed rows to save."
         return
     config = shopify_sync.get_config()
     result = shopify_sync.sync_limited_edition_metafields_for_products(
-        [_shopify_values_from_row(row) for row in rows],
+        [_shopify_values_from_row(row) for row in changed],
         config=config,
     )
-    all_rows = [_recalculate_row(row) for row in st.session_state.get(ROWS_KEY, [])]
-    _mark_synced(all_rows, st.session_state.get(ORIGINAL_ROWS_KEY, []), result.get("results") or [])
+    _mark_synced(rows, originals, result.get("results") or [])
     if result.get("failed"):
         st.session_state[NOTICE_KEY] = (
-            f"{success_prefix}: synced {result.get('synced', 0)} rows, "
-            f"{result.get('failed', 0)} failed."
+            f"Saved {result.get('synced', 0)} changed rows. "
+            f"{result.get('failed', 0)} rows need review."
         )
     else:
-        st.session_state[NOTICE_KEY] = f"{success_prefix}: synced {result.get('synced', 0)} rows."
+        st.session_state[NOTICE_KEY] = f"Saved {result.get('synced', 0)} changed rows."
+
+
+def _rows_from_editor(value):
+    if hasattr(value, "to_dict"):
+        return [dict(row) for row in value.to_dict("records")]
+    return [dict(row) for row in (value or [])]
+
+
+def _merge_visible_rows(edited_rows, source_rows):
+    merged = []
+    for index, row in enumerate(edited_rows):
+        source = source_rows[index] if index < len(source_rows) else {}
+        updated = dict(source)
+        updated.update(row)
+        merged.append(_normalise_row(updated))
+    return merged
+
+
+def _export_csv(rows):
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=CSV_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        normalised = _normalise_row(row)
+        export_row = {field: normalised.get(field, "") for field in CSV_COLUMNS}
+        export_row["edition_enabled"] = "true" if normalised.get("edition_enabled") else "false"
+        writer.writerow(export_row)
+    return buffer.getvalue().encode("utf-8-sig")
+
+
+def _validate_import_int(raw_value, field_name, row_label, warnings):
+    if str(raw_value or "").strip() == "":
+        return None
+    try:
+        value = int(str(raw_value).strip())
+    except ValueError:
+        warnings.append(f"{row_label}: {field_name} must be a whole number.")
+        return "invalid"
+    if value < 1:
+        warnings.append(f"{row_label}: {field_name} must be 1 or higher.")
+        return "invalid"
+    return value
+
+
+def _apply_csv_import(uploaded_file):
+    if uploaded_file is None:
+        st.session_state[IMPORT_WARNINGS_KEY] = ["Choose a CSV file first."]
+        return
+
+    rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
+    by_gid = {row.get("shopify_product_gid"): index for index, row in enumerate(rows) if row.get("shopify_product_gid")}
+    by_handle = {row.get("handle"): index for index, row in enumerate(rows) if row.get("handle")}
+    warnings = []
+    changed_count = 0
+
+    text = uploaded_file.getvalue().decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+    for line_number, csv_row in enumerate(reader, start=2):
+        gid = str(csv_row.get("shopify_product_gid") or "").strip()
+        handle = str(csv_row.get("handle") or "").strip()
+        match_index = by_gid.get(gid) if gid else None
+        if match_index is None and handle:
+            match_index = by_handle.get(handle)
+        row_label = handle or gid or f"CSV line {line_number}"
+        if match_index is None:
+            warnings.append(f"{row_label}: not in the loaded table, ignored.")
+            continue
+
+        total = _validate_import_int(csv_row.get("edition_total"), "edition_total", row_label, warnings)
+        next_number = _validate_import_int(csv_row.get("edition_next_number"), "edition_next_number", row_label, warnings)
+        if total == "invalid" or next_number == "invalid":
+            continue
+
+        updated = dict(rows[match_index])
+        if str(csv_row.get("edition_enabled") or "").strip():
+            updated["edition_enabled"] = _coerce_bool(csv_row.get("edition_enabled"))
+        if total is not None:
+            updated["edition_total"] = total
+        if next_number is not None:
+            updated["edition_next_number"] = next_number
+        if str(csv_row.get("edition_label") or "").strip():
+            updated["edition_label"] = str(csv_row.get("edition_label")).strip()
+        if "edition_status_override" in csv_row:
+            updated["edition_status_override"] = str(csv_row.get("edition_status_override") or "").strip()
+        updated["sync_status"] = "Unsaved import"
+        updated["sync_error"] = ""
+        rows[match_index] = _normalise_row(updated)
+        changed_count += 1
+
+    st.session_state[ROWS_KEY] = rows
+    st.session_state[NOTICE_KEY] = f"Imported updates for {changed_count} visible rows. Click Save Changed Rows to write them to Shopify."
+    st.session_state[IMPORT_WARNINGS_KEY] = warnings
+    _write_snapshot(rows, st.session_state.get(ORIGINAL_ROWS_KEY, []))
+    _bump_editor_version()
 
 
 def _orders_url(config):
@@ -260,46 +487,25 @@ def _orders_search_url(config, query):
     return f"{base}?query={quote_plus(str(query).strip())}"
 
 
-def _definition_rows(status):
-    return [
-        {
-            "Name": item.get("name"),
-            "Namespace / key": f"{item.get('namespace')}.{item.get('key')}",
-            "Owner": item.get("ownerType"),
-            "Type": item.get("type"),
-            "Status": item.get("status"),
-        }
-        for item in ((status or {}).get("definitions") or [])
-    ]
-
-
-def _render_definition_panel(config):
-    with st.expander("Shopify Metafield Setup", expanded=False):
-        st.caption("Definitions are checked or created only when you press a button.")
-        cols = st.columns([1, 1, 2])
-        if cols[0].button("Check Metafield Definitions", use_container_width=True, disabled=not config.get("configured")):
-            with st.spinner("Checking Shopify metafield definitions..."):
-                st.session_state[DEFINITIONS_KEY] = shopify_sync.list_edition_ops_metafield_definitions(config=config)
-        if cols[1].button("Create Missing Metafield Definitions", type="primary", use_container_width=True, disabled=not config.get("configured")):
-            with st.spinner("Creating missing Shopify metafield definitions..."):
-                st.session_state[DEFINITIONS_KEY] = shopify_sync.create_missing_edition_ops_metafield_definitions(config=config)
-        cols[2].caption("Needed: enabled, total, next number, label, and status override on PRODUCT.")
-
-        status = st.session_state.get(DEFINITIONS_KEY)
-        if status:
-            rows = _definition_rows(status)
-            if rows:
-                st.dataframe(rows, hide_index=True, use_container_width=True)
-            for error in status.get("errors") or []:
-                st.error(f"{error.get('namespace')}.{error.get('key')}: {error.get('message')}")
+def _column_config():
+    return {
+        "product_title": st.column_config.TextColumn("Product title"),
+        "handle": st.column_config.TextColumn("Handle"),
+        "edition_enabled": st.column_config.CheckboxColumn("Enabled"),
+        "edition_total": st.column_config.NumberColumn("Edition total", min_value=1, max_value=100000, step=1),
+        "edition_next_number": st.column_config.NumberColumn("Next edition number", min_value=1, max_value=100000, step=1),
+        "remaining": st.column_config.NumberColumn("Remaining"),
+        "widget_status": st.column_config.TextColumn("Widget status"),
+        "sync_status": st.column_config.TextColumn("Sync status"),
+        "admin_url": st.column_config.LinkColumn("Open Shopify", display_text="Open"),
+        "online_store_url": st.column_config.LinkColumn("Open live product", display_text="Open"),
+    }
 
 
 def _render_orders_shortcut(config):
     with st.container(border=True):
         st.subheader("Shopify Orders")
-        st.caption(
-            "Orders sync is paused for the Edition Ops MVP. Use Shopify as the order source while this page only controls product edition metafields."
-        )
+        st.caption("No order sync runs here. Use Shopify as the order source.")
         orders_url = _orders_url(config)
         if orders_url:
             st.link_button("Open Shopify Orders", orders_url, use_container_width=False)
@@ -314,132 +520,110 @@ def _render_orders_shortcut(config):
             st.link_button("Open Shopify Orders Search", _orders_search_url(config, order_query), use_container_width=False)
 
 
-def _column_config():
-    return {
-        "Thumbnail": st.column_config.ImageColumn("Thumbnail", width="small"),
-        "Enabled": st.column_config.CheckboxColumn("Enabled"),
-        "Edition total": st.column_config.NumberColumn("Edition total", min_value=1, max_value=100000, step=1),
-        "Next edition number": st.column_config.NumberColumn("Next edition number", min_value=1, max_value=100000, step=1),
-        "Edition label": st.column_config.TextColumn("Edition label"),
-        "Status override": st.column_config.TextColumn("Status override"),
-        "Remaining": st.column_config.NumberColumn("Remaining"),
-        "Open Shopify": st.column_config.LinkColumn("Open Shopify", display_text="Open"),
-        "Open live product": st.column_config.LinkColumn("Open live product", display_text="Open"),
-        "Product ID": None,
-        "Legacy ID": None,
-    }
-
-
 def render_page():
     started = datetime.now(timezone.utc)
     _ensure_state()
+    _hydrate_from_snapshot_once()
     config = shopify_sync.get_config()
+    rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
+    originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
+    changed = _changed_rows(rows, originals)
+    meta = st.session_state.get(META_KEY) or {}
 
     st.title("Edition Ops")
-    st.caption(
-        "Configure Shopify limited-edition display data and jump to Shopify orders. Shopify metafields are the source of truth for this MVP."
+    st.caption("Use this page to manage limited edition numbers.")
+    st.markdown(
+        "1. Refresh products when new products are added in Shopify.\n"
+        "2. Edit Enabled, Edition Total, and Next Edition Number.\n"
+        "3. Save changed rows.\n"
+        "4. Export a CSV backup after major edits."
     )
+    st.info("Shopify is the permanent record. The table below is a fast saved copy of the last refresh/save.")
+    st.caption(f"Last refreshed from Shopify: {_format_time(meta.get('last_refreshed_from_shopify'))}")
 
     notice = st.session_state.get(NOTICE_KEY)
     if notice:
-        st.info(notice)
+        st.success(notice)
         st.session_state[NOTICE_KEY] = ""
 
-    if not config.get("configured"):
-        st.warning("Shopify is not configured yet. Product loading and syncing stay disabled until credentials are present.")
+    warnings = st.session_state.get(IMPORT_WARNINGS_KEY) or []
+    for warning in warnings:
+        st.warning(warning)
+    st.session_state[IMPORT_WARNINGS_KEY] = []
 
-    action_cols = st.columns([1, 1, 1, 2])
-    if action_cols[0].button("Load Active Shopify Products", type="primary", use_container_width=True, disabled=not config.get("configured")):
-        with st.spinner("Loading ACTIVE Shopify products..."):
-            _load_active_products()
+    action_cols = st.columns([1, 1, 1, 1, 1])
+    if action_cols[0].button("Refresh Products From Shopify", type="primary", use_container_width=True, disabled=not config.get("configured")):
+        with st.spinner("Refreshing active Shopify products..."):
+            _load_active_products_from_shopify()
         st.rerun()
-    if action_cols[1].button("Refresh From Shopify", use_container_width=True, disabled=not config.get("configured")):
-        with st.spinner("Refreshing ACTIVE Shopify products..."):
-            _load_active_products()
+    if action_cols[1].button("Save Changed Rows", use_container_width=True, disabled=not bool(changed)):
+        with st.spinner("Saving changed rows to Shopify..."):
+            _save_changed_rows()
         st.rerun()
-    if action_cols[2].button("Clear Loaded Table", use_container_width=True, disabled=not bool(st.session_state.get(ROWS_KEY))):
+    action_cols[2].download_button(
+        "Export CSV Backup",
+        data=_export_csv(rows),
+        file_name=f"edition-ops-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
+        mime="text/csv",
+        use_container_width=True,
+        disabled=not bool(rows),
+    )
+    with action_cols[3].popover("Import CSV Updates", use_container_width=True):
+        st.caption("Imports update the visible table only. Click Save Changed Rows afterwards to write to Shopify.")
+        uploaded_csv = st.file_uploader(
+            "Choose CSV backup",
+            type=["csv"],
+            key="edition-ops-import-csv",
+        )
+        if st.button("Update Visible Table", use_container_width=True, disabled=uploaded_csv is None):
+            _apply_csv_import(uploaded_csv)
+            st.rerun()
+    if action_cols[4].button("Clear Table", use_container_width=True, disabled=not bool(rows)):
         st.session_state[ROWS_KEY] = []
         st.session_state[ORIGINAL_ROWS_KEY] = []
         st.session_state[ERRORS_KEY] = {}
-        st.session_state[NOTICE_KEY] = "Loaded Edition Ops table cleared."
+        st.session_state[META_KEY] = {"last_refreshed_from_shopify": "", "saved_at": ""}
+        if SNAPSHOT_PATH.exists():
+            SNAPSHOT_PATH.unlink()
+        st.session_state[NOTICE_KEY] = "Edition Ops table cleared."
         _bump_editor_version()
         st.rerun()
-    action_cols[3].caption(
-        f"ACTIVE products only. Page size 50. Max {config.get('edition_ops_max_products', 500)} via SHOPIFY_EDITION_OPS_MAX_PRODUCTS."
-    )
 
-    rows = [_recalculate_row(row) for row in st.session_state.get(ROWS_KEY, [])]
     if rows:
-        st.caption(f"{len(rows)} active Shopify products loaded. Edit the chart, then save changed rows.")
+        st.caption(f"{len(rows)} saved products shown. {len(changed)} changed rows waiting to save.")
         edited = st.data_editor(
             rows,
             hide_index=True,
             use_container_width=True,
             num_rows="fixed",
             key=f"edition-ops-editor-{st.session_state[EDITOR_VERSION_KEY]}",
-            column_order=TABLE_COLUMNS,
+            column_order=VISIBLE_COLUMNS,
             column_config=_column_config(),
             disabled=[
-                "Thumbnail",
-                "Product title",
-                "Handle",
-                "Status",
-                "Remaining",
-                "Widget status",
-                "Last saved / Synced",
-                "Open Shopify",
-                "Open live product",
+                "product_title",
+                "handle",
+                "remaining",
+                "widget_status",
+                "sync_status",
+                "admin_url",
+                "online_store_url",
             ],
         )
-        current_rows = [_recalculate_row(row) for row in _merge_editor_rows(_rows_from_editor(edited), rows)]
+        current_rows = _mark_current_changes(_merge_visible_rows(_rows_from_editor(edited), rows), originals)
         st.session_state[ROWS_KEY] = current_rows
-        changed = _changed_rows(current_rows, st.session_state.get(ORIGINAL_ROWS_KEY, []))
+        st.session_state[ORIGINAL_ROWS_KEY] = originals
+        if current_rows != rows:
+            _write_snapshot(current_rows, originals)
 
-        labels = {
-            row["Product ID"]: f"{row.get('Product title')} ({row.get('Handle')})"
-            for row in current_rows
-        }
-        selected_ids = st.multiselect(
-            "Select rows for Sync Selected Rows",
-            options=[row["Product ID"] for row in current_rows],
-            format_func=lambda product_id: labels.get(product_id, product_id),
-        )
-
-        sync_cols = st.columns([1, 1, 1, 2])
-        if sync_cols[0].button("Save Changed Rows to Shopify", type="primary", use_container_width=True, disabled=not bool(changed)):
-            with st.spinner("Syncing changed rows to Shopify metafields..."):
-                _sync_rows(changed, "Changed rows saved")
-            st.rerun()
-        if sync_cols[1].button("Sync Selected Rows", use_container_width=True, disabled=not bool(selected_ids)):
-            selected_rows = [row for row in current_rows if row.get("Product ID") in set(selected_ids)]
-            with st.spinner("Syncing selected rows to Shopify metafields..."):
-                _sync_rows(selected_rows, "Selected rows synced")
-            st.rerun()
-        if sync_cols[2].button("Sync All Loaded Rows", use_container_width=True, disabled=not bool(current_rows)):
-            with st.spinner("Syncing all loaded rows to Shopify metafields..."):
-                _sync_rows(current_rows, "All loaded rows synced")
-            st.rerun()
-        sync_cols[3].caption(
-            f"{len(changed)} changed rows detected. Sync batches are capped at 5 products / 25 metafields per GraphQL mutation."
-        )
-
-        errors = st.session_state.get(ERRORS_KEY) or {}
+        errors = {row["product_title"]: row["sync_error"] for row in current_rows if row.get("sync_error")}
         if errors:
-            st.error("Some products failed to sync.")
-            for product_id, message in errors.items():
-                st.caption(f"{labels.get(product_id, product_id)}: {message}")
+            st.error("Some rows need review before they are fully synced.")
+            for product_title, message in errors.items():
+                st.caption(f"{product_title}: {message}")
     else:
-        st.info("No products loaded yet. Press Load Active Shopify Products when you are ready.")
+        st.info("No products loaded yet. Refresh products from Shopify to build the first fast saved table.")
 
-    _render_definition_panel(config)
     _render_orders_shortcut(config)
-
-    with st.expander("Storefront Widget Reminder", expanded=False):
-        st.write(
-            "The storefront widget must read only `product.metafields.sports_cave`, render nothing when disabled, "
-            "calculate remaining in Liquid, and avoid Sports Cave OS, Supabase, inventory, or external API calls."
-        )
-        st.caption("Display: Numbered Edition of 100 | Only 48 remaining | No reprints once sold out")
 
     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
     print(f"PERF Edition Ops total={elapsed:.3f}s rows={len(st.session_state.get(ROWS_KEY, []))}", flush=True)

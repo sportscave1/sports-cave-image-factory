@@ -8518,11 +8518,67 @@ def render_settings_page(app_version, database_path, password_status):
                 st.caption("No edition orders are available for certificate generation testing yet.")
 
     with st.expander("Developer Tools", expanded=False):
-        dev_tabs = st.tabs(["Shopify Diagnostics", "Sync Tools", "Metafield Bridge", "Product Assets / PSD Links", "Certificates"])
+        dev_tabs = st.tabs([
+            "Shopify Diagnostics",
+            "Edition Ops Setup",
+            "Sync Tools",
+            "Metafield Bridge",
+            "Product Assets / PSD Links",
+            "Certificates",
+        ])
         with dev_tabs[0]:
             st.caption("Manual Shopify connection check. This only runs a token/API test when you click the button.")
             render_shopify_scope_diagnostics(shopify_config, "settings-dev")
         with dev_tabs[1]:
+            st.caption("Developer-only setup for the Shopify product fields used by Edition Ops.")
+            setup_cols = st.columns([1, 1, 2])
+            if setup_cols[0].button(
+                "Check Metafield Definitions",
+                key="settings-edition-ops-check-definitions",
+                disabled=not shopify_config["configured"],
+                use_container_width=True,
+            ):
+                try:
+                    st.session_state.settings_edition_ops_definitions = (
+                        shopify_sync.list_edition_ops_metafield_definitions(config=shopify_config)
+                    )
+                except Exception as error:
+                    st.error("Could not check Edition Ops definitions.")
+                    st.exception(error)
+            if setup_cols[1].button(
+                "Create Missing Metafield Definitions",
+                key="settings-edition-ops-create-definitions",
+                disabled=not shopify_config["configured"],
+                use_container_width=True,
+            ):
+                try:
+                    st.session_state.settings_edition_ops_definitions = (
+                        shopify_sync.create_missing_edition_ops_metafield_definitions(config=shopify_config)
+                    )
+                except Exception as error:
+                    st.error("Could not create Edition Ops definitions.")
+                    st.exception(error)
+            setup_cols[2].caption("Run this only when setting up a new Shopify store or repairing missing product fields.")
+
+            definition_status = st.session_state.get("settings_edition_ops_definitions")
+            if definition_status:
+                rows = []
+                for definition in definition_status.get("definitions") or []:
+                    rows.append(
+                        {
+                            "Name": definition.get("name"),
+                            "Namespace / key": f"{definition.get('namespace')}.{definition.get('key')}",
+                            "Owner": definition.get("ownerType"),
+                            "Type": definition.get("type"),
+                            "Status": definition.get("status"),
+                        }
+                    )
+                if rows:
+                    st.dataframe(rows, hide_index=True, use_container_width=True)
+                for error in definition_status.get("errors") or []:
+                    st.error(f"{error.get('namespace')}.{error.get('key')}: {error.get('message')}")
+
+        with dev_tabs[2]:
             st.caption("Protected sync tools. These are not part of the normal VA workflow.")
             if not supabase_backend.is_configured():
                 st.warning("DATABASE_URL is required before running sync tools.")
@@ -8649,7 +8705,7 @@ def render_settings_page(app_version, database_path, password_status):
                     except Exception as error:
                         st.error("Could not reset edition counters.")
                         st.exception(error)
-        with dev_tabs[2]:
+        with dev_tabs[3]:
             st.caption("Supabase is the source of truth. Shopify product/order metafields are display and customer-account bridges.")
             widget_code, snippet_path = load_edition_widget_liquid()
             bridge_columns = st.columns(3)
@@ -8679,7 +8735,7 @@ def render_settings_page(app_version, database_path, password_status):
                 st.warning("Widget snippet file is missing from the repo.")
             st.divider()
             render_developer_widget_status(shopify_config)
-        with dev_tabs[3]:
+        with dev_tabs[4]:
             st.caption("Import and manage Google Drive PSD links in Supabase product_assets. No PSD files are uploaded or stored.")
             if not supabase_backend.is_configured():
                 st.warning("DATABASE_URL is required before importing PSD links.")
@@ -8704,7 +8760,7 @@ def render_settings_page(app_version, database_path, password_status):
                 except Exception as error:
                     st.error("Could not load products for PSD import.")
                     st.exception(error)
-        with dev_tabs[4]:
+        with dev_tabs[5]:
             st.caption("Certificate tools live here now; Orders remains the daily certificate workflow.")
             if not supabase_backend.is_configured():
                 st.warning("DATABASE_URL is required before loading certificate tools.")
