@@ -40,6 +40,7 @@ import streamlit.components.v1 as components
 db = None
 image_factory = None
 os_pages = None
+shopify_sync = None
 
 
 load_dotenv()
@@ -98,6 +99,15 @@ def get_os_pages():
     return os_pages
 
 
+def get_shopify_sync():
+    global shopify_sync
+    if shopify_sync is None:
+        log_startup_stage("SHOPIFY MODULE IMPORT START")
+        shopify_sync = importlib.import_module("shopify_sync")
+        log_startup_stage("SHOPIFY MODULE IMPORT DONE")
+    return shopify_sync
+
+
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
 UPLOAD_PREVIEW_DIR = BASE_DIR / "output" / "_ui-upload-previews"
@@ -142,7 +152,7 @@ HIDDEN_PAGE_OPTIONS = [
     "Edition Integrity Check",
 ]
 ALL_PAGE_OPTIONS = [*MENU_OPTIONS, *HIDDEN_PAGE_OPTIONS]
-APP_VERSION = "Sports Cave OS Supabase Edition Backend - 2026-06-14"
+APP_VERSION = "Sports Cave OS Shopify Metafields MVP - 2026-06-22"
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
     "limited_editions": "Limited Editions",
@@ -4461,16 +4471,15 @@ def render_sidebar():
         st.sidebar.divider()
         st.sidebar.subheader("Limited Editions")
         st.sidebar.write("1. Search the Shopify product.")
-        st.sidebar.write("2. Check the exact next edition number.")
-        st.sidebar.write("3. Save PSD and Prodigi links.")
-        st.sidebar.write("4. Sync the storefront display mirror when ready.")
+        st.sidebar.write("2. Set total, next number, label, and enabled status.")
+        st.sidebar.write("3. Save Shopify metafields.")
+        st.sidebar.write("4. The storefront widget reads Shopify only.")
     elif st.session_state.selected_page == "Orders":
         st.sidebar.divider()
         st.sidebar.subheader("Orders")
-        st.sidebar.write("1. Fetch recent Shopify orders manually.")
-        st.sidebar.write("2. Sports Cave OS assigns paid order editions.")
-        st.sidebar.write("3. Open the shared PSD folder and Prodigi links from each line.")
-        st.sidebar.write("4. Review any missing or sold-out issues.")
+        st.sidebar.write("1. Orders sync is paused.")
+        st.sidebar.write("2. Open Shopify Orders when needed.")
+        st.sidebar.write("3. No edition assignment runs here.")
     elif st.session_state.selected_page == "Prodigi":
         st.sidebar.divider()
         st.sidebar.subheader("Prodigi")
@@ -4481,7 +4490,7 @@ def render_sidebar():
     elif st.session_state.selected_page == "Dashboard":
         st.sidebar.divider()
         st.sidebar.subheader("Today's Focus")
-        st.sidebar.write("Use the dashboard to find missing assets, review work, edition limits, and live products missing files.")
+        st.sidebar.write("Open Limited Editions only when product metafields need a manual update.")
     elif st.session_state.selected_page == "Files":
         st.sidebar.divider()
         st.sidebar.subheader("Asset Control")
@@ -4500,9 +4509,9 @@ def render_sidebar():
         st.sidebar.write("Run connection tests, imports, diagnostics, and admin checks only when needed.")
 
     st.sidebar.divider()
-    st.sidebar.subheader("Phase 5B")
+    st.sidebar.subheader("MVP Mode")
     st.sidebar.caption(
-        "Backend-led edition numbers and manual Shopify order fetches are active. Drive remains link-based and lightweight."
+        "Limited Editions uses Shopify metafields only. Order sync, product sync, Supabase sync, and certificates are paused."
     )
 
 
@@ -4753,6 +4762,429 @@ def render_product_uploads_page():
         "shopify-final-qa-checklist-prompt",
     )
     safe_startup_print(f"PERF Product Uploads total={(time.perf_counter() - started):.3f}s")
+
+
+def _limited_edition_product_key(product, index=0):
+    raw_key = (
+        product.get("shopify_product_id")
+        or product.get("legacy_resource_id")
+        or product.get("handle")
+        or index
+    )
+    return re.sub(r"[^a-zA-Z0-9_-]+", "-", str(raw_key)).strip("-") or f"product-{index}"
+
+
+def _load_limited_edition_shopify_page(search, after, page_size):
+    shopify = get_shopify_sync()
+    config = shopify.get_config()
+    if not config.get("configured"):
+        raise ValueError(
+            "Shopify is not configured. Add SHOPIFY_STORE_DOMAIN, SHOPIFY_API_VERSION, "
+            "and Shopify admin credentials before searching products."
+        )
+    return shopify.fetch_limited_edition_products_page(
+        search=search,
+        after=after or None,
+        page_size=int(page_size or 25),
+        config=config,
+    )
+
+
+def _store_limited_edition_shopify_page(page, *, search, after, page_size, page_number):
+    st.session_state["limited-editions-shopify-page"] = page
+    st.session_state["limited-editions-shopify-query"] = str(search or "").strip()
+    st.session_state["limited-editions-shopify-after"] = after or ""
+    st.session_state["limited-editions-shopify-page-size"] = int(page_size or 25)
+    st.session_state["limited-editions-shopify-page-number"] = max(int(page_number or 1), 1)
+    st.session_state["limited-editions-shopify-error"] = ""
+
+
+def _update_limited_edition_product_readback(product_id, readback):
+    page = dict(st.session_state.get("limited-editions-shopify-page") or {})
+    products = []
+    for product in page.get("products") or []:
+        if product.get("shopify_product_id") == product_id:
+            updated = dict(product)
+            updated["metafields"] = readback.get("metafields") or []
+            updated["edition"] = readback.get("edition") or {}
+            products.append(updated)
+        else:
+            products.append(product)
+    page["products"] = products
+    st.session_state["limited-editions-shopify-page"] = page
+
+
+def _limited_edition_remaining(edition_total, edition_next_number):
+    try:
+        total = max(int(edition_total), 1)
+    except (TypeError, ValueError):
+        total = 100
+    try:
+        next_number = max(int(edition_next_number), 1)
+    except (TypeError, ValueError):
+        next_number = 1
+    return max(total - next_number + 1, 0)
+
+
+def _render_limited_edition_styles():
+    st.markdown(
+        """
+        <style>
+        .sc-le-thumb-empty {
+            width: 56px;
+            height: 56px;
+            border-radius: 8px;
+            border: 1px solid rgba(212, 165, 76, 0.38);
+            background: #0B0B0D;
+            color: #D4A54C;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+        }
+        .sc-le-product-title {
+            color: #F5F2EA;
+            font-weight: 800;
+            line-height: 1.2;
+            margin-bottom: 0.15rem;
+        }
+        .sc-le-product-handle,
+        .sc-le-muted {
+            color: #A6A19A;
+            font-size: 0.82rem;
+            line-height: 1.25;
+            word-break: break-word;
+        }
+        .sc-le-status {
+            display: inline-flex;
+            border: 1px solid rgba(245, 242, 234, 0.16);
+            border-radius: 999px;
+            color: #E9C980;
+            font-size: 0.72rem;
+            font-weight: 800;
+            padding: 0.2rem 0.5rem;
+            text-transform: uppercase;
+        }
+        div[data-testid="stButton"] button,
+        div[data-testid="stLinkButton"] a {
+            white-space: nowrap !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _render_limited_edition_product_row(product, index):
+    shopify = get_shopify_sync()
+    edition = product.get("edition") or {}
+    item_key = _limited_edition_product_key(product, index)
+    product_id = product.get("shopify_product_id") or ""
+    title = product.get("title") or "Untitled Shopify Product"
+    handle = product.get("handle") or ""
+    edition_enabled = bool(edition.get("edition_enabled", False))
+    edition_total = max(int(edition.get("edition_total") or 100), 1)
+    edition_next_number = max(int(edition.get("edition_next_number") or 1), 1)
+    edition_label = edition.get("edition_label") or "Numbered Edition"
+    status_override = edition.get("edition_status_override") or ""
+
+    with st.container(border=True):
+        top = st.columns([0.55, 2.2, 0.75, 1.0])
+        with top[0]:
+            if product.get("thumbnail_url"):
+                st.image(product["thumbnail_url"], width=56)
+            else:
+                st.markdown('<div class="sc-le-thumb-empty">SC</div>', unsafe_allow_html=True)
+        top[1].markdown(
+            (
+                f'<div class="sc-le-product-title">{html.escape(title)}</div>'
+                f'<div class="sc-le-product-handle">{html.escape(handle or "handle missing")}</div>'
+            ),
+            unsafe_allow_html=True,
+        )
+        top[2].markdown(
+            f'<span class="sc-le-status">{html.escape(product.get("status") or "UNKNOWN")}</span>',
+            unsafe_allow_html=True,
+        )
+        if product.get("admin_url"):
+            top[3].link_button("Open Shopify Admin", product["admin_url"], use_container_width=True)
+        else:
+            top[3].caption("Admin link unavailable")
+
+        fields = st.columns([0.9, 0.9, 0.9, 0.85, 1.25, 1.25, 0.75])
+        enabled_value = fields[0].checkbox(
+            "Enabled",
+            value=edition_enabled,
+            key=f"le-mvp-enabled-{item_key}",
+        )
+        total_value = fields[1].number_input(
+            "Edition total",
+            min_value=1,
+            max_value=100000,
+            value=edition_total,
+            step=1,
+            key=f"le-mvp-total-{item_key}",
+        )
+        next_value = fields[2].number_input(
+            "Next number",
+            min_value=1,
+            max_value=100000,
+            value=edition_next_number,
+            step=1,
+            key=f"le-mvp-next-{item_key}",
+        )
+        remaining = _limited_edition_remaining(total_value, next_value)
+        fields[3].metric("Remaining", remaining)
+        label_value = fields[4].text_input(
+            "Edition label",
+            value=edition_label,
+            key=f"le-mvp-label-{item_key}",
+        )
+        override_value = fields[5].text_input(
+            "Status override",
+            value=status_override,
+            placeholder="Blank",
+            key=f"le-mvp-override-{item_key}",
+        )
+        if fields[6].button(
+            "Save",
+            type="primary",
+            disabled=not product_id,
+            use_container_width=True,
+            key=f"le-mvp-save-{item_key}",
+        ):
+            values = {
+                "edition_enabled": enabled_value,
+                "edition_total": int(total_value),
+                "edition_next_number": int(next_value),
+                "edition_status_override": override_value.strip(),
+                "edition_label": label_value.strip() or "Numbered Edition",
+            }
+            try:
+                with st.spinner("Saving Shopify metafields..."):
+                    config = shopify.get_config()
+                    readback = shopify.save_limited_edition_metafields(
+                        product_id,
+                        values,
+                        config=config,
+                    )
+                product["metafields"] = readback.get("metafields") or []
+                product["edition"] = readback.get("edition") or {}
+                _update_limited_edition_product_readback(product_id, readback)
+                st.success(f"Saved Shopify metafields for {title}.")
+                st.caption("Readback complete from Shopify sports_cave metafields.")
+            except Exception as error:
+                st.error(f"Could not save Shopify metafields for {title}.")
+                st.caption(str(error))
+
+
+def render_limited_editions_page():
+    started = time.perf_counter()
+    shopify = get_shopify_sync()
+    config = shopify.get_config()
+    st.title("Limited Editions")
+    st.caption("Shopify metafields only. No Supabase storage, order sync, product sync, CSV import, or certificate workflow runs here.")
+    _render_limited_edition_styles()
+
+    if not config.get("configured"):
+        st.warning("Shopify is not configured yet.")
+        st.caption(
+            "Required: SHOPIFY_STORE_DOMAIN, SHOPIFY_API_VERSION, and either "
+            "SHOPIFY_ADMIN_ACCESS_TOKEN or SHOPIFY_CLIENT_ID plus SHOPIFY_CLIENT_SECRET."
+        )
+
+    with st.form("limited-editions-shopify-search-form"):
+        search_columns = st.columns([3.0, 0.9, 0.9])
+        search_value = search_columns[0].text_input(
+            "Search Shopify products",
+            placeholder="Product title, handle, or Shopify product query",
+            key="limited-editions-shopify-search-input",
+        )
+        page_size = search_columns[1].selectbox(
+            "Max results",
+            (25, 50),
+            index=0,
+            key="limited-editions-shopify-page-size-input",
+        )
+        search_clicked = search_columns[2].form_submit_button(
+            "Search",
+            type="primary",
+            use_container_width=True,
+            disabled=not config.get("configured"),
+        )
+
+    if search_clicked:
+        st.session_state["limited-editions-shopify-page"] = None
+        st.session_state["limited-editions-shopify-cursor-stack"] = []
+        st.session_state["limited-editions-shopify-error"] = ""
+        try:
+            with st.spinner("Searching Shopify products..."):
+                page = _load_limited_edition_shopify_page(search_value, "", page_size)
+            _store_limited_edition_shopify_page(
+                page,
+                search=search_value,
+                after="",
+                page_size=page_size,
+                page_number=1,
+            )
+        except Exception as error:
+            st.session_state["limited-editions-shopify-error"] = str(error)
+
+    current_error = st.session_state.get("limited-editions-shopify-error")
+    if current_error:
+        st.error("Shopify product search failed.")
+        st.caption(current_error)
+
+    current_page = st.session_state.get("limited-editions-shopify-page") or {}
+    products = current_page.get("products") or []
+    current_query = st.session_state.get("limited-editions-shopify-query", "")
+    current_after = st.session_state.get("limited-editions-shopify-after", "")
+    current_page_size = int(st.session_state.get("limited-editions-shopify-page-size") or page_size or 25)
+    current_page_number = int(st.session_state.get("limited-editions-shopify-page-number") or 1)
+
+    toolbar = st.columns([0.9, 0.9, 2.6])
+    refresh_clicked = toolbar[0].button(
+        "Refresh Results",
+        disabled=not bool(current_page) or not config.get("configured"),
+        use_container_width=True,
+    )
+    clear_clicked = toolbar[1].button(
+        "Clear",
+        disabled=not bool(current_page),
+        use_container_width=True,
+    )
+    toolbar[2].caption(
+        "Search results stay in memory while you edit. Shopify is queried only by search, refresh, pagination, or save."
+    )
+    if clear_clicked:
+        st.session_state["limited-editions-shopify-page"] = None
+        st.session_state["limited-editions-shopify-query"] = ""
+        st.session_state["limited-editions-shopify-after"] = ""
+        st.session_state["limited-editions-shopify-cursor-stack"] = []
+        st.session_state["limited-editions-shopify-error"] = ""
+        st.rerun()
+    if refresh_clicked:
+        try:
+            with st.spinner("Refreshing Shopify products..."):
+                page = _load_limited_edition_shopify_page(current_query, current_after, current_page_size)
+            _store_limited_edition_shopify_page(
+                page,
+                search=current_query,
+                after=current_after,
+                page_size=current_page_size,
+                page_number=current_page_number,
+            )
+            st.rerun()
+        except Exception as error:
+            st.session_state["limited-editions-shopify-error"] = str(error)
+            st.rerun()
+
+    if not current_page:
+        st.info("Search Shopify products to edit limited edition metafields.")
+        safe_startup_print(f"PERF Limited Editions MVP total={(time.perf_counter() - started):.3f}s rows=0")
+        return
+
+    st.caption(
+        f"Showing {len(products)} Shopify products"
+        + (f" for `{current_query}`" if current_query else "")
+        + f" | Page {current_page_number}"
+    )
+    if not products:
+        st.info("No Shopify products matched that search.")
+        safe_startup_print(f"PERF Limited Editions MVP total={(time.perf_counter() - started):.3f}s rows=0")
+        return
+
+    for index, product in enumerate(products):
+        _render_limited_edition_product_row(product, index)
+
+    pager = st.columns([0.9, 0.9, 2.6])
+    previous_clicked = pager[0].button(
+        "Previous",
+        disabled=not bool(st.session_state.get("limited-editions-shopify-cursor-stack")),
+        use_container_width=True,
+    )
+    next_clicked = pager[1].button(
+        "Next",
+        disabled=not current_page.get("has_next_page"),
+        use_container_width=True,
+    )
+    pager[2].caption(
+        f"Page size {current_page_size}. Variants, orders, certificates, and local product records are not loaded."
+    )
+    if previous_clicked:
+        cursor_stack = list(st.session_state.get("limited-editions-shopify-cursor-stack") or [])
+        previous_after = cursor_stack.pop() if cursor_stack else ""
+        try:
+            with st.spinner("Loading previous Shopify page..."):
+                page = _load_limited_edition_shopify_page(current_query, previous_after, current_page_size)
+            st.session_state["limited-editions-shopify-cursor-stack"] = cursor_stack
+            _store_limited_edition_shopify_page(
+                page,
+                search=current_query,
+                after=previous_after,
+                page_size=current_page_size,
+                page_number=max(current_page_number - 1, 1),
+            )
+            st.rerun()
+        except Exception as error:
+            st.session_state["limited-editions-shopify-error"] = str(error)
+            st.rerun()
+    if next_clicked:
+        cursor_stack = list(st.session_state.get("limited-editions-shopify-cursor-stack") or [])
+        cursor_stack.append(current_after)
+        next_after = current_page.get("end_cursor") or ""
+        try:
+            with st.spinner("Loading next Shopify page..."):
+                page = _load_limited_edition_shopify_page(current_query, next_after, current_page_size)
+            st.session_state["limited-editions-shopify-cursor-stack"] = cursor_stack
+            _store_limited_edition_shopify_page(
+                page,
+                search=current_query,
+                after=next_after,
+                page_size=current_page_size,
+                page_number=current_page_number + 1,
+            )
+            st.rerun()
+        except Exception as error:
+            st.session_state["limited-editions-shopify-error"] = str(error)
+            st.rerun()
+
+    safe_startup_print(
+        f"PERF Limited Editions MVP total={(time.perf_counter() - started):.3f}s rows={len(products)}"
+    )
+
+
+def _shopify_orders_admin_url():
+    try:
+        shopify = get_shopify_sync()
+        config = shopify.get_config()
+        return shopify.build_orders_admin_url(config.get("store_domain"))
+    except Exception:
+        return ""
+
+
+def render_lightweight_orders_page():
+    st.title("Orders")
+    st.caption("Orders sync paused for Limited Edition MVP.")
+    st.info("Orders sync paused for Limited Edition MVP.")
+    orders_url = _shopify_orders_admin_url()
+    if orders_url:
+        st.link_button("Open Shopify Orders", orders_url, use_container_width=False)
+    else:
+        st.caption("Set SHOPIFY_STORE_DOMAIN to enable the Shopify Orders shortcut.")
+    st.caption("This page does not fetch Shopify orders, Supabase orders, local order rows, or certificates.")
+
+
+def render_lightweight_products_page():
+    st.title("Products")
+    st.caption("Full product sync and local product rendering are paused for the Limited Edition MVP.")
+    st.info("Use Limited Editions to search Shopify products on demand and update metafields.")
+    if st.button("Open Limited Editions", type="primary", use_container_width=False):
+        st.session_state.selected_page = "Limited Editions"
+        st.rerun()
+    st.caption("This page does not load local product rows, product assets, CSV imports, or Shopify catalogue sync.")
 
 
 def render_edition_dispatch_log(embedded=False):
@@ -5023,33 +5455,33 @@ def render_placeholder_page(title, body):
 def render_lightweight_dashboard_page():
     started = time.perf_counter()
     st.title("Sports Cave OS")
-    st.caption("Daily operating screen for orders, editions, products, and files.")
+    st.caption("Lightweight command screen for the Limited Edition MVP.")
     with st.container(border=True):
         st.markdown("**Today**")
         st.caption(
-            "Start with orders, then check edition numbers and any missing production links."
+            "Open Limited Editions only when a Shopify product needs metafield configuration."
         )
 
     st.subheader("Today's Focus")
     focus_columns = st.columns(3)
     with focus_columns[0]:
-        st.info("Sync paid orders, then check any rows missing certificates, PSD links, or Prodigi details.")
+        st.info("Configure limited edition totals and next numbers directly on Shopify product metafields.")
     with focus_columns[1]:
-        st.info("Open Limited Editions when product counters need review or a manual CSV correction.")
+        st.info("Orders, Supabase sync, product sync, CSV imports, and certificates are paused for this MVP.")
     with focus_columns[2]:
         st.info("Use Mockups only when artwork is ready. Keep generated ZIPs saved in the right Drive folder.")
 
-    st.subheader("Order Data")
+    st.subheader("Shopify Data")
     st.write(
-        "Sports Cave OS stores edition numbers and synced order history. Shopify provides product and order updates "
-        "when sync runs."
+        "Shopify is the source of truth for limited edition display data. This dashboard does not fetch Shopify, "
+        "Supabase, orders, certificates, Google Drive, CSV files, or product sync data."
     )
-    st.caption("Advanced tools are kept separate from the daily order workflow.")
+    st.caption("Advanced legacy tools stay separate from this MVP flow.")
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 
 def page_uses_local_database(current_page):
-    if current_page == "Dashboard":
+    if current_page in {"Dashboard", "Products", "Limited Editions", "Orders"}:
         return False
     supabase_enabled = any(os.getenv(key, "").strip() for key in DATABASE_URL_ENV_KEYS)
     local_fallback_enabled = os.getenv("ENABLE_LOCAL_SQLITE_FALLBACK", "true").lower() == "true"
@@ -5079,13 +5511,13 @@ def render_selected_page(current_page):
     if current_page == "Dashboard":
         render_lightweight_dashboard_page()
     elif current_page == "Products":
-        os_route_pages().render_products_page()
+        render_lightweight_products_page()
     elif current_page == "Mockups":
         render_mockups_page()
     elif current_page == "Limited Editions":
-        os_route_pages().render_limited_editions_page()
+        render_limited_editions_page()
     elif current_page == "Orders":
-        os_route_pages().render_orders_page()
+        render_lightweight_orders_page()
     elif current_page == "Product Assets":
         os_route_pages().render_product_assets_page()
     elif current_page == "Prodigi":

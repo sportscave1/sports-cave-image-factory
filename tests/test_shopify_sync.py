@@ -309,6 +309,178 @@ class ShopifySyncClientTests(unittest.TestCase):
             "https://admin.shopify.com/store/sports-cave/products/123",
         )
 
+    def test_limited_edition_product_search_is_small_and_metafield_only(self):
+        requests_seen = []
+
+        def fake_post(*args, **kwargs):
+            requests_seen.append(kwargs["json"])
+            return FakeResponse(
+                {
+                    "data": {
+                        "products": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": "cursor-1"},
+                            "nodes": [
+                                {
+                                    "id": "gid://shopify/Product/123",
+                                    "legacyResourceId": "123",
+                                    "title": "All Rise Wall Art",
+                                    "handle": "all-rise-wall-art",
+                                    "status": "ACTIVE",
+                                    "media": {
+                                        "nodes": [
+                                            {
+                                                "id": "gid://shopify/MediaImage/1",
+                                                "alt": "All Rise",
+                                                "image": {
+                                                    "url": "https://cdn.shopify.com/product.webp",
+                                                    "width": 800,
+                                                    "height": 800,
+                                                },
+                                            }
+                                        ]
+                                    },
+                                    "metafields": {
+                                        "nodes": [
+                                            {
+                                                "namespace": "sports_cave",
+                                                "key": "edition_enabled",
+                                                "type": "boolean",
+                                                "value": "true",
+                                            },
+                                            {
+                                                "namespace": "sports_cave",
+                                                "key": "edition_total",
+                                                "type": "number_integer",
+                                                "value": "100",
+                                            },
+                                            {
+                                                "namespace": "sports_cave",
+                                                "key": "edition_next_number",
+                                                "type": "number_integer",
+                                                "value": "96",
+                                            },
+                                        ]
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                }
+            )
+
+        page = shopify_sync.fetch_limited_edition_products_page(
+            search="all rise",
+            page_size=50,
+            config=self.config,
+            request_post=fake_post,
+        )
+
+        query = requests_seen[0]["query"]
+        self.assertNotIn("variants(", query)
+        self.assertNotIn("collections(", query)
+        self.assertIn('metafields(first: 10, namespace: "sports_cave")', query)
+        self.assertEqual(requests_seen[0]["variables"]["first"], 50)
+        product = page["products"][0]
+        self.assertEqual(product["title"], "All Rise Wall Art")
+        self.assertEqual(product["thumbnail_url"], "https://cdn.shopify.com/product.webp")
+        self.assertTrue(product["edition"]["edition_enabled"])
+        self.assertEqual(product["edition"]["remaining"], 5)
+
+    def test_limited_edition_metafields_save_exact_keys_and_readback(self):
+        requests_seen = []
+        responses = [
+            FakeResponse(
+                {
+                    "data": {
+                        "metafieldsSet": {
+                            "metafields": [],
+                            "userErrors": [],
+                        }
+                    }
+                }
+            ),
+            FakeResponse(
+                {
+                    "data": {
+                        "node": {
+                            "id": "gid://shopify/Product/123",
+                            "metafields": {
+                                "nodes": [
+                                    {
+                                        "namespace": "sports_cave",
+                                        "key": "edition_enabled",
+                                        "type": "boolean",
+                                        "value": "true",
+                                    },
+                                    {
+                                        "namespace": "sports_cave",
+                                        "key": "edition_total",
+                                        "type": "number_integer",
+                                        "value": "100",
+                                    },
+                                    {
+                                        "namespace": "sports_cave",
+                                        "key": "edition_next_number",
+                                        "type": "number_integer",
+                                        "value": "98",
+                                    },
+                                    {
+                                        "namespace": "sports_cave",
+                                        "key": "edition_status_override",
+                                        "type": "single_line_text_field",
+                                        "value": " ",
+                                    },
+                                    {
+                                        "namespace": "sports_cave",
+                                        "key": "edition_label",
+                                        "type": "single_line_text_field",
+                                        "value": "Numbered Edition",
+                                    },
+                                ]
+                            },
+                        }
+                    }
+                }
+            ),
+        ]
+
+        def fake_post(*args, **kwargs):
+            requests_seen.append(kwargs["json"])
+            return responses.pop(0)
+
+        result = shopify_sync.save_limited_edition_metafields(
+            "gid://shopify/Product/123",
+            {
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 98,
+                "edition_status_override": "",
+                "edition_label": "Numbered Edition",
+            },
+            config=self.config,
+            request_post=fake_post,
+        )
+
+        inputs = requests_seen[0]["variables"]["metafields"]
+        keys = {item["key"]: item for item in inputs}
+        self.assertEqual(
+            set(keys),
+            {
+                "edition_enabled",
+                "edition_total",
+                "edition_next_number",
+                "edition_status_override",
+                "edition_label",
+            },
+        )
+        self.assertEqual(keys["edition_enabled"]["type"], "boolean")
+        self.assertEqual(keys["edition_enabled"]["value"], "true")
+        self.assertEqual(keys["edition_status_override"]["value"], " ")
+        self.assertNotIn("remaining_count", keys)
+        self.assertNotIn("sold_count", keys)
+        self.assertEqual(result["edition"]["remaining"], 3)
+        self.assertEqual(result["edition"]["edition_status_override"], "")
+
     def test_normalize_order_uses_customer_fallbacks(self):
         order = shopify_sync.normalize_order(
             {

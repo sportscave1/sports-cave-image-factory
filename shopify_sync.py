@@ -428,6 +428,46 @@ query SportsCaveProducts($first: Int!, $after: String, $query: String) {
 """
 
 
+LIMITED_EDITION_PRODUCTS_QUERY = """
+query SportsCaveLimitedEditionProducts($first: Int!, $after: String, $query: String) {
+  products(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      id
+      legacyResourceId
+      title
+      handle
+      status
+      media(first: 1) {
+        nodes {
+          ... on MediaImage {
+            id
+            alt
+            image {
+              url
+              width
+              height
+            }
+          }
+        }
+      }
+      metafields(first: 10, namespace: "sports_cave") {
+        nodes {
+          namespace
+          key
+          type
+          value
+        }
+      }
+    }
+  }
+}
+"""
+
+
 PRODUCT_BY_ID_QUERY = """
 query SportsCaveProductById($id: ID!) {
   product(id: $id) {
@@ -589,6 +629,105 @@ def normalize_product(node, store_domain):
         "online_store_url": node.get("onlineStoreUrl") or "",
         "admin_url": build_admin_url(store_domain, legacy_resource_id),
         "remote_updated_at": node.get("updatedAt") or "",
+    }
+
+
+LIMITED_EDITION_DEFAULTS = {
+    "edition_enabled": False,
+    "edition_total": 100,
+    "edition_next_number": 1,
+    "edition_status_override": "",
+    "edition_label": "Numbered Edition",
+}
+
+
+def _metafields_by_key(metafields):
+    return {
+        item.get("key"): item
+        for item in (metafields or [])
+        if item.get("namespace") == "sports_cave" and item.get("key")
+    }
+
+
+def _parse_bool_metafield(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return bool(default)
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "off"}:
+        return False
+    return bool(default)
+
+
+def _parse_int_metafield(value, default):
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def calculate_limited_edition_remaining(edition_total, edition_next_number):
+    total = max(_parse_int_metafield(edition_total, LIMITED_EDITION_DEFAULTS["edition_total"]), 1)
+    next_number = max(_parse_int_metafield(edition_next_number, LIMITED_EDITION_DEFAULTS["edition_next_number"]), 1)
+    return max(total - next_number + 1, 0)
+
+
+def normalize_limited_edition_metafields(metafields):
+    by_key = _metafields_by_key(metafields)
+    edition_total = max(
+        _parse_int_metafield(
+            (by_key.get("edition_total") or {}).get("value"),
+            LIMITED_EDITION_DEFAULTS["edition_total"],
+        ),
+        1,
+    )
+    edition_next_number = max(
+        _parse_int_metafield(
+            (by_key.get("edition_next_number") or {}).get("value"),
+            LIMITED_EDITION_DEFAULTS["edition_next_number"],
+        ),
+        1,
+    )
+    edition_label = str(
+        (by_key.get("edition_label") or {}).get("value")
+        or LIMITED_EDITION_DEFAULTS["edition_label"]
+    ).strip() or LIMITED_EDITION_DEFAULTS["edition_label"]
+    status_override = str((by_key.get("edition_status_override") or {}).get("value") or "").strip()
+    enabled = _parse_bool_metafield(
+        (by_key.get("edition_enabled") or {}).get("value"),
+        LIMITED_EDITION_DEFAULTS["edition_enabled"],
+    )
+    return {
+        "edition_enabled": enabled,
+        "edition_total": edition_total,
+        "edition_next_number": edition_next_number,
+        "edition_status_override": status_override,
+        "edition_label": edition_label,
+        "remaining": calculate_limited_edition_remaining(edition_total, edition_next_number),
+    }
+
+
+def normalize_limited_edition_product(node, store_domain):
+    media_nodes = (node.get("media") or {}).get("nodes") or []
+    thumbnail_url = ""
+    if media_nodes:
+        image = (media_nodes[0].get("image") or {})
+        thumbnail_url = image.get("url") or ""
+    metafields = ((node.get("metafields") or {}).get("nodes") or [])
+    legacy_resource_id = str(node.get("legacyResourceId") or "")
+    return {
+        "shopify_product_id": node.get("id") or "",
+        "legacy_resource_id": legacy_resource_id,
+        "title": node.get("title") or "Untitled Shopify Product",
+        "handle": node.get("handle") or "",
+        "status": node.get("status") or "UNKNOWN",
+        "thumbnail_url": thumbnail_url,
+        "admin_url": build_admin_url(store_domain, legacy_resource_id),
+        "metafields": metafields,
+        "edition": normalize_limited_edition_metafields(metafields),
     }
 
 
@@ -866,6 +1005,90 @@ def fetch_metafields(owner_id, namespace="sports_cave", config=None, request_pos
     node = data.get("node") or {}
     metafields = ((node.get("metafields") or {}).get("nodes") or [])
     return {"metafields": metafields, "api_version": served_version or (config or get_config()).get("api_version")}
+
+
+def fetch_limited_edition_products_page(after=None, search="", page_size=25, config=None, request_post=None):
+    config = config or get_config()
+    first = min(max(int(page_size), 1), 50)
+    data, served_version = graphql_request(
+        LIMITED_EDITION_PRODUCTS_QUERY,
+        variables={
+            "first": first,
+            "after": after or None,
+            "query": str(search or "").strip() or None,
+        },
+        config=config,
+        request_post=request_post,
+    )
+    connection = data.get("products") or {}
+    nodes = connection.get("nodes") or []
+    products = [normalize_limited_edition_product(node, config["store_domain"]) for node in nodes]
+    page_info = connection.get("pageInfo") or {}
+    return {
+        "products": products,
+        "has_next_page": bool(page_info.get("hasNextPage")),
+        "end_cursor": page_info.get("endCursor"),
+        "api_version": served_version or config.get("api_version"),
+    }
+
+
+def limited_edition_metafield_inputs(product_id, values):
+    owner_id = shopify_gid("Product", product_id)
+    if not owner_id:
+        raise ShopifyAPIError("Shopify product ID is missing.")
+    edition_total = max(
+        _parse_int_metafield(values.get("edition_total"), LIMITED_EDITION_DEFAULTS["edition_total"]),
+        1,
+    )
+    edition_next_number = max(
+        _parse_int_metafield(values.get("edition_next_number"), LIMITED_EDITION_DEFAULTS["edition_next_number"]),
+        1,
+    )
+    status_override = str(values.get("edition_status_override") or "").strip()
+    return [
+        _metafield_input(
+            owner_id,
+            "edition_enabled",
+            "boolean",
+            _bool_value(values.get("edition_enabled")),
+        ),
+        _metafield_input(owner_id, "edition_total", "number_integer", edition_total),
+        _metafield_input(owner_id, "edition_next_number", "number_integer", edition_next_number),
+        _metafield_input(
+            owner_id,
+            "edition_status_override",
+            "single_line_text_field",
+            status_override or " ",
+        ),
+        _metafield_input(
+            owner_id,
+            "edition_label",
+            "single_line_text_field",
+            str(values.get("edition_label") or LIMITED_EDITION_DEFAULTS["edition_label"]).strip()
+            or LIMITED_EDITION_DEFAULTS["edition_label"],
+        ),
+    ]
+
+
+def save_limited_edition_metafields(product_id, values, config=None, request_post=None):
+    owner_id = shopify_gid("Product", product_id)
+    metafields_set(
+        limited_edition_metafield_inputs(owner_id, values),
+        config=config,
+        request_post=request_post,
+    )
+    readback = fetch_metafields(
+        owner_id,
+        namespace="sports_cave",
+        config=config,
+        request_post=request_post,
+    )
+    metafields = readback.get("metafields") or []
+    return {
+        "metafields": metafields,
+        "edition": normalize_limited_edition_metafields(metafields),
+        "api_version": readback.get("api_version"),
+    }
 
 
 def product_edition_metafield_inputs(product):
