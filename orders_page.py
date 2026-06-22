@@ -18,16 +18,17 @@ META_KEY = "orders_allocation_meta"
 SNAPSHOT_LOADED_KEY = "orders_allocation_snapshot_loaded"
 NOTICE_KEY = "orders_allocation_notice"
 SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
+GRID_KEY = "orders-fulfilment-grid"
 
 VISIBLE_COLUMNS = (
     "order",
     "date",
     "customer",
+    "edition",
+    "certificate",
     "shipping",
     "product",
     "variant",
-    "edition",
-    "certificate",
 )
 
 
@@ -197,6 +198,10 @@ def _merge_local_certificate_fields(refreshed_rows, existing_rows):
     for row in refreshed_rows:
         updated = _normalise_row(row)
         existing = existing_by_key.get(_row_key(updated)) or {}
+        if existing:
+            for key in ("certificate_pdf_path", "certificate_preview_path"):
+                if existing.get(key) and not updated.get(key):
+                    updated[key] = existing[key]
         if existing and not updated.get("certificate_pdf_url"):
             updated.update({key: value for key, value in existing.items() if value})
             updated["certificate"] = _certificate_label(updated)
@@ -400,14 +405,14 @@ def _display_rows(rows):
 
 def _column_config():
     return {
-        "order": st.column_config.TextColumn("Order"),
-        "date": st.column_config.TextColumn("Date"),
-        "customer": st.column_config.TextColumn("Customer"),
-        "shipping": st.column_config.TextColumn("Shipping"),
-        "product": st.column_config.TextColumn("Product"),
-        "variant": st.column_config.TextColumn("Variant"),
-        "edition": st.column_config.TextColumn("Edition"),
-        "certificate": st.column_config.TextColumn("Certificate"),
+        "order": st.column_config.TextColumn("Order", width="small"),
+        "date": st.column_config.TextColumn("Date", width="small"),
+        "customer": st.column_config.TextColumn("Customer", width="medium"),
+        "edition": st.column_config.TextColumn("Edition", width="small"),
+        "certificate": st.column_config.TextColumn("Certificate", width="small"),
+        "shipping": st.column_config.TextColumn("Shipping", width="medium"),
+        "product": st.column_config.TextColumn("Product", width="large"),
+        "variant": st.column_config.TextColumn("Variant", width="large"),
     }
 
 
@@ -568,110 +573,136 @@ def _file_link(path):
     return ""
 
 
-def _pdf_bytes(path):
-    try:
-        pdf_path = Path(path)
-        if pdf_path.exists() and pdf_path.is_file():
-            return pdf_path.read_bytes()
-    except Exception:
-        return b""
-    return b""
+def _selected_indices_from_state():
+    state = st.session_state.get(GRID_KEY)
+    if isinstance(state, dict):
+        selection = state.get("selection") or {}
+        raw_rows = selection.get("rows") or []
+    else:
+        selection = getattr(state, "selection", None)
+        raw_rows = getattr(selection, "rows", []) if selection else []
+    indices = []
+    for value in raw_rows or []:
+        try:
+            indices.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return indices
 
 
-def _selected_row_from_event(event, rows):
-    try:
-        selected_rows = list(event.selection.rows or [])
-    except Exception:
-        selected_rows = []
-    if not selected_rows:
-        return _normalise_row(rows[0]) if rows else {}
-    index = int(selected_rows[0])
-    if index < 0 or index >= len(rows):
-        return _normalise_row(rows[0]) if rows else {}
-    return _normalise_row(rows[index])
+def _selected_rows_from_state(rows):
+    normalised_rows = [_normalise_row(row) for row in rows or []]
+    selected = []
+    for index in _selected_indices_from_state():
+        if 0 <= index < len(normalised_rows):
+            selected.append(normalised_rows[index])
+    return selected
 
 
-def _certificate_filename(row):
-    record = certificate_engine.certificate_record_from_order_row(row)
-    return f"{record.get('certificate_id') or 'sports-cave-certificate'}.pdf".lower()
+def _current_row_for(row):
+    target_key = _row_key(row)
+    for current in st.session_state.get(ROWS_KEY, []):
+        normalised = _normalise_row(current)
+        if _row_key(normalised) == target_key:
+            return normalised
+    return _normalise_row(row)
 
 
-def _render_certificate_actions(row):
-    row = _normalise_row(row)
-    key_base = f"order-cert-{row.get('shopify_order_id')}-{row.get('shopify_line_item_id')}-{row.get('edition_offset')}"
-    st.subheader("Selected Order")
-    st.caption(
-        f"{row.get('order') or 'Order'} | {row.get('customer') or 'Customer'} | "
-        f"{row.get('product') or 'Artwork'} | {row.get('edition') or 'No edition'}"
-    )
-    if row.get("certificate_preview_path") and Path(row.get("certificate_preview_path")).exists():
-        st.image(row.get("certificate_preview_path"), caption="Certificate preview", use_container_width=True)
-
-    action_cols = st.columns(4)
-    if row.get("certificate_pdf_url"):
-        action_cols[0].success("Uploaded")
-        if row.get("certificate_pdf_path") and Path(row.get("certificate_pdf_path")).exists():
-            action_cols[1].download_button(
-                "Download PDF",
-                data=_pdf_bytes(row.get("certificate_pdf_path")),
-                file_name=_certificate_filename(row),
-                mime="application/pdf",
-                use_container_width=True,
-                key=f"{key_base}-download-uploaded",
-            )
-        action_cols[2].link_button("Open PDF", row["certificate_pdf_url"], use_container_width=True)
-        return
-    if row.get("certificate_pdf_path") and Path(row.get("certificate_pdf_path")).exists():
-        action_cols[0].success("Generated")
-        action_cols[1].download_button(
-            "Download PDF",
-            data=_pdf_bytes(row.get("certificate_pdf_path")),
-            file_name=_certificate_filename(row),
-            mime="application/pdf",
-            use_container_width=True,
-            key=f"{key_base}-download-generated",
-        )
-        if action_cols[2].button("Upload", key=f"{key_base}-upload", use_container_width=True):
-            _upload_certificate_for_row(row)
-            st.rerun()
-        local_link = _file_link(row.get("certificate_pdf_path"))
+def _first_pdf_url(rows):
+    for row in rows or []:
+        normalised = _normalise_row(row)
+        if normalised.get("certificate_pdf_url"):
+            return normalised["certificate_pdf_url"]
+        local_link = _file_link(normalised.get("certificate_pdf_path"))
         if local_link:
-            action_cols[3].link_button("Open PDF", local_link, use_container_width=True)
+            return local_link
+    return ""
+
+
+def _generate_selected_certificates(rows):
+    if not rows:
+        st.session_state[NOTICE_KEY] = "Select one or more order rows first."
         return
-    if str(row.get("certificate_status") or "").casefold() in {"error", "template missing", "upload error"}:
-        action_cols[0].error("Error")
-        if row.get("certificate_error"):
-            st.caption(row.get("certificate_error"))
-        if action_cols[1].button("Retry", key=f"{key_base}-retry", use_container_width=True):
-            _generate_certificate_for_row(row)
-            st.rerun()
-        return
-    if action_cols[0].button("Generate", key=f"{key_base}-generate", use_container_width=True, disabled=not bool(row.get("edition_number"))):
+    for row in rows:
         _generate_certificate_for_row(row)
+    st.session_state[NOTICE_KEY] = f"Generated or checked {len(rows)} selected certificate(s)."
+
+
+def _upload_selected_certificates(rows):
+    if not rows:
+        st.session_state[NOTICE_KEY] = "Select one or more order rows first."
+        return
+    for row in rows:
+        _upload_certificate_for_row(row)
+    st.session_state[NOTICE_KEY] = f"Uploaded or checked {len(rows)} selected certificate(s)."
+
+
+def _generate_upload_selected_certificates(rows):
+    if not rows:
+        st.session_state[NOTICE_KEY] = "Select one or more order rows first."
+        return
+    for row in rows:
+        _generate_certificate_for_row(row)
+        _upload_certificate_for_row(_current_row_for(row))
+    st.session_state[NOTICE_KEY] = f"Generated and uploaded {len(rows)} selected certificate(s)."
+
+
+def _render_top_actions(rows):
+    selected_rows = _selected_rows_from_state(rows)
+    selected_count = len(selected_rows)
+    open_url = _first_pdf_url(selected_rows)
+
+    action_cols = st.columns([1.1, 1.5, 1.45, 1.55, 1.2])
+    if action_cols[0].button("Refresh Orders", type="primary", use_container_width=True):
+        with st.spinner("Refreshing recent paid orders..."):
+            _refresh_orders()
         st.rerun()
-    if not row.get("edition_number"):
-        st.caption("This row needs an edition before a certificate can be generated.")
+    if action_cols[1].button(
+        "Generate Selected Certificates",
+        use_container_width=True,
+        disabled=selected_count == 0,
+    ):
+        with st.spinner("Generating selected certificates..."):
+            _generate_selected_certificates(selected_rows)
+        st.rerun()
+    if action_cols[2].button(
+        "Upload Selected to Shopify",
+        use_container_width=True,
+        disabled=selected_count == 0,
+    ):
+        with st.spinner("Uploading selected certificates..."):
+            _upload_selected_certificates(selected_rows)
+        st.rerun()
+    if action_cols[3].button(
+        "Generate + Upload Selected",
+        use_container_width=True,
+        disabled=selected_count == 0,
+    ):
+        with st.spinner("Generating and uploading selected certificates..."):
+            _generate_upload_selected_certificates(selected_rows)
+        st.rerun()
+    if open_url:
+        action_cols[4].link_button("Open Selected PDF", open_url, use_container_width=True)
+    else:
+        action_cols[4].button("Open Selected PDF", use_container_width=True, disabled=True)
+    st.caption(f"{selected_count} row(s) selected. Tip: scroll sideways to view all fulfilment fields.")
 
 
 def _render_orders_table(rows):
     rows = [_normalise_row(row) for row in rows]
     with st.container(border=True):
-        event = st.dataframe(
+        st.dataframe(
             _display_rows(rows),
             hide_index=True,
             use_container_width=True,
-            height=min(720, max(320, 42 * (len(rows) + 1))),
+            height=min(840, max(440, 32 * (len(rows) + 1))),
             column_order=VISIBLE_COLUMNS,
             column_config=_column_config(),
-            selection_mode="single-row",
+            selection_mode="multi-row",
             on_select="rerun",
-            key="orders-fulfilment-grid",
+            row_height=30,
+            key=GRID_KEY,
         )
-    if rows:
-        st.caption("Select an order row above to generate, upload, download, or open its certificate.")
-        selected = _selected_row_from_event(event, rows)
-        with st.container(border=True):
-            _render_certificate_actions(selected)
 
 
 def render_page():
@@ -690,10 +721,7 @@ def render_page():
         st.success(notice)
         st.session_state[NOTICE_KEY] = ""
 
-    if st.button("Refresh Orders", type="primary", use_container_width=True):
-        with st.spinner("Refreshing recent paid orders..."):
-            _refresh_orders()
-        st.rerun()
+    _render_top_actions(rows)
 
     if not rows:
         st.info("No saved orders yet. Use Refresh Orders to load recent paid orders.")

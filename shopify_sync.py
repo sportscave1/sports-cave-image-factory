@@ -1416,6 +1416,7 @@ def upload_pdf_to_shopify_files(
         "url": file_node.get("url") or "",
         "status": file_node.get("fileStatus") or "",
         "filename": filename,
+        "resource_url": staged["target"].get("resourceUrl") or "",
     }
 
 

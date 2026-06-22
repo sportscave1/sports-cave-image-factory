@@ -4509,10 +4509,10 @@ def render_sidebar():
     elif st.session_state.selected_page == "Orders":
         st.sidebar.divider()
         st.sidebar.subheader("Orders")
-        st.sidebar.write("1. Shows the saved order allocation snapshot immediately.")
-        st.sidebar.write("2. Refresh recent paid orders only when needed.")
-        st.sidebar.write("3. Edition numbers are read-only here.")
-        st.sidebar.write("4. Change product edition numbers only from Edition Ops.")
+        st.sidebar.write("1. Refresh recent paid orders only when needed.")
+        st.sidebar.write("2. Edition numbers are read-only and come from Edition Ops/order allocations.")
+        st.sidebar.write("3. Select rows, then generate or upload certificates from the top buttons.")
+        st.sidebar.write("4. Use Open PDF after a certificate is generated/uploaded.")
     elif st.session_state.selected_page == "Prodigi":
         st.sidebar.divider()
         st.sidebar.subheader("Prodigi")

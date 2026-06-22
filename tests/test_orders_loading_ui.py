@@ -80,16 +80,19 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(
             orders_page.VISIBLE_COLUMNS,
-            ("order", "date", "customer", "shipping", "product", "variant", "edition", "certificate"),
+            ("order", "date", "customer", "edition", "certificate", "shipping", "product", "variant"),
         )
         self.assertIn("orders_allocation_snapshot.json", source)
         self.assertIn("Refresh Orders", source)
         self.assertIn("_render_orders_table", source)
         self.assertIn("st.dataframe", source)
-        self.assertIn("selection_mode=\"single-row\"", source)
-        self.assertIn("Generate", source)
-        self.assertIn("Download PDF", source)
+        self.assertIn("selection_mode=\"multi-row\"", source)
+        self.assertIn("Generate Selected Certificates", source)
+        self.assertIn("Upload Selected to Shopify", source)
+        self.assertIn("Generate + Upload Selected", source)
+        self.assertIn("Open Selected PDF", source)
         self.assertIn("Upload", source)
+        self.assertIn("Tip: scroll sideways to view all fulfilment fields.", source)
         self.assertNotIn("Save Changed Order Editions", source)
         self.assertNotIn("Allocate Selected From Product Counter", source)
         self.assertNotIn("Overwrite Selected Order Allocation", source)
@@ -207,6 +210,59 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(rows[0]["certificate_pdf_url"], "https://cdn.example/certificate.pdf")
         self.assertEqual(rows[0]["certificate_pdf_path"], "C:/certificates/certificate.pdf")
         self.assertEqual(rows[0]["certificate_preview_path"], "C:/certificates/certificate.png")
+
+    def test_orders_page_preserves_local_certificate_paths_when_refresh_has_remote_pdf_url(self):
+        line_item_id = "gid://shopify/LineItem/1"
+        refreshed = orders_page._rows_from_order_line(
+            {
+                "order_name": "#SC1234",
+                "processed_at": "2026-06-22T10:00:00Z",
+                "customer_name": "John",
+                "metafields": [
+                    {
+                        "namespace": "sports_cave",
+                        "key": "edition_allocations",
+                        "value": json.dumps({"line_items": {line_item_id: {"edition_numbers": [50]}}}),
+                    },
+                    {
+                        "namespace": "sports_cave",
+                        "key": "certificates",
+                        "value": json.dumps(
+                            [
+                                {
+                                    "line_item_id": line_item_id,
+                                    "line_item_unit_index": 1,
+                                    "edition_number": 50,
+                                    "status": "Ready",
+                                    "pdf_url": "https://cdn.example/certificate.pdf",
+                                }
+                            ]
+                        ),
+                    },
+                ],
+            },
+            {
+                "shopify_line_item_id": line_item_id,
+                "shopify_product_id": "gid://shopify/Product/1",
+                "product_title": "Shane Warne Tribute Wall Art",
+                "variant_title": "Black / XL",
+                "quantity": 1,
+            },
+            {"edition_next_number": 91},
+        )
+        existing = [
+            {
+                **refreshed[0],
+                "certificate_pdf_path": "C:/certificates/certificate.pdf",
+                "certificate_preview_path": "C:/certificates/certificate.png",
+            }
+        ]
+
+        merged = orders_page._merge_local_certificate_fields(refreshed, existing)
+
+        self.assertEqual(merged[0]["certificate_pdf_url"], "https://cdn.example/certificate.pdf")
+        self.assertEqual(merged[0]["certificate_pdf_path"], "C:/certificates/certificate.pdf")
+        self.assertEqual(merged[0]["certificate_preview_path"], "C:/certificates/certificate.png")
 
     def test_orders_page_certificate_record_uses_exact_visible_row_edition(self):
         row = orders_page._normalise_row(

@@ -126,6 +126,9 @@ class CertificateEngineTests(unittest.TestCase):
         self.assertEqual(record["edition_number"], 96)
         self.assertEqual(record["edition_display"], "#096")
         self.assertEqual(record["pdf_shopify_file_id"], "gid://shopify/GenericFile/1")
+        self.assertEqual(record["pdf_size_bytes"], len(b"%PDF-1.4\n%%EOF\n"))
+        self.assertNotIn("local_pdf_path", record)
+        self.assertNotIn("preview_path", record)
         self.assertEqual(record["status"], "Ready")
         self.assertIn("SC-SC1234-GREG-MURPHY-LAP-OF-THE-GODS-WALL-ART-EDITION-096", record["certificate_id"])
 
@@ -256,6 +259,37 @@ class CertificateEngineTests(unittest.TestCase):
         self.assertEqual(synced[0][0]["status"], "Upload error")
         self.assertIn("Upload failed", synced[0][0]["sync_error"])
         sync_allocations.assert_not_called()
+
+    def test_order_row_upload_rejects_empty_or_non_pdf_local_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bad_path = Path(tmpdir) / "certificate.pdf"
+            bad_path.write_text("not a pdf", encoding="utf-8")
+            record = {
+                "order_name": "#SC1234",
+                "handle": "greg-murphy-lap-of-the-gods-wall-art",
+                "edition_number": 96,
+                "edition_total": 100,
+                "local_pdf_path": str(bad_path),
+            }
+
+            with self.assertRaises(shopify_sync.ShopifyAPIError):
+                certificate_engine.upload_generated_certificate_record(record, config=self.config)
+
+    def test_certificate_metafield_record_removes_local_only_paths(self):
+        record = certificate_engine.certificate_metafield_record(
+            {
+                "certificate_id": "SC-SC1234-096",
+                "pdf_url": "https://cdn.example/certificate.pdf",
+                "local_pdf_path": "C:/local/certificate.pdf",
+                "preview_path": "C:/local/certificate.png",
+                "pdf_size_bytes": 123,
+            }
+        )
+
+        self.assertEqual(record["pdf_url"], "https://cdn.example/certificate.pdf")
+        self.assertEqual(record["pdf_size_bytes"], 123)
+        self.assertNotIn("local_pdf_path", record)
+        self.assertNotIn("preview_path", record)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ BASE_DIR = Path(__file__).resolve().parent
 CERTIFICATE_OUTPUT_DIR = BASE_DIR / "output" / "certificates"
 SNAPSHOT_PATH = BASE_DIR / "output" / "_cache" / "certificates_snapshot.json"
 SNAPSHOT_VERSION = 1
+LOCAL_ONLY_CERTIFICATE_KEYS = {"local_pdf_path", "preview_path"}
 
 
 def now_iso():
@@ -251,6 +252,14 @@ def find_existing_certificate(certificates, record):
     return existing.get(_certificate_key(record)) or {}
 
 
+def certificate_metafield_record(record):
+    return {
+        key: value
+        for key, value in dict(record or {}).items()
+        if key not in LOCAL_ONLY_CERTIFICATE_KEYS
+    }
+
+
 def generate_local_certificate_for_record(record, output_dir=None):
     output_dir = Path(output_dir or CERTIFICATE_OUTPUT_DIR)
     updated = dict(record or {})
@@ -312,6 +321,11 @@ def upload_generated_certificate_record(record, *, config=None, request_post=Non
     local_path = Path(local_raw)
     if not local_path.exists():
         raise FileNotFoundError(f"Generated certificate PDF is missing: {local_path}")
+    local_bytes = local_path.read_bytes()
+    if not local_bytes:
+        raise FileNotFoundError(f"Generated certificate PDF is empty: {local_path}")
+    if not local_bytes.startswith(b"%PDF"):
+        raise shopify_sync.ShopifyAPIError(f"Generated certificate is not a PDF: {local_path}")
     filename = certificate_service.certificate_pdf_filename(
         updated.get("order_name"),
         updated.get("handle"),
@@ -328,8 +342,12 @@ def upload_generated_certificate_record(record, *, config=None, request_post=Non
     )
     if not upload_result.get("file_id") or not upload_result.get("url"):
         raise shopify_sync.ShopifyAPIError("Shopify file upload did not return a ready PDF URL.")
+    if upload_result.get("resource_url") and upload_result.get("url") == upload_result.get("resource_url"):
+        raise shopify_sync.ShopifyAPIError("Shopify file upload returned a staged URL instead of a permanent file URL.")
     updated["pdf_shopify_file_id"] = upload_result.get("file_id") or ""
     updated["pdf_url"] = upload_result.get("url") or ""
+    updated["pdf_size_bytes"] = len(local_bytes)
+    updated["shopify_file_status"] = upload_result.get("status") or ""
     updated["status"] = "Ready"
     updated["sync_error"] = ""
     updated["generated_at"] = updated.get("generated_at") or now_iso()
@@ -340,17 +358,18 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
     order_gid = order_allocator.order_gid(record.get("order_gid"))
     if not order_gid:
         raise shopify_sync.ShopifyAPIError("Order ID is missing for certificate save.")
+    record_to_save = certificate_metafield_record(record)
     state = read_order_certificate_state(order_gid, config=config, request_post=request_post)
     certificates = state.get("certificates") or []
     existing = _existing_ready_certificate(
         {_certificate_key(item): item for item in certificates},
-        record.get("line_item_id"),
-        record.get("edition_number"),
-        record.get("line_item_unit_index"),
+        record_to_save.get("line_item_id"),
+        record_to_save.get("edition_number"),
+        record_to_save.get("line_item_unit_index"),
     )
     if existing:
         return {"record": existing, "saved": False, "skipped_existing": True}
-    certificates = _replace_certificate(certificates, record)
+    certificates = _replace_certificate(certificates, record_to_save)
     shopify_sync.sync_order_certificate_metafields(
         order_gid,
         certificates,
@@ -358,7 +377,7 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
         config=config,
         request_post=request_post,
     )
-    return {"record": record, "saved": True, "skipped_existing": False}
+    return {"record": record_to_save, "saved": True, "skipped_existing": False}
 
 
 def certificate_records_from_allocations(order_payload, allocation_payload):
@@ -460,8 +479,9 @@ def generate_missing_certificates_for_order(
             record["status"] = "Template missing"
             record["sync_error"] = f"Certificate template missing: {certificate_service.CERTIFICATE_TEMPLATE_PRINT_PATH}"
             record["generated_at"] = now_iso()
-            certificates = _replace_certificate(certificates, record)
-            existing[_certificate_key(record)] = record
+            record_to_save = certificate_metafield_record(record)
+            certificates = _replace_certificate(certificates, record_to_save)
+            existing[_certificate_key(record_to_save)] = record_to_save
             errors.append(record["sync_error"])
             changed = True
             continue
@@ -478,21 +498,14 @@ def generate_missing_certificates_for_order(
                 shopify_handle=record.get("handle"),
                 filename=filename,
             )
-            upload_result = shopify_sync.upload_pdf_to_shopify_files(
-                pdf_path,
-                filename=filename,
-                alt=f"{record.get('certificate_id')} certificate",
+            record["local_pdf_path"] = pdf_path
+            uploaded = upload_generated_certificate_record(
+                record,
                 config=config,
                 request_post=request_post,
                 upload_post=upload_post,
             )
-            if not upload_result.get("file_id") or not upload_result.get("url"):
-                raise shopify_sync.ShopifyAPIError("Shopify file upload did not return a ready PDF URL.")
-            record["pdf_shopify_file_id"] = upload_result.get("file_id") or ""
-            record["pdf_url"] = upload_result.get("url") or ""
-            record["generated_at"] = now_iso()
-            record["status"] = "Ready"
-            record["sync_error"] = ""
+            record.update(uploaded)
             generated += 1
         except FileNotFoundError as error:
             record["status"] = "Template missing"
@@ -505,8 +518,9 @@ def generate_missing_certificates_for_order(
             record["generated_at"] = now_iso()
             errors.append(str(error))
 
-        certificates = _replace_certificate(certificates, record)
-        existing[_certificate_key(record)] = record
+        record_to_save = certificate_metafield_record(record)
+        certificates = _replace_certificate(certificates, record_to_save)
+        existing[_certificate_key(record_to_save)] = record_to_save
         changed = True
 
     if changed:

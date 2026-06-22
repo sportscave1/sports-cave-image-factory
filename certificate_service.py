@@ -187,8 +187,8 @@ def generate_template_certificate_pdf(
         int(width * 0.41),
         int(width * 0.82),
         int(height * 0.682),
-        max_size=max(17, int(32 * scale)),
-        min_size=max(12, int(15 * scale)),
+        max_size=max(13, int(25 * scale)),
+        min_size=max(10, int(13 * scale)),
     )
     draw_fitted_text(
         draw,
@@ -196,8 +196,8 @@ def generate_template_certificate_pdf(
         int(width * 0.43),
         int(width * 0.54),
         int(height * 0.744),
-        max_size=max(18, int(33 * scale)),
-        min_size=max(12, int(18 * scale)),
+        max_size=max(15, int(27 * scale)),
+        min_size=max(10, int(15 * scale)),
     )
 
     certificate.save(pdf_path, "PDF", resolution=300.0)
@@ -245,8 +245,8 @@ def generate_certificate_preview_png(
         int(width * 0.41),
         int(width * 0.82),
         int(height * 0.682),
-        max_size=max(17, int(32 * scale)),
-        min_size=max(12, int(15 * scale)),
+        max_size=max(13, int(25 * scale)),
+        min_size=max(10, int(13 * scale)),
     )
     draw_fitted_text(
         draw,
@@ -254,8 +254,8 @@ def generate_certificate_preview_png(
         int(width * 0.43),
         int(width * 0.54),
         int(height * 0.744),
-        max_size=max(18, int(33 * scale)),
-        min_size=max(12, int(18 * scale)),
+        max_size=max(15, int(27 * scale)),
+        min_size=max(10, int(15 * scale)),
     )
     certificate.save(preview_path, "PNG")
     certificate.close()
