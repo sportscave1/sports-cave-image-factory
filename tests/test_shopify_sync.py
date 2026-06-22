@@ -791,6 +791,47 @@ class ShopifySyncClientTests(unittest.TestCase):
         order_sync.assert_not_called()
         product_sync.assert_not_called()
 
+    def test_activate_live_allocation_saves_cutover_and_product_baselines(self):
+        saved_states = []
+
+        def fake_save_cutover_state(state):
+            saved_states.append(state)
+            return dict(state)
+
+        with patch.object(
+            order_allocator,
+            "load_cutover_state",
+            return_value={"active": False, "automation_started_at": "", "baselines": {}},
+        ), patch.object(
+            order_allocator,
+            "save_cutover_state",
+            side_effect=fake_save_cutover_state,
+        ):
+            result = order_allocator.activate_live_allocation(
+                [
+                    {
+                        "shopify_product_id": "gid://shopify/Product/777",
+                        "handle": "justin-gaethje-undisputed-wall-art",
+                        "product_title": "Justin Gaethje Undisputed Wall Art",
+                        "edition_total": 100,
+                        "edition_next_number": 14,
+                        "edition_sold_count": 13,
+                        "edition_remaining": 87,
+                    }
+                ],
+                started_at="2026-06-23T10:00:00Z",
+            )
+
+        self.assertTrue(result["active"])
+        self.assertEqual(result["automation_started_at"], "2026-06-23T10:00:00Z")
+        self.assertEqual(result["captured_count"], 1)
+        self.assertEqual(saved_states[0]["automation_started_at"], "2026-06-23T10:00:00Z")
+        self.assertTrue(saved_states[0]["active"])
+        baseline = saved_states[0]["baselines"]["gid://shopify/Product/777"]
+        self.assertEqual(baseline["baseline_next_number"], 14)
+        self.assertEqual(baseline["baseline_sold_count"], 13)
+        self.assertEqual(baseline["baseline_remaining"], 87)
+
     def test_paid_order_allocator_skips_pre_cutover_orders_for_historical_backfill(self):
         order_payload = {
             "id": 1234,

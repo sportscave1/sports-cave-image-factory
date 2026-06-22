@@ -12,7 +12,6 @@ import shopify_sync
 
 
 BASE_DIR = Path(__file__).resolve().parent
-EDITION_OPS_SNAPSHOT_PATH = BASE_DIR / "output" / "_cache" / "edition_ops_products_snapshot.json"
 
 ROWS_KEY = "orders_allocation_rows"
 META_KEY = "orders_allocation_meta"
@@ -279,16 +278,6 @@ def _write_snapshot(rows, meta=None):
     }
 
 
-def _edition_ops_snapshot_rows():
-    if not EDITION_OPS_SNAPSHOT_PATH.exists():
-        return []
-    try:
-        payload = json.loads(EDITION_OPS_SNAPSHOT_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    return [row for row in payload.get("rows") or [] if isinstance(row, dict)]
-
-
 def _apply_latest_product_numbers(rows):
     return _sort_rows(rows)
 
@@ -483,11 +472,11 @@ def _allocate_missing_paid_orders():
         st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before allocating orders."
         return
     if not st.session_state.get(ALLOCATE_CONFIRM_KEY):
-        st.session_state[NOTICE_KEY] = "Confirm allocation repair before running Allocate Missing Paid Orders."
+        st.session_state[NOTICE_KEY] = "Confirm allocation repair before running Allocate Missing Recent Paid Orders."
         return
     cutover = order_allocator.load_cutover_state()
     if not order_allocator.automation_started_at(cutover):
-        st.session_state[NOTICE_KEY] = "Enable Live Allocation From Now before allocating missing paid orders."
+        st.session_state[NOTICE_KEY] = "Activate Live Allocation before allocating missing recent paid orders."
         return
     existing_rows = st.session_state.get(ROWS_KEY, [])
     orders = _fetch_recent_paid_orders(config)
@@ -519,21 +508,63 @@ def _allocate_missing_paid_orders():
         )
 
 
-def _enable_live_allocation_from_now():
-    state = order_allocator.enable_live_allocation_from_now()
+def _baseline_row_from_shopify_product(product):
+    edition = product.get("edition") or {}
+    return {
+        "shopify_product_id": product.get("shopify_product_id") or "",
+        "shopify_product_gid": product.get("shopify_product_id") or "",
+        "handle": product.get("handle") or "",
+        "product_title": product.get("title") or product.get("product_title") or "",
+        "edition_enabled": edition.get("edition_enabled"),
+        "edition_total": edition.get("edition_total"),
+        "edition_next_number": edition.get("edition_next_number"),
+        "edition_sold_count": edition.get("edition_sold_count"),
+        "edition_remaining": edition.get("edition_remaining"),
+        "edition_status": edition.get("edition_status"),
+    }
+
+
+def _fetch_current_product_baseline_rows(config, source):
+    start = time.perf_counter()
+    loaded = shopify_sync.fetch_edition_ops_active_products(
+        max_products=config.get("edition_ops_max_products", 500),
+        page_size=50,
+        config=config,
+    )
+    rows = [_baseline_row_from_shopify_product(product) for product in loaded.get("products") or []]
+    _perf_log("fetch product metafields", start, source=source, products=len(rows))
+    return rows
+
+
+def _activate_live_allocation():
+    config = shopify_sync.get_config()
+    if not config.get("configured"):
+        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before activating live allocation."
+        return
+    rows = _fetch_current_product_baseline_rows(config, source="activate_live_allocation")
+    if not rows:
+        st.session_state[NOTICE_KEY] = "No active Shopify products with edition metafields were found. Refresh Edition Ops first if this looks wrong."
+        return
+    state = order_allocator.activate_live_allocation(rows)
     st.session_state[NOTICE_KEY] = (
-        f"Live allocation enabled from {_format_time(state.get('automation_started_at'))}."
+        f"Live allocation active from {_format_time(state.get('automation_started_at'))}. "
+        f"Baselines captured: {state.get('captured_count') or 0} product(s). "
+        "New paid orders now auto-allocate."
     )
 
 
-def _capture_product_baselines():
-    rows = _edition_ops_snapshot_rows()
+def _recapture_product_baselines():
+    config = shopify_sync.get_config()
+    if not config.get("configured"):
+        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before re-capturing baselines."
+        return
+    rows = _fetch_current_product_baseline_rows(config, source="baseline_recapture")
     if not rows:
-        st.session_state[NOTICE_KEY] = "No Edition Ops product snapshot was found. Refresh Edition Ops first."
+        st.session_state[NOTICE_KEY] = "No active Shopify products with edition metafields were found."
         return
     state = order_allocator.capture_product_baselines(rows)
     st.session_state[NOTICE_KEY] = (
-        f"Captured {state.get('captured_count') or 0} product baseline(s)."
+        f"Re-captured {state.get('captured_count') or 0} product baseline(s)."
     )
 
 
@@ -594,7 +625,7 @@ def _historical_backfill_selected_orders(rows):
     if skipped_not_historical and not result.get("assignments_created"):
         st.session_state[NOTICE_KEY] = (
             f"Skipped {skipped_not_historical} post-cutover row(s). "
-            "Use Allocate Missing Paid Orders for new orders."
+            "Use Allocate Missing Recent Paid Orders for new orders."
         )
     elif errors:
         st.session_state[NOTICE_KEY] = (
@@ -868,21 +899,89 @@ def _generate_upload_selected_certificates(rows):
     st.session_state[NOTICE_KEY] = f"Generated and uploaded {len(rows)} selected certificate(s)."
 
 
+def _baseline_count(cutover_state):
+    return len((cutover_state or {}).get("baselines") or {})
+
+
+def _render_allocation_status_card():
+    state = order_allocator.load_cutover_state()
+    active = order_allocator.live_allocation_active(state)
+    with st.container(border=True):
+        if active:
+            st.caption("Edition Allocation: Active")
+            st.caption(f"Cutover: {_format_time(state.get('automation_started_at'))}")
+            st.caption(f"Baselines captured: {_baseline_count(state)} products")
+            st.caption("New paid orders: auto-allocate")
+            return
+
+        st.caption("Edition Allocation: Not active")
+        st.caption("New paid orders will not auto-assign edition numbers until activated.")
+        cols = st.columns([1.1, 3])
+        if cols[0].button("Activate Live Allocation", type="primary", use_container_width=True):
+            with st.spinner("Activating live allocation..."):
+                _activate_live_allocation()
+            st.rerun()
+        st.caption(
+            "Activate Live Allocation is a one-time setup. It starts automatic edition allocation "
+            "for new paid orders and captures current product counters as the historical baseline."
+        )
+
+
+def _render_advanced_allocation_tools(rows):
+    selected_rows = _selected_rows_from_state(rows)
+    selected_count = len(selected_rows)
+    with st.expander("Advanced Allocation Tools", expanded=False):
+        st.warning(
+            "Use these only to repair orders placed before or during the allocation bug. "
+            "New paid orders allocate automatically once Live Allocation is active."
+        )
+        st.caption(
+            "Re-capture Product Baselines: advanced repair only. Use after a CSV/product counter correction "
+            "if baselines need to be refreshed."
+        )
+        st.caption(
+            "Allocate Missing Recent Paid Orders: repairs recent paid orders without saved order allocations. "
+            "Allocates oldest to newest and updates product counters."
+        )
+        st.caption(
+            "Historical Backfill Selected Orders: for old orders already included in current product counters. "
+            "Assigns historical edition numbers without moving product counters."
+        )
+
+        repair_cols = st.columns([1.35, 1.75, 1.75])
+        if repair_cols[0].button("Re-capture Product Baselines", use_container_width=True):
+            with st.spinner("Re-capturing product baselines..."):
+                _recapture_product_baselines()
+            st.rerun()
+        if repair_cols[1].button("Allocate Missing Recent Paid Orders", use_container_width=True):
+            with st.spinner("Allocating missing recent paid orders..."):
+                _allocate_missing_paid_orders()
+            st.rerun()
+        if repair_cols[2].button(
+            "Historical Backfill Selected Orders",
+            use_container_width=True,
+            disabled=selected_count == 0,
+        ):
+            with st.spinner("Backfilling selected historical orders..."):
+                _historical_backfill_selected_orders(selected_rows)
+            st.rerun()
+
+        confirm_cols = st.columns([1.2, 1.2, 2])
+        confirm_cols[0].checkbox("Confirm allocation repair", key=ALLOCATE_CONFIRM_KEY)
+        confirm_cols[1].checkbox("Confirm historical backfill", key=BACKFILL_CONFIRM_KEY)
+
+
 def _render_top_actions(rows):
     selected_rows = _selected_rows_from_state(rows)
     selected_count = len(selected_rows)
     open_url = _first_pdf_url(selected_rows)
 
-    action_cols = st.columns([1.1, 1.35, 1.5, 1.45, 1.55, 1.2])
+    action_cols = st.columns([1.1, 1.55, 1.45, 1.55, 1.2])
     if action_cols[0].button("Refresh Orders", type="primary", use_container_width=True):
         with st.spinner("Refreshing recent paid orders..."):
             _refresh_orders()
         st.rerun()
-    if action_cols[1].button("Allocate Missing Paid Orders", use_container_width=True):
-        with st.spinner("Allocating missing paid orders..."):
-            _allocate_missing_paid_orders()
-        st.rerun()
-    if action_cols[2].button(
+    if action_cols[1].button(
         "Generate Selected Certificates",
         use_container_width=True,
         disabled=selected_count == 0,
@@ -890,7 +989,7 @@ def _render_top_actions(rows):
         with st.spinner("Generating selected certificates..."):
             _generate_selected_certificates(selected_rows)
         st.rerun()
-    if action_cols[3].button(
+    if action_cols[2].button(
         "Upload Selected to Shopify",
         use_container_width=True,
         disabled=selected_count == 0,
@@ -898,7 +997,7 @@ def _render_top_actions(rows):
         with st.spinner("Uploading selected certificates..."):
             _upload_selected_certificates(selected_rows)
         st.rerun()
-    if action_cols[4].button(
+    if action_cols[3].button(
         "Generate + Upload Selected",
         use_container_width=True,
         disabled=selected_count == 0,
@@ -907,26 +1006,9 @@ def _render_top_actions(rows):
             _generate_upload_selected_certificates(selected_rows)
         st.rerun()
     if open_url:
-        action_cols[5].link_button("Open Selected PDF", open_url, use_container_width=True)
+        action_cols[4].link_button("Open Selected PDF", open_url, use_container_width=True)
     else:
-        action_cols[5].button("Open Selected PDF", use_container_width=True, disabled=True)
-    setup_cols = st.columns([1.3, 1.25, 1.6, 1.2, 1.2])
-    if setup_cols[0].button("Enable Live Allocation From Now", use_container_width=True):
-        _enable_live_allocation_from_now()
-        st.rerun()
-    if setup_cols[1].button("Capture Product Baselines", use_container_width=True):
-        _capture_product_baselines()
-        st.rerun()
-    if setup_cols[2].button(
-        "Historical Backfill Selected Orders",
-        use_container_width=True,
-        disabled=selected_count == 0,
-    ):
-        with st.spinner("Backfilling selected historical orders..."):
-            _historical_backfill_selected_orders(selected_rows)
-        st.rerun()
-    setup_cols[3].checkbox("Confirm allocation repair", key=ALLOCATE_CONFIRM_KEY)
-    setup_cols[4].checkbox("Confirm historical backfill", key=BACKFILL_CONFIRM_KEY)
+        action_cols[4].button("Open Selected PDF", use_container_width=True, disabled=True)
     st.caption(f"{selected_count} row(s) selected. Tip: scroll sideways to view all fulfilment fields.")
 
 
@@ -965,7 +1047,9 @@ def render_page():
         st.success(notice)
         st.session_state[NOTICE_KEY] = ""
 
+    _render_allocation_status_card()
     _render_top_actions(rows)
+    _render_advanced_allocation_tools(rows)
 
     if not rows:
         st.info("No saved orders yet. Use Refresh Orders to load recent paid orders.")

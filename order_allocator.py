@@ -205,6 +205,7 @@ def _line_position(line_item, fallback):
 def _empty_cutover_state():
     return {
         "version": CUTOVER_VERSION,
+        "active": False,
         "automation_started_at": "",
         "baselines": {},
         "updated_at": "",
@@ -225,6 +226,7 @@ def load_cutover_state():
     env_started_at = _safe_iso(os.getenv(AUTOMATION_STARTED_ENV, ""))
     if env_started_at:
         state["automation_started_at"] = env_started_at
+    state["active"] = bool(state.get("active") or state.get("automation_started_at"))
     return state
 
 
@@ -234,6 +236,7 @@ def save_cutover_state(state):
     payload["version"] = CUTOVER_VERSION
     payload["automation_started_at"] = _safe_iso(payload.get("automation_started_at")) or ""
     payload["baselines"] = payload.get("baselines") or {}
+    payload["active"] = bool(payload.get("active") or payload.get("automation_started_at"))
     payload["updated_at"] = now_iso()
     CUTOVER_PATH.parent.mkdir(parents=True, exist_ok=True)
     CUTOVER_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -243,6 +246,7 @@ def save_cutover_state(state):
 def enable_live_allocation_from_now(started_at=None):
     state = load_cutover_state()
     state["automation_started_at"] = _safe_iso(started_at or now_iso())
+    state["active"] = True
     return save_cutover_state(state)
 
 
@@ -277,21 +281,40 @@ def _baseline_from_product_row(row, captured_at):
     }
 
 
-def capture_product_baselines(product_rows, captured_at=None):
-    captured = _safe_iso(captured_at or now_iso())
-    state = load_cutover_state()
-    baselines = dict(state.get("baselines") or {})
+def _baselines_from_product_rows(product_rows, captured_at):
+    baselines = {}
     count = 0
     for row in product_rows or []:
         if not isinstance(row, dict):
             continue
-        baseline = _baseline_from_product_row(row, captured)
+        baseline = _baseline_from_product_row(row, captured_at)
         if not baseline:
             continue
         baselines[baseline["product_gid"]] = baseline
         count += 1
+    return baselines, count
+
+
+def capture_product_baselines(product_rows, captured_at=None):
+    captured = _safe_iso(captured_at or now_iso())
+    state = load_cutover_state()
+    baselines, count = _baselines_from_product_rows(product_rows, captured)
     state["baselines"] = baselines
     state.setdefault("automation_started_at", "")
+    state["baseline_captured_at"] = captured
+    saved = save_cutover_state(state)
+    saved["captured_count"] = count
+    return saved
+
+
+def activate_live_allocation(product_rows, started_at=None):
+    captured = _safe_iso(started_at or now_iso())
+    baselines, count = _baselines_from_product_rows(product_rows, captured)
+    state = load_cutover_state()
+    state["active"] = True
+    state["automation_started_at"] = captured
+    state["baseline_captured_at"] = captured
+    state["baselines"] = baselines
     saved = save_cutover_state(state)
     saved["captured_count"] = count
     return saved
@@ -301,6 +324,11 @@ def automation_started_at(cutover_state=None):
     state = cutover_state or load_cutover_state()
     started_at = _safe_iso((state or {}).get("automation_started_at") or os.getenv(AUTOMATION_STARTED_ENV, ""))
     return started_at
+
+
+def live_allocation_active(cutover_state=None):
+    state = cutover_state or load_cutover_state()
+    return bool((state or {}).get("active") and automation_started_at(state))
 
 
 def _automation_started_datetime(cutover_state=None):

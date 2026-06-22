@@ -1,4 +1,5 @@
 from pathlib import Path
+import inspect
 import json
 import unittest
 from types import SimpleNamespace
@@ -90,12 +91,14 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("selection_mode=\"multi-row\"", source)
         self.assertIn("Generate Selected Certificates", source)
         self.assertIn("Upload Selected to Shopify", source)
-        self.assertIn("Allocate Missing Paid Orders", source)
-        self.assertIn("Enable Live Allocation From Now", source)
-        self.assertIn("Capture Product Baselines", source)
+        self.assertIn("Activate Live Allocation", source)
+        self.assertIn("Advanced Allocation Tools", source)
+        self.assertIn("Re-capture Product Baselines", source)
+        self.assertIn("Allocate Missing Recent Paid Orders", source)
         self.assertIn("Historical Backfill Selected Orders", source)
         self.assertIn("Confirm allocation repair", source)
         self.assertIn("Confirm historical backfill", source)
+        self.assertIn("fetch_edition_ops_active_products", source)
         self.assertIn("PERF Orders", source)
         self.assertIn('"load snapshot"', source)
         self.assertIn('"render table"', source)
@@ -109,6 +112,9 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("Overwrite Selected Order Allocation", source)
         self.assertNotIn("Override Selected Order Allocation", source)
         self.assertNotIn("Manual Allocation", source)
+        self.assertNotIn("Enable Live Allocation From Now", source)
+        self.assertNotIn("Capture Product Baselines", source)
+        self.assertNotIn("Allocate Missing Paid Orders", source)
         self.assertNotIn("st.data_editor", source)
         self.assertIn("sync_order_allocation_metafield", source)
         self.assertNotIn('"qty"', source)
@@ -116,6 +122,37 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn('"sync_status"', source)
         self.assertNotIn('"admin_url"', source)
         self.assertNotIn("supabase_backend", source)
+
+    def test_orders_main_toolbar_only_contains_daily_actions(self):
+        top_actions = inspect.getsource(orders_page._render_top_actions)
+        advanced_actions = inspect.getsource(orders_page._render_advanced_allocation_tools)
+        status_card = inspect.getsource(orders_page._render_allocation_status_card)
+
+        for label in (
+            "Refresh Orders",
+            "Generate Selected Certificates",
+            "Upload Selected to Shopify",
+            "Generate + Upload Selected",
+            "Open Selected PDF",
+        ):
+            self.assertIn(label, top_actions)
+
+        for label in (
+            "Activate Live Allocation",
+            "Re-capture Product Baselines",
+            "Allocate Missing Recent Paid Orders",
+            "Historical Backfill Selected Orders",
+            "Confirm allocation repair",
+            "Confirm historical backfill",
+        ):
+            self.assertNotIn(label, top_actions)
+
+        self.assertIn("Activate Live Allocation", status_card)
+        self.assertIn("Advanced Allocation Tools", advanced_actions)
+        self.assertIn("Use these only to repair orders placed before or during the allocation bug", advanced_actions)
+        self.assertIn("Re-capture Product Baselines", advanced_actions)
+        self.assertIn("Allocate Missing Recent Paid Orders", advanced_actions)
+        self.assertIn("Historical Backfill Selected Orders", advanced_actions)
 
     def test_orders_page_open_renders_snapshot_without_shopify_or_allocation_work(self):
         class FakeContainer:
@@ -162,6 +199,12 @@ class EditionOpsUiTests(unittest.TestCase):
             def info(self, *args, **kwargs):
                 return None
 
+            def warning(self, *args, **kwargs):
+                return None
+
+            def expander(self, *args, **kwargs):
+                return FakeContainer()
+
         fake_st = FakeStreamlit()
         snapshot = {
             "rows": [
@@ -188,6 +231,10 @@ class EditionOpsUiTests(unittest.TestCase):
             "load_orders_snapshot",
             return_value=snapshot,
         ), patch.object(
+            orders_page.order_allocator,
+            "load_cutover_state",
+            return_value={"active": False, "automation_started_at": "", "baselines": {}},
+        ), patch.object(
             orders_page.shopify_sync,
             "iter_order_pages",
             side_effect=AssertionError("Orders page open must not fetch Shopify orders."),
@@ -203,11 +250,66 @@ class EditionOpsUiTests(unittest.TestCase):
             orders_page.certificate_engine,
             "read_order_certificate_state",
             side_effect=AssertionError("Orders page open must not fetch certificates."),
+        ), patch.object(
+            orders_page.shopify_sync,
+            "fetch_edition_ops_active_products",
+            side_effect=AssertionError("Orders page open must not fetch product baselines."),
         ):
             orders_page.render_page()
 
         self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC1234")
         self.assertEqual(set(fake_st.rendered_rows[0]), set(orders_page.VISIBLE_COLUMNS))
+
+    def test_activate_live_allocation_fetches_shopify_products_and_persists_state(self):
+        fake_st = SimpleNamespace(session_state={orders_page.NOTICE_KEY: ""})
+        captured_rows = []
+
+        def fake_activate(rows):
+            captured_rows.extend(rows)
+            return {
+                "active": True,
+                "automation_started_at": "2026-06-23T10:00:00Z",
+                "captured_count": len(rows),
+                "baselines": {"gid://shopify/Product/777": {}},
+            }
+
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page.shopify_sync,
+            "get_config",
+            return_value={"configured": True, "edition_ops_max_products": 500},
+        ), patch.object(
+            orders_page.shopify_sync,
+            "fetch_edition_ops_active_products",
+            return_value={
+                "products": [
+                    {
+                        "shopify_product_id": "gid://shopify/Product/777",
+                        "title": "Justin Gaethje Undisputed Wall Art",
+                        "handle": "justin-gaethje-undisputed-wall-art",
+                        "edition": {
+                            "edition_enabled": True,
+                            "edition_total": 100,
+                            "edition_next_number": 13,
+                            "edition_sold_count": 12,
+                            "edition_remaining": 88,
+                            "edition_status": "Limited Edition",
+                        },
+                    }
+                ]
+            },
+        ) as fetch_products, patch.object(
+            orders_page.order_allocator,
+            "activate_live_allocation",
+            side_effect=fake_activate,
+        ) as activate:
+            orders_page._activate_live_allocation()
+
+        fetch_products.assert_called_once()
+        activate.assert_called_once()
+        self.assertEqual(captured_rows[0]["shopify_product_gid"], "gid://shopify/Product/777")
+        self.assertEqual(captured_rows[0]["edition_next_number"], 13)
+        self.assertIn("Live allocation active", fake_st.session_state[orders_page.NOTICE_KEY])
+        self.assertIn("Baselines captured: 1 product", fake_st.session_state[orders_page.NOTICE_KEY])
 
     def test_refresh_orders_fetches_shopify_without_allocation_or_product_metafields(self):
         fake_st = SimpleNamespace(
