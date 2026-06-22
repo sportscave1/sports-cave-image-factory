@@ -58,30 +58,33 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Check Product Metafield Definitions", source)
         self.assertIn("Create Missing Product Metafield Definitions", source)
 
-    def test_blank_status_override_is_auto_and_not_written_to_shopify(self):
-        blank_inputs = shopify_sync.limited_edition_metafield_inputs(
+    def test_limited_edition_inputs_use_only_calculated_mvp_metafields(self):
+        inputs = shopify_sync.limited_edition_metafield_inputs(
             "gid://shopify/Product/1",
             {
                 "edition_enabled": True,
                 "edition_total": 100,
                 "edition_next_number": 65,
                 "edition_label": "Numbered Edition",
-                "edition_status_override": "",
             },
         )
-        override_inputs = shopify_sync.limited_edition_metafield_inputs(
-            "gid://shopify/Product/1",
-            {
-                "edition_enabled": True,
-                "edition_total": 100,
-                "edition_next_number": 65,
-                "edition_label": "Numbered Edition",
-                "edition_status_override": "Final Editions",
-            },
-        )
+        keys = {item["key"]: item["value"] for item in inputs}
 
-        self.assertNotIn("edition_status_override", {item["key"] for item in blank_inputs})
-        self.assertIn("edition_status_override", {item["key"] for item in override_inputs})
+        self.assertEqual(
+            set(keys),
+            {
+                "edition_enabled",
+                "edition_total",
+                "edition_next_number",
+                "edition_sold_count",
+                "edition_remaining",
+                "edition_status",
+                "edition_label",
+            },
+        )
+        self.assertEqual(keys["edition_sold_count"], "64")
+        self.assertEqual(keys["edition_remaining"], "36")
+        self.assertEqual(keys["edition_status"], "Limited Edition")
 
     def test_edition_ops_export_uses_required_csv_columns(self):
         row = edition_ops._normalise_row(

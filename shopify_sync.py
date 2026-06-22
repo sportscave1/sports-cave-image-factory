@@ -673,9 +673,10 @@ LIMITED_EDITION_DEFAULTS = {
     "edition_enabled": False,
     "edition_total": 100,
     "edition_next_number": 1,
-    "edition_status_override": "",
     "edition_label": "Numbered Edition",
 }
+EDITION_OPS_METAFIELDS_PER_PRODUCT = 7
+SHOPIFY_METAFIELDS_SET_LIMIT = 25
 
 
 EDITION_OPS_METAFIELD_DEFINITIONS = [
@@ -701,16 +702,30 @@ EDITION_OPS_METAFIELD_DEFINITIONS = [
         "ownerType": "PRODUCT",
     },
     {
-        "name": "Sports Cave Edition Label",
+        "name": "Sports Cave Edition Sold Count",
         "namespace": "sports_cave",
-        "key": "edition_label",
+        "key": "edition_sold_count",
+        "type": "number_integer",
+        "ownerType": "PRODUCT",
+    },
+    {
+        "name": "Sports Cave Edition Remaining",
+        "namespace": "sports_cave",
+        "key": "edition_remaining",
+        "type": "number_integer",
+        "ownerType": "PRODUCT",
+    },
+    {
+        "name": "Sports Cave Edition Status",
+        "namespace": "sports_cave",
+        "key": "edition_status",
         "type": "single_line_text_field",
         "ownerType": "PRODUCT",
     },
     {
-        "name": "Sports Cave Status Override",
+        "name": "Sports Cave Edition Label",
         "namespace": "sports_cave",
-        "key": "edition_status_override",
+        "key": "edition_label",
         "type": "single_line_text_field",
         "ownerType": "PRODUCT",
     },
@@ -751,6 +766,22 @@ def calculate_limited_edition_remaining(edition_total, edition_next_number):
     return max(total - next_number + 1, 0)
 
 
+def calculate_limited_edition_sold_count(edition_next_number):
+    next_number = max(_parse_int_metafield(edition_next_number, LIMITED_EDITION_DEFAULTS["edition_next_number"]), 1)
+    return max(next_number - 1, 0)
+
+
+def calculate_limited_edition_status(remaining):
+    remaining = max(_parse_int_metafield(remaining, 0), 0)
+    if remaining <= 0:
+        return "Sold Out Archive"
+    if remaining <= 5:
+        return "Final Editions"
+    if remaining <= 12:
+        return "Selling Quickly"
+    return "Limited Edition"
+
+
 def normalize_limited_edition_metafields(metafields):
     by_key = _metafields_by_key(metafields)
     edition_total = max(
@@ -771,7 +802,9 @@ def normalize_limited_edition_metafields(metafields):
         (by_key.get("edition_label") or {}).get("value")
         or LIMITED_EDITION_DEFAULTS["edition_label"]
     ).strip() or LIMITED_EDITION_DEFAULTS["edition_label"]
-    status_override = str((by_key.get("edition_status_override") or {}).get("value") or "").strip()
+    sold_count = calculate_limited_edition_sold_count(edition_next_number)
+    remaining = max(edition_total - sold_count, 0)
+    status = calculate_limited_edition_status(remaining)
     enabled = _parse_bool_metafield(
         (by_key.get("edition_enabled") or {}).get("value"),
         LIMITED_EDITION_DEFAULTS["edition_enabled"],
@@ -780,9 +813,11 @@ def normalize_limited_edition_metafields(metafields):
         "edition_enabled": enabled,
         "edition_total": edition_total,
         "edition_next_number": edition_next_number,
-        "edition_status_override": status_override,
+        "edition_sold_count": sold_count,
+        "edition_remaining": remaining,
+        "edition_status": status,
         "edition_label": edition_label,
-        "remaining": calculate_limited_edition_remaining(edition_total, edition_next_number),
+        "remaining": remaining,
     }
 
 
@@ -1232,8 +1267,10 @@ def limited_edition_metafield_inputs(product_id, values):
         _parse_int_metafield(values.get("edition_next_number"), LIMITED_EDITION_DEFAULTS["edition_next_number"]),
         1,
     )
-    status_override = str(values.get("edition_status_override") or "").strip()
-    inputs = [
+    edition_sold_count = calculate_limited_edition_sold_count(edition_next_number)
+    edition_remaining = max(edition_total - edition_sold_count, 0)
+    edition_status = calculate_limited_edition_status(edition_remaining)
+    return [
         _metafield_input(
             owner_id,
             "edition_enabled",
@@ -1242,6 +1279,9 @@ def limited_edition_metafield_inputs(product_id, values):
         ),
         _metafield_input(owner_id, "edition_total", "number_integer", edition_total),
         _metafield_input(owner_id, "edition_next_number", "number_integer", edition_next_number),
+        _metafield_input(owner_id, "edition_sold_count", "number_integer", edition_sold_count),
+        _metafield_input(owner_id, "edition_remaining", "number_integer", edition_remaining),
+        _metafield_input(owner_id, "edition_status", "single_line_text_field", edition_status),
         _metafield_input(
             owner_id,
             "edition_label",
@@ -1250,16 +1290,6 @@ def limited_edition_metafield_inputs(product_id, values):
             or LIMITED_EDITION_DEFAULTS["edition_label"],
         ),
     ]
-    if status_override:
-        inputs.append(
-            _metafield_input(
-                owner_id,
-                "edition_status_override",
-                "single_line_text_field",
-                status_override,
-            )
-        )
-    return inputs
 
 
 def save_limited_edition_metafields(product_id, values, config=None, request_post=None):
@@ -1290,8 +1320,9 @@ def sync_limited_edition_metafields_for_products(products, config=None, request_
     synced = 0
     failed = 0
 
-    for index in range(0, len(rows), 5):
-        chunk = rows[index : index + 5]
+    products_per_batch = max(1, SHOPIFY_METAFIELDS_SET_LIMIT // EDITION_OPS_METAFIELDS_PER_PRODUCT)
+    for index in range(0, len(rows), products_per_batch):
+        chunk = rows[index : index + products_per_batch]
         inputs = []
         for row in chunk:
             inputs.extend(limited_edition_metafield_inputs(row["shopify_product_id"], row))

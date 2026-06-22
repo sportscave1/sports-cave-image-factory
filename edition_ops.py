@@ -37,7 +37,6 @@ EDITABLE_FIELDS = (
     "edition_total",
     "edition_next_number",
     "edition_label",
-    "edition_status_override",
 )
 
 VISIBLE_COLUMNS = (
@@ -78,7 +77,6 @@ CSV_COLUMNS = (
     "edition_total",
     "edition_next_number",
     "edition_label",
-    "edition_status_override",
     "remaining",
     "widget_status",
     "online_store_url",
@@ -125,10 +123,7 @@ def _remaining(total, next_number):
     return max(total_value - next_value + 1, 0)
 
 
-def _widget_status(remaining, override=""):
-    override_text = str(override or "").strip()
-    if override_text:
-        return override_text
+def _widget_status(remaining):
     if remaining <= 0:
         return "Sold Out Archive"
     if remaining <= 5:
@@ -202,12 +197,9 @@ def _normalise_row(row):
         str(updated.get("edition_label") or updated.get("Edition label") or "Numbered Edition").strip()
         or "Numbered Edition"
     )
-    updated["edition_status_override"] = str(
-        updated.get("edition_status_override", updated.get("Status override", ""))
-        or ""
-    ).strip()
     updated["remaining"] = _remaining(updated["edition_total"], updated["edition_next_number"])
-    updated["widget_status"] = _widget_status(updated["remaining"], updated["edition_status_override"])
+    updated["widget_status"] = _widget_status(updated["remaining"])
+    updated["edition_status"] = updated["widget_status"]
     updated["online_store_url"] = str(updated.get("online_store_url") or updated.get("Open live product") or "")
     updated["admin_url"] = str(updated.get("admin_url") or updated.get("Open Shopify") or "")
     updated["last_synced_at"] = str(updated.get("last_synced_at") or "")
@@ -229,7 +221,6 @@ def _row_from_product(product):
         "edition_total": _coerce_int(edition.get("edition_total"), 100),
         "edition_next_number": _coerce_int(edition.get("edition_next_number"), 1),
         "edition_label": edition.get("edition_label") or "Numbered Edition",
-        "edition_status_override": edition.get("edition_status_override") or "",
         "online_store_url": product.get("online_store_url") or "",
         "admin_url": product.get("admin_url") or "",
         "last_synced_at": "",
@@ -511,7 +502,8 @@ def _advance_product_rows_from_orders(product_rows, order_rows):
         if required_next > next_number:
             row["edition_next_number"] = required_next
             row["remaining"] = _remaining(row["edition_total"], row["edition_next_number"])
-            row["widget_status"] = _widget_status(row["remaining"], row["edition_status_override"])
+            row["widget_status"] = _widget_status(row["remaining"])
+            row["edition_status"] = row["widget_status"]
             row["sync_status"] = "Auto advanced"
             row["sync_error"] = ""
             changed.append(_normalise_row(row))
@@ -692,7 +684,6 @@ def _shopify_values_from_row(row):
         "edition_total": recalculated.get("edition_total"),
         "edition_next_number": recalculated.get("edition_next_number"),
         "edition_label": recalculated.get("edition_label"),
-        "edition_status_override": recalculated.get("edition_status_override"),
     }
 
 
@@ -914,16 +905,6 @@ def _apply_csv_updates_to_rows(rows, csv_text):
         label_value = _csv_value(csv_row, "edition_label", "Edition label", "edition label")
         if str(label_value or "").strip():
             updated["edition_label"] = str(label_value).strip()
-        status_override_value = _csv_value(
-            csv_row,
-            "edition_status_override",
-            "Status override",
-            "edition status override",
-        )
-        if _normalise_csv_header("edition_status_override") in {_normalise_csv_header(key) for key in csv_row} or (
-            _normalise_csv_header("Status override") in {_normalise_csv_header(key) for key in csv_row}
-        ):
-            updated["edition_status_override"] = str(status_override_value or "").strip()
         updated["sync_status"] = "Imported"
         updated["sync_error"] = ""
         normalised = _normalise_row(updated)

@@ -462,7 +462,7 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(product["online_store_url"], "https://sportscaveshop.com/products/all-rise-wall-art")
         self.assertEqual(product["edition"]["remaining"], 48)
 
-    def test_edition_ops_sync_batches_five_products_per_metafields_set(self):
+    def test_edition_ops_sync_batches_three_products_per_metafields_set(self):
         requests_seen = []
 
         def fake_post(*args, **kwargs):
@@ -486,7 +486,6 @@ class ShopifySyncClientTests(unittest.TestCase):
                 "edition_total": 100,
                 "edition_next_number": index,
                 "edition_label": "Numbered Edition",
-                "edition_status_override": "",
             }
             for index in range(1, 8)
         ]
@@ -499,9 +498,10 @@ class ShopifySyncClientTests(unittest.TestCase):
 
         self.assertEqual(result["synced"], 7)
         self.assertEqual(result["failed"], 0)
-        self.assertEqual(len(requests_seen), 2)
-        self.assertEqual(len(requests_seen[0]["variables"]["metafields"]), 20)
-        self.assertEqual(len(requests_seen[1]["variables"]["metafields"]), 8)
+        self.assertEqual(len(requests_seen), 3)
+        self.assertEqual(len(requests_seen[0]["variables"]["metafields"]), 21)
+        self.assertEqual(len(requests_seen[1]["variables"]["metafields"]), 21)
+        self.assertEqual(len(requests_seen[2]["variables"]["metafields"]), 7)
 
     def test_edition_ops_metafield_definition_check_and_create_missing(self):
         requests_seen = []
@@ -528,6 +528,8 @@ class ShopifySyncClientTests(unittest.TestCase):
             FakeResponse({"data": {"metafieldDefinitionCreate": {"createdDefinition": {"id": "3"}, "userErrors": []}}}),
             FakeResponse({"data": {"metafieldDefinitionCreate": {"createdDefinition": {"id": "4"}, "userErrors": []}}}),
             FakeResponse({"data": {"metafieldDefinitionCreate": {"createdDefinition": {"id": "5"}, "userErrors": []}}}),
+            FakeResponse({"data": {"metafieldDefinitionCreate": {"createdDefinition": {"id": "6"}, "userErrors": []}}}),
+            FakeResponse({"data": {"metafieldDefinitionCreate": {"createdDefinition": {"id": "7"}, "userErrors": []}}}),
             FakeResponse(
                 {
                     "data": {
@@ -558,14 +560,17 @@ class ShopifySyncClientTests(unittest.TestCase):
             request_post=fake_post,
         )
 
-        self.assertEqual(len(result["created"]), 4)
+        self.assertEqual(len(result["created"]), 6)
         self.assertEqual(len(result["skipped"]), 1)
         self.assertEqual(result["definitions"][0]["status"], "Ready")
         create_requests = [request for request in requests_seen if "metafieldDefinitionCreate" in request["query"]]
-        self.assertEqual(len(create_requests), 4)
+        self.assertEqual(len(create_requests), 6)
         created_keys = {request["variables"]["definition"]["key"] for request in create_requests}
         self.assertNotIn("edition_enabled", created_keys)
         self.assertIn("edition_next_number", created_keys)
+        self.assertIn("edition_sold_count", created_keys)
+        self.assertIn("edition_remaining", created_keys)
+        self.assertIn("edition_status", created_keys)
 
     def test_limited_edition_metafields_save_exact_keys_and_readback(self):
         requests_seen = []
@@ -607,9 +612,21 @@ class ShopifySyncClientTests(unittest.TestCase):
                                     },
                                     {
                                         "namespace": "sports_cave",
-                                        "key": "edition_status_override",
+                                        "key": "edition_sold_count",
+                                        "type": "number_integer",
+                                        "value": "97",
+                                    },
+                                    {
+                                        "namespace": "sports_cave",
+                                        "key": "edition_remaining",
+                                        "type": "number_integer",
+                                        "value": "3",
+                                    },
+                                    {
+                                        "namespace": "sports_cave",
+                                        "key": "edition_status",
                                         "type": "single_line_text_field",
-                                        "value": " ",
+                                        "value": "Final Editions",
                                     },
                                     {
                                         "namespace": "sports_cave",
@@ -635,7 +652,6 @@ class ShopifySyncClientTests(unittest.TestCase):
                 "edition_enabled": True,
                 "edition_total": 100,
                 "edition_next_number": 98,
-                "edition_status_override": "",
                 "edition_label": "Numbered Edition",
             },
             config=self.config,
@@ -650,15 +666,22 @@ class ShopifySyncClientTests(unittest.TestCase):
                 "edition_enabled",
                 "edition_total",
                 "edition_next_number",
+                "edition_sold_count",
+                "edition_remaining",
+                "edition_status",
                 "edition_label",
             },
         )
         self.assertEqual(keys["edition_enabled"]["type"], "boolean")
         self.assertEqual(keys["edition_enabled"]["value"], "true")
+        self.assertEqual(keys["edition_sold_count"]["value"], "97")
+        self.assertEqual(keys["edition_remaining"]["value"], "3")
+        self.assertEqual(keys["edition_status"]["value"], "Final Editions")
         self.assertNotIn("remaining_count", keys)
         self.assertNotIn("sold_count", keys)
         self.assertEqual(result["edition"]["remaining"], 3)
-        self.assertEqual(result["edition"]["edition_status_override"], "")
+        self.assertEqual(result["edition"]["edition_sold_count"], 97)
+        self.assertEqual(result["edition"]["edition_status"], "Final Editions")
 
     def test_normalize_order_uses_customer_fallbacks(self):
         order = shopify_sync.normalize_order(
