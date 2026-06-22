@@ -151,6 +151,34 @@ def _coerce_int(value, default):
         return default
 
 
+def _normalise_csv_header(value):
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def _csv_value(row, *aliases):
+    if not row:
+        return ""
+    normalised = {_normalise_csv_header(key): value for key, value in row.items()}
+    for alias in aliases:
+        key = _normalise_csv_header(alias)
+        if key in normalised:
+            return normalised[key]
+    return ""
+
+
+def _parse_positive_int(raw_value):
+    text = str(raw_value or "").strip().replace(",", "")
+    if text == "":
+        return None
+    try:
+        numeric = float(text)
+    except ValueError:
+        return "invalid"
+    if not numeric.is_integer() or numeric < 1:
+        return "invalid"
+    return int(numeric)
+
+
 def _normalise_row(row):
     updated = dict(row or {})
     updated["shopify_product_gid"] = str(
@@ -307,13 +335,35 @@ def _product_lookup(product_rows):
     return by_gid, by_handle
 
 
-def _edition_for_order_line(order_row, products_by_gid, products_by_handle, cursors):
-    product = products_by_gid.get(order_row.get("shopify_product_gid")) or products_by_handle.get(
+def _order_line_key(row):
+    normalised = _normalise_order_row(row)
+    if normalised.get("shopify_line_item_id"):
+        return normalised["shopify_line_item_id"]
+    return "::".join(
+        [
+            normalised.get("shopify_order_id") or normalised.get("order_name"),
+            normalised.get("shopify_product_gid") or normalised.get("product_handle"),
+            normalised.get("variant_title"),
+            normalised.get("sku"),
+        ]
+    )
+
+
+def _product_for_order_line(order_row, products_by_gid, products_by_handle):
+    return products_by_gid.get(order_row.get("shopify_product_gid")) or products_by_handle.get(
         order_row.get("product_handle")
     )
+
+
+def _product_key(product):
+    return (product or {}).get("shopify_product_gid") or (product or {}).get("handle") or ""
+
+
+def _edition_for_order_line(order_row, products_by_gid, products_by_handle, cursors):
+    product = _product_for_order_line(order_row, products_by_gid, products_by_handle)
     if not product:
         return "", "Product not in table"
-    product_key = product.get("shopify_product_gid") or product.get("handle")
+    product_key = _product_key(product)
     if not product.get("edition_enabled"):
         return "", "Edition not enabled"
 
@@ -336,8 +386,21 @@ def _edition_for_order_line(order_row, products_by_gid, products_by_handle, curs
 def _recalculate_order_editions(order_rows, product_rows, *, generate_certificates=False):
     products_by_gid, products_by_handle = _product_lookup(product_rows)
     cursors = {}
+    normalised_rows = [_normalise_order_row(row) for row in order_rows]
+
+    for row in normalised_rows:
+        assigned_numbers, _edition_total = _edition_numbers_from_display(row.get("edition_display"))
+        if not assigned_numbers:
+            continue
+        product = _product_for_order_line(row, products_by_gid, products_by_handle)
+        product_key = _product_key(product)
+        if not product_key:
+            continue
+        product_next = _coerce_int((product or {}).get("edition_next_number"), 1)
+        cursors[product_key] = max(cursors.get(product_key, product_next), max(assigned_numbers) + 1)
+
     allocation_order = sorted(
-        [_normalise_order_row(row) for row in order_rows],
+        normalised_rows,
         key=lambda row: (
             row.get("created_at") or "",
             row.get("order_name") or "",
@@ -346,15 +409,20 @@ def _recalculate_order_editions(order_rows, product_rows, *, generate_certificat
     )
     calculated_by_line = {}
     for row in allocation_order:
-        edition_display, edition_status = _edition_for_order_line(row, products_by_gid, products_by_handle, cursors)
-        calculated_by_line[row.get("shopify_line_item_id") or f"{row.get('order_name')}::{row.get('product_title')}"] = (
+        assigned_numbers, _edition_total = _edition_numbers_from_display(row.get("edition_display"))
+        if assigned_numbers:
+            edition_display = row.get("edition_display") or ""
+            edition_status = row.get("edition_status") or "Ready"
+        else:
+            edition_display, edition_status = _edition_for_order_line(row, products_by_gid, products_by_handle, cursors)
+        calculated_by_line[_order_line_key(row)] = (
             edition_display,
             edition_status,
         )
 
     recalculated = []
-    for row in [_normalise_order_row(row) for row in order_rows]:
-        key = row.get("shopify_line_item_id") or f"{row.get('order_name')}::{row.get('product_title')}"
+    for row in normalised_rows:
+        key = _order_line_key(row)
         edition_display, edition_status = calculated_by_line.get(key, ("", ""))
         row["edition_display"] = edition_display
         row["edition_status"] = edition_status
@@ -362,34 +430,75 @@ def _recalculate_order_editions(order_rows, product_rows, *, generate_certificat
     return sorted(recalculated, key=lambda row: row.get("created_at") or "", reverse=True)
 
 
-def _order_rows_from_shopify_orders(orders, product_rows, *, generate_certificates=False):
+def _order_rows_from_shopify_orders(orders, product_rows, *, existing_order_rows=None, generate_certificates=False):
+    existing_by_key = {
+        _order_line_key(row): _normalise_order_row(row)
+        for row in (existing_order_rows or [])
+        if _order_line_key(row)
+    }
     rows = []
     for order in orders:
         for item in order.get("line_items") or []:
-            rows.append(
-                _normalise_order_row(
-                    {
-                        "shopify_order_id": order.get("shopify_order_id") or "",
-                        "legacy_resource_id": order.get("legacy_resource_id") or "",
-                        "shopify_line_item_id": item.get("shopify_line_item_id") or "",
-                        "shopify_product_gid": item.get("shopify_product_id") or "",
-                        "product_handle": item.get("product_handle") or "",
-                        "order_name": order.get("order_name") or "",
-                        "created_at": order.get("created_at") or order.get("processed_at") or "",
-                        "customer_name": order.get("customer_name") or "",
-                        "customer_email": order.get("customer_email") or "",
-                        "product_title": item.get("product_title") or "",
-                        "variant_title": item.get("variant_title") or "",
-                        "sku": item.get("sku") or "",
-                        "quantity": item.get("quantity") or 1,
-                        "shipping_method": order.get("shipping_method") or order.get("shipping_title") or "",
-                        "financial_status": order.get("financial_status") or "",
-                        "fulfillment_status": order.get("fulfillment_status") or "",
-                        "admin_url": order.get("admin_url") or "",
-                    }
-                )
+            row = _normalise_order_row(
+                {
+                    "shopify_order_id": order.get("shopify_order_id") or "",
+                    "legacy_resource_id": order.get("legacy_resource_id") or "",
+                    "shopify_line_item_id": item.get("shopify_line_item_id") or "",
+                    "shopify_product_gid": item.get("shopify_product_id") or "",
+                    "product_handle": item.get("product_handle") or "",
+                    "order_name": order.get("order_name") or "",
+                    "created_at": order.get("created_at") or order.get("processed_at") or "",
+                    "customer_name": order.get("customer_name") or "",
+                    "customer_email": order.get("customer_email") or "",
+                    "product_title": item.get("product_title") or "",
+                    "variant_title": item.get("variant_title") or "",
+                    "sku": item.get("sku") or "",
+                    "quantity": item.get("quantity") or 1,
+                    "shipping_method": order.get("shipping_method") or order.get("shipping_title") or "",
+                    "financial_status": order.get("financial_status") or "",
+                    "fulfillment_status": order.get("fulfillment_status") or "",
+                    "admin_url": order.get("admin_url") or "",
+                }
             )
+            existing = existing_by_key.get(_order_line_key(row))
+            if existing and _edition_numbers_from_display(existing.get("edition_display"))[0]:
+                row["edition_display"] = existing.get("edition_display") or ""
+                row["edition_status"] = existing.get("edition_status") or "Ready"
+                row["certificate_display"] = existing.get("certificate_display") or ""
+                row["certificate_ids"] = existing.get("certificate_ids") or ""
+                row["certificate_file_paths"] = existing.get("certificate_file_paths") or ""
+            rows.append(row)
     return _recalculate_order_editions(rows, product_rows, generate_certificates=generate_certificates)
+
+
+def _advance_product_rows_from_orders(product_rows, order_rows):
+    products_by_gid, products_by_handle = _product_lookup(product_rows)
+    highest_by_product = {}
+    for row in [_normalise_order_row(item) for item in order_rows]:
+        assigned_numbers, _edition_total = _edition_numbers_from_display(row.get("edition_display"))
+        if not assigned_numbers:
+            continue
+        product = _product_for_order_line(row, products_by_gid, products_by_handle)
+        product_key = _product_key(product)
+        if not product_key:
+            continue
+        highest_by_product[product_key] = max(highest_by_product.get(product_key, 0), max(assigned_numbers))
+
+    changed = []
+    updated_rows = []
+    for row in [_normalise_row(item) for item in product_rows]:
+        key = _product_key(row)
+        next_number = _coerce_int(row.get("edition_next_number"), 1)
+        required_next = highest_by_product.get(key, 0) + 1
+        if required_next > next_number:
+            row["edition_next_number"] = required_next
+            row["remaining"] = _remaining(row["edition_total"], row["edition_next_number"])
+            row["widget_status"] = _widget_status(row["remaining"], row["edition_status_override"])
+            row["sync_status"] = "Auto advanced"
+            row["sync_error"] = ""
+            changed.append(_normalise_row(row))
+        updated_rows.append(_normalise_row(row))
+    return updated_rows, changed
 
 
 def _ensure_state():
@@ -612,9 +721,36 @@ def _refresh_orders_from_shopify(product_rows):
     ):
         orders.extend(page.get("orders") or [])
     refreshed_at = _now_iso()
-    rows = _order_rows_from_shopify_orders(orders, product_rows, generate_certificates=True)
+    existing_order_rows = [_normalise_order_row(row) for row in st.session_state.get(ORDER_ROWS_KEY, [])]
+    rows = _order_rows_from_shopify_orders(
+        orders,
+        product_rows,
+        existing_order_rows=existing_order_rows,
+        generate_certificates=True,
+    )
+    updated_products, advanced_products = _advance_product_rows_from_orders(product_rows, rows)
     st.session_state[ORDER_ROWS_KEY] = rows
-    st.session_state[ORDER_NOTICE_KEY] = f"Refreshed {len(rows)} order lines."
+    if advanced_products:
+        st.session_state[ROWS_KEY] = updated_products
+        st.session_state[ORIGINAL_ROWS_KEY] = deepcopy(updated_products)
+        _write_snapshot(updated_products, deepcopy(updated_products))
+        if config.get("configured"):
+            try:
+                result = shopify_sync.sync_limited_edition_metafields_for_products(
+                    [_shopify_values_from_row(row) for row in advanced_products],
+                    config=config,
+                )
+                if result.get("failed"):
+                    st.session_state[IMPORT_WARNINGS_KEY] = [
+                        f"{result.get('failed')} product next number update could not sync to Shopify. Local values are still kept."
+                    ]
+            except Exception as error:
+                st.session_state[IMPORT_WARNINGS_KEY] = [
+                    f"Product next numbers were saved locally, but Shopify sync failed: {error}"
+                ]
+    st.session_state[ORDER_NOTICE_KEY] = (
+        f"Refreshed {len(rows)} order lines. Advanced {len(advanced_products)} product next numbers."
+    )
     _write_orders_snapshot(rows, meta={"last_refreshed_from_shopify": refreshed_at})
     st.session_state[ORDER_EDITOR_VERSION_KEY] = int(st.session_state.get(ORDER_EDITOR_VERSION_KEY) or 0) + 1
 
@@ -707,33 +843,25 @@ def _export_csv(rows):
 def _validate_import_int(raw_value, field_name, row_label, warnings):
     if str(raw_value or "").strip() == "":
         return None
-    try:
-        value = int(str(raw_value).strip())
-    except ValueError:
-        warnings.append(f"{row_label}: {field_name} must be a whole number.")
-        return "invalid"
-    if value < 1:
+    value = _parse_positive_int(raw_value)
+    if value == "invalid":
         warnings.append(f"{row_label}: {field_name} must be 1 or higher.")
         return "invalid"
     return value
 
 
-def _apply_csv_import(uploaded_file):
-    if uploaded_file is None:
-        st.session_state[IMPORT_WARNINGS_KEY] = ["Choose a CSV file first."]
-        return
-
-    rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
+def _apply_csv_updates_to_rows(rows, csv_text):
+    rows = [_normalise_row(row) for row in rows]
     by_gid = {row.get("shopify_product_gid"): index for index, row in enumerate(rows) if row.get("shopify_product_gid")}
     by_handle = {row.get("handle"): index for index, row in enumerate(rows) if row.get("handle")}
     warnings = []
     changed_count = 0
+    changed_rows = []
 
-    text = uploaded_file.getvalue().decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
+    reader = csv.DictReader(io.StringIO(csv_text))
     for line_number, csv_row in enumerate(reader, start=2):
-        gid = str(csv_row.get("shopify_product_gid") or "").strip()
-        handle = str(csv_row.get("handle") or "").strip()
+        gid = str(_csv_value(csv_row, "shopify_product_gid", "shopify product gid", "product id") or "").strip()
+        handle = str(_csv_value(csv_row, "handle", "Handle") or "").strip()
         match_index = by_gid.get(gid) if gid else None
         if match_index is None and handle:
             match_index = by_handle.get(handle)
@@ -742,31 +870,103 @@ def _apply_csv_import(uploaded_file):
             warnings.append(f"{row_label}: not in the loaded table, ignored.")
             continue
 
-        total = _validate_import_int(csv_row.get("edition_total"), "edition_total", row_label, warnings)
-        next_number = _validate_import_int(csv_row.get("edition_next_number"), "edition_next_number", row_label, warnings)
+        total = _validate_import_int(
+            _csv_value(csv_row, "edition_total", "Edition total", "edition total"),
+            "edition_total",
+            row_label,
+            warnings,
+        )
+        next_number = _validate_import_int(
+            _csv_value(csv_row, "edition_next_number", "Next edition number", "edition next number", "next edition"),
+            "edition_next_number",
+            row_label,
+            warnings,
+        )
         if total == "invalid" or next_number == "invalid":
             continue
 
         updated = dict(rows[match_index])
-        if str(csv_row.get("edition_enabled") or "").strip():
-            updated["edition_enabled"] = _coerce_bool(csv_row.get("edition_enabled"))
+        enabled_value = _csv_value(csv_row, "edition_enabled", "Enabled", "edition enabled")
+        if str(enabled_value or "").strip():
+            updated["edition_enabled"] = _coerce_bool(enabled_value)
         if total is not None:
             updated["edition_total"] = total
         if next_number is not None:
             updated["edition_next_number"] = next_number
-        if str(csv_row.get("edition_label") or "").strip():
-            updated["edition_label"] = str(csv_row.get("edition_label")).strip()
-        if "edition_status_override" in csv_row:
-            updated["edition_status_override"] = str(csv_row.get("edition_status_override") or "").strip()
-        updated["sync_status"] = "Unsaved import"
+        label_value = _csv_value(csv_row, "edition_label", "Edition label", "edition label")
+        if str(label_value or "").strip():
+            updated["edition_label"] = str(label_value).strip()
+        status_override_value = _csv_value(
+            csv_row,
+            "edition_status_override",
+            "Status override",
+            "edition status override",
+        )
+        if _normalise_csv_header("edition_status_override") in {_normalise_csv_header(key) for key in csv_row} or (
+            _normalise_csv_header("Status override") in {_normalise_csv_header(key) for key in csv_row}
+        ):
+            updated["edition_status_override"] = str(status_override_value or "").strip()
+        updated["sync_status"] = "Imported"
         updated["sync_error"] = ""
-        rows[match_index] = _normalise_row(updated)
-        changed_count += 1
+        normalised = _normalise_row(updated)
+        if _editable_snapshot(normalised) != _editable_snapshot(rows[match_index]):
+            changed_count += 1
+            changed_rows.append(normalised)
+        rows[match_index] = normalised
+
+    return rows, changed_rows, changed_count, warnings
+
+
+def _apply_csv_import(uploaded_file):
+    if uploaded_file is None:
+        st.session_state[IMPORT_WARNINGS_KEY] = ["Choose a CSV file first."]
+        return
+
+    text = uploaded_file.getvalue().decode("utf-8-sig")
+    rows, changed_rows, changed_count, warnings = _apply_csv_updates_to_rows(
+        st.session_state.get(ROWS_KEY, []),
+        text,
+    )
+
+    config = shopify_sync.get_config()
+    if changed_rows and config.get("configured"):
+        try:
+            result = shopify_sync.sync_limited_edition_metafields_for_products(
+                [_shopify_values_from_row(row) for row in changed_rows],
+                config=config,
+            )
+            ok_ids = {item.get("shopify_product_id") for item in result.get("results") or [] if item.get("ok")}
+            failures = {
+                item.get("shopify_product_id"): item.get("message") or "Sync failed"
+                for item in result.get("results") or []
+                if not item.get("ok")
+            }
+            synced_at = _now_iso()
+            updated_rows = []
+            for row in rows:
+                product_id = row.get("shopify_product_gid")
+                updated = dict(row)
+                if product_id in ok_ids:
+                    updated["sync_status"] = "Synced"
+                    updated["sync_error"] = ""
+                    updated["last_synced_at"] = synced_at
+                elif product_id in failures:
+                    updated["sync_status"] = "Error"
+                    updated["sync_error"] = failures[product_id]
+                updated_rows.append(_normalise_row(updated))
+            rows = updated_rows
+            if result.get("failed"):
+                warnings.append(f"{result.get('failed')} imported rows could not sync to Shopify. Local values are still kept.")
+        except Exception as error:
+            warnings.append(f"Imported values were saved locally, but Shopify sync failed: {error}")
+    elif changed_rows:
+        warnings.append("Shopify is not connected, so imported values were saved locally only.")
 
     st.session_state[ROWS_KEY] = rows
     st.session_state[NOTICE_KEY] = f"Imported updates for {changed_count} visible rows."
     st.session_state[IMPORT_WARNINGS_KEY] = warnings
-    _write_snapshot(rows, st.session_state.get(ORIGINAL_ROWS_KEY, []))
+    st.session_state[ORIGINAL_ROWS_KEY] = deepcopy(rows)
+    _write_snapshot(rows, deepcopy(rows))
     _bump_editor_version()
 
 
