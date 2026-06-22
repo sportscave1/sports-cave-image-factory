@@ -1,0 +1,279 @@
+{%- liquid
+  assign sc_enabled = product.metafields.sports_cave.edition_enabled.value
+  assign sc_enabled_text = sc_enabled | append: ''
+  assign edition_total = product.metafields.sports_cave.edition_total.value | default: 0 | plus: 0
+  assign qty = product.metafields.sports_cave.edition_remaining.value | default: 0 | plus: 0
+  assign label = ''
+  assign state = 'hidden'
+  assign sc_section_id = section.id | default: 'section'
+  assign sc_product_id = product.id | default: 'product'
+  assign sc_urg_id = 'scx-urg-' | append: sc_section_id | append: '-' | append: sc_product_id
+
+  if sc_enabled == true or sc_enabled_text == 'true'
+    if edition_total > 0 and qty > 0
+      if qty == 1
+        assign label = 'Final 1 of ' | append: edition_total | append: ' remaining'
+        assign state = 'final'
+      elsif qty >= 2 and qty <= 3
+        assign label = 'Final ' | append: qty | append: ' of ' | append: edition_total | append: ' remaining'
+        assign state = 'final'
+      elsif qty >= 4 and qty <= 6
+        assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
+        assign state = 'low'
+      elsif qty >= 7 and qty <= 12
+        assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
+        assign state = 'count'
+      elsif qty >= 13
+        assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
+        assign state = 'standard'
+      endif
+    endif
+  endif
+-%}
+
+{%- if state != 'hidden' -%}
+  <div
+    id="{{ sc_urg_id }}"
+    class="scx-urg-rail"
+    aria-label="Limited run availability"
+    data-urg-state="{{ state }}"
+    data-edition-total="{{ edition_total }}"
+  >
+    <div class="scx-urg" aria-live="off">
+      <span class="scx-urg__badge" data-scx-urg-badge>
+        <span class="scx-urg__dot" aria-hidden="true"></span>
+        <span class="scx-urg__text" data-scx-urg-text>{{ label }}</span>
+      </span>
+    </div>
+  </div>
+
+  <style>
+    #{{ sc_urg_id }},
+    #{{ sc_urg_id }} *{
+      box-sizing:border-box;
+    }
+
+    #{{ sc_urg_id }}{
+      --sc-black:#0B0B0D;
+      --sc-gold:#D4A54C;
+      --sc-gold-soft:#E2C17A;
+      --sc-orange:#F7A007;
+      --sc-amber:#E2A93B;
+      --urg-inset-x:6px;
+      --urg-top:-2px;
+      position:relative!important;
+      height:0!important;
+      overflow:visible!important;
+      pointer-events:none!important;
+      z-index:20!important;
+      font-family:"Montserrat",system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+      -webkit-font-smoothing:antialiased;
+    }
+
+    #{{ sc_urg_id }} .scx-urg{
+      position:absolute!important;
+      right:var(--urg-inset-x)!important;
+      top:var(--urg-top)!important;
+      display:flex!important;
+      align-items:center!important;
+      justify-content:flex-end!important;
+      max-width:min(61vw, 308px)!important;
+    }
+
+    #{{ sc_urg_id }} .scx-urg__badge{
+      position:relative!important;
+      display:inline-flex!important;
+      align-items:center!important;
+      justify-content:center!important;
+      gap:7.7px!important;
+      min-height:36px!important;
+      padding:7.7px 14.3px 7.7px 13.2px!important;
+      border-radius:999px!important;
+      border:1px solid rgba(212,165,76,.62)!important;
+      background:
+        radial-gradient(circle at 18% 0%, rgba(212,165,76,.20) 0%, rgba(212,165,76,0) 42%),
+        linear-gradient(180deg, rgba(22,22,23,.98) 0%, rgba(11,11,13,.98) 100%)!important;
+      box-shadow:
+        0 1px 0 rgba(255,255,255,.09) inset,
+        0 7px 18px rgba(0,0,0,.24),
+        0 0 0 1px rgba(0,0,0,.22)!important;
+      color:var(--sc-gold-soft)!important;
+      white-space:nowrap!important;
+      transform-origin:right center!important;
+    }
+
+    #{{ sc_urg_id }} .scx-urg__badge::after{
+      content:"";
+      position:absolute;
+      left:14.3px;
+      right:14.3px;
+      bottom:5.5px;
+      height:1px;
+      background:linear-gradient(90deg, rgba(212,165,76,0) 0%, rgba(212,165,76,.42) 22%, rgba(212,165,76,.82) 50%, rgba(212,165,76,.42) 78%, rgba(212,165,76,0) 100%);
+      opacity:.62;
+      pointer-events:none;
+    }
+
+    #{{ sc_urg_id }} .scx-urg__dot{
+      width:8.8px!important;
+      height:8.8px!important;
+      border-radius:999px!important;
+      flex:0 0 8.8px!important;
+      background:var(--sc-gold)!important;
+      box-shadow:0 0 10px rgba(212,165,76,.58);
+      animation:scxUrgPulse-{{ sc_section_id }}-{{ sc_product_id }} 2.8s ease-out infinite;
+    }
+
+    #{{ sc_urg_id }} .scx-urg__text{
+      color:var(--sc-gold-soft)!important;
+      font-size:.737rem!important;
+      line-height:1!important;
+      font-weight:950!important;
+      letter-spacing:.064em!important;
+      text-transform:uppercase!important;
+      white-space:nowrap!important;
+      text-align:right!important;
+    }
+
+    #{{ sc_urg_id }}[data-urg-state="standard"] .scx-urg__dot{
+      background:rgba(212,165,76,.78)!important;
+      box-shadow:0 0 8px rgba(212,165,76,.36);
+    }
+
+    #{{ sc_urg_id }}[data-urg-state="count"] .scx-urg__dot{
+      background:var(--sc-gold)!important;
+      box-shadow:0 0 11px rgba(212,165,76,.62);
+    }
+
+    #{{ sc_urg_id }}[data-urg-state="low"] .scx-urg__dot{
+      background:var(--sc-amber)!important;
+      box-shadow:0 0 13px rgba(226,169,59,.72);
+      animation-duration:2.1s;
+    }
+
+    #{{ sc_urg_id }}[data-urg-state="final"] .scx-urg__dot{
+      background:var(--sc-orange)!important;
+      box-shadow:0 0 15px rgba(247,160,7,.82);
+      animation-duration:1.55s;
+    }
+
+    @keyframes scxUrgPulse-{{ sc_section_id }}-{{ sc_product_id }}{
+      0%{
+        box-shadow:0 0 0 0 currentColor;
+        opacity:.90;
+      }
+      55%{
+        box-shadow:0 0 0 8px rgba(0,0,0,0);
+        opacity:1;
+      }
+      100%{
+        box-shadow:0 0 0 0 rgba(0,0,0,0);
+        opacity:.90;
+      }
+    }
+
+    .price,
+    .price__container,
+    .price-item,
+    .product__info-container .price,
+    .product__info-container .price__container{
+      overflow:visible!important;
+    }
+
+    @media(max-width:740px){
+      #{{ sc_urg_id }}{
+        --urg-inset-x:4px;
+        --urg-top:-2px;
+      }
+
+      #{{ sc_urg_id }} .scx-urg{
+        max-width:246px!important;
+      }
+
+      #{{ sc_urg_id }} .scx-urg__badge{
+        min-height:33px!important;
+        gap:6.6px!important;
+        padding:6.6px 11px 6.6px 11px!important;
+      }
+
+      #{{ sc_urg_id }} .scx-urg__dot{
+        width:7.7px!important;
+        height:7.7px!important;
+        flex-basis:7.7px!important;
+      }
+
+      #{{ sc_urg_id }} .scx-urg__text{
+        font-size:.638rem!important;
+        letter-spacing:.048em!important;
+      }
+    }
+
+    @media(max-width:390px){
+      #{{ sc_urg_id }} .scx-urg{
+        max-width:224px!important;
+      }
+
+      #{{ sc_urg_id }} .scx-urg__badge{
+        min-height:31px!important;
+        gap:5.5px!important;
+        padding:5.5px 8.8px!important;
+      }
+
+      #{{ sc_urg_id }} .scx-urg__text{
+        font-size:.589rem!important;
+        letter-spacing:.035em!important;
+      }
+    }
+
+    @media(max-width:350px){
+      #{{ sc_urg_id }} .scx-urg{
+        max-width:202px!important;
+      }
+
+      #{{ sc_urg_id }} .scx-urg__badge{
+        min-height:30px!important;
+        padding:5.5px 7.7px!important;
+      }
+
+      #{{ sc_urg_id }} .scx-urg__text{
+        font-size:.55rem!important;
+        letter-spacing:.025em!important;
+      }
+    }
+
+    @media(prefers-reduced-motion:reduce){
+      #{{ sc_urg_id }} .scx-urg__dot{
+        animation:none!important;
+      }
+    }
+  </style>
+
+  <script>
+    (function(){
+      var root = document.getElementById('{{ sc_urg_id }}');
+      if(!root || root.dataset.bound === '1') return;
+      root.dataset.bound = '1';
+      var badgeEl = root.querySelector('[data-scx-urg-badge]');
+      var textEl = root.querySelector('[data-scx-urg-text]');
+      var anchor = root.closest('.price') || root.closest('.price__container') || root.closest('.price-item') || document.querySelector('.price') || document.querySelector('.price__container') || root.parentElement;
+      if(anchor){
+        if(!anchor.style.position) anchor.style.position = 'relative';
+        anchor.style.overflow = 'visible';
+      }
+      function fitBadge(){
+        if(!badgeEl || !textEl) return;
+        var anchorWidth = anchor && anchor.getBoundingClientRect ? anchor.getBoundingClientRect().width : 0;
+        var textLength = (textEl.textContent || '').trim().length;
+        badgeEl.style.transform = 'scale(1)';
+        if(window.innerWidth <= 390 || anchorWidth < 270 || textLength > 19){
+          badgeEl.style.transform = 'scale(.98)';
+        }
+        if(window.innerWidth <= 350 || anchorWidth < 240 || textLength > 22){
+          badgeEl.style.transform = 'scale(.94)';
+        }
+      }
+      fitBadge();
+      window.addEventListener('resize', fitBadge, { passive:true });
+    })();
+  </script>
+{%- endif -%}

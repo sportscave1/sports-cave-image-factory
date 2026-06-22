@@ -2262,6 +2262,32 @@ def load_edition_widget_liquid():
     return snippet_path.read_text(encoding="utf-8"), snippet_path
 
 
+def load_edition_widget_liquid_snippets():
+    snippet_specs = (
+        (
+            "Sports Cave Remaining Pill",
+            Path("shopify/snippets/sports-cave-remaining-pill.liquid"),
+            360,
+        ),
+        (
+            "Sports Cave Numbered Edition Bar",
+            Path("shopify/snippets/sports-cave-numbered-edition-bar.liquid"),
+            420,
+        ),
+    )
+    snippets = []
+    for label, path, height in snippet_specs:
+        snippets.append(
+            {
+                "label": label,
+                "path": path,
+                "height": height,
+                "code": path.read_text(encoding="utf-8") if path.exists() else "",
+            }
+        )
+    return snippets
+
+
 def render_prodigi_option_card(frame_label, frame_colour, size_option, is_unframed=False):
     shopify_variant = f"{frame_label} / {size_option['shopify_size']}"
     product_name = size_option["unframed_name"] if is_unframed else size_option["framed_name"]
@@ -8707,33 +8733,48 @@ def render_settings_page(app_version, database_path, password_status):
                         st.error("Could not reset edition counters.")
                         st.exception(error)
         with dev_tabs[3]:
-            st.caption("Supabase is the source of truth. Shopify product/order metafields are display and customer-account bridges.")
-            widget_code, snippet_path = load_edition_widget_liquid()
+            st.caption("Product metafields are the display source for these storefront snippets. The snippets do not call Sports Cave OS, stock, or variant inventory.")
             bridge_columns = st.columns(3)
-            bridge_columns[0].markdown("**Product metafields**")
-            bridge_columns[0].caption("edition_total, next_edition_number, remaining_count, edition_display_text")
-            bridge_columns[1].markdown("**Order metafields**")
-            bridge_columns[1].caption("certificates JSON plus single-certificate fallback fields")
-            bridge_columns[2].markdown("**Storefront widget**")
-            bridge_columns[2].caption("Reads Shopify metafields only; never calls Supabase")
+            bridge_columns[0].markdown("**Sports Cave Remaining Pill**")
+            bridge_columns[0].caption("Reads edition_remaining and edition_total.")
+            bridge_columns[1].markdown("**Sports Cave Numbered Edition Bar**")
+            bridge_columns[1].caption("Reads edition_next_number and edition_total.")
+            bridge_columns[2].markdown("**Safe install path**")
+            bridge_columns[2].caption("Copy into a product page custom-liquid block or convert into app blocks later.")
             st.info(
-                "Manual install option: paste the snippet into Shopify Theme Editor -> Product page -> Custom Liquid. "
-                "Future option: wrap this same snippet in a Shopify Theme App Extension."
+                "No live theme edits are made from this page. App blocks are not scaffolded in this repo yet, so these are paste-ready fallback snippets."
             )
-            if snippet_path.exists():
+            for snippet in load_edition_widget_liquid_snippets():
+                st.markdown(f"**{snippet['label']}**")
+                if snippet["code"]:
+                    st.caption(str(snippet["path"]))
+                    st.text_area(
+                        snippet["label"],
+                        value=snippet["code"],
+                        height=snippet["height"],
+                        label_visibility="collapsed",
+                    )
+                    render_copy_text_button(
+                        snippet["code"],
+                        f"settings-{safe_filename_part(snippet['label'])}-snippet",
+                        f"Copy {snippet['label']}",
+                    )
+                else:
+                    st.warning(f"{snippet['label']} snippet file is missing from the repo.")
+            widget_code, snippet_path = load_edition_widget_liquid()
+            if widget_code and snippet_path.exists():
+                st.caption("Wrapper render line for themes where both snippet files are installed.")
                 st.text_area(
                     "sports-cave-edition-widget.liquid",
                     value=widget_code,
-                    height=320,
+                    height=90,
                     label_visibility="collapsed",
                 )
                 render_copy_text_button(
                     widget_code,
                     "settings-metafield-widget-snippet",
-                    "Copy Widget Code",
+                    "Copy Both Widgets Wrapper",
                 )
-            else:
-                st.warning("Widget snippet file is missing from the repo.")
             st.divider()
             render_developer_widget_status(shopify_config)
         with dev_tabs[4]:
