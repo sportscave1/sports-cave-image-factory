@@ -42,6 +42,7 @@ image_factory = None
 os_pages = None
 shopify_sync = None
 edition_ops_module = None
+orders_page_module = None
 
 
 load_dotenv()
@@ -118,6 +119,15 @@ def get_edition_ops():
     return edition_ops_module
 
 
+def get_orders_page():
+    global orders_page_module
+    if orders_page_module is None:
+        log_startup_stage("ORDERS PAGE IMPORT START")
+        orders_page_module = importlib.import_module("orders_page")
+        log_startup_stage("ORDERS PAGE IMPORT DONE")
+    return orders_page_module
+
+
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
 UPLOAD_PREVIEW_DIR = BASE_DIR / "output" / "_ui-upload-previews"
@@ -143,6 +153,7 @@ MENU_OPTIONS = [
     "Mockups",
     "Product Uploads",
     "Edition Ops",
+    "Orders",
     "Prodigi",
     "Files",
     "Marketing Factory",
@@ -160,6 +171,7 @@ HIDDEN_PAGE_OPTIONS = [
 ]
 ALL_PAGE_OPTIONS = [*MENU_OPTIONS, *HIDDEN_PAGE_OPTIONS]
 APP_VERSION = "Sports Cave OS Edition Fields MVP - 2026-06-22"
+DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
     "edition_ops": "Edition Ops",
@@ -4495,6 +4507,13 @@ def render_sidebar():
         st.sidebar.write("2. Edit edition totals and next numbers in one chart.")
         st.sidebar.write("3. Save changed rows to product fields.")
         st.sidebar.write("4. Use CSV import only when replacing the table.")
+    elif st.session_state.selected_page == "Orders":
+        st.sidebar.divider()
+        st.sidebar.subheader("Orders")
+        st.sidebar.write("1. Shows the saved order allocation snapshot immediately.")
+        st.sidebar.write("2. Refresh recent paid orders only when needed.")
+        st.sidebar.write("3. Manual edits update order edition fields only.")
+        st.sidebar.write("4. Product counters stay controlled from Edition Ops unless explicitly allocated.")
     elif st.session_state.selected_page == "Prodigi":
         st.sidebar.divider()
         st.sidebar.subheader("Prodigi")
@@ -4526,7 +4545,7 @@ def render_sidebar():
     st.sidebar.divider()
     st.sidebar.subheader("MVP Mode")
     st.sidebar.caption(
-        "Edition Ops uses product edition fields only. Order sync, Supabase sync, product sync, and certificates are paused."
+        "Edition Ops controls product edition fields. Orders uses a lightweight saved allocation snapshot."
     )
 
 
@@ -4855,25 +4874,216 @@ def get_password_protection_status():
     return "Managed outside app or not detected"
 
 
-def render_settings_page():
-    st.title("Developer")
-    st.caption("Diagnostics, connection checks, imports, and admin tools.")
+def _developer_unlocked():
+    return bool(st.session_state.get("developer_unlocked"))
 
-    st.write(f"**Password protection:** {get_password_protection_status()}")
-    st.write(f"**Edition Log JSON URL present:** {'Yes' if get_edition_log_json_url() else 'No'}")
-    st.write(f"**Edition Log sheet shortcut URL present:** {'Yes' if bool(GOOGLE_SHEET_URL) else 'No'}")
-    st.write(f"**Google Drive lightweight flag:** {'Enabled' if ENABLE_GOOGLE_DRIVE else 'Disabled'}")
-    if ENABLE_GOOGLE_DRIVE:
-        st.write("**Google Drive configured:** Open the Google Drive page to inspect the current connection.")
-        st.write("**Root folder ID present:** Checked only on the Google Drive page")
-    else:
-        st.write("**Google Drive configured:** Disabled in lightweight mode")
-        st.write("**Root folder ID present:** Not checked while Drive is disabled")
-    st.write(f"**OAuth client ID present:** {'Yes' if os.getenv('GOOGLE_OAUTH_CLIENT_ID') else 'No'}")
-    st.write(f"**OAuth client secret present:** {'Yes' if os.getenv('GOOGLE_OAUTH_CLIENT_SECRET') else 'No'}")
-    st.write(f"**OAuth refresh token present:** {'Yes' if os.getenv('GOOGLE_OAUTH_REFRESH_TOKEN') else 'No'}")
-    st.write(f"**Output folder path:** `{RUNS_DIR}`")
-    st.write(f"**App version:** {APP_VERSION}")
+
+def _developer_section_enabled(key, label):
+    if st.button(label, key=key, use_container_width=True):
+        st.session_state[key] = True
+    return bool(st.session_state.get(key))
+
+
+def _render_developer_password_gate():
+    st.title("Developer")
+    st.caption("Protected diagnostics and setup tools.")
+    password = st.text_input(
+        "Developer password",
+        type="password",
+        key="developer-page-password-input",
+    )
+    unlock_cols = st.columns([1, 2])
+    if unlock_cols[0].button("Unlock Developer", type="primary", use_container_width=True):
+        if password == DEVELOPER_PAGE_PASSWORD:
+            st.session_state.developer_unlocked = True
+            st.rerun()
+        else:
+            st.error("Incorrect developer password.")
+    unlock_cols[1].caption("Unlock is kept only for this Streamlit session.")
+
+
+def render_settings_page():
+    if not _developer_unlocked():
+        _render_developer_password_gate()
+        return
+
+    st.title("Developer")
+    st.caption("Protected setup tools. Diagnostics run only when you click a button.")
+    lock_cols = st.columns([1, 3])
+    if lock_cols[0].button("Lock Developer", use_container_width=True):
+        st.session_state.developer_unlocked = False
+        st.rerun()
+    lock_cols[1].caption("No store, database, Drive, or storage calls run just by opening this page.")
+
+    with st.expander("Basic App Info", expanded=True):
+        st.write(f"**App version:** {APP_VERSION}")
+        st.write(f"**App password protection:** {get_password_protection_status()}")
+        st.write(f"**Developer password env override:** {'Set' if os.getenv('DEVELOPER_PAGE_PASSWORD') else 'Using MVP default'}")
+        st.write(f"**Output folder path:** `{RUNS_DIR}`")
+        st.write(f"**Python working directory:** `{Path.cwd()}`")
+
+    with st.expander("Shopify Connection", expanded=False):
+        if _developer_section_enabled("developer-load-shopify-connection", "Load Shopify Connection Tools"):
+            sync = get_shopify_sync()
+            config = sync.get_config()
+            st.write(f"**Configured:** {'Yes' if config.get('configured') else 'No'}")
+            st.write(f"**Store domain present:** {'Yes' if bool(config.get('store_domain')) else 'No'}")
+            st.write(f"**API version:** {config.get('api_version') or 'Missing'}")
+            st.write(f"**Auth mode:** {config.get('auth_mode') or 'Missing'}")
+            if st.button(
+                "Test Shopify Connection",
+                key="developer-test-shopify-connection",
+                disabled=not config.get("configured"),
+                use_container_width=True,
+            ):
+                try:
+                    result = sync.test_connection(config=config)
+                    st.success(f"Connection OK: {result.get('name') or 'store found'}")
+                except Exception as error:
+                    st.error("Connection test failed.")
+                    st.exception(error)
+
+    with st.expander("Shopify Limited Edition Setup", expanded=False):
+        if _developer_section_enabled("developer-load-limited-edition-setup", "Load Limited Edition Setup"):
+            sync = get_shopify_sync()
+            config = sync.get_config()
+            setup_cols = st.columns(2)
+            if setup_cols[0].button(
+                "Check Product Metafield Definitions",
+                key="developer-check-product-metafields",
+                disabled=not config.get("configured"),
+                use_container_width=True,
+            ):
+                try:
+                    st.session_state.developer_product_metafields = sync.list_edition_ops_metafield_definitions(
+                        config=config
+                    )
+                except Exception as error:
+                    st.error("Product metafield check failed.")
+                    st.exception(error)
+            if setup_cols[1].button(
+                "Create Missing Product Metafield Definitions",
+                key="developer-create-product-metafields",
+                disabled=not config.get("configured"),
+                use_container_width=True,
+            ):
+                try:
+                    st.session_state.developer_product_metafields = sync.create_missing_edition_ops_metafield_definitions(
+                        config=config
+                    )
+                    st.success("Product metafield setup checked.")
+                except Exception as error:
+                    st.error("Product metafield setup failed.")
+                    st.exception(error)
+            definitions = (st.session_state.get("developer_product_metafields") or {}).get("definitions") or []
+            if definitions:
+                st.dataframe(
+                    [
+                        {
+                            "Key": item.get("key"),
+                            "Type": item.get("type"),
+                            "Status": item.get("status") or item.get("message") or "",
+                        }
+                        for item in definitions
+                    ],
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
+    with st.expander("Shopify Webhook Setup", expanded=False):
+        st.write("**Paid orders webhook endpoint:** `/webhooks/shopify/orders-paid`")
+        st.write(f"**Webhook secret configured:** {'Yes' if bool(os.getenv('SHOPIFY_WEBHOOK_SECRET', '').strip()) else 'No'}")
+        st.caption("The endpoint verifies the HMAC header before allocating edition numbers.")
+
+    with st.expander("Order Metafield Setup", expanded=False):
+        if _developer_section_enabled("developer-load-order-metafields", "Load Order Metafield Tools"):
+            sync = get_shopify_sync()
+            config = sync.get_config()
+            order_cols = st.columns(2)
+            if order_cols[0].button(
+                "Check Order Metafield Definition",
+                key="developer-check-order-metafields",
+                disabled=not config.get("configured"),
+                use_container_width=True,
+            ):
+                try:
+                    st.session_state.developer_order_metafields = sync.list_order_allocation_metafield_definitions(
+                        config=config
+                    )
+                except Exception as error:
+                    st.error("Order metafield check failed.")
+                    st.exception(error)
+            if order_cols[1].button(
+                "Create Missing Order Metafield Definition",
+                key="developer-create-order-metafields",
+                disabled=not config.get("configured"),
+                use_container_width=True,
+            ):
+                try:
+                    st.session_state.developer_order_metafields = sync.create_missing_order_allocation_metafield_definitions(
+                        config=config
+                    )
+                    st.success("Order metafield setup checked.")
+                except Exception as error:
+                    st.error("Order metafield setup failed.")
+                    st.exception(error)
+            definitions = (st.session_state.get("developer_order_metafields") or {}).get("definitions") or []
+            if definitions:
+                st.dataframe(
+                    [
+                        {
+                            "Key": item.get("key"),
+                            "Type": item.get("type"),
+                            "Status": item.get("status") or item.get("message") or "",
+                        }
+                        for item in definitions
+                    ],
+                    hide_index=True,
+                    use_container_width=True,
+                )
+
+    with st.expander("Database / Supabase", expanded=False):
+        st.write(f"**DATABASE_URL present:** {'Yes' if any(os.getenv(key, '').strip() for key in DATABASE_URL_ENV_KEYS) else 'No'}")
+        if st.button("Run Database Connection Test", key="developer-test-database", use_container_width=True):
+            try:
+                supabase_backend = importlib.import_module("supabase_backend")
+                result = supabase_backend.test_connection()
+                st.success("Database connection OK.")
+                st.caption(f"Server time: {result.get('server_time')}")
+            except Exception as error:
+                st.error("Database connection failed.")
+                st.exception(error)
+
+    with st.expander("Google Drive / R2", expanded=False):
+        st.write(f"**Google Drive lightweight flag:** {'Enabled' if ENABLE_GOOGLE_DRIVE else 'Disabled'}")
+        st.write(f"**OAuth client ID present:** {'Yes' if os.getenv('GOOGLE_OAUTH_CLIENT_ID') else 'No'}")
+        st.write(f"**OAuth refresh token present:** {'Yes' if os.getenv('GOOGLE_OAUTH_REFRESH_TOKEN') else 'No'}")
+        st.write(f"**R2 endpoint present:** {'Yes' if os.getenv('R2_ENDPOINT_URL') else 'No'}")
+        if st.button("Load R2 Status", key="developer-load-r2-status", use_container_width=True):
+            try:
+                r2_storage = importlib.import_module("services.r2_storage")
+                st.json(r2_storage.get_r2_status())
+            except Exception as error:
+                st.error("R2 status failed.")
+                st.exception(error)
+
+    with st.expander("Diagnostics", expanded=False):
+        st.caption("These checks import heavier modules only after you click.")
+        diag_cols = st.columns(2)
+        if diag_cols[0].button("Load Legacy Diagnostics Module", key="developer-load-legacy-pages", use_container_width=True):
+            try:
+                get_os_pages()
+                st.success("Legacy diagnostics module imported.")
+            except Exception as error:
+                st.error("Legacy diagnostics import failed.")
+                st.exception(error)
+        if diag_cols[1].button("Load Local DB Module", key="developer-load-local-db", use_container_width=True):
+            try:
+                local_db = get_db()
+                st.success(f"Local DB module loaded: `{local_db.DB_PATH}`")
+            except Exception as error:
+                st.error("Local DB import failed.")
+                st.exception(error)
 
 
 def render_placeholder_page(title, body):
@@ -4910,10 +5120,10 @@ def render_lightweight_dashboard_page():
 
 
 def page_uses_local_database(current_page):
-    if current_page in {"Dashboard", "Products", "Edition Ops"}:
+    if current_page in {"Dashboard", "Products", "Edition Ops", "Orders", "Developer", "Settings"}:
         return False
     supabase_enabled = any(os.getenv(key, "").strip() for key in DATABASE_URL_ENV_KEYS)
-    if current_page in {"Settings", "Developer", "Files"}:
+    if current_page in {"Files"}:
         return True
     if not supabase_enabled and current_page in {
         "Products",
@@ -4940,6 +5150,8 @@ def render_selected_page(current_page):
         render_mockups_page()
     elif current_page == "Edition Ops":
         get_edition_ops().render_page()
+    elif current_page == "Orders":
+        get_orders_page().render_page()
     elif current_page == "Product Assets":
         os_route_pages().render_product_assets_page()
     elif current_page == "Prodigi":
@@ -4961,11 +5173,7 @@ def render_selected_page(current_page):
     elif current_page == "Marketing Factory":
         os_route_pages().render_marketing_factory_page()
     elif current_page in {"Settings", "Developer"}:
-        os_route_pages().render_settings_page(
-            app_version=APP_VERSION,
-            database_path=get_db().DB_PATH,
-            password_status=get_password_protection_status(),
-        )
+        render_settings_page()
     else:
         os_route_pages().render_placeholder_page(current_page)
 

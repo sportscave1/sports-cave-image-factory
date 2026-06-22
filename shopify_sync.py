@@ -731,6 +731,16 @@ EDITION_OPS_METAFIELD_DEFINITIONS = [
     },
 ]
 
+ORDER_ALLOCATION_METAFIELD_DEFINITIONS = [
+    {
+        "name": "Sports Cave Edition Allocations",
+        "namespace": "sports_cave",
+        "key": "edition_allocations",
+        "type": "json",
+        "ownerType": "ORDER",
+    },
+]
+
 
 def _metafields_by_key(metafields):
     return {
@@ -900,6 +910,7 @@ mutation SportsCaveSetEditionMetafields($metafields: [MetafieldsSetInput!]!) {
       key
       type
       value
+      compareDigest
     }
     userErrors {
       field
@@ -962,6 +973,7 @@ query SportsCaveMetafieldsByOwner($id: ID!, $namespace: String!) {
           key
           type
           value
+          compareDigest
         }
       }
     }
@@ -973,6 +985,7 @@ query SportsCaveMetafieldsByOwner($id: ID!, $namespace: String!) {
           key
           type
           value
+          compareDigest
         }
       }
     }
@@ -1025,6 +1038,15 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
         name
         firstName
         lastName
+      }
+      metafields(first: 20, namespace: "sports_cave") {
+        nodes {
+          namespace
+          key
+          type
+          value
+          compareDigest
+        }
       }
       lineItems(first: 100) {
         nodes {
@@ -1091,6 +1113,15 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
         firstName
         lastName
       }
+      metafields(first: 20, namespace: "sports_cave") {
+        nodes {
+          namespace
+          key
+          type
+          value
+          compareDigest
+        }
+      }
       lineItems(first: 100) {
         nodes {
           id
@@ -1126,14 +1157,17 @@ def _bool_value(value):
     return "true" if bool(value) else "false"
 
 
-def _metafield_input(owner_id, key, metafield_type, value, namespace="sports_cave"):
-    return {
+def _metafield_input(owner_id, key, metafield_type, value, namespace="sports_cave", compare_digest=None):
+    data = {
         "ownerId": owner_id,
         "namespace": namespace,
         "key": key,
         "type": metafield_type,
         "value": _string_value(value),
     }
+    if compare_digest is not None:
+        data["compareDigest"] = compare_digest
+    return data
 
 
 def _metafields_user_error_text(errors):
@@ -1411,6 +1445,47 @@ def list_edition_ops_metafield_definitions(config=None, request_post=None):
     return {"definitions": definitions, "api_version": served_version or config.get("api_version")}
 
 
+def list_order_allocation_metafield_definitions(config=None, request_post=None):
+    config = config or get_config()
+    data, served_version = graphql_request(
+        METAFIELD_DEFINITIONS_QUERY,
+        variables={"ownerType": "ORDER", "namespace": "sports_cave"},
+        config=config,
+        request_post=request_post,
+    )
+    existing = {}
+    for node in ((data.get("metafieldDefinitions") or {}).get("nodes") or []):
+        key = node.get("key") or ""
+        type_node = node.get("type") or {}
+        existing[key] = {
+            "id": node.get("id") or "",
+            "name": node.get("name") or "",
+            "namespace": node.get("namespace") or "",
+            "key": key,
+            "ownerType": node.get("ownerType") or "",
+            "type": type_node.get("name") or "",
+        }
+
+    definitions = []
+    for required in ORDER_ALLOCATION_METAFIELD_DEFINITIONS:
+        found = existing.get(required["key"])
+        ready = bool(
+            found
+            and found.get("namespace") == required["namespace"]
+            and found.get("ownerType") == required["ownerType"]
+            and found.get("type") == required["type"]
+        )
+        definitions.append(
+            {
+                **required,
+                "id": (found or {}).get("id", ""),
+                "found_type": (found or {}).get("type", ""),
+                "status": "Ready" if ready else ("Type mismatch" if found else "Missing"),
+            }
+        )
+    return {"definitions": definitions, "api_version": served_version or config.get("api_version")}
+
+
 def create_edition_ops_metafield_definition(definition, config=None, request_post=None):
     config = config or get_config()
     data, served_version = graphql_request(
@@ -1432,6 +1507,10 @@ def create_edition_ops_metafield_definition(definition, config=None, request_pos
         raise ShopifyAPIError(_metafields_user_error_text(result.get("userErrors")))
     created = result.get("createdDefinition") or {}
     return {"definition": created, "api_version": served_version or config.get("api_version")}
+
+
+def create_order_allocation_metafield_definition(definition, config=None, request_post=None):
+    return create_edition_ops_metafield_definition(definition, config=config, request_post=request_post)
 
 
 def create_missing_edition_ops_metafield_definitions(config=None, request_post=None):
@@ -1457,6 +1536,38 @@ def create_missing_edition_ops_metafield_definitions(config=None, request_post=N
         except Exception as error:
             errors.append({**definition, "message": str(error)})
     refreshed = list_edition_ops_metafield_definitions(config=config, request_post=request_post)
+    return {
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+        "definitions": refreshed.get("definitions") or [],
+        "api_version": refreshed.get("api_version") or checked.get("api_version"),
+    }
+
+
+def create_missing_order_allocation_metafield_definitions(config=None, request_post=None):
+    config = config or get_config()
+    checked = list_order_allocation_metafield_definitions(config=config, request_post=request_post)
+    created = []
+    skipped = []
+    errors = []
+    for definition in checked.get("definitions") or []:
+        if definition.get("status") == "Ready":
+            skipped.append({**definition, "message": "Already exists"})
+            continue
+        if definition.get("status") == "Type mismatch":
+            errors.append({**definition, "message": "Definition exists with a different type"})
+            continue
+        try:
+            created_result = create_order_allocation_metafield_definition(
+                definition,
+                config=config,
+                request_post=request_post,
+            )
+            created.append({**definition, "message": "Created", "created": created_result.get("definition")})
+        except Exception as error:
+            errors.append({**definition, "message": str(error)})
+    refreshed = list_order_allocation_metafield_definitions(config=config, request_post=request_post)
     return {
         "created": created,
         "skipped": skipped,
@@ -1613,6 +1724,31 @@ def _certificate_display(item):
     return f"#{number:03d}/{total}"
 
 
+def order_allocation_metafield_input(order_gid, allocations, compare_digest=None):
+    owner_id = shopify_gid("Order", order_gid)
+    payload = allocations if isinstance(allocations, dict) else {"line_items": allocations or {}}
+    return _metafield_input(
+        owner_id,
+        "edition_allocations",
+        "json",
+        json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
+        compare_digest=compare_digest,
+    )
+
+
+def sync_order_allocation_metafield(order_gid, allocations, compare_digest=None, config=None, request_post=None):
+    try:
+        return metafields_set(
+            [order_allocation_metafield_input(order_gid, allocations, compare_digest=compare_digest)],
+            config=config,
+            request_post=request_post,
+        )
+    except ShopifyAPIError as error:
+        raise ShopifyAPIError(
+            f"Could not sync order edition allocations. {error}"
+        ) from error
+
+
 def order_certificate_metafield_inputs(order_gid, certificates):
     owner_id = shopify_gid("Order", order_gid)
     items = []
@@ -1718,6 +1854,7 @@ def normalize_order(node, store_domain):
         )
     legacy_resource_id = str(node.get("legacyResourceId") or "")
     financial_status = node.get("displayFinancialStatus") or ""
+    metafields = ((node.get("metafields") or {}).get("nodes") or [])
     return {
         "shopify_order_id": node.get("id") or "",
         "legacy_resource_id": legacy_resource_id,
@@ -1740,6 +1877,7 @@ def normalize_order(node, store_domain):
         "total_price": str(total_price.get("amount") or ""),
         "currency": total_price.get("currencyCode") or "",
         "cancelled_at": node.get("cancelledAt") or "",
+        "metafields": metafields,
         "line_items": line_items,
     }
 

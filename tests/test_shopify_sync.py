@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import db
+import order_allocator
 import shopify_sync
 import supabase_backend
 
@@ -238,6 +239,57 @@ class ShopifySyncClientTests(unittest.TestCase):
         with self.assertRaises(shopify_sync.ShopifyConfigurationError) as context:
             shopify_sync.validate_config(config)
         self.assertIn("Missing Shopify authentication", str(context.exception))
+
+    def test_paid_order_allocator_assigns_current_next_number_and_advances_product(self):
+        order_payload = {
+            "id": 1234,
+            "name": "#SC9999",
+            "financial_status": "paid",
+            "line_items": [
+                {
+                    "id": 555,
+                    "product_id": 777,
+                    "title": "Shane Warne Wall Art",
+                    "variant_title": "Black / XL",
+                    "quantity": 1,
+                }
+            ],
+        }
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id == "gid://shopify/Order/1234":
+                return {"metafields": [], "api_version": "2026-04"}
+            self.assertEqual(owner_id, "gid://shopify/Product/777")
+            return {
+                "metafields": [
+                    {"namespace": "sports_cave", "key": "edition_enabled", "type": "boolean", "value": "true"},
+                    {"namespace": "sports_cave", "key": "edition_total", "type": "number_integer", "value": "100"},
+                    {"namespace": "sports_cave", "key": "edition_next_number", "type": "number_integer", "value": "91"},
+                    {"namespace": "sports_cave", "key": "edition_label", "type": "single_line_text_field", "value": "Numbered Edition"},
+                ],
+                "api_version": "2026-04",
+            }
+
+        order_writes = []
+        product_writes = []
+
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+            side_effect=lambda order_gid, allocations, compare_digest=None, config=None, request_post=None: order_writes.append(allocations),
+        ), patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+            side_effect=lambda products, config=None, request_post=None: product_writes.extend(products),
+        ):
+            result = order_allocator.process_shopify_order_for_editions(order_payload, config=self.config)
+
+        self.assertTrue(result["processed"])
+        self.assertEqual(result["assignments_created"], 1)
+        allocation = order_writes[0]["line_items"]["gid://shopify/LineItem/555"]
+        self.assertEqual(allocation["edition_numbers"], [91])
+        self.assertEqual(allocation["edition_display"], "#091/100")
+        self.assertEqual(product_writes[0]["edition_next_number"], 92)
 
     def test_connection_and_product_page_parsing(self):
         responses = [

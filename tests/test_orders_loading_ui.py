@@ -13,13 +13,16 @@ class EditionOpsUiTests(unittest.TestCase):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
 
         self.assertIn('"Edition Ops"', source)
+        self.assertIn('"Orders"', source)
         self.assertIn("get_edition_ops().render_page()", source)
+        self.assertIn("get_orders_page().render_page()", source)
         self.assertNotIn('"Limited Editions",', source)
-        self.assertNotIn('"Orders",', source)
         self.assertNotIn("render_limited_editions_page", source)
-        self.assertNotIn("render_lightweight_orders_page", source)
         self.assertNotIn("render_edition_orders_page", source)
         self.assertNotIn("render_edition_integrity_check_page", source)
+        self.assertIn('current_page in {"Dashboard", "Products", "Edition Ops", "Orders", "Developer", "Settings"}', source)
+        self.assertIn("DEVELOPER_PAGE_PASSWORD", source)
+        self.assertIn("developer_unlocked", source)
 
     def test_edition_ops_uses_one_editor_and_no_old_data_sources(self):
         source = (ROOT / "edition_ops.py").read_text(encoding="utf-8")
@@ -57,11 +60,26 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("fetch_orders", source)
 
     def test_developer_keeps_edition_ops_metafield_setup(self):
-        source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
 
         self.assertIn('"Shopify Limited Edition Setup"', source)
         self.assertIn("Check Product Metafield Definitions", source)
         self.assertIn("Create Missing Product Metafield Definitions", source)
+        self.assertIn('"Order Metafield Setup"', source)
+        self.assertIn("Check Order Metafield Definition", source)
+        self.assertIn("Create Missing Order Metafield Definition", source)
+
+    def test_orders_page_is_snapshot_based_and_lightweight(self):
+        source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
+
+        self.assertIn("orders_allocation_snapshot.json", source)
+        self.assertIn("Refresh Orders", source)
+        self.assertIn("Save Changed Order Editions", source)
+        self.assertIn("Allocate Selected From Product Counter", source)
+        self.assertIn("Overwrite Selected Order Allocation", source)
+        self.assertIn("st.data_editor", source)
+        self.assertNotIn("supabase_backend", source)
+        self.assertNotIn("certificate", source.casefold())
 
     def test_limited_edition_inputs_use_only_calculated_mvp_metafields(self):
         inputs = shopify_sync.limited_edition_metafield_inputs(

@@ -41,8 +41,6 @@ async def healthz():
 
 @app.post("/webhooks/shopify/orders-paid")
 async def shopify_orders_paid_webhook(request: Request):
-    import supabase_backend
-
     raw_body = await request.body()
     if not verify_shopify_hmac(raw_body, request.headers.get("X-Shopify-Hmac-SHA256", "")):
         return Response("Invalid Shopify webhook signature.", status_code=401)
@@ -53,15 +51,23 @@ async def shopify_orders_paid_webhook(request: Request):
     webhook_id = request.headers.get("X-Shopify-Webhook-Id") or request.headers.get("X-Shopify-Event-Id") or ""
     topic = request.headers.get("X-Shopify-Topic") or "orders/paid"
     try:
-        result = supabase_backend.process_order_paid_webhook(payload, webhook_id, topic=topic)
+        import order_allocator
+
+        result = order_allocator.process_shopify_order_for_editions(payload)
     except Exception as error:
-        supabase_backend.log_app_error(
-            "shopify_webhook_failed",
-            str(error),
-            {"webhook_id": webhook_id, "topic": topic},
+        print(
+            json.dumps(
+                {
+                    "event": "shopify_webhook_failed",
+                    "error": str(error),
+                    "webhook_id": webhook_id,
+                    "topic": topic,
+                }
+            ),
+            flush=True,
         )
         return Response("Webhook accepted but processing failed.", status_code=500)
-    status = "duplicate" if result.get("duplicate") else "processed"
+    status = "processed" if result.get("processed") else "skipped"
     return {"ok": True, "status": status, "assignments_created": result.get("assignments_created", 0)}
 
 
