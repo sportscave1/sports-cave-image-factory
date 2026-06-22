@@ -1907,10 +1907,12 @@ def inject_styles():
         .stButton > button,
         .stLinkButton > a,
         .stDownloadButton > button,
+        div[data-testid="stPopover"] button,
         div[data-testid="stFileUploader"] button,
         section[data-testid="stFileUploaderDropzone"] button {
             background: #F5F2EA !important;
             color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
             border: 1px solid rgba(212, 165, 76, 0.55) !important;
             box-shadow: none !important;
             text-shadow: none !important;
@@ -1919,31 +1921,46 @@ def inject_styles():
         .stButton > button *,
         .stLinkButton > a *,
         .stDownloadButton > button *,
+        div[data-testid="stPopover"] button *,
         div[data-testid="stFileUploader"] button *,
         section[data-testid="stFileUploaderDropzone"] button *,
         .stButton > button p,
         .stLinkButton > a p,
         .stDownloadButton > button p,
+        div[data-testid="stPopover"] button p,
         div[data-testid="stFileUploader"] button p,
         section[data-testid="stFileUploaderDropzone"] button p,
         .stButton > button span,
         .stLinkButton > a span,
         .stDownloadButton > button span,
+        div[data-testid="stPopover"] button span,
         div[data-testid="stFileUploader"] button span,
         section[data-testid="stFileUploaderDropzone"] button span {
             color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
             fill: #000000 !important;
             stroke: #000000 !important;
         }
 
         .stButton > button:hover,
+        .stButton > button:focus,
+        .stButton > button:active,
         .stLinkButton > a:hover,
+        .stLinkButton > a:focus,
+        .stLinkButton > a:active,
         .stDownloadButton > button:hover,
+        .stDownloadButton > button:focus,
+        .stDownloadButton > button:active,
+        div[data-testid="stPopover"] button:hover,
+        div[data-testid="stPopover"] button:focus,
+        div[data-testid="stPopover"] button:active,
+        div[data-testid="stPopover"] button[aria-expanded="true"],
         div[data-testid="stFileUploader"] button:hover,
         section[data-testid="stFileUploaderDropzone"] button:hover {
             background: #F5F2EA !important;
             border-color: rgba(212, 165, 76, 0.55) !important;
             color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
             box-shadow: none !important;
             filter: none !important;
             transform: none !important;
