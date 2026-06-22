@@ -5,22 +5,35 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class OrdersLoadingUiTests(unittest.TestCase):
-    def test_orders_and_limited_pages_do_not_show_lazy_load_copy(self):
-        source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
+class EditionOpsUiTests(unittest.TestCase):
+    def test_app_routes_to_edition_ops_not_old_orders_or_limited_pages(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
 
-        blocked_phrases = (
-            "Load / Refresh",
-            "Load orders",
-            "Load edition products",
-            "Fetch Latest Orders",
-            "Fetch Latest Shopify Products",
-            "lazy loaded",
-            "Fast mode",
-            "Technical detail",
-        )
-        for phrase in blocked_phrases:
-            self.assertNotIn(phrase, source)
+        self.assertIn('"Edition Ops"', source)
+        self.assertIn("get_edition_ops().render_page()", source)
+        self.assertNotIn('"Limited Editions",', source)
+        self.assertNotIn('"Orders",', source)
+        self.assertNotIn("render_limited_editions_page", source)
+        self.assertNotIn("render_lightweight_orders_page", source)
+        self.assertNotIn("render_edition_orders_page", source)
+        self.assertNotIn("render_edition_integrity_check_page", source)
+
+    def test_edition_ops_uses_one_editor_and_no_old_data_sources(self):
+        source = (ROOT / "edition_ops.py").read_text(encoding="utf-8")
+
+        self.assertIn("st.data_editor", source)
+        self.assertIn("Load Active Shopify Products", source)
+        self.assertIn("Refresh From Shopify", source)
+        self.assertIn("Clear Loaded Table", source)
+        self.assertIn("Save Changed Rows to Shopify", source)
+        self.assertIn("Sync Selected Rows", source)
+        self.assertIn("Open Shopify Orders", source)
+        self.assertNotIn("import supabase", source.casefold())
+        self.assertNotIn("supabase_backend", source.casefold())
+        self.assertNotIn("import google", source.casefold())
+        self.assertNotIn("csv", source.casefold())
+        self.assertNotIn("certificate", source.casefold())
+        self.assertNotIn("fetch_orders", source)
 
     def test_certificate_schema_uses_uuid_safe_related_column_without_runtime_fk(self):
         source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
@@ -30,43 +43,6 @@ class OrdersLoadingUiTests(unittest.TestCase):
         self.assertIn("DROP CONSTRAINT IF EXISTS certificates_related_edition_order_id_fkey", source)
         self.assertNotIn("FOREIGN KEY (edition_order_id)", source)
         self.assertNotIn("FOREIGN KEY (related_edition_order_id)", source)
-
-    def test_orders_read_without_full_schema_gate(self):
-        source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
-
-        self.assertIn("def ensure_order_read_schema", source)
-        self.assertIn("def list_orders", source)
-        self.assertIn("def get_order_summary", source)
-        self.assertIn("ensure_order_read_schema()", source)
-
-    def test_orders_ui_uses_cached_fulfilment_helper_copy(self):
-        source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
-        renderer_start = source.index("def _render_shopify_style_cached_orders_table")
-        renderer_end = source.index("def _shopify_orders_mirror_styles", renderer_start)
-        renderer_source = source[renderer_start:renderer_end]
-
-        self.assertIn("Fetch New Orders", source)
-        self.assertIn("Deep Refresh 60 Days", source)
-        self.assertIn("Load 50 More", source)
-        self.assertIn("Needs Action", source)
-        self.assertIn("Paid + Unfulfilled", source)
-        self.assertIn("ACTION_BOARD_LOAD", source)
-        self.assertIn("ACTION_ROWS_QUERY", source)
-        self.assertIn("st.columns", renderer_source)
-        self.assertIn(".badge(", renderer_source)
-        self.assertIn("st.link_button", renderer_source)
-        for label in ("Order", "Customer", "Product", "Variant", "Edition", "Certificate", "PSD", "Prodigi", "Shopify"):
-            self.assertIn(label, renderer_source)
-        self.assertIn("Open Order", renderer_source)
-        self.assertNotIn('"Date"', renderer_source)
-        self.assertNotIn('"Total"', renderer_source)
-        self.assertNotIn('"Channel"', renderer_source)
-        self.assertNotIn('"Status"', renderer_source)
-        self.assertNotIn('"Open"', renderer_source)
-        self.assertNotIn("components.html", renderer_source)
-        self.assertNotIn("<tr", renderer_source)
-        self.assertNotIn("<td", renderer_source)
-        self.assertIn("render_supabase_orders_page()", source)
 
 
 if __name__ == "__main__":

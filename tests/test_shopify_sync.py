@@ -60,6 +60,7 @@ class ShopifySyncClientTests(unittest.TestCase):
 
         self.assertTrue(config["configured"])
         self.assertEqual(config["auth_mode"], "Client credentials mode")
+        self.assertEqual(config["edition_ops_max_products"], 500)
         self.assertTrue(config["has_legacy_admin_token"])
 
     def test_environment_config_accepts_client_credentials(self):
@@ -385,6 +386,186 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(product["thumbnail_url"], "https://cdn.shopify.com/product.webp")
         self.assertTrue(product["edition"]["edition_enabled"])
         self.assertEqual(product["edition"]["remaining"], 5)
+
+    def test_edition_ops_active_products_are_active_only_and_lightweight(self):
+        requests_seen = []
+
+        def fake_post(*args, **kwargs):
+            requests_seen.append(kwargs["json"])
+            return FakeResponse(
+                {
+                    "data": {
+                        "products": {
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                            "nodes": [
+                                {
+                                    "id": "gid://shopify/Product/123",
+                                    "legacyResourceId": "123",
+                                    "title": "All Rise Wall Art",
+                                    "handle": "all-rise-wall-art",
+                                    "status": "ACTIVE",
+                                    "onlineStoreUrl": "https://sportscaveshop.com/products/all-rise-wall-art",
+                                    "media": {
+                                        "nodes": [
+                                            {
+                                                "image": {
+                                                    "url": "https://cdn.shopify.com/product.webp",
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    "metafields": {
+                                        "nodes": [
+                                            {
+                                                "namespace": "sports_cave",
+                                                "key": "edition_enabled",
+                                                "type": "boolean",
+                                                "value": "true",
+                                            },
+                                            {
+                                                "namespace": "sports_cave",
+                                                "key": "edition_total",
+                                                "type": "number_integer",
+                                                "value": "100",
+                                            },
+                                            {
+                                                "namespace": "sports_cave",
+                                                "key": "edition_next_number",
+                                                "type": "number_integer",
+                                                "value": "53",
+                                            },
+                                        ]
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                }
+            )
+
+        result = shopify_sync.fetch_edition_ops_active_products(
+            max_products=500,
+            page_size=50,
+            config=self.config,
+            request_post=fake_post,
+        )
+
+        request = requests_seen[0]
+        self.assertEqual(request["variables"]["query"], "status:active")
+        self.assertEqual(request["variables"]["first"], 50)
+        self.assertIn("sortKey: TITLE", request["query"])
+        self.assertIn("onlineStoreUrl", request["query"])
+        self.assertIn('metafields(first: 20, namespace: "sports_cave")', request["query"])
+        self.assertNotIn("variants(", request["query"])
+        self.assertNotIn("collections(", request["query"])
+        product = result["products"][0]
+        self.assertEqual(product["online_store_url"], "https://sportscaveshop.com/products/all-rise-wall-art")
+        self.assertEqual(product["edition"]["remaining"], 48)
+
+    def test_edition_ops_sync_batches_five_products_per_metafields_set(self):
+        requests_seen = []
+
+        def fake_post(*args, **kwargs):
+            requests_seen.append(kwargs["json"])
+            return FakeResponse(
+                {
+                    "data": {
+                        "metafieldsSet": {
+                            "metafields": [],
+                            "userErrors": [],
+                        }
+                    }
+                }
+            )
+
+        rows = [
+            {
+                "shopify_product_id": f"gid://shopify/Product/{index}",
+                "title": f"Product {index}",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": index,
+                "edition_label": "Numbered Edition",
+                "edition_status_override": "",
+            }
+            for index in range(1, 8)
+        ]
+
+        result = shopify_sync.sync_limited_edition_metafields_for_products(
+            rows,
+            config=self.config,
+            request_post=fake_post,
+        )
+
+        self.assertEqual(result["synced"], 7)
+        self.assertEqual(result["failed"], 0)
+        self.assertEqual(len(requests_seen), 2)
+        self.assertEqual(len(requests_seen[0]["variables"]["metafields"]), 25)
+        self.assertEqual(len(requests_seen[1]["variables"]["metafields"]), 10)
+
+    def test_edition_ops_metafield_definition_check_and_create_missing(self):
+        requests_seen = []
+        responses = [
+            FakeResponse(
+                {
+                    "data": {
+                        "metafieldDefinitions": {
+                            "nodes": [
+                                {
+                                    "id": "gid://shopify/MetafieldDefinition/1",
+                                    "name": "Sports Cave Edition Enabled",
+                                    "namespace": "sports_cave",
+                                    "key": "edition_enabled",
+                                    "ownerType": "PRODUCT",
+                                    "type": {"name": "boolean"},
+                                }
+                            ]
+                        }
+                    }
+                }
+            ),
+            FakeResponse({"data": {"metafieldDefinitionCreate": {"createdDefinition": {"id": "2"}, "userErrors": []}}}),
+            FakeResponse({"data": {"metafieldDefinitionCreate": {"createdDefinition": {"id": "3"}, "userErrors": []}}}),
+            FakeResponse({"data": {"metafieldDefinitionCreate": {"createdDefinition": {"id": "4"}, "userErrors": []}}}),
+            FakeResponse({"data": {"metafieldDefinitionCreate": {"createdDefinition": {"id": "5"}, "userErrors": []}}}),
+            FakeResponse(
+                {
+                    "data": {
+                        "metafieldDefinitions": {
+                            "nodes": [
+                                {
+                                    "id": "gid://shopify/MetafieldDefinition/1",
+                                    "name": definition["name"],
+                                    "namespace": definition["namespace"],
+                                    "key": definition["key"],
+                                    "ownerType": definition["ownerType"],
+                                    "type": {"name": definition["type"]},
+                                }
+                                for definition in shopify_sync.EDITION_OPS_METAFIELD_DEFINITIONS
+                            ]
+                        }
+                    }
+                }
+            ),
+        ]
+
+        def fake_post(*args, **kwargs):
+            requests_seen.append(kwargs["json"])
+            return responses.pop(0)
+
+        result = shopify_sync.create_missing_edition_ops_metafield_definitions(
+            config=self.config,
+            request_post=fake_post,
+        )
+
+        self.assertEqual(len(result["created"]), 4)
+        self.assertEqual(len(result["skipped"]), 1)
+        self.assertEqual(result["definitions"][0]["status"], "Ready")
+        create_requests = [request for request in requests_seen if "metafieldDefinitionCreate" in request["query"]]
+        self.assertEqual(len(create_requests), 4)
+        created_keys = {request["variables"]["definition"]["key"] for request in create_requests}
+        self.assertNotIn("edition_enabled", created_keys)
+        self.assertIn("edition_next_number", created_keys)
 
     def test_limited_edition_metafields_save_exact_keys_and_readback(self):
         requests_seen = []

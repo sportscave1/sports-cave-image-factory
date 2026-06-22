@@ -12,6 +12,7 @@ DEFAULT_API_VERSION = "2026-04"
 DEFAULT_PAGE_SIZE = 50
 DEFAULT_MAX_PRODUCTS = 500
 DEFAULT_MAX_ORDERS = 250
+DEFAULT_EDITION_OPS_MAX_PRODUCTS = 500
 TOKEN_REFRESH_BUFFER_SECONDS = 300
 
 
@@ -51,6 +52,10 @@ def get_config():
     api_version = os.getenv("SHOPIFY_API_VERSION", "").strip()
     max_products_raw = os.getenv("SHOPIFY_SYNC_MAX_PRODUCTS", str(DEFAULT_MAX_PRODUCTS)).strip()
     max_orders_raw = os.getenv("SHOPIFY_SYNC_MAX_ORDERS", str(DEFAULT_MAX_ORDERS)).strip()
+    edition_ops_max_products_raw = os.getenv(
+        "SHOPIFY_EDITION_OPS_MAX_PRODUCTS",
+        str(DEFAULT_EDITION_OPS_MAX_PRODUCTS),
+    ).strip()
     try:
         max_products = max(1, int(max_products_raw))
     except ValueError:
@@ -59,6 +64,10 @@ def get_config():
         max_orders = max(1, int(max_orders_raw))
     except ValueError:
         max_orders = DEFAULT_MAX_ORDERS
+    try:
+        edition_ops_max_products = max(1, int(edition_ops_max_products_raw))
+    except ValueError:
+        edition_ops_max_products = DEFAULT_EDITION_OPS_MAX_PRODUCTS
 
     if client_id and client_secret:
         auth_mode = "Client credentials mode"
@@ -76,6 +85,7 @@ def get_config():
         "api_version": api_version,
         "max_products": max_products,
         "max_orders": max_orders,
+        "edition_ops_max_products": edition_ops_max_products,
         "auth_mode": auth_mode,
         "configured": bool(store_domain and api_version and auth_mode != "Missing credentials"),
     }
@@ -468,6 +478,33 @@ query SportsCaveLimitedEditionProducts($first: Int!, $after: String, $query: Str
 """
 
 
+EDITION_OPS_ACTIVE_PRODUCTS_QUERY = """
+query EditionOpsActiveProducts($first: Int!, $after: String, $query: String) {
+  products(first: $first, after: $after, query: $query, sortKey: TITLE) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id
+      legacyResourceId
+      title
+      handle
+      status
+      onlineStoreUrl
+      media(first: 1) {
+        nodes {
+          ... on MediaImage {
+            image { url }
+          }
+        }
+      }
+      metafields(first: 20, namespace: "sports_cave") {
+        nodes { namespace key type value }
+      }
+    }
+  }
+}
+"""
+
+
 PRODUCT_BY_ID_QUERY = """
 query SportsCaveProductById($id: ID!) {
   product(id: $id) {
@@ -641,6 +678,45 @@ LIMITED_EDITION_DEFAULTS = {
 }
 
 
+EDITION_OPS_METAFIELD_DEFINITIONS = [
+    {
+        "name": "Sports Cave Edition Enabled",
+        "namespace": "sports_cave",
+        "key": "edition_enabled",
+        "type": "boolean",
+        "ownerType": "PRODUCT",
+    },
+    {
+        "name": "Sports Cave Edition Total",
+        "namespace": "sports_cave",
+        "key": "edition_total",
+        "type": "number_integer",
+        "ownerType": "PRODUCT",
+    },
+    {
+        "name": "Sports Cave Next Edition Number",
+        "namespace": "sports_cave",
+        "key": "edition_next_number",
+        "type": "number_integer",
+        "ownerType": "PRODUCT",
+    },
+    {
+        "name": "Sports Cave Edition Label",
+        "namespace": "sports_cave",
+        "key": "edition_label",
+        "type": "single_line_text_field",
+        "ownerType": "PRODUCT",
+    },
+    {
+        "name": "Sports Cave Status Override",
+        "namespace": "sports_cave",
+        "key": "edition_status_override",
+        "type": "single_line_text_field",
+        "ownerType": "PRODUCT",
+    },
+]
+
+
 def _metafields_by_key(metafields):
     return {
         item.get("key"): item
@@ -731,6 +807,27 @@ def normalize_limited_edition_product(node, store_domain):
     }
 
 
+def normalize_edition_ops_product(node, store_domain):
+    media_nodes = (node.get("media") or {}).get("nodes") or []
+    thumbnail_url = ""
+    if media_nodes:
+        thumbnail_url = ((media_nodes[0].get("image") or {}).get("url") or "")
+    metafields = ((node.get("metafields") or {}).get("nodes") or [])
+    legacy_resource_id = str(node.get("legacyResourceId") or "")
+    return {
+        "shopify_product_id": node.get("id") or "",
+        "legacy_resource_id": legacy_resource_id,
+        "title": node.get("title") or "Untitled Shopify Product",
+        "handle": node.get("handle") or "",
+        "status": node.get("status") or "UNKNOWN",
+        "thumbnail_url": thumbnail_url,
+        "online_store_url": node.get("onlineStoreUrl") or "",
+        "admin_url": build_admin_url(store_domain, legacy_resource_id),
+        "metafields": metafields,
+        "edition": normalize_limited_edition_metafields(metafields),
+    }
+
+
 def shopify_gid(resource_type, value):
     raw = str(value or "").strip()
     if not raw:
@@ -772,6 +869,47 @@ mutation SportsCaveSetEditionMetafields($metafields: [MetafieldsSetInput!]!) {
     userErrors {
       field
       message
+    }
+  }
+}
+"""
+
+
+METAFIELD_DEFINITIONS_QUERY = """
+query SportsCaveEditionMetafieldDefinitions($ownerType: MetafieldOwnerType!, $namespace: String!) {
+  metafieldDefinitions(first: 50, ownerType: $ownerType, namespace: $namespace) {
+    nodes {
+      id
+      name
+      namespace
+      key
+      ownerType
+      type {
+        name
+      }
+    }
+  }
+}
+"""
+
+
+METAFIELD_DEFINITION_CREATE_MUTATION = """
+mutation SportsCaveEditionMetafieldDefinitionCreate($definition: MetafieldDefinitionInput!) {
+  metafieldDefinitionCreate(definition: $definition) {
+    createdDefinition {
+      id
+      name
+      namespace
+      key
+      ownerType
+      type {
+        name
+      }
+    }
+    userErrors {
+      field
+      message
+      code
     }
   }
 }
@@ -1032,6 +1170,56 @@ def fetch_limited_edition_products_page(after=None, search="", page_size=25, con
     }
 
 
+def fetch_edition_ops_active_products_page(after=None, page_size=50, config=None, request_post=None):
+    config = config or get_config()
+    first = min(max(int(page_size), 1), 50)
+    data, served_version = graphql_request(
+        EDITION_OPS_ACTIVE_PRODUCTS_QUERY,
+        variables={
+            "first": first,
+            "after": after or None,
+            "query": "status:active",
+        },
+        config=config,
+        request_post=request_post,
+    )
+    connection = data.get("products") or {}
+    nodes = connection.get("nodes") or []
+    products = [normalize_edition_ops_product(node, config["store_domain"]) for node in nodes]
+    page_info = connection.get("pageInfo") or {}
+    return {
+        "products": products,
+        "has_next_page": bool(page_info.get("hasNextPage")),
+        "end_cursor": page_info.get("endCursor"),
+        "api_version": served_version or config.get("api_version"),
+    }
+
+
+def fetch_edition_ops_active_products(max_products=None, page_size=50, config=None, request_post=None):
+    config = config or get_config()
+    limit = max(1, int(max_products if max_products is not None else config.get("edition_ops_max_products", DEFAULT_EDITION_OPS_MAX_PRODUCTS)))
+    after = None
+    products = []
+    served_version = config.get("api_version")
+    while len(products) < limit:
+        page = fetch_edition_ops_active_products_page(
+            after=after,
+            page_size=min(int(page_size or 50), limit - len(products)),
+            config=config,
+            request_post=request_post,
+        )
+        products.extend(page.get("products") or [])
+        served_version = page.get("api_version") or served_version
+        if not page.get("has_next_page") or not page.get("end_cursor"):
+            break
+        after = page.get("end_cursor")
+    return {
+        "products": products[:limit],
+        "api_version": served_version,
+        "max_products": limit,
+    }
+
+
 def limited_edition_metafield_inputs(product_id, values):
     owner_id = shopify_gid("Product", product_id)
     if not owner_id:
@@ -1088,6 +1276,158 @@ def save_limited_edition_metafields(product_id, values, config=None, request_pos
         "metafields": metafields,
         "edition": normalize_limited_edition_metafields(metafields),
         "api_version": readback.get("api_version"),
+    }
+
+
+def sync_limited_edition_metafields_for_products(products, config=None, request_post=None):
+    config = config or get_config()
+    rows = [row for row in (products or []) if row.get("shopify_product_id")]
+    results = []
+    synced = 0
+    failed = 0
+
+    for index in range(0, len(rows), 5):
+        chunk = rows[index : index + 5]
+        inputs = []
+        for row in chunk:
+            inputs.extend(limited_edition_metafield_inputs(row["shopify_product_id"], row))
+
+        try:
+            metafields_set(inputs, config=config, request_post=request_post)
+            for row in chunk:
+                results.append(
+                    {
+                        "shopify_product_id": row["shopify_product_id"],
+                        "title": row.get("title") or row.get("handle") or row["shopify_product_id"],
+                        "ok": True,
+                        "message": "Synced",
+                    }
+                )
+                synced += 1
+        except Exception as batch_error:
+            for row in chunk:
+                try:
+                    metafields_set(
+                        limited_edition_metafield_inputs(row["shopify_product_id"], row),
+                        config=config,
+                        request_post=request_post,
+                    )
+                    results.append(
+                        {
+                            "shopify_product_id": row["shopify_product_id"],
+                            "title": row.get("title") or row.get("handle") or row["shopify_product_id"],
+                            "ok": True,
+                            "message": "Synced",
+                        }
+                    )
+                    synced += 1
+                except Exception as product_error:
+                    results.append(
+                        {
+                            "shopify_product_id": row["shopify_product_id"],
+                            "title": row.get("title") or row.get("handle") or row["shopify_product_id"],
+                            "ok": False,
+                            "message": str(product_error) or str(batch_error),
+                        }
+                    )
+                    failed += 1
+
+    return {"synced": synced, "failed": failed, "results": results}
+
+
+def list_edition_ops_metafield_definitions(config=None, request_post=None):
+    config = config or get_config()
+    data, served_version = graphql_request(
+        METAFIELD_DEFINITIONS_QUERY,
+        variables={"ownerType": "PRODUCT", "namespace": "sports_cave"},
+        config=config,
+        request_post=request_post,
+    )
+    existing = {}
+    for node in ((data.get("metafieldDefinitions") or {}).get("nodes") or []):
+        key = node.get("key") or ""
+        type_node = node.get("type") or {}
+        existing[key] = {
+            "id": node.get("id") or "",
+            "name": node.get("name") or "",
+            "namespace": node.get("namespace") or "",
+            "key": key,
+            "ownerType": node.get("ownerType") or "",
+            "type": type_node.get("name") or "",
+        }
+
+    definitions = []
+    for required in EDITION_OPS_METAFIELD_DEFINITIONS:
+        found = existing.get(required["key"])
+        ready = bool(
+            found
+            and found.get("namespace") == required["namespace"]
+            and found.get("ownerType") == required["ownerType"]
+            and found.get("type") == required["type"]
+        )
+        definitions.append(
+            {
+                **required,
+                "id": (found or {}).get("id", ""),
+                "found_type": (found or {}).get("type", ""),
+                "status": "Ready" if ready else ("Type mismatch" if found else "Missing"),
+            }
+        )
+    return {"definitions": definitions, "api_version": served_version or config.get("api_version")}
+
+
+def create_edition_ops_metafield_definition(definition, config=None, request_post=None):
+    config = config or get_config()
+    data, served_version = graphql_request(
+        METAFIELD_DEFINITION_CREATE_MUTATION,
+        variables={
+            "definition": {
+                "name": definition["name"],
+                "namespace": definition["namespace"],
+                "key": definition["key"],
+                "type": definition["type"],
+                "ownerType": definition["ownerType"],
+            }
+        },
+        config=config,
+        request_post=request_post,
+    )
+    result = data.get("metafieldDefinitionCreate") or {}
+    if result.get("userErrors"):
+        raise ShopifyAPIError(_metafields_user_error_text(result.get("userErrors")))
+    created = result.get("createdDefinition") or {}
+    return {"definition": created, "api_version": served_version or config.get("api_version")}
+
+
+def create_missing_edition_ops_metafield_definitions(config=None, request_post=None):
+    config = config or get_config()
+    checked = list_edition_ops_metafield_definitions(config=config, request_post=request_post)
+    created = []
+    skipped = []
+    errors = []
+    for definition in checked.get("definitions") or []:
+        if definition.get("status") == "Ready":
+            skipped.append({**definition, "message": "Already exists"})
+            continue
+        if definition.get("status") == "Type mismatch":
+            errors.append({**definition, "message": "Definition exists with a different type"})
+            continue
+        try:
+            created_result = create_edition_ops_metafield_definition(
+                definition,
+                config=config,
+                request_post=request_post,
+            )
+            created.append({**definition, "message": "Created", "created": created_result.get("definition")})
+        except Exception as error:
+            errors.append({**definition, "message": str(error)})
+    refreshed = list_edition_ops_metafield_definitions(config=config, request_post=request_post)
+    return {
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+        "definitions": refreshed.get("definitions") or [],
+        "api_version": refreshed.get("api_version") or checked.get("api_version"),
     }
 
 
