@@ -5,6 +5,7 @@ import re
 
 import streamlit as st
 
+import certificate_engine
 import order_allocator
 import shopify_sync
 
@@ -26,6 +27,7 @@ VISIBLE_COLUMNS = (
     "product",
     "variant",
     "edition",
+    "certificate",
 )
 
 
@@ -84,14 +86,23 @@ def _format_edition(value):
     return f"#{number:03d}" if number else ""
 
 
+def _certificate_label(row):
+    if row.get("certificate_pdf_url"):
+        return "Uploaded"
+    status = str(row.get("certificate_status") or "").strip()
+    if status in {"Generated", "Uploaded", "Error", "Template missing", "Upload error"}:
+        return "Error" if status in {"Template missing", "Upload error"} else status
+    if row.get("certificate_pdf_path"):
+        return "Generated"
+    return "Generate"
+
+
 def _allocation_numbers(allocation):
     values = allocation.get("edition_numbers")
     if isinstance(values, list):
         numbers = []
         for number in values:
-            normalised = _normalise_edition_number(number)
-            if normalised:
-                numbers.append(normalised)
+            numbers.append(_normalise_edition_number(number))
         return numbers
     single = _normalise_edition_number(
         allocation.get("edition_number")
@@ -116,16 +127,28 @@ def _normalise_row(row):
     updated["variant"] = str(updated.get("variant") or "")
     updated["edition_number"] = edition_number
     updated["edition"] = _format_edition(edition_number)
+    updated["edition_total"] = int(updated.get("edition_total") or 100)
     updated["has_saved_allocation"] = bool(updated.get("has_saved_allocation"))
     updated["edition_offset"] = int(updated.get("edition_offset") or 0)
+    updated["line_quantity"] = int(updated.get("line_quantity") or 1)
     updated["shopify_order_id"] = str(updated.get("shopify_order_id") or "")
     updated["legacy_resource_id"] = str(updated.get("legacy_resource_id") or "")
     updated["shopify_line_item_id"] = str(updated.get("shopify_line_item_id") or "")
     updated["shopify_product_id"] = str(updated.get("shopify_product_id") or "")
+    updated["variant_id"] = str(updated.get("variant_id") or "")
+    updated["product_handle"] = str(updated.get("product_handle") or updated.get("handle") or "")
     updated["customer_email"] = str(updated.get("customer_email") or "")
     updated["processed_at"] = str(updated.get("processed_at") or "")
     updated["created_at"] = str(updated.get("created_at") or "")
     updated["order_number_sort"] = int(updated.get("order_number_sort") or _parse_order_number(updated["order"]))
+    updated["certificate_id"] = str(updated.get("certificate_id") or "")
+    updated["certificate_status"] = str(updated.get("certificate_status") or "")
+    updated["certificate"] = _certificate_label(updated)
+    updated["certificate_pdf_path"] = str(updated.get("certificate_pdf_path") or "")
+    updated["certificate_pdf_url"] = str(updated.get("certificate_pdf_url") or "")
+    updated["certificate_shopify_file_id"] = str(updated.get("certificate_shopify_file_id") or "")
+    updated["certificate_generated_at"] = str(updated.get("certificate_generated_at") or "")
+    updated["certificate_error"] = str(updated.get("certificate_error") or "")
     return updated
 
 
@@ -139,6 +162,56 @@ def _sort_rows(rows):
         ),
         reverse=True,
     )
+
+
+def _row_key(row):
+    normalised = _normalise_row(row)
+    return "|".join(
+        [
+            normalised.get("shopify_order_id") or normalised.get("order") or "",
+            normalised.get("shopify_line_item_id") or "",
+            str(normalised.get("edition_offset") or 0),
+            str(normalised.get("edition_number") or ""),
+        ]
+    )
+
+
+def _certificate_fields(row):
+    normalised = _normalise_row(row)
+    return {
+        "certificate_id": normalised.get("certificate_id") or "",
+        "certificate_status": normalised.get("certificate_status") or "",
+        "certificate_pdf_path": normalised.get("certificate_pdf_path") or "",
+        "certificate_pdf_url": normalised.get("certificate_pdf_url") or "",
+        "certificate_shopify_file_id": normalised.get("certificate_shopify_file_id") or "",
+        "certificate_generated_at": normalised.get("certificate_generated_at") or "",
+        "certificate_error": normalised.get("certificate_error") or "",
+    }
+
+
+def _merge_local_certificate_fields(refreshed_rows, existing_rows):
+    existing_by_key = {_row_key(row): _certificate_fields(row) for row in existing_rows or []}
+    output = []
+    for row in refreshed_rows:
+        updated = _normalise_row(row)
+        existing = existing_by_key.get(_row_key(updated)) or {}
+        if existing and not updated.get("certificate_pdf_url"):
+            updated.update({key: value for key, value in existing.items() if value})
+            updated["certificate"] = _certificate_label(updated)
+        output.append(_normalise_row(updated))
+    return output
+
+
+def _update_matching_row(target_row, updates):
+    target_key = _row_key(target_row)
+    rows = []
+    for row in st.session_state.get(ROWS_KEY, []):
+        normalised = _normalise_row(row)
+        if _row_key(normalised) == target_key:
+            normalised.update(updates)
+        rows.append(_normalise_row(normalised))
+    st.session_state[ROWS_KEY] = _sort_rows(rows)
+    _write_snapshot(st.session_state[ROWS_KEY], meta=st.session_state.get(META_KEY) or {})
 
 
 def _load_snapshot_once():
@@ -204,6 +277,19 @@ def _allocation_for_line(order, line_item):
     return (allocations.get("line_items") or {}).get(line_item.get("shopify_line_item_id")) or {}
 
 
+def _certificate_for_unit(order, line_id, edition_number, unit_index):
+    certificates = certificate_engine.certificate_payload_from_metafields(order.get("metafields") or [])
+    for certificate in certificates:
+        if str(certificate.get("line_item_id") or "") != str(line_id or ""):
+            continue
+        if _normalise_edition_number(certificate.get("edition_number")) != _normalise_edition_number(edition_number):
+            continue
+        if int(certificate.get("line_item_unit_index") or 1) != int(unit_index or 1):
+            continue
+        return certificate
+    return {}
+
+
 def _product_edition(product_id, cache, config):
     if not product_id:
         return {}
@@ -227,10 +313,17 @@ def _rows_from_order_line(order, line_item, edition):
     allocation = _allocation_for_line(order, line_item)
     allocation_numbers = _allocation_numbers(allocation)
     product_next_number = _normalise_edition_number(edition.get("edition_next_number"))
+    edition_total = int(allocation.get("edition_total") or edition.get("edition_total") or 100)
     rows = []
     for index in range(quantity):
         saved_number = allocation_numbers[index] if index < len(allocation_numbers) else None
         edition_number = saved_number or (product_next_number + index if product_next_number else None)
+        certificate = _certificate_for_unit(
+            order,
+            line_item.get("shopify_line_item_id"),
+            edition_number,
+            index + 1,
+        )
         rows.append(
             _normalise_row(
                 {
@@ -242,15 +335,25 @@ def _rows_from_order_line(order, line_item, edition):
                     "product": line_item.get("product_title") or "",
                     "variant": line_item.get("variant_title") or "",
                     "edition_number": edition_number,
+                    "edition_total": edition_total,
                     "has_saved_allocation": bool(saved_number),
                     "edition_offset": index,
+                    "line_quantity": quantity,
                     "shopify_order_id": order.get("shopify_order_id") or "",
                     "legacy_resource_id": order.get("legacy_resource_id") or "",
                     "shopify_line_item_id": line_item.get("shopify_line_item_id") or "",
                     "shopify_product_id": line_item.get("shopify_product_id") or "",
+                    "product_handle": line_item.get("product_handle") or "",
+                    "variant_id": line_item.get("variant_id") or "",
                     "processed_at": order.get("processed_at") or "",
                     "created_at": order.get("created_at") or "",
                     "order_number_sort": _parse_order_number(order.get("order_name")),
+                    "certificate_id": certificate.get("certificate_id") or "",
+                    "certificate_status": "Uploaded" if certificate.get("pdf_url") else certificate.get("status") or "",
+                    "certificate_pdf_url": certificate.get("pdf_url") or certificate.get("certificate_url") or "",
+                    "certificate_shopify_file_id": certificate.get("pdf_shopify_file_id") or "",
+                    "certificate_generated_at": certificate.get("generated_at") or "",
+                    "certificate_error": certificate.get("sync_error") or "",
                 }
             )
         )
@@ -262,6 +365,7 @@ def _refresh_orders():
     if not config.get("configured"):
         st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before refreshing orders."
         return
+    existing_rows = st.session_state.get(ROWS_KEY, [])
     rows = []
     product_cache = {}
     for page in shopify_sync.iter_order_pages(
@@ -277,7 +381,7 @@ def _refresh_orders():
                 edition = _product_edition(line_item.get("shopify_product_id"), product_cache, config)
                 rows.extend(_rows_from_order_line(order, line_item, edition))
     refreshed_at = _now_iso()
-    sorted_rows = _sort_rows(rows)
+    sorted_rows = _sort_rows(_merge_local_certificate_fields(rows, existing_rows))
     st.session_state[ROWS_KEY] = sorted_rows
     _write_snapshot(sorted_rows, meta={"last_refreshed": refreshed_at})
     st.session_state[NOTICE_KEY] = f"Refreshed {len(sorted_rows)} artwork rows."
@@ -299,7 +403,213 @@ def _column_config():
         "product": st.column_config.TextColumn("Product"),
         "variant": st.column_config.TextColumn("Variant"),
         "edition": st.column_config.TextColumn("Edition"),
+        "certificate": st.column_config.TextColumn("Certificate"),
     }
+
+
+def _positive_numbers(values):
+    output = []
+    for value in values or []:
+        number = _normalise_edition_number(value)
+        if number:
+            output.append(number)
+    return output
+
+
+def _lock_allocation_for_row(row, config):
+    row = _normalise_row(row)
+    if not row.get("shopify_order_id") or not row.get("shopify_line_item_id"):
+        raise shopify_sync.ShopifyAPIError("Order or line item ID is missing.")
+    edition_number = _normalise_edition_number(row.get("edition_number"))
+    if not edition_number:
+        raise ValueError("This row has no edition number to lock yet.")
+
+    state = order_allocator.read_order_allocation_state(row["shopify_order_id"], config=config)
+    payload = order_allocator.parse_allocation_payload(state.get("payload") or {})
+    payload.update(
+        {
+            "version": order_allocator.SNAPSHOT_VERSION,
+            "source": "sports_cave_os_orders_generate",
+            "order_id": order_allocator.order_gid(row["shopify_order_id"]),
+            "order_name": row.get("order") or payload.get("order_name") or "",
+            "updated_at": _now_iso(),
+        }
+    )
+    line_items = dict(payload.get("line_items") or {})
+    line_id = order_allocator.line_item_gid(row["shopify_line_item_id"])
+    allocation = dict(line_items.get(line_id) or {})
+    quantity = max(int(row.get("line_quantity") or 1), int(row.get("edition_offset") or 0) + 1)
+    numbers = list(allocation.get("edition_numbers") or [])
+    while len(numbers) < quantity:
+        numbers.append(None)
+    unit_index = int(row.get("edition_offset") or 0)
+    if not _normalise_edition_number(numbers[unit_index]):
+        numbers[unit_index] = edition_number
+
+    allocation.update(
+        {
+            "line_item_id": line_id,
+            "product_id": order_allocator.product_gid(row.get("shopify_product_id")),
+            "variant_id": row.get("variant_id") or "",
+            "handle": row.get("product_handle") or "",
+            "product_title": row.get("product") or "",
+            "variant_title": row.get("variant") or "",
+            "quantity": quantity,
+            "edition_numbers": numbers,
+            "edition_number": _positive_numbers(numbers)[0] if _positive_numbers(numbers) else edition_number,
+            "edition_total": int(row.get("edition_total") or 100),
+            "edition_display": order_allocator.format_edition_numbers(_positive_numbers(numbers), row.get("edition_total") or 100),
+            "order_name": row.get("order") or "",
+            "allocated_at": allocation.get("allocated_at") or _now_iso(),
+        }
+    )
+    line_items[line_id] = allocation
+    payload["line_items"] = line_items
+    shopify_sync.sync_order_allocation_metafield(
+        row["shopify_order_id"],
+        payload,
+        compare_digest=state.get("compare_digest"),
+        config=config,
+    )
+    return allocation
+
+
+def _update_row_from_certificate(row, record):
+    updates = {
+        "has_saved_allocation": True,
+        "certificate_id": record.get("certificate_id") or "",
+        "certificate_status": record.get("status") or "",
+        "certificate_pdf_path": record.get("local_pdf_path") or "",
+        "certificate_pdf_url": record.get("pdf_url") or "",
+        "certificate_shopify_file_id": record.get("pdf_shopify_file_id") or "",
+        "certificate_generated_at": record.get("generated_at") or "",
+        "certificate_error": record.get("sync_error") or "",
+    }
+    updates["certificate"] = _certificate_label(updates)
+    _update_matching_row(row, updates)
+
+
+def _existing_uploaded_certificate(row, config):
+    record = certificate_engine.certificate_record_from_order_row(row)
+    state = certificate_engine.read_order_certificate_state(row.get("shopify_order_id"), config=config)
+    existing = certificate_engine.find_existing_certificate(state.get("certificates") or [], record)
+    if existing and (existing.get("pdf_url") or existing.get("certificate_url")):
+        return existing
+    return {}
+
+
+def _generate_certificate_for_row(row):
+    config = shopify_sync.get_config()
+    if not config.get("configured"):
+        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before generating certificates."
+        return
+    row = _normalise_row(row)
+    try:
+        if not row.get("has_saved_allocation"):
+            _lock_allocation_for_row(row, config)
+            row["has_saved_allocation"] = True
+        existing = _existing_uploaded_certificate(row, config)
+        if existing:
+            record = {**certificate_engine.certificate_record_from_order_row(row), **existing, "status": "Uploaded"}
+            _update_row_from_certificate(row, record)
+            st.session_state[NOTICE_KEY] = f"Certificate already uploaded for {row.get('order')} {row.get('edition')}."
+            return
+        record = certificate_engine.certificate_record_from_order_row(row)
+        generated = certificate_engine.generate_local_certificate_for_record(record)
+        _update_row_from_certificate(row, generated)
+        if generated.get("status") == "Generated":
+            st.session_state[NOTICE_KEY] = f"Generated certificate for {row.get('order')} {row.get('edition')}."
+        else:
+            st.session_state[NOTICE_KEY] = generated.get("sync_error") or "Certificate generation needs review."
+    except Exception as error:
+        _update_matching_row(row, {"certificate_status": "Error", "certificate_error": str(error), "certificate": "Error"})
+        st.session_state[NOTICE_KEY] = f"Certificate generation failed: {error}"
+
+
+def _upload_certificate_for_row(row):
+    config = shopify_sync.get_config()
+    if not config.get("configured"):
+        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before uploading certificates."
+        return
+    row = _normalise_row(row)
+    try:
+        existing = _existing_uploaded_certificate(row, config)
+        if existing:
+            record = {**certificate_engine.certificate_record_from_order_row(row), **existing, "status": "Uploaded"}
+            _update_row_from_certificate(row, record)
+            st.session_state[NOTICE_KEY] = f"Certificate already uploaded for {row.get('order')} {row.get('edition')}."
+            return
+        record = certificate_engine.certificate_record_from_order_row(row)
+        record["local_pdf_path"] = row.get("certificate_pdf_path") or record.get("local_pdf_path") or ""
+        if not record.get("local_pdf_path"):
+            record = certificate_engine.generate_local_certificate_for_record(record)
+        uploaded = certificate_engine.upload_generated_certificate_record(record, config=config)
+        saved = certificate_engine.save_certificate_record_to_order(uploaded, config=config)
+        saved_record = {**uploaded, **(saved.get("record") or {}), "status": "Uploaded"}
+        _update_row_from_certificate(row, saved_record)
+        st.session_state[NOTICE_KEY] = f"Uploaded certificate for {row.get('order')} {row.get('edition')}."
+    except Exception as error:
+        _update_matching_row(row, {"certificate_status": "Error", "certificate_error": str(error), "certificate": "Error"})
+        st.session_state[NOTICE_KEY] = f"Certificate upload failed: {error}"
+
+
+def _file_link(path):
+    try:
+        pdf_path = Path(path)
+        if pdf_path.exists():
+            return pdf_path.resolve().as_uri()
+    except Exception:
+        return ""
+    return ""
+
+
+def _render_certificate_actions(row, index):
+    row = _normalise_row(row)
+    key_base = f"order-cert-{row.get('shopify_order_id')}-{row.get('shopify_line_item_id')}-{row.get('edition_offset')}-{index}"
+    if row.get("certificate_pdf_url"):
+        st.write("Uploaded")
+        st.markdown(f"[Open PDF]({row['certificate_pdf_url']})")
+        return
+    if row.get("certificate_pdf_path") and Path(row.get("certificate_pdf_path")).exists():
+        st.write("Generated")
+        if st.button("Upload to Shopify", key=f"{key_base}-upload", use_container_width=True):
+            _upload_certificate_for_row(row)
+            st.rerun()
+        local_link = _file_link(row.get("certificate_pdf_path"))
+        if local_link:
+            st.markdown(f"[Open PDF]({local_link})")
+        return
+    if str(row.get("certificate_status") or "").casefold() in {"error", "template missing", "upload error"}:
+        st.write("Error")
+        if row.get("certificate_error"):
+            st.caption(row.get("certificate_error"))
+        if st.button("Retry", key=f"{key_base}-retry", use_container_width=True):
+            _generate_certificate_for_row(row)
+            st.rerun()
+        return
+    if st.button("Generate", key=f"{key_base}-generate", use_container_width=True, disabled=not bool(row.get("edition_number"))):
+        _generate_certificate_for_row(row)
+        st.rerun()
+
+
+def _render_orders_table(rows):
+    widths = [0.8, 0.9, 1.45, 1.35, 2.4, 1.7, 0.7, 1.35]
+    headers = ("Order", "Date", "Customer", "Shipping", "Product", "Variant", "Edition", "Certificate")
+    header_cols = st.columns(widths)
+    for col, header in zip(header_cols, headers):
+        col.caption(header)
+    for index, row in enumerate(rows):
+        row = _normalise_row(row)
+        cols = st.columns(widths)
+        cols[0].write(row.get("order") or "")
+        cols[1].write(row.get("date") or "")
+        cols[2].write(row.get("customer") or "")
+        cols[3].write(row.get("shipping") or "")
+        cols[4].write(row.get("product") or "")
+        cols[5].write(row.get("variant") or "")
+        cols[6].write(row.get("edition") or "")
+        with cols[7]:
+            _render_certificate_actions(row, index)
 
 
 def render_page():
@@ -328,10 +638,4 @@ def render_page():
         return
 
     st.caption(f"{len(rows)} artwork rows shown.")
-    st.dataframe(
-        _display_rows(rows),
-        hide_index=True,
-        use_container_width=True,
-        column_order=VISIBLE_COLUMNS,
-        column_config=_column_config(),
-    )
+    _render_orders_table(rows)

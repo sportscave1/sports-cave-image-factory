@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import unittest
+from unittest.mock import patch
 
 import edition_ops
 import orders_page
@@ -16,15 +17,16 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn('"Edition Ops"', source)
         self.assertIn('"Orders"', source)
-        self.assertIn('"Certificates"', source)
         self.assertIn("get_edition_ops().render_page()", source)
         self.assertIn("get_orders_page().render_page()", source)
-        self.assertIn("get_certificates_page().render_page()", source)
+        self.assertNotIn('"Certificates"', source)
+        self.assertNotIn("get_certificates_page", source)
+        self.assertNotIn("certificates_page", source)
         self.assertNotIn('"Limited Editions",', source)
         self.assertNotIn("render_limited_editions_page", source)
         self.assertNotIn("render_edition_orders_page", source)
         self.assertNotIn("render_edition_integrity_check_page", source)
-        self.assertIn('current_page in {"Dashboard", "Products", "Edition Ops", "Orders", "Certificates", "Developer", "Settings"}', source)
+        self.assertIn('current_page in {"Dashboard", "Products", "Edition Ops", "Orders", "Developer", "Settings"}', source)
         self.assertIn("DEVELOPER_PAGE_PASSWORD", source)
         self.assertIn("developer_unlocked", source)
 
@@ -78,24 +80,25 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(
             orders_page.VISIBLE_COLUMNS,
-            ("order", "date", "customer", "shipping", "product", "variant", "edition"),
+            ("order", "date", "customer", "shipping", "product", "variant", "edition", "certificate"),
         )
         self.assertIn("orders_allocation_snapshot.json", source)
         self.assertIn("Refresh Orders", source)
-        self.assertIn("st.dataframe", source)
+        self.assertIn("_render_orders_table", source)
+        self.assertIn("Generate", source)
+        self.assertIn("Upload to Shopify", source)
         self.assertNotIn("Save Changed Order Editions", source)
         self.assertNotIn("Allocate Selected From Product Counter", source)
         self.assertNotIn("Overwrite Selected Order Allocation", source)
         self.assertNotIn("Override Selected Order Allocation", source)
         self.assertNotIn("Manual Allocation", source)
         self.assertNotIn("st.data_editor", source)
-        self.assertNotIn("sync_order_allocation_metafield", source)
+        self.assertIn("sync_order_allocation_metafield", source)
         self.assertNotIn('"qty"', source)
         self.assertNotIn('"allocation_status"', source)
         self.assertNotIn('"sync_status"', source)
         self.assertNotIn('"admin_url"', source)
         self.assertNotIn("supabase_backend", source)
-        self.assertNotIn("certificate", source.casefold())
 
     def test_orders_page_formats_single_edition_numbers(self):
         self.assertEqual(orders_page._format_edition("50"), "#050")
@@ -153,6 +156,67 @@ class EditionOpsUiTests(unittest.TestCase):
         rows = orders_page._rows_from_order_line(order, line_item, {"edition_next_number": 91})
 
         self.assertEqual([row["edition"] for row in rows], ["#091", "#092"])
+
+    def test_orders_page_certificate_record_uses_exact_visible_row_edition(self):
+        row = orders_page._normalise_row(
+            {
+                "order": "#SC1234",
+                "date": "2026-06-22",
+                "customer": "Greg Collector",
+                "customer_email": "greg@example.com",
+                "product": "Greg Murphy Lap of the Gods Wall Art",
+                "variant": "Black / XL",
+                "edition_number": 16,
+                "edition_total": 100,
+                "shopify_order_id": "gid://shopify/Order/1234",
+                "shopify_line_item_id": "gid://shopify/LineItem/555",
+                "shopify_product_id": "gid://shopify/Product/777",
+                "variant_id": "gid://shopify/ProductVariant/888",
+                "product_handle": "greg-murphy-lap-of-the-gods-wall-art",
+                "edition_offset": 0,
+            }
+        )
+
+        record = orders_page.certificate_engine.certificate_record_from_order_row(row)
+
+        self.assertEqual(record["edition_number"], 16)
+        self.assertEqual(record["edition_display"], "#016")
+        self.assertEqual(record["line_item_unit_index"], 1)
+        self.assertIn("SC-SC1234-GREG-MURPHY-LAP-OF-THE-GODS-WALL-ART-EDITION-016", record["certificate_id"])
+
+    def test_generate_lock_saves_visible_edition_before_certificate_generation(self):
+        row = orders_page._normalise_row(
+            {
+                "order": "#SC1234",
+                "product": "Greg Murphy Lap of the Gods Wall Art",
+                "variant": "Black / XL",
+                "edition_number": 16,
+                "edition_total": 100,
+                "edition_offset": 1,
+                "line_quantity": 2,
+                "shopify_order_id": "gid://shopify/Order/1234",
+                "shopify_line_item_id": "gid://shopify/LineItem/555",
+                "shopify_product_id": "gid://shopify/Product/777",
+                "variant_id": "gid://shopify/ProductVariant/888",
+                "product_handle": "greg-murphy-lap-of-the-gods-wall-art",
+            }
+        )
+        synced = []
+
+        with patch.object(
+            orders_page.order_allocator,
+            "read_order_allocation_state",
+            return_value={"payload": {"line_items": {}}, "compare_digest": "digest-1"},
+        ), patch.object(
+            orders_page.shopify_sync,
+            "sync_order_allocation_metafield",
+            side_effect=lambda order_id, payload, compare_digest=None, config=None: synced.append(payload),
+        ):
+            allocation = orders_page._lock_allocation_for_row(row, {"configured": True})
+
+        self.assertEqual(allocation["edition_numbers"], [None, 16])
+        self.assertEqual(allocation["edition_number"], 16)
+        self.assertEqual(synced[0]["line_items"]["gid://shopify/LineItem/555"]["edition_numbers"], [None, 16])
 
     def test_limited_edition_inputs_use_only_calculated_mvp_metafields(self):
         inputs = shopify_sync.limited_edition_metafield_inputs(

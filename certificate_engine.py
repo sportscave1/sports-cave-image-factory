@@ -169,7 +169,8 @@ def _existing_ready_certificate(existing, line_id, edition_number, unit_index):
     record = existing.get(key)
     if not record:
         return None
-    if str(record.get("status") or "").casefold() == "ready" and (record.get("pdf_url") or record.get("certificate_url")):
+    status = str(record.get("status") or "").casefold()
+    if status in {"ready", "uploaded"} and (record.get("pdf_url") or record.get("certificate_url")):
         return record
     return None
 
@@ -212,6 +213,140 @@ def _certificate_base_record(order_payload, line_id, allocation, line_item, edit
         "generated_at": "",
         "status": "Generating",
     }
+
+
+def certificate_record_from_order_row(row):
+    edition_number = int(row.get("edition_number") or 0)
+    edition_total = int(row.get("edition_total") or 100)
+    order_name = row.get("order") or row.get("order_name") or ""
+    product_title = row.get("product") or row.get("product_title") or ""
+    handle = row.get("product_handle") or row.get("handle") or certificate_service.safe_filename_part(product_title)
+    return {
+        "certificate_id": certificate_service.certificate_id(order_name, edition_number, handle),
+        "order_gid": order_allocator.order_gid(row.get("shopify_order_id") or row.get("order_gid")),
+        "order_name": order_name,
+        "line_item_id": order_allocator.line_item_gid(row.get("shopify_line_item_id")),
+        "line_item_unit_index": int(row.get("edition_offset") or 0) + 1,
+        "product_gid": order_allocator.product_gid(row.get("shopify_product_id") or row.get("product_gid")),
+        "variant_gid": row.get("variant_id") or row.get("variant_gid") or "",
+        "product_title": product_title,
+        "variant_title": row.get("variant") or row.get("variant_title") or "",
+        "handle": handle,
+        "edition_number": edition_number,
+        "edition_display": padded_edition(edition_number),
+        "edition_total": edition_total,
+        "customer_name": row.get("customer") or row.get("customer_name") or "",
+        "customer_email": row.get("customer_email") or "",
+        "purchase_date": row.get("processed_at") or row.get("date") or "",
+        "pdf_shopify_file_id": row.get("certificate_shopify_file_id") or "",
+        "pdf_url": row.get("certificate_pdf_url") or "",
+        "local_pdf_path": row.get("certificate_pdf_path") or "",
+        "generated_at": row.get("certificate_generated_at") or "",
+        "status": row.get("certificate_status") or "Generating",
+    }
+
+
+def find_existing_certificate(certificates, record):
+    existing = {_certificate_key(item): item for item in certificates or []}
+    return existing.get(_certificate_key(record)) or {}
+
+
+def generate_local_certificate_for_record(record, output_dir=None):
+    output_dir = Path(output_dir or CERTIFICATE_OUTPUT_DIR)
+    updated = dict(record or {})
+    filename = certificate_service.certificate_pdf_filename(
+        updated.get("order_name"),
+        updated.get("handle"),
+        updated.get("edition_number"),
+        updated.get("edition_total"),
+    )
+    if not certificate_service.CERTIFICATE_TEMPLATE_PRINT_PATH.exists():
+        updated["status"] = "Template missing"
+        updated["sync_error"] = f"Certificate template missing: {certificate_service.CERTIFICATE_TEMPLATE_PRINT_PATH}"
+        updated["generated_at"] = now_iso()
+        return updated
+    try:
+        pdf_path = certificate_service.generate_certificate_pdf(
+            output_dir,
+            product_title=updated.get("product_title"),
+            edition_number=updated.get("edition_number"),
+            edition_total=updated.get("edition_total"),
+            order_name=updated.get("order_name"),
+            customer_name=updated.get("customer_name"),
+            assigned_at=updated.get("purchase_date"),
+            shopify_handle=updated.get("handle"),
+            filename=filename,
+        )
+        updated["local_pdf_path"] = pdf_path
+        updated["generated_at"] = now_iso()
+        updated["status"] = "Generated"
+        updated["sync_error"] = ""
+    except FileNotFoundError as error:
+        updated["status"] = "Template missing"
+        updated["sync_error"] = str(error)
+        updated["generated_at"] = now_iso()
+    except Exception as error:
+        updated["status"] = "Error"
+        updated["sync_error"] = str(error)
+        updated["generated_at"] = now_iso()
+    return updated
+
+
+def upload_generated_certificate_record(record, *, config=None, request_post=None, upload_post=None):
+    updated = dict(record or {})
+    local_raw = str(updated.get("local_pdf_path") or "").strip()
+    if not local_raw:
+        raise FileNotFoundError("Generated certificate PDF is missing.")
+    local_path = Path(local_raw)
+    if not local_path.exists():
+        raise FileNotFoundError(f"Generated certificate PDF is missing: {local_path}")
+    filename = certificate_service.certificate_pdf_filename(
+        updated.get("order_name"),
+        updated.get("handle"),
+        updated.get("edition_number"),
+        updated.get("edition_total"),
+    )
+    upload_result = shopify_sync.upload_pdf_to_shopify_files(
+        local_path,
+        filename=filename,
+        alt=f"{updated.get('certificate_id')} certificate",
+        config=config,
+        request_post=request_post,
+        upload_post=upload_post,
+    )
+    if not upload_result.get("file_id") or not upload_result.get("url"):
+        raise shopify_sync.ShopifyAPIError("Shopify file upload did not return a ready PDF URL.")
+    updated["pdf_shopify_file_id"] = upload_result.get("file_id") or ""
+    updated["pdf_url"] = upload_result.get("url") or ""
+    updated["status"] = "Ready"
+    updated["sync_error"] = ""
+    updated["generated_at"] = updated.get("generated_at") or now_iso()
+    return updated
+
+
+def save_certificate_record_to_order(record, *, config=None, request_post=None):
+    order_gid = order_allocator.order_gid(record.get("order_gid"))
+    if not order_gid:
+        raise shopify_sync.ShopifyAPIError("Order ID is missing for certificate save.")
+    state = read_order_certificate_state(order_gid, config=config, request_post=request_post)
+    certificates = state.get("certificates") or []
+    existing = _existing_ready_certificate(
+        {_certificate_key(item): item for item in certificates},
+        record.get("line_item_id"),
+        record.get("edition_number"),
+        record.get("line_item_unit_index"),
+    )
+    if existing:
+        return {"record": existing, "saved": False, "skipped_existing": True}
+    certificates = _replace_certificate(certificates, record)
+    shopify_sync.sync_order_certificate_metafields(
+        order_gid,
+        certificates,
+        compare_digest=state.get("compare_digest"),
+        config=config,
+        request_post=request_post,
+    )
+    return {"record": record, "saved": True, "skipped_existing": False}
 
 
 def certificate_records_from_allocations(order_payload, allocation_payload):
