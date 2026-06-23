@@ -4733,6 +4733,123 @@ def _render_developer_allocation_tools():
         except Exception as error:
             _developer_action_error("Historical backfill", error)
 
+    st.divider()
+    st.subheader("Manual Edition Override")
+    st.caption(
+        "Admin-only correction for one already allocated order row. Auto-allocation remains the default."
+    )
+    override_search = st.text_input(
+        "Find allocated order row",
+        value=st.session_state.get("developer-edition-override-search", ""),
+        placeholder="#SC2843 or GOAT Debate",
+        key="developer-edition-override-search",
+    )
+    override_cols = st.columns([1, 1])
+    if override_cols[0].button(
+        "Load Override Rows",
+        key="developer-load-edition-override-rows",
+        use_container_width=True,
+    ):
+        try:
+            supabase = importlib.import_module("supabase_backend")
+            st.session_state.developer_edition_override_rows = supabase.list_edition_orders(
+                search=override_search,
+                limit=80,
+            )
+        except Exception as error:
+            _developer_action_error("Load override rows", error)
+
+    override_rows = st.session_state.get("developer_edition_override_rows") or []
+    if override_rows:
+        def _override_row_label(row):
+            number = row.get("edition_number")
+            edition = f"#{int(number):03d}" if str(number or "").isdigit() else "No edition"
+            order_name = row.get("shopify_order_name") or row.get("order_name") or row.get("shopify_order_id") or ""
+            product = row.get("product_title") or row.get("shopify_handle") or ""
+            variant = row.get("variant_title") or ""
+            return f"{row.get('id')} | {order_name} | {product} | {variant} | {edition}"
+
+        labels = [_override_row_label(row) for row in override_rows]
+        selected_label = st.selectbox(
+            "Allocated order row",
+            labels,
+            key="developer-edition-override-row-label",
+        )
+        selected_row = override_rows[labels.index(selected_label)]
+        current_number = int(selected_row.get("edition_number") or 1)
+        edition_total = max(int(selected_row.get("edition_total") or 100), 1)
+        st.caption(
+            f"Selected row ID {selected_row.get('id')} - current edition #{current_number:03d}/{edition_total}."
+        )
+        new_number = st.number_input(
+            "New edition number",
+            min_value=1,
+            max_value=edition_total,
+            value=min(max(current_number, 1), edition_total),
+            step=1,
+            key="developer-edition-override-new-number",
+        )
+        override_reason = st.text_input(
+            "Override reason",
+            value="Manual correction",
+            key="developer-edition-override-reason",
+        )
+        action_cols = st.columns(2)
+        if action_cols[0].button(
+            "Override Edition",
+            key="developer-override-edition-number",
+            type="primary",
+            use_container_width=True,
+        ):
+            try:
+                supabase = importlib.import_module("supabase_backend")
+                result = supabase.override_edition_order_number(
+                    selected_row.get("id"),
+                    int(new_number),
+                    reason=override_reason,
+                    config=config,
+                    sync_shopify=bool(config.get("configured")),
+                )
+                product = result.get("product") or {}
+                st.success(
+                    f"Overrode edition #{result.get('old_edition_number'):03d} "
+                    f"to #{result.get('new_edition_number'):03d}. "
+                    f"Next edition is #{int(product.get('next_edition_number') or 0):03d}."
+                )
+                if product.get("sold_out"):
+                    st.warning("Product is sold out. Needs Review - Sold Out.")
+                if result.get("warning"):
+                    st.warning(result["warning"])
+                st.session_state.developer_edition_override_rows = supabase.list_edition_orders(
+                    search=override_search,
+                    limit=80,
+                )
+            except Exception as error:
+                _developer_action_error("Override Edition", error)
+        if action_cols[1].button(
+            "Recalculate Next Edition Number",
+            key="developer-recalculate-next-edition-number",
+            use_container_width=True,
+        ):
+            try:
+                supabase = importlib.import_module("supabase_backend")
+                result = supabase.recalculate_next_edition_number(
+                    shopify_handle=selected_row.get("shopify_handle") or selected_row.get("product_handle") or "",
+                    shopify_product_id=selected_row.get("shopify_product_id") or "",
+                    sync_shopify=bool(config.get("configured")),
+                    config=config,
+                )
+                st.success(
+                    f"Recalculated {result.get('shopify_handle')}: "
+                    f"next edition #{int(result.get('next_edition_number') or 0):03d}."
+                )
+                if result.get("sold_out"):
+                    st.warning("Product is sold out. Needs Review - Sold Out.")
+                if result.get("warning"):
+                    st.warning(result["warning"])
+            except Exception as error:
+                _developer_action_error("Recalculate Next Edition Number", error)
+
 
 def render_settings_page():
     if not _developer_unlocked():

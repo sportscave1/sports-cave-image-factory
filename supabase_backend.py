@@ -458,6 +458,11 @@ def _ensure_schema_uncached():
                     certificate_file_url TEXT,
                     purchase_date TIMESTAMPTZ,
                     source TEXT DEFAULT 'sports_cave_os',
+                    manual_override BOOLEAN DEFAULT FALSE,
+                    override_old_edition_number INTEGER,
+                    override_new_edition_number INTEGER,
+                    override_timestamp TIMESTAMPTZ,
+                    override_reason TEXT,
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ DEFAULT now(),
                     UNIQUE (shopify_line_item_id, allocation_index)
@@ -785,6 +790,11 @@ def _ensure_schema_uncached():
                     ("certificate_file_url", "TEXT"),
                     ("purchase_date", "TIMESTAMPTZ"),
                     ("source", "TEXT DEFAULT 'sports_cave_os'"),
+                    ("manual_override", "BOOLEAN DEFAULT FALSE"),
+                    ("override_old_edition_number", "INTEGER"),
+                    ("override_new_edition_number", "INTEGER"),
+                    ("override_timestamp", "TIMESTAMPTZ"),
+                    ("override_reason", "TEXT"),
                     ("created_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("edition_run_id", "UUID"),
                     ("edition_name", "TEXT"),
@@ -1309,6 +1319,11 @@ def ensure_order_read_schema():
                         certificate_file_url TEXT,
                         purchase_date TIMESTAMPTZ,
                         source TEXT DEFAULT 'sports_cave_os',
+                        manual_override BOOLEAN DEFAULT FALSE,
+                        override_old_edition_number INTEGER,
+                        override_new_edition_number INTEGER,
+                        override_timestamp TIMESTAMPTZ,
+                        override_reason TEXT,
                         created_at TIMESTAMPTZ DEFAULT now(),
                         updated_at TIMESTAMPTZ DEFAULT now()
                     )
@@ -1447,6 +1462,11 @@ def ensure_order_read_schema():
                         ("certificate_file_url", "TEXT"),
                         ("purchase_date", "TIMESTAMPTZ"),
                         ("source", "TEXT DEFAULT 'sports_cave_os'"),
+                        ("manual_override", "BOOLEAN DEFAULT FALSE"),
+                        ("override_old_edition_number", "INTEGER"),
+                        ("override_new_edition_number", "INTEGER"),
+                        ("override_timestamp", "TIMESTAMPTZ"),
+                        ("override_reason", "TEXT"),
                         ("created_at", "TIMESTAMPTZ DEFAULT now()"),
                         ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                         ("status", "TEXT DEFAULT 'assigned'"),
@@ -6403,6 +6423,502 @@ def mark_certificates_checked(edition_order_ids):
             count = cur.rowcount
         conn.commit()
     return count
+
+
+def _edition_product_for_order_row(cur, row, *, lock=False):
+    lock_sql = " FOR UPDATE" if lock else ""
+    handle = str(row.get("shopify_handle") or row.get("product_handle") or "").strip()
+    product_id = str(row.get("shopify_product_id") or "").strip()
+    if handle:
+        cur.execute(
+            f"""
+            SELECT *
+            FROM edition_products
+            WHERE shopify_handle=%s
+            {lock_sql}
+            """,
+            (handle,),
+        )
+        product = cur.fetchone()
+        if product:
+            return product
+    if product_id:
+        cur.execute(
+            f"""
+            SELECT *
+            FROM edition_products
+            WHERE shopify_product_id=%s
+               OR shopify_product_gid=%s
+            ORDER BY updated_at DESC NULLS LAST
+            LIMIT 1
+            {lock_sql}
+            """,
+            (product_id, product_id),
+        )
+        product = cur.fetchone()
+        if product:
+            return product
+    return None
+
+
+def _edition_conflict_for_number(cur, *, row, product, edition_number):
+    conditions = []
+    params = [str(row.get("id")), int(edition_number)]
+    run_id = row.get("edition_run_id")
+    product_id = str((product or {}).get("shopify_product_id") or row.get("shopify_product_id") or "").strip()
+    handle = str((product or {}).get("shopify_handle") or row.get("shopify_handle") or row.get("product_handle") or "").strip()
+    if run_id:
+        conditions.append("edition_run_id=%s")
+        params.append(run_id)
+    if product_id:
+        conditions.append("shopify_product_id=%s")
+        params.append(product_id)
+    if handle:
+        conditions.append("(shopify_handle=%s OR product_handle=%s)")
+        params.extend([handle, handle])
+    if not conditions:
+        raise ValueError("Row has no matched edition product.")
+    cur.execute(
+        f"""
+        SELECT id, shopify_order_id, shopify_order_name, shopify_line_item_id,
+               product_title, shopify_handle, edition_number
+        FROM edition_orders
+        WHERE id::text <> %s
+          AND edition_number=%s
+          AND ({" OR ".join(conditions)})
+        LIMIT 1
+        """,
+        tuple(params),
+    )
+    return cur.fetchone()
+
+
+def _max_assigned_for_product(cur, product, run):
+    conditions = []
+    params = []
+    if run and run.get("id"):
+        conditions.append("edition_run_id=%s")
+        params.append(run["id"])
+    product_id = str((product or {}).get("shopify_product_id") or "").strip()
+    handle = str((product or {}).get("shopify_handle") or "").strip()
+    if product_id:
+        conditions.append("shopify_product_id=%s")
+        params.append(product_id)
+    if handle:
+        conditions.append("(shopify_handle=%s OR product_handle=%s)")
+        params.extend([handle, handle])
+    if not conditions:
+        return 0
+    cur.execute(
+        f"""
+        SELECT COALESCE(MAX(edition_number), 0) AS max_assigned
+        FROM edition_orders
+        WHERE {" OR ".join(conditions)}
+        """,
+        tuple(params),
+    )
+    return _int_value((cur.fetchone() or {}).get("max_assigned"), 0)
+
+
+def _recalculate_next_edition_number_with_cursor(cur, product, run=None, *, reason="Manual edition override"):
+    if not product:
+        raise ValueError("No edition product was provided.")
+    handle = str(product.get("shopify_handle") or "").strip()
+    if not handle:
+        raise ValueError("Edition product handle is missing.")
+    if run is None:
+        _, run = _get_active_edition_run_for_handle(cur, handle, lock=True, create_missing=True)
+    edition_total = max(
+        _int_value((run or {}).get("edition_total"), _int_value(product.get("edition_total"), 100)),
+        1,
+    )
+    old_next = max(
+        _int_value((run or {}).get("next_edition_number"), _int_value(product.get("next_edition_number"), 1)),
+        1,
+    )
+    max_assigned = max(_max_assigned_for_product(cur, product, run), 0)
+    sold_out = max_assigned >= edition_total
+    next_number = edition_total if sold_out else min(max(max_assigned + 1, 1), edition_total)
+    remaining = max(edition_total - max_assigned, 0)
+    run_status = SOLD_OUT_RUN_STATUS if sold_out else ACTIVE_RUN_STATUS
+
+    if run and run.get("id"):
+        cur.execute(
+            """
+            UPDATE edition_runs
+            SET next_edition_number=%s,
+                status=%s,
+                updated_at=now()
+            WHERE id=%s
+            """,
+            (next_number, run_status, run.get("id")),
+        )
+    cur.execute(
+        """
+        UPDATE edition_products
+        SET next_edition_number=%s,
+            last_assigned_edition=%s,
+            remaining_count=%s,
+            active=%s,
+            is_active=%s,
+            sold_out=%s,
+            is_sold_out=%s,
+            updated_at=now()
+        WHERE shopify_handle=%s
+        RETURNING *
+        """,
+        (
+            next_number,
+            max_assigned,
+            remaining,
+            not sold_out,
+            not sold_out,
+            sold_out,
+            sold_out,
+            handle,
+        ),
+    )
+    updated_product = cur.fetchone() or product
+    _insert_edition_adjustment_with_cursor(
+        cur,
+        product=updated_product,
+        run=run,
+        old_next=old_next,
+        new_next=next_number,
+        old_total=edition_total,
+        new_total=edition_total,
+        reason=reason,
+        source="manual_override",
+    )
+    return {
+        "shopify_handle": handle,
+        "shopify_product_id": updated_product.get("shopify_product_id") or product.get("shopify_product_id") or "",
+        "edition_total": edition_total,
+        "max_assigned": max_assigned,
+        "next_edition_number": next_number,
+        "remaining_count": remaining,
+        "sold_out": sold_out,
+        "status": run_status,
+    }
+
+
+def recalculate_next_edition_number(shopify_handle="", shopify_product_id="", *, sync_shopify=False, config=None):
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            product = _edition_product_for_order_row(
+                cur,
+                {"shopify_handle": shopify_handle, "shopify_product_id": shopify_product_id},
+                lock=True,
+            )
+            if not product:
+                raise ValueError("Edition product was not found.")
+            _, run = _get_active_edition_run_for_handle(
+                cur,
+                product.get("shopify_handle"),
+                lock=True,
+                create_missing=True,
+            )
+            result = _recalculate_next_edition_number_with_cursor(
+                cur,
+                product,
+                run,
+                reason="Manual product next edition recalculation",
+            )
+        conn.commit()
+    warning = ""
+    if sync_shopify:
+        try:
+            product_for_sync = {
+                **result,
+                "product_title": (product or {}).get("product_title") or "",
+            }
+            _sync_shopify_product_after_override(product_for_sync, config=config)
+        except Exception as error:
+            warning = f"Shopify product metafield sync failed: {error}"
+            log_app_error("manual_recalculate_product_metafield_sync_failed", str(error), result)
+    if warning:
+        result["warning"] = warning
+    return result
+
+
+def _is_uploaded_certificate_row(row):
+    return bool(
+        (row or {}).get("shopify_file_id")
+        or (row or {}).get("shopify_file_url")
+        or (row or {}).get("certificate_file_url")
+        or (row or {}).get("certificate_r2_bucket")
+        or (row or {}).get("certificate_r2_key")
+    )
+
+
+def _sync_shopify_order_allocation_override(row, new_edition_number, reason="", config=None):
+    import order_allocator
+
+    order_id = row.get("shopify_order_id")
+    line_id = order_allocator.line_item_gid(row.get("shopify_line_item_id"))
+    if not order_id or not line_id:
+        return {"ok": False, "warning": "Shopify order or line item ID is missing."}
+    state = order_allocator.read_order_allocation_state(order_id, config=config)
+    payload = order_allocator.parse_allocation_payload(state.get("payload") or {})
+    payload.update(
+        {
+            "version": order_allocator.SNAPSHOT_VERSION,
+            "source": "sports_cave_os_manual_override",
+            "order_id": order_allocator.order_gid(order_id),
+            "order_name": row.get("shopify_order_name") or row.get("order_name") or payload.get("order_name") or "",
+            "updated_at": utc_now(),
+        }
+    )
+    line_items = dict(payload.get("line_items") or {})
+    allocation = dict(line_items.get(line_id) or {})
+    quantity = max(_int_value(row.get("quantity"), 1), _int_value(row.get("allocation_index"), 1), 1)
+    numbers = list(allocation.get("edition_numbers") or [])
+    while len(numbers) < quantity:
+        numbers.append(None)
+    unit_index = max(_int_value(row.get("allocation_index"), 1), 1)
+    numbers[unit_index - 1] = int(new_edition_number)
+    positive_numbers = [number for number in numbers if _int_value(number, 0) > 0]
+    unit_allocations = [unit for unit in allocation.get("unit_allocations") or [] if isinstance(unit, dict)]
+    replaced_unit = False
+    for unit in unit_allocations:
+        if _int_value(unit.get("line_item_unit_index"), 0) == unit_index:
+            unit.update(
+                {
+                    "edition_number": int(new_edition_number),
+                    "manual_override": True,
+                    "override_reason": reason or "Manual edition override",
+                    "override_timestamp": utc_now(),
+                }
+            )
+            replaced_unit = True
+    if not replaced_unit:
+        unit_allocations.append(
+            {
+                "order_gid": order_allocator.order_gid(order_id),
+                "line_item_gid": line_id,
+                "line_item_unit_index": unit_index,
+                "product_gid": order_allocator.product_gid(row.get("shopify_product_id")),
+                "variant_gid": row.get("shopify_variant_id") or "",
+                "edition_number": int(new_edition_number),
+                "manual_override": True,
+                "override_reason": reason or "Manual edition override",
+                "override_timestamp": utc_now(),
+            }
+        )
+    allocation.update(
+        {
+            "line_item_id": line_id,
+            "product_id": order_allocator.product_gid(row.get("shopify_product_id")),
+            "variant_id": row.get("shopify_variant_id") or "",
+            "handle": row.get("shopify_handle") or row.get("product_handle") or "",
+            "product_title": row.get("product_title") or "",
+            "variant_title": row.get("variant_title") or "",
+            "quantity": quantity,
+            "edition_numbers": numbers,
+            "edition_number": positive_numbers[0] if positive_numbers else int(new_edition_number),
+            "edition_total": _int_value(row.get("edition_total"), 100),
+            "edition_display": order_allocator.format_edition_numbers(positive_numbers, row.get("edition_total") or 100),
+            "status": "Manual Override",
+            "manual_override": True,
+            "override_reason": reason or "Manual edition override",
+            "override_timestamp": utc_now(),
+            "unit_allocations": unit_allocations,
+        }
+    )
+    line_items[line_id] = allocation
+    payload["line_items"] = line_items
+    shopify_sync.sync_order_allocation_metafield(
+        order_id,
+        payload,
+        compare_digest=state.get("compare_digest"),
+        config=config,
+    )
+    return {"ok": True, "payload": payload}
+
+
+def _sync_shopify_product_after_override(product_state, config=None):
+    product_id = product_state.get("shopify_product_id")
+    if not product_id:
+        return {"ok": False, "warning": "Shopify product ID is missing; product metafields were not synced."}
+    remaining = _int_value(product_state.get("remaining_count"), 0)
+    shopify_sync.sync_limited_edition_metafields_for_products(
+        [
+            {
+                "shopify_product_id": product_id,
+                "handle": product_state.get("shopify_handle") or "",
+                "title": product_state.get("product_title") or product_state.get("shopify_handle") or "",
+                "edition_enabled": True,
+                "edition_total": product_state.get("edition_total"),
+                "edition_next_number": product_state.get("next_edition_number"),
+                "edition_sold_count": product_state.get("max_assigned"),
+                "edition_remaining": remaining,
+                "edition_status": shopify_sync.calculate_limited_edition_status(remaining),
+            }
+        ],
+        config=config,
+    )
+    return {"ok": True}
+
+
+def override_edition_order_number(edition_order_id, new_edition_number, *, reason="", config=None, sync_shopify=True):
+    ensure_schema()
+    row_id = str(edition_order_id or "").strip()
+    new_number = _int_value(new_edition_number, 0)
+    if not row_id:
+        raise ValueError("Edition order ID is required.")
+    if new_number <= 0:
+        raise ValueError("New edition number must be at least 1.")
+
+    shopify_warning = ""
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT eo.*, o.order_name,
+                       c.id AS certificate_row_id,
+                       c.local_file_path,
+                       COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
+                       c.shopify_file_id AS certificate_shopify_file_id,
+                       c.certificate_r2_bucket,
+                       c.certificate_r2_key
+                FROM edition_orders eo
+                LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+                LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)=eo.id::text
+                WHERE eo.id::text=%s
+                ORDER BY c.updated_at DESC NULLS LAST
+                LIMIT 1
+                FOR UPDATE OF eo
+                """,
+                (row_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise ValueError("Edition order row was not found.")
+            product = _edition_product_for_order_row(cur, row, lock=True)
+            if not product:
+                raise ValueError("Row has no matched edition product.")
+            _, run = _get_active_edition_run_for_handle(
+                cur,
+                product.get("shopify_handle"),
+                lock=True,
+                create_missing=True,
+            )
+            edition_total = max(
+                _int_value((run or {}).get("edition_total"), _int_value(product.get("edition_total"), row.get("edition_total") or 100)),
+                1,
+            )
+            if new_number > edition_total:
+                raise ValueError(f"Edition number must be between 1 and {edition_total}.")
+            conflict = _edition_conflict_for_number(
+                cur,
+                row=row,
+                product=product,
+                edition_number=new_number,
+            )
+            if conflict:
+                order_label = conflict.get("shopify_order_name") or conflict.get("shopify_order_id") or "another order"
+                raise ValueError(f"Edition #{new_number:03d} is already used by {order_label} for this product.")
+
+            old_number = _int_value(row.get("edition_number"), 0)
+            certificate_uploaded = _is_uploaded_certificate_row(row)
+            certificate_status = "Needs regeneration" if certificate_uploaded else "Generate"
+            display = format_edition_display_number(new_number, edition_total)
+            cur.execute(
+                """
+                UPDATE edition_orders
+                SET edition_number=%s,
+                    edition_total=%s,
+                    edition_display=%s,
+                    certificate_status=%s,
+                    shopify_file_status=CASE
+                        WHEN %s THEN 'STALE'
+                        ELSE shopify_file_status
+                    END,
+                    manual_override=TRUE,
+                    override_old_edition_number=%s,
+                    override_new_edition_number=%s,
+                    override_timestamp=now(),
+                    override_reason=%s,
+                    status='manual_override',
+                    updated_at=now()
+                WHERE id::text=%s
+                RETURNING *
+                """,
+                (
+                    new_number,
+                    edition_total,
+                    display,
+                    certificate_status,
+                    certificate_uploaded,
+                    old_number,
+                    new_number,
+                    reason or "Manual edition override",
+                    row_id,
+                ),
+            )
+            updated_row = cur.fetchone()
+            if row.get("certificate_row_id"):
+                cur.execute(
+                    """
+                    UPDATE certificates
+                    SET status='Stale - Needs regeneration',
+                        certificate_status='Needs regeneration',
+                        updated_at=now()
+                    WHERE id=%s
+                    """,
+                    (row.get("certificate_row_id"),),
+                )
+            cur.execute(
+                """
+                UPDATE shopify_order_lines
+                SET assignment_status='Assigned',
+                    last_error='',
+                    updated_at=now()
+                WHERE shopify_line_item_id=%s
+                """,
+                (updated_row.get("shopify_line_item_id"),),
+            )
+            product_state = _recalculate_next_edition_number_with_cursor(
+                cur,
+                product,
+                run,
+                reason=reason or "Manual edition override",
+            )
+        conn.commit()
+
+    shopify_results = {}
+    if sync_shopify:
+        try:
+            shopify_results["order_allocation"] = _sync_shopify_order_allocation_override(
+                updated_row,
+                new_number,
+                reason=reason,
+                config=config,
+            )
+        except Exception as error:
+            shopify_warning = f"Shopify order allocation metafield sync failed: {error}"
+            log_app_error("manual_override_order_metafield_sync_failed", str(error), {"edition_order_id": row_id})
+        try:
+            product_for_sync = {**product_state, "product_title": product.get("product_title") or ""}
+            shopify_results["product_metafields"] = _sync_shopify_product_after_override(
+                product_for_sync,
+                config=config,
+            )
+        except Exception as error:
+            warning = f"Shopify product metafield sync failed: {error}"
+            shopify_warning = f"{shopify_warning} {warning}".strip()
+            log_app_error("manual_override_product_metafield_sync_failed", str(error), {"edition_order_id": row_id})
+
+    return {
+        "edition_order": updated_row,
+        "old_edition_number": old_number,
+        "new_edition_number": new_number,
+        "certificate_status": certificate_status,
+        "product": product_state,
+        "shopify": shopify_results,
+        "warning": shopify_warning,
+    }
 
 
 def list_certificates(search="", limit=250):

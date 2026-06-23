@@ -3700,6 +3700,8 @@ def _assignment_certificate_status(assignment):
     local_path = _clean_order_text(assignment.get("local_file_path") or assignment.get("certificate_pdf_path"))
     if "error" in status.casefold():
         return "Error"
+    if "regeneration" in status.casefold():
+        return "Needs regeneration"
     if has_r2 or has_remote:
         return "Generated"
     if local_path:

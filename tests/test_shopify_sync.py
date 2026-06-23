@@ -2069,6 +2069,94 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["next_number"], 75)
         self.assertEqual(result["mode"], "respect_manual_counter")
 
+    def test_manual_override_recalculate_sets_next_after_max_assigned(self):
+        class FakeCursor:
+            def __init__(self, max_assigned):
+                self.max_assigned = max_assigned
+                self.product_update_params = None
+                self.run_update_params = None
+
+            def execute(self, sql, params=()):
+                self.sql = sql
+                self.params = params
+                if "SELECT COALESCE(MAX(edition_number)" in sql:
+                    self.next_row = {"max_assigned": self.max_assigned}
+                elif "UPDATE edition_products" in sql:
+                    self.product_update_params = params
+                    self.next_row = {
+                        "shopify_handle": "goat-debate-wall-art",
+                        "shopify_product_id": "gid://shopify/Product/777",
+                        "edition_total": 100,
+                        "next_edition_number": params[0],
+                    }
+                else:
+                    if "UPDATE edition_runs" in sql:
+                        self.run_update_params = params
+                    self.next_row = None
+
+            def fetchone(self):
+                return self.next_row
+
+        cursor = FakeCursor(max_assigned=51)
+        result = supabase_backend._recalculate_next_edition_number_with_cursor(
+            cursor,
+            {
+                "id": 1,
+                "shopify_handle": "goat-debate-wall-art",
+                "shopify_product_id": "gid://shopify/Product/777",
+                "edition_total": 100,
+                "next_edition_number": 96,
+            },
+            {"id": "run-1", "edition_total": 100, "next_edition_number": 96},
+            reason="Manual correction",
+        )
+
+        self.assertEqual(result["next_edition_number"], 52)
+        self.assertEqual(result["max_assigned"], 51)
+        self.assertEqual(result["remaining_count"], 49)
+        self.assertFalse(result["sold_out"])
+        self.assertEqual(cursor.run_update_params[0], 52)
+        self.assertEqual(cursor.product_update_params[0], 52)
+
+    def test_manual_override_recalculate_never_exceeds_edition_total(self):
+        class FakeCursor:
+            def execute(self, sql, params=()):
+                if "SELECT COALESCE(MAX(edition_number)" in sql:
+                    self.next_row = {"max_assigned": 100}
+                elif "UPDATE edition_products" in sql:
+                    self.product_update_params = params
+                    self.next_row = {
+                        "shopify_handle": "goat-debate-wall-art",
+                        "shopify_product_id": "gid://shopify/Product/777",
+                        "edition_total": 100,
+                        "next_edition_number": params[0],
+                    }
+                else:
+                    self.next_row = None
+
+            def fetchone(self):
+                return self.next_row
+
+        cursor = FakeCursor()
+        result = supabase_backend._recalculate_next_edition_number_with_cursor(
+            cursor,
+            {
+                "id": 1,
+                "shopify_handle": "goat-debate-wall-art",
+                "shopify_product_id": "gid://shopify/Product/777",
+                "edition_total": 100,
+                "next_edition_number": 100,
+            },
+            {"id": "run-1", "edition_total": 100, "next_edition_number": 100},
+            reason="Manual correction",
+        )
+
+        self.assertEqual(result["next_edition_number"], 100)
+        self.assertEqual(result["max_assigned"], 100)
+        self.assertEqual(result["remaining_count"], 0)
+        self.assertTrue(result["sold_out"])
+        self.assertEqual(cursor.product_update_params[0], 100)
+
     @patch.object(supabase_backend, "process_paid_order")
     @patch.object(
         supabase_backend,
