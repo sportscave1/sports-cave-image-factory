@@ -2143,12 +2143,30 @@ def order_certificate_metafield_inputs(order_gid, certificates, compare_digest=N
 
 
 def sync_order_certificate_metafields(order_gid, certificates, compare_digest=None, config=None, request_post=None):
+    inputs = order_certificate_metafield_inputs(order_gid, certificates, compare_digest=compare_digest)
     try:
-        return metafields_set(
-            order_certificate_metafield_inputs(order_gid, certificates, compare_digest=compare_digest),
-            config=config,
-            request_post=request_post,
-        )
+        result = metafields_set(inputs, config=config, request_post=request_post)
+        written_keys = {
+            item.get("key")
+            for item in (result.get("metafields") or [])
+            if item.get("namespace") == "sports_cave"
+        }
+        missing_inputs = [
+            item
+            for item in inputs
+            if item.get("key") in {"certificates", "certificates_json"} and item.get("key") not in written_keys
+        ]
+        if missing_inputs:
+            fallback_metafields = list(result.get("metafields") or [])
+            for item in missing_inputs:
+                fallback = metafields_set([item], config=config, request_post=request_post)
+                fallback_metafields.extend(fallback.get("metafields") or [])
+            result = {
+                **result,
+                "count": len(fallback_metafields),
+                "metafields": fallback_metafields,
+            }
+        return result
     except ShopifyAPIError as error:
         raise ShopifyAPIError(
             f"Could not sync order certificate metafields. {error}"

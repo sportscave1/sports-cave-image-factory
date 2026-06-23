@@ -97,6 +97,72 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(processing["certificate_status"], "Processing")
         self.assertEqual(processing["certificate_file_url"], "")
 
+    def test_order_certificate_sync_retries_missing_vault_json_metafield(self):
+        requests_seen = []
+
+        def fake_post(*args, **kwargs):
+            requests_seen.append(kwargs["json"])
+            request_index = len(requests_seen)
+            if request_index == 1:
+                return FakeResponse(
+                    {
+                        "data": {
+                            "metafieldsSet": {
+                                "metafields": [
+                                    {
+                                        "namespace": "sports_cave",
+                                        "key": "certificates",
+                                        "type": "json",
+                                        "value": "[]",
+                                        "compareDigest": "legacy-digest",
+                                    }
+                                ],
+                                "userErrors": [],
+                            }
+                        }
+                    }
+                )
+            return FakeResponse(
+                {
+                    "data": {
+                        "metafieldsSet": {
+                            "metafields": [
+                                {
+                                    "namespace": "sports_cave",
+                                    "key": "certificates_json",
+                                    "type": "json",
+                                    "value": kwargs["json"]["variables"]["metafields"][0]["value"],
+                                    "compareDigest": "json-digest",
+                                }
+                            ],
+                            "userErrors": [],
+                        }
+                    }
+                }
+            )
+
+        result = shopify_sync.sync_order_certificate_metafields(
+            "gid://shopify/Order/1234",
+            [
+                {
+                    "order_gid": "gid://shopify/Order/1234",
+                    "line_item_id": "gid://shopify/LineItem/555",
+                    "edition_number": 12,
+                    "edition_total": 100,
+                    "certificate_id": "SC-SC1234-012",
+                    "pdf_url": "https://cdn.example/cert.pdf",
+                    "status": "Ready",
+                }
+            ],
+            config=self.config,
+            request_post=fake_post,
+        )
+
+        self.assertEqual(len(requests_seen), 2)
+        self.assertEqual([item["key"] for item in requests_seen[0]["variables"]["metafields"]], ["certificates", "certificates_json"])
+        self.assertEqual([item["key"] for item in requests_seen[1]["variables"]["metafields"]], ["certificates_json"])
+        self.assertEqual({item["key"] for item in result["metafields"]}, {"certificates", "certificates_json"})
+
     def test_environment_config_prefers_client_credentials_over_legacy_admin_token(self):
         environment = {
             "SHOPIFY_STORE_DOMAIN": "sports-cave.myshopify.com",
