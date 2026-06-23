@@ -84,6 +84,21 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("process_shopify_orders_for_editions", source)
         self.assertIn("historical_backfill_order_rows", source)
 
+    def test_developer_lazy_loaders_do_not_reuse_widget_keys_as_state(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        helper = source[
+            source.index("def _developer_section_enabled") : source.index("\n\ndef _developer_section_error")
+        ]
+
+        self.assertIn('state_key = f"{key}-enabled"', helper)
+        self.assertIn('button_key = f"{key}-button"', helper)
+        self.assertIn("st.session_state[state_key] = True", helper)
+        self.assertNotIn("key=key", helper)
+        self.assertNotIn("st.session_state[key] = True", helper)
+        self.assertIn("def _developer_section_error", source)
+        self.assertIn("def _developer_action_error", source)
+        self.assertIn("The rest of Developer is still available", source)
+
     def test_render_uses_single_streamlit_process_for_free_instance(self):
         source = (ROOT / "render.yaml").read_text(encoding="utf-8")
 
@@ -111,6 +126,8 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("def render_prompt_edit_controls", os_pages_source)
         self.assertIn("Developer password", app_source)
         self.assertIn("DEVELOPER_PAGE_PASSWORD", app_source)
+        self.assertIn('label="✎"', app_source)
+        self.assertIn('div[data-testid="stButton"] button', app_source)
         self.assertIn("prompt_store.save_prompt", app_source)
         self.assertIn("prompt_store.save_prompt", os_pages_source)
 

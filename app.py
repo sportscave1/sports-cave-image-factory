@@ -1389,14 +1389,18 @@ def inject_styles():
         [data-testid="stExpander"] details > div .stButton > button,
         [data-testid="stExpander"] details > div .stButton > button:hover,
         [data-testid="stExpander"] details > div .stButton > button:focus,
+        [data-testid="stExpander"] details > div div[data-testid="stButton"] button,
+        [data-testid="stExpander"] details > div div[data-testid="stButton"] button:hover,
+        [data-testid="stExpander"] details > div div[data-testid="stButton"] button:focus,
         [data-testid="stExpander"] details > div .stDownloadButton > button,
         [data-testid="stExpander"] details > div .stDownloadButton > button:hover,
         [data-testid="stExpander"] details > div .stDownloadButton > button:focus,
+        [data-testid="stExpander"] details > div div[data-testid="stDownloadButton"] button,
+        [data-testid="stExpander"] details > div div[data-testid="stDownloadButton"] button:hover,
+        [data-testid="stExpander"] details > div div[data-testid="stDownloadButton"] button:focus,
         [data-testid="stExpander"] details > div .stLinkButton > a,
         [data-testid="stExpander"] details > div .stLinkButton > a:hover,
         [data-testid="stExpander"] details > div .stLinkButton > a:focus,
-        [data-testid="stExpander"] details > div div[data-testid="stButton"] button,
-        [data-testid="stExpander"] details > div div[data-testid="stDownloadButton"] button,
         [data-testid="stExpander"] details > div a[data-testid="stLinkButton"] {
             background: #F5F2EA !important;
             color: #000000 !important;
@@ -1407,10 +1411,12 @@ def inject_styles():
         }
 
         [data-testid="stExpander"] details > div .stButton > button *,
-        [data-testid="stExpander"] details > div .stDownloadButton > button *,
-        [data-testid="stExpander"] details > div .stLinkButton > a *,
         [data-testid="stExpander"] details > div div[data-testid="stButton"] button *,
+        [data-testid="stExpander"] details > div div[data-testid="stButton"] button p,
+        [data-testid="stExpander"] details > div div[data-testid="stButton"] button span,
+        [data-testid="stExpander"] details > div .stDownloadButton > button *,
         [data-testid="stExpander"] details > div div[data-testid="stDownloadButton"] button *,
+        [data-testid="stExpander"] details > div .stLinkButton > a *,
         [data-testid="stExpander"] details > div a[data-testid="stLinkButton"] * {
             color: #000000 !important;
             -webkit-text-fill-color: #000000 !important;
@@ -1419,8 +1425,10 @@ def inject_styles():
         }
 
         .stButton > button,
+        div[data-testid="stButton"] button,
         .stLinkButton > a,
         .stDownloadButton > button,
+        div[data-testid="stDownloadButton"] button,
         div[data-testid="stPopover"] button,
         div[data-testid="stFileUploader"] button,
         section[data-testid="stFileUploaderDropzone"] button {
@@ -1433,8 +1441,12 @@ def inject_styles():
         }
 
         .stButton > button *,
+        div[data-testid="stButton"] button *,
+        div[data-testid="stButton"] button p,
+        div[data-testid="stButton"] button span,
         .stLinkButton > a *,
         .stDownloadButton > button *,
+        div[data-testid="stDownloadButton"] button *,
         div[data-testid="stPopover"] button *,
         div[data-testid="stFileUploader"] button *,
         section[data-testid="stFileUploaderDropzone"] button *,
@@ -1459,12 +1471,18 @@ def inject_styles():
         .stButton > button:hover,
         .stButton > button:focus,
         .stButton > button:active,
+        div[data-testid="stButton"] button:hover,
+        div[data-testid="stButton"] button:focus,
+        div[data-testid="stButton"] button:active,
         .stLinkButton > a:hover,
         .stLinkButton > a:focus,
         .stLinkButton > a:active,
         .stDownloadButton > button:hover,
         .stDownloadButton > button:focus,
         .stDownloadButton > button:active,
+        div[data-testid="stDownloadButton"] button:hover,
+        div[data-testid="stDownloadButton"] button:focus,
+        div[data-testid="stDownloadButton"] button:active,
         div[data-testid="stPopover"] button:hover,
         div[data-testid="stPopover"] button:focus,
         div[data-testid="stPopover"] button:active,
@@ -1480,7 +1498,8 @@ def inject_styles():
             transform: none !important;
         }
 
-        .stButton > button[kind="primary"] {
+        .stButton > button[kind="primary"],
+        div[data-testid="stButton"] button[kind="primary"] {
             background: var(--sc-gold) !important;
             border-color: var(--sc-gold) !important;
             color: #000000 !important;
@@ -1489,15 +1508,21 @@ def inject_styles():
 
         .stButton > button[kind="primary"] *,
         .stButton > button[kind="primary"] p,
-        .stButton > button[kind="primary"] span {
+        .stButton > button[kind="primary"] span,
+        div[data-testid="stButton"] button[kind="primary"] *,
+        div[data-testid="stButton"] button[kind="primary"] p,
+        div[data-testid="stButton"] button[kind="primary"] span {
             color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
             fill: #000000 !important;
             stroke: #000000 !important;
         }
 
         .stButton > button:disabled,
+        div[data-testid="stButton"] button:disabled,
         .stLinkButton > a[aria-disabled="true"],
         .stDownloadButton > button:disabled,
+        div[data-testid="stDownloadButton"] button:disabled,
         div[data-testid="stFileUploader"] button:disabled,
         section[data-testid="stFileUploaderDropzone"] button:disabled {
             background: #2A2A2D !important;
@@ -1507,8 +1532,10 @@ def inject_styles():
         }
 
         .stButton > button:disabled *,
+        div[data-testid="stButton"] button:disabled *,
         .stLinkButton > a[aria-disabled="true"] *,
         .stDownloadButton > button:disabled *,
+        div[data-testid="stDownloadButton"] button:disabled *,
         div[data-testid="stFileUploader"] button:disabled *,
         section[data-testid="stFileUploaderDropzone"] button:disabled * {
             color: #C2BBB0 !important;
@@ -1516,7 +1543,8 @@ def inject_styles():
             stroke: #C2BBB0 !important;
         }
 
-        .stButton > button[kind="primary"]:hover {
+        .stButton > button[kind="primary"]:hover,
+        div[data-testid="stButton"] button[kind="primary"]:hover {
             background: var(--sc-gold) !important;
             border-color: var(--sc-gold) !important;
             color: #000000 !important;
@@ -4510,9 +4538,31 @@ def _developer_unlocked():
 
 
 def _developer_section_enabled(key, label):
-    if st.button(label, key=key, use_container_width=True):
-        st.session_state[key] = True
-    return bool(st.session_state.get(key))
+    state_key = f"{key}-enabled"
+    button_key = f"{key}-button"
+    if st.session_state.get(key):
+        st.session_state[state_key] = True
+    if st.session_state.get(state_key):
+        st.caption("Loaded for this session.")
+        return True
+    if st.button(label, key=button_key, use_container_width=True):
+        st.session_state[state_key] = True
+        return True
+    return False
+
+
+def _developer_section_error(title, error):
+    logging.exception("Developer section failed: %s", title)
+    st.error(f"{title} failed to load. The rest of Developer is still available.")
+    st.caption(f"{type(error).__name__}: {error}")
+    st.caption("Full traceback is logged in Render.")
+
+
+def _developer_action_error(label, error):
+    logging.exception("Developer action failed: %s", label)
+    st.error(f"{label} failed.")
+    st.caption(f"{type(error).__name__}: {error}")
+    st.caption("Full traceback is logged in Render.")
 
 
 def _render_developer_password_gate():
@@ -4599,14 +4649,22 @@ def _render_developer_allocation_tools():
     if not _developer_section_enabled("developer-load-allocation-tools", "Load Allocation Repair Tools"):
         return
 
-    allocator = importlib.import_module("order_allocator")
-    sync = get_shopify_sync()
-    config = sync.get_config()
+    try:
+        allocator = importlib.import_module("order_allocator")
+        sync = get_shopify_sync()
+        config = sync.get_config()
+    except Exception as error:
+        _developer_section_error("Allocation Repair Tools", error)
+        return
+
     st.caption("Admin repair tools only. Orders remains a daily fulfilment page.")
 
     view_cols = st.columns(2)
     if view_cols[0].button("View allocation settings", key="developer-view-allocation-settings", use_container_width=True):
-        st.session_state.developer_allocation_settings = allocator.load_cutover_state()
+        try:
+            st.session_state.developer_allocation_settings = allocator.load_cutover_state()
+        except Exception as error:
+            _developer_action_error("View allocation settings", error)
     if st.session_state.get("developer_allocation_settings"):
         st.json(st.session_state.developer_allocation_settings)
 
@@ -4622,8 +4680,7 @@ def _render_developer_allocation_tools():
             st.session_state.developer_allocation_settings = state
             st.success(f"Re-captured {state.get('captured_count') or 0} product baseline(s).")
         except Exception as error:
-            st.error("Baseline capture failed.")
-            st.exception(error)
+            _developer_action_error("Baseline capture", error)
 
     repair_cols = st.columns(2)
     if repair_cols[0].button(
@@ -4646,10 +4703,14 @@ def _render_developer_allocation_tools():
             if result.get("errors"):
                 st.warning(f"{len(result.get('errors') or [])} order(s) need review.")
         except Exception as error:
-            st.error("Recent paid order allocation failed.")
-            st.exception(error)
+            _developer_action_error("Recent paid order allocation", error)
 
-    snapshot = allocator.load_orders_snapshot()
+    try:
+        snapshot = allocator.load_orders_snapshot()
+    except Exception as error:
+        snapshot = {"rows": []}
+        st.warning("Orders snapshot could not be loaded for historical backfill selection.")
+        st.caption(f"{type(error).__name__}: {error}")
     candidates = _historical_backfill_candidates(snapshot.get("rows") or [])
     label_to_index = {_candidate_label(index, row): index for index, row in enumerate(candidates)}
     selected_labels = st.multiselect(
@@ -4670,8 +4731,7 @@ def _render_developer_allocation_tools():
             if result.get("errors"):
                 st.warning(f"{len(result.get('errors') or [])} product group(s) need review.")
         except Exception as error:
-            st.error("Historical backfill failed.")
-            st.exception(error)
+            _developer_action_error("Historical backfill", error)
 
 
 def render_settings_page():
@@ -4695,72 +4755,78 @@ def render_settings_page():
         st.write(f"**Python working directory:** `{Path.cwd()}`")
 
     with st.expander("Shopify Connection", expanded=False):
-        if _developer_section_enabled("developer-load-shopify-connection", "Load Shopify Connection Tools"):
-            sync = get_shopify_sync()
-            config = sync.get_config()
-            st.write(f"**Configured:** {'Yes' if config.get('configured') else 'No'}")
-            st.write(f"**Store domain present:** {'Yes' if bool(config.get('store_domain')) else 'No'}")
-            st.write(f"**API version:** {config.get('api_version') or 'Missing'}")
-            st.write(f"**Auth mode:** {config.get('auth_mode') or 'Missing'}")
-            if st.button(
-                "Test Shopify Connection",
-                key="developer-test-shopify-connection",
-                disabled=not config.get("configured"),
-                use_container_width=True,
-            ):
-                try:
-                    result = sync.test_connection(config=config)
-                    st.success(f"Connection OK: {result.get('name') or 'store found'}")
-                except Exception as error:
-                    st.error("Connection test failed.")
-                    st.exception(error)
+        try:
+            if _developer_section_enabled("developer-load-shopify-connection", "Load Shopify Connection Tools"):
+                sync = get_shopify_sync()
+                config = sync.get_config()
+                st.write(f"**Configured:** {'Yes' if config.get('configured') else 'No'}")
+                st.write(f"**Store domain present:** {'Yes' if bool(config.get('store_domain')) else 'No'}")
+                st.write(f"**API version:** {config.get('api_version') or 'Missing'}")
+                st.write(f"**Auth mode:** {config.get('auth_mode') or 'Missing'}")
+                if st.button(
+                    "Test Shopify Connection",
+                    key="developer-test-shopify-connection",
+                    disabled=not config.get("configured"),
+                    use_container_width=True,
+                ):
+                    try:
+                        result = sync.test_connection(config=config)
+                        st.success(f"Connection OK: {result.get('name') or 'store found'}")
+                    except Exception as error:
+                        st.error("Connection test failed.")
+                        st.caption(f"{type(error).__name__}: {error}")
+        except Exception as error:
+            _developer_section_error("Shopify Connection", error)
 
     with st.expander("Shopify Limited Edition Setup", expanded=False):
-        if _developer_section_enabled("developer-load-limited-edition-setup", "Load Limited Edition Setup"):
-            sync = get_shopify_sync()
-            config = sync.get_config()
-            setup_cols = st.columns(2)
-            if setup_cols[0].button(
-                "Check Product Metafield Definitions",
-                key="developer-check-product-metafields",
-                disabled=not config.get("configured"),
-                use_container_width=True,
-            ):
-                try:
-                    st.session_state.developer_product_metafields = sync.list_edition_ops_metafield_definitions(
-                        config=config
-                    )
-                except Exception as error:
-                    st.error("Product metafield check failed.")
-                    st.exception(error)
-            if setup_cols[1].button(
-                "Create Missing Product Metafield Definitions",
-                key="developer-create-product-metafields",
-                disabled=not config.get("configured"),
-                use_container_width=True,
-            ):
-                try:
-                    st.session_state.developer_product_metafields = sync.create_missing_edition_ops_metafield_definitions(
-                        config=config
-                    )
-                    st.success("Product metafield setup checked.")
-                except Exception as error:
-                    st.error("Product metafield setup failed.")
-                    st.exception(error)
-            definitions = (st.session_state.get("developer_product_metafields") or {}).get("definitions") or []
-            if definitions:
-                st.dataframe(
-                    [
-                        {
-                            "Key": item.get("key"),
-                            "Type": item.get("type"),
-                            "Status": item.get("status") or item.get("message") or "",
-                        }
-                        for item in definitions
-                    ],
-                    hide_index=True,
+        try:
+            if _developer_section_enabled("developer-load-limited-edition-setup", "Load Limited Edition Setup"):
+                sync = get_shopify_sync()
+                config = sync.get_config()
+                setup_cols = st.columns(2)
+                if setup_cols[0].button(
+                    "Check Product Metafield Definitions",
+                    key="developer-check-product-metafields",
+                    disabled=not config.get("configured"),
                     use_container_width=True,
-                )
+                ):
+                    try:
+                        st.session_state.developer_product_metafields = sync.list_edition_ops_metafield_definitions(
+                            config=config
+                        )
+                    except Exception as error:
+                        st.error("Product metafield check failed.")
+                        st.caption(f"{type(error).__name__}: {error}")
+                if setup_cols[1].button(
+                    "Create Missing Product Metafield Definitions",
+                    key="developer-create-product-metafields",
+                    disabled=not config.get("configured"),
+                    use_container_width=True,
+                ):
+                    try:
+                        st.session_state.developer_product_metafields = sync.create_missing_edition_ops_metafield_definitions(
+                            config=config
+                        )
+                        st.success("Product metafield setup checked.")
+                    except Exception as error:
+                        st.error("Product metafield setup failed.")
+                        st.caption(f"{type(error).__name__}: {error}")
+                definitions = (st.session_state.get("developer_product_metafields") or {}).get("definitions") or []
+                if definitions:
+                    st.dataframe(
+                        [
+                            {
+                                "Key": item.get("key"),
+                                "Type": item.get("type"),
+                                "Status": item.get("status") or item.get("message") or "",
+                            }
+                            for item in definitions
+                        ],
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+        except Exception as error:
+            _developer_section_error("Shopify Limited Edition Setup", error)
 
     with st.expander("Shopify Webhook Setup", expanded=False):
         st.write("**Paid orders webhook endpoint:** `/webhooks/shopify/orders-paid`")
@@ -4771,63 +4837,72 @@ def render_settings_page():
         )
 
     with st.expander("Allocation Repair Tools", expanded=False):
-        _render_developer_allocation_tools()
+        try:
+            _render_developer_allocation_tools()
+        except Exception as error:
+            _developer_section_error("Allocation Repair Tools", error)
 
     with st.expander("Order Metafield Setup", expanded=False):
-        if _developer_section_enabled("developer-load-order-metafields", "Load Order Metafield Tools"):
-            sync = get_shopify_sync()
-            config = sync.get_config()
-            order_cols = st.columns(2)
-            if order_cols[0].button(
-                "Check Order Metafield Definition",
-                key="developer-check-order-metafields",
-                disabled=not config.get("configured"),
-                use_container_width=True,
-            ):
-                try:
-                    st.session_state.developer_order_metafields = sync.list_order_allocation_metafield_definitions(
-                        config=config
-                    )
-                except Exception as error:
-                    st.error("Order metafield check failed.")
-                    st.exception(error)
-            if order_cols[1].button(
-                "Create Missing Order Metafield Definition",
-                key="developer-create-order-metafields",
-                disabled=not config.get("configured"),
-                use_container_width=True,
-            ):
-                try:
-                    st.session_state.developer_order_metafields = sync.create_missing_order_allocation_metafield_definitions(
-                        config=config
-                    )
-                    st.success("Order metafield setup checked.")
-                except Exception as error:
-                    st.error("Order metafield setup failed.")
-                    st.exception(error)
-            definitions = (st.session_state.get("developer_order_metafields") or {}).get("definitions") or []
-            if definitions:
-                st.dataframe(
-                    [
-                        {
-                            "Key": item.get("key"),
-                            "Type": item.get("type"),
-                            "Status": item.get("status") or item.get("message") or "",
-                        }
-                        for item in definitions
-                    ],
-                    hide_index=True,
+        try:
+            if _developer_section_enabled("developer-load-order-metafields", "Load Order Metafield Tools"):
+                sync = get_shopify_sync()
+                config = sync.get_config()
+                order_cols = st.columns(2)
+                if order_cols[0].button(
+                    "Check Order Metafield Definition",
+                    key="developer-check-order-metafields",
+                    disabled=not config.get("configured"),
                     use_container_width=True,
-                )
+                ):
+                    try:
+                        st.session_state.developer_order_metafields = sync.list_order_allocation_metafield_definitions(
+                            config=config
+                        )
+                    except Exception as error:
+                        st.error("Order metafield check failed.")
+                        st.caption(f"{type(error).__name__}: {error}")
+                if order_cols[1].button(
+                    "Create Missing Order Metafield Definition",
+                    key="developer-create-order-metafields",
+                    disabled=not config.get("configured"),
+                    use_container_width=True,
+                ):
+                    try:
+                        st.session_state.developer_order_metafields = sync.create_missing_order_allocation_metafield_definitions(
+                            config=config
+                        )
+                        st.success("Order metafield setup checked.")
+                    except Exception as error:
+                        st.error("Order metafield setup failed.")
+                        st.caption(f"{type(error).__name__}: {error}")
+                definitions = (st.session_state.get("developer_order_metafields") or {}).get("definitions") or []
+                if definitions:
+                    st.dataframe(
+                        [
+                            {
+                                "Key": item.get("key"),
+                                "Type": item.get("type"),
+                                "Status": item.get("status") or item.get("message") or "",
+                            }
+                            for item in definitions
+                        ],
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+        except Exception as error:
+            _developer_section_error("Order Metafield Setup", error)
 
     with st.expander("Certificate Templates", expanded=False):
-        if _developer_section_enabled("developer-load-certificate-template-check", "Check Certificate Templates"):
-            certificates = importlib.import_module("certificate_service")
-            status = certificates.certificate_template_status()
-            st.write(f"**Certificate print template:** {'Found' if status['print_template_found'] else 'Missing'}")
-            st.caption(status["print_template_path"])
-            st.write(f"**Certificate preview template:** {'Found' if status['preview_template_found'] else 'Missing'}")
-            st.caption(status["preview_template_path"])
+        try:
+            if _developer_section_enabled("developer-load-certificate-template-check", "Check Certificate Templates"):
+                certificates = importlib.import_module("certificate_service")
+                status = certificates.certificate_template_status()
+                st.write(f"**Certificate print template:** {'Found' if status['print_template_found'] else 'Missing'}")
+                st.caption(status["print_template_path"])
+                st.write(f"**Certificate preview template:** {'Found' if status['preview_template_found'] else 'Missing'}")
+                st.caption(status["preview_template_path"])
+        except Exception as error:
+            _developer_section_error("Certificate Templates", error)
 
     with st.expander("Database / Supabase", expanded=False):
         st.write(f"**DATABASE_URL present:** {'Yes' if any(os.getenv(key, '').strip() for key in DATABASE_URL_ENV_KEYS) else 'No'}")
@@ -4838,8 +4913,7 @@ def render_settings_page():
                 st.success("Database connection OK.")
                 st.caption(f"Server time: {result.get('server_time')}")
             except Exception as error:
-                st.error("Database connection failed.")
-                st.exception(error)
+                _developer_action_error("Database connection test", error)
 
     with st.expander("Google Drive / R2", expanded=False):
         st.write(f"**Google Drive lightweight flag:** {'Enabled' if ENABLE_GOOGLE_DRIVE else 'Disabled'}")
@@ -4851,8 +4925,7 @@ def render_settings_page():
                 r2_storage = importlib.import_module("services.r2_storage")
                 st.json(r2_storage.get_r2_status())
             except Exception as error:
-                st.error("R2 status failed.")
-                st.exception(error)
+                _developer_action_error("R2 status", error)
 
     with st.expander("Diagnostics", expanded=False):
         st.caption("These checks import heavier modules only after you click.")
@@ -4862,15 +4935,13 @@ def render_settings_page():
                 get_os_pages()
                 st.success("Legacy diagnostics module imported.")
             except Exception as error:
-                st.error("Legacy diagnostics import failed.")
-                st.exception(error)
+                _developer_action_error("Legacy diagnostics import", error)
         if diag_cols[1].button("Load Local DB Module", key="developer-load-local-db", use_container_width=True):
             try:
                 local_db = get_db()
                 st.success(f"Local DB module loaded: `{local_db.DB_PATH}`")
             except Exception as error:
-                st.error("Local DB import failed.")
-                st.exception(error)
+                _developer_action_error("Local DB import", error)
 
 
 def render_placeholder_page(title, body):
