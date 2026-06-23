@@ -4794,7 +4794,7 @@ def _render_developer_allocation_tools():
             value="Manual correction",
             key="developer-edition-override-reason",
         )
-        action_cols = st.columns(2)
+        action_cols = st.columns(3)
         if action_cols[0].button(
             "Override Edition",
             key="developer-override-edition-number",
@@ -4849,6 +4849,24 @@ def _render_developer_allocation_tools():
                     st.warning(result["warning"])
             except Exception as error:
                 _developer_action_error("Recalculate Next Edition Number", error)
+        if action_cols[2].button(
+            "Retry Shopify Metafield Sync",
+            key="developer-retry-shopify-product-metafield-sync",
+            use_container_width=True,
+        ):
+            try:
+                supabase = importlib.import_module("supabase_backend")
+                handle = selected_row.get("shopify_handle") or selected_row.get("product_handle") or ""
+                if not handle:
+                    raise ValueError("Selected row does not have a Shopify handle.")
+                result = supabase.sync_product_edition_metafields(handle, config=config)
+                payload = result.get("payload") or {}
+                st.success(
+                    f"Retried Shopify metafield sync for {result.get('shopify_handle') or handle}: "
+                    f"next edition #{int(payload.get('next_edition_number') or 0):03d}."
+                )
+            except Exception as error:
+                _developer_action_error("Retry Shopify Metafield Sync", error)
 
 
 def render_settings_page():
@@ -4948,6 +4966,25 @@ def render_settings_page():
     with st.expander("Shopify Webhook Setup", expanded=False):
         st.write("**Paid orders webhook endpoint:** `/webhooks/shopify/orders-paid`")
         st.write(f"**Webhook secret configured:** {'Yes' if bool(os.getenv('SHOPIFY_WEBHOOK_SECRET', '').strip()) else 'No'}")
+        try:
+            sync = get_shopify_sync()
+            config = sync.get_config()
+            callback_url = sync.orders_paid_webhook_callback_url()
+            st.write(f"**Public callback URL:** `{callback_url or 'Not configured'}`")
+            if st.button(
+                "Register / Verify Orders Paid Webhook",
+                key="developer-register-orders-paid-webhook",
+                disabled=not bool(config.get("configured")),
+                use_container_width=True,
+            ):
+                result = sync.ensure_orders_paid_webhook_subscription(config=config)
+                subscription = result.get("subscription") or {}
+                status = "created" if result.get("created") else "already registered"
+                st.success(
+                    f"orders/paid webhook {status}: {subscription.get('id') or result.get('callback_url')}"
+                )
+        except Exception as error:
+            _developer_section_error("Shopify Webhook Setup", error)
         st.caption(
             "The lightweight webhook wrapper is available in server.py. "
             "Render free uses direct Streamlit startup to stay under the 512MB memory limit."

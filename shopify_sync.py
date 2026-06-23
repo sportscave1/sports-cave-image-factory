@@ -991,6 +991,46 @@ mutation SportsCaveEditionMetafieldDefinitionCreate($definition: MetafieldDefini
 """
 
 
+ORDERS_PAID_WEBHOOK_SUBSCRIPTIONS_QUERY = """
+query SportsCaveOrdersPaidWebhookSubscriptions($first: Int!, $topics: [WebhookSubscriptionTopic!]) {
+  webhookSubscriptions(first: $first, topics: $topics) {
+    nodes {
+      id
+      topic
+      endpoint {
+        __typename
+        ... on WebhookHttpEndpoint {
+          callbackUrl
+        }
+      }
+    }
+  }
+}
+"""
+
+
+WEBHOOK_SUBSCRIPTION_CREATE_MUTATION = """
+mutation SportsCaveCreateWebhookSubscription($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
+  webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
+    webhookSubscription {
+      id
+      topic
+      endpoint {
+        __typename
+        ... on WebhookHttpEndpoint {
+          callbackUrl
+        }
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+"""
+
+
 METAFIELDS_BY_OWNER_QUERY = """
 query SportsCaveMetafieldsByOwner($id: ID!, $namespace: String!) {
   node(id: $id) {
@@ -1600,7 +1640,24 @@ def save_limited_edition_metafields(product_id, values, config=None, request_pos
     }
 
 
-def sync_limited_edition_metafields_for_products(products, config=None, request_post=None):
+def _limited_edition_sync_error_text(results):
+    messages = []
+    for item in results or []:
+        if item.get("ok"):
+            continue
+        title = item.get("title") or item.get("shopify_product_id") or "Product"
+        message = item.get("message") or "Unknown Shopify metafield sync error"
+        messages.append(f"{title}: {message}")
+    return "; ".join(messages) or "Unknown Shopify metafield sync error"
+
+
+def sync_limited_edition_metafields_for_products(
+    products,
+    config=None,
+    request_post=None,
+    *,
+    raise_on_failure=False,
+):
     config = config or get_config()
     rows = [row for row in (products or []) if row.get("shopify_product_id")]
     results = []
@@ -1654,7 +1711,102 @@ def sync_limited_edition_metafields_for_products(products, config=None, request_
                     )
                     failed += 1
 
-    return {"synced": synced, "failed": failed, "results": results}
+    result = {"synced": synced, "failed": failed, "results": results}
+    if failed and raise_on_failure:
+        raise ShopifyAPIError(f"Shopify metafield sync failed: {_limited_edition_sync_error_text(results)}")
+    return result
+
+
+def public_app_base_url():
+    for key in (
+        "SPORTS_CAVE_APP_URL",
+        "PUBLIC_APP_URL",
+        "APP_BASE_URL",
+        "RENDER_EXTERNAL_URL",
+        "RENDER_EXTERNAL_HOSTNAME",
+    ):
+        value = str(os.getenv(key, "") or "").strip()
+        if not value:
+            continue
+        if key == "RENDER_EXTERNAL_HOSTNAME" and "://" not in value:
+            value = f"https://{value}"
+        if "://" not in value:
+            value = f"https://{value}"
+        return value.rstrip("/")
+    return ""
+
+
+def orders_paid_webhook_callback_url(base_url=None):
+    base = str(base_url or public_app_base_url() or "").strip().rstrip("/")
+    if not base:
+        return ""
+    if "://" not in base:
+        base = f"https://{base}"
+    return f"{base}/webhooks/shopify/orders-paid"
+
+
+def _webhook_callback_url(subscription):
+    endpoint = (subscription or {}).get("endpoint") or {}
+    return str(endpoint.get("callbackUrl") or "").strip()
+
+
+def list_orders_paid_webhook_subscriptions(config=None, request_post=None):
+    config = config or get_config()
+    data, served_version = graphql_request(
+        ORDERS_PAID_WEBHOOK_SUBSCRIPTIONS_QUERY,
+        variables={"first": 50, "topics": ["ORDERS_PAID"]},
+        config=config,
+        request_post=request_post,
+    )
+    nodes = ((data.get("webhookSubscriptions") or {}).get("nodes") or [])
+    return {
+        "subscriptions": nodes,
+        "api_version": served_version or config.get("api_version"),
+    }
+
+
+def ensure_orders_paid_webhook_subscription(callback_url=None, config=None, request_post=None):
+    config = config or get_config()
+    target_url = orders_paid_webhook_callback_url(callback_url)
+    if not target_url:
+        raise ShopifyConfigurationError(
+            "Public app URL is missing. Set SPORTS_CAVE_APP_URL, PUBLIC_APP_URL, APP_BASE_URL, "
+            "or RENDER_EXTERNAL_URL before registering the Shopify orders/paid webhook."
+        )
+    existing = list_orders_paid_webhook_subscriptions(config=config, request_post=request_post)
+    for subscription in existing.get("subscriptions") or []:
+        if _webhook_callback_url(subscription).rstrip("/") == target_url.rstrip("/"):
+            return {
+                "created": False,
+                "subscription": subscription,
+                "callback_url": target_url,
+                "api_version": existing.get("api_version"),
+            }
+
+    data, served_version = graphql_request(
+        WEBHOOK_SUBSCRIPTION_CREATE_MUTATION,
+        variables={
+            "topic": "ORDERS_PAID",
+            "webhookSubscription": {
+                "callbackUrl": target_url,
+                "format": "JSON",
+            },
+        },
+        config=config,
+        request_post=request_post,
+    )
+    result = data.get("webhookSubscriptionCreate") or {}
+    if result.get("userErrors"):
+        raise ShopifyAPIError(_metafields_user_error_text(result.get("userErrors")))
+    subscription = result.get("webhookSubscription") or {}
+    if not subscription.get("id"):
+        raise ShopifyAPIError("Shopify did not return the created orders/paid webhook subscription.")
+    return {
+        "created": True,
+        "subscription": subscription,
+        "callback_url": target_url,
+        "api_version": served_version or config.get("api_version"),
+    }
 
 
 def list_edition_ops_metafield_definitions(config=None, request_post=None):

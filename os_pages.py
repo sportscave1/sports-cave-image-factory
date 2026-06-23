@@ -2619,6 +2619,10 @@ def apply_supabase_edition_editor_changes(products, edited_rows):
                 status=new_status,
                 reason="Limited Editions tracker grid edit",
             )
+            try:
+                supabase_backend.sync_product_edition_metafields(handle)
+            except Exception as sync_error:
+                errors.append(f"{handle}: Shopify metafield sync failed: {sync_error}")
             updated += 1
         except Exception as error:
             errors.append(f"{handle}: {error}")
@@ -3053,6 +3057,16 @@ def render_supabase_limited_editions_page():
                     status=selected_status,
                     reason="Limited Editions row edit",
                 )
+                sync_warning = ""
+                try:
+                    supabase_backend.sync_product_edition_metafields(product_handle)
+                except Exception as sync_error:
+                    sync_warning = f" Shopify metafield sync failed: {sync_error}"
+                    supabase_backend.log_app_error(
+                        "limited_editions_row_metafield_sync_failed",
+                        str(sync_error),
+                        {"source": "limited_editions_page", "handle": product_handle},
+                    )
                 if psd_value.strip():
                     supabase_backend.upsert_product_asset(
                         product_handle,
@@ -3072,7 +3086,9 @@ def render_supabase_limited_editions_page():
                         is_primary=True,
                     )
                 bump_supabase_cache_version("limited")
-                st.session_state.supabase_limited_notice = f"Saved edition settings for {product.get('product_title') or product_handle}."
+                st.session_state.supabase_limited_notice = (
+                    f"Saved edition settings for {product.get('product_title') or product_handle}.{sync_warning}"
+                )
                 st.rerun()
             except Exception as error:
                 st.error("Could not save this edition row.")
@@ -5217,7 +5233,7 @@ def _sync_visible_shopify_orders_into_sports_cave(orders):
             result = supabase_backend.process_shopify_order_for_editions(
                 order,
                 generate_certificates=False,
-                sync_product_metafields=False,
+                sync_product_metafields=True,
             )
             orders_checked += 1
             assignments_created += int(result.get("assignments_created") or 0)

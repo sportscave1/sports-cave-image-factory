@@ -785,11 +785,14 @@ def _sync_product_updates_with_retry(product_updates, allocation_records, config
         if not updates:
             return 0
         try:
-            shopify_sync.sync_limited_edition_metafields_for_products(
+            result = shopify_sync.sync_limited_edition_metafields_for_products(
                 list(updates.values()),
                 config=config,
                 request_post=request_post,
             )
+            if isinstance(result, dict) and int(result.get("failed") or 0):
+                error_text = shopify_sync._limited_edition_sync_error_text(result.get("results") or [])
+                raise shopify_sync.ShopifyAPIError(f"Shopify metafield sync failed: {error_text}")
             return len(updates)
         except shopify_sync.ShopifyAPIError as error:
             last_error = error
@@ -802,6 +805,21 @@ def _sync_product_updates_with_retry(product_updates, allocation_records, config
                 continue
             raise
     raise last_error
+
+
+def _product_metafield_sync_failure(error, order_id):
+    message = f"Shopify metafield sync failed: {error}"
+    print(
+        json.dumps(
+            {
+                "event": "shopify_product_metafield_sync_failed",
+                "order_id": order_id,
+                "error": str(error),
+            }
+        ),
+        flush=True,
+    )
+    return message
 
 
 def _fetch_product_state(product_id, product_state_cache, config=None, request_post=None):
@@ -1050,25 +1068,30 @@ def process_shopify_order_for_editions(
 
         if not new_allocations:
             updated_products = 0
+            sync_errors = []
             if require_cutover and plan["skipped_existing"]:
-                updated_products = _sync_product_updates_with_retry(
-                    _product_updates_from_allocation_records(
+                try:
+                    updated_products = _sync_product_updates_with_retry(
+                        _product_updates_from_allocation_records(
+                            (existing_payload.get("line_items") or {}).values(),
+                            config=config,
+                            request_post=request_post,
+                        ),
                         (existing_payload.get("line_items") or {}).values(),
                         config=config,
                         request_post=request_post,
-                    ),
-                    (existing_payload.get("line_items") or {}).values(),
-                    config=config,
-                    request_post=request_post,
-                )
+                    )
+                except shopify_sync.ShopifyAPIError as error:
+                    sync_errors.append(_product_metafield_sync_failure(error, shopify_order_id))
             return {
                 "processed": True,
                 "assignments_created": 0,
-                "issues": plan["issues"],
+                "issues": [*plan["issues"], *({"status": message} for message in sync_errors)],
                 "skipped_existing": plan["skipped_existing"],
                 "allocation_payload": existing_payload,
                 "order_id": shopify_order_id,
                 "updated_products": updated_products,
+                "product_metafield_sync_error": sync_errors[0] if sync_errors else "",
             }
 
         payload = _sync_order_allocations_with_retry(
@@ -1090,7 +1113,17 @@ def process_shopify_order_for_editions(
             if attempt < 2 and _is_compare_error(error):
                 last_compare_error = error
                 continue
-            raise
+            sync_error = _product_metafield_sync_failure(error, shopify_order_id)
+            return {
+                "processed": True,
+                "assignments_created": plan["assignments_created"],
+                "issues": [*plan["issues"], {"order_id": shopify_order_id, "status": sync_error}],
+                "skipped_existing": plan["skipped_existing"],
+                "updated_products": 0,
+                "allocation_payload": payload,
+                "order_id": shopify_order_id,
+                "product_metafield_sync_error": sync_error,
+            }
         return {
             "processed": True,
             "assignments_created": plan["assignments_created"],

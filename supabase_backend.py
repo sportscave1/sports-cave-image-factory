@@ -2795,11 +2795,36 @@ def _mark_product_metafields_sync(shopify_handle, payload, status, error_message
 def sync_product_edition_metafields(shopify_handle, config=None, request_post=None):
     payload = get_product_edition_metafield_payload(shopify_handle)
     try:
-        result = shopify_sync.sync_product_edition_metafields(
-            payload,
+        result = shopify_sync.sync_limited_edition_metafields_for_products(
+            [
+                {
+                    "shopify_product_id": payload.get("shopify_product_id"),
+                    "handle": payload.get("shopify_handle") or shopify_handle,
+                    "title": payload.get("product_title") or payload.get("title") or shopify_handle,
+                    "edition_enabled": not bool(payload.get("is_archived")),
+                    "edition_total": payload.get("edition_total"),
+                    "edition_next_number": payload.get("next_edition_number"),
+                    "edition_sold_count": payload.get("sold_count"),
+                    "edition_remaining": payload.get("remaining_count"),
+                    "edition_status": payload.get("edition_status"),
+                }
+            ],
             config=config,
             request_post=request_post,
+            raise_on_failure=True,
         )
+        try:
+            shopify_sync.sync_product_edition_metafields(
+                payload,
+                config=config,
+                request_post=request_post,
+            )
+        except Exception as legacy_error:
+            log_app_error(
+                "legacy_product_metafield_sync_failed",
+                str(legacy_error),
+                {"shopify_handle": shopify_handle},
+            )
         _mark_product_metafields_sync(shopify_handle, payload, "Synced", "")
         return {"shopify_handle": shopify_handle, "payload": payload, **result}
     except Exception as error:
@@ -5633,7 +5658,7 @@ def process_paid_order(
             try:
                 sync_product_edition_metafields(handle)
             except Exception as error:
-                errors.append(f"Product metafield sync failed for {handle}: {error}")
+                errors.append(f"Shopify metafield sync failed for {handle}: {error}")
 
     for message in errors:
         log_app_error("order_processing_warning", message, {"shopify_order_id": order.get("shopify_order_id")})
@@ -5653,16 +5678,11 @@ def process_shopify_order_for_editions(
     fetch_missing_products=True,
     allocation_status="assigned",
     generate_certificates=False,
-    sync_product_metafields=False,
+    sync_product_metafields=True,
     assign_editions=True,
     allocation_skip_reason="",
 ):
-    """Persist one Shopify order and assign editions from Sports Cave OS state only.
-
-    TODO: Future Shopify orders/paid webhook should call process_shopify_order_for_editions.
-    Order-level Shopify edition mirrors are intentionally not written here because
-    they need safe write_orders scope and should never slow or block local assignment.
-    """
+    """Persist one Shopify order, assign editions, and sync product widget metafields."""
     order = dict(order_payload or {})
     if not order.get("shopify_order_id") and order.get("id") and isinstance(order.get("line_items"), list):
         order = normalize_rest_order(order)
@@ -6742,7 +6762,7 @@ def _sync_shopify_product_after_override(product_state, config=None):
     if not product_id:
         return {"ok": False, "warning": "Shopify product ID is missing; product metafields were not synced."}
     remaining = _int_value(product_state.get("remaining_count"), 0)
-    shopify_sync.sync_limited_edition_metafields_for_products(
+    result = shopify_sync.sync_limited_edition_metafields_for_products(
         [
             {
                 "shopify_product_id": product_id,
@@ -6757,8 +6777,9 @@ def _sync_shopify_product_after_override(product_state, config=None):
             }
         ],
         config=config,
+        raise_on_failure=True,
     )
-    return {"ok": True}
+    return {"ok": True, **result}
 
 
 def override_edition_order_number(edition_order_id, new_edition_number, *, reason="", config=None, sync_shopify=True):

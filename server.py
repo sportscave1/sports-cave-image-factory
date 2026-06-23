@@ -51,27 +51,51 @@ async def shopify_orders_paid_webhook(request: Request):
     webhook_id = request.headers.get("X-Shopify-Webhook-Id") or request.headers.get("X-Shopify-Event-Id") or ""
     topic = request.headers.get("X-Shopify-Topic") or "orders/paid"
     try:
-        import order_allocator
-
-        result = order_allocator.process_shopify_order_for_editions(payload, require_cutover=True)
-        certificate_result = {}
+        result = {}
+        used_supabase_processor = False
         try:
-            import certificate_engine
+            import supabase_backend
 
-            certificate_result = certificate_engine.generate_missing_certificates_for_order(payload)
-        except Exception as certificate_error:
-            certificate_result = {"errors": [str(certificate_error)], "generated": 0}
+            if supabase_backend.is_configured():
+                result = supabase_backend.process_order_paid_webhook(payload, webhook_id, topic)
+                used_supabase_processor = True
+        except Exception as supabase_error:
             print(
                 json.dumps(
                     {
-                        "event": "shopify_certificate_generation_failed",
-                        "error": str(certificate_error),
+                        "event": "shopify_webhook_supabase_processor_failed",
+                        "error": str(supabase_error),
                         "webhook_id": webhook_id,
                         "topic": topic,
                     }
                 ),
                 flush=True,
             )
+            raise
+
+        if not used_supabase_processor:
+            import order_allocator
+
+            result = order_allocator.process_shopify_order_for_editions(payload, require_cutover=True)
+        certificate_result = {}
+        if not result.get("duplicate"):
+            try:
+                import certificate_engine
+
+                certificate_result = certificate_engine.generate_missing_certificates_for_order(payload)
+            except Exception as certificate_error:
+                certificate_result = {"errors": [str(certificate_error)], "generated": 0}
+                print(
+                    json.dumps(
+                        {
+                            "event": "shopify_certificate_generation_failed",
+                            "error": str(certificate_error),
+                            "webhook_id": webhook_id,
+                            "topic": topic,
+                        }
+                    ),
+                    flush=True,
+                )
     except Exception as error:
         print(
             json.dumps(
