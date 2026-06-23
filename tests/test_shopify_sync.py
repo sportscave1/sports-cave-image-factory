@@ -761,7 +761,7 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(allocation["edition_number"], None)
         self.assertEqual(allocation["status"], "Needs Review - Sold Out")
 
-    def test_paid_order_allocator_requires_cutover_when_requested(self):
+    def test_paid_order_allocator_auto_creates_settings_and_lazily_captures_product_baseline(self):
         order_payload = {
             "id": 1234,
             "name": "#SC9999",
@@ -770,14 +770,43 @@ class ShopifySyncClientTests(unittest.TestCase):
             "line_items": [{"id": 555, "product_id": 777, "title": "Justin Gaethje", "quantity": 1}],
         }
 
-        with patch.object(
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id == "gid://shopify/Order/1234":
+                return {"metafields": [], "api_version": "2026-04"}
+            return {
+                "metafields": [
+                    {"namespace": "sports_cave", "key": "edition_enabled", "type": "boolean", "value": "true"},
+                    {"namespace": "sports_cave", "key": "edition_total", "type": "number_integer", "value": "100"},
+                    {"namespace": "sports_cave", "key": "edition_next_number", "type": "number_integer", "value": "13"},
+                    {"namespace": "sports_cave", "key": "edition_sold_count", "type": "number_integer", "value": "12"},
+                    {"namespace": "sports_cave", "key": "edition_remaining", "type": "number_integer", "value": "88"},
+                    {"namespace": "sports_cave", "key": "edition_label", "type": "single_line_text_field", "value": "Numbered Edition"},
+                ],
+                "api_version": "2026-04",
+            }
+
+        saved_states = []
+        order_writes = []
+        product_writes = []
+
+        def fake_save_cutover_state(state):
+            saved = dict(state)
+            saved_states.append(saved)
+            return saved
+
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            order_allocator,
+            "save_cutover_state",
+            side_effect=fake_save_cutover_state,
+        ), patch.object(
             shopify_sync,
-            "fetch_metafields",
-            side_effect=AssertionError("Cutover guard should return before Shopify metafield reads."),
-        ), patch.object(shopify_sync, "sync_order_allocation_metafield") as order_sync, patch.object(
+            "sync_order_allocation_metafield",
+            side_effect=lambda order_gid, allocations, compare_digest=None, config=None, request_post=None: order_writes.append(allocations),
+        ), patch.object(
             shopify_sync,
             "sync_limited_edition_metafields_for_products",
-        ) as product_sync:
+            side_effect=lambda products, config=None, request_post=None: product_writes.extend(products),
+        ):
             result = order_allocator.process_shopify_order_for_editions(
                 order_payload,
                 config=self.config,
@@ -785,11 +814,17 @@ class ShopifySyncClientTests(unittest.TestCase):
                 cutover_state={"automation_started_at": "", "baselines": {}},
             )
 
-        self.assertFalse(result["processed"])
-        self.assertEqual(result["assignments_created"], 0)
-        self.assertIn("Live allocation is not enabled", result["reason"])
-        order_sync.assert_not_called()
-        product_sync.assert_not_called()
+        self.assertTrue(result["processed"])
+        self.assertEqual(result["assignments_created"], 1)
+        self.assertTrue(saved_states[0]["active"])
+        self.assertTrue(saved_states[0]["allocation_enabled"])
+        self.assertTrue(saved_states[0]["automation_started_at"])
+        lazy_baseline = saved_states[1]["baselines"]["gid://shopify/Product/777"]
+        self.assertEqual(lazy_baseline["baseline_next_number"], 13)
+        self.assertEqual(lazy_baseline["baseline_sold_count"], 12)
+        self.assertEqual(lazy_baseline["baseline_remaining"], 88)
+        self.assertEqual(order_writes[0]["line_items"]["gid://shopify/LineItem/555"]["edition_numbers"], [13])
+        self.assertEqual(product_writes[0]["edition_next_number"], 14)
 
     def test_activate_live_allocation_saves_cutover_and_product_baselines(self):
         saved_states = []
@@ -860,7 +895,12 @@ class ShopifySyncClientTests(unittest.TestCase):
                 require_cutover=True,
                 cutover_state={
                     "automation_started_at": "2026-06-23T00:00:00Z",
-                    "baselines": {},
+                    "baselines": {
+                        "gid://shopify/Product/777": {
+                            "product_gid": "gid://shopify/Product/777",
+                            "baseline_next_number": 13,
+                        }
+                    },
                 },
             )
 
@@ -913,7 +953,12 @@ class ShopifySyncClientTests(unittest.TestCase):
                 require_cutover=True,
                 cutover_state={
                     "automation_started_at": "2026-06-23T00:00:00Z",
-                    "baselines": {},
+                    "baselines": {
+                        "gid://shopify/Product/777": {
+                            "product_gid": "gid://shopify/Product/777",
+                            "baseline_next_number": 13,
+                        }
+                    },
                 },
             )
 

@@ -206,6 +206,7 @@ def _empty_cutover_state():
     return {
         "version": CUTOVER_VERSION,
         "active": False,
+        "allocation_enabled": True,
         "automation_started_at": "",
         "baselines": {},
         "updated_at": "",
@@ -227,15 +228,20 @@ def load_cutover_state():
     if env_started_at:
         state["automation_started_at"] = env_started_at
     state["active"] = bool(state.get("active") or state.get("automation_started_at"))
+    state["allocation_enabled"] = bool(state.get("allocation_enabled", True))
     return state
 
 
 def save_cutover_state(state):
     payload = _empty_cutover_state()
     payload.update(state or {})
+    for key in list(payload):
+        if str(key).startswith("_"):
+            payload.pop(key, None)
     payload["version"] = CUTOVER_VERSION
     payload["automation_started_at"] = _safe_iso(payload.get("automation_started_at")) or ""
     payload["baselines"] = payload.get("baselines") or {}
+    payload["allocation_enabled"] = bool(payload.get("allocation_enabled", True))
     payload["active"] = bool(payload.get("active") or payload.get("automation_started_at"))
     payload["updated_at"] = now_iso()
     CUTOVER_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -247,6 +253,7 @@ def enable_live_allocation_from_now(started_at=None):
     state = load_cutover_state()
     state["automation_started_at"] = _safe_iso(started_at or now_iso())
     state["active"] = True
+    state["allocation_enabled"] = True
     return save_cutover_state(state)
 
 
@@ -312,6 +319,7 @@ def activate_live_allocation(product_rows, started_at=None):
     baselines, count = _baselines_from_product_rows(product_rows, captured)
     state = load_cutover_state()
     state["active"] = True
+    state["allocation_enabled"] = True
     state["automation_started_at"] = captured
     state["baseline_captured_at"] = captured
     state["baselines"] = baselines
@@ -328,7 +336,26 @@ def automation_started_at(cutover_state=None):
 
 def live_allocation_active(cutover_state=None):
     state = cutover_state or load_cutover_state()
-    return bool((state or {}).get("active") and automation_started_at(state))
+    return bool((state or {}).get("allocation_enabled", True) and (state or {}).get("active") and automation_started_at(state))
+
+
+def ensure_allocation_settings(cutover_state=None, started_at=None):
+    state = cutover_state if isinstance(cutover_state, dict) else load_cutover_state()
+    auto_created = False
+    if not automation_started_at(state):
+        state["active"] = True
+        state["allocation_enabled"] = True
+        state["automation_started_at"] = _safe_iso(started_at or now_iso())
+        state.setdefault("baselines", {})
+        state = save_cutover_state(state)
+        auto_created = True
+    else:
+        state["active"] = True
+        state["allocation_enabled"] = bool(state.get("allocation_enabled", True))
+    state["_auto_created"] = bool(auto_created or state.get("_auto_created"))
+    if isinstance(cutover_state, dict):
+        cutover_state.update(state)
+    return state
 
 
 def _automation_started_datetime(cutover_state=None):
@@ -666,6 +693,36 @@ def _product_update_from_state(product_state, line_item):
     }
 
 
+def _baseline_from_product_state(product_state, line_item, captured_at):
+    return {
+        "product_gid": product_state["product_id"],
+        "shopify_handle": _line_product_handle(line_item),
+        "product_title": _line_product_title(line_item),
+        "baseline_next_number": int(product_state.get("next_number") or 1),
+        "baseline_sold_count": int(product_state.get("sold_count") or 0),
+        "baseline_remaining": int(product_state.get("remaining") or 0),
+        "baseline_total": int(product_state.get("edition_total") or 100),
+        "baseline_captured_at": captured_at,
+    }
+
+
+def _ensure_product_baseline(cutover_state, product_state, line_item):
+    if not isinstance(cutover_state, dict):
+        return
+    product_id = product_state.get("product_id")
+    if not product_id:
+        return
+    baselines = dict(cutover_state.get("baselines") or {})
+    if product_id in baselines:
+        return
+    captured_at = now_iso()
+    baselines[product_id] = _baseline_from_product_state(product_state, line_item, captured_at)
+    cutover_state["baselines"] = baselines
+    cutover_state["baseline_captured_at"] = cutover_state.get("baseline_captured_at") or captured_at
+    saved = save_cutover_state(cutover_state)
+    cutover_state.update(saved)
+
+
 def _apply_allocated_numbers_to_product_state(product_state, edition_numbers):
     before = (
         int(product_state.get("next_number") or 1),
@@ -769,7 +826,7 @@ def _sorted_line_items(order_payload):
     ]
 
 
-def _plan_order_allocations(order_payload, existing_payload, product_state_cache, config=None, request_post=None):
+def _plan_order_allocations(order_payload, existing_payload, product_state_cache, config=None, request_post=None, cutover_state=None):
     existing_lines = (existing_payload or {}).get("line_items") or {}
     new_allocations = {}
     product_updates = {}
@@ -804,6 +861,7 @@ def _plan_order_allocations(order_payload, existing_payload, product_state_cache
                     config=config,
                     request_post=request_post,
                 )
+                _ensure_product_baseline(cutover_state, product_state, line_item)
             if not product_state.get("edition_enabled"):
                 issues.append({"line_item_id": line_id, "product_id": product_id, "status": "Edition Disabled"})
                 line_status = line_status or "Needs allocation"
@@ -890,6 +948,8 @@ def process_shopify_order_for_editions(
         raise shopify_sync.ShopifyAPIError("Order ID is missing from webhook payload.")
 
     cutover = cutover_state or load_cutover_state()
+    if require_cutover:
+        cutover = ensure_allocation_settings(cutover)
     started_at = automation_started_at(cutover)
     if require_cutover and not started_at:
         return {
@@ -900,7 +960,7 @@ def process_shopify_order_for_editions(
             "order_id": shopify_order_id,
         }
 
-    if started_at and _is_before_automation_start(order_payload, cutover):
+    if started_at and not cutover.get("_auto_created") and _is_before_automation_start(order_payload, cutover):
         state = read_order_allocation_state(shopify_order_id, config=config, request_post=request_post)
         existing_payload = state.get("payload") or {}
         return {
@@ -923,6 +983,7 @@ def process_shopify_order_for_editions(
             {},
             config=config,
             request_post=request_post,
+            cutover_state=cutover if require_cutover else None,
         )
         new_allocations = plan["new_allocations"]
         product_updates = plan["product_updates"]
@@ -995,6 +1056,8 @@ def process_shopify_orders_for_editions(
     errors = []
     assignments_created = 0
     cutover = cutover_state or load_cutover_state()
+    if require_cutover:
+        cutover = ensure_allocation_settings(cutover)
     for order_payload in sorted(orders or [], key=allocation_order_key):
         try:
             result = process_shopify_order_for_editions(

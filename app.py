@@ -4901,6 +4901,147 @@ def _render_developer_password_gate():
     unlock_cols[1].caption("Unlock is kept only for this Streamlit session.")
 
 
+def _allocation_baseline_row_from_product(product):
+    edition = product.get("edition") or {}
+    return {
+        "shopify_product_id": product.get("shopify_product_id") or "",
+        "shopify_product_gid": product.get("shopify_product_id") or "",
+        "handle": product.get("handle") or "",
+        "product_title": product.get("title") or product.get("product_title") or "",
+        "edition_enabled": edition.get("edition_enabled"),
+        "edition_total": edition.get("edition_total"),
+        "edition_next_number": edition.get("edition_next_number"),
+        "edition_sold_count": edition.get("edition_sold_count"),
+        "edition_remaining": edition.get("edition_remaining"),
+        "edition_status": edition.get("edition_status"),
+    }
+
+
+def _fetch_allocation_baseline_rows(sync, config):
+    loaded = sync.fetch_edition_ops_active_products(
+        max_products=config.get("edition_ops_max_products", 500),
+        page_size=50,
+        config=config,
+    )
+    return [_allocation_baseline_row_from_product(product) for product in loaded.get("products") or []]
+
+
+def _fetch_recent_paid_shopify_orders(sync, config):
+    orders = []
+    for page in sync.iter_order_pages(
+        days=30,
+        page_size=50,
+        max_orders=100,
+        query="financial_status:paid",
+        default_paid_unfulfilled_filter=False,
+        config=config,
+    ):
+        orders.extend(page.get("orders") or [])
+    return orders
+
+
+def _historical_backfill_candidates(rows):
+    candidates = []
+    for row in rows or []:
+        if row.get("has_saved_allocation"):
+            continue
+        if str(row.get("edition") or "").strip().startswith("#"):
+            continue
+        if not row.get("shopify_order_id") or not row.get("shopify_line_item_id") or not row.get("shopify_product_id"):
+            continue
+        candidates.append(row)
+    return candidates
+
+
+def _candidate_label(index, row):
+    parts = [
+        str(row.get("order") or ""),
+        str(row.get("date") or ""),
+        str(row.get("product") or ""),
+        str(row.get("variant") or ""),
+    ]
+    return f"{index}: " + " | ".join(part for part in parts if part)
+
+
+def _render_developer_allocation_tools():
+    if not _developer_section_enabled("developer-load-allocation-tools", "Load Allocation Repair Tools"):
+        return
+
+    allocator = importlib.import_module("order_allocator")
+    sync = get_shopify_sync()
+    config = sync.get_config()
+    st.caption("Admin repair tools only. Orders remains a daily fulfilment page.")
+
+    view_cols = st.columns(2)
+    if view_cols[0].button("View allocation settings", key="developer-view-allocation-settings", use_container_width=True):
+        st.session_state.developer_allocation_settings = allocator.load_cutover_state()
+    if st.session_state.get("developer_allocation_settings"):
+        st.json(st.session_state.developer_allocation_settings)
+
+    if view_cols[1].button(
+        "Re-capture product baselines",
+        key="developer-recapture-allocation-baselines",
+        disabled=not config.get("configured"),
+        use_container_width=True,
+    ):
+        try:
+            rows = _fetch_allocation_baseline_rows(sync, config)
+            state = allocator.capture_product_baselines(rows)
+            st.session_state.developer_allocation_settings = state
+            st.success(f"Re-captured {state.get('captured_count') or 0} product baseline(s).")
+        except Exception as error:
+            st.error("Baseline capture failed.")
+            st.exception(error)
+
+    repair_cols = st.columns(2)
+    if repair_cols[0].button(
+        "Allocate Missing Recent Paid Orders",
+        key="developer-allocate-missing-paid-orders",
+        disabled=not config.get("configured"),
+        use_container_width=True,
+    ):
+        try:
+            orders = _fetch_recent_paid_shopify_orders(sync, config)
+            result = allocator.process_shopify_orders_for_editions(
+                orders,
+                config=config,
+                require_cutover=True,
+            )
+            st.success(
+                f"Allocated {result.get('assignments_created') or 0} edition number(s) "
+                f"across {result.get('processed_orders') or 0} recent paid order(s)."
+            )
+            if result.get("errors"):
+                st.warning(f"{len(result.get('errors') or [])} order(s) need review.")
+        except Exception as error:
+            st.error("Recent paid order allocation failed.")
+            st.exception(error)
+
+    snapshot = allocator.load_orders_snapshot()
+    candidates = _historical_backfill_candidates(snapshot.get("rows") or [])
+    label_to_index = {_candidate_label(index, row): index for index, row in enumerate(candidates)}
+    selected_labels = st.multiselect(
+        "Historical backfill selected orders",
+        list(label_to_index),
+        key="developer-historical-backfill-selected-labels",
+    )
+    if repair_cols[1].button(
+        "Historical Backfill Selected Orders",
+        key="developer-historical-backfill-selected-orders",
+        disabled=not config.get("configured") or not selected_labels,
+        use_container_width=True,
+    ):
+        try:
+            selected_rows = [candidates[label_to_index[label]] for label in selected_labels]
+            result = allocator.historical_backfill_order_rows(selected_rows, config=config)
+            st.success(f"Historical backfill assigned {result.get('assignments_created') or 0} selected row(s).")
+            if result.get("errors"):
+                st.warning(f"{len(result.get('errors') or [])} product group(s) need review.")
+        except Exception as error:
+            st.error("Historical backfill failed.")
+            st.exception(error)
+
+
 def render_settings_page():
     if not _developer_unlocked():
         _render_developer_password_gate()
@@ -4993,6 +5134,9 @@ def render_settings_page():
         st.write("**Paid orders webhook endpoint:** `/webhooks/shopify/orders-paid`")
         st.write(f"**Webhook secret configured:** {'Yes' if bool(os.getenv('SHOPIFY_WEBHOOK_SECRET', '').strip()) else 'No'}")
         st.caption("The endpoint verifies the HMAC header before allocating edition numbers.")
+
+    with st.expander("Allocation Repair Tools", expanded=False):
+        _render_developer_allocation_tools()
 
     with st.expander("Order Metafield Setup", expanded=False):
         if _developer_section_enabled("developer-load-order-metafields", "Load Order Metafield Tools"):
