@@ -998,17 +998,17 @@ def _ensure_schema_uncached():
                         """
                         UPDATE certificates
                         SET related_edition_order_id = CASE
-                            WHEN edition_order_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                            WHEN edition_order_id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
                             THEN edition_order_id::uuid
                             ELSE NULL
                         END
                         WHERE related_edition_order_id IS NULL
-                          AND edition_order_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                          AND edition_order_id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
                           AND EXISTS (
                               SELECT 1
                               FROM edition_orders eo
                               WHERE eo.id = CASE
-                                  WHEN certificates.edition_order_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                                  WHEN certificates.edition_order_id::text ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
                                   THEN certificates.edition_order_id::uuid
                                   ELSE NULL
                               END
@@ -6349,45 +6349,107 @@ def get_dashboard_summary():
             return cur.fetchone() or {}
 
 
+def _edition_order_search_filter(search):
+    raw = str(search or "").strip()
+    if not raw:
+        return "", []
+
+    conditions = []
+    params = []
+    order_terms = []
+    general_terms = [raw]
+    without_hash = raw[1:].strip() if raw.startswith("#") else raw
+    if without_hash and without_hash != raw:
+        order_terms.append(without_hash)
+        general_terms.append(without_hash)
+    if raw:
+        order_terms.append(raw)
+    if raw and not raw.startswith("#"):
+        order_terms.append(f"#{raw}")
+
+    unique_order_terms = []
+    for term in order_terms:
+        clean = str(term or "").strip()
+        if clean and clean not in unique_order_terms:
+            unique_order_terms.append(clean)
+
+    for term in unique_order_terms:
+        pattern = f"%{term}%"
+        conditions.extend(
+            [
+                "COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, ''), '') ILIKE %s",
+                "COALESCE(eo.shopify_order_id, '') ILIKE %s",
+            ]
+        )
+        params.extend([pattern, pattern])
+
+    unique_general_terms = []
+    for term in general_terms:
+        clean = str(term or "").strip()
+        if clean and clean not in unique_general_terms:
+            unique_general_terms.append(clean)
+
+    for term in unique_general_terms:
+        pattern = f"%{term}%"
+        conditions.extend(
+            [
+                "COALESCE(eo.customer_name, '') ILIKE %s",
+                "COALESCE(eo.customer_email, '') ILIKE %s",
+                "COALESCE(eo.product_title, '') ILIKE %s",
+                "COALESCE(eo.variant_title, '') ILIKE %s",
+                "COALESCE(eo.shopify_handle, eo.product_handle, '') ILIKE %s",
+                "COALESCE(eo.sku, '') ILIKE %s",
+                "COALESCE(eo.shopify_line_item_id, '') ILIKE %s",
+            ]
+        )
+        params.extend([pattern] * 7)
+
+    edition_match = re.fullmatch(r"#?0*(\d+)", raw)
+    if edition_match:
+        conditions.append("eo.edition_number = %s")
+        params.append(int(edition_match.group(1)))
+
+    uuid_value = _coerce_uuid_or_none(raw)
+    if uuid_value:
+        conditions.extend(
+            [
+                "eo.id::text = %s",
+                "c.edition_order_id::text = %s",
+                "c.related_edition_order_id::text = %s",
+            ]
+        )
+        params.extend([uuid_value, uuid_value, uuid_value])
+
+    if not conditions:
+        return "", []
+    return "WHERE " + "\n                       OR ".join(conditions), params
+
+
 def list_edition_orders(search="", limit=250):
     ensure_schema()
-    search_value = f"%{search.strip().lower()}%" if search.strip() else None
+    where_sql, search_params = _edition_order_search_filter(search)
     with connect() as conn:
         with conn.cursor() as cur:
-            if search_value:
-                cur.execute(
-                    """
-                    SELECT eo.*, o.order_name, o.admin_url, c.local_file_path,
-                           COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
-                           c.certificate_r2_bucket, c.certificate_r2_key,
-                           c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
-                    FROM edition_orders eo
-                    LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                    LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)=eo.id::text
-                    WHERE LOWER(COALESCE(eo.product_title, '')) LIKE %s
-                       OR LOWER(COALESCE(eo.shopify_handle, '')) LIKE %s
-                       OR LOWER(COALESCE(o.order_name, '')) LIKE %s
-                       OR LOWER(COALESCE(eo.customer_name, '')) LIKE %s
-                    ORDER BY eo.assigned_at DESC
-                    LIMIT %s
-                    """,
-                    (search_value, search_value, search_value, search_value, limit),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT eo.*, o.order_name, o.admin_url, c.local_file_path,
-                           COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
-                           c.certificate_r2_bucket, c.certificate_r2_key,
-                           c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
-                    FROM edition_orders eo
-                    LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                    LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)=eo.id::text
-                    ORDER BY eo.assigned_at DESC
-                    LIMIT %s
-                    """,
-                    (limit,),
-                )
+            cur.execute(
+                f"""
+                SELECT eo.*, o.order_name, o.admin_url, c.local_file_path,
+                       COALESCE(NULLIF(eo.certificate_status, ''), NULLIF(c.status, ''), 'Certificate Missing') AS certificate_status,
+                       COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
+                       c.certificate_r2_bucket, c.certificate_r2_key,
+                       c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
+                FROM edition_orders eo
+                LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+                LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)=eo.id::text
+                {where_sql}
+                ORDER BY COALESCE(o.processed_at, o.created_at, eo.purchase_date, eo.assigned_at) DESC NULLS LAST,
+                         COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, '')) DESC NULLS LAST,
+                         eo.shopify_line_item_id ASC NULLS LAST,
+                         eo.allocation_index ASC NULLS LAST,
+                         eo.edition_number ASC NULLS LAST
+                LIMIT %s
+                """,
+                (*search_params, limit),
+            )
             return cur.fetchall()
 
 

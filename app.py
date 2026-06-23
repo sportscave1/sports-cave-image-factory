@@ -4765,9 +4765,11 @@ def _render_developer_allocation_tools():
             number = row.get("edition_number")
             edition = f"#{int(number):03d}" if str(number or "").isdigit() else "No edition"
             order_name = row.get("shopify_order_name") or row.get("order_name") or row.get("shopify_order_id") or ""
+            customer = row.get("customer_name") or row.get("customer_email") or "Customer not shown"
             product = row.get("product_title") or row.get("shopify_handle") or ""
             variant = row.get("variant_title") or ""
-            return f"{row.get('id')} | {order_name} | {product} | {variant} | {edition}"
+            certificate = row.get("certificate_status") or "Certificate Missing"
+            return f"{order_name} | {customer} | {product} | {variant} | {edition} | {certificate} | row {row.get('id')}"
 
         labels = [_override_row_label(row) for row in override_rows]
         selected_label = st.selectbox(

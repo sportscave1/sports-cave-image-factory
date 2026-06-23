@@ -2230,6 +2230,39 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertTrue(kwargs["assign_editions"])
         self.assertEqual(kwargs["allocation_skip_reason"], "")
 
+    def test_edition_order_search_by_order_name_does_not_regex_uuid_columns(self):
+        where_sql, params = supabase_backend._edition_order_search_filter("#SC2843")
+
+        self.assertIn("eo.shopify_order_name", where_sql)
+        self.assertIn("o.order_name", where_sql)
+        self.assertIn("eo.shopify_order_id", where_sql)
+        self.assertIn("%#SC2843%", params)
+        self.assertIn("%SC2843%", params)
+        self.assertNotIn("~*", where_sql)
+        self.assertNotIn("edition_order_id::text = %s", where_sql)
+
+    def test_edition_order_search_only_checks_uuid_ids_for_valid_uuid_input(self):
+        search = "123e4567-e89b-12d3-a456-426614174000"
+        where_sql, params = supabase_backend._edition_order_search_filter(search)
+
+        self.assertIn("eo.id::text = %s", where_sql)
+        self.assertIn("c.edition_order_id::text = %s", where_sql)
+        self.assertIn("c.related_edition_order_id::text = %s", where_sql)
+        self.assertGreaterEqual(params.count(search), 3)
+        self.assertNotIn("~*", where_sql)
+
+    def test_edition_order_search_matches_manual_edition_number_input(self):
+        where_sql, params = supabase_backend._edition_order_search_filter("#094")
+
+        self.assertIn("eo.edition_number = %s", where_sql)
+        self.assertIn(94, params)
+
+    def test_certificate_uuid_repair_casts_before_regex(self):
+        source = (Path(__file__).resolve().parents[1] / "supabase_backend.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("edition_order_id ~*", source)
+        self.assertIn("edition_order_id::text ~*", source)
+
 
 class ShopifyDatabaseTests(unittest.TestCase):
     def setUp(self):
