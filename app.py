@@ -334,580 +334,691 @@ return ContentService
 }"""
 
 NEW_SHOPIFY_PRODUCT_PROMPT = """SOP 07B — Sports Cave Shopify Product Creation Using ChatGPT + Shopify Connector
-Direct Draft Product Upload Version — No CSV Import Required
-Goal
-Create a complete new Sports Cave Shopify product directly through ChatGPT using the connected Shopify tool.
-This SOP replaces the old CSV import workflow for new product uploads.
-ChatGPT must:
-Create the Shopify product as a Draft
-Upload all supplied final WebP product images to Shopify
-Use those Shopify-uploaded images in the product gallery
-Create all required variants
-Set pricing and compare-at pricing
-Assign variant images correctly
-Write the product description in the correct Sports Cave style
-Create SEO meta title and meta description for maximum organic search value
-Write unique image alt text for every image
-Add clean tags for automated collections
-Leave the product unpublished until manually approved
-No CSV import is required.
-No manual Shopify image upload is required.
-No product should be published automatically.
+Direct Draft Product Upload — Current Sports Cave Standard
 
-Brutal Rule
+PURPOSE
+Create one complete new Sports Cave product directly in Shopify from final approved WebP assets.
+Do not create a CSV. Do not ask for manual Shopify image uploads. Do not publish automatically.
+
+NON-NEGOTIABLE OUTCOME
+- Create the product as Draft.
+- Published: false.
+- Upload all required final WebP images to Shopify.
+- Apply the exact Sports Cave gallery order.
+- Create the exact 16-variant Frame × Size matrix.
+- Apply current selling prices and the existing RRP compare-at prices.
+- Map the correct frame image to every frame variant.
+- Set every variant to continue selling when out of stock.
+- Select the exact Shopify product category shown below.
+- Write a complete, grounded Shopify description rather than short ad copy.
+- Apply commercial SEO metadata and unique, accurate image alt text.
+- Leave the product ready for manual review and publishing.
+
+BRUTAL DRAFT RULE
 Never publish a new product automatically.
-Every new Sports Cave product must be created as:
-Status: Draft
-Published: false
-The product must only be published after the final manual review confirms:
-Images are correct
-Product title is correct
-Description feels premium
-Variants are correct
-Prices are correct
-Variant image mapping is correct
-SEO fields are complete
-Tags are clean
-Mobile preview looks strong
-Product feels ready to sell
+Every new product must be created as:
+- Status: Draft
+- Published: false
+Only the user may approve publication after checking the full draft.
 
-Required Uploads
-Before running this SOP, upload all final approved WebP product images.
-Images should already be:
-Final production assets
-Optimised WebP files
-Correctly cropped
-Correctly sized
-Visually approved
-Ready for Shopify upload
-Do not ask ChatGPT to redesign, edit, crop, stylise, resize, relight, or change any product image during this SOP.
-This SOP is for Shopify product creation only.
+REQUIRED ASSETS
+The standard gallery requires these final approved WebP roles:
+1. Black frame product image
+2. Lifestyle mockup 1
+3. Lifestyle mockup 2
+4. Lifestyle mockup 3
+5. Size guide
+6. Oak frame product image
+7. White frame product image
+8. Unframed product image
 
-Required Product Inputs
-Along with the WebP images, provide as much of the following as possible:
-Product subject
-Example: Greg Murphy, Cristiano Ronaldo, Arsenal, Shane Warne
-Sport or category
-Example: Motorsport, Football, NBA, Cricket, Boxing, Tennis
-Athlete, team, rivalry, or moment
-Example: Bathurst 2003 Lap of the Gods, Manchester United years, Arsenal title charge
-Product title idea if already chosen
-Optional
-Collection/category if known
-Example: Motor Racing Wall Art, Football Wall Art, NBA Wall Art
-Any required wording that must appear in the product description
-Optional
-Any wording that must not appear
-Optional
-If the uploaded images make the product subject obvious, ChatGPT may infer the subject and create the product copy from the visuals.
-If the subject is unclear, ChatGPT must ask before creating the Shopify draft.
+All files must already be final, correctly cropped, optimised, and visually approved.
+Do not redesign, crop, resize, relight, stylise, regenerate, or otherwise modify product media during this workflow.
+Identify each image by its filename and visible role, not merely by upload sequence.
+If a required role is missing or ambiguous, stop and ask before creating the draft.
+If extra approved lifestyle images are supplied, place them after the first three lifestyle images and before the size guide only when the user explicitly wants them included.
+Never silently omit a supplied approved image and never use exact duplicate files.
 
-Shopify Product Creation Rule
-ChatGPT must create the product directly in Shopify using the connected Shopify tool.
-The product must be created as a draft first.
-Default Shopify product fields:
-Vendor: Sports Cave
-Product type: Framed Art
-Status: Draft
-Published: false
-Gift card: false
-Requires shipping: true
-Taxable: true
-Condition: New
-Product category: Home & Garden > Decor > Artwork > Posters, Prints & Visual Artwork
-If Shopify rejects or does not support a category/taxonomy field through the connector, leave that field blank and continue. Do not guess controlled Shopify metafield values.
+REQUIRED PRODUCT INPUTS
+Use the supplied product files and context to identify:
+- Product subject
+- Athlete, team, rivalry, vehicle, event, or sporting moment
+- Sport/category
+- Product title idea, if supplied
+- Target collection, if supplied
+- Edition limit, if supplied
+- Required or prohibited wording, if supplied
+If the subject or moment is unclear, ask before creating the draft. Do not guess identities, events, dates, achievements, signatures, licensing, or edition facts.
 
-High-Risk Shopify Metafield Rule
-Do not fill Shopify-controlled category metafields unless Shopify provides safe accepted values.
-Leave the following blank unless the value is confirmed inside Shopify:
-Art movement
-Art style
-Artwork authenticity
-Artwork frame material
-Colour
-Condition metafields
-Frame style
-Material
-Orientation
-Painting medium
-Print edition type
-Rarity
-Signature placement
-Sports logo
-Suitable space
-Theme
-Printing method
-Do not invent values such as:
-Modernism
-Reproduction
-Horizontal
-Limited edition
-Paper
-Wood
-Black
-Gold
-Framed
-Sports
-These may look correct but can break Shopify category validation.
-Default action:
-Leave Shopify taxonomy metafields blank unless safely accepted by Shopify.
+DEFAULT SHOPIFY PRODUCT FIELDS
+- Vendor: Sports Cave
+- Product type: Framed Art
+- Status: Draft
+- Published: false
+- Gift card: false
+- Requires shipping: true
+- Taxable: true
+- Condition: New
 
-Product Title Rules
-Create a short, premium, SEO-friendly product title.
+EXACT SHOPIFY PRODUCT CATEGORY
+Select the Shopify category result whose visible label is exactly:
+Prints in Posters, Prints, & Visual Artwork
+Do not leave the product assigned only to the parent category.
+Do not substitute a nearby category.
+If the connector cannot set this exact category, create the draft without an approximation and report this single manual action clearly.
+
+SHOPIFY-CONTROLLED METAFIELDS
+Do not invent values for controlled taxonomy metafields.
+Leave controlled category metafields blank unless Shopify returns an accepted value for the selected category.
+This includes, but is not limited to:
+- Art movement
+- Art style
+- Artwork authenticity
+- Artwork frame material
+- Colour
+- Frame style
+- Material
+- Orientation
+- Painting medium
+- Print edition type
+- Rarity
+- Signature placement
+- Sports logo
+- Suitable space
+- Theme
+- Printing method
+Category selection must not be allowed to block creation of the draft.
+
+PRODUCT TITLE AND H1
+The Shopify product title is the page H1.
+Create a concise, premium, search-intent-led title.
 Rules:
-Must include Wall Art
-Maximum 10 words where possible
-Clear subject first
-No cheap marketplace-style wording
-No keyword stuffing
-No “poster print canvas home decor gift” style titles
-Good examples:
-Greg Murphy Bathurst Wall Art
-Cristiano Ronaldo Manchester United Wall Art
-Arsenal The Wait Is Over Wall Art
-Shane Warne MCG Wall Art
-Kobe Bryant Lakers Wall Art
-Lionel Messi World Cup Wall Art
-Peter Brock Bathurst Wall Art
-Bad examples:
-Premium Limited Edition Sports Poster Print Wall Decor Gift
-New Framed Motorsport Poster For Man Cave
-Cool Racing Car Sports Artwork Canvas Print
-The title should feel premium, clean, and collectible.
+- Put the subject or sporting moment first.
+- Include Wall Art naturally.
+- Aim for 10 words or fewer where practical.
+- Make the title specific enough for both buyers and search engines.
+- Do not keyword stuff.
+- Do not use cheap marketplace strings such as poster print canvas gift decor.
+- Do not rely on a poetic campaign name alone.
+Preferred pattern:
+[Subject or Moment] Wall Art
+Optional when useful:
+[Subject or Moment] [Sport/Location] Wall Art
 
-Shopify Handle Rules
-Create a lowercase, hyphenated Shopify handle.
+SHOPIFY HANDLE
+Create a clean lowercase, hyphenated handle.
 Rules:
-Lowercase only
-Hyphens only
-Short and clean
-Include main subject and Wall Art
-No filler words
-No “limited-edition-premium-poster-print” clutter
-Good examples:
-greg-murphy-bathurst-wall-art
-cristiano-ronaldo-manchester-united-wall-art
-arsenal-the-wait-is-over-wall-art
-shane-warne-mcg-wall-art
+- Lowercase letters and hyphens only.
+- Include the principal subject and wall-art intent.
+- Remove filler words.
+- Do not add random numbers or repeated keywords.
+Preferred pattern:
+[subject-or-moment]-wall-art
 
-Product Description Rules
-The product description must follow the Sports Cave emotional collector style.
-It must be:
-Short
-Emotional
-Nostalgic
-Identity-driven
-Collector-focused
-Built for mobile reading
-Written like a premium sports tribute, not a product listing
-The buyer should read it and think:
-“That’s me. I remember that. I need this.”
+VISIBLE PRODUCT DESCRIPTION — COMPLETE SHOPIFY COPY
+The description must be emotionally engaging but must read like a complete Shopify product description, not like a Meta ad.
 
-Description Length
-Preferred length:
-65–105 words
-Maximum:
-125 words
-Do not over-explain.
+Length:
+- 90–130 words total.
+- Never exceed 130 words.
 
-Description HTML Rules
-Use clean Shopify-safe HTML only.
-Allowed:
-<p>
-<strong>
-<br>
-<em>
-Do not use:
-<div>
-<section>
-inline CSS
-classes
-tables
-bullet lists
-emoji
-data-start
-data-end
+Required structure — exactly four paragraphs:
+1. One bold hook.
+2. Concise story paragraph one.
+3. Concise story paragraph two.
+4. One bold scarcity close.
 
-Words To Avoid In The Visible Description
-In the visible product description body, avoid these words where possible:
-art
-artwork
-poster
-product
-wall decor
-print
-Use these instead:
-edition
-limited edition
-collector edition
-piece
-release
-tribute
-moment
-frame
-legacy
-drop
-SEO keywords can still be used in the SEO title, SEO description, product title, tags, and image alt text.
-The visible description should sell emotion first.
+Required HTML format:
+<p><strong>[One grounded, product-specific hook.]</strong></p>
+<p>[Story paragraph one: identify the subject/moment and explain the sporting context clearly.]</p>
+<p>[Story paragraph two: explain why the moment matters to the fan or collector, using specific and supportable details.]</p>
+<p><strong>[Short scarcity close based only on the confirmed edition limit.]</strong></p>
 
-Sports Cave Description Structure
-Every product description must follow this structure:
+Description rules:
+- Use one bold hook only and one bold scarcity close only.
+- Use two concise story paragraphs between them.
+- Name the athlete, team, event, rivalry, car, track, or moment naturally where supported.
+- Be specific, grounded, and readable on mobile.
+- Emotion should come from recognisable details, not exaggerated claims.
+- Vary sentence length naturally.
+- Write unique copy for the actual product; do not reuse a stock hook across products.
+- Keep the tone premium, collector-focused, and human.
+- State a numbered or limited edition only when the edition limit is confirmed.
+- Use the exact confirmed limit when supplied.
 
-1. Emotional Hook
-One or two short lines.
-Examples:
-<p><strong>Some moments don’t fade.</strong><br>They live on the wall.</p>
+Do not:
+- Write a sequence of advertising slogans.
+- Overstate the cultural importance of the subject.
+- Use vague claims such as a nation's memory, sacred, changed everything, defined a generation, or the greatest ever unless objectively supported and appropriate.
+- Use generic clichés such as greatness never fades, more than a game, history on your wall, elevate your space, must-have, the ultimate tribute, or a moment frozen in time.
+- Invent specifications, materials, paper stock, glaze type, frame construction, dimensions, certificates, authentication, hand-numbering, signatures, licensing, shipping details, production methods, or included hardware.
+- Present an inferred detail as fact.
+- Mention a reprint, second run, or sell-out consequence unless that policy is confirmed.
+- Fill the visible description with SEO keywords.
+- Use emoji, bullet lists, tables, inline CSS, classes, <div>, or <section>.
 
-<p><strong>Before the trophies, there was the hunger.</strong></p>
+Allowed visible-description HTML:
+- <p>
+- <strong>
+- <em> only when genuinely needed
 
-<p><strong>This wasn’t just a game.</strong><br>It was the moment everything changed.</strong></p>
-The hook should feel like Nike meets sports nostalgia.
-Short. Sharp. Emotional.
+SEO PRINCIPLE
+SEO fields must be search-intent first and premium second.
+They must tell Google and the buyer:
+- Who or what the product features
+- What the product is
+- Which sport or category it belongs to
+- Where or why a buyer would display or collect it
+Do not make SEO fields poetic at the expense of clarity.
 
-2. Nostalgia Trigger
-Bring the fan back to the moment, era, shirt, stadium, rivalry, roar, colour, car, track, or pressure.
-Examples:
-<p>The roar. The colours. The rivalry. That split-second every real fan still remembers.</p>
+PRIMARY KEYWORD SELECTION
+Select one primary commercial keyword based on the product subject.
+Examples of keyword patterns:
+- [Athlete] wall art
+- [Moment/Event] wall art
+- [Team] wall art
+- Bathurst wall art
+- football wall art / soccer wall art
+- NBA wall art / basketball wall art
+- cricket wall art
+- motorsport wall art
+Use closely related secondary terms naturally, but never stack them unnaturally.
+Use sports posters Australia only for Australian subjects and markets where it is genuinely relevant.
 
-<p>The shirt. The number. The stadium under lights. A whole era in one frame.</p>
-
-<p>The mountain. The engine note. The lap that still gets talked about like folklore.</p>
-This section should make the fan feel the memory.
-
-3. Identity Line
-Tell the buyer who this is for.
-Examples:
-<p>Built for fans who were there in spirit, even if they watched from the couch.</p>
-
-<p>Made for the ones who still talk about that night.</p>
-
-<p>For the collector who knows this meant more than a scoreline.</p>
-The buyer must feel seen.
-
-4. Scarcity Close
-Short, direct, urgent.
-Examples:
-<p><strong>Only 100 made. Secure yours before it’s gone.</strong></p>
-
-<p><strong>Numbered edition. Once they’re gone, they’re gone.</strong></p>
-
-<p><strong>A collector’s piece for real fans. Don’t miss this drop.</strong></p>
-No long urgency paragraphs.
-No fake hype.
-No over-selling.
-
-Final Description Format
-Use this structure:
-<p><strong>[Short emotional hook.]</strong><br>[Optional second punch line.]</p>
-<p>[Nostalgia trigger: 2–4 short sentences tied to the sport, athlete, rivalry, era, stadium, car, track, shirt, or moment.]</p>
-<p>[Identity line for the true fan or collector.]</p>
-<p><strong>[Scarcity close.]</strong></p>
-
-Description Style Examples
-Motorsport Example
-<p><strong>Some laps become legend.</strong><br>This was one of them.</p>
-<p>The mountain. The pressure. The engine note echoing through Bathurst. One lap, no room for fear, and a moment that still gives real racing fans chills.</p>
-<p>Made for the ones who remember when motorsport felt raw, loud, and untouchable.</p>
-<p><strong>Only 100 made. Secure yours before it’s gone.</strong></p>
-Football Example
-<p><strong>Before the records, there was the obsession.</strong><br>Old Trafford felt it first.</p>
-<p>The red shirt. The number seven. The stepovers. The stare. Those European nights when defenders knew what was coming — and still couldn’t stop it.</p>
-<p>Built for fans who remember the rise before the world called him inevitable.</p>
-<p><strong>Only 100 made. Secure yours before this edition disappears.</strong></p>
-NBA Example
-<p><strong>Some players change the game.</strong><br>Others become the standard.</p>
-<p>The footwork. The stare. The final shot. Every era has stars, but only a few leave a mark that never fades.</p>
-<p>For the fans who still measure greatness against the legends.</p>
-<p><strong>Numbered edition. Once they’re gone, they’re gone.</strong></p>
-Cricket Example
-<p><strong>Some spells never leave the memory.</strong><br>They echo through summer forever.</p>
-<p>The white zinc. The packed stands. The pause before the ball ripped sideways. Real cricket fans know exactly what that felt like.</p>
-<p>Made for the ones who still talk about legends like they watched them yesterday.</p>
-<p><strong>Only 100 made. Secure yours before it’s gone.</strong></p>
-
-SEO Meta Tag Rules
-SEO must be built for maximum organic reach while still sounding premium.
-The goal is to rank for high-intent product searches, not generic low-quality traffic.
-
-SEO Meta Title
+SEO META TITLE
 Rules:
-Maximum 55–60 characters preferred
-Include the main subject
-Include Wall Art
-Use the strongest relevant keyword naturally
-Keep it clean and premium
-Do not stuff keywords
-Do not include the website URL
-Do not use fake hype words
-Good examples:
-Greg Murphy Bathurst Wall Art
-Cristiano Ronaldo Man United Wall Art
-Arsenal The Wait Is Over Wall Art
-Shane Warne Cricket Wall Art
-Peter Brock Bathurst Wall Art
-Kobe Bryant Lakers Wall Art
-If space allows and it feels natural, add a high-intent modifier:
-Limited Edition
-Framed
-Bathurst
-NBA
-Cricket
-Football
-Example:
-Greg Murphy Bathurst Wall Art | Limited Edition
-Only use a separator if it still fits cleanly under 60 characters.
+- Target 50–60 characters; never exceed 60 characters unless Shopify itself requires otherwise.
+- Put the primary keyword near the beginning.
+- Clearly identify the subject and product type.
+- Include Wall Art.
+- Add Limited Edition, Framed Print, the sport, or Sports Cave only when it fits naturally within the limit.
+- Do not use a poetic campaign title by itself.
+- Do not keyword stuff.
+Preferred pattern:
+[Subject/Moment] Wall Art | Limited Edition [Sport] Print
+Alternative when shorter:
+[Subject/Moment] Wall Art | Sports Cave
 
-SEO Meta Description
+SEO META DESCRIPTION
 Rules:
-Maximum 150–155 characters preferred
-Mention the subject
-Include one strong SEO keyword naturally
-Mention limited edition or collector appeal
-Make it emotional enough to win clicks
-Do not include the website URL
-Do not say “elevate your space”
-Do not sound generic
-Do not keyword stuff
-Structure:
-[Subject/moment] + [SEO keyword] + [collector scarcity/emotion].
-Good examples:
-Greg Murphy Bathurst wall art celebrating the Lap of the Gods. A limited edition collector piece for true motorsport fans.
-Cristiano Ronaldo Manchester United wall art built for fans who remember the rise, the number seven, and the hunger. Limited to 100.
-Arsenal wall art for fans who believe the wait is over. A numbered collector edition built around pride, history, and belief.
+- Target 145–160 characters.
+- Mention the subject or moment.
+- Use the primary keyword naturally once.
+- Include limited-edition or collector intent only when confirmed.
+- Mention a relevant use such as collectors, man caves, offices, bars, or homes when space allows.
+- Sound commercial and human, not robotic.
+- Do not use hashtags, emoji, fake urgency, keyword lists, or the phrase elevate your space.
+- Do not include the store URL.
+Preferred structure:
+Shop premium [primary keyword] featuring [subject/moment]. [Confirmed collector/edition angle] for [relevant buyer or room intent].
 
-SEO Keyword Selection Rules
-Choose keywords based on the product subject.
-Use the most relevant keywords only.
-Do not force every keyword into one product.
+OPEN GRAPH FIELDS
+If the connector exposes Open Graph fields safely:
+- Use a buyer-friendly OG title based on the product title.
+- Use a concise OG description based on the visible description.
+- Do not duplicate a keyword-stuffed SEO field.
+If unsupported, leave for manual review.
 
-Core Sports Cave Keywords
-Use naturally where relevant:
-sports wall art
-framed sports art
-framed sports memorabilia
-limited edition sports prints
-man cave wall art
-premium sports collectibles
-sports art prints
-sports posters Australia
-Only use sports posters Australia when the product is Australian-based.
-Examples:
-Use for:
-Bathurst
-V8 Supercars
-Greg Murphy
-Peter Brock
-Allan Moffat
-Shane Warne
-Australian cricket
-AFL
-Melbourne Cup
-Australian racing moments
-Do not use for:
-NBA USA products
-Premier League products
-European football products
-US boxing products
-
-Sport-Specific SEO Keyword Map
-Motorsport / Bathurst / V8
-Use keywords such as:
-motorsport wall art
-Bathurst wall art
-V8 Supercars wall art
-motor racing wall art
-framed sports memorabilia
-sports posters Australia
-limited edition sports prints
-man cave wall art
-Best for:
-Greg Murphy
-Peter Brock
-Allan Moffat
-Bathurst moments
-Australian touring cars
-
-NBA / Basketball
-Use keywords such as:
-NBA wall art
-basketball wall art
-Michael Jordan wall art
-Kobe Bryant wall art
-LeBron James wall art
-framed sports art
-man cave wall art
-premium sports collectibles
-Best for:
-Michael Jordan
-Kobe Bryant
-LeBron James
-Stephen Curry
-Jalen Brunson
-Knicks, Lakers, Bulls, Warriors
-
-Football / Soccer
-Use keywords such as:
-football wall art
-soccer wall art
-Cristiano Ronaldo wall art
-Lionel Messi wall art
-Premier League wall art
-framed sports art
-limited edition sports prints
-sports wall art
-Best for:
-Cristiano Ronaldo
-Lionel Messi
-Arsenal
-Manchester United
-Real Madrid
-World Cup moments
-Premier League legends
-
-Cricket
-Use keywords such as:
-cricket wall art
-cricket memorabilia
-Shane Warne wall art
-sports posters Australia
-limited edition sports prints
-man cave wall art
-Best for:
-Shane Warne
-Don Bradman
-Ricky Ponting
-Pat Cummins
-Ashes moments
-Australian cricket icons
-
-Boxing / Combat
-Use keywords such as:
-boxing wall art
-Muhammad Ali wall art
-Mike Tyson wall art
-combat sports wall art
-framed sports art
-premium sports collectibles
-man cave wall art
-
-Horse Racing
-Use keywords such as:
-horse racing wall art
-horse racing memorabilia
-Melbourne Cup wall art
-framed sports memorabilia
-sports posters Australia
-premium sports collectibles
-
-Tennis
-Use keywords such as:
-tennis wall art
-tennis sports wall art
-framed sports art
-premium sports collectibles
-limited edition sports prints
-
-Image Upload Rules
-ChatGPT must upload every supplied final WebP image to Shopify.
-Do not skip valid images.
-Do not manually ask the user to upload images to Shopify Files.
-Do not use local file paths in the final product.
-Only use Shopify-hosted media once uploaded successfully.
-If an image upload fails, ChatGPT must stop and report which file failed.
-
-Product Image Order
-Use this Sports Cave media order:
-Black frame image
-Lifestyle/mockup image 1
-Lifestyle/mockup image 2
-Lifestyle/mockup image 3
-Office or man cave image
-Size guide image
-Oak frame image
-White frame image
-Unframed image
-If fewer or more lifestyle images are supplied, keep this general order:
-Black frame
-Lifestyle/mockups
-Size guide
-Oak frame
-White frame
-Unframed
-Every valid supplied image must be included.
-Only remove exact duplicate files.
-
-Image Naming Rules Before Upload
-Where possible, rename files before Shopify upload using:
-Lowercase letters
-Hyphens only
-Product-specific names
-Accurate image descriptor
-Do not include:
-final
-compressed
-v2
-copy
-new
-test
-random numbers
-unnecessary descriptors
-Good examples:
-greg-murphy-bathurst-wall-art-black-frame.webp
-greg-murphy-bathurst-wall-art-living-room.webp
-greg-murphy-bathurst-wall-art-man-cave.webp
-greg-murphy-bathurst-wall-art-sizing-guide.webp
-greg-murphy-bathurst-wall-art-oak-frame.webp
-greg-murphy-bathurst-wall-art-white-frame.webp
-greg-murphy-bathurst-wall-art-unframed.webp
-
-Image Alt Text Rules
-Every image must have unique SEO-friendly alt text.
+IMAGE FILE NAMING BEFORE UPLOAD
+Where file renaming is possible, use:
+[subject]-[sport]-wall-art-[image-role]-sports-cave.webp
 Rules:
-110–125 characters preferred
-Natural sentence-style wording
-Mention subject
-Mention image type or setting
-Use one SEO keyword only if it fits naturally
-Do not keyword stuff
-Do not repeat the same alt text for every image
-Do not describe irrelevant furniture too heavily
-Do not overuse “premium”
-Good structure:
-[Image type] + [subject] + [sport/keyword] + [fan/collector context].
+- Lowercase letters and hyphens only.
+- Product-specific and accurate.
+- Do not use final, compressed, v2, copy, new, test, or random numbers.
+Examples of image-role suffixes:
+- black-frame
+- man-cave
+- office
+- living-room
+- size-guide
+- oak-frame
+- white-frame
+- unframed
+Do not rename a file in a way that changes or misstates its content.
 
-Alt Text Examples
-Black frame:
-Black framed Greg Murphy Bathurst wall art celebrating the Lap of the Gods for Australian motorsport fans.
-Living room:
-Greg Murphy Bathurst wall art displayed in a modern living room for collectors of iconic racing moments.
-Man cave:
-Greg Murphy Lap of the Gods framed sports memorabilia styled in a dark man cave for true V8 racing fans.
-Size guide:
-Greg Murphy Bathurst wall art size guide showing framed options for limited edition motorsport collectors.
-Oak frame:
-Oak framed Greg Murphy Bathurst wall art with collector styling for fans of Australian motor racing history.
-White frame:
-White framed Greg Murphy Bathurst wall art featuring the Lap of the Gods moment for motorsport collectors.
-Unframed:
-Unframed Greg Murphy Bathurst sports poster Australia design celebrating the legendary Lap of the Gods.
+IMAGE ALT TEXT — COMMERCIAL SEO STANDARD
+Write unique alt text for every product image.
+Rules:
+- Usually 80–140 characters; aim for clarity rather than forcing a length.
+- Describe the actual image accurately.
+- Use the primary keyword naturally no more than once.
+- Mention the athlete, team, moment, or sport only when supplied or clearly verified.
+- Mention the visible setting for lifestyle images.
+- Mention frame colour for frame product images.
+- Mention size guide for the size guide.
+- Keep each alt text meaningfully different.
+- Write for accessibility first and SEO second.
+- Do not begin with image of unless natural context requires it.
+- Do not include sales hype, edition scarcity, hashtags, emoji, or keyword strings.
+- Do not heavily describe irrelevant furniture.
+- Never invent a person, team, event, logo, trophy, signature, or room detail.
 
-Variant Structure
-Create exactly 16 variants.
-Option 1 Name:
+Recommended alt-text pattern by role:
+- Black frame: Black framed [subject] [sport] wall art for [relevant collector context].
+- Lifestyle: [Subject] wall art in a [visible setting], styled for [relevant fan or collector context].
+- Size guide: [Subject] wall art size guide showing the available framed and unframed dimensions.
+- Oak frame: Oak framed [subject] wall art for [relevant collector context].
+- White frame: White framed [subject] wall art for [relevant collector context].
+- Unframed: Unframed [subject] [sport] wall art design for [relevant fan or collector context].
+Use these as structures, not copy-and-paste templates.
+
+EXACT PRODUCT GALLERY ORDER
+After all images are uploaded and processed, order the Shopify media exactly as follows:
+1. Black frame product image
+2. Lifestyle mockup 1
+3. Lifestyle mockup 2
+4. Lifestyle mockup 3
+5. Size guide
+6. Oak frame product image
+7. White frame product image
+8. Unframed product image
+
+The black frame must always be first.
+The three primary lifestyle mockups must immediately follow it.
+The size guide must come before all alternative frame product images.
+Oak, White, and Unframed must be the final three images in that exact order.
+Do not place the size guide second.
+Do not intermix alternative frame images with lifestyle mockups.
+Use Shopify-hosted media only after upload succeeds.
+If any required upload fails, stop and identify the exact failed file.
+
+VARIANT STRUCTURE — EXACTLY 16 VARIANTS
+Option 1 name:
 Frame
-Frame values in this order:
-Black
-Oak
-White
-Unframed
-Option 2 Name:
+Option 1 values in this exact order:
+1. Black
+2. Oak
+3. White
+4. Unframed
+
+Option 2 name:
 Size
-Size values in this order for each frame:
-XL - 62 × 87 cm (24.4 × 34.3 in)
-L - 45 × 62 cm (17.7 × 24.4 in)
-M - 30 × 45 cm (11.8 × 17.7 in)
-S - 21 × 30 cm (8.3 × 11.8 in)
-Variant order must be:
+Option 2 values in this exact order:
+1. XL - 62 × 87 cm (24.4 × 34.3 in)
+2. L - 45 × 62 cm (17.7 × 24.4 in)
+3. M - 30 × 45 cm (11.8 × 17.7 in)
+4. S - 21 × 30 cm (8.3 × 11.8 in)
+
+Create the variants in this exact order:
+1. Black / XL
+2. Black / L
+3. Black / M
+4. Black / S
+5. Oak / XL
+6. Oak / L
+7. Oak / M
+8. Oak / S
+9. White / XL
+10. White / L
+11. White / M
+12. White / S
+13. Unframed / XL
+14. Unframed / L
+15. Unframed / M
+16. Unframed / S
+
+Do not abbreviate, reorder, or alter the visible option values.
+
+CURRENT SELLING PRICES AND RRP
+Currency: AUD
+The Shopify Price field is the current selling price.
+The Shopify Compare-at price field is the RRP.
+Keep the RRP values below unchanged.
+
+Black, Oak, and White framed variants:
+- XL: Price 349.00 | Compare-at/RRP 428.00
+- L: Price 269.00 | Compare-at/RRP 324.00
+- M: Price 209.00 | Compare-at/RRP 259.00
+- S: Price 159.00 | Compare-at/RRP 194.00
+
+Unframed variants:
+- XL: Price 159.00 | Compare-at/RRP 194.00
+- L: Price 119.00 | Compare-at/RRP 142.00
+- M: Price 89.00 | Compare-at/RRP 103.00
+- S: Price 55.00 | Compare-at/RRP 64.00
+
+Do not reverse Price and Compare-at price.
+Do not apply the unframed price to a framed variant.
+Do not calculate new RRPs.
+
+INVENTORY AND CONTINUE-SELLING RULE
+For every one of the 16 variants:
+- Track inventory: true when supported.
+- Inventory policy: continue.
+- The Shopify checkbox Continue selling when out of stock must be ticked.
+- Requires shipping: true.
+- Taxable: true.
+Do not use inventory policy deny.
+If the connector cannot set or verify inventory policy, report all affected variants for manual review.
+Do not invent stock quantities.
+
+SKU RULES
+Create 16 unique uppercase SKUs using a short product-specific prefix and these suffixes:
+- Black: A1B, A2B, A3B, A4B
+- Oak: A1O, A2O, A3O, A4O
+- White: A1W, A2W, A3W, A4W
+- Unframed: A1, A2, A3, A4
+A1 = XL, A2 = L, A3 = M, A4 = S.
+Use uppercase letters and numbers only. No spaces or punctuation.
+Check that no SKU is duplicated in the store before finalising.
+
+VARIANT IMAGE MAPPING
+After media upload and variant creation:
+- Assign the black frame product image to all four Black variants.
+- Assign the oak frame product image to all four Oak variants.
+- Assign the white frame product image to all four White variants.
+- Assign the unframed product image to all four Unframed variants.
+Do not assign lifestyle images or the size guide to variants.
+After mapping, verify each selector visually:
+- Clicking Black shows the black frame image.
+- Clicking Oak shows the oak frame image.
+- Clicking White shows the white frame image.
+- Clicking Unframed shows the unframed image.
+
+TAGS AND COLLECTION INTENT
+Use 8–16 clean tags based on confirmed product facts.
+Core tags when applicable:
+- Collector Series
+- Limited Edition, only when confirmed
+- Sports Wall Art
+- Limited Edition Sports Prints, only when confirmed
+- Framed Sports Art
+- Man Cave Wall Art
+Add sport, athlete, team, event, and category tags naturally.
+Do not use performance claims such as Best Seller, Best Selling, Popular, Viral, Trending, Featured, or New Arrival unless proven or explicitly instructed.
+Use tags to support the correct automated sport and collector collections.
+Do not assign an unrelated collection.
+
+GOOGLE SHOPPING
+When safely supported:
+- Condition: New
+- Custom product: true
+- Age group: Adult only if required
+- Gender: Unisex only if required
+Do not guess unsupported Google taxonomy values.
+
+PRE-CREATION VALIDATION
+Before creating the draft, confirm internally:
+- The product subject and sport are clear.
+- All eight required image roles are present and distinct.
+- Gallery order is planned exactly.
+- The title/H1 is specific and search-led.
+- The handle is clean.
+- The description is 90–130 words.
+- The description has exactly one bold hook, two story paragraphs, and one bold scarcity close.
+- No product specifications were invented.
+- The primary keyword is selected.
+- SEO title is 60 characters or fewer.
+- Meta description is 145–160 characters where possible and never keyword stuffed.
+- Every image has unique, accurate alt text.
+- The exact Shopify category is planned.
+- All 16 variants are planned in the correct order.
+- The selling prices and RRP values match this SOP.
+- Inventory policy is continue for all variants.
+- Variant image mapping is planned.
+- All SKUs are unique.
+- Product will remain Draft and unpublished.
+
+CREATION WORKFLOW — USE THIS ORDER
+1. Identify the product subject, sport, and primary keyword.
+2. Classify all uploaded images by role.
+3. Create the product title/H1 and handle.
+4. Write the four-paragraph 90–130-word description.
+5. Create the SEO title and meta description.
+6. Create unique alt text for every image.
+7. Create clean tags.
+8. Upload all required WebP files to Shopify.
+9. Confirm every upload processed successfully.
+10. Create the product as Draft and unpublished.
+11. Select Prints in Posters, Prints, & Visual Artwork.
+12. Attach and order all product media exactly.
+13. Create all 16 variants in the exact option and variant order.
+14. Set selling prices and Compare-at/RRP values exactly.
+15. Set inventory policy to continue for every variant.
+16. Add unique SKUs.
+17. Assign the correct frame image to each variant group.
+18. Apply SEO fields and alt text where supported.
+19. Validate the complete draft.
+20. Return the Shopify draft/admin link and a concise manual-review list.
+
+POST-CREATION VALIDATION
+Verify all of the following:
+- Correct product exists once; no duplicate was created.
+- Status is Draft.
+- Published is false.
+- Product title and handle are correct.
+- Category displays Prints in Posters, Prints, & Visual Artwork.
+- Description is clean HTML and 90–130 words.
+- Description structure is correct and not generic ad copy.
+- SEO title and meta description are present and within limits.
+- All required images uploaded.
+- Gallery order is Black, Lifestyle 1, Lifestyle 2, Lifestyle 3, Size Guide, Oak, White, Unframed.
+- Every image has unique, accurate alt text where supported.
+- Frame options display Black, Oak, White, Unframed.
+- Size options display XL, L, M, S with the exact dimensions.
+- All 16 variants exist in the correct order.
+- Current selling prices are correct.
+- Existing RRP compare-at prices are unchanged and correct.
+- Continue selling when out of stock is enabled for every variant.
+- SKUs are unique.
+- Black, Oak, White, and Unframed variant image mappings work correctly.
+- No unsupported taxonomy metafields were invented.
+If the connector cannot verify any item, state exactly what requires manual review.
+
+FAILURE RULES
+Do not guess or retry blindly.
+If creation fails, determine whether the cause is:
+- Ambiguous product identity
+- Missing required image role
+- Failed media upload
+- Existing handle conflict
+- Duplicate SKU
+- Variant creation failure
+- Category rejection
+- Unsupported controlled metafield
+- Missing connector permission
+- Inventory policy failure
+Create the draft without risky optional taxonomy fields when necessary, but never substitute a wrong category or publish the product.
+Do not create a second product as a workaround for a failed update during the same run.
+
+FINAL EXECUTION PROMPT
+I have uploaded the final approved Sports Cave WebP assets for one product.
+Use SOP 07B and create the Shopify product directly through the connected Shopify tool.
+Create it as Draft and keep it unpublished.
+Use the exact gallery order: Black frame, three lifestyle mockups, Size Guide, Oak frame, White frame, Unframed.
+Write a complete 90–130-word product description with one bold hook, two concise story paragraphs, and one bold scarcity close. Keep it specific and grounded, avoid generic clichés, and invent no specifications.
+Apply search-intent-led SEO metadata and unique, accurate image alt text.
+Select the exact category Prints in Posters, Prints, & Visual Artwork.
+Create the exact 16 variants with Frame ordered Black, Oak, White, Unframed and Size ordered XL, L, M, S.
+Use the current Sports Cave selling-price matrix and preserve the listed RRP compare-at prices.
+Enable Continue selling when out of stock for all variants.
+Map each frame image to its matching variants.
+Do not publish. Return the draft link and validation results.
+"""
+UPDATE_EXISTING_PRODUCT_PROMPT = """SOP 07C — Sports Cave Existing Shopify Product Update and Standardisation
+Direct Existing-Product Update — No CSV Import Required
+
+PURPOSE
+Update the correct existing Sports Cave Shopify product without creating a duplicate.
+This SOP supports two modes:
+1. Media Update Mode — replace and reorder product images, update image alt text, and repair variant image mapping.
+2. Full Standardisation Mode — apply Media Update Mode plus current Sports Cave category, description, SEO, variant-order, pricing, inventory-policy, and variant-image standards when the user explicitly requests a full refresh or standardisation.
+
+BRUTAL EXISTING-PRODUCT RULE
+Never create a new product when the task is to update an existing product.
+Find and verify the exact existing product using at least one of:
+- Shopify product URL
+- Product ID
+- Exact handle
+- Exact product title
+- One unambiguous Shopify search result matching the supplied subject
+If more than one product could match, stop and ask for confirmation.
+
+STATUS RULE
+Keep the existing product status and publication state unchanged unless the user explicitly instructs otherwise.
+- Active stays Active.
+- Draft stays Draft.
+- Archived requires confirmation before editing.
+Never publish automatically.
+
+REQUIRED REPLACEMENT ASSETS
+The standard final gallery contains:
+1. Black frame product image
+2. Lifestyle mockup 1
+3. Lifestyle mockup 2
+4. Lifestyle mockup 3
+5. Size guide
+6. Oak frame product image
+7. White frame product image
+8. Unframed product image
+All replacement files must be final approved WebP assets.
+Do not redesign, crop, resize, relight, regenerate, or otherwise edit them.
+Identify roles from filename and content. If a role is missing or ambiguous, ask before replacing media.
+
+SAFE MEDIA REPLACEMENT SEQUENCE
+1. Find and verify the correct existing product.
+2. Review current media and current variant-image mapping.
+3. Upload all new WebP files first.
+4. Confirm new Shopify-hosted media exists and has processed successfully.
+5. Attach the new media to the existing product.
+6. Apply unique SEO alt text.
+7. Reorder the gallery.
+8. Reassign variant images.
+9. Confirm the new gallery and variant mappings work.
+10. Remove only the old media being replaced.
+Never remove old media before replacement media is confirmed.
+
+EXACT PRODUCT GALLERY ORDER
+Use this exact order:
+1. Black frame product image
+2. Lifestyle mockup 1
+3. Lifestyle mockup 2
+4. Lifestyle mockup 3
+5. Size guide
+6. Oak frame product image
+7. White frame product image
+8. Unframed product image
+The black frame must be first.
+The three lifestyles must follow it immediately.
+The size guide must be fifth.
+Oak, White, and Unframed must be the final three images in that order.
+If extra approved lifestyle images are explicitly retained, place them after the first three lifestyle images and before the size guide.
+Do not omit a retained image or keep an obsolete duplicate.
+
+IMAGE FILE NAMING
+Where safe and possible, use:
+[subject]-[sport]-wall-art-[image-role]-sports-cave.webp
+Use lowercase letters and hyphens only.
+Do not use final, compressed, v2, copy, new, test, or random numbers.
+Do not mislabel image content.
+
+IMAGE ALT TEXT — APPLY TO EVERY REPLACEMENT IMAGE
+Rules:
+- Usually 80–140 characters.
+- Accurately describe the actual image.
+- Use the main commercial keyword naturally no more than once.
+- Mention the athlete, event, team, or sport only when verified.
+- Mention visible room setting for lifestyle mockups.
+- Mention frame colour for Black, Oak, and White product images.
+- Identify the size guide as a size guide.
+- Keep every alt text unique.
+- Do not include sales hype, hashtags, emoji, keyword stuffing, or invented details.
+- Do not overdescribe irrelevant furniture.
+- Write for accessibility first and SEO second.
+
+VARIANT IMAGE MAPPING — ALWAYS REPAIR WHEN MEDIA IS UPDATED
+- All Black variants use the black frame product image.
+- All Oak variants use the oak frame product image.
+- All White variants use the white frame product image.
+- All Unframed variants use the unframed product image.
+Never map lifestyle images or the size guide to variants.
+Visually verify each Frame selector after mapping.
+
+MEDIA UPDATE MODE — DEFAULT SCOPE
+Unless the user asks for a full standardisation, change only:
+- Product images
+- Gallery order
+- Image alt text
+- Variant image mapping
+Preserve:
+- Product title
+- Handle
+- Description
+- SEO title and meta description
+- Tags and collections
+- Category
+- Product type and vendor
+- Variant option names and values
+- Prices and compare-at prices
+- SKUs
+- Inventory quantities and inventory policy
+- Product status and publication state
+Report any visible mismatch against the current Sports Cave standard, but do not silently change protected fields in Media Update Mode.
+
+FULL STANDARDISATION MODE
+Use this mode only when the user explicitly asks to standardise, fully refresh, or bring the existing product to the current Sports Cave setup.
+Before applying it, confirm the product is intended to use the standard 16-variant Frame × Size model.
+In Full Standardisation Mode, apply all rules below.
+
+EXACT SHOPIFY CATEGORY IN FULL STANDARDISATION MODE
+Select the Shopify category result whose visible label is exactly:
+Prints in Posters, Prints, & Visual Artwork
+Do not use only the parent category or a nearby substitute.
+If the connector cannot set the exact category, preserve the current category and report the manual action.
+Do not invent controlled taxonomy metafields.
+
+VISIBLE PRODUCT DESCRIPTION IN FULL STANDARDISATION MODE
+Rewrite only when requested.
+Requirements:
+- 90–130 words total.
+- Exactly four paragraphs.
+- Paragraph 1: one bold, grounded, product-specific hook.
+- Paragraph 2: concise story paragraph identifying the subject or moment and context.
+- Paragraph 3: concise story paragraph explaining collector/fan significance through supportable details.
+- Paragraph 4: one bold scarcity close based only on confirmed edition facts.
+- Exactly one bold hook and one bold close.
+- Clean Shopify-safe HTML using <p>, <strong>, and <em> only when necessary.
+- Specific and human, not a series of ad slogans.
+- No generic clichés such as greatness never fades, more than a game, history on your wall, elevate your space, must-have, ultimate tribute, or moment frozen in time.
+- No overstated claims such as a nation's memory or sacred unless objectively justified.
+- No invented materials, dimensions, paper, glazing, authentication, signatures, edition facts, shipping details, production methods, or included hardware.
+
+SEO IN FULL STANDARDISATION MODE
+SEO must be search-intent first and premium second.
+SEO title:
+- 50–60 characters preferred; 60 maximum.
+- Primary commercial keyword near the beginning.
+- Include subject and Wall Art.
+- Add Limited Edition, Framed Print, sport, or Sports Cave only when it fits naturally.
+- Do not use a poetic campaign title alone.
+Meta description:
+- 145–160 characters preferred.
+- Mention subject/moment and primary keyword naturally.
+- Include confirmed collector/edition intent and a relevant buyer or room use when space allows.
+- No keyword stuffing, hashtags, emoji, store URL, or elevate your space.
+Handle:
+- Preserve the existing handle unless the user explicitly asks to change it.
+- If changed, use a clean lowercase hyphenated subject-wall-art handle and warn about redirect requirements.
+
+EXACT STANDARD VARIANT OPTIONS IN FULL STANDARDISATION MODE
+Option 1:
+Frame
+Values in this exact order:
+1. Black
+2. Oak
+3. White
+4. Unframed
+
+Option 2:
+Size
+Values in this exact order:
+1. XL - 62 × 87 cm (24.4 × 34.3 in)
+2. L - 45 × 62 cm (17.7 × 24.4 in)
+3. M - 30 × 45 cm (11.8 × 17.7 in)
+4. S - 21 × 30 cm (8.3 × 11.8 in)
+
+Exact variant order:
 Black / XL
 Black / L
 Black / M
@@ -925,754 +1036,121 @@ Unframed / L
 Unframed / M
 Unframed / S
 
-Pricing Rules
-Use AUD pricing.
-Framed Black, Oak, White
-XL:
-Price: 329.00
-Compare-at price: 428.00
-L:
-Price: 249.00
-Compare-at price: 324.00
-M:
-Price: 199.00
-Compare-at price: 259.00
-S:
-Price: 149.00
-Compare-at price: 194.00
-Unframed
-XL:
-Price: 149.00
-Compare-at price: 194.00
-L:
-Price: 109.00
-Compare-at price: 142.00
-M:
-Price: 79.00
-Compare-at price: 103.00
-S:
-Price: 49.00
-Compare-at price: 64.00
+Do not delete and recreate variants until current orders, SKUs, fulfilment references, and app dependencies have been considered.
+When Shopify cannot safely reorder existing variants in place, report the limitation before destructive changes.
 
-Inventory and Shipping Rules
-Default settings:
-Track inventory: true if supported
-Inventory policy: continue unless instructed otherwise
-Fulfillment service: manual unless Shopify fulfilment settings require otherwise
-Requires shipping: true
-Taxable: true
-Weight unit: kg
-If inventory quantity is not supplied or cannot be safely set through the Shopify connector, ChatGPT must leave inventory for manual review.
-Do not use inventory deny unless stock is being controlled correctly.
+CURRENT SELLING PRICES AND RRP IN FULL STANDARDISATION MODE
+Currency: AUD
+Price = current selling price.
+Compare-at price = RRP.
 
-SKU Rules
-Create clean unique SKUs.
-Rules:
-Uppercase letters and numbers only
-No spaces
-No special symbols
-Product-specific prefix
-Size/frame suffix
-Create a short SKU prefix from the product subject.
-Examples:
-Greg Murphy Lap of the Gods:
-Prefix:
-GMLG
-Cristiano Ronaldo Manchester United:
-Prefix:
-CRMU
-Arsenal The Wait Is Over:
-Prefix:
-ATWIO
+Black, Oak, and White framed variants:
+- XL: Price 349.00 | Compare-at/RRP 428.00
+- L: Price 269.00 | Compare-at/RRP 324.00
+- M: Price 209.00 | Compare-at/RRP 259.00
+- S: Price 159.00 | Compare-at/RRP 194.00
 
-SKU Suffix System
-Black:
-A1B = XL Black
-A2B = L Black
-A3B = M Black
-A4B = S Black
-Oak:
-A1O = XL Oak
-A2O = L Oak
-A3O = M Oak
-A4O = S Oak
-White:
-A1W = XL White
-A2W = L White
-A3W = M White
-A4W = S White
-Unframed:
-A1 = XL Unframed
-A2 = L Unframed
-A3 = M Unframed
-A4 = S Unframed
-Example:
-GMLGA1B
-GMLGA2B
-GMLGA3B
-GMLGA4B
-GMLGA1O
-GMLGA1W
-GMLGA1
-All 16 SKUs must be unique.
+Unframed variants:
+- XL: Price 159.00 | Compare-at/RRP 194.00
+- L: Price 119.00 | Compare-at/RRP 142.00
+- M: Price 89.00 | Compare-at/RRP 103.00
+- S: Price 55.00 | Compare-at/RRP 64.00
 
-Variant Image Mapping
-Assign variant images correctly.
-Rules:
-Black variants use the black frame image
-Oak variants use the oak frame image
-White variants use the white frame image
-Unframed variants use the unframed image
-Do not assign these as variant images:
-Lifestyle images
-Living room images
-Office images
-Man cave images
-Size guide images
-Close-up detail images
-These belong in the gallery only.
+Keep the RRP values unchanged.
+Do not reverse Price and Compare-at price.
+Apply the entire matrix consistently; do not partially update only some frame colours or sizes.
 
-Tags
-Use 8–16 clean, relevant tags.
-Every product should include:
-Collector Series
-Limited Edition
-Sports Wall Art
-Limited Edition Sports Prints
-Framed Sports Art
-Man Cave Wall Art
-Then add sport/product-specific tags.
+CONTINUE SELLING IN FULL STANDARDISATION MODE
+For all 16 variants:
+- Track inventory: true when supported.
+- Inventory policy: continue.
+- Continue selling when out of stock must be ticked.
+- Requires shipping: true.
+- Taxable: true.
+Do not invent inventory quantities.
+If the connector cannot set or verify the policy, report each affected variant.
 
-Motorsport Tag Examples
-Motorsport Wall Art
-Motor Racing Wall Art
-Bathurst Wall Art
-V8 Supercars Wall Art
-Sports Posters Australia
-Greg Murphy
-Bathurst
-Lap Of The Gods
+SKU PROTECTION
+Preserve existing unique SKUs unless the user asks to rebuild them or a SKU is missing/invalid.
+When rebuilding, use an uppercase product prefix and:
+- Black: A1B, A2B, A3B, A4B
+- Oak: A1O, A2O, A3O, A4O
+- White: A1W, A2W, A3W, A4W
+- Unframed: A1, A2, A3, A4
+A1 = XL, A2 = L, A3 = M, A4 = S.
+Check store-wide uniqueness before saving.
 
-Football Tag Examples
-Football Wall Art
-Soccer Wall Art
-Premier League Wall Art
-Cristiano Ronaldo Wall Art
-Lionel Messi Wall Art
-Arsenal
-Manchester United
-Real Madrid
+TAGS, COLLECTIONS, AND CONTROLLED METAFIELDS
+Preserve existing tags and collections unless the user asks for SEO or collection cleanup.
+Never add unproven performance tags such as Best Seller, Best Selling, Popular, Viral, Trending, Featured, or New Arrival.
+Do not fill controlled category metafields with guessed values.
 
-NBA Tag Examples
-NBA Wall Art
-Basketball Wall Art
-Kobe Bryant Wall Art
-Michael Jordan Wall Art
-Lakers Wall Art
-Bulls Wall Art
-New York Knicks
-Jalen Brunson
+EXISTING PRODUCT WORKFLOW
+1. Identify and verify the exact existing product.
+2. Confirm update mode: Media Update or Full Standardisation.
+3. Review current media, variants, prices, inventory policy, category, SEO, and variant image mappings as required by the selected mode.
+4. Classify uploaded replacement images.
+5. Generate unique, accurate alt text.
+6. Upload all replacement media first.
+7. Confirm uploads processed successfully.
+8. Attach and order media exactly.
+9. Repair frame variant image mappings.
+10. In Full Standardisation Mode, apply the exact category, description/SEO rules, option order, pricing matrix, RRP, and continue-selling policy.
+11. Verify all changes.
+12. Remove old replaced media only after the new setup is confirmed.
+13. Keep status and publication state unchanged.
+14. Return the existing product/admin link and a concise validation report.
 
-Cricket Tag Examples
-Cricket Wall Art
-Cricket Memorabilia
-Shane Warne Wall Art
-Sports Posters Australia
-Australian Cricket
-Ashes Cricket
+POST-UPDATE VALIDATION
+Always verify:
+- Correct existing product was updated.
+- No duplicate product was created.
+- Product status and publication state did not change.
+- New media uploaded successfully before old media was removed.
+- Gallery order is Black, Lifestyle 1, Lifestyle 2, Lifestyle 3, Size Guide, Oak, White, Unframed.
+- All replacement images have unique accurate alt text where supported.
+- Black, Oak, White, and Unframed variant image mappings work.
+In Full Standardisation Mode also verify:
+- Category is Prints in Posters, Prints, & Visual Artwork.
+- Description is 90–130 words with the required four-paragraph structure.
+- SEO fields meet length and search-intent rules.
+- Frame values are Black, Oak, White, Unframed.
+- Size values are XL, L, M, S with exact dimensions.
+- 16 variants are present in the intended order.
+- Current selling prices and RRP values match the SOP.
+- Continue selling when out of stock is enabled for all variants.
+- SKUs remain unique.
+If any field cannot be verified, list it for manual review.
 
-Tags To Avoid Unless Proven
-Do not use these unless specifically instructed:
-Best Seller
-Best Selling
-Popular
-Viral
-Trending
-Featured
-New Arrival
-Only use performance-based tags when proven by sales data.
+FAILURE RULES
+Do not guess and do not create a new product as a workaround.
+If the update fails, first check:
+- Wrong or ambiguous product match
+- Failed media upload or processing
+- Missing connector permission
+- Variant image assignment failure
+- Variant reorder limitation
+- Category rejection
+- Duplicate SKU
+- Inventory policy failure
+- Media deletion failure
+Keep old media until replacement media is safely attached.
+Retry a failed upload once; if it still fails, report the exact file.
 
-Collections
-Default safer method:
-Use tags to trigger automated collections.
-ChatGPT may assign collections directly only if the Shopify connector safely supports collection assignment.
-Every product usually needs to appear in:
-Collector Series Wall Art
-Best Online Sports Wall Art
-Sport collection examples:
-NBA product → NBA Wall Art
-Motorsport product → Motor Racing Wall Art
-Cricket product → Cricket Wall Art
-Football product → Football Wall Art
-Horse racing product → Horse Racing Wall Art
-Combat product → Combat Wall Art
-NFL product → NFL Wall Art
-Ice Hockey product → Ice Hockey Wall Art
-Baseball product → Baseball Wall Art
-Tennis product → Tennis Wall Art
-WWE product → WWE Wrestling Wall Art
-Only use these collections when specifically instructed:
-Popular
-Featured Sports Wall Art
-Best Selling Wall Art UK
+FINAL EXECUTION PROMPT — MEDIA UPDATE MODE
+I have uploaded final approved replacement Sports Cave WebP assets.
+Use SOP 07C in Media Update Mode.
+Update the existing Shopify product only; do not create a new product.
+Upload new media first, apply the exact gallery order, write unique accurate SEO alt text, repair Black/Oak/White/Unframed variant image mappings, confirm the result, and only then remove the replaced old media.
+Keep title, handle, description, SEO, category, variants, prices, RRPs, SKUs, inventory, tags, collections, status, and publication state unchanged.
 
-Google Shopping Fields
-If the Shopify connector supports Google Shopping fields, use:
-Google Shopping condition: New
-Google Shopping custom product: True
-Google Shopping age group: Adult if required
-Google Shopping gender: Unisex if required
-If Google Shopping fields are not safely supported through the connector, leave them for manual review.
-Do not invent Google taxonomy values.
-
-Product Category
-Use:
-Home & Garden > Decor > Artwork > Posters, Prints & Visual Artwork
-If Shopify rejects the product category through the connector, leave it blank and continue.
-Do not let category setup block product creation.
-
-Pre-Creation Checklist
-Before creating the Shopify draft, ChatGPT must confirm internally:
-Product subject is clear
-Sport/category is clear
-Product title is clean
-Handle is clean
-Description follows Sports Cave structure
-SEO title is under 60 characters
-SEO description is under 155 characters
-All supplied images are WebP
-All supplied images are final assets
-All supplied images are included
-Image order is planned
-Alt text is unique for every image
-16 variants are planned
-Prices are correct
-Compare-at prices are correct
-Compare-at prices are correct
-SKUs are unique
-Product will be draft
-Product will not be published
-
-Shopify Creation Workflow
-ChatGPT must complete the workflow in this order:
-Identify product subject from uploads and user context
-Create product title
-Create Shopify handle
-Write Sports Cave-style description
-Create SEO title
-Create SEO description
-Generate tags
-Generate unique image alt text
-Upload all supplied WebP images to Shopify
-Create Shopify product as Draft
-Add all images to the product in correct order
-Create all 16 variants
-Add prices and compare-at prices
-Add SKUs
-Assign variant images
-Add tags
-Add product type and vendor
-Add product category only if safe
-Leave product unpublished
-Return the draft product link or confirmation
-
-Post-Creation Validation
-After creating the draft product, ChatGPT must verify:
-Product exists in Shopify
-Product is Draft
-Product is not published
-Product title is correct
-Handle is correct
-Product description has clean HTML
-All images uploaded successfully
-Image order is correct
-All image alt text is applied where supported
-All 16 variants exist
-Variant order is correct
-Prices are correct
-Compare-at prices are correct
-SKUs are unique
-Variant images are mapped correctly
-Tags are applied
-SEO title is applied
-SEO description is applied
-No unsupported category metafields were filled
-If the connector cannot verify a field, ChatGPT must clearly state what needs manual review.
-
-Manual Review Checklist Before Publishing
-Open the draft product in Shopify and check:
-Product title
-Product images
-Image order
-Image quality
-Image alt text
-Description formatting
-Product description strength
-Variant selector
-Variant images
-Prices
-Compare-at prices
-SKUs
-Tags
-Collections
-SEO title
-SEO description
-Product category
-Inventory
-Markets
-Google Shopping fields
-Mobile preview
-Desktop preview
-Only publish when the product feels premium and ready.
-
-Failure Rules
-If Shopify product creation fails, ChatGPT must not guess or retry blindly.
-Check these first:
-Did image upload fail?
-Did Shopify reject the product category?
-Did Shopify reject a controlled metafield?
-Did variant creation fail?
-Did a SKU duplicate an existing SKU?
-Did the product handle already exist?
-Did the connector lack permission to upload media?
-Did the connector lack permission to create products?
-Fastest safe fix:
-Create product without risky category fields
-Leave taxonomy metafields blank
-Re-upload failed images
-Use a slightly adjusted handle if the handle already exists
-Keep product as Draft
-
-No-Publish Rule
-ChatGPT must never publish the product unless the user explicitly says:
-Publish this product now.
-Even then, ChatGPT must confirm the product has been reviewed first.
-Default status is always:
-Draft
-
-Final Execution Prompt
-Use this prompt when uploading a new product:
-
-I have uploaded final approved Sports Cave WebP product images.
-Use SOP 07B.
-Create a new Shopify product directly through the connected Shopify tool.
-Do not create a CSV.
-Do not ask me to manually upload images.
-Upload all supplied WebP images to Shopify, create the product as a Draft, add all images in the correct Sports Cave order, write the product title, handle, Sports Cave-style emotional description, SEO meta title, SEO meta description, image alt text, tags, variants, SKUs, pricing, compare-at pricing, and variant image mapping.
-Keep the product unpublished.
-Use the product subject, sport, athlete, team, rivalry, or moment from the uploaded images. If unclear, ask before creating the draft.
-Follow the Sports Cave description style:
-Short. Emotional. Nostalgic. Identity-driven. Collector-focused.
-The buyer should feel:
-“That’s me. I remember that. I need this.”
-
-Final Rule
-This SOP exists to remove CSV import risk and manual Shopify upload work.
-ChatGPT should now create the product directly in Shopify as a clean draft.
-The only manual step left should be final approval and publishing.
-"""
-UPDATE_EXISTING_PRODUCT_PROMPT = """
-SOP 07C — Sports Cave Shopify Existing Product Image Update Using ChatGPT + Shopify Connector
-Direct Product Media Replacement Version — No CSV Import Required
-Goal
-Update an existing Sports Cave Shopify product directly through ChatGPT using the connected Shopify tool.
-This SOP is for existing products only.
-ChatGPT must:
-Find the correct existing Shopify product
-Upload all supplied final WebP replacement images to Shopify
-Replace the existing product gallery images with the new supplied images
-Apply the new images in the correct Sports Cave media order
-Write or update unique SEO image alt text
-Reassign variant images correctly
-Keep the existing product handle unless instructed otherwise
-Keep existing product pricing unless instructed otherwise
-Keep existing variants unless instructed otherwise
-Keep existing product status unchanged
-Leave the product unpublished if it is already unpublished
-Do not create a duplicate product
-Do not use CSV import
-Do not ask the user to manually upload images to Shopify
-Brutal Rule
-Never create a new Shopify product when the task is to update an existing product.
-ChatGPT must update the existing product only.
-Before making changes, ChatGPT must confirm it has found the correct existing product by matching at least one of the following:
-Shopify product URL
-Shopify product handle
-Exact product title
-Product ID
-Clear product subject with only one matching Shopify product
-If there is more than one possible match, ChatGPT must stop and ask the user to confirm the correct product.
-Required Uploads
-Before running this SOP, upload all final approved replacement WebP product images.
-Images should already be:
-Final production assets
-Optimised WebP files
-Correctly cropped
-Correctly sized
-Visually approved
-Ready for Shopify upload
-Do not ask ChatGPT to redesign, edit, crop, stylise, resize, relight, or change any product image during this SOP.
-This SOP is for Shopify product image replacement and product media updating only.
-Required Product Inputs
-Provide one of the following:
-Existing Shopify product URL
-Existing Shopify product handle
-Exact existing Shopify product title
-Product subject and sport/category if the product can be clearly identified
-Also provide:
-Final approved replacement WebP images
-Any images that must stay on the product, if any
-Any images that must be removed, if any
-Any title, description, SEO, or tag changes required
-If the user only uploads images and gives no product URL, handle, or title, ChatGPT must identify the likely product from Shopify search but must ask for confirmation before replacing images.
-Default Update Scope
-Unless the user specifically requests more, ChatGPT must update only:
-Product images
-Image order
-Image alt text
-Variant image mapping
-ChatGPT must not change these unless requested:
-Product title
-Product handle
-Product description
-SEO title
-SEO description
-Tags
-Product type
-Vendor
-Collections
-Prices
-Compare-at prices
-Variants
-SKUs
-Inventory
-Product status
-Publishing status
-Markets
-Google Shopping fields
-Shopify category metafields
-No-Publish / Status Rule
-ChatGPT must never publish, unpublish, archive, or change the product status unless the user specifically asks.
-Default action:
-If product is Active, keep Active
-If product is Draft, keep Draft
-If product is Archived, stop and ask before updating
-Do not automatically publish an updated product.
-Existing Product Safety Rule
-Before replacing images, ChatGPT must verify internally:
-Correct product has been found
-Product title matches user intent
-Product handle matches user intent
-Uploaded images match the product subject
-Replacement images are WebP
-Images appear to be final assets
-New image order is planned
-Variant image mapping is planned
-No duplicate product will be created
-If there is uncertainty, ChatGPT must ask before updating.
-Image Replacement Rule
-ChatGPT must replace the existing product images with the new supplied images.
-Default behaviour:
-Upload all supplied replacement WebP images to Shopify
-Add the new Shopify-hosted images to the existing product
-Apply image alt text to each new image where supported
-Reorder the product gallery into the correct Sports Cave order
-Assign the correct variant images
-Remove old product images after the new images are confirmed uploaded and attached
-Do not remove old images first.
-Safe sequence:
-Upload new images first
-Attach new images to product
-Confirm new images are present
-Assign variant images
-Confirm variant image mapping
-Then remove old images that are being replaced
-This prevents the product being left with no images if upload fails.
-Image Preservation Rule
-If the existing product has images that should remain, the user must clearly say so.
-Examples:
-Keep the size guide
-Keep the lifestyle image
-Keep the old black frame image
-Only replace the mockups
-Only replace the frame images
-If the user says “replace the images” or “update to these new images,” ChatGPT should assume all old gallery images should be replaced by the newly supplied images.
-Product Image Order
-Use this Sports Cave media order:
-Black frame image
-Lifestyle/mockup image 1
-Lifestyle/mockup image 2
-Lifestyle/mockup image 3
-Office, hallway, living room, sports bar, or man cave image
-Size guide image
-Oak frame image
-White frame image
-Unframed image
-If fewer or more lifestyle images are supplied, keep this general order:
-Black frame
-Lifestyle/mockups
-Size guide
-Oak frame
-White frame
-Unframed
-Every valid supplied image must be included.
-Only remove exact duplicate files.
-Image Naming Rules Before Upload
-Where possible, rename files before Shopify upload using:
-Lowercase letters
-Hyphens only
-Product-specific names
-Accurate image descriptor
-Do not include:
-final
-compressed
-v2
-copy
-new
-test
-random numbers
-unnecessary descriptors
-Good examples:
-greg-murphy-bathurst-wall-art-black-frame.webp
-greg-murphy-bathurst-wall-art-living-room.webp
-greg-murphy-bathurst-wall-art-man-cave.webp
-greg-murphy-bathurst-wall-art-sizing-guide.webp
-greg-murphy-bathurst-wall-art-oak-frame.webp
-greg-murphy-bathurst-wall-art-white-frame.webp
-greg-murphy-bathurst-wall-art-unframed.webp
-Image Alt Text Rules
-Every replacement image must have unique SEO-friendly alt text.
-Rules:
-110–125 characters preferred
-Natural sentence-style wording
-Mention the subject
-Mention image type or setting
-Use one SEO keyword only if it fits naturally
-Do not keyword stuff
-Do not repeat the same alt text for every image
-Do not describe irrelevant furniture too heavily
-Do not overuse “premium”
-Good structure:
-[Image type] + [subject] + [sport/keyword] + [fan/collector context].
-Alt Text Examples
-Black frame:
-Black framed Greg Murphy Bathurst wall art celebrating the Lap of the Gods for Australian motorsport fans.
-Living room:
-Greg Murphy Bathurst wall art displayed in a modern living room for collectors of iconic racing moments.
-Man cave:
-Greg Murphy Lap of the Gods framed sports memorabilia styled in a dark man cave for true V8 racing fans.
-Size guide:
-Greg Murphy Bathurst wall art size guide showing framed options for limited edition motorsport collectors.
-Oak frame:
-Oak framed Greg Murphy Bathurst wall art with collector styling for fans of Australian motor racing history.
-White frame:
-White framed Greg Murphy Bathurst wall art featuring the Lap of the Gods moment for motorsport collectors.
-Unframed:
-Unframed Greg Murphy Bathurst sports poster Australia design celebrating the legendary Lap of the Gods.
-Variant Image Mapping
-After replacing product images, ChatGPT must reassign variant images correctly.
-Rules:
-Black variants use the black frame image
-Oak variants use the oak frame image
-White variants use the white frame image
-Unframed variants use the unframed image
-Do not assign these as variant images:
-Lifestyle images
-Living room images
-Office images
-Hallway images
-Sports bar images
-Man cave images
-Size guide images
-Close-up detail images
-These belong in the product gallery only.
-Variant Structure Protection Rule
-Existing product variants must not be deleted or recreated unless specifically requested.
-Default action:
-Keep all existing variants
-Keep existing variant order
-Keep existing prices
-Keep existing compare-at prices
-Keep existing SKUs
-Only update variant image assignments
-If the product has broken, missing, or incorrect variants, ChatGPT must report the issue and ask before making variant changes.
-Pricing Protection Rule
-Do not change pricing during an image replacement update unless the user specifically asks.
-Existing prices must remain unchanged.
-Existing compare-at prices must remain unchanged.
-Inventory Protection Rule
-Do not change inventory during an image replacement update unless the user specifically asks.
-Existing inventory tracking must remain unchanged.
-Existing inventory policy must remain unchanged.
-Existing stock quantities must remain unchanged.
-SEO Update Rule
-Default action:
-Update image alt text only.
-Do not rewrite SEO title or SEO meta description unless the user asks.
-If the user asks to refresh SEO at the same time, follow the Sports Cave SEO rules:
-SEO title should be under 60 characters
-SEO description should be under 155 characters
-Use the main subject and strongest relevant wall art keyword
-Keep it premium and clean
-Do not keyword stuff
-Do not use generic phrases like “elevate your space”
-Product Description Update Rule
-Default action:
-Do not change the existing product description.
-If the user asks to update the product description, rewrite it in the Sports Cave emotional collector style:
-Short
-Emotional
-Nostalgic
-Identity-driven
-Collector-focused
-Built for mobile reading
-Description structure:
-Emotional hook
-Nostalgia trigger
-Identity line
-Scarcity close
-Allowed HTML:
-Do not use:
-Tags and Collections Protection Rule
-Do not change tags or collections during an image replacement update unless the user specifically asks.
-Existing automated collection logic may depend on tags.
-If tags are updated, use only clean, relevant Sports Cave tags.
-Do not add performance-based tags unless proven:
-Best Seller
-Best Selling
-Popular
-Viral
-Trending
-Featured
-New Arrival
-Shopify Category and Metafield Protection Rule
-Do not update Shopify-controlled category metafields during an image replacement update unless specifically instructed and safe accepted values are provided.
-Leave the following unchanged:
-Art movement
-Art style
-Artwork authenticity
-Artwork frame material
-Colour
-Condition metafields
-Frame style
-Material
-Orientation
-Painting medium
-Print edition type
-Rarity
-Signature placement
-Sports logo
-Suitable space
-Theme
-Printing method
-Do not invent values.
-Existing Product Update Workflow
-ChatGPT must complete the workflow in this order:
-Identify the existing Shopify product
-Confirm the product match if there is any uncertainty
-Review current product images and variant image mapping where possible
-Identify all supplied replacement WebP images
-Plan the new Sports Cave image order
-Generate unique alt text for every replacement image
-Upload all replacement images to Shopify
-Attach the new images to the existing product
-Reorder the product gallery correctly
-Assign black frame image to all Black variants
-Assign oak frame image to all Oak variants
-Assign white frame image to all White variants
-Assign unframed image to all Unframed variants
-Confirm new images are attached successfully
-Remove old images that are being replaced
-Keep product status unchanged
-Verify the updated product
-Return the product link and manual review checklist
-Post-Update Validation
-After updating the product, ChatGPT must verify:
-Correct existing product was updated
-No duplicate product was created
-Product status was not changed
-Product title was not changed unless requested
-Product handle was not changed unless requested
-All new images uploaded successfully
-Old images were removed only after new images were attached
-Image order is correct
-Image alt text is applied where supported
-All 16 variants still exist if the product previously had 16 variants
-Variant image mapping is correct
-Prices were not changed unless requested
-Compare-at prices were not changed unless requested
-SKUs were not changed unless requested
-Inventory was not changed unless requested
-Tags were not changed unless requested
-SEO fields were not changed unless requested
-No unsupported category metafields were filled
-If the Shopify connector cannot verify a field, ChatGPT must clearly state what needs manual review.
-Manual Review Checklist After Updating Images
-After updating the product, ChatGPT must verify:
-Open the product in Shopify and check:
-Correct product was updated
-No duplicate product was created
-Product images
-Image order
-Image quality
-Image alt text
-Black variant image
-Oak variant image
-White variant image
-Unframed variant image
-Variant selector
-Prices
-Compare-at prices
-SKUs
-Inventory
-Tags
-Collections
-SEO title
-SEO description
-Mobile preview
-Desktop preview
-Live product page if product is active
-Only consider the update complete when the product looks premium and ready to sell.
-Failure Rules
-If the Shopify product update fails, ChatGPT must not guess or retry blindly.
-Check these first:
-Could the existing product not be found?
-Were multiple matching products found?
-Did image upload fail?
-Did Shopify reject one or more media files?
-Did the connector lack permission to upload media?
-Did the connector lack permission to update products?
-Did variant image assignment fail?
-Did old image deletion fail?
-Did alt text fail to apply?
-Did Shopify timeout during media processing?
-Fastest safe fix:
-Do not remove old images until new images are confirmed
-Retry failed image upload once
-If upload still fails, report the failed file
-If product match is unclear, ask user for product URL or handle
-If variant mapping fails, leave product images updated and report variant mapping for manual review
-Do not create a new product as a workaround.
-Final Execution Prompt
-Use this prompt when updating an existing product:
-I have uploaded final approved replacement Sports Cave WebP product images.
-Use SOP 07C.
-Update the existing Shopify product directly through the connected Shopify tool.
-Do not create a CSV.
-Do not create a new product.
-Do not ask me to manually upload images.
-Find the existing product using the product URL, handle, title, or product subject I provide.
-Upload all supplied WebP images to Shopify, attach them to the existing product, replace the old product images, apply the correct Sports Cave image order, write unique SEO-friendly alt text for every image, and reassign variant images correctly.
-Black variants use the black frame image.
-Oak variants use the oak frame image.
-White variants use the white frame image.
-Unframed variants use the unframed image.
-Keep the existing product status unchanged.
-Keep the existing product title, handle, description, SEO, tags, prices, SKUs, variants, inventory, collections, and metafields unchanged unless I specifically ask you to update them.
-If the correct product is unclear, ask before making changes.
-Final Rule
-This SOP exists to replace manual Shopify image updates and prevent duplicate products.
-ChatGPT should update the existing Shopify product directly, replace the old images safely, reassign variant images, and leave only final manual review.
+FINAL EXECUTION PROMPT — FULL STANDARDISATION MODE
+I have uploaded final approved replacement Sports Cave WebP assets.
+Use SOP 07C in Full Standardisation Mode.
+Update the existing Shopify product only; do not create a duplicate.
+Apply the exact gallery order, current description and commercial SEO rules, exact category Prints in Posters, Prints, & Visual Artwork, exact Frame and Size ordering, current Sports Cave selling prices, unchanged RRP compare-at prices, Continue selling when out of stock for every variant, and correct frame variant image mappings.
+Keep the existing status and publication state unchanged.
+Return the product link and full validation results.
 """
 
 
@@ -3381,69 +2859,173 @@ def get_product_upload_prompt(metadata, update_existing=False):
     return UPDATE_EXISTING_PRODUCT_PROMPT if update_existing else NEW_SHOPIFY_PRODUCT_PROMPT
 
 
-PRODUCT_UPLOAD_ALT_TEXT_PROMPT = """
-Create unique Shopify image alt text for every Sports Cave product image I upload.
+PRODUCT_UPLOAD_ALT_TEXT_PROMPT = """Create unique commercial SEO image alt text for every Sports Cave Shopify product image supplied.
 
 Inputs:
-- Product title
-- Sport / athlete / team / moment if known
-- Image filenames or image order
-- Screenshot/product preview if supplied
-
-Rules:
-- Write one unique alt text line per image.
-- Keep it natural, descriptive, and buyer-friendly.
-- Include the product title or sport context only when true.
-- Do not keyword stuff.
-- Do not repeat the same wording across every image.
-- Do not invent athletes, teams, trophies, or events that are not visible/provided.
-
-Output:
-Image/file | Alt text
-"""
-
-
-PRODUCT_UPLOAD_META_PROMPT = """
-Write Shopify SEO metadata for this Sports Cave product.
-
-Inputs:
-- Product title
+- Product title/H1
+- Athlete, team, vehicle, rivalry, event, or sporting moment
 - Sport/category
-- Product description or artwork context
-- Target market if known
+- Primary commercial keyword
+- Ordered image filenames and roles
+- Visible room/setting for each lifestyle mockup
 
-Output:
-1. SEO title, maximum 60 characters
-2. SEO meta description, maximum 155 characters
-3. URL handle suggestion
-4. 10 Shopify tags
+Required output:
+A table in the exact gallery order:
+Position | File/image role | Alt text | Character count
+
+Canonical gallery order:
+1. Black frame
+2. Lifestyle mockup 1
+3. Lifestyle mockup 2
+4. Lifestyle mockup 3
+5. Size guide
+6. Oak frame
+7. White frame
+8. Unframed
 
 Rules:
-- Premium sports wall art tone.
-- Clear collector/man cave intent.
-- No fake scarcity unless the edition limit is provided.
-- No keyword stuffing.
-- Make the meta description sound human, not robotic.
+- Accurately describe what is visible.
+- Usually 80–140 characters; clarity is more important than forcing length.
+- Use the primary keyword naturally no more than once per alt text.
+- Mention the verified athlete/moment/sport and visible setting when relevant.
+- Mention frame colour for Black, Oak, and White product images.
+- Identify the size guide clearly.
+- Make every line genuinely unique.
+- Write for accessibility first and SEO second.
+- Do not use hashtags, emoji, sales hype, scarcity language, or keyword stuffing.
+- Do not begin with image of unless it is genuinely natural.
+- Do not invent a person, team, logo, trophy, signature, event, achievement, room detail, or product specification.
+- Do not overdescribe irrelevant furniture.
 """
 
 
-PRODUCT_UPLOAD_QA_CHECKLIST_PROMPT = """
-Review this Shopify product draft before publishing.
+PRODUCT_UPLOAD_META_PROMPT = """Write commercial Shopify SEO metadata for one Sports Cave product.
 
-Check:
-- Product title is clean and accurate.
-- Description sounds like Sports Cave and does not overpromise.
-- All uploaded images are in the correct order.
-- Each image has unique alt text.
-- Variant names, SKUs, prices, and compare-at prices are correct.
-- Frame/size variant image mapping is correct.
-- SEO title and meta description are filled in.
-- Tags are relevant and not spammy.
-- Limited edition wording is accurate.
-- Product is saved as Draft until manually approved.
+Inputs:
+- Product title
+- Athlete/team/moment/event
+- Sport/category
+- Product context
+- Confirmed edition limit, if any
+- Target market
+- Primary and secondary keyword candidates
+
+SEO principle:
+Search intent first, premium tone second. Clearly tell Google and buyers who/what the page features, what the product is, the sport/category, and the collector or room intent.
 
 Output:
-Pass / Needs Fix table with exact fixes.
+1. Primary keyword
+2. Up to 4 secondary keywords
+3. SEO title with character count
+4. Meta description with character count
+5. URL handle
+6. H1/product title recommendation
+7. Open Graph title
+8. Open Graph description
+9. Three natural internal-link anchor text ideas
+
+Rules for SEO title:
+- 50–60 characters preferred; 60 maximum.
+- Put the primary keyword near the start.
+- Include the subject and Wall Art.
+- Add Limited Edition, Framed Print, sport, or Sports Cave only when it fits naturally.
+- Never use a poetic campaign title by itself.
+- No keyword stuffing.
+
+Rules for meta description:
+- 145–160 characters preferred.
+- Mention the subject or moment and primary keyword naturally once.
+- Mention collector/limited-edition intent only when confirmed.
+- Add a relevant use such as collectors, man caves, offices, bars, or homes when space permits.
+- Commercial and human, not robotic.
+- No hashtags, emoji, fake urgency, keyword lists, store URL, or elevate your space.
+
+Rules for handle:
+- Lowercase letters and hyphens only.
+- Include the principal subject and wall-art intent.
+- Remove filler words and repeated keywords.
+
+Do not invent dates, achievements, edition limits, licensing, signatures, materials, or product specifications.
+"""
+
+
+PRODUCT_UPLOAD_QA_CHECKLIST_PROMPT = """Review this Sports Cave Shopify product draft before publishing.
+
+Return a Pass / Needs Fix table with the exact evidence and exact correction for each item.
+
+PRODUCT IDENTITY AND STATUS
+- Correct product title/H1 and clean handle
+- Vendor: Sports Cave
+- Product type: Framed Art
+- Status: Draft for a new product
+- Published: false for a new product
+- Exact category: Prints in Posters, Prints, & Visual Artwork
+
+DESCRIPTION
+- 90–130 words
+- Exactly one bold hook
+- Exactly two concise story paragraphs
+- Exactly one bold scarcity close
+- Specific and grounded rather than ad-like or overstated
+- No generic clichés
+- No invented specifications or unconfirmed edition claims
+- Clean Shopify-safe HTML
+
+SEO
+- Primary keyword is commercially relevant
+- SEO title is 60 characters or fewer and search-intent led
+- Meta description is 145–160 characters where practical
+- Metadata is clear rather than poetic-first
+- No keyword stuffing
+- Every image has unique, accurate alt text
+- Alt text describes the real image and uses a target keyword naturally at most once
+
+MEDIA ORDER
+Verify the exact sequence:
+1. Black frame
+2. Lifestyle 1
+3. Lifestyle 2
+4. Lifestyle 3
+5. Size guide
+6. Oak frame
+7. White frame
+8. Unframed
+
+VARIANTS
+- Option 1 Frame: Black, Oak, White, Unframed
+- Option 2 Size: XL, L, M, S with exact dimensions
+- All 16 variants exist in correct order
+- Black variants show black-frame image
+- Oak variants show oak-frame image
+- White variants show white-frame image
+- Unframed variants show unframed image
+
+PRICING — AUD
+Framed Black/Oak/White:
+- XL 349.00 / RRP 428.00
+- L 269.00 / RRP 324.00
+- M 209.00 / RRP 259.00
+- S 159.00 / RRP 194.00
+Unframed:
+- XL 159.00 / RRP 194.00
+- L 119.00 / RRP 142.00
+- M 89.00 / RRP 103.00
+- S 55.00 / RRP 64.00
+Verify Price and Compare-at/RRP are not reversed.
+
+INVENTORY AND FULFILMENT
+- Continue selling when out of stock is enabled for all 16 variants
+- Inventory policy is continue
+- Requires shipping is true
+- Taxable is true
+- SKUs are unique
+
+FINAL
+- Tags and collections are relevant and not based on unproven performance claims
+- No unsupported taxonomy metafields were invented
+- Mobile preview is strong
+- Desktop preview is strong
+- Product remains unpublished until manually approved
 """
 
 
