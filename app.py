@@ -31,11 +31,8 @@ def safe_startup_print(message):
 
 safe_startup_print("STARTUP APP START total=0.000s stage=0.000s")
 
-from PIL import Image, ImageOps, UnidentifiedImageError
 from dotenv import load_dotenv
-import requests
 import streamlit as st
-import streamlit.components.v1 as components
 
 db = None
 image_factory = None
@@ -43,6 +40,9 @@ os_pages = None
 shopify_sync = None
 edition_ops_module = None
 orders_page_module = None
+requests_module = None
+components_module = None
+pillow_modules = None
 
 
 load_dotenv()
@@ -126,6 +126,29 @@ def get_orders_page():
         orders_page_module = importlib.import_module("orders_page")
         log_startup_stage("ORDERS PAGE IMPORT DONE")
     return orders_page_module
+
+
+def get_requests_module():
+    global requests_module
+    if requests_module is None:
+        requests_module = importlib.import_module("requests")
+    return requests_module
+
+
+def get_components_module():
+    global components_module
+    if components_module is None:
+        components_module = importlib.import_module("streamlit.components.v1")
+    return components_module
+
+
+def get_pillow_modules():
+    global pillow_modules
+    if pillow_modules is None:
+        from PIL import Image, ImageOps, UnidentifiedImageError
+
+        pillow_modules = (Image, ImageOps, UnidentifiedImageError)
+    return pillow_modules
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -2688,6 +2711,7 @@ def load_edition_log_snapshot_cache():
 
 
 def request_google_sheet_csv_export(sheet_url):
+    requests = get_requests_module()
     export_url = build_google_sheet_csv_export_url(sheet_url)
     diagnostics = {
         "requested_url": export_url,
@@ -2762,6 +2786,7 @@ def request_google_sheet_csv_export(sheet_url):
 
 
 def request_edition_log_endpoint(request_url):
+    requests = get_requests_module()
     diagnostics = {
         "requested_url": request_url,
         "final_url": None,
@@ -3253,6 +3278,7 @@ def get_uploaded_file_signature(uploaded_file):
 
 
 def create_uploaded_preview(uploaded_file):
+    Image, ImageOps, _ = get_pillow_modules()
     preview_signature = get_uploaded_file_signature(uploaded_file)
     if preview_signature is None:
         return None
@@ -3422,6 +3448,7 @@ Pass / Needs Fix table with exact fixes.
 
 
 def validate_uploaded_artwork(uploaded_file):
+    Image, _, UnidentifiedImageError = get_pillow_modules()
     if uploaded_file is None:
         raise ValueError("Please upload an artwork image first.")
 
@@ -3636,7 +3663,7 @@ def render_copy_prompt_button(
     prompt_text_json = json.dumps(prompt_text)
     safe_label = html.escape(label)
 
-    components.html(
+    get_components_module().html(
         f"""
         <div style="padding-top:2px;">
           <button
@@ -3706,7 +3733,7 @@ def render_copyable_prompt(title, prompt_text, key, show_title=True):
         else '<span style="display:block;width:1px;height:1px;opacity:0;">Prompt</span>'
     )
 
-    components.html(
+    get_components_module().html(
         f"""
         <div style="border:1px solid rgba(212,165,76,0.30);border-radius:16px;padding:16px;background:#FFFFFF;color:#0B0B0D;box-sizing:border-box;">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;">
@@ -5133,7 +5160,10 @@ def render_settings_page():
     with st.expander("Shopify Webhook Setup", expanded=False):
         st.write("**Paid orders webhook endpoint:** `/webhooks/shopify/orders-paid`")
         st.write(f"**Webhook secret configured:** {'Yes' if bool(os.getenv('SHOPIFY_WEBHOOK_SECRET', '').strip()) else 'No'}")
-        st.caption("The endpoint verifies the HMAC header before allocating edition numbers.")
+        st.caption(
+            "The lightweight webhook wrapper is available in server.py. "
+            "Render free uses direct Streamlit startup to stay under the 512MB memory limit."
+        )
 
     with st.expander("Allocation Repair Tools", expanded=False):
         _render_developer_allocation_tools()

@@ -84,11 +84,22 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("process_shopify_orders_for_editions", source)
         self.assertIn("historical_backfill_order_rows", source)
 
-    def test_render_uses_server_for_shopify_webhooks(self):
+    def test_render_uses_single_streamlit_process_for_free_instance(self):
         source = (ROOT / "render.yaml").read_text(encoding="utf-8")
 
-        self.assertIn("startCommand: python server.py", source)
-        self.assertNotIn("startCommand: streamlit run app.py", source)
+        self.assertIn("startCommand: streamlit run app.py", source)
+        self.assertIn("--server.fileWatcherType none", source)
+        self.assertIn("--server.runOnSave false", source)
+        self.assertIn("--browser.gatherUsageStats false", source)
+        self.assertIn("healthCheckPath: /_stcore/health", source)
+        self.assertNotIn("startCommand: python server.py", source)
+
+    def test_lightweight_webhook_server_route_remains_available(self):
+        source = (ROOT / "server.py").read_text(encoding="utf-8")
+
+        self.assertIn('/webhooks/shopify/orders-paid', source)
+        self.assertIn("process_shopify_order_for_editions", source)
+        self.assertIn("require_cutover=True", source)
 
     def test_orders_page_is_snapshot_based_and_lightweight(self):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
