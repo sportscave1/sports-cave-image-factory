@@ -3244,12 +3244,15 @@ def current_prompt_text(prompt_id, default_text):
     return prompt_store.get_prompt(prompt_id, default_text)
 
 
-def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=420):
+def render_prompt_edit_button(prompt_id, *, label="✎"):
     button_key = f"prompt-edit-button::{prompt_id}"
     panel_key = f"prompt-edit-open::{prompt_id}"
-    if st.button("Edit prompt", key=button_key, help="Developer password required."):
+    if st.button(label, key=button_key, help="Developer password required.", use_container_width=True):
         st.session_state[panel_key] = True
 
+
+def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=420):
+    panel_key = f"prompt-edit-open::{prompt_id}"
     if not st.session_state.get(panel_key):
         return
 
@@ -3280,6 +3283,11 @@ def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=420):
             st.rerun()
 
 
+def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=420, label="✎"):
+    render_prompt_edit_button(prompt_id, label=label)
+    render_prompt_edit_panel(title, prompt_id, prompt_text, height=height)
+
+
 def render_download_button(label, file_path, mime, key):
     if not file_path:
         return
@@ -3303,18 +3311,32 @@ def render_copy_prompt_button(
     prompt_text,
     key,
     label="Copy Prompt",
-    background="#0B0B0D",
-    text_color="#F5F2EA",
-    border_color="#0B0B0D",
+    background="#FFFFFF",
+    text_color="#0B0B0D",
+    border_color="rgba(11,11,13,0.55)",
 ):
     prompt_text_json = json.dumps(prompt_text)
     safe_label = html.escape(label)
+    button_id = f"copy-inline-button-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
 
     get_components_module().html(
         f"""
+        <style>
+        #{button_id},
+        #{button_id}:hover,
+        #{button_id}:focus,
+        #{button_id}:active {{
+            background:{background}!important;
+            color:{text_color}!important;
+            border-color:{border_color}!important;
+            box-shadow:none!important;
+            filter:none!important;
+            transform:none!important;
+        }}
+        </style>
         <div style="padding-top:2px;">
           <button
-            id="copy-inline-button-{key}"
+            id="{button_id}"
             type="button"
             style="width:100%;border:1px solid {border_color};border-radius:14px;padding:12px 14px;background:{background};color:{text_color};font-weight:700;font-size:0.95rem;cursor:pointer;box-sizing:border-box;"
           >
@@ -3323,7 +3345,7 @@ def render_copy_prompt_button(
         </div>
         <script>
         (() => {{
-          const button = document.getElementById("copy-inline-button-{key}");
+          const button = document.getElementById("{button_id}");
           const originalLabel = button.innerText;
           const promptText = {prompt_text_json};
 
@@ -3372,71 +3394,37 @@ def render_copy_prompt_button(
 def render_copyable_prompt(title, prompt_text, key, show_title=True, prompt_id=None):
     prompt_id = prompt_id or prompt_edit_id("app", key)
     prompt_text = current_prompt_text(prompt_id, prompt_text).strip()
-    render_prompt_edit_controls(title, prompt_id, prompt_text)
 
     textarea_height = min(780, max(320, (prompt_text.count("\n") + 1) * 18 + 80))
-    component_height = textarea_height + (104 if show_title else 78)
-    safe_title = html.escape(title)
     safe_text = html.escape(prompt_text)
-    title_markup = (
-        f'<strong style="font-size:1rem;color:#0B0B0D;">{safe_title}</strong>'
-        if show_title
-        else '<span style="display:block;width:1px;height:1px;opacity:0;">Prompt</span>'
-    )
 
-    get_components_module().html(
-        f"""
-        <div style="border:1px solid rgba(212,165,76,0.30);border-radius:16px;padding:16px;background:#FFFFFF;color:#0B0B0D;box-sizing:border-box;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;">
-            {title_markup}
-            <button
-              id="copy-button-{key}"
-              type="button"
-              style="border:1px solid #0B0B0D;border-radius:999px;padding:10px 16px;background:#FFFFFF;color:#0B0B0D;font-weight:700;cursor:pointer;"
-            >
-              Copy Prompt
-            </button>
-          </div>
-          <textarea
-            id="prompt-text-{key}"
-            readonly
-            style="width:100%;height:{textarea_height}px;border:1px solid rgba(11,11,13,0.18);border-radius:12px;padding:12px;background:#FFFFFF;color:#000000;font-size:0.95rem;line-height:1.45;resize:none;box-sizing:border-box;"
-          >{safe_text}</textarea>
-        </div>
-        <script>
-        (() => {{
-          const button = document.getElementById("copy-button-{key}");
-          const textarea = document.getElementById("prompt-text-{key}");
-          const originalLabel = button.innerText;
-          const promptText = {json.dumps(prompt_text)};
+    with st.container(border=True):
+        if show_title:
+            header_cols = st.columns([6, 1.2, 0.35])
+            header_cols[0].markdown(f"**{title}**")
+            with header_cols[1]:
+                render_copy_prompt_button(prompt_text, f"copy::{key}")
+            with header_cols[2]:
+                render_prompt_edit_button(prompt_id)
+        else:
+            header_cols = st.columns([1.2, 0.35, 6])
+            with header_cols[0]:
+                render_copy_prompt_button(prompt_text, f"copy::{key}")
+            with header_cols[1]:
+                render_prompt_edit_button(prompt_id)
 
-          async function copyPrompt() {{
-            textarea.focus();
-            textarea.select();
-            textarea.setSelectionRange(0, textarea.value.length);
+        render_prompt_edit_panel(title, prompt_id, prompt_text)
 
-            try {{
-              if (navigator.clipboard && window.isSecureContext) {{
-                await navigator.clipboard.writeText(promptText);
-              }} else {{
-                document.execCommand("copy");
-              }}
-            }} catch (error) {{
-              document.execCommand("copy");
-            }}
-
-            button.innerText = "Copied";
-            setTimeout(() => {{
-              button.innerText = originalLabel;
-            }}, 1400);
-          }}
-
-          button.addEventListener("click", copyPrompt);
-        }})();
-        </script>
-        """,
-        height=component_height,
-    )
+        get_components_module().html(
+            f"""
+            <textarea
+              id="prompt-text-{key}"
+              readonly
+              style="width:100%;height:{textarea_height}px;border:1px solid rgba(11,11,13,0.18);border-radius:12px;padding:12px;background:#FFFFFF;color:#000000;font-size:0.95rem;line-height:1.45;resize:none;box-sizing:border-box;"
+            >{safe_text}</textarea>
+            """,
+            height=textarea_height + 18,
+        )
 
 
 def prime_asset_selection_state(result):
@@ -3954,24 +3942,13 @@ def render_prompt_cards(result, prompt_paths, heading):
             prompt_text = current_prompt_text(prompt_id, default_prompt_text)
             prompt_key = f"{result['run_dir']}::{prompt_name}"
 
-            prompt_header_cols = st.columns([4, 1], gap="small")
-            with prompt_header_cols[0]:
-                with st.expander("View Prompt"):
-                    render_copyable_prompt(
-                        get_prompt_label(prompt_path),
-                        prompt_text,
-                        f"prompt-box::{prompt_key}",
-                        show_title=False,
-                        prompt_id=prompt_id,
-                    )
-            with prompt_header_cols[1]:
-                render_copy_prompt_button(
+            with st.expander("View Prompt"):
+                render_copyable_prompt(
+                    get_prompt_label(prompt_path),
                     prompt_text,
-                    f"prompt-header::{prompt_key}",
-                    label="Copy",
-                    background="#0B0B0D",
-                    text_color="#F5F2EA",
-                    border_color="#0B0B0D",
+                    f"prompt-box::{prompt_key}",
+                    show_title=False,
+                    prompt_id=prompt_id,
                 )
 
             saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
@@ -4422,12 +4399,7 @@ def render_product_uploads_page():
         "Use this lightweight prompt page when you already have your Shopify upload images and HTML preview ready to drag into ChatGPT."
     )
 
-    st.info(
-        "This page does not scan local runs. Attach your own `shopify-uploads` WEBP files and HTML preview in ChatGPT, then copy one of the two product prompts below."
-    )
-
-    with st.container(border=True):
-        st.markdown("**Upload checklist**")
+    with st.expander("How to", expanded=False):
         st.markdown(
             "1. Drag every WEBP file from your `shopify-uploads` folder into ChatGPT.\n"
             "2. Drag the matching HTML preview into ChatGPT if you have it.\n"
@@ -4438,7 +4410,6 @@ def render_product_uploads_page():
         )
 
     st.divider()
-    st.write("Only two product prompts are shown here. Nothing on this page queries products, Shopify, or generated runs.")
 
     render_copyable_prompt(
         "New Shopify Product Prompt",

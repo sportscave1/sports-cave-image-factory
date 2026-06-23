@@ -6663,12 +6663,15 @@ def _prompt_edit_id(namespace, key):
     return f"{namespace}::{key}"
 
 
-def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=360):
+def render_prompt_edit_button(prompt_id, *, label="✎"):
     button_key = f"prompt-edit-button::{prompt_id}"
     panel_key = f"prompt-edit-open::{prompt_id}"
-    if st.button("Edit prompt", key=button_key, help="Developer password required."):
+    if st.button(label, key=button_key, help="Developer password required.", use_container_width=True):
         st.session_state[panel_key] = True
 
+
+def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=360):
+    panel_key = f"prompt-edit-open::{prompt_id}"
     if not st.session_state.get(panel_key):
         return prompt_text
 
@@ -6700,6 +6703,11 @@ def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=360):
     return prompt_text
 
 
+def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=360, label="✎"):
+    render_prompt_edit_button(prompt_id, label=label)
+    return render_prompt_edit_panel(title, prompt_id, prompt_text, height=height)
+
+
 def render_prompt_block(title, prompt, key, when_to_use=None, height=220):
     prompt_id = _prompt_edit_id("marketing", key)
     prompt_text = prompt_store.get_prompt(prompt_id, prompt).strip()
@@ -6714,11 +6722,12 @@ def render_prompt_block(title, prompt, key, when_to_use=None, height=220):
             key=f"prompt-text-{key}",
             label_visibility="collapsed",
         )
-        action_cols = st.columns([1, 1, 4])
+        action_cols = st.columns([1.2, 0.35, 4.45])
         with action_cols[0]:
             render_copy_text_button(prompt_text, f"marketing-{key}", "Copy Prompt")
         with action_cols[1]:
-            render_prompt_edit_controls(title, prompt_id, prompt_text)
+            render_prompt_edit_button(prompt_id)
+        render_prompt_edit_panel(title, prompt_id, prompt_text)
 
 
 def render_marketing_card(title, body, *, key=None, copy_label=None):

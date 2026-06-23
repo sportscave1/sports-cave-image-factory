@@ -126,6 +126,8 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("Image Alt Text Prompt", product_uploads)
         self.assertNotIn("Meta Title / Description Prompt", product_uploads)
         self.assertNotIn("Final QA Checklist Prompt", product_uploads)
+        self.assertNotIn("Only two product prompts are shown here. Nothing on this page queries products, Shopify, or generated runs.", product_uploads)
+        self.assertIn('st.expander("How to", expanded=False)', product_uploads)
         self.assertIn("image alt text, SEO meta tags, and final QA checklist instructions are already embedded", product_uploads)
         self.assertIn("def build_product_upload_prompt", source)
         self.assertIn("PRODUCT_UPLOAD_ALT_TEXT_PROMPT.strip()", source)
