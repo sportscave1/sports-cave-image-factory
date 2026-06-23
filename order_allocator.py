@@ -816,6 +816,57 @@ def _fetch_product_state(product_id, product_state_cache, config=None, request_p
     return product_state_cache[product_id]
 
 
+def _fetch_limited_edition_product_by_handle(handle, config=None, request_post=None):
+    handle = str(handle or "").strip()
+    if not handle:
+        return None
+    page = shopify_sync.fetch_limited_edition_products_page(
+        search=f"handle:{handle}",
+        page_size=10,
+        config=config,
+        request_post=request_post,
+    )
+    for product in page.get("products") or []:
+        if str(product.get("handle") or "").strip().casefold() == handle.casefold():
+            return product
+    return None
+
+
+def _fetch_product_state_for_line(line_item, product_state_cache, config=None, request_post=None):
+    product_id = _line_product_gid(line_item)
+    handle = _line_product_handle(line_item)
+    if product_id:
+        try:
+            return _fetch_product_state(
+                product_id,
+                product_state_cache,
+                config=config,
+                request_post=request_post,
+            )
+        except shopify_sync.ShopifyAPIError:
+            if not handle:
+                raise
+
+    if not handle:
+        return None
+
+    cache_key = f"handle:{handle.casefold()}"
+    if cache_key not in product_state_cache:
+        product = _fetch_limited_edition_product_by_handle(
+            handle,
+            config=config,
+            request_post=request_post,
+        )
+        if not product or not product.get("shopify_product_id"):
+            product_state_cache[cache_key] = None
+        else:
+            state = _product_state_from_metafields(product["shopify_product_id"], product.get("metafields") or [])
+            state["product_status"] = product.get("status") or ""
+            product_state_cache[cache_key] = state
+            product_state_cache[state["product_id"]] = state
+    return product_state_cache.get(cache_key)
+
+
 def _sorted_line_items(order_payload):
     return [
         line_item
@@ -845,8 +896,8 @@ def _plan_order_allocations(order_payload, existing_payload, product_state_cache
         line_status = ""
 
         product_id = _line_product_gid(line_item)
-        if not product_id:
-            issues.append({"line_item_id": line_id, "status": "Product Not Found"})
+        if not product_id and not _line_product_handle(line_item):
+            issues.append({"line_item_id": line_id, "status": "Missing Shopify ID"})
             continue
 
         product_state = None
@@ -855,16 +906,25 @@ def _plan_order_allocations(order_payload, existing_payload, product_state_cache
                 skipped_existing += 1
                 continue
             if product_state is None:
-                product_state = _fetch_product_state(
-                    product_id,
+                product_state = _fetch_product_state_for_line(
+                    line_item,
                     product_state_cache,
                     config=config,
                     request_post=request_post,
                 )
+                if not product_state:
+                    issues.append({"line_item_id": line_id, "status": "Product not matched"})
+                    line_status = line_status or "Product not matched"
+                    continue
                 _ensure_product_baseline(cutover_state, product_state, line_item)
+                product_id = product_state.get("product_id") or product_id
+            if str(product_state.get("product_status") or "").strip().upper() not in {"", "ACTIVE"}:
+                issues.append({"line_item_id": line_id, "product_id": product_id, "status": "Product inactive"})
+                line_status = line_status or "Product inactive"
+                continue
             if not product_state.get("edition_enabled"):
                 issues.append({"line_item_id": line_id, "product_id": product_id, "status": "Edition Disabled"})
-                line_status = line_status or "Needs allocation"
+                line_status = line_status or "Edition disabled"
                 continue
             if _product_is_sold_out(product_state):
                 issues.append({"line_item_id": line_id, "product_id": product_id, "status": "Needs Review - Sold Out"})
@@ -1085,6 +1145,15 @@ def process_shopify_orders_for_editions(
         "errors": errors,
         "results": results,
     }
+
+
+def process_recent_paid_orders_for_editions(orders, config=None, request_post=None):
+    return process_shopify_orders_for_editions(
+        orders,
+        config=config,
+        request_post=request_post,
+        require_cutover=True,
+    )
 
 
 def _row_unit_index(row):

@@ -503,6 +503,76 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(unit["product_gid"], "gid://shopify/Product/777")
         self.assertEqual(unit["edition_number"], 91)
 
+    def test_paid_order_allocator_falls_back_to_handle_when_product_id_lookup_fails(self):
+        order_payload = {
+            "id": 1234,
+            "name": "#SC9999",
+            "financial_status": "paid",
+            "line_items": [
+                {
+                    "id": 555,
+                    "product_id": 999,
+                    "product_handle": "goat-debate-wall-art",
+                    "title": "GOAT Debate Wall Art",
+                    "variant_title": "Black / XL",
+                    "quantity": 1,
+                }
+            ],
+        }
+        product_fetches = []
+
+        def fake_fetch_metafields(owner_id, namespace="sports_cave", config=None, request_post=None):
+            if owner_id == "gid://shopify/Order/1234":
+                return {"metafields": [], "api_version": "2026-04"}
+            product_fetches.append(owner_id)
+            raise shopify_sync.ShopifyAPIError("Product ID lookup failed")
+
+        def fake_fetch_products_by_handle(after=None, search="", page_size=25, config=None, request_post=None):
+            self.assertEqual(search, "handle:goat-debate-wall-art")
+            return {
+                "products": [
+                    {
+                        "shopify_product_id": "gid://shopify/Product/777",
+                        "handle": "goat-debate-wall-art",
+                        "title": "GOAT Debate Wall Art",
+                        "status": "ACTIVE",
+                        "metafields": [
+                            {"namespace": "sports_cave", "key": "edition_enabled", "type": "boolean", "value": "true"},
+                            {"namespace": "sports_cave", "key": "edition_total", "type": "number_integer", "value": "100"},
+                            {"namespace": "sports_cave", "key": "edition_next_number", "type": "number_integer", "value": "35"},
+                            {"namespace": "sports_cave", "key": "edition_sold_count", "type": "number_integer", "value": "34"},
+                            {"namespace": "sports_cave", "key": "edition_remaining", "type": "number_integer", "value": "66"},
+                        ],
+                    }
+                ],
+                "has_next_page": False,
+            }
+
+        order_writes = []
+        product_writes = []
+        with patch.object(shopify_sync, "fetch_metafields", side_effect=fake_fetch_metafields), patch.object(
+            shopify_sync,
+            "fetch_limited_edition_products_page",
+            side_effect=fake_fetch_products_by_handle,
+        ), patch.object(
+            shopify_sync,
+            "sync_order_allocation_metafield",
+            side_effect=lambda order_gid, allocations, compare_digest=None, config=None, request_post=None: order_writes.append(allocations),
+        ), patch.object(
+            shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+            side_effect=lambda products, config=None, request_post=None: product_writes.extend(products),
+        ):
+            result = order_allocator.process_shopify_order_for_editions(order_payload, config=self.config)
+
+        self.assertEqual(product_fetches, ["gid://shopify/Product/999"])
+        self.assertEqual(result["assignments_created"], 1)
+        allocation = order_writes[0]["line_items"]["gid://shopify/LineItem/555"]
+        self.assertEqual(allocation["edition_numbers"], [35])
+        self.assertEqual(allocation["product_id"], "gid://shopify/Product/777")
+        self.assertEqual(product_writes[0]["shopify_product_id"], "gid://shopify/Product/777")
+        self.assertEqual(product_writes[0]["edition_next_number"], 36)
+
     def test_paid_order_allocator_splits_quantity_and_updates_product_totals(self):
         order_payload = {
             "id": 1234,

@@ -322,7 +322,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC1234")
         self.assertEqual(set(fake_st.rendered_rows[0]), set(orders_page.VISIBLE_COLUMNS))
 
-    def test_refresh_orders_fetches_shopify_without_allocation_or_product_metafields(self):
+    def test_refresh_orders_allocates_missing_paid_rows_before_saving_snapshot(self):
         fake_st = SimpleNamespace(
             session_state={
                 orders_page.ROWS_KEY: [],
@@ -338,13 +338,7 @@ class EditionOpsUiTests(unittest.TestCase):
             "created_at": "2026-06-23T09:55:00Z",
             "customer_name": "Justin Collector",
             "shipping_method": "US Standard Tracked Shipping",
-            "metafields": [
-                {
-                    "namespace": "sports_cave",
-                    "key": "edition_allocations",
-                    "value": json.dumps({"line_items": {line_item_id: {"edition_numbers": [13], "edition_total": 100}}}),
-                }
-            ],
+            "metafields": [],
             "line_items": [
                 {
                     "shopify_line_item_id": line_item_id,
@@ -367,6 +361,16 @@ class EditionOpsUiTests(unittest.TestCase):
             saved_payloads.append(payload)
             return payload
 
+        allocation_payload = {
+            "line_items": {
+                line_item_id: {
+                    "edition_numbers": [14],
+                    "edition_total": 100,
+                    "status": "Allocated",
+                }
+            }
+        }
+
         with patch.object(orders_page, "st", fake_st), patch.object(
             orders_page.shopify_sync,
             "get_config",
@@ -378,22 +382,102 @@ class EditionOpsUiTests(unittest.TestCase):
         ), patch.object(
             orders_page.shopify_sync,
             "fetch_metafields",
-            side_effect=AssertionError("Refresh Orders must not fetch per-row metafields."),
+            side_effect=AssertionError("Orders page should leave product/order metafield fetches to the allocator."),
         ), patch.object(
             orders_page.order_allocator,
-            "process_shopify_orders_for_editions",
-            side_effect=AssertionError("Refresh Orders must not allocate editions."),
-        ), patch.object(
+            "process_recent_paid_orders_for_editions",
+            return_value={
+                "processed_orders": 1,
+                "assignments_created": 1,
+                "errors": [],
+                "results": [
+                    {
+                        "order_id": "gid://shopify/Order/1234",
+                        "allocation_payload": allocation_payload,
+                    }
+                ],
+            },
+        ) as process_orders, patch.object(
             orders_page.order_allocator,
             "save_orders_snapshot",
             side_effect=fake_save_snapshot,
         ):
             orders_page._refresh_orders()
 
-        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY][0]["edition"], "#013")
+        process_orders.assert_called_once()
+        _, process_kwargs = process_orders.call_args
+        self.assertEqual(process_kwargs["config"], {"configured": True})
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY][0]["edition"], "#014")
         self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY][0]["certificate"], "Generate")
         self.assertIn("Refreshed 1 artwork rows", fake_st.session_state[orders_page.NOTICE_KEY])
+        self.assertIn("Allocated 1 new edition", fake_st.session_state[orders_page.NOTICE_KEY])
         self.assertEqual(saved_payloads[0]["rows"][0]["shopify_product_id"], "gid://shopify/Product/777")
+
+    def test_refresh_orders_shows_allocation_blocker_reason(self):
+        fake_st = SimpleNamespace(
+            session_state={
+                orders_page.ROWS_KEY: [],
+                orders_page.META_KEY: {"last_refreshed": "", "saved_at": ""},
+                orders_page.NOTICE_KEY: "",
+            }
+        )
+        line_item_id = "gid://shopify/LineItem/555"
+        order_payload = {
+            "shopify_order_id": "gid://shopify/Order/1234",
+            "order_name": "#SC1234",
+            "processed_at": "2026-06-23T10:00:00Z",
+            "created_at": "2026-06-23T09:55:00Z",
+            "customer_name": "Justin Collector",
+            "shipping_method": "US Standard Tracked Shipping",
+            "metafields": [],
+            "line_items": [
+                {
+                    "shopify_line_item_id": line_item_id,
+                    "shopify_product_id": "gid://shopify/Product/777",
+                    "product_title": "Justin Gaethje Undisputed Wall Art",
+                    "variant_title": "Black / XL",
+                    "quantity": 1,
+                }
+            ],
+        }
+
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page.shopify_sync,
+            "get_config",
+            return_value={"configured": True},
+        ), patch.object(
+            orders_page.shopify_sync,
+            "iter_order_pages",
+            return_value=[{"orders": [order_payload]}],
+        ), patch.object(
+            orders_page.order_allocator,
+            "process_recent_paid_orders_for_editions",
+            return_value={
+                "processed_orders": 1,
+                "assignments_created": 0,
+                "errors": [],
+                "results": [
+                    {
+                        "order_id": "gid://shopify/Order/1234",
+                        "issues": [{"line_item_id": line_item_id, "status": "Edition Disabled"}],
+                        "allocation_payload": {},
+                    }
+                ],
+            },
+        ), patch.object(
+            orders_page.order_allocator,
+            "save_orders_snapshot",
+            side_effect=lambda rows, meta=None: {
+                "rows": rows,
+                "last_refreshed": (meta or {}).get("last_refreshed") or "",
+                "saved_at": "2026-06-23T10:00:01Z",
+            },
+        ):
+            orders_page._refresh_orders()
+
+        row = fake_st.session_state[orders_page.ROWS_KEY][0]
+        self.assertEqual(row["edition"], "Edition disabled")
+        self.assertEqual(row["certificate"], "Edition disabled")
 
     def test_orders_page_formats_single_edition_numbers(self):
         self.assertEqual(orders_page._format_edition("50"), "#050")

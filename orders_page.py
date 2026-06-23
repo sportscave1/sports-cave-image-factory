@@ -19,6 +19,16 @@ SNAPSHOT_LOADED_KEY = "orders_allocation_snapshot_loaded"
 NOTICE_KEY = "orders_allocation_notice"
 SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
 GRID_KEY = "orders-fulfilment-grid"
+ALLOCATION_BLOCKER_STATUSES = {
+    "Needs allocation",
+    "Needs Review - Sold Out",
+    "Missing Shopify ID",
+    "Product not matched",
+    "Edition disabled",
+    "Product inactive",
+    "Historical backfill required",
+    "Allocation error",
+}
 VISIBLE_COLUMNS = (
     "order",
     "date",
@@ -97,7 +107,7 @@ def _certificate_label(row):
     if row.get("certificate_pdf_url"):
         return "Uploaded"
     status = str(row.get("certificate_status") or "").strip()
-    if status in {"Needs allocation", "Needs Review - Sold Out"}:
+    if status in ALLOCATION_BLOCKER_STATUSES:
         return status
     if status in {"Generated", "Uploaded", "Error", "Template missing", "Upload error"}:
         return "Error" if status in {"Template missing", "Upload error"} else status
@@ -445,6 +455,90 @@ def _rows_from_orders(orders, allocation_payloads=None):
     return rows
 
 
+def _allocation_issue_status(issue, default_status="Needs allocation"):
+    status = str((issue or {}).get("status") or default_status or "").strip()
+    lowered = status.casefold()
+    if "sold out" in lowered:
+        return "Needs Review - Sold Out"
+    if "missing shopify id" in lowered or "missing product" in lowered:
+        return "Missing Shopify ID"
+    if "product not matched" in lowered or "product not found" in lowered:
+        return "Product not matched"
+    if "edition disabled" in lowered:
+        return "Edition disabled"
+    if "product inactive" in lowered:
+        return "Product inactive"
+    if "historical" in lowered:
+        return "Historical backfill required"
+    if "error" in lowered:
+        return "Allocation error"
+    return status or default_status or "Needs allocation"
+
+
+def _status_payload_for_order(order, result):
+    payload = order_allocator.allocation_payload_from_metafields(order.get("metafields") or [])
+    payload.update(
+        {
+            "version": order_allocator.SNAPSHOT_VERSION,
+            "source": "sports_cave_os_refresh_status",
+            "order_id": _order_identity(order),
+            "order_name": order.get("order_name") or order.get("name") or payload.get("order_name") or "",
+            "updated_at": _now_iso(),
+        }
+    )
+    line_items = dict(payload.get("line_items") or {})
+    issue_statuses = {}
+    for issue in result.get("issues") or []:
+        line_id = order_allocator.line_item_gid(issue.get("line_item_id") or issue.get("line_item_gid"))
+        if line_id:
+            issue_statuses[line_id] = _allocation_issue_status(issue)
+    default_status = "Allocation error" if result.get("error") else ""
+    for line_item in order.get("line_items") or []:
+        line_id = order_allocator.line_item_gid(line_item.get("shopify_line_item_id") or line_item.get("id"))
+        if not line_id:
+            continue
+        status = issue_statuses.get(line_id) or default_status
+        if not status:
+            continue
+        existing = dict(line_items.get(line_id) or {})
+        if _positive_numbers(existing.get("edition_numbers")):
+            continue
+        quantity = max(int(line_item.get("quantity") or existing.get("quantity") or 1), 1)
+        existing.update(
+            {
+                "line_item_id": line_id,
+                "product_id": order_allocator.product_gid(line_item.get("shopify_product_id") or line_item.get("product_id")),
+                "variant_id": line_item.get("variant_id") or line_item.get("shopify_variant_id") or "",
+                "handle": line_item.get("product_handle") or line_item.get("handle") or existing.get("handle") or "",
+                "product_title": line_item.get("product_title") or line_item.get("title") or existing.get("product_title") or "",
+                "variant_title": line_item.get("variant_title") or existing.get("variant_title") or "",
+                "quantity": quantity,
+                "edition_numbers": existing.get("edition_numbers") or [None] * quantity,
+                "status": status,
+            }
+        )
+        line_items[line_id] = existing
+    payload["line_items"] = line_items
+    return payload
+
+
+def _allocation_payloads_from_refresh(orders, allocation_result):
+    by_order = {_order_identity(order): order for order in orders or []}
+    payloads = {}
+    for result in (allocation_result or {}).get("results") or []:
+        order_id = order_allocator.order_gid(result.get("order_id"))
+        if not order_id:
+            continue
+        if result.get("allocation_payload"):
+            payloads[order_id] = result["allocation_payload"]
+            continue
+        if result.get("issues") or result.get("error"):
+            order = by_order.get(order_id)
+            if order:
+                payloads[order_id] = _status_payload_for_order(order, result)
+    return payloads
+
+
 def _save_refreshed_rows(rows, existing_rows, refreshed_at=None):
     refreshed_at = refreshed_at or _now_iso()
     sorted_rows = _sort_rows(_merge_local_certificate_fields(rows, existing_rows))
@@ -460,9 +554,43 @@ def _refresh_orders():
         return
     existing_rows = st.session_state.get(ROWS_KEY, [])
     orders = _fetch_recent_paid_orders(config)
-    rows = _rows_from_orders(orders)
+    allocation_start = time.perf_counter()
+    try:
+        allocation_result = order_allocator.process_recent_paid_orders_for_editions(
+            orders,
+            config=config,
+        )
+    except Exception as error:
+        print(f"Orders allocation refresh failed: {error}", flush=True)
+        allocation_result = {
+            "processed_orders": 0,
+            "assignments_created": 0,
+            "errors": [{"error": str(error)}],
+            "results": [
+                {
+                    "order_id": _order_identity(order),
+                    "error": str(error),
+                    "issues": [],
+                }
+                for order in orders
+            ],
+        }
+    _perf_log(
+        "allocate missing paid orders",
+        allocation_start,
+        orders=allocation_result.get("processed_orders", 0),
+        assignments=allocation_result.get("assignments_created", 0),
+        errors=len(allocation_result.get("errors") or []),
+    )
+    allocation_payloads = _allocation_payloads_from_refresh(orders, allocation_result)
+    rows = _rows_from_orders(orders, allocation_payloads=allocation_payloads)
     sorted_rows = _save_refreshed_rows(rows, existing_rows)
-    st.session_state[NOTICE_KEY] = f"Refreshed {len(sorted_rows)} artwork rows from Shopify."
+    assignments = int(allocation_result.get("assignments_created") or 0)
+    errors = allocation_result.get("errors") or []
+    suffix = f" Allocated {assignments} new edition(s)." if assignments else ""
+    if errors:
+        suffix += f" {len(errors)} allocation issue(s) need review."
+    st.session_state[NOTICE_KEY] = f"Refreshed {len(sorted_rows)} artwork rows from Shopify.{suffix}"
 
 
 def _display_rows(rows):
