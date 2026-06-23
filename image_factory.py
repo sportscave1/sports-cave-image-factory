@@ -8,6 +8,8 @@ import shutil
 from datetime import datetime
 from textwrap import dedent
 
+import prompt_store
+
 try:
     import psutil
 except ImportError:
@@ -1544,6 +1546,7 @@ def generate_lifestyle_prompt_pack(product_name, sport_category, product_slug, r
 
     for filename, _, prompt_body in LIFESTYLE_PROMPT_SPECS:
         prompt_path = prompt_dir / filename
+        prompt_body = prompt_store.get_prompt(f"lifestyle::{filename}", prompt_body)
         prompt_text = dedent(
             f"""
             Product name: {product_name}

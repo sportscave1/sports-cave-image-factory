@@ -101,6 +101,37 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("process_shopify_order_for_editions", source)
         self.assertIn("require_cutover=True", source)
 
+    def test_prompt_editing_is_password_gated_and_backend_persisted(self):
+        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+        os_pages_source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
+
+        self.assertIn("import prompt_store", app_source)
+        self.assertIn("import prompt_store", os_pages_source)
+        self.assertIn("def render_prompt_edit_controls", app_source)
+        self.assertIn("def render_prompt_edit_controls", os_pages_source)
+        self.assertIn("Developer password", app_source)
+        self.assertIn("DEVELOPER_PAGE_PASSWORD", app_source)
+        self.assertIn("prompt_store.save_prompt", app_source)
+        self.assertIn("prompt_store.save_prompt", os_pages_source)
+
+    def test_product_uploads_shows_only_two_embedded_product_prompts(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        product_uploads = source[
+            source.index("def render_product_uploads_page():") : source.index("\n\ndef test_google_drive_connection")
+        ]
+
+        self.assertEqual(product_uploads.count("render_copyable_prompt("), 2)
+        self.assertIn("New Shopify Product Prompt", product_uploads)
+        self.assertIn("Update Existing Product Prompt", product_uploads)
+        self.assertNotIn("Image Alt Text Prompt", product_uploads)
+        self.assertNotIn("Meta Title / Description Prompt", product_uploads)
+        self.assertNotIn("Final QA Checklist Prompt", product_uploads)
+        self.assertIn("image alt text, SEO meta tags, and final QA checklist instructions are already embedded", product_uploads)
+        self.assertIn("def build_product_upload_prompt", source)
+        self.assertIn("PRODUCT_UPLOAD_ALT_TEXT_PROMPT.strip()", source)
+        self.assertIn("PRODUCT_UPLOAD_META_PROMPT.strip()", source)
+        self.assertIn("PRODUCT_UPLOAD_QA_CHECKLIST_PROMPT.strip()", source)
+
     def test_orders_page_is_snapshot_based_and_lightweight(self):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
 

@@ -34,6 +34,8 @@ safe_startup_print("STARTUP APP START total=0.000s stage=0.000s")
 from dotenv import load_dotenv
 import streamlit as st
 
+import prompt_store
+
 db = None
 image_factory = None
 os_pages = None
@@ -2856,7 +2858,8 @@ def load_run_metadata(run_dir):
 
 
 def get_product_upload_prompt(metadata, update_existing=False):
-    return UPDATE_EXISTING_PRODUCT_PROMPT if update_existing else NEW_SHOPIFY_PRODUCT_PROMPT
+    base_prompt = UPDATE_EXISTING_PRODUCT_PROMPT if update_existing else NEW_SHOPIFY_PRODUCT_PROMPT
+    return build_product_upload_prompt(base_prompt)
 
 
 PRODUCT_UPLOAD_ALT_TEXT_PROMPT = """Create unique commercial SEO image alt text for every Sports Cave Shopify product image supplied.
@@ -3027,6 +3030,24 @@ FINAL
 - Desktop preview is strong
 - Product remains unpublished until manually approved
 """
+
+def product_upload_embedded_sections():
+    return f"""ADDITIONAL REQUIRED SUB-PROMPTS
+Use these sections inside the product creation/update workflow. Do not run them as separate prompts unless the user explicitly asks.
+
+IMAGE ALT TEXT SUB-PROMPT
+{PRODUCT_UPLOAD_ALT_TEXT_PROMPT.strip()}
+
+SEO META TAGS SUB-PROMPT
+{PRODUCT_UPLOAD_META_PROMPT.strip()}
+
+FINAL QA CHECKLIST SUB-PROMPT
+{PRODUCT_UPLOAD_QA_CHECKLIST_PROMPT.strip()}
+""".strip()
+
+
+def build_product_upload_prompt(base_prompt):
+    return f"{str(base_prompt or '').strip()}\n\n{product_upload_embedded_sections()}".strip()
 
 
 def validate_uploaded_artwork(uploaded_file):
@@ -3215,6 +3236,50 @@ def is_product_page_prompt(prompt_path):
     return Path(prompt_path).name in PRODUCT_PAGE_PROMPT_NAMES
 
 
+def prompt_edit_id(namespace, key):
+    return f"{namespace}::{key}"
+
+
+def current_prompt_text(prompt_id, default_text):
+    return prompt_store.get_prompt(prompt_id, default_text)
+
+
+def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=420):
+    button_key = f"prompt-edit-button::{prompt_id}"
+    panel_key = f"prompt-edit-open::{prompt_id}"
+    if st.button("Edit prompt", key=button_key, help="Developer password required."):
+        st.session_state[panel_key] = True
+
+    if not st.session_state.get(panel_key):
+        return
+
+    with st.container(border=True):
+        st.caption("Developer only. Saved changes replace this prompt everywhere it is used.")
+        edited_text = st.text_area(
+            "Prompt text",
+            value=prompt_text,
+            height=height,
+            key=f"prompt-edit-text::{prompt_id}",
+        )
+        password = st.text_input(
+            "Developer password",
+            type="password",
+            key=f"prompt-edit-password::{prompt_id}",
+        )
+        cols = st.columns([1, 1, 3])
+        if cols[0].button("Save prompt", key=f"prompt-edit-save::{prompt_id}", use_container_width=True):
+            if password != DEVELOPER_PAGE_PASSWORD:
+                st.error("Developer password is incorrect.")
+            else:
+                prompt_store.save_prompt(prompt_id, title, edited_text)
+                st.session_state[panel_key] = False
+                st.success("Prompt saved to backend.")
+                st.rerun()
+        if cols[1].button("Cancel", key=f"prompt-edit-cancel::{prompt_id}", use_container_width=True):
+            st.session_state[panel_key] = False
+            st.rerun()
+
+
 def render_download_button(label, file_path, mime, key):
     if not file_path:
         return
@@ -3304,7 +3369,11 @@ def render_copy_prompt_button(
     )
 
 
-def render_copyable_prompt(title, prompt_text, key, show_title=True):
+def render_copyable_prompt(title, prompt_text, key, show_title=True, prompt_id=None):
+    prompt_id = prompt_id or prompt_edit_id("app", key)
+    prompt_text = current_prompt_text(prompt_id, prompt_text).strip()
+    render_prompt_edit_controls(title, prompt_id, prompt_text)
+
     textarea_height = min(780, max(320, (prompt_text.count("\n") + 1) * 18 + 80))
     component_height = textarea_height + (104 if show_title else 78)
     safe_title = html.escape(title)
@@ -3880,7 +3949,9 @@ def render_prompt_cards(result, prompt_paths, heading):
         with cols[index % 3]:
             st.markdown(f"**{get_prompt_label(prompt_path)}**")
             prompt_name = prompt_path.name
-            prompt_text = prompt_path.read_text(encoding="utf-8")
+            default_prompt_text = prompt_path.read_text(encoding="utf-8")
+            prompt_id = prompt_edit_id("lifestyle", prompt_name)
+            prompt_text = current_prompt_text(prompt_id, default_prompt_text)
             prompt_key = f"{result['run_dir']}::{prompt_name}"
 
             prompt_header_cols = st.columns([4, 1], gap="small")
@@ -3891,6 +3962,7 @@ def render_prompt_cards(result, prompt_paths, heading):
                         prompt_text,
                         f"prompt-box::{prompt_key}",
                         show_title=False,
+                        prompt_id=prompt_id,
                     )
             with prompt_header_cols[1]:
                 render_copy_prompt_button(
@@ -4351,7 +4423,7 @@ def render_product_uploads_page():
     )
 
     st.info(
-        "This page does not scan local runs. Attach your own `shopify-uploads` WEBP files and HTML preview in ChatGPT, then copy one of the prompts below."
+        "This page does not scan local runs. Attach your own `shopify-uploads` WEBP files and HTML preview in ChatGPT, then copy one of the two product prompts below."
     )
 
     with st.container(border=True):
@@ -4359,20 +4431,20 @@ def render_product_uploads_page():
         st.markdown(
             "1. Drag every WEBP file from your `shopify-uploads` folder into ChatGPT.\n"
             "2. Drag the matching HTML preview into ChatGPT if you have it.\n"
-            "3. Copy the product prompt you need.\n"
-            "4. Copy the alt text and meta prompts when the draft needs them.\n"
-            "5. Run the final QA checklist before publishing.\n"
+            "3. Copy either the new-product prompt or the update-existing-product prompt.\n"
+            "4. The image alt text, SEO meta tags, and final QA checklist instructions are already embedded inside both prompts.\n"
             "\n"
             "This page stays manual on purpose so it remains fast and lightweight on Render."
         )
 
     st.divider()
-    st.write("Copy only the prompt you need. Nothing on this page queries products, Shopify, or generated runs.")
+    st.write("Only two product prompts are shown here. Nothing on this page queries products, Shopify, or generated runs.")
 
     render_copyable_prompt(
         "New Shopify Product Prompt",
         get_product_upload_prompt({}, update_existing=False),
         "new-shopify-product-prompt",
+        prompt_id=prompt_edit_id("product-upload", "new-shopify-product"),
     )
 
     st.divider()
@@ -4381,27 +4453,7 @@ def render_product_uploads_page():
         "Update Existing Product Prompt",
         get_product_upload_prompt({}, update_existing=True),
         "update-existing-shopify-product-prompt",
-    )
-
-    st.divider()
-    render_copyable_prompt(
-        "Image Alt Text Prompt",
-        PRODUCT_UPLOAD_ALT_TEXT_PROMPT,
-        "shopify-image-alt-text-prompt",
-    )
-
-    st.divider()
-    render_copyable_prompt(
-        "Meta Title / Description Prompt",
-        PRODUCT_UPLOAD_META_PROMPT,
-        "shopify-meta-title-description-prompt",
-    )
-
-    st.divider()
-    render_copyable_prompt(
-        "Final QA Checklist Prompt",
-        PRODUCT_UPLOAD_QA_CHECKLIST_PROMPT,
-        "shopify-final-qa-checklist-prompt",
+        prompt_id=prompt_edit_id("product-upload", "update-existing-shopify-product"),
     )
     safe_startup_print(f"PERF Product Uploads total={(time.perf_counter() - started):.3f}s")
 

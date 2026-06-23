@@ -14,6 +14,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import db
+import prompt_store
 import shopify_sync
 import supabase_backend
 from services import r2_storage
@@ -24,6 +25,7 @@ SUPABASE_PAGE_CACHE_TTL_SECONDS = int(os.getenv("SUPABASE_PAGE_CACHE_TTL_SECONDS
 PRODUCT_CACHE_DISPLAY_LIMIT = 5000
 ORDER_SCREEN_CACHE_LIMIT = int(os.getenv("SUPABASE_ORDER_SCREEN_CACHE_LIMIT", "1500"))
 DEFAULT_PAGE_SIZE = 50
+DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
 
 QUICK_LINKS = (
     ("shopify_admin_url", "Open Shopify Admin"),
@@ -6657,19 +6659,66 @@ def render_certificates_page():
             columns[5].caption("Missing file")
 
 
+def _prompt_edit_id(namespace, key):
+    return f"{namespace}::{key}"
+
+
+def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=360):
+    button_key = f"prompt-edit-button::{prompt_id}"
+    panel_key = f"prompt-edit-open::{prompt_id}"
+    if st.button("Edit prompt", key=button_key, help="Developer password required."):
+        st.session_state[panel_key] = True
+
+    if not st.session_state.get(panel_key):
+        return prompt_text
+
+    with st.container(border=True):
+        st.caption("Developer only. Saved changes replace this prompt everywhere it is used.")
+        edited_text = st.text_area(
+            "Prompt text",
+            value=prompt_text,
+            height=height,
+            key=f"prompt-edit-text::{prompt_id}",
+        )
+        password = st.text_input(
+            "Developer password",
+            type="password",
+            key=f"prompt-edit-password::{prompt_id}",
+        )
+        cols = st.columns([1, 1, 3])
+        if cols[0].button("Save prompt", key=f"prompt-edit-save::{prompt_id}", use_container_width=True):
+            if password != DEVELOPER_PAGE_PASSWORD:
+                st.error("Developer password is incorrect.")
+            else:
+                prompt_store.save_prompt(prompt_id, title, edited_text)
+                st.session_state[panel_key] = False
+                st.success("Prompt saved to backend.")
+                st.rerun()
+        if cols[1].button("Cancel", key=f"prompt-edit-cancel::{prompt_id}", use_container_width=True):
+            st.session_state[panel_key] = False
+            st.rerun()
+    return prompt_text
+
+
 def render_prompt_block(title, prompt, key, when_to_use=None, height=220):
+    prompt_id = _prompt_edit_id("marketing", key)
+    prompt_text = prompt_store.get_prompt(prompt_id, prompt).strip()
     with st.expander(title, expanded=False):
         if when_to_use:
             st.caption(f"When to use this: {when_to_use}")
         st.caption("Copy this prompt into ChatGPT.")
         st.text_area(
             f"{title} prompt",
-            value=prompt.strip(),
+            value=prompt_text,
             height=height,
             key=f"prompt-text-{key}",
             label_visibility="collapsed",
         )
-        render_copy_text_button(prompt.strip(), f"marketing-{key}", "Copy Prompt")
+        action_cols = st.columns([1, 1, 4])
+        with action_cols[0]:
+            render_copy_text_button(prompt_text, f"marketing-{key}", "Copy Prompt")
+        with action_cols[1]:
+            render_prompt_edit_controls(title, prompt_id, prompt_text)
 
 
 def render_marketing_card(title, body, *, key=None, copy_label=None):
