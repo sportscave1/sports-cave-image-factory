@@ -1,0 +1,14 @@
+api_version = "2026-04"
+
+[[extensions]]
+name = "My Sports Cave Collection"
+handle = "customer-certificate-vault"
+uid = "ba32a77c-8dd1-4bae-dae7-fe481a4d4e7723e3ca05"
+type = "ui_extension"
+
+[[extensions.targeting]]
+target = "customer-account.page.render"
+module = "./src/MySportsCaveCollection.jsx"
+
+[extensions.capabilities]
+api_access = true

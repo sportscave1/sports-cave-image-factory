@@ -19,8 +19,10 @@ workflow, Shopify product sync, and the backend-led limited edition engine.
 - Cached Shopify variants, image links, tags, collections, and metafields
 - Existing mockup generation, previews, prompts, and ZIP downloads
 
-The sidebar still includes placeholders for Certificates, Marketing Factory, and
-VA Training. Certificates and customer vault features remain intentionally deferred.
+The sidebar still includes placeholders for Marketing Factory and VA Training.
+Customer Certificate Vault V1 is a Shopify Customer Account UI Extension in
+`shopify_customer_account/` and reads Shopify order metafield
+`sports_cave.certificates_json`.
 
 ## Database
 
