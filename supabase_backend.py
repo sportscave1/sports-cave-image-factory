@@ -433,10 +433,14 @@ def _ensure_schema_uncached():
                 """
                 CREATE TABLE IF NOT EXISTS edition_orders (
                     id BIGSERIAL PRIMARY KEY,
+                    shopify_customer_id TEXT,
                     shopify_order_id TEXT,
+                    shopify_order_name TEXT,
                     shopify_line_item_id TEXT,
                     shopify_product_id TEXT,
+                    shopify_variant_id TEXT,
                     shopify_handle TEXT,
+                    product_handle TEXT,
                     product_title TEXT,
                     variant_title TEXT,
                     sku TEXT,
@@ -444,9 +448,18 @@ def _ensure_schema_uncached():
                     customer_email TEXT,
                     edition_number INTEGER,
                     edition_total INTEGER,
+                    edition_display TEXT,
                     allocation_index INTEGER DEFAULT 1,
                     assigned_at TIMESTAMPTZ DEFAULT now(),
                     certificate_status TEXT DEFAULT 'Certificate Missing',
+                    certificate_id TEXT,
+                    shopify_file_id TEXT,
+                    shopify_file_status TEXT,
+                    certificate_file_url TEXT,
+                    purchase_date TIMESTAMPTZ,
+                    source TEXT DEFAULT 'sports_cave_os',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ DEFAULT now(),
                     UNIQUE (shopify_line_item_id, allocation_index)
                 )
                 """
@@ -457,18 +470,37 @@ def _ensure_schema_uncached():
                     id BIGSERIAL PRIMARY KEY,
                     edition_order_id TEXT UNIQUE,
                     related_edition_order_id uuid NULL,
+                    shopify_customer_id TEXT,
+                    customer_email TEXT,
+                    customer_name TEXT,
                     shopify_order_id TEXT,
+                    shopify_order_name TEXT,
+                    shopify_line_item_id TEXT,
                     shopify_handle TEXT,
+                    product_handle TEXT,
+                    shopify_product_id TEXT,
+                    shopify_variant_id TEXT,
+                    product_title TEXT,
+                    variant_title TEXT,
                     certificate_id TEXT,
                     edition_number INTEGER,
                     edition_total INTEGER,
+                    edition_display TEXT,
+                    line_item_unit_index INTEGER DEFAULT 1,
+                    pdf_filename TEXT,
                     local_file_path TEXT,
                     shopify_file_id TEXT,
+                    shopify_file_status TEXT,
                     shopify_file_url TEXT,
                     certificate_file_url TEXT,
                     certificate_shopify_file_id TEXT,
+                    certificate_status TEXT DEFAULT 'Processing',
+                    purchase_date TIMESTAMPTZ,
+                    source TEXT DEFAULT 'sports_cave_os',
                     generated_at TIMESTAMPTZ DEFAULT now(),
-                    status TEXT DEFAULT 'Local PDF'
+                    status TEXT DEFAULT 'Local PDF',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ DEFAULT now()
                 )
                 """
             )
@@ -724,12 +756,14 @@ def _ensure_schema_uncached():
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
                 "edition_orders": (
+                    ("shopify_customer_id", "TEXT"),
                     ("shopify_order_id", "TEXT"),
                     ("shopify_order_name", "TEXT"),
                     ("shopify_line_item_id", "TEXT"),
                     ("shopify_product_id", "TEXT"),
                     ("shopify_variant_id", "TEXT"),
                     ("shopify_handle", "TEXT"),
+                    ("product_handle", "TEXT"),
                     ("product_title", "TEXT"),
                     ("variant_title", "TEXT"),
                     ("sku", "TEXT"),
@@ -739,11 +773,19 @@ def _ensure_schema_uncached():
                     ("shopify_customer_email", "TEXT"),
                     ("edition_number", "INTEGER"),
                     ("edition_total", "INTEGER"),
+                    ("edition_display", "TEXT"),
                     ("allocation_index", "INTEGER DEFAULT 1"),
                     ("quantity", "INTEGER DEFAULT 1"),
                     ("status", "TEXT DEFAULT 'assigned'"),
                     ("assigned_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("certificate_status", "TEXT DEFAULT 'Certificate Missing'"),
+                    ("certificate_id", "TEXT"),
+                    ("shopify_file_id", "TEXT"),
+                    ("shopify_file_status", "TEXT"),
+                    ("certificate_file_url", "TEXT"),
+                    ("purchase_date", "TIMESTAMPTZ"),
+                    ("source", "TEXT DEFAULT 'sports_cave_os'"),
+                    ("created_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("edition_run_id", "UUID"),
                     ("edition_name", "TEXT"),
                     ("certificate_r2_bucket", "TEXT"),
@@ -755,16 +797,34 @@ def _ensure_schema_uncached():
                 "certificates": (
                     ("edition_order_id", "TEXT"),
                     ("related_edition_order_id", "uuid NULL"),
+                    ("shopify_customer_id", "TEXT"),
+                    ("customer_email", "TEXT"),
+                    ("customer_name", "TEXT"),
                     ("shopify_order_id", "TEXT"),
+                    ("shopify_order_name", "TEXT"),
+                    ("shopify_line_item_id", "TEXT"),
                     ("shopify_handle", "TEXT"),
+                    ("product_handle", "TEXT"),
+                    ("shopify_product_id", "TEXT"),
+                    ("shopify_variant_id", "TEXT"),
+                    ("product_title", "TEXT"),
+                    ("variant_title", "TEXT"),
                     ("certificate_id", "TEXT"),
                     ("edition_number", "INTEGER"),
                     ("edition_total", "INTEGER"),
+                    ("edition_display", "TEXT"),
+                    ("line_item_unit_index", "INTEGER DEFAULT 1"),
                     ("local_file_path", "TEXT"),
                     ("shopify_file_id", "TEXT"),
+                    ("shopify_file_status", "TEXT"),
                     ("shopify_file_url", "TEXT"),
                     ("certificate_file_url", "TEXT"),
                     ("certificate_shopify_file_id", "TEXT"),
+                    ("certificate_status", "TEXT DEFAULT 'Processing'"),
+                    ("purchase_date", "TIMESTAMPTZ"),
+                    ("source", "TEXT DEFAULT 'sports_cave_os'"),
+                    ("created_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("generated_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("status", "TEXT DEFAULT 'Local PDF'"),
                 ),
@@ -783,20 +843,38 @@ def _ensure_schema_uncached():
                 "certificates": (
                     ("edition_order_id", "TEXT"),
                     ("related_edition_order_id", "uuid NULL"),
+                    ("shopify_customer_id", "TEXT"),
+                    ("customer_email", "TEXT"),
+                    ("customer_name", "TEXT"),
                     ("shopify_order_id", "TEXT"),
+                    ("shopify_order_name", "TEXT"),
+                    ("shopify_line_item_id", "TEXT"),
                     ("shopify_handle", "TEXT"),
+                    ("product_handle", "TEXT"),
+                    ("shopify_product_id", "TEXT"),
+                    ("shopify_variant_id", "TEXT"),
+                    ("product_title", "TEXT"),
+                    ("variant_title", "TEXT"),
                     ("certificate_id", "TEXT"),
                     ("edition_number", "INTEGER"),
                     ("edition_total", "INTEGER"),
+                    ("edition_display", "TEXT"),
+                    ("line_item_unit_index", "INTEGER DEFAULT 1"),
                     ("pdf_filename", "TEXT"),
                     ("local_file_path", "TEXT"),
                     ("shopify_file_id", "TEXT"),
+                    ("shopify_file_status", "TEXT"),
                     ("shopify_file_url", "TEXT"),
                     ("certificate_file_url", "TEXT"),
                     ("certificate_shopify_file_id", "TEXT"),
+                    ("certificate_status", "TEXT DEFAULT 'Processing'"),
                     ("order_metafields_synced_at", "TIMESTAMPTZ"),
                     ("order_metafields_sync_status", "TEXT DEFAULT 'Never Synced'"),
                     ("order_metafields_error", "TEXT"),
+                    ("purchase_date", "TIMESTAMPTZ"),
+                    ("source", "TEXT DEFAULT 'sports_cave_os'"),
+                    ("created_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("certificate_r2_bucket", "TEXT"),
                     ("certificate_r2_key", "TEXT"),
                     ("certificate_preview_r2_bucket", "TEXT"),
@@ -1036,6 +1114,9 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_adjustments_run ON edition_adjustments(edition_run_id, created_at DESC)")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_certificates_edition_order_unique ON certificates(edition_order_id)", "idx_certificates_edition_order_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_certificates_related_edition_order ON certificates(related_edition_order_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_certificates_certificate_id ON certificates(certificate_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_certificates_shopify_order_id ON certificates(shopify_order_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_certificates_line_unit ON certificates(shopify_line_item_id, line_item_unit_index)")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_unique ON product_assets(shopify_handle, asset_type)", "idx_product_assets_handle_type_unique")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_name_unique ON product_assets(shopify_handle, asset_type, asset_name)", "idx_product_assets_handle_type_name_unique")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_file_assets_bucket_key_unique ON file_assets(bucket, object_key)", "idx_file_assets_bucket_key_unique")
@@ -1203,10 +1284,14 @@ def ensure_order_read_schema():
                     """
                     CREATE TABLE IF NOT EXISTS edition_orders (
                         id BIGSERIAL PRIMARY KEY,
+                        shopify_customer_id TEXT,
                         shopify_order_id TEXT,
+                        shopify_order_name TEXT,
                         shopify_line_item_id TEXT,
                         shopify_product_id TEXT,
+                        shopify_variant_id TEXT,
                         shopify_handle TEXT,
+                        product_handle TEXT,
                         product_title TEXT,
                         variant_title TEXT,
                         sku TEXT,
@@ -1214,9 +1299,18 @@ def ensure_order_read_schema():
                         customer_email TEXT,
                         edition_number INTEGER,
                         edition_total INTEGER,
+                        edition_display TEXT,
                         allocation_index INTEGER DEFAULT 1,
                         assigned_at TIMESTAMPTZ DEFAULT now(),
-                        certificate_status TEXT DEFAULT 'Certificate Missing'
+                        certificate_status TEXT DEFAULT 'Certificate Missing',
+                        certificate_id TEXT,
+                        shopify_file_id TEXT,
+                        shopify_file_status TEXT,
+                        certificate_file_url TEXT,
+                        purchase_date TIMESTAMPTZ,
+                        source TEXT DEFAULT 'sports_cave_os',
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        updated_at TIMESTAMPTZ DEFAULT now()
                     )
                     """
                 )
@@ -1226,16 +1320,37 @@ def ensure_order_read_schema():
                         id BIGSERIAL PRIMARY KEY,
                         edition_order_id TEXT UNIQUE,
                         related_edition_order_id uuid NULL,
+                        shopify_customer_id TEXT,
+                        customer_email TEXT,
+                        customer_name TEXT,
                         shopify_order_id TEXT,
+                        shopify_order_name TEXT,
+                        shopify_line_item_id TEXT,
                         shopify_handle TEXT,
+                        product_handle TEXT,
+                        shopify_product_id TEXT,
+                        shopify_variant_id TEXT,
+                        product_title TEXT,
+                        variant_title TEXT,
                         certificate_id TEXT,
                         edition_number INTEGER,
                         edition_total INTEGER,
+                        edition_display TEXT,
+                        line_item_unit_index INTEGER DEFAULT 1,
+                        pdf_filename TEXT,
                         local_file_path TEXT,
+                        shopify_file_id TEXT,
+                        shopify_file_status TEXT,
                         shopify_file_url TEXT,
                         certificate_file_url TEXT,
+                        certificate_shopify_file_id TEXT,
+                        certificate_status TEXT DEFAULT 'Processing',
+                        purchase_date TIMESTAMPTZ,
+                        source TEXT DEFAULT 'sports_cave_os',
                         generated_at TIMESTAMPTZ DEFAULT now(),
-                        status TEXT DEFAULT 'Local PDF'
+                        status TEXT DEFAULT 'Local PDF',
+                        created_at TIMESTAMPTZ DEFAULT now(),
+                        updated_at TIMESTAMPTZ DEFAULT now()
                     )
                     """
                 )
@@ -1307,10 +1422,14 @@ def ensure_order_read_schema():
                         ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                     ),
                     "edition_orders": (
+                        ("shopify_customer_id", "TEXT"),
                         ("shopify_order_id", "TEXT"),
+                        ("shopify_order_name", "TEXT"),
                         ("shopify_line_item_id", "TEXT"),
                         ("shopify_product_id", "TEXT"),
+                        ("shopify_variant_id", "TEXT"),
                         ("shopify_handle", "TEXT"),
+                        ("product_handle", "TEXT"),
                         ("product_title", "TEXT"),
                         ("variant_title", "TEXT"),
                         ("sku", "TEXT"),
@@ -1318,19 +1437,54 @@ def ensure_order_read_schema():
                         ("customer_email", "TEXT"),
                         ("edition_number", "INTEGER"),
                         ("edition_total", "INTEGER"),
+                        ("edition_display", "TEXT"),
                         ("allocation_index", "INTEGER DEFAULT 1"),
                         ("assigned_at", "TIMESTAMPTZ DEFAULT now()"),
                         ("certificate_status", "TEXT DEFAULT 'Certificate Missing'"),
+                        ("certificate_id", "TEXT"),
+                        ("shopify_file_id", "TEXT"),
+                        ("shopify_file_status", "TEXT"),
+                        ("certificate_file_url", "TEXT"),
+                        ("purchase_date", "TIMESTAMPTZ"),
+                        ("source", "TEXT DEFAULT 'sports_cave_os'"),
+                        ("created_at", "TIMESTAMPTZ DEFAULT now()"),
+                        ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                         ("status", "TEXT DEFAULT 'assigned'"),
                     ),
                     "certificates": (
                         ("edition_order_id", "TEXT"),
                         ("related_edition_order_id", "uuid NULL"),
+                        ("shopify_customer_id", "TEXT"),
+                        ("customer_email", "TEXT"),
+                        ("customer_name", "TEXT"),
+                        ("shopify_order_id", "TEXT"),
+                        ("shopify_order_name", "TEXT"),
+                        ("shopify_line_item_id", "TEXT"),
+                        ("shopify_handle", "TEXT"),
+                        ("product_handle", "TEXT"),
+                        ("shopify_product_id", "TEXT"),
+                        ("shopify_variant_id", "TEXT"),
+                        ("product_title", "TEXT"),
+                        ("variant_title", "TEXT"),
                         ("certificate_id", "TEXT"),
+                        ("edition_number", "INTEGER"),
+                        ("edition_total", "INTEGER"),
+                        ("edition_display", "TEXT"),
+                        ("line_item_unit_index", "INTEGER DEFAULT 1"),
+                        ("pdf_filename", "TEXT"),
                         ("local_file_path", "TEXT"),
+                        ("shopify_file_id", "TEXT"),
+                        ("shopify_file_status", "TEXT"),
                         ("shopify_file_url", "TEXT"),
                         ("certificate_file_url", "TEXT"),
+                        ("certificate_shopify_file_id", "TEXT"),
+                        ("certificate_status", "TEXT DEFAULT 'Processing'"),
+                        ("purchase_date", "TIMESTAMPTZ"),
+                        ("source", "TEXT DEFAULT 'sports_cave_os'"),
+                        ("status", "TEXT DEFAULT 'Local PDF'"),
                         ("generated_at", "TIMESTAMPTZ DEFAULT now()"),
+                        ("created_at", "TIMESTAMPTZ DEFAULT now()"),
+                        ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                         ("certificate_r2_bucket", "TEXT"),
                         ("certificate_r2_key", "TEXT"),
                         ("certificate_preview_r2_bucket", "TEXT"),
@@ -2698,9 +2852,16 @@ def _certificate_rows_for_order(shopify_order_id):
                 SELECT c.id AS certificate_row_id, c.certificate_id, c.edition_number,
                        c.edition_total,
                        COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
-                       c.generated_at,
-                       eo.product_title, eo.shopify_handle, o.shopify_order_id,
-                       o.order_name
+                       c.shopify_file_id, c.shopify_file_status, c.certificate_status,
+                       c.shopify_customer_id, c.customer_email, c.customer_name,
+                       c.shopify_order_name, c.shopify_line_item_id, c.shopify_product_id,
+                       c.shopify_variant_id, c.product_title AS certificate_product_title,
+                       c.product_handle, c.variant_title AS certificate_variant_title,
+                       c.line_item_unit_index, c.purchase_date, c.created_at, c.generated_at,
+                       eo.product_title, eo.shopify_handle, eo.variant_title,
+                       eo.customer_name AS edition_customer_name,
+                       eo.customer_email AS edition_customer_email,
+                       o.shopify_order_id, o.customer_id, o.order_name
                 FROM certificates c
                 LEFT JOIN edition_orders eo ON eo.id::text=COALESCE(c.related_edition_order_id::text, c.edition_order_id::text)
                 LEFT JOIN shopify_orders o ON o.shopify_order_id=c.shopify_order_id
@@ -2723,8 +2884,18 @@ def sync_order_certificate_metafields(shopify_order_id, config=None, request_pos
     for row in rows:
         certificates.append(
             {
-                "product_title": row.get("product_title") or "",
-                "shopify_handle": row.get("shopify_handle") or "",
+                "shopify_customer_id": row.get("shopify_customer_id") or row.get("customer_id") or "",
+                "customer_email": row.get("customer_email") or row.get("edition_customer_email") or "",
+                "customer_name": row.get("customer_name") or row.get("edition_customer_name") or "",
+                "shopify_order_id": row.get("shopify_order_id") or order_id,
+                "shopify_order_name": row.get("shopify_order_name") or row.get("order_name") or "",
+                "shopify_line_item_id": row.get("shopify_line_item_id") or "",
+                "shopify_product_id": row.get("shopify_product_id") or "",
+                "shopify_variant_id": row.get("shopify_variant_id") or "",
+                "product_title": row.get("certificate_product_title") or row.get("product_title") or "",
+                "shopify_handle": row.get("product_handle") or row.get("shopify_handle") or "",
+                "product_handle": row.get("product_handle") or row.get("shopify_handle") or "",
+                "variant_title": row.get("certificate_variant_title") or row.get("variant_title") or "",
                 "edition_number": row.get("edition_number") or 0,
                 "edition_total": row.get("edition_total") or 100,
                 "edition_display": format_edition_display_number(
@@ -2732,7 +2903,15 @@ def sync_order_certificate_metafields(shopify_order_id, config=None, request_pos
                     row.get("edition_total") or 100,
                 ),
                 "certificate_id": row.get("certificate_id") or "",
+                "shopify_file_id": row.get("shopify_file_id") or "",
+                "pdf_shopify_file_id": row.get("shopify_file_id") or "",
+                "shopify_file_status": row.get("shopify_file_status") or "",
                 "certificate_url": row.get("shopify_file_url") or "",
+                "certificate_file_url": row.get("shopify_file_url") or "",
+                "line_item_unit_index": row.get("line_item_unit_index") or 1,
+                "certificate_status": row.get("certificate_status") or "",
+                "purchase_date": str(row.get("purchase_date") or ""),
+                "created_at": str(row.get("created_at") or row.get("generated_at") or ""),
                 "generated_at": str(row.get("generated_at") or ""),
             }
         )
@@ -2775,7 +2954,52 @@ def sync_order_certificate_metafields(shopify_order_id, config=None, request_pos
             str(error),
             {"shopify_order_id": order_id},
         )
-        raise
+        return {
+            "count": 0,
+            "failed": True,
+            "error": str(error),
+            "certificates": certificates,
+        }
+
+
+def backfill_ready_certificate_order_metafields(config=None, request_post=None, limit=100):
+    if not is_configured():
+        return {"attempted": 0, "synced": 0, "failed": 0, "skipped": True, "reason": "Supabase is not configured."}
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT shopify_order_id
+                FROM certificates
+                WHERE shopify_order_id IS NOT NULL
+                  AND shopify_order_id <> ''
+                  AND COALESCE(NULLIF(shopify_file_url, ''), NULLIF(certificate_file_url, '')) IS NOT NULL
+                  AND COALESCE(NULLIF(shopify_file_url, ''), NULLIF(certificate_file_url, '')) <> ''
+                ORDER BY shopify_order_id
+                LIMIT %s
+                """,
+                (max(int(limit or 100), 1),),
+            )
+            order_ids = [row.get("shopify_order_id") for row in cur.fetchall() if row.get("shopify_order_id")]
+    attempted = 0
+    synced = 0
+    failed = 0
+    errors = []
+    for order_id in order_ids:
+        attempted += 1
+        result = sync_order_certificate_metafields(order_id, config=config, request_post=request_post)
+        if result.get("failed"):
+            failed += 1
+            errors.append(result.get("error") or f"Failed for {order_id}")
+        else:
+            synced += 1
+    return {
+        "attempted": attempted,
+        "synced": synced,
+        "failed": failed,
+        "errors": errors[:10],
+    }
 
 
 def persistence_counts():
@@ -4346,6 +4570,150 @@ def _coerce_uuid_or_none(value):
     return cleaned if UUID_RE.match(cleaned) else None
 
 
+def _none_if_blank(value):
+    cleaned = str(value or "").strip()
+    return cleaned or None
+
+
+def _int_or_none(value):
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def upsert_certificate_metadata(metadata):
+    if not is_configured():
+        return {"ok": False, "skipped": True, "reason": "Supabase DATABASE_URL is not configured."}
+    metadata = dict(metadata or {})
+    account_record = shopify_sync.order_certificate_account_record(metadata)
+    now_value = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    certificate_url = account_record.get("certificate_file_url") or ""
+    line_item_unit_index = _int_or_none(
+        metadata.get("line_item_unit_index") or metadata.get("allocation_index")
+    ) or 1
+    row = {
+        "edition_order_id": _none_if_blank(metadata.get("edition_order_id")),
+        "related_edition_order_id": _coerce_uuid_or_none(metadata.get("related_edition_order_id") or metadata.get("edition_order_id")),
+        "shopify_customer_id": _none_if_blank(account_record.get("shopify_customer_id")),
+        "customer_email": _none_if_blank(account_record.get("customer_email")),
+        "customer_name": _none_if_blank(account_record.get("customer_name")),
+        "shopify_order_id": _none_if_blank(account_record.get("shopify_order_id")),
+        "shopify_order_name": _none_if_blank(account_record.get("shopify_order_name")),
+        "shopify_line_item_id": _none_if_blank(account_record.get("shopify_line_item_id")),
+        "shopify_handle": _none_if_blank(account_record.get("product_handle")),
+        "product_handle": _none_if_blank(account_record.get("product_handle")),
+        "shopify_product_id": _none_if_blank(account_record.get("shopify_product_id")),
+        "shopify_variant_id": _none_if_blank(account_record.get("shopify_variant_id")),
+        "product_title": _none_if_blank(account_record.get("product_title")),
+        "variant_title": _none_if_blank(account_record.get("variant_title")),
+        "certificate_id": _none_if_blank(account_record.get("certificate_id")),
+        "edition_number": _int_or_none(account_record.get("edition_number")),
+        "edition_total": _int_or_none(account_record.get("edition_total")) or 100,
+        "edition_display": _none_if_blank(account_record.get("edition_display")),
+        "line_item_unit_index": line_item_unit_index,
+        "pdf_filename": _none_if_blank(metadata.get("pdf_filename") or Path(str(metadata.get("local_pdf_path") or "")).name),
+        "local_file_path": _none_if_blank(metadata.get("local_pdf_path")),
+        "shopify_file_id": _none_if_blank(account_record.get("shopify_file_id")),
+        "shopify_file_status": _none_if_blank(account_record.get("shopify_file_status")),
+        "shopify_file_url": _none_if_blank(certificate_url),
+        "certificate_file_url": _none_if_blank(certificate_url),
+        "certificate_shopify_file_id": _none_if_blank(account_record.get("shopify_file_id")),
+        "certificate_status": _none_if_blank(account_record.get("certificate_status")) or "Processing",
+        "purchase_date": _none_if_blank(account_record.get("purchase_date")),
+        "source": "sports_cave_os",
+        "generated_at": _none_if_blank(metadata.get("generated_at") or account_record.get("created_at")),
+        "status": _none_if_blank(metadata.get("status") or account_record.get("certificate_status")) or "Processing",
+        "created_at": _none_if_blank(metadata.get("created_at") or account_record.get("created_at")) or now_value,
+        "updated_at": _none_if_blank(metadata.get("updated_at")) or now_value,
+    }
+    if not row["certificate_id"] and not (row["shopify_order_id"] and row["shopify_line_item_id"] and row["edition_number"]):
+        return {"ok": False, "skipped": True, "reason": "Certificate metadata is missing stable identity fields."}
+
+    columns = tuple(row.keys())
+    assignments = ", ".join(f"{column}=%s" for column in columns)
+    insert_columns = ", ".join(columns)
+    placeholders = ", ".join(["%s"] * len(columns))
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id
+                FROM certificates
+                WHERE (%s <> '' AND certificate_id=%s)
+                   OR (
+                        shopify_order_id=%s
+                    AND shopify_line_item_id=%s
+                    AND line_item_unit_index=%s
+                    AND edition_number=%s
+                   )
+                ORDER BY updated_at DESC NULLS LAST, id DESC
+                LIMIT 1
+                """,
+                (
+                    row["certificate_id"] or "",
+                    row["certificate_id"] or "",
+                    row["shopify_order_id"],
+                    row["shopify_line_item_id"],
+                    row["line_item_unit_index"],
+                    row["edition_number"],
+                ),
+            )
+            existing = cur.fetchone() or {}
+            if existing.get("id"):
+                cur.execute(
+                    f"UPDATE certificates SET {assignments} WHERE id=%s",
+                    tuple(row[column] for column in columns) + (existing["id"],),
+                )
+                certificate_row_id = existing["id"]
+                action = "updated"
+            else:
+                cur.execute(
+                    f"INSERT INTO certificates ({insert_columns}) VALUES ({placeholders}) RETURNING id",
+                    tuple(row[column] for column in columns),
+                )
+                certificate_row_id = (cur.fetchone() or {}).get("id")
+                action = "inserted"
+            cur.execute(
+                """
+                UPDATE edition_orders
+                SET shopify_customer_id=%s,
+                    shopify_order_name=%s,
+                    shopify_variant_id=%s,
+                    product_handle=%s,
+                    edition_display=%s,
+                    certificate_status=%s,
+                    certificate_id=%s,
+                    shopify_file_id=%s,
+                    shopify_file_status=%s,
+                    certificate_file_url=%s,
+                    purchase_date=%s,
+                    updated_at=now()
+                WHERE shopify_line_item_id=%s
+                  AND allocation_index=%s
+                """,
+                (
+                    row["shopify_customer_id"],
+                    row["shopify_order_name"],
+                    row["shopify_variant_id"],
+                    row["product_handle"],
+                    row["edition_display"],
+                    row["certificate_status"],
+                    row["certificate_id"],
+                    row["shopify_file_id"],
+                    row["shopify_file_status"],
+                    row["certificate_file_url"],
+                    row["purchase_date"],
+                    row["shopify_line_item_id"],
+                    row["line_item_unit_index"],
+                ),
+            )
+        conn.commit()
+    return {"ok": True, "action": action, "id": certificate_row_id, "certificate_id": row["certificate_id"]}
+
+
 def _upsert_file_asset_with_cursor(cur, metadata):
     if not table_exists(cur, "file_assets"):
         return {"ok": False, "warning": "R2 file uploaded, but file_assets metadata table is missing."}
@@ -4636,28 +5004,62 @@ def _generate_certificate_for_assignment(cur, assignment, *, force=False):
         cur.execute(
             """
             INSERT INTO certificates(
-                edition_order_id, related_edition_order_id, shopify_order_id, shopify_handle, certificate_id, edition_number,
-                edition_total, pdf_filename, local_file_path, status, generated_at
+                edition_order_id, related_edition_order_id, shopify_customer_id, customer_email, customer_name,
+                shopify_order_id, shopify_order_name, shopify_line_item_id, shopify_handle, product_handle,
+                shopify_product_id, shopify_variant_id, product_title, variant_title,
+                certificate_id, edition_number, edition_total, edition_display, line_item_unit_index,
+                pdf_filename, local_file_path, certificate_status, status, purchase_date, source,
+                generated_at, created_at, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'Local PDF', now())
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, 'Processing', 'Local PDF', %s, 'sports_cave_os',
+                now(), now(), now()
+            )
             ON CONFLICT (edition_order_id) DO UPDATE SET
                 related_edition_order_id=EXCLUDED.related_edition_order_id,
+                shopify_customer_id=EXCLUDED.shopify_customer_id,
+                customer_email=EXCLUDED.customer_email,
+                customer_name=EXCLUDED.customer_name,
+                shopify_order_name=EXCLUDED.shopify_order_name,
+                shopify_line_item_id=EXCLUDED.shopify_line_item_id,
+                product_handle=EXCLUDED.product_handle,
+                shopify_product_id=EXCLUDED.shopify_product_id,
+                shopify_variant_id=EXCLUDED.shopify_variant_id,
+                product_title=EXCLUDED.product_title,
+                variant_title=EXCLUDED.variant_title,
                 certificate_id=EXCLUDED.certificate_id,
+                edition_display=EXCLUDED.edition_display,
+                line_item_unit_index=EXCLUDED.line_item_unit_index,
                 pdf_filename=EXCLUDED.pdf_filename,
                 local_file_path=EXCLUDED.local_file_path,
                 generated_at=now(),
-                status='Local PDF'
+                status='Local PDF',
+                updated_at=now()
             """,
             (
                 str(assignment["id"]),
                 _coerce_uuid_or_none(assignment.get("id")),
+                assignment.get("shopify_customer_id") or assignment.get("customer_id"),
+                assignment.get("customer_email"),
+                assignment.get("customer_name"),
                 assignment.get("shopify_order_id"),
+                assignment.get("order_name") or assignment.get("shopify_order_name"),
+                assignment.get("shopify_line_item_id"),
                 assignment.get("shopify_handle"),
+                assignment.get("product_handle") or assignment.get("shopify_handle"),
+                assignment.get("shopify_product_id"),
+                assignment.get("shopify_variant_id"),
+                assignment.get("product_title"),
+                assignment.get("variant_title"),
                 generated_certificate_id,
                 assignment.get("edition_number"),
                 assignment.get("edition_total"),
+                format_edition_display_number(assignment.get("edition_number"), assignment.get("edition_total") or 100),
+                assignment.get("allocation_index") or 1,
                 Path(local_file_path).name,
                 local_file_path,
+                assignment.get("assigned_at"),
             ),
         )
         _upload_certificate_outputs_to_r2(cur, assignment, local_file_path, local_preview_path)

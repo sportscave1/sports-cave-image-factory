@@ -608,7 +608,7 @@ class EditionOpsUiTests(unittest.TestCase):
         record = orders_page.certificate_engine.certificate_record_from_order_row(row)
 
         self.assertEqual(record["edition_number"], 16)
-        self.assertEqual(record["edition_display"], "#016")
+        self.assertEqual(record["edition_display"], "#016/100")
         self.assertEqual(record["line_item_unit_index"], 1)
         self.assertIn("SC-SC1234-GREG-MURPHY-LAP-OF-THE-GODS-WALL-ART-EDITION-016", record["certificate_id"])
 
@@ -859,10 +859,33 @@ class EditionOpsUiTests(unittest.TestCase):
 
     def test_certificate_schema_uses_uuid_safe_related_column_without_runtime_fk(self):
         source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
+        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+        shopify_source = (ROOT / "shopify_sync.py").read_text(encoding="utf-8")
 
         self.assertIn("related_edition_order_id uuid NULL", source)
         self.assertIn("DROP CONSTRAINT IF EXISTS certificates_edition_order_id_fkey", source)
         self.assertIn("DROP CONSTRAINT IF EXISTS certificates_related_edition_order_id_fkey", source)
+        for field in (
+            "shopify_customer_id",
+            "customer_email",
+            "customer_name",
+            "shopify_order_name",
+            "shopify_line_item_id",
+            "shopify_product_id",
+            "shopify_variant_id",
+            "product_handle",
+            "edition_display",
+            "shopify_file_status",
+            "certificate_status",
+            "purchase_date",
+            "created_at",
+            "updated_at",
+        ):
+            self.assertIn(field, source)
+        self.assertIn("def upsert_certificate_metadata", source)
+        self.assertIn("def backfill_ready_certificate_order_metafields", source)
+        self.assertIn("Retry Certificate Metafield Push", app_source)
+        self.assertIn('"key": "certificates_json"', shopify_source)
         self.assertNotIn("FOREIGN KEY (edition_order_id)", source)
         self.assertNotIn("FOREIGN KEY (related_edition_order_id)", source)
 

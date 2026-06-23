@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
+import importlib
 import json
+import logging
 from pathlib import Path
 
 import certificate_service
@@ -12,6 +14,8 @@ CERTIFICATE_OUTPUT_DIR = BASE_DIR / "output" / "certificates"
 SNAPSHOT_PATH = BASE_DIR / "output" / "_cache" / "certificates_snapshot.json"
 SNAPSHOT_VERSION = 1
 LOCAL_ONLY_CERTIFICATE_KEYS = {"local_pdf_path", "preview_path"}
+
+logger = logging.getLogger(__name__)
 
 
 def now_iso():
@@ -27,11 +31,29 @@ def padded_edition(value):
 
 
 def _parse_certificate_payload(value):
+    def normalize_record(item):
+        record = dict(item or {})
+        aliases = {
+            "line_item_id": "shopify_line_item_id",
+            "product_gid": "shopify_product_id",
+            "variant_gid": "shopify_variant_id",
+            "order_gid": "shopify_order_id",
+            "order_name": "shopify_order_name",
+            "handle": "product_handle",
+            "pdf_shopify_file_id": "shopify_file_id",
+            "pdf_url": "certificate_file_url",
+            "status": "certificate_status",
+        }
+        for target, source in aliases.items():
+            if not record.get(target) and record.get(source):
+                record[target] = record.get(source)
+        return record
+
     if isinstance(value, list):
-        return [dict(item) for item in value if isinstance(item, dict)]
+        return [normalize_record(item) for item in value if isinstance(item, dict)]
     if isinstance(value, dict):
         rows = value.get("certificates") if isinstance(value.get("certificates"), list) else []
-        return [dict(item) for item in rows if isinstance(item, dict)]
+        return [normalize_record(item) for item in rows if isinstance(item, dict)]
     try:
         parsed = json.loads(value or "[]")
     except (TypeError, ValueError):
@@ -46,8 +68,18 @@ def certificate_metafield_from_list(metafields):
     return {}
 
 
+def certificate_json_metafield_from_list(metafields):
+    for metafield in metafields or []:
+        if metafield.get("namespace") == "sports_cave" and metafield.get("key") == "certificates_json":
+            return metafield
+    return {}
+
+
 def certificate_payload_from_metafields(metafields):
-    return _parse_certificate_payload((certificate_metafield_from_list(metafields) or {}).get("value"))
+    legacy_payload = _parse_certificate_payload((certificate_metafield_from_list(metafields) or {}).get("value"))
+    if legacy_payload:
+        return legacy_payload
+    return _parse_certificate_payload((certificate_json_metafield_from_list(metafields) or {}).get("value"))
 
 
 def read_order_certificate_state(order_id, config=None, request_post=None):
@@ -59,7 +91,7 @@ def read_order_certificate_state(order_id, config=None, request_post=None):
     )
     metafield = certificate_metafield_from_list(fetched.get("metafields") or [])
     return {
-        "certificates": _parse_certificate_payload((metafield or {}).get("value")),
+        "certificates": certificate_payload_from_metafields(fetched.get("metafields") or []),
         "compare_digest": (metafield or {}).get("compareDigest"),
         "api_version": fetched.get("api_version"),
     }
@@ -90,6 +122,11 @@ def _customer_name(order_payload):
 def _customer_email(order_payload):
     customer = order_payload.get("customer") if isinstance(order_payload.get("customer"), dict) else {}
     return order_payload.get("customer_email") or customer.get("email") or order_payload.get("email") or ""
+
+
+def _shopify_customer_id(order_payload):
+    customer = order_payload.get("customer") if isinstance(order_payload.get("customer"), dict) else {}
+    return order_payload.get("shopify_customer_id") or order_payload.get("customer_id") or customer.get("id") or ""
 
 
 def _purchase_date(order_payload):
@@ -195,23 +232,35 @@ def _certificate_base_record(order_payload, line_id, allocation, line_item, edit
     return {
         "certificate_id": certificate_id,
         "order_gid": order_gid,
+        "shopify_order_id": order_gid,
         "order_name": order_name,
+        "shopify_order_name": order_name,
         "line_item_id": line_id,
+        "shopify_line_item_id": line_id,
         "line_item_unit_index": int(unit_index or 1),
         "product_gid": product_gid,
+        "shopify_product_id": product_gid,
         "variant_gid": _variant_gid(line_item),
+        "shopify_variant_id": _variant_gid(line_item),
         "product_title": product_title,
         "variant_title": variant_title,
         "handle": handle,
+        "product_handle": handle,
         "edition_number": int(edition_number or 0),
-        "edition_display": padded_edition(edition_number),
+        "edition_display": shopify_sync._certificate_display(
+            {"edition_number": edition_number, "edition_total": edition_total or 100}
+        ),
         "edition_total": edition_total,
+        "shopify_customer_id": _shopify_customer_id(order_payload),
         "customer_name": _customer_name(order_payload),
         "customer_email": _customer_email(order_payload),
         "purchase_date": _purchase_date(order_payload),
         "pdf_shopify_file_id": "",
         "pdf_url": "",
         "generated_at": "",
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+        "source": "sports_cave_os",
         "status": "Generating",
     }
 
@@ -222,20 +271,34 @@ def certificate_record_from_order_row(row):
     order_name = row.get("order") or row.get("order_name") or ""
     product_title = row.get("product") or row.get("product_title") or ""
     handle = row.get("product_handle") or row.get("handle") or certificate_service.safe_filename_part(product_title)
+    order_gid = order_allocator.order_gid(row.get("shopify_order_id") or row.get("order_gid"))
+    line_item_gid = order_allocator.line_item_gid(row.get("shopify_line_item_id"))
+    product_gid = order_allocator.product_gid(row.get("shopify_product_id") or row.get("product_gid"))
+    variant_gid = row.get("variant_id") or row.get("variant_gid") or row.get("shopify_variant_id") or ""
+    created_at = row.get("certificate_generated_at") or row.get("created_at") or now_iso()
     return {
         "certificate_id": certificate_service.certificate_id(order_name, edition_number, handle),
-        "order_gid": order_allocator.order_gid(row.get("shopify_order_id") or row.get("order_gid")),
+        "order_gid": order_gid,
+        "shopify_order_id": order_gid,
         "order_name": order_name,
-        "line_item_id": order_allocator.line_item_gid(row.get("shopify_line_item_id")),
+        "shopify_order_name": order_name,
+        "line_item_id": line_item_gid,
+        "shopify_line_item_id": line_item_gid,
         "line_item_unit_index": int(row.get("edition_offset") or 0) + 1,
-        "product_gid": order_allocator.product_gid(row.get("shopify_product_id") or row.get("product_gid")),
-        "variant_gid": row.get("variant_id") or row.get("variant_gid") or "",
+        "product_gid": product_gid,
+        "shopify_product_id": product_gid,
+        "variant_gid": variant_gid,
+        "shopify_variant_id": variant_gid,
         "product_title": product_title,
         "variant_title": row.get("variant") or row.get("variant_title") or "",
         "handle": handle,
+        "product_handle": handle,
         "edition_number": edition_number,
-        "edition_display": padded_edition(edition_number),
+        "edition_display": shopify_sync._certificate_display(
+            {"edition_number": edition_number, "edition_total": edition_total}
+        ),
         "edition_total": edition_total,
+        "shopify_customer_id": row.get("shopify_customer_id") or row.get("customer_id") or "",
         "customer_name": row.get("customer") or row.get("customer_name") or "",
         "customer_email": row.get("customer_email") or "",
         "purchase_date": row.get("processed_at") or row.get("date") or "",
@@ -243,6 +306,9 @@ def certificate_record_from_order_row(row):
         "pdf_url": row.get("certificate_pdf_url") or "",
         "local_pdf_path": row.get("certificate_pdf_path") or "",
         "generated_at": row.get("certificate_generated_at") or "",
+        "created_at": created_at,
+        "updated_at": now_iso(),
+        "source": "sports_cave_os",
         "status": row.get("certificate_status") or "Generating",
     }
 
@@ -258,6 +324,68 @@ def certificate_metafield_record(record):
         for key, value in dict(record or {}).items()
         if key not in LOCAL_ONLY_CERTIFICATE_KEYS
     }
+
+
+def certificate_account_record(record):
+    return shopify_sync.order_certificate_account_record(certificate_metafield_record(record))
+
+
+def certificates_json_payload(certificates):
+    return shopify_sync.order_certificates_json_payload(certificates)
+
+
+def _log_certificate_metafield_failure(order_gid, error, certificates=None):
+    logger.warning("Certificate metafield push failed for %s: %s", order_gid, error)
+    try:
+        supabase = importlib.import_module("supabase_backend")
+        supabase.log_app_error(
+            "certificate_metafield_push_failed",
+            str(error),
+            {
+                "shopify_order_id": order_gid,
+                "certificate_count": len(certificates or []),
+            },
+        )
+    except Exception:
+        pass
+
+
+def persist_certificate_record_to_supabase(record):
+    try:
+        supabase = importlib.import_module("supabase_backend")
+    except Exception as error:
+        logger.info("Supabase certificate metadata skipped: %s", error)
+        return {"ok": False, "skipped": True, "reason": str(error)}
+    if not getattr(supabase, "is_configured", lambda: False)():
+        return {"ok": False, "skipped": True, "reason": "Supabase DATABASE_URL is not configured."}
+    try:
+        return supabase.upsert_certificate_metadata(certificate_metafield_record(record))
+    except Exception as error:
+        logger.warning("Supabase certificate metadata write failed: %s", error)
+        try:
+            supabase.log_app_error(
+                "certificate_metadata_supabase_write_failed",
+                str(error),
+                {"certificate_id": (record or {}).get("certificate_id")},
+            )
+        except Exception:
+            pass
+        return {"ok": False, "error": str(error)}
+
+
+def _sync_order_certificate_records(order_gid, records, *, compare_digest=None, config=None, request_post=None):
+    try:
+        shopify_sync.sync_order_certificate_metafields(
+            order_gid,
+            records,
+            compare_digest=compare_digest,
+            config=config,
+            request_post=request_post,
+        )
+        return {"ok": True, "error": ""}
+    except Exception as error:
+        _log_certificate_metafield_failure(order_gid, error, records)
+        return {"ok": False, "error": str(error)}
 
 
 def generate_local_certificate_for_record(record, output_dir=None):
@@ -300,16 +428,22 @@ def generate_local_certificate_for_record(record, output_dir=None):
         updated["local_pdf_path"] = pdf_path
         updated["preview_path"] = preview_path
         updated["generated_at"] = now_iso()
+        updated["created_at"] = updated.get("created_at") or updated["generated_at"]
+        updated["updated_at"] = updated["generated_at"]
         updated["status"] = "Generated"
         updated["sync_error"] = ""
     except FileNotFoundError as error:
         updated["status"] = "Template missing"
         updated["sync_error"] = str(error)
         updated["generated_at"] = now_iso()
+        updated["created_at"] = updated.get("created_at") or updated["generated_at"]
+        updated["updated_at"] = updated["generated_at"]
     except Exception as error:
         updated["status"] = "Error"
         updated["sync_error"] = str(error)
         updated["generated_at"] = now_iso()
+        updated["created_at"] = updated.get("created_at") or updated["generated_at"]
+        updated["updated_at"] = updated["generated_at"]
     return updated
 
 
@@ -351,14 +485,17 @@ def upload_generated_certificate_record(record, *, config=None, request_post=Non
     updated["status"] = "Ready"
     updated["sync_error"] = ""
     updated["generated_at"] = updated.get("generated_at") or now_iso()
+    updated["created_at"] = updated.get("created_at") or updated["generated_at"]
+    updated["updated_at"] = now_iso()
     return updated
 
 
 def save_certificate_record_to_order(record, *, config=None, request_post=None):
-    order_gid = order_allocator.order_gid(record.get("order_gid"))
+    order_gid = order_allocator.order_gid(record.get("order_gid") or record.get("shopify_order_id"))
     if not order_gid:
         raise shopify_sync.ShopifyAPIError("Order ID is missing for certificate save.")
     record_to_save = certificate_metafield_record(record)
+    persist_certificate_record_to_supabase(record_to_save)
     state = read_order_certificate_state(order_gid, config=config, request_post=request_post)
     certificates = state.get("certificates") or []
     existing = _existing_ready_certificate(
@@ -368,16 +505,78 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
         record_to_save.get("line_item_unit_index"),
     )
     if existing:
-        return {"record": existing, "saved": False, "skipped_existing": True}
+        sync_result = _sync_order_certificate_records(
+            order_gid,
+            certificates,
+            compare_digest=state.get("compare_digest"),
+            config=config,
+            request_post=request_post,
+        )
+        return {
+            "record": existing,
+            "saved": False,
+            "skipped_existing": True,
+            "metafields_synced": bool(sync_result.get("ok")),
+            "metafield_error": sync_result.get("error") or "",
+        }
     certificates = _replace_certificate(certificates, record_to_save)
-    shopify_sync.sync_order_certificate_metafields(
+    sync_result = _sync_order_certificate_records(
         order_gid,
         certificates,
         compare_digest=state.get("compare_digest"),
         config=config,
         request_post=request_post,
     )
-    return {"record": record_to_save, "saved": True, "skipped_existing": False}
+    return {
+        "record": record_to_save,
+        "saved": True,
+        "skipped_existing": False,
+        "metafields_synced": bool(sync_result.get("ok")),
+        "metafield_error": sync_result.get("error") or "",
+    }
+
+
+def retry_certificate_metafield_push_for_rows(rows, *, config=None, request_post=None):
+    config = config or shopify_sync.get_config()
+    attempted = 0
+    synced = 0
+    failed = 0
+    skipped = 0
+    errors = []
+    seen = set()
+    for row in rows or []:
+        record = certificate_record_from_order_row(row)
+        url = record.get("pdf_url") or record.get("certificate_file_url") or record.get("certificate_url")
+        if not url:
+            skipped += 1
+            continue
+        key = _certificate_key(record)
+        order_gid = order_allocator.order_gid(record.get("order_gid") or record.get("shopify_order_id"))
+        unique_key = (order_gid, *key)
+        if unique_key in seen:
+            skipped += 1
+            continue
+        seen.add(unique_key)
+        record["status"] = "Ready"
+        attempted += 1
+        try:
+            result = save_certificate_record_to_order(record, config=config, request_post=request_post)
+            if result.get("metafields_synced"):
+                synced += 1
+            else:
+                failed += 1
+                errors.append(result.get("metafield_error") or "Certificate metafield push failed.")
+        except Exception as error:
+            failed += 1
+            errors.append(str(error))
+            _log_certificate_metafield_failure(order_gid, error, [record])
+    return {
+        "attempted": attempted,
+        "synced": synced,
+        "failed": failed,
+        "skipped": skipped,
+        "errors": errors[:10],
+    }
 
 
 def certificate_records_from_allocations(order_payload, allocation_payload):
@@ -454,6 +653,7 @@ def generate_missing_certificates_for_order(
     generated = 0
     skipped = 0
     errors = []
+    metafield_errors = []
     changed = False
 
     for record in certificate_records_from_allocations(order_payload, allocation_payload):
@@ -479,7 +679,10 @@ def generate_missing_certificates_for_order(
             record["status"] = "Template missing"
             record["sync_error"] = f"Certificate template missing: {certificate_service.CERTIFICATE_TEMPLATE_PRINT_PATH}"
             record["generated_at"] = now_iso()
+            record["created_at"] = record.get("created_at") or record["generated_at"]
+            record["updated_at"] = record["generated_at"]
             record_to_save = certificate_metafield_record(record)
+            persist_certificate_record_to_supabase(record_to_save)
             certificates = _replace_certificate(certificates, record_to_save)
             existing[_certificate_key(record_to_save)] = record_to_save
             errors.append(record["sync_error"])
@@ -511,26 +714,33 @@ def generate_missing_certificates_for_order(
             record["status"] = "Template missing"
             record["sync_error"] = str(error)
             record["generated_at"] = now_iso()
+            record["created_at"] = record.get("created_at") or record["generated_at"]
+            record["updated_at"] = record["generated_at"]
             errors.append(str(error))
         except Exception as error:
             record["status"] = "Upload error"
             record["sync_error"] = str(error)
             record["generated_at"] = now_iso()
+            record["created_at"] = record.get("created_at") or record["generated_at"]
+            record["updated_at"] = record["generated_at"]
             errors.append(str(error))
 
         record_to_save = certificate_metafield_record(record)
+        persist_certificate_record_to_supabase(record_to_save)
         certificates = _replace_certificate(certificates, record_to_save)
         existing[_certificate_key(record_to_save)] = record_to_save
         changed = True
 
     if changed:
-        shopify_sync.sync_order_certificate_metafields(
+        sync_result = _sync_order_certificate_records(
             order_gid,
             certificates,
             compare_digest=certificate_state.get("compare_digest"),
             config=config,
             request_post=request_post,
         )
+        if not sync_result.get("ok"):
+            metafield_errors.append(sync_result.get("error") or "Certificate metafield push failed.")
 
     return {
         "processed": True,
@@ -538,6 +748,7 @@ def generate_missing_certificates_for_order(
         "generated": generated,
         "skipped": skipped,
         "errors": errors,
+        "metafield_errors": metafield_errors,
         "certificates": certificates,
     }
 

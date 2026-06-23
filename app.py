@@ -4904,6 +4904,43 @@ def render_settings_page():
         except Exception as error:
             _developer_section_error("Certificate Templates", error)
 
+    with st.expander("Certificate Metadata", expanded=False):
+        st.caption(
+            "Repairs Shopify order certificate metafields for ready certificates. "
+            "Runs only when clicked and never generates certificates."
+        )
+        if st.button("Retry Certificate Metafield Push", key="developer-retry-certificate-metafield-push", use_container_width=True):
+            try:
+                sync = get_shopify_sync()
+                config = sync.get_config()
+                if not config.get("configured"):
+                    st.warning("Shopify is not configured. Certificate metafields were not pushed.")
+                else:
+                    certificate_engine = importlib.import_module("certificate_engine")
+                    allocator = importlib.import_module("order_allocator")
+                    snapshot = allocator.load_orders_snapshot()
+                    snapshot_result = certificate_engine.retry_certificate_metafield_push_for_rows(
+                        snapshot.get("rows") or [],
+                        config=config,
+                    )
+                    supabase_result = {"attempted": 0, "synced": 0, "failed": 0, "skipped": True}
+                    try:
+                        supabase = importlib.import_module("supabase_backend")
+                        if supabase.is_configured():
+                            supabase_result = supabase.backfill_ready_certificate_order_metafields(config=config)
+                    except Exception as supabase_error:
+                        _developer_action_error("Supabase certificate metadata backfill", supabase_error)
+                    st.success(
+                        "Certificate metafield retry complete: "
+                        f"{snapshot_result.get('synced') or 0} snapshot row(s) synced, "
+                        f"{supabase_result.get('synced') or 0} Supabase order(s) synced."
+                    )
+                    total_failed = int(snapshot_result.get("failed") or 0) + int(supabase_result.get("failed") or 0)
+                    if total_failed:
+                        st.warning(f"{total_failed} certificate metafield push(es) still need review.")
+            except Exception as error:
+                _developer_action_error("Certificate metafield retry", error)
+
     with st.expander("Database / Supabase", expanded=False):
         st.write(f"**DATABASE_URL present:** {'Yes' if any(os.getenv(key, '').strip() for key in DATABASE_URL_ENV_KEYS) else 'No'}")
         if st.button("Run Database Connection Test", key="developer-test-database", use_container_width=True):

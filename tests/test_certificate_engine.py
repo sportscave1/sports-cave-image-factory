@@ -124,7 +124,12 @@ class CertificateEngineTests(unittest.TestCase):
         self.assertEqual(len(synced[0]), 1)
         record = synced[0][0]
         self.assertEqual(record["edition_number"], 96)
-        self.assertEqual(record["edition_display"], "#096")
+        self.assertEqual(record["edition_display"], "#096/100")
+        self.assertEqual(record["shopify_customer_id"], "")
+        self.assertEqual(record["shopify_order_name"], "#SC1234")
+        self.assertEqual(record["shopify_line_item_id"], self.line_id)
+        self.assertEqual(record["shopify_product_id"], "gid://shopify/Product/777")
+        self.assertEqual(record["shopify_variant_id"], "gid://shopify/ProductVariant/888")
         self.assertEqual(record["pdf_shopify_file_id"], "gid://shopify/GenericFile/1")
         self.assertEqual(record["pdf_size_bytes"], len(b"%PDF-1.4\n%%EOF\n"))
         self.assertNotIn("local_pdf_path", record)
@@ -162,8 +167,37 @@ class CertificateEngineTests(unittest.TestCase):
             )
 
         self.assertEqual(result["generated"], 2)
-        self.assertEqual([record["edition_display"] for record in synced[0]], ["#096", "#097"])
+        self.assertEqual([record["edition_display"] for record in synced[0]], ["#096/100", "#097/100"])
         self.assertEqual([record["line_item_unit_index"] for record in synced[0]], [1, 2])
+
+    def test_certificate_metafield_push_failure_does_not_lose_generated_certificate(self):
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
+            shopify_sync,
+            "fetch_metafields",
+            side_effect=self._fake_fetch([self._allocation_metafield([96]), self._certificate_metafield()]),
+        ), patch.object(
+            certificate_service,
+            "generate_certificate_pdf",
+            side_effect=self._fake_pdf,
+        ), patch.object(
+            shopify_sync,
+            "upload_pdf_to_shopify_files",
+            return_value={"file_id": "gid://shopify/GenericFile/1", "url": "https://cdn.example/cert.pdf"},
+        ), patch.object(
+            shopify_sync,
+            "sync_order_certificate_metafields",
+            side_effect=shopify_sync.ShopifyAPIError("metafield failed"),
+        ):
+            result = certificate_engine.generate_missing_certificates_for_order(
+                self.order_payload,
+                config=self.config,
+                output_dir=tmpdir,
+            )
+
+        self.assertEqual(result["generated"], 1)
+        self.assertEqual(len(result["certificates"]), 1)
+        self.assertEqual(result["certificates"][0]["pdf_url"], "https://cdn.example/cert.pdf")
+        self.assertEqual(result["metafield_errors"], ["metafield failed"])
 
     def test_existing_certificate_metadata_prevents_duplicate_generation(self):
         existing = {

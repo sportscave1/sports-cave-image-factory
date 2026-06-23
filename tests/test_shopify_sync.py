@@ -49,6 +49,54 @@ class ShopifySyncClientTests(unittest.TestCase):
             "sports-cave.myshopify.com",
         )
 
+    def test_order_certificate_metafields_include_vault_ready_json(self):
+        inputs = shopify_sync.order_certificate_metafield_inputs(
+            "gid://shopify/Order/1234",
+            [
+                {
+                    "shopify_customer_id": "gid://shopify/Customer/9",
+                    "customer_email": "greg@example.com",
+                    "customer_name": "Greg Collector",
+                    "order_gid": "gid://shopify/Order/1234",
+                    "order_name": "#SC1234",
+                    "line_item_id": "gid://shopify/LineItem/555",
+                    "product_gid": "gid://shopify/Product/777",
+                    "variant_gid": "gid://shopify/ProductVariant/888",
+                    "product_title": "Greg Murphy Lap of the Gods Wall Art",
+                    "handle": "greg-murphy-lap-of-the-gods-wall-art",
+                    "variant_title": "Black / XL",
+                    "edition_number": 12,
+                    "edition_total": 100,
+                    "certificate_id": "SC-SC1234-012",
+                    "pdf_shopify_file_id": "gid://shopify/GenericFile/1",
+                    "pdf_url": "https://cdn.example/cert.pdf",
+                    "status": "Ready",
+                    "shopify_file_status": "READY",
+                    "purchase_date": "2026-06-22T10:00:00Z",
+                    "generated_at": "2026-06-22T10:05:00Z",
+                },
+                {
+                    "order_gid": "gid://shopify/Order/1234",
+                    "line_item_id": "gid://shopify/LineItem/556",
+                    "edition_number": 13,
+                    "edition_total": 100,
+                    "certificate_id": "SC-SC1234-013",
+                    "status": "Generated",
+                },
+            ],
+        )
+
+        self.assertEqual([item["key"] for item in inputs], ["certificates", "certificates_json"])
+        payload = json.loads(inputs[1]["value"])
+        self.assertEqual(payload["version"], 1)
+        self.assertEqual(payload["source"], "sports_cave_os")
+        ready, processing = payload["certificates"]
+        self.assertEqual(ready["edition_display"], "#012/100")
+        self.assertEqual(ready["certificate_status"], "Ready")
+        self.assertEqual(ready["certificate_file_url"], "https://cdn.example/cert.pdf")
+        self.assertEqual(processing["certificate_status"], "Processing")
+        self.assertEqual(processing["certificate_file_url"], "")
+
     def test_environment_config_prefers_client_credentials_over_legacy_admin_token(self):
         environment = {
             "SHOPIFY_STORE_DOMAIN": "sports-cave.myshopify.com",

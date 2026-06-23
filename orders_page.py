@@ -166,6 +166,7 @@ def _normalise_row(row):
     updated["shopify_product_id"] = str(updated.get("shopify_product_id") or "")
     updated["variant_id"] = str(updated.get("variant_id") or "")
     updated["product_handle"] = str(updated.get("product_handle") or updated.get("handle") or "")
+    updated["shopify_customer_id"] = str(updated.get("shopify_customer_id") or updated.get("customer_id") or "")
     updated["customer_email"] = str(updated.get("customer_email") or "")
     updated["processed_at"] = str(updated.get("processed_at") or "")
     updated["created_at"] = str(updated.get("created_at") or "")
@@ -343,6 +344,7 @@ def _rows_from_order_line(order, line_item, edition):
                     "order": order.get("order_name") or "",
                     "date": (order.get("processed_at") or order.get("created_at") or "")[:10],
                     "customer": order.get("customer_name") or order.get("customer_email") or "",
+                    "shopify_customer_id": order.get("shopify_customer_id") or order.get("customer_id") or "",
                     "customer_email": order.get("customer_email") or "",
                     "shipping": order.get("shipping_method") or order.get("shipping_title") or "",
                     "product": line_item.get("product_title") or "",
@@ -627,7 +629,13 @@ def _upload_certificate_for_row(row):
         saved = certificate_engine.save_certificate_record_to_order(uploaded, config=config)
         saved_record = {**uploaded, **(saved.get("record") or {}), "status": "Uploaded"}
         _update_row_from_certificate(row, saved_record)
-        st.session_state[NOTICE_KEY] = f"Uploaded certificate for {row.get('order')} {row.get('edition')}."
+        if saved.get("metafields_synced") is False:
+            st.session_state[NOTICE_KEY] = (
+                f"Uploaded certificate for {row.get('order')} {row.get('edition')}, "
+                "but the order metafield push needs retry."
+            )
+        else:
+            st.session_state[NOTICE_KEY] = f"Uploaded certificate for {row.get('order')} {row.get('edition')}."
     except Exception as error:
         _update_matching_row(row, {"certificate_status": "Error", "certificate_error": str(error), "certificate": "Error"})
         st.session_state[NOTICE_KEY] = f"Certificate upload failed: {error}"

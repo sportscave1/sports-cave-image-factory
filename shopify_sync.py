@@ -748,6 +748,13 @@ ORDER_ALLOCATION_METAFIELD_DEFINITIONS = [
         "type": "json",
         "ownerType": "ORDER",
     },
+    {
+        "name": "Sports Cave Certificates JSON",
+        "namespace": "sports_cave",
+        "key": "certificates_json",
+        "type": "json",
+        "ownerType": "ORDER",
+    },
 ]
 
 
@@ -1970,6 +1977,109 @@ def _certificate_display(item):
     return f"#{number:03d}/{total}"
 
 
+def _positive_int(value, default=0):
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        number = int(default or 0)
+    return number if number > 0 else int(default or 0)
+
+
+def _clean_certificate_status(record):
+    url = (
+        record.get("certificate_file_url")
+        or record.get("pdf_url")
+        or record.get("certificate_url")
+        or record.get("shopify_file_url")
+        or ""
+    )
+    raw_status = str(record.get("certificate_status") or record.get("status") or "").strip()
+    raw_key = raw_status.casefold()
+    if url and raw_key in {"ready", "uploaded", "certificate ready", "local pdf", ""}:
+        return "Ready"
+    if url and (record.get("shopify_file_id") or record.get("pdf_shopify_file_id")):
+        return "Ready"
+    if raw_key in {"upload error", "template missing", "error", "missing", "certificate missing"}:
+        return "Missing"
+    return "Processing"
+
+
+def _certificate_file_status(record, certificate_status):
+    raw = str(record.get("shopify_file_status") or record.get("file_status") or "").strip().upper()
+    if raw:
+        return raw
+    if certificate_status == "Ready":
+        return "READY"
+    if certificate_status == "Missing":
+        return "MISSING"
+    return "PROCESSING"
+
+
+def order_certificate_account_record(record):
+    record = dict(record or {})
+    certificate_status = _clean_certificate_status(record)
+    url = (
+        record.get("certificate_file_url")
+        or record.get("pdf_url")
+        or record.get("certificate_url")
+        or record.get("shopify_file_url")
+        or ""
+    )
+    if certificate_status != "Ready":
+        url = ""
+    edition_total = _positive_int(record.get("edition_total"), 100) or 100
+    edition_number = _positive_int(record.get("edition_number"), 0)
+    created_at = (
+        record.get("created_at")
+        or record.get("generated_at")
+        or record.get("purchase_date")
+        or ""
+    )
+    return {
+        "shopify_customer_id": str(record.get("shopify_customer_id") or record.get("customer_id") or "").strip(),
+        "customer_email": str(record.get("customer_email") or "").strip(),
+        "customer_name": str(record.get("customer_name") or "").strip(),
+        "shopify_order_id": shopify_gid("Order", record.get("shopify_order_id") or record.get("order_gid")),
+        "shopify_order_name": str(record.get("shopify_order_name") or record.get("order_name") or "").strip(),
+        "shopify_line_item_id": shopify_gid("LineItem", record.get("shopify_line_item_id") or record.get("line_item_id")),
+        "shopify_product_id": shopify_gid("Product", record.get("shopify_product_id") or record.get("product_gid")),
+        "shopify_variant_id": shopify_gid("ProductVariant", record.get("shopify_variant_id") or record.get("variant_gid")),
+        "product_title": str(record.get("product_title") or "").strip(),
+        "product_handle": str(record.get("product_handle") or record.get("handle") or record.get("shopify_handle") or "").strip(),
+        "variant_title": str(record.get("variant_title") or "").strip(),
+        "edition_number": edition_number,
+        "edition_total": edition_total,
+        "edition_display": _certificate_display({"edition_number": edition_number, "edition_total": edition_total}),
+        "certificate_id": str(record.get("certificate_id") or "").strip(),
+        "shopify_file_id": str(record.get("shopify_file_id") or record.get("pdf_shopify_file_id") or record.get("certificate_shopify_file_id") or "").strip(),
+        "certificate_file_url": str(url or "").strip(),
+        "certificate_status": certificate_status,
+        "shopify_file_status": _certificate_file_status(record, certificate_status),
+        "purchase_date": str(record.get("purchase_date") or record.get("processed_at") or "").strip(),
+        "created_at": str(created_at or "").strip(),
+        "source": "sports_cave_os",
+    }
+
+
+def order_certificates_json_payload(certificates):
+    records_by_key = {}
+    for certificate in certificates or []:
+        record = order_certificate_account_record(certificate)
+        key = (
+            record.get("shopify_order_id") or "",
+            record.get("shopify_line_item_id") or "",
+            record.get("edition_number") or 0,
+            str((certificate or {}).get("line_item_unit_index") or (certificate or {}).get("allocation_index") or 1),
+            record.get("certificate_id") or "",
+        )
+        records_by_key[key] = record
+    return {
+        "certificates": list(records_by_key.values()),
+        "version": 1,
+        "source": "sports_cave_os",
+    }
+
+
 def order_allocation_metafield_input(order_gid, allocations, compare_digest=None):
     owner_id = shopify_gid("Order", order_gid)
     payload = allocations if isinstance(allocations, dict) else {"line_items": allocations or {}}
@@ -2015,8 +2125,21 @@ def order_certificate_metafield_input(order_gid, certificates, compare_digest=No
     )
 
 
+def order_certificates_json_metafield_input(order_gid, certificates):
+    owner_id = shopify_gid("Order", order_gid)
+    return _metafield_input(
+        owner_id,
+        "certificates_json",
+        "json",
+        json.dumps(order_certificates_json_payload(certificates), ensure_ascii=True, separators=(",", ":")),
+    )
+
+
 def order_certificate_metafield_inputs(order_gid, certificates, compare_digest=None):
-    return [order_certificate_metafield_input(order_gid, certificates, compare_digest=compare_digest)]
+    return [
+        order_certificate_metafield_input(order_gid, certificates, compare_digest=compare_digest),
+        order_certificates_json_metafield_input(order_gid, certificates),
+    ]
 
 
 def sync_order_certificate_metafields(order_gid, certificates, compare_digest=None, config=None, request_post=None):
@@ -2099,6 +2222,7 @@ def normalize_order(node, store_domain):
         "order_number": (node.get("name") or "").lstrip("#"),
         "admin_url": build_order_admin_url(store_domain, legacy_resource_id),
         "customer_id": customer.get("id") or customer_email or "",
+        "shopify_customer_id": customer.get("id") or "",
         "created_at": node.get("createdAt") or "",
         "remote_updated_at": node.get("updatedAt") or "",
         "processed_at": node.get("processedAt") or "",
