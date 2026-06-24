@@ -3405,8 +3405,25 @@ def render_copy_prompt_button(
               document.body.removeChild(textarea);
             }}
 
-            button.innerText = "Copied";
+            const toast = document.createElement("div");
+            toast.innerText = "Prompt copied";
+            toast.style.position = "fixed";
+            toast.style.bottom = "22px";
+            toast.style.right = "22px";
+            toast.style.zIndex = "999999";
+            toast.style.background = "#F5F2EA";
+            toast.style.color = "#0B0B0D";
+            toast.style.border = "1px solid rgba(212,165,76,0.85)";
+            toast.style.borderRadius = "999px";
+            toast.style.padding = "10px 14px";
+            toast.style.fontWeight = "700";
+            toast.style.boxShadow = "0 12px 32px rgba(0,0,0,0.32)";
+            document.body.appendChild(toast);
+            button.innerText = "Prompt copied";
             setTimeout(() => {{
+              if (toast.parentNode) {{
+                toast.parentNode.removeChild(toast);
+              }}
               button.innerText = originalLabel;
             }}, 1400);
           }}
@@ -3453,6 +3470,82 @@ def render_copyable_prompt(title, prompt_text, key, show_title=True, prompt_id=N
             """,
             height=textarea_height + 18,
         )
+
+
+def _mockup_prompt_dialog_key(kind, prompt_id):
+    return f"mockup-prompt-{kind}::{prompt_id}"
+
+
+def _close_mockup_prompt_dialog(kind, prompt_id):
+    st.session_state[_mockup_prompt_dialog_key(kind, prompt_id)] = False
+
+
+def render_mockup_prompt_dialogs(title, prompt_id, prompt_text):
+    edit_key = _mockup_prompt_dialog_key("edit", prompt_id)
+    preview_key = _mockup_prompt_dialog_key("preview", prompt_id)
+
+    if st.session_state.get(edit_key):
+        @st.dialog(f"Edit prompt: {title}", width="large")
+        def _edit_prompt_dialog():
+            st.caption("Developer only. Saved changes replace this prompt everywhere it is used.")
+            edited_text = st.text_area(
+                "Prompt text",
+                value=prompt_text,
+                height=520,
+                key=f"mockup-prompt-edit-text::{prompt_id}",
+            )
+            password = st.text_input(
+                "Developer password",
+                type="password",
+                key=f"mockup-prompt-edit-password::{prompt_id}",
+            )
+            cols = st.columns([1, 1, 3])
+            if cols[0].button("Save", key=f"mockup-prompt-edit-save::{prompt_id}", type="primary", use_container_width=True):
+                if password != DEVELOPER_PAGE_PASSWORD:
+                    st.error("Developer password is incorrect.")
+                else:
+                    prompt_store.save_prompt(prompt_id, title, edited_text)
+                    _close_mockup_prompt_dialog("edit", prompt_id)
+                    st.success("Prompt saved")
+                    st.rerun()
+            if cols[1].button("Cancel", key=f"mockup-prompt-edit-cancel::{prompt_id}", use_container_width=True):
+                _close_mockup_prompt_dialog("edit", prompt_id)
+                st.rerun()
+
+        _edit_prompt_dialog()
+
+    if st.session_state.get(preview_key):
+        @st.dialog(f"Prompt preview: {title}", width="large")
+        def _preview_prompt_dialog():
+            st.caption("Read-only preview. Copy uses the complete stored prompt text.")
+            st.text_area(
+                "Full prompt",
+                value=prompt_text,
+                height=520,
+                disabled=True,
+                key=f"mockup-prompt-preview-text::{prompt_id}",
+            )
+            if st.button("Close", key=f"mockup-prompt-preview-close::{prompt_id}", use_container_width=True):
+                _close_mockup_prompt_dialog("preview", prompt_id)
+                st.rerun()
+
+        _preview_prompt_dialog()
+
+
+def render_mockup_prompt_action_row(title, prompt_text, key, prompt_id):
+    prompt_text = current_prompt_text(prompt_id, prompt_text).strip()
+    action_cols = st.columns([1.35, 0.34, 0.62, 2.2])
+    with action_cols[0]:
+        render_copy_prompt_button(prompt_text, f"mockup-copy::{key}", label="Copy Prompt")
+    with action_cols[1]:
+        if st.button("✎", key=f"mockup-edit-prompt::{key}", help="Edit prompt. Developer password required.", use_container_width=True):
+            st.session_state[_mockup_prompt_dialog_key("edit", prompt_id)] = True
+            st.rerun()
+    with action_cols[2]:
+        if st.button("Preview", key=f"mockup-preview-prompt::{key}", help="Open a read-only prompt preview.", use_container_width=True):
+            st.session_state[_mockup_prompt_dialog_key("preview", prompt_id)] = True
+            st.rerun()
+    render_mockup_prompt_dialogs(title, prompt_id, prompt_text)
 
 
 def prime_asset_selection_state(result):
@@ -3963,21 +4056,14 @@ def render_prompt_cards(result, prompt_paths, heading):
 
     for index, prompt_path in enumerate(prompt_paths):
         with cols[index % 3]:
-            st.markdown(f"**{get_prompt_label(prompt_path)}**")
+            prompt_title = get_prompt_label(prompt_path)
+            st.markdown(f"**{prompt_title}**")
             prompt_name = prompt_path.name
             default_prompt_text = prompt_path.read_text(encoding="utf-8")
             prompt_id = prompt_edit_id("lifestyle", prompt_name)
             prompt_text = current_prompt_text(prompt_id, default_prompt_text)
             prompt_key = f"{result['run_dir']}::{prompt_name}"
-
-            with st.expander("View Prompt"):
-                render_copyable_prompt(
-                    get_prompt_label(prompt_path),
-                    prompt_text,
-                    f"prompt-box::{prompt_key}",
-                    show_title=False,
-                    prompt_id=prompt_id,
-                )
+            render_mockup_prompt_action_row(prompt_title, prompt_text, prompt_key, prompt_id)
 
             saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
 

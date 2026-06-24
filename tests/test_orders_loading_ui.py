@@ -113,11 +113,24 @@ class EditionOpsUiTests(unittest.TestCase):
 
     def test_prodigi_tracker_has_csv_import_export_and_support_email(self):
         source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
+        prodigi_page = source[
+            source.index("def render_prodigi_page") : source.index("\n\ndef fetch_latest_shopify_products")
+        ]
 
-        self.assertIn("Prodigi Fulfilment Tracker", source)
-        self.assertIn("Import CSV", source)
-        self.assertIn("Export Tracker CSV", source)
-        self.assertIn("Export Selected CSV", source)
+        self.assertIn("Prodigi Fulfilment Inbox", prodigi_page)
+        self.assertIn("Ready to Send", prodigi_page)
+        self.assertIn("Copy Prodigi Details", prodigi_page)
+        self.assertIn("Open Checklist", prodigi_page)
+        self.assertIn("Mark Submitted", prodigi_page)
+        self.assertIn("Hold / Issue", prodigi_page)
+        self.assertIn("No orders ready for Prodigi.", prodigi_page)
+        self.assertIn("Load from Orders", prodigi_page)
+        self.assertIn("Import CSV", prodigi_page)
+        self.assertIn("Export Tracker CSV", prodigi_page)
+        self.assertIn("Export Selected CSV", prodigi_page)
+        self.assertIn("Last Orders snapshot", prodigi_page)
+        self.assertIn("Last tracker save", prodigi_page)
+        self.assertNotIn("st.data_editor", prodigi_page)
         self.assertIn('PRODIGI_SUPPORT_EMAIL = "pro@prodigi.com"', source)
         self.assertNotIn("support@prodigi.com", source)
 
@@ -171,7 +184,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["prodigi_code"], "GLOBAL-CFP-A2")
         self.assertEqual(rows[1]["prodigi_code"], "GLOBAL-FAP-A3")
-        self.assertTrue(all(row["prodigi_status"] == "Ready for Prodigi" for row in rows))
+        self.assertTrue(all(row["prodigi_status"] == "Ready to Send" for row in rows))
 
     def test_prodigi_copy_details_contains_fulfilment_fields(self):
         row = os_pages.prodigi_tracker_row_from_order(
@@ -225,6 +238,74 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Already submitted", os_pages.prodigi_submission_blockers(submitted))
         result = os_pages.apply_prodigi_bulk_action([submitted], [submitted["row_id"]], "submitted")
         self.assertTrue(result["errors"])
+
+    def test_prodigi_checklist_progress_and_submission_gates(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 50,
+                "shipping": "US Standard Tracked Shipping",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8431",
+                "shopify_product_id": "gid://shopify/Product/9001",
+            }
+        )
+
+        progress = os_pages.prodigi_progress_text(row)
+        self.assertIn("Edition", progress)
+        self.assertIn("Cert", progress)
+        self.assertIn("Submitted", progress)
+        self.assertIn("Tracking", progress)
+        section_names = [section for section, _ in os_pages.prodigi_checklist_sections(row)]
+        self.assertEqual(
+            section_names,
+            [
+                "Edition QA",
+                "Certificate QA",
+                "Prodigi QA",
+                "Shipping QA",
+                "Submission QA",
+                "Tracking / Shopify Fulfilment QA",
+            ],
+        )
+        self.assertIn("Frame colour not checked", os_pages.prodigi_manual_submit_blockers(row))
+        ready = {
+            **row,
+            "frame_colour_checked": True,
+            "prodigi_option_checked": True,
+            "shipping_checked": True,
+            "submitted_confirmed": True,
+        }
+        self.assertEqual(os_pages.prodigi_manual_submit_blockers(ready), [])
+
+    def test_prodigi_fulfillment_blocks_missing_tracking_and_certificate(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 50,
+                "shipping": "US Standard Tracked Shipping",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8431",
+                "shopify_product_id": "gid://shopify/Product/9001",
+                "date_sent_to_prodigi": "2026-06-23T10:00:00Z",
+            },
+            {
+                "date_sent_to_prodigi": "2026-06-23T10:00:00Z",
+                "prodigi_status": "Submitted to Prodigi",
+            },
+        )
+
+        blockers = os_pages.prodigi_fulfillment_blockers(row)
+        self.assertIn("Tracking missing", blockers)
+        self.assertIn("Certificate not uploaded", blockers)
 
     def test_prodigi_csv_import_matches_existing_rows_and_export_roundtrips(self):
         rows = os_pages.build_prodigi_tracker_rows(
@@ -321,6 +402,27 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn('div[data-testid="stButton"] button', app_source)
         self.assertIn("prompt_store.save_prompt", app_source)
         self.assertIn("prompt_store.save_prompt", os_pages_source)
+
+    def test_mockups_prompt_cards_use_compact_modal_prompt_actions(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        prompt_cards = source[
+            source.index("def render_prompt_cards") : source.index("\n\ndef render_optional_package_controls")
+        ]
+        mockup_actions = source[
+            source.index("def render_mockup_prompt_dialogs") : source.index("\n\ndef prime_asset_selection_state")
+        ]
+
+        self.assertIn("render_mockup_prompt_action_row", prompt_cards)
+        self.assertIn("Upload image from ChatGPT", prompt_cards)
+        self.assertIn("Add To ZIP", prompt_cards)
+        self.assertNotIn("View Prompt", prompt_cards)
+        self.assertNotIn("st.expander", prompt_cards)
+        self.assertNotIn("render_copyable_prompt", prompt_cards)
+        self.assertIn("st.dialog", mockup_actions)
+        self.assertIn("Prompt saved", mockup_actions)
+        self.assertIn("Prompt copied", source)
+        self.assertIn("prompt_store.save_prompt", mockup_actions)
+        self.assertIn("Developer password", mockup_actions)
 
     def test_product_uploads_shows_only_two_embedded_product_prompts(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")

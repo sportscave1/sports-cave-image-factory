@@ -133,18 +133,27 @@ PRODIGI_TRACKER_PATH = db.BASE_DIR / "output" / "_cache" / "prodigi_fulfillments
 PRODIGI_TRACKER_VERSION = 1
 PRODIGI_STATUS_OPTIONS = (
     "Needs Review",
-    "Ready for Prodigi",
-    "Double Checked",
+    "Ready to Send",
     "Submitted to Prodigi",
     "In Production",
+    "Awaiting Tracking",
     "Shipped",
     "Fulfilled in Shopify",
-    "Issue / Hold",
+    "Hold / Issue",
 )
 PRODIGI_ACTIONABLE_STATUS_ORDER = {status: index for index, status in enumerate(PRODIGI_STATUS_OPTIONS)}
+PRODIGI_ACTIVE_STATUSES = {
+    "Needs Review",
+    "Ready to Send",
+    "Submitted to Prodigi",
+    "In Production",
+    "Awaiting Tracking",
+    "Shipped",
+    "Hold / Issue",
+}
 PRODIGI_TRACKER_EXPORT_COLUMNS = (
     "row_id",
-    "status",
+    "prodigi_status",
     "shopify_order_name",
     "date",
     "customer_name",
@@ -160,6 +169,14 @@ PRODIGI_TRACKER_EXPORT_COLUMNS = (
     "shipping_method",
     "certificate_status",
     "double_checked",
+    "certificate_visual_checked",
+    "certificate_customer_checked",
+    "certificate_product_checked",
+    "certificate_edition_checked",
+    "frame_colour_checked",
+    "prodigi_option_checked",
+    "shipping_checked",
+    "submitted_confirmed",
     "checked_by",
     "checked_at",
     "prodigi_order_id",
@@ -344,16 +361,18 @@ def _prodigi_status_from_sheet(value):
         return "Fulfilled in Shopify"
     if "ship" in raw or "tracking" in raw:
         return "Shipped"
+    if "await" in raw:
+        return "Awaiting Tracking"
     if "production" in raw:
         return "In Production"
     if "submitted" in raw or "prodigi" in raw or "sent" in raw:
         return "Submitted to Prodigi"
     if "double" in raw or "checked" in raw:
-        return "Double Checked"
+        return "Ready to Send"
     if "hold" in raw or "issue" in raw or "review" in raw:
-        return "Issue / Hold"
+        return "Hold / Issue"
     if "ready" in raw:
-        return "Ready for Prodigi"
+        return "Ready to Send"
     return value if value in PRODIGI_STATUS_OPTIONS else "Needs Review"
 
 
@@ -390,7 +409,85 @@ def _prodigi_default_status(row):
     blockers = [blocker for blocker in prodigi_submission_blockers(row) if blocker != "Already submitted"]
     if blockers:
         return "Needs Review"
-    return "Ready for Prodigi"
+    return "Ready to Send"
+
+
+def _prodigi_certificate_generated(row):
+    status = _prodigi_normalise_text(row.get("certificate_status"))
+    return bool(
+        "generated" in status
+        or "uploaded" in status
+        or "ready" in status
+        or row.get("certificate_pdf_path")
+        or row.get("certificate_pdf_url")
+    )
+
+
+def _prodigi_certificate_uploaded(row):
+    status = _prodigi_normalise_text(row.get("certificate_status"))
+    return bool("uploaded" in status or "ready" in status or row.get("certificate_pdf_url") or row.get("shopify_file_url"))
+
+
+def _prodigi_submitted(row):
+    return bool(
+        row.get("prodigi_status") in {"Submitted to Prodigi", "In Production", "Awaiting Tracking", "Shipped", "Fulfilled in Shopify"}
+        or _prodigi_clean(row.get("date_sent_to_prodigi"))
+        or _prodigi_clean(row.get("prodigi_order_id"))
+    )
+
+
+def _prodigi_tracking_exists(row):
+    return bool(_prodigi_clean(row.get("tracking_number")) or _prodigi_clean(row.get("tracking_url")))
+
+
+def _prodigi_fulfilled(row):
+    return bool(
+        row.get("prodigi_status") == "Fulfilled in Shopify"
+        or row.get("shopify_fulfillment_status") == "Fulfilled in Shopify"
+        or _prodigi_clean(row.get("date_fulfilled_in_shopify"))
+    )
+
+
+def prodigi_progress_checks(row):
+    return {
+        "Edition": bool(_prodigi_int(row.get("edition_number"), 0)),
+        "Cert": _prodigi_certificate_uploaded(row),
+        "Prodigi": bool(row.get("prodigi_size") and row.get("prodigi_product_option") and row.get("prodigi_code")),
+        "Shipping": bool(_prodigi_clean(row.get("shipping_method"))),
+        "Submitted": _prodigi_submitted(row),
+        "Tracking": _prodigi_tracking_exists(row),
+        "Fulfilled": _prodigi_fulfilled(row),
+    }
+
+
+def prodigi_progress_text(row):
+    checks = prodigi_progress_checks(row)
+    return " | ".join(f"{name} {'✅' if ok else '⬜'}" for name, ok in checks.items())
+
+
+def prodigi_manual_submit_blockers(row):
+    blockers = []
+    blockers.extend(prodigi_submission_blockers(row))
+    if not _prodigi_bool(row.get("frame_colour_checked")):
+        blockers.append("Frame colour not checked")
+    if not _prodigi_bool(row.get("prodigi_option_checked")):
+        blockers.append("Prodigi option not checked")
+    if not _prodigi_bool(row.get("shipping_checked")):
+        blockers.append("Shipping not checked")
+    if not _prodigi_bool(row.get("submitted_confirmed")):
+        blockers.append("Submission not confirmed")
+    return blockers
+
+
+def prodigi_fulfillment_blockers(row):
+    blockers = []
+    if not _prodigi_submitted(row):
+        blockers.append("Not submitted to Prodigi")
+    if not _prodigi_tracking_exists(row):
+        blockers.append("Tracking missing")
+    if not _prodigi_certificate_uploaded(row):
+        blockers.append("Certificate not uploaded")
+    return blockers
 
 
 def prodigi_tracker_row_from_order(order_row, stored=None):
@@ -430,11 +527,21 @@ def prodigi_tracker_row_from_order(order_row, stored=None):
         "tracking_url": stored.get("tracking_url") or "",
         "carrier": stored.get("carrier") or "",
         "certificate_status": order_row.get("certificate") or order_row.get("certificate_status") or stored.get("certificate_status") or "",
+        "certificate_pdf_url": order_row.get("certificate_pdf_url") or stored.get("certificate_pdf_url") or "",
+        "shopify_file_url": order_row.get("shopify_file_url") or stored.get("shopify_file_url") or "",
         "date": order_row.get("date") or stored.get("date") or "",
         "date_sent_to_prodigi": stored.get("date_sent_to_prodigi") or "",
         "date_shipped": stored.get("date_shipped") or "",
         "date_fulfilled_in_shopify": stored.get("date_fulfilled_in_shopify") or "",
         "double_checked": _prodigi_bool(stored.get("double_checked")),
+        "certificate_visual_checked": _prodigi_bool(stored.get("certificate_visual_checked")),
+        "certificate_customer_checked": _prodigi_bool(stored.get("certificate_customer_checked")),
+        "certificate_product_checked": _prodigi_bool(stored.get("certificate_product_checked")),
+        "certificate_edition_checked": _prodigi_bool(stored.get("certificate_edition_checked")),
+        "frame_colour_checked": _prodigi_bool(stored.get("frame_colour_checked")),
+        "prodigi_option_checked": _prodigi_bool(stored.get("prodigi_option_checked")),
+        "shipping_checked": _prodigi_bool(stored.get("shipping_checked")),
+        "submitted_confirmed": _prodigi_bool(stored.get("submitted_confirmed")),
         "checked_by": stored.get("checked_by") or "",
         "checked_at": stored.get("checked_at") or "",
         "notes": stored.get("notes") or "",
@@ -645,15 +752,17 @@ def apply_prodigi_bulk_action(rows, selected_ids, action, value=""):
         if action == "double_checked":
             item["double_checked"] = True
             item["checked_at"] = now
-            item["prodigi_status"] = "Double Checked"
+            item["prodigi_status"] = "Ready to Send"
         elif action == "submitted":
-            blockers = prodigi_submission_blockers(item)
+            blockers = prodigi_manual_submit_blockers(item)
             if blockers:
                 errors.append(f"{item.get('shopify_order_name')}: {', '.join(blockers)}")
                 updated.append(item)
                 continue
             item["prodigi_status"] = "Submitted to Prodigi"
             item["date_sent_to_prodigi"] = item.get("date_sent_to_prodigi") or now
+        elif action == "hold":
+            item["prodigi_status"] = "Hold / Issue"
         elif action == "status":
             item["prodigi_status"] = value if value in PRODIGI_STATUS_OPTIONS else item.get("prodigi_status")
         elif action == "shipping":
@@ -2904,52 +3013,288 @@ def render_prodigi_page_legacy():
         st.write("4. Check the order one more time before sending it to production.")
 
 
+def _prodigi_active_rows(rows):
+    return [row for row in rows or [] if row.get("prodigi_status") in PRODIGI_ACTIVE_STATUSES]
+
+
+def _prodigi_rows_for_tab(rows, tab_name):
+    if tab_name == "Ready to Send":
+        return [row for row in rows if row.get("prodigi_status") == "Ready to Send"]
+    if tab_name == "Needs Review":
+        return [row for row in rows if row.get("prodigi_status") in {"Needs Review", "Hold / Issue"}]
+    if tab_name == "Awaiting Tracking":
+        return [
+            row
+            for row in rows
+            if row.get("prodigi_status") in {"Submitted to Prodigi", "In Production", "Awaiting Tracking", "Shipped"}
+            and not _prodigi_fulfilled(row)
+        ]
+    if tab_name == "History":
+        return [row for row in rows if row.get("prodigi_status") == "Fulfilled in Shopify"]
+    return rows
+
+
+def _prodigi_save_row_update(rows, row_id, updates):
+    updated_rows = []
+    updated_row = None
+    for row in rows or []:
+        if row.get("row_id") != row_id:
+            updated_rows.append(row)
+            continue
+        merged = dict(row)
+        merged.update(updates or {})
+        merged["updated_at"] = _prodigi_now_iso()
+        updated_row = prodigi_tracker_row_from_order(merged, merged)
+        updated_rows.append(updated_row)
+    save_prodigi_tracker_rows(updated_rows)
+    return updated_rows, updated_row
+
+
+def _prodigi_row_by_id(rows, row_id):
+    return next((row for row in rows or [] if row.get("row_id") == row_id), None)
+
+
+def _prodigi_check_status(ok, manual=False):
+    if ok:
+        return "✅"
+    return "☐" if manual else "⚠"
+
+
+def prodigi_checklist_sections(row):
+    duplicate_ok = "Duplicate" not in str(row.get("blockers") or "")
+    return [
+        (
+            "Edition QA",
+            [
+                ("Edition number assigned", bool(_prodigi_int(row.get("edition_number"), 0)), "auto"),
+                ("Edition number matches product", bool(row.get("shopify_product_id") or row.get("product_title")), "auto"),
+                ("No duplicate edition number", duplicate_ok, "auto"),
+                ("Product edition total exists", bool(_prodigi_int(row.get("edition_total"), 0)), "auto"),
+            ],
+        ),
+        (
+            "Certificate QA",
+            [
+                ("Certificate generated", _prodigi_certificate_generated(row), "auto"),
+                ("Certificate visually checked", _prodigi_bool(row.get("certificate_visual_checked")), "manual"),
+                ("Certificate customer name checked", _prodigi_bool(row.get("certificate_customer_checked")), "manual"),
+                ("Certificate product title checked", _prodigi_bool(row.get("certificate_product_checked")), "manual"),
+                ("Certificate edition number checked", _prodigi_bool(row.get("certificate_edition_checked")), "manual"),
+                ("Certificate uploaded to Shopify/customer account", _prodigi_certificate_uploaded(row), "auto"),
+            ],
+        ),
+        (
+            "Prodigi QA",
+            [
+                ("Shopify variant mapped correctly", bool(row.get("frame") and row.get("size")), "auto"),
+                ("Frame colour checked", _prodigi_bool(row.get("frame_colour_checked")), "manual"),
+                ("Size checked", bool(row.get("size")), "auto"),
+                ("Prodigi size checked", bool(row.get("prodigi_size")), "auto"),
+                ("Prodigi product option checked", _prodigi_bool(row.get("prodigi_option_checked")), "manual"),
+                ("Prodigi code checked", bool(row.get("prodigi_code")), "auto"),
+            ],
+        ),
+        (
+            "Shipping QA",
+            [
+                ("Shipping method exists", bool(row.get("shipping_method")), "auto"),
+                ("Express/standard checked", _prodigi_bool(row.get("shipping_checked")), "manual"),
+                ("Customer delivery details present", bool(row.get("customer_name") or row.get("customer_email")), "auto"),
+            ],
+        ),
+        (
+            "Submission QA",
+            [
+                ("Submitted to Prodigi", _prodigi_submitted(row), "auto"),
+                ("Date sent to Prodigi", bool(row.get("date_sent_to_prodigi")), "auto"),
+                ("Prodigi order ID added if available", bool(row.get("prodigi_order_id")) or _prodigi_submitted(row), "auto"),
+                ("Submission manually confirmed", _prodigi_bool(row.get("submitted_confirmed")), "manual"),
+            ],
+        ),
+        (
+            "Tracking / Shopify Fulfilment QA",
+            [
+                ("Tracking number added", bool(row.get("tracking_number")), "auto"),
+                ("Tracking URL/carrier added", bool(row.get("tracking_url") or row.get("carrier")), "auto"),
+                ("Shopify fulfilment completed", _prodigi_fulfilled(row), "auto"),
+                ("Final status marked Fulfilled", row.get("prodigi_status") == "Fulfilled in Shopify", "auto"),
+            ],
+        ),
+    ]
+
+
+def _render_prodigi_checklist_dialog(rows):
+    row_id = st.session_state.get("prodigi-checklist-row-id")
+    if not row_id:
+        return rows
+    row = _prodigi_row_by_id(rows, row_id)
+    if not row:
+        st.session_state["prodigi-checklist-row-id"] = ""
+        return rows
+
+    @st.dialog(f"Prodigi QA Checklist: {row.get('shopify_order_name') or 'Order'}", width="large")
+    def _checklist_dialog():
+        st.caption(row.get("product_title") or "")
+        st.write(prodigi_progress_text(row))
+        if row.get("blockers"):
+            st.warning(row["blockers"])
+
+        manual_values = {}
+        for section, items in prodigi_checklist_sections(row):
+            st.markdown(f"**{section}**")
+            for label, ok, check_type in items:
+                if check_type == "manual":
+                    field = {
+                        "Certificate visually checked": "certificate_visual_checked",
+                        "Certificate customer name checked": "certificate_customer_checked",
+                        "Certificate product title checked": "certificate_product_checked",
+                        "Certificate edition number checked": "certificate_edition_checked",
+                        "Frame colour checked": "frame_colour_checked",
+                        "Prodigi product option checked": "prodigi_option_checked",
+                        "Express/standard checked": "shipping_checked",
+                        "Submission manually confirmed": "submitted_confirmed",
+                    }.get(label)
+                    manual_values[field] = st.checkbox(
+                        label,
+                        value=bool(ok),
+                        key=f"prodigi-checklist-{field}-{safe_filename_part(row_id)}",
+                    )
+                else:
+                    st.checkbox(
+                        f"{label} {_prodigi_check_status(ok)}",
+                        value=bool(ok),
+                        disabled=True,
+                        key=f"prodigi-checklist-auto-{safe_filename_part(label)}-{safe_filename_part(row_id)}",
+                    )
+
+        prodigi_order_id = st.text_input(
+            "Prodigi order ID",
+            value=row.get("prodigi_order_id") or "",
+            key=f"prodigi-checklist-order-id-{safe_filename_part(row_id)}",
+        )
+        tracking_number = st.text_input(
+            "Tracking number",
+            value=row.get("tracking_number") or "",
+            key=f"prodigi-checklist-tracking-{safe_filename_part(row_id)}",
+        )
+        tracking_url = st.text_input(
+            "Tracking URL",
+            value=row.get("tracking_url") or "",
+            key=f"prodigi-checklist-tracking-url-{safe_filename_part(row_id)}",
+        )
+        carrier = st.text_input(
+            "Carrier",
+            value=row.get("carrier") or "",
+            key=f"prodigi-checklist-carrier-{safe_filename_part(row_id)}",
+        )
+        notes = st.text_area(
+            "Notes",
+            value=row.get("notes") or "",
+            height=110,
+            key=f"prodigi-checklist-notes-{safe_filename_part(row_id)}",
+        )
+
+        actions = st.columns([1, 1, 1, 1, 1])
+        base_updates = {
+            **manual_values,
+            "prodigi_order_id": prodigi_order_id,
+            "tracking_number": tracking_number,
+            "tracking_url": tracking_url,
+            "carrier": carrier,
+            "notes": notes,
+        }
+        if actions[0].button("Save", type="primary", use_container_width=True):
+            _prodigi_save_row_update(rows, row_id, base_updates)
+            st.success("Checklist saved.")
+            st.rerun()
+        if actions[1].button("Mark Submitted", use_container_width=True):
+            candidate = prodigi_tracker_row_from_order({**row, **base_updates}, {**row, **base_updates})
+            blockers = prodigi_manual_submit_blockers(candidate)
+            if blockers:
+                st.error(", ".join(blockers))
+            else:
+                _prodigi_save_row_update(
+                    rows,
+                    row_id,
+                    {**base_updates, "prodigi_status": "Submitted to Prodigi", "date_sent_to_prodigi": row.get("date_sent_to_prodigi") or _prodigi_now_iso()},
+                )
+                st.success("Marked submitted.")
+                st.rerun()
+        if actions[2].button("Mark Fulfilled", use_container_width=True):
+            candidate = prodigi_tracker_row_from_order({**row, **base_updates}, {**row, **base_updates})
+            blockers = prodigi_fulfillment_blockers(candidate)
+            if blockers:
+                st.error(", ".join(blockers))
+            else:
+                _prodigi_save_row_update(
+                    rows,
+                    row_id,
+                    {**base_updates, "prodigi_status": "Fulfilled in Shopify", "date_fulfilled_in_shopify": row.get("date_fulfilled_in_shopify") or _prodigi_now_iso()},
+                )
+                st.success("Marked fulfilled.")
+                st.rerun()
+        if actions[3].button("Hold / Issue", use_container_width=True):
+            _prodigi_save_row_update(rows, row_id, {**base_updates, "prodigi_status": "Hold / Issue"})
+            st.rerun()
+        if actions[4].button("Close", use_container_width=True):
+            st.session_state["prodigi-checklist-row-id"] = ""
+            st.rerun()
+
+    _checklist_dialog()
+    return rows
+
+
 def render_prodigi_page():
-    st.title("Prodigi Fulfilment Tracker")
-    st.caption("Fast-fill fulfilment tracker for Shopify artwork lines. Support: "
-               f"[{PRODIGI_SUPPORT_EMAIL}](mailto:{PRODIGI_SUPPORT_EMAIL})")
+    st.title("Prodigi Fulfilment Inbox")
+    st.caption(
+        "Daily QA queue for artwork order lines. Copy details, check the risks, then move each row forward. "
+        f"Support: [{PRODIGI_SUPPORT_EMAIL}](mailto:{PRODIGI_SUPPORT_EMAIL})"
+    )
 
     order_allocator = importlib.import_module("order_allocator")
     stored_state = load_prodigi_tracker_state()
     orders_snapshot = order_allocator.load_orders_snapshot()
     rows = build_prodigi_tracker_rows(orders_snapshot.get("rows") or [], stored_state.get("rows") or [])
     if not stored_state.get("rows") and rows:
-        save_prodigi_tracker_rows(rows)
+        stored_state = save_prodigi_tracker_rows(rows)
 
-    if "prodigi_tracker_filter" not in st.session_state:
-        st.session_state.prodigi_tracker_filter = "All"
+    rows = _render_prodigi_checklist_dialog(rows)
+
+    def reload_from_orders_snapshot():
+        refreshed = build_prodigi_tracker_rows(orders_snapshot.get("rows") or [], stored_state.get("rows") or rows)
+        save_prodigi_tracker_rows(refreshed)
+        return refreshed
 
     counts = {status: 0 for status in PRODIGI_STATUS_OPTIONS}
     for row in rows:
-        counts[row.get("prodigi_status") or "Needs Review"] = counts.get(row.get("prodigi_status") or "Needs Review", 0) + 1
+        status = row.get("prodigi_status") or "Needs Review"
+        counts[status] = counts.get(status, 0) + 1
+    active_count = len(_prodigi_active_rows(rows))
 
-    summary_labels = (
-        "Needs Review",
-        "Ready for Prodigi",
-        "Double Checked",
-        "Submitted to Prodigi",
-        "Shipped",
-        "Fulfilled in Shopify",
-        "Issue / Hold",
+    metric_columns = st.columns(4)
+    metric_columns[0].metric("Ready to Send", counts.get("Ready to Send", 0))
+    metric_columns[1].metric("Needs Review", counts.get("Needs Review", 0) + counts.get("Hold / Issue", 0))
+    metric_columns[2].metric(
+        "Awaiting Tracking",
+        counts.get("Submitted to Prodigi", 0) + counts.get("In Production", 0) + counts.get("Awaiting Tracking", 0) + counts.get("Shipped", 0),
     )
-    summary_columns = st.columns(len(summary_labels))
-    for column, label in zip(summary_columns, summary_labels):
-        with column:
-            if st.button(f"{label}\n{counts.get(label, 0)}", key=f"prodigi-filter-card-{label}", use_container_width=True):
-                st.session_state.prodigi_tracker_filter = label
-                st.rerun()
+    metric_columns[3].metric("Active Rows", active_count)
 
-    toolbar = st.columns([1.2, 1.2, 1.2, 1.2, 1.2])
+    toolbar = st.columns([1.1, 1.1, 1.1, 1.1])
     toolbar[0].link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=True)
-    toolbar[1].download_button(
+    if toolbar[1].button("Load from Orders", use_container_width=True, key="prodigi-load-from-orders-top"):
+        rows = reload_from_orders_snapshot()
+        st.success("Loaded rows from the saved Orders snapshot.")
+        st.rerun()
+    toolbar[2].download_button(
         "Export Tracker CSV",
         data=export_prodigi_tracker_csv(rows),
         file_name=f"prodigi-fulfilment-tracker-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
         mime="text/csv",
         use_container_width=True,
     )
-    with toolbar[2].popover("Import CSV", use_container_width=True):
-        st.caption("Imports the historical Google Sheet tracking CSV or a tracker export.")
+    with toolbar[3].popover("Import CSV", use_container_width=True):
+        st.caption("Imports the old tracking sheet or a tracker export. Existing row IDs stay matched where possible.")
         uploaded_csv = st.file_uploader(
             "Upload Prodigi tracker CSV",
             type=["csv"],
@@ -2957,39 +3302,29 @@ def render_prodigi_page():
         )
         if st.button("Import CSV Into Tracker", disabled=uploaded_csv is None, use_container_width=True):
             result = import_prodigi_tracker_csv(uploaded_csv, rows)
-            rows = result["rows"]
-            save_prodigi_tracker_rows(rows)
+            save_prodigi_tracker_rows(result["rows"])
             st.success(
                 f"Imported {result['read']} row(s). Matched {result['matched']}; created {result['created']} review row(s)."
             )
             for warning in result.get("warnings") or []:
                 st.warning(warning)
             st.rerun()
-    toolbar[3].caption(f"Last tracker save: {stored_state.get('updated_at') or 'Not saved yet'}")
-    toolbar[4].caption(f"Orders snapshot: {orders_snapshot.get('last_refreshed') or orders_snapshot.get('saved_at') or 'Not loaded'}")
 
-    filters = st.columns([1.2, 2.4, 1])
-    status_filter = filters[0].selectbox(
-        "Status filter",
-        ("All", *PRODIGI_STATUS_OPTIONS),
-        index=("All", *PRODIGI_STATUS_OPTIONS).index(st.session_state.prodigi_tracker_filter)
-        if st.session_state.prodigi_tracker_filter in ("All", *PRODIGI_STATUS_OPTIONS)
-        else 0,
-        key="prodigi-tracker-status-filter",
+    snapshot_columns = st.columns(2)
+    snapshot_columns[0].caption(
+        f"Last Orders snapshot: {orders_snapshot.get('last_refreshed') or orders_snapshot.get('saved_at') or 'Not loaded'}"
     )
-    st.session_state.prodigi_tracker_filter = status_filter
-    search = filters[1].text_input(
-        "Search",
+    snapshot_columns[1].caption(f"Last tracker save: {stored_state.get('updated_at') or 'Not saved yet'}")
+
+    search = st.text_input(
+        "Find row",
         placeholder="Order, customer, product, edition, tracking",
-        key="prodigi-tracker-search",
+        key="prodigi-inbox-search",
     )
-    filters[2].caption("Tip: edit cells directly, then tab through the row.")
+    search_text = _prodigi_normalise_text(search)
 
     def row_matches(row):
-        if status_filter != "All" and row.get("prodigi_status") != status_filter:
-            return False
-        needle = _prodigi_normalise_text(search)
-        if not needle:
+        if not search_text:
             return True
         haystack = _prodigi_normalise_text(
             " ".join(
@@ -3001,190 +3336,141 @@ def render_prodigi_page():
                     "product_title",
                     "variant_title",
                     "edition_number",
+                    "shipping_method",
                     "tracking_number",
                     "prodigi_order_id",
                     "prodigi_code",
+                    "blockers",
                 )
             )
         )
-        return needle in haystack
+        return search_text in haystack
 
-    visible_rows = [row for row in rows if row_matches(row)][:150]
-    editor_rows = []
-    for row in visible_rows:
-        editor_rows.append(
+    def selection_key(row):
+        return f"prodigi-select-{safe_filename_part(row.get('row_id') or '')}"
+
+    def edition_label(row):
+        edition = _prodigi_int(row.get("edition_number"), 0)
+        return f"#{edition:03d}" if edition else "Missing"
+
+    def save_updates(row, updates):
+        updated_rows, updated_row = _prodigi_save_row_update(rows, row.get("row_id"), updates)
+        return updated_rows, updated_row
+
+    def mark_row_submitted(row):
+        blockers = prodigi_manual_submit_blockers(row)
+        if blockers:
+            st.error(", ".join(blockers))
+            return False
+        save_updates(
+            row,
             {
-                "select": False,
-                "row_id": row["row_id"],
-                "Status": row.get("prodigi_status") or "Needs Review",
-                "Order #": row.get("shopify_order_name") or "",
-                "Date": row.get("date") or "",
-                "Customer": row.get("customer_name") or "",
-                "Product": row.get("product_title") or "",
-                "Edition #": f"#{int(row.get('edition_number') or 0):03d}" if int(row.get("edition_number") or 0) else "",
-                "Frame": row.get("frame") or "",
-                "Size": row.get("size") or "",
-                "Prodigi Size": row.get("prodigi_size") or "",
-                "Prodigi Code": row.get("prodigi_code") or "",
-                "Shipping": row.get("shipping_method") or "",
-                "Certificate": row.get("certificate_status") or "",
-                "Double Checked": bool(row.get("double_checked")),
-                "Prodigi Order ID": row.get("prodigi_order_id") or "",
-                "Tracking": row.get("tracking_number") or "",
-                "Carrier": row.get("carrier") or "",
-                "Notes": row.get("notes") or "",
-                "Actions": "Select + copy",
-            }
+                "prodigi_status": "Submitted to Prodigi",
+                "date_sent_to_prodigi": row.get("date_sent_to_prodigi") or _prodigi_now_iso(),
+            },
         )
+        st.success(f"{row.get('shopify_order_name') or 'Order'} marked submitted.")
+        return True
 
-    st.caption(f"{len(visible_rows)} tracker row(s) shown. Rows load from the saved Orders snapshot and local tracker cache.")
-    edited_rows = st.data_editor(
-        editor_rows,
-        hide_index=True,
-        use_container_width=True,
-        height=min(720, max(260, 44 + len(editor_rows) * 36)),
-        column_order=[
-            "select",
-            "Status",
-            "Order #",
-            "Date",
-            "Customer",
-            "Product",
-            "Edition #",
-            "Frame",
-            "Size",
-            "Prodigi Size",
-            "Prodigi Code",
-            "Shipping",
-            "Certificate",
-            "Double Checked",
-            "Prodigi Order ID",
-            "Tracking",
-            "Carrier",
-            "Notes",
-            "Actions",
-        ],
-        disabled=[
-            "Order #",
-            "Date",
-            "Customer",
-            "Product",
-            "Edition #",
-            "Frame",
-            "Size",
-            "Prodigi Size",
-            "Prodigi Code",
-            "Certificate",
-            "Actions",
-        ],
-        column_config={
-            "select": st.column_config.CheckboxColumn(""),
-            "Status": st.column_config.SelectboxColumn("Status", options=list(PRODIGI_STATUS_OPTIONS)),
-            "Double Checked": st.column_config.CheckboxColumn("Double Checked"),
-            "Notes": st.column_config.TextColumn("Notes", width="medium"),
-            "row_id": None,
-        },
-        key="prodigi-fulfilment-editor",
-    )
+    def render_bulk_actions(tab_name, selected_rows):
+        if not selected_rows:
+            return
+        selected_ids = [row.get("row_id") for row in selected_rows if row.get("row_id")]
+        with st.container(border=True):
+            st.markdown(f"**{len(selected_rows)} selected**")
+            bulk = st.columns([1.4, 1.1, 1, 1])
+            with bulk[0]:
+                render_copy_text_button(
+                    "\n\n---\n\n".join(prodigi_copy_details(row) for row in selected_rows),
+                    f"prodigi-selected-copy-{safe_filename_part(tab_name)}",
+                    "Copy Selected Prodigi Details",
+                )
+            if bulk[1].button("Mark Selected Submitted", use_container_width=True, key=f"prodigi-bulk-submit-{tab_name}"):
+                result = apply_prodigi_bulk_action(rows, selected_ids, "submitted")
+                if result["errors"]:
+                    for error in result["errors"]:
+                        st.error(error)
+                else:
+                    save_prodigi_tracker_rows(result["rows"])
+                    st.rerun()
+            if bulk[2].button("Hold Selected", use_container_width=True, key=f"prodigi-bulk-hold-{tab_name}"):
+                result = apply_prodigi_bulk_action(rows, selected_ids, "hold")
+                save_prodigi_tracker_rows(result["rows"])
+                st.rerun()
+            bulk[3].download_button(
+                "Export Selected CSV",
+                data=export_prodigi_tracker_csv(selected_rows),
+                file_name=f"prodigi-selected-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
 
-    by_id = {row["row_id"]: row for row in rows}
-    edited_by_id = {}
-    for edited in edited_rows or []:
-        row_id = edited.get("row_id")
-        if not row_id or row_id not in by_id:
-            continue
-        updated = dict(by_id[row_id])
-        updated["prodigi_status"] = edited.get("Status") or updated.get("prodigi_status")
-        updated["prodigi_order_id"] = edited.get("Prodigi Order ID") or ""
-        updated["tracking_number"] = edited.get("Tracking") or ""
-        updated["carrier"] = edited.get("Carrier") or ""
-        updated["notes"] = edited.get("Notes") or ""
-        updated["shipping_method"] = edited.get("Shipping") or ""
-        updated["double_checked"] = bool(edited.get("Double Checked"))
-        updated["updated_at"] = _prodigi_now_iso()
-        edited_by_id[row_id] = prodigi_tracker_row_from_order(updated, updated)
+    def render_queue(tab_name):
+        tab_rows = [row for row in _prodigi_rows_for_tab(rows, tab_name) if row_matches(row)][:150]
+        if not tab_rows:
+            if tab_name == "Ready to Send":
+                st.info("No orders ready for Prodigi.")
+                if st.button("Load from Orders", key="prodigi-load-from-orders-empty", use_container_width=False):
+                    reload_from_orders_snapshot()
+                    st.rerun()
+            else:
+                st.info("No rows in this queue.")
+            return
 
-    changed = False
-    for index, row in enumerate(rows):
-        edited = edited_by_id.get(row.get("row_id"))
-        if edited and any(edited.get(field) != row.get(field) for field in PRODIGI_EDITABLE_FIELDS):
-            rows[index] = edited
-            changed = True
-    if changed:
-        save_prodigi_tracker_rows(rows)
-        st.success("Saved")
+        st.caption(f"{len(tab_rows)} row(s) shown.")
+        header = st.columns([0.45, 0.8, 1.15, 2.2, 0.7, 1.3, 1.2, 2.45, 3.1])
+        for column, label in zip(
+            header,
+            ("", "Order #", "Customer", "Product", "Edition #", "Variant", "Shipping", "Progress", "Actions"),
+        ):
+            column.caption(label)
 
-    selected_ids = [edited.get("row_id") for edited in edited_rows or [] if edited.get("select")]
-    selected_rows = [row for row in rows if row.get("row_id") in set(selected_ids)]
+        selected_rows = []
+        for row in tab_rows:
+            row_id = row.get("row_id") or ""
+            key_part = safe_filename_part(row_id)
+            with st.container(border=True):
+                columns = st.columns([0.45, 0.8, 1.15, 2.2, 0.7, 1.3, 1.2, 2.45, 3.1])
+                selected = columns[0].checkbox(
+                    "Select",
+                    key=selection_key(row),
+                    label_visibility="collapsed",
+                )
+                if selected:
+                    selected_rows.append(row)
+                columns[1].write(row.get("shopify_order_name") or "-")
+                columns[2].write(row.get("customer_name") or "-")
+                columns[3].write(row.get("product_title") or "-")
+                if row.get("blockers"):
+                    columns[3].caption(f"Blockers: {row.get('blockers')}")
+                columns[4].write(edition_label(row))
+                columns[5].write(row.get("variant_title") or "-")
+                columns[6].write(row.get("shipping_method") or "Missing")
+                columns[7].caption(prodigi_progress_text(row))
+                action_columns = columns[8].columns([1.3, 1.05, 1.15, 1])
+                with action_columns[0]:
+                    render_copy_text_button(prodigi_copy_details(row), f"prodigi-copy-{key_part}", "Copy Prodigi Details")
+                if action_columns[1].button("Open Checklist", key=f"prodigi-checklist-open-{key_part}", use_container_width=True):
+                    st.session_state["prodigi-checklist-row-id"] = row_id
+                    st.rerun()
+                if action_columns[2].button("Mark Submitted", key=f"prodigi-submit-{key_part}", use_container_width=True):
+                    if mark_row_submitted(row):
+                        st.rerun()
+                if action_columns[3].button("Hold / Issue", key=f"prodigi-hold-{key_part}", use_container_width=True):
+                    save_updates(row, {"prodigi_status": "Hold / Issue"})
+                    st.rerun()
 
-    st.subheader("Fast Fill / Bulk Actions Toolbar")
-    bulk = st.columns(7)
-    if bulk[0].button("Mark Selected Double Checked", disabled=not selected_ids, use_container_width=True):
-        result = apply_prodigi_bulk_action(rows, selected_ids, "double_checked")
-        save_prodigi_tracker_rows(result["rows"])
-        st.rerun()
-    if bulk[1].button("Mark Selected Submitted to Prodigi", disabled=not selected_ids, use_container_width=True):
-        result = apply_prodigi_bulk_action(rows, selected_ids, "submitted")
-        if result["errors"]:
-            for error in result["errors"]:
-                st.error(error)
-        save_prodigi_tracker_rows(result["rows"])
-        st.rerun()
-    bulk_status = bulk[2].selectbox("Bulk Set Status", PRODIGI_STATUS_OPTIONS, key="prodigi-bulk-status")
-    if bulk[3].button("Apply Status", disabled=not selected_ids, use_container_width=True):
-        result = apply_prodigi_bulk_action(rows, selected_ids, "status", bulk_status)
-        save_prodigi_tracker_rows(result["rows"])
-        st.rerun()
-    bulk_shipping = bulk[4].text_input("Bulk Set Shipping", key="prodigi-bulk-shipping")
-    if bulk[5].button("Apply Shipping", disabled=not selected_ids or not bulk_shipping.strip(), use_container_width=True):
-        result = apply_prodigi_bulk_action(rows, selected_ids, "shipping", bulk_shipping)
-        save_prodigi_tracker_rows(result["rows"])
-        st.rerun()
-    if bulk[6].download_button(
-        "Export Selected CSV",
-        data=export_prodigi_tracker_csv(selected_rows),
-        file_name=f"prodigi-selected-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
-        mime="text/csv",
-        disabled=not selected_rows,
-        use_container_width=True,
-    ):
-        pass
+        render_bulk_actions(tab_name, selected_rows)
 
-    note_cols = st.columns([3, 1, 1])
-    bulk_note = note_cols[0].text_input("Bulk Add Note", key="prodigi-bulk-note")
-    if note_cols[1].button("Add Note", disabled=not selected_ids or not bulk_note.strip(), use_container_width=True):
-        result = apply_prodigi_bulk_action(rows, selected_ids, "note", bulk_note)
-        save_prodigi_tracker_rows(result["rows"])
-        st.rerun()
-    with note_cols[2]:
-        render_copy_text_button(
-            "\n\n---\n\n".join(prodigi_copy_details(row) for row in selected_rows),
-            "prodigi-selected-copy-pack",
-            "Copy Selected Prodigi Details",
-        )
-
-    if selected_rows:
-        selected = selected_rows[0]
-        with st.expander("Selected row details", expanded=False):
-            st.write(f"**Order:** {selected.get('shopify_order_name')}")
-            st.write(f"**Customer:** {selected.get('customer_name')} / {selected.get('customer_email')}")
-            st.write(f"**Product:** {selected.get('product_title')}")
-            st.write(f"**Variant:** {selected.get('variant_title')}")
-            st.write(f"**Certificate:** {selected.get('certificate_status')}")
-            st.write(f"**Tracking URL:** {selected.get('tracking_url') or '-'}")
-            st.write(f"**Blockers:** {selected.get('blockers') or 'None'}")
-            st.write(f"**Notes:** {selected.get('notes') or '-'}")
-            render_copy_text_button(prodigi_copy_details(selected), f"prodigi-row-copy-{selected.get('row_id')}", "Copy Prodigi Details")
+    tabs = st.tabs(["Ready to Send", "Needs Review", "Awaiting Tracking", "History"])
+    for tab, tab_name in zip(tabs, ["Ready to Send", "Needs Review", "Awaiting Tracking", "History"]):
+        with tab:
+            render_queue(tab_name)
 
     with st.expander("Prodigi Product Code Reference", expanded=False):
         reference_rows = prodigi_reference_rows()
         st.dataframe(reference_rows, hide_index=True, use_container_width=True)
         st.caption("XL=A1, L=A2, M=A3, S=A4. Oak in Sports Cave = Natural in Prodigi.")
-
-    st.caption(
-        "Before sending to production: confirm XL=A1, L=A2, M=A3, S=A4, Classic Frame or Fine Art Paper, "
-        f"and the exact frame colour. For print errors, damage, or warranty support, email {PRODIGI_SUPPORT_EMAIL}."
-    )
 
 
 def fetch_latest_shopify_products(config):
