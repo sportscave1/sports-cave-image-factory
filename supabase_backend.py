@@ -527,6 +527,36 @@ def _ensure_schema_uncached():
                 )
                 """
             )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS prodigi_dispatch_rows (
+                    row_id TEXT PRIMARY KEY,
+                    shopify_order_id TEXT,
+                    shopify_order_name TEXT,
+                    shopify_order_number TEXT,
+                    shopify_line_item_id TEXT,
+                    customer_name TEXT,
+                    product_title TEXT,
+                    shopify_variant_title TEXT,
+                    edition_number INTEGER,
+                    sports_cave_frame TEXT,
+                    sports_cave_size TEXT,
+                    prodigi_product_name TEXT,
+                    prodigi_product_code TEXT,
+                    prodigi_frame_colour TEXT,
+                    prodigi_status TEXT,
+                    date_sent_to_prodigi TEXT,
+                    submitted_at TIMESTAMPTZ,
+                    qa_confirmed BOOLEAN DEFAULT FALSE,
+                    qa_notes TEXT,
+                    notes TEXT,
+                    source TEXT DEFAULT 'prodigi_dispatch_log',
+                    row_json JSONB DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
             cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
             cur.execute(
                 """
@@ -850,6 +880,32 @@ def _ensure_schema_uncached():
                     ("created_at", "TIMESTAMPTZ DEFAULT now()"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
+                "prodigi_dispatch_rows": (
+                    ("row_id", "TEXT"),
+                    ("shopify_order_id", "TEXT"),
+                    ("shopify_order_name", "TEXT"),
+                    ("shopify_order_number", "TEXT"),
+                    ("shopify_line_item_id", "TEXT"),
+                    ("customer_name", "TEXT"),
+                    ("product_title", "TEXT"),
+                    ("shopify_variant_title", "TEXT"),
+                    ("edition_number", "INTEGER"),
+                    ("sports_cave_frame", "TEXT"),
+                    ("sports_cave_size", "TEXT"),
+                    ("prodigi_product_name", "TEXT"),
+                    ("prodigi_product_code", "TEXT"),
+                    ("prodigi_frame_colour", "TEXT"),
+                    ("prodigi_status", "TEXT"),
+                    ("date_sent_to_prodigi", "TEXT"),
+                    ("submitted_at", "TIMESTAMPTZ"),
+                    ("qa_confirmed", "BOOLEAN DEFAULT FALSE"),
+                    ("qa_notes", "TEXT"),
+                    ("notes", "TEXT"),
+                    ("source", "TEXT DEFAULT 'prodigi_dispatch_log'"),
+                    ("row_json", "JSONB DEFAULT '{}'::jsonb"),
+                    ("created_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
+                ),
                 "certificates": (
                     ("edition_order_id", "TEXT"),
                     ("related_edition_order_id", "uuid NULL"),
@@ -1129,6 +1185,10 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_certificates_line_unit ON certificates(shopify_line_item_id, line_item_unit_index)")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_unique ON product_assets(shopify_handle, asset_type)", "idx_product_assets_handle_type_unique")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_product_assets_handle_type_name_unique ON product_assets(shopify_handle, asset_type, asset_name)", "idx_product_assets_handle_type_name_unique")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_prodigi_dispatch_rows_row_id_unique ON prodigi_dispatch_rows(row_id)", "idx_prodigi_dispatch_rows_row_id_unique")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_prodigi_dispatch_rows_order ON prodigi_dispatch_rows(shopify_order_name)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_prodigi_dispatch_rows_status ON prodigi_dispatch_rows(prodigi_status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_prodigi_dispatch_rows_updated_at ON prodigi_dispatch_rows(updated_at DESC)")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_file_assets_bucket_key_unique ON file_assets(bucket, object_key)", "idx_file_assets_bucket_key_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_file_assets_handle ON file_assets(related_shopify_handle)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_file_assets_order ON file_assets(related_shopify_order_id)")
@@ -3142,6 +3202,125 @@ def get_order_line_assignment_snapshot(line_item_ids):
         for row in rows
         if str(row.get("shopify_line_item_id") or "").strip()
     }
+
+
+def _prodigi_int_value(value, default=0):
+    try:
+        return int(value or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _prodigi_bool_value(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "y", "checked"}
+
+
+def list_prodigi_dispatch_rows(limit=1000):
+    ensure_schema()
+    limit_value = max(min(int(limit or 1000), 5000), 1)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT row_json, updated_at
+                FROM prodigi_dispatch_rows
+                ORDER BY updated_at DESC NULLS LAST, shopify_order_name DESC NULLS LAST
+                LIMIT %s
+                """,
+                (limit_value,),
+            )
+            rows = cur.fetchall()
+    output = []
+    for row in rows:
+        payload = row.get("row_json") or {}
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (TypeError, ValueError):
+                payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        if row.get("updated_at") and not payload.get("updated_at"):
+            payload["updated_at"] = str(row.get("updated_at"))
+        output.append(payload)
+    return output
+
+
+def upsert_prodigi_dispatch_rows(rows):
+    ensure_schema()
+    count = 0
+    with connect() as conn:
+        with conn.cursor() as cur:
+            for raw in rows or []:
+                row = dict(raw or {})
+                row_id = str(row.get("row_id") or "").strip()
+                if not row_id:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO prodigi_dispatch_rows(
+                        row_id, shopify_order_id, shopify_order_name, shopify_line_item_id,
+                        shopify_order_number, customer_name, product_title, shopify_variant_title,
+                        edition_number, sports_cave_frame, sports_cave_size, prodigi_product_name,
+                        prodigi_product_code, prodigi_frame_colour, prodigi_status,
+                        date_sent_to_prodigi, submitted_at, qa_confirmed, qa_notes,
+                        notes, source, row_json, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now())
+                    ON CONFLICT (row_id) DO UPDATE SET
+                        shopify_order_id=EXCLUDED.shopify_order_id,
+                        shopify_order_name=EXCLUDED.shopify_order_name,
+                        shopify_line_item_id=EXCLUDED.shopify_line_item_id,
+                        shopify_order_number=EXCLUDED.shopify_order_number,
+                        customer_name=EXCLUDED.customer_name,
+                        product_title=EXCLUDED.product_title,
+                        shopify_variant_title=EXCLUDED.shopify_variant_title,
+                        edition_number=EXCLUDED.edition_number,
+                        sports_cave_frame=EXCLUDED.sports_cave_frame,
+                        sports_cave_size=EXCLUDED.sports_cave_size,
+                        prodigi_product_name=EXCLUDED.prodigi_product_name,
+                        prodigi_product_code=EXCLUDED.prodigi_product_code,
+                        prodigi_frame_colour=EXCLUDED.prodigi_frame_colour,
+                        prodigi_status=EXCLUDED.prodigi_status,
+                        date_sent_to_prodigi=EXCLUDED.date_sent_to_prodigi,
+                        submitted_at=EXCLUDED.submitted_at,
+                        qa_confirmed=EXCLUDED.qa_confirmed,
+                        qa_notes=EXCLUDED.qa_notes,
+                        notes=EXCLUDED.notes,
+                        source=EXCLUDED.source,
+                        row_json=EXCLUDED.row_json,
+                        updated_at=now()
+                    """,
+                    (
+                        row_id,
+                        str(row.get("shopify_order_id") or ""),
+                        str(row.get("shopify_order_name") or ""),
+                        str(row.get("shopify_line_item_id") or row.get("linked_order_line_id") or ""),
+                        str(row.get("shopify_order_number") or row.get("shopify_order_name") or ""),
+                        str(row.get("customer_name") or ""),
+                        str(row.get("product_title") or ""),
+                        str(row.get("shopify_variant_title") or row.get("variant_title") or ""),
+                        _prodigi_int_value(row.get("edition_number"), 0) or None,
+                        str(row.get("sports_cave_frame") or row.get("frame") or ""),
+                        str(row.get("sports_cave_size") or row.get("size") or ""),
+                        str(row.get("prodigi_product_name") or ""),
+                        str(row.get("prodigi_product_code") or row.get("prodigi_code") or ""),
+                        str(row.get("prodigi_frame_colour") or row.get("prodigi_frame") or ""),
+                        str(row.get("prodigi_status") or ""),
+                        str(row.get("date_sent_to_prodigi") or ""),
+                        str(row.get("submitted_at") or "") or None,
+                        _prodigi_bool_value(row.get("qa_confirmed")),
+                        str(row.get("qa_notes") or ""),
+                        str(row.get("notes") or row.get("issue_reason") or ""),
+                        str(row.get("source") or "prodigi_dispatch_log"),
+                        json_dumps(row),
+                    ),
+                )
+                count += 1
+        conn.commit()
+    return {"upserted": count}
 
 
 def get_app_setting(key, default=None):

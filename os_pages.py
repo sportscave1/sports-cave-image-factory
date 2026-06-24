@@ -83,50 +83,198 @@ LIMITED_EDITION_EXPORT_FIELDS = (
     "updated_at",
 )
 
-PRODIGI_DASHBOARD_URL = "https://dashboard.prodigi.com/dashboard"
-PRODIGI_SIZE_OPTIONS = (
+PRODIGI_DASHBOARD_URL = (
+    "https://dashboard.prodigi.com/connect-sales-channel/shopify?"
+    "code=8cb5baf40dc839d456b331fbf23fd82c&"
+    "hmac=3caa9f14ab6565fc1b41d4fa44fe7873d069895aa75192e93ff3a82fdd28de30&"
+    "host=YWRtaW4uc2hvcGlmeS5jb20vc3RvcmUvc3BvcnRzY2F2ZS1uYg&"
+    "shop=sportscave-nb.myshopify.com&"
+    "state=We_6XjylWzROi8kCdXMTLECYFxjp80JZvK82DUf9Xzo&"
+    "timestamp=1782278816"
+)
+PRODIGI_REFERENCE_MAPPINGS = (
     {
-        "shopify_size": "XL",
+        "sports_cave_variant": "Black / XL - 62 × 87 cm (24.4 × 34.3 in)",
+        "sports_cave_frame": "Black",
+        "sports_cave_size": "XL - 62 × 87 cm",
         "prodigi_size": "A1",
-        "dimensions": "62 x 87 cm (24.4 x 34.3 in)",
-        "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 59.4x84.1cm / 23.4x33.1" (A1)',
-        "framed_code": "GLOBAL-CFP-A1",
-        "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 59.4x84.1cm / 23.4x33.1" (A1)',
-        "unframed_code": "GLOBAL-FAP-A1",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 59.4x84.1cm / 23.4x33.1" (A1)',
+        "prodigi_code": "GLOBAL-CFP-A1",
+        "prodigi_frame_colour": "Black",
     },
     {
-        "shopify_size": "L",
+        "sports_cave_variant": "Black / L - 45 × 62 cm (17.7 × 24.4 in)",
+        "sports_cave_frame": "Black",
+        "sports_cave_size": "L - 45 × 62 cm",
         "prodigi_size": "A2",
-        "dimensions": "45 x 62 cm (17.7 x 24.4 in)",
-        "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 42x59.4cm / 16.5x23.4" (A2)',
-        "framed_code": "GLOBAL-CFP-A2",
-        "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 42x59.4cm / 16.5x23.4" (A2)',
-        "unframed_code": "GLOBAL-FAP-A2",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 42x59.4cm/16.5x23.4" (A2)',
+        "prodigi_code": "GLOBAL-CFP-A2",
+        "prodigi_frame_colour": "Black",
     },
     {
-        "shopify_size": "M",
+        "sports_cave_variant": "Black / M - 30 × 45 cm (11.8 × 17.7 in)",
+        "sports_cave_frame": "Black",
+        "sports_cave_size": "M - 30 × 45 cm",
         "prodigi_size": "A3",
-        "dimensions": "30 x 45 cm (11.8 x 17.7 in)",
-        "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 29.7x42cm / 11.7x16.5" (A3)',
-        "framed_code": "GLOBAL-CFP-A3",
-        "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 29.7x42cm / 11.7x16.5" (A3)',
-        "unframed_code": "GLOBAL-FAP-A3",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 29.7x42cm / 11.7x16.5" (A3)',
+        "prodigi_code": "GLOBAL-CFP-A3",
+        "prodigi_frame_colour": "Black",
     },
     {
-        "shopify_size": "S",
+        "sports_cave_variant": "Black / S- 21 × 30 cm (8.3 × 11.8 in)",
+        "sports_cave_frame": "Black",
+        "sports_cave_size": "S - 21 × 30 cm",
         "prodigi_size": "A4",
-        "dimensions": "21 x 30 cm (8.3 x 11.8 in)",
-        "framed_name": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 21x29.7cm / 8.3x11.7" (A4)',
-        "framed_code": "GLOBAL-CFP-A4",
-        "unframed_name": 'EMA, Enhanced Matte Art Paper, 200gsm, 21x29.7cm / 8.3x11.7" (A4)',
-        "unframed_code": "GLOBAL-FAP-A4",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 21x29.7cm / 8.3x11.7" (A4)',
+        "prodigi_code": "GLOBAL-CFP-A4",
+        "prodigi_frame_colour": "Black",
     },
+    {
+        "sports_cave_variant": "Oak / XL - 62 × 87 cm (24.4 × 34.3 in)",
+        "sports_cave_frame": "Oak",
+        "sports_cave_size": "XL - 62 × 87 cm",
+        "prodigi_size": "A1",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 59.4x84.1cm / 23.4x33.1" (A1)',
+        "prodigi_code": "GLOBAL-CFP-A1",
+        "prodigi_frame_colour": "Natural",
+    },
+    {
+        "sports_cave_variant": "Oak / L - 45 × 62 cm (17.7 × 24.4 in)",
+        "sports_cave_frame": "Oak",
+        "sports_cave_size": "L - 45 × 62 cm",
+        "prodigi_size": "A2",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 42x59.4cm/16.5x23.4" (A2)',
+        "prodigi_code": "GLOBAL-CFP-A2",
+        "prodigi_frame_colour": "Natural",
+    },
+    {
+        "sports_cave_variant": "Oak / M - 30 × 45 cm (11.8 × 17.7 in)",
+        "sports_cave_frame": "Oak",
+        "sports_cave_size": "M - 30 × 45 cm",
+        "prodigi_size": "A3",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 29.7x42cm / 11.7x16.5" (A3)',
+        "prodigi_code": "GLOBAL-CFP-A3",
+        "prodigi_frame_colour": "Natural",
+    },
+    {
+        "sports_cave_variant": "Oak / S- 21 × 30 cm (8.3 × 11.8 in)",
+        "sports_cave_frame": "Oak",
+        "sports_cave_size": "S - 21 × 30 cm",
+        "prodigi_size": "A4",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 21x29.7cm / 8.3x11.7" (A4)',
+        "prodigi_code": "GLOBAL-CFP-A4",
+        "prodigi_frame_colour": "Natural",
+    },
+    {
+        "sports_cave_variant": "White / XL - 62 × 87 cm (24.4 × 34.3 in)",
+        "sports_cave_frame": "White",
+        "sports_cave_size": "XL - 62 × 87 cm",
+        "prodigi_size": "A1",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 59.4x84.1cm / 23.4x33.1" (A1)',
+        "prodigi_code": "GLOBAL-CFP-A1",
+        "prodigi_frame_colour": "White",
+    },
+    {
+        "sports_cave_variant": "White / L - 45 × 62 cm (17.7 × 24.4 in)",
+        "sports_cave_frame": "White",
+        "sports_cave_size": "L - 45 × 62 cm",
+        "prodigi_size": "A2",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 42x59.4cm/16.5x23.4" (A2)',
+        "prodigi_code": "GLOBAL-CFP-A2",
+        "prodigi_frame_colour": "White",
+    },
+    {
+        "sports_cave_variant": "White / M - 30 × 45 cm (11.8 × 17.7 in)",
+        "sports_cave_frame": "White",
+        "sports_cave_size": "M - 30 × 45 cm",
+        "prodigi_size": "A3",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 29.7x42cm / 11.7x16.5" (A3)',
+        "prodigi_code": "GLOBAL-CFP-A3",
+        "prodigi_frame_colour": "White",
+    },
+    {
+        "sports_cave_variant": "White / S- 21 × 30 cm (8.3 × 11.8 in)",
+        "sports_cave_frame": "White",
+        "sports_cave_size": "S - 21 × 30 cm",
+        "prodigi_size": "A4",
+        "prodigi_product_option": "Classic Frame",
+        "prodigi_product": 'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 21x29.7cm / 8.3x11.7" (A4)',
+        "prodigi_code": "GLOBAL-CFP-A4",
+        "prodigi_frame_colour": "White",
+    },
+    {
+        "sports_cave_variant": "Unframed / XL - 62 × 87 cm (24.4 × 34.3 in)",
+        "sports_cave_frame": "Unframed",
+        "sports_cave_size": "XL - 62 × 87 cm",
+        "prodigi_size": "A1",
+        "prodigi_product_option": "Fine Art Paper",
+        "prodigi_product": 'EMA, Enhanced Matte Art Paper, 200gsm, 59.4x84.1cm / 23.4x33.1" (A1)',
+        "prodigi_code": "GLOBAL-FAP-A1",
+        "prodigi_frame_colour": "No frame",
+    },
+    {
+        "sports_cave_variant": "Unframed / L - 45 × 62 cm (17.7 × 24.4 in)",
+        "sports_cave_frame": "Unframed",
+        "sports_cave_size": "L - 45 × 62 cm",
+        "prodigi_size": "A2",
+        "prodigi_product_option": "Fine Art Paper",
+        "prodigi_product": 'EMA, Enhanced Matte Art Paper, 200gsm, 42x59.4cm / 16.5x23.4" (A2)',
+        "prodigi_code": "GLOBAL-FAP-A2",
+        "prodigi_frame_colour": "No frame",
+    },
+    {
+        "sports_cave_variant": "Unframed / M - 30 × 45 cm (11.8 × 17.7 in)",
+        "sports_cave_frame": "Unframed",
+        "sports_cave_size": "M - 30 × 45 cm",
+        "prodigi_size": "A3",
+        "prodigi_product_option": "Fine Art Paper",
+        "prodigi_product": 'EMA, Enhanced Matte Art Paper, 200gsm, 29.7x42cm / 11.7x16.5" (A3)',
+        "prodigi_code": "GLOBAL-FAP-A3",
+        "prodigi_frame_colour": "No frame",
+    },
+    {
+        "sports_cave_variant": "Unframed / S- 21 × 30 cm (8.3 × 11.8 in)",
+        "sports_cave_frame": "Unframed",
+        "sports_cave_size": "S - 21 × 30 cm",
+        "prodigi_size": "A4",
+        "prodigi_product_option": "Fine Art Paper",
+        "prodigi_product": 'EMA, Enhanced Matte Art Paper, 200gsm, 21x29.7cm / 8.3x11.7" (A4)',
+        "prodigi_code": "GLOBAL-FAP-A4",
+        "prodigi_frame_colour": "No frame",
+    },
+)
+PRODIGI_SIZE_OPTIONS = tuple(
+    {
+        "shopify_size": size,
+        "prodigi_size": next(row["prodigi_size"] for row in PRODIGI_REFERENCE_MAPPINGS if row["sports_cave_frame"] == "Black" and row["sports_cave_size"].startswith(size)),
+        "dimensions": re.sub(
+            r"^[A-Z]+\s*-\s*",
+            "",
+            next(row["sports_cave_variant"].split("/", 1)[1].strip() for row in PRODIGI_REFERENCE_MAPPINGS if row["sports_cave_frame"] == "Black" and row["sports_cave_size"].startswith(size)),
+        ),
+        "framed_name": next(row["prodigi_product"] for row in PRODIGI_REFERENCE_MAPPINGS if row["sports_cave_frame"] == "Black" and row["sports_cave_size"].startswith(size)),
+        "framed_code": next(row["prodigi_code"] for row in PRODIGI_REFERENCE_MAPPINGS if row["sports_cave_frame"] == "Black" and row["sports_cave_size"].startswith(size)),
+        "unframed_name": next(row["prodigi_product"] for row in PRODIGI_REFERENCE_MAPPINGS if row["sports_cave_frame"] == "Unframed" and row["sports_cave_size"].startswith(size)),
+        "unframed_code": next(row["prodigi_code"] for row in PRODIGI_REFERENCE_MAPPINGS if row["sports_cave_frame"] == "Unframed" and row["sports_cave_size"].startswith(size)),
+    }
+    for size in ("XL", "L", "M", "S")
 )
 PRODIGI_FRAME_OPTIONS = (
     ("Black", "Black", "Sports Cave Black Frame"),
     ("Oak", "Natural", "Sports Cave Oak Frame"),
     ("White", "White", "Sports Cave White Frame"),
-    ("Unframed", "No frame / Fine Art Paper", "Sports Cave Unframed"),
+    ("Unframed", "No frame", "Sports Cave Unframed"),
 )
 PRODIGI_SUPPORT_EMAIL = "pro@prodigi.com"
 PRODIGI_TRACKER_PATH = db.BASE_DIR / "output" / "_cache" / "prodigi_fulfillments.json"
@@ -156,17 +304,24 @@ PRODIGI_TRACKER_EXPORT_COLUMNS = (
     "row_id",
     "prodigi_status",
     "shopify_order_name",
+    "shopify_order_number",
     "date",
     "customer_name",
     "customer_email",
     "product_title",
+    "shopify_variant_title",
     "edition_number",
     "edition_total",
     "frame",
     "size",
+    "sports_cave_frame",
+    "sports_cave_size",
     "prodigi_size",
     "prodigi_product_option",
+    "prodigi_product_name",
     "prodigi_code",
+    "prodigi_product_code",
+    "prodigi_frame_colour",
     "shipping_method",
     "certificate_status",
     "double_checked",
@@ -191,9 +346,12 @@ PRODIGI_TRACKER_EXPORT_COLUMNS = (
     "shopify_variant_id",
     "shopify_fulfillment_status",
     "date_sent_to_prodigi",
+    "submitted_at",
     "date_shipped",
     "date_fulfilled_in_shopify",
     "qa_completed",
+    "qa_confirmed",
+    "qa_notes",
     "qa_completed_at",
     "qa_answers",
     "linked_order_line_id",
@@ -240,28 +398,17 @@ def render_page_intro(title, purpose, next_step, mistake_tip=None):
 
 
 def prodigi_reference_rows():
-    rows = []
-    frame_rows = (
-        ("Black", "Black", False),
-        ("Oak", "Natural", False),
-        ("White", "White", False),
-        ("Unframed", "No frame / Fine Art Paper", True),
-    )
-    for frame, prodigi_frame, is_unframed in frame_rows:
-        for size_option in PRODIGI_SIZE_OPTIONS:
-            rows.append(
-                {
-                    "Frame": frame,
-                    "Shopify Size": size_option["shopify_size"],
-                    "Prodigi Size": size_option["prodigi_size"],
-                    "Prodigi Product Name": size_option["unframed_name"] if is_unframed else size_option["framed_name"],
-                    "Prodigi Code": size_option["unframed_code"] if is_unframed else size_option["framed_code"],
-                    "Prodigi Frame": prodigi_frame,
-                    "Copy Name": size_option["unframed_name"] if is_unframed else size_option["framed_name"],
-                    "Copy Code": size_option["unframed_code"] if is_unframed else size_option["framed_code"],
-                }
-            )
-    return rows
+    return [
+        {
+            "Sports Cave Variant": row["sports_cave_variant"],
+            "Sports Cave Frame": row["sports_cave_frame"],
+            "Sports Cave Size": row["sports_cave_size"],
+            "Prodigi Product": row["prodigi_product"],
+            "Prodigi Code": row["prodigi_code"],
+            "Prodigi Frame Colour": row["prodigi_frame_colour"],
+        }
+        for row in PRODIGI_REFERENCE_MAPPINGS
+    ]
 
 
 def _prodigi_now_iso():
@@ -299,8 +446,27 @@ def _prodigi_normalise_text(value):
     return re.sub(r"\s+", " ", _prodigi_clean(value)).casefold()
 
 
+def _prodigi_normalise_variant(value):
+    text = _prodigi_clean(value)
+    replacements = {
+        "\u00d7": "x",
+        "\u2010": "-",
+        "\u2011": "-",
+        "\u2012": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2212": "-",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    text = re.sub(r"\s*/\s*", " / ", text)
+    text = re.sub(r"\s*-\s*", " - ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip().casefold()
+
+
 def _prodigi_frame_from_variant(variant, fallback=""):
-    text = f"{variant} {fallback}".casefold()
+    text = _prodigi_normalise_variant(f"{variant} {fallback}")
     if "unframed" in text:
         return "Unframed"
     if "black" in text:
@@ -313,21 +479,36 @@ def _prodigi_frame_from_variant(variant, fallback=""):
 
 
 def _prodigi_size_from_variant(variant, fallback=""):
-    text = f"{variant} {fallback}".upper()
+    text = _prodigi_normalise_variant(f"{variant} {fallback}").upper()
+    size_text = text.split("/", 1)[1] if "/" in text else text
     for size in ("XL", "L", "M", "S"):
-        if re.search(rf"(^|[^A-Z0-9]){size}([^A-Z0-9]|$)", text):
+        if re.search(rf"(^|[^A-Z0-9]){size}([^A-Z0-9]|$)", size_text):
             return size
     return ""
 
 
-def prodigi_mapping_for_frame_size(frame, size):
+def _prodigi_mapping_key(frame, size):
     clean_frame = _prodigi_frame_from_variant(frame, frame) or _prodigi_clean(frame)
     clean_size = _prodigi_size_from_variant(size, size) or _prodigi_clean(size).upper()
-    size_option = next(
-        (option for option in PRODIGI_SIZE_OPTIONS if option["shopify_size"] == clean_size),
+    return clean_frame, clean_size
+
+
+def prodigi_mapping_for_variant(variant, fallback=""):
+    return prodigi_mapping_for_frame_size(*_prodigi_mapping_key(f"{variant} {fallback}", f"{variant} {fallback}"))
+
+
+def prodigi_mapping_for_frame_size(frame, size):
+    clean_frame, clean_size = _prodigi_mapping_key(frame, size)
+    mapping = next(
+        (
+            row
+            for row in PRODIGI_REFERENCE_MAPPINGS
+            if row["sports_cave_frame"] == clean_frame
+            and row["sports_cave_size"].split(" ", 1)[0] == clean_size
+        ),
         None,
     )
-    if not size_option or clean_frame not in {"Black", "Oak", "White", "Unframed"}:
+    if not mapping:
         return {
             "frame": clean_frame,
             "size": clean_size,
@@ -337,17 +518,83 @@ def prodigi_mapping_for_frame_size(frame, size):
             "prodigi_frame": "",
             "prodigi_product_name": "",
         }
-    is_unframed = clean_frame == "Unframed"
-    prodigi_frame = "No frame / Fine Art Paper" if is_unframed else {"Black": "Black", "Oak": "Natural", "White": "White"}[clean_frame]
     return {
         "frame": clean_frame,
         "size": clean_size,
-        "prodigi_size": size_option["prodigi_size"],
-        "prodigi_product_option": "Fine Art Paper" if is_unframed else "Classic Frame",
-        "prodigi_code": size_option["unframed_code"] if is_unframed else size_option["framed_code"],
-        "prodigi_frame": prodigi_frame,
-        "prodigi_product_name": size_option["unframed_name"] if is_unframed else size_option["framed_name"],
+        "prodigi_size": mapping["prodigi_size"],
+        "prodigi_product_option": mapping["prodigi_product_option"],
+        "prodigi_code": mapping["prodigi_code"],
+        "prodigi_frame": mapping["prodigi_frame_colour"],
+        "prodigi_product_name": mapping["prodigi_product"],
+        "prodigi_frame_colour": mapping["prodigi_frame_colour"],
+        "sports_cave_variant": mapping["sports_cave_variant"],
+        "sports_cave_size": mapping["sports_cave_size"],
     }
+
+
+def prodigi_required_confirmation_question(row):
+    code = row.get("prodigi_product_code") or row.get("prodigi_code") or ""
+    product = row.get("prodigi_product_name") or ""
+    frame_colour = row.get("prodigi_frame_colour") or row.get("prodigi_frame") or ""
+    if row.get("frame") == "Unframed" or frame_colour == "No frame":
+        suffix = "No frame"
+    else:
+        suffix = f"Frame colour: {frame_colour or '-'}"
+    return f"Is the selected Prodigi product exactly {code} - {product}, {suffix}?"
+
+
+def prodigi_reference_table_html(rows):
+    headers = ("Sports Cave Variant", "Sports Cave Frame", "Sports Cave Size", "Prodigi Product", "Prodigi Code", "Prodigi Frame Colour")
+    header_html = "".join(f"<th>{html.escape(header)}</th>" for header in headers)
+    body_rows = []
+    for row in rows:
+        cells = []
+        for header in headers:
+            value = html.escape(str(row.get(header) or ""))
+            class_name = "prodigi-code-cell" if header == "Prodigi Code" else ""
+            cells.append(f'<td class="{class_name}">{value}</td>')
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+    return f"""
+    <style>
+      .prodigi-reference-table {{
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.84rem;
+      }}
+      .prodigi-reference-table th {{
+        position: sticky;
+        top: 0;
+        background: #151515;
+        color: #f5efe2;
+        text-align: left;
+        padding: 0.55rem 0.6rem;
+        border-bottom: 1px solid rgba(218, 179, 92, 0.35);
+      }}
+      .prodigi-reference-table td {{
+        color: #efe9dd;
+        padding: 0.52rem 0.6rem;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        vertical-align: top;
+      }}
+      .prodigi-reference-scroll {{
+        max-height: 470px;
+        overflow: auto;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+      }}
+      .prodigi-code-cell {{
+        color: #dab35c !important;
+        font-weight: 800;
+        white-space: nowrap;
+      }}
+    </style>
+    <div class="prodigi-reference-scroll">
+      <table class="prodigi-reference-table">
+        <thead><tr>{header_html}</tr></thead>
+        <tbody>{''.join(body_rows)}</tbody>
+      </table>
+    </div>
+    """
 
 
 def prodigi_product_option_display(row):
@@ -517,6 +764,7 @@ def prodigi_tracker_row_from_order(order_row, stored=None):
         "edition_order_id": stored.get("edition_order_id") or order_row.get("edition_order_id") or "",
         "shopify_order_id": order_row.get("shopify_order_id") or stored.get("shopify_order_id") or "",
         "shopify_order_name": order_row.get("order") or order_row.get("order_name") or stored.get("shopify_order_name") or "",
+        "shopify_order_number": order_row.get("order") or order_row.get("order_name") or stored.get("shopify_order_number") or stored.get("shopify_order_name") or "",
         "shopify_line_item_id": order_row.get("shopify_line_item_id") or stored.get("shopify_line_item_id") or "",
         "customer_name": order_row.get("customer") or order_row.get("customer_name") or stored.get("customer_name") or "",
         "customer_email": order_row.get("customer_email") or stored.get("customer_email") or "",
@@ -524,15 +772,20 @@ def prodigi_tracker_row_from_order(order_row, stored=None):
         "shopify_product_id": order_row.get("shopify_product_id") or stored.get("shopify_product_id") or "",
         "shopify_variant_id": order_row.get("variant_id") or order_row.get("shopify_variant_id") or stored.get("shopify_variant_id") or "",
         "variant_title": variant or stored.get("variant_title") or "",
+        "shopify_variant_title": variant or stored.get("shopify_variant_title") or stored.get("variant_title") or "",
         "edition_number": edition_number,
         "edition_total": _prodigi_int(order_row.get("edition_total") or stored.get("edition_total"), 100),
         "frame": mapping.get("frame") or frame,
         "size": mapping.get("size") or size,
+        "sports_cave_frame": mapping.get("frame") or frame,
+        "sports_cave_size": mapping.get("sports_cave_size") or mapping.get("size") or size,
         "prodigi_size": stored.get("prodigi_size") or mapping.get("prodigi_size") or "",
         "prodigi_product_option": stored.get("prodigi_product_option") or mapping.get("prodigi_product_option") or "",
         "prodigi_code": stored.get("prodigi_code") or mapping.get("prodigi_code") or "",
         "prodigi_frame": stored.get("prodigi_frame") or mapping.get("prodigi_frame") or "",
         "prodigi_product_name": stored.get("prodigi_product_name") or mapping.get("prodigi_product_name") or "",
+        "prodigi_product_code": stored.get("prodigi_product_code") or mapping.get("prodigi_code") or "",
+        "prodigi_frame_colour": stored.get("prodigi_frame_colour") or mapping.get("prodigi_frame_colour") or mapping.get("prodigi_frame") or "",
         "prodigi_order_id": stored.get("prodigi_order_id") or "",
         "shipping_method": stored.get("shipping_method") or order_row.get("shipping") or order_row.get("shipping_method") or "",
         "prodigi_status": stored.get("prodigi_status") or stored.get("status") or "",
@@ -545,9 +798,12 @@ def prodigi_tracker_row_from_order(order_row, stored=None):
         "shopify_file_url": order_row.get("shopify_file_url") or stored.get("shopify_file_url") or "",
         "date": order_row.get("date") or stored.get("date") or "",
         "date_sent_to_prodigi": stored.get("date_sent_to_prodigi") or "",
+        "submitted_at": stored.get("submitted_at") or "",
         "date_shipped": stored.get("date_shipped") or "",
         "date_fulfilled_in_shopify": stored.get("date_fulfilled_in_shopify") or "",
         "qa_completed": _prodigi_bool(stored.get("qa_completed")),
+        "qa_confirmed": _prodigi_bool(stored.get("qa_confirmed")),
+        "qa_notes": stored.get("qa_notes") or "",
         "qa_completed_at": stored.get("qa_completed_at") or "",
         "qa_answers": stored.get("qa_answers") or {},
         "linked_order_line_id": stored.get("linked_order_line_id") or order_row.get("shopify_line_item_id") or stored.get("shopify_line_item_id") or "",
@@ -575,6 +831,13 @@ def prodigi_tracker_row_from_order(order_row, stored=None):
 
 
 def load_prodigi_tracker_state(path=None):
+    if path is None and supabase_backend.is_configured():
+        try:
+            rows = supabase_backend.list_prodigi_dispatch_rows(limit=1500)
+            updated_at = max((str(row.get("updated_at") or "") for row in rows), default="")
+            return {"version": PRODIGI_TRACKER_VERSION, "rows": rows, "updated_at": updated_at, "source": "supabase"}
+        except Exception as error:
+            supabase_backend.log_app_error("prodigi_dispatch_load_failed", str(error), {"source": "prodigi_page"})
     target = Path(path or PRODIGI_TRACKER_PATH)
     if not target.exists():
         return {"version": PRODIGI_TRACKER_VERSION, "rows": [], "updated_at": ""}
@@ -589,6 +852,18 @@ def load_prodigi_tracker_state(path=None):
 
 
 def save_prodigi_tracker_rows(rows, path=None):
+    if path is None and supabase_backend.is_configured():
+        try:
+            result = supabase_backend.upsert_prodigi_dispatch_rows(rows or [])
+            return {
+                "version": PRODIGI_TRACKER_VERSION,
+                "updated_at": _prodigi_now_iso(),
+                "rows": rows or [],
+                "source": "supabase",
+                **result,
+            }
+        except Exception as error:
+            supabase_backend.log_app_error("prodigi_dispatch_save_failed", str(error), {"source": "prodigi_page"})
     payload = {
         "version": PRODIGI_TRACKER_VERSION,
         "updated_at": _prodigi_now_iso(),
@@ -634,12 +909,14 @@ def prodigi_copy_details(row):
         f"Shopify Order #: {row.get('shopify_order_name') or ''}",
         f"Customer: {row.get('customer_name') or ''}",
         f"Product: {row.get('product_title') or ''}",
+        f"Shopify Variant: {row.get('variant_title') or row.get('shopify_variant_title') or ''}",
         f"Edition #: #{_prodigi_int(row.get('edition_number'), 0):03d}" if _prodigi_int(row.get("edition_number"), 0) else "Edition #:",
         f"Frame: {row.get('frame') or ''}",
         f"Size: {row.get('size') or ''}",
         f"Prodigi Size: {row.get('prodigi_size') or ''}",
-        f"Prodigi Product Option: {prodigi_product_option_display(row)}",
-        f"Prodigi Code: {row.get('prodigi_code') or ''}",
+        f"Prodigi Product: {row.get('prodigi_product_name') or prodigi_product_option_display(row)}",
+        f"Prodigi Code: {row.get('prodigi_product_code') or row.get('prodigi_code') or ''}",
+        f"Prodigi Frame Colour: {row.get('prodigi_frame_colour') or row.get('prodigi_frame') or ''}",
         f"Shipping: {row.get('shipping_method') or ''}",
     ]
     return "\n".join(lines)
@@ -3501,6 +3778,20 @@ def prodigi_dispatch_issue_reasons(row, answers):
     return reasons
 
 
+def prodigi_line_confirmation_defaults(row):
+    stored = row.get("qa_answers") or {}
+    if isinstance(stored, str):
+        try:
+            stored = json.loads(stored)
+        except (TypeError, ValueError):
+            stored = {}
+    if not isinstance(stored, dict):
+        stored = {}
+    confirmed = row.get("qa_confirmed") or stored.get("product_confirmation") == "Yes"
+    notes = row.get("qa_notes") or stored.get("product_confirmation_notes") or ""
+    return {"confirmed": bool(confirmed), "notes": str(notes or "")}
+
+
 def prodigi_dispatch_blockers(row, answers):
     blockers = []
     if not row.get("shopify_order_name"):
@@ -3533,6 +3824,21 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
     row_id = base_row.get("row_id") or prodigi_tracker_row_id(base_row)
     today_sent = date.today().isoformat()
     issue_reasons = prodigi_dispatch_issue_reasons(base_row, qa_answers)
+    qa_confirmed = status == "Submitted" and all(
+        qa_answers.get(field) in {"Yes", "Not Required"}
+        for field in (
+            "certificate",
+            "artwork_upload",
+            "product_option",
+            "frame",
+            "size",
+            "edition_number",
+            "shipping",
+            "sent_to_production",
+            "final_check",
+        )
+    )
+    qa_notes = str(qa_answers.get("product_confirmation_notes") or notes or "")
     updated_rows = []
     saved = None
     found = False
@@ -3552,9 +3858,19 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
                 "notes": notes,
                 "qa_completed": status == "Submitted",
                 "qa_completed_at": now if status == "Submitted" else merged.get("qa_completed_at") or "",
+                "qa_confirmed": qa_confirmed,
+                "qa_notes": qa_notes,
                 "qa_answers": qa_answers,
                 "linked_order_line_id": base_row.get("shopify_line_item_id") or base_row.get("linked_order_line_id") or "",
                 "issue_reason": "; ".join(issue_reasons) if status == "Needs Review" else "",
+                "shopify_order_number": base_row.get("shopify_order_number") or base_row.get("shopify_order_name") or "",
+                "shopify_variant_title": base_row.get("shopify_variant_title") or base_row.get("variant_title") or "",
+                "sports_cave_frame": base_row.get("sports_cave_frame") or base_row.get("frame") or "",
+                "sports_cave_size": base_row.get("sports_cave_size") or base_row.get("size") or "",
+                "prodigi_product_name": base_row.get("prodigi_product_name") or "",
+                "prodigi_product_code": base_row.get("prodigi_product_code") or base_row.get("prodigi_code") or "",
+                "prodigi_frame_colour": base_row.get("prodigi_frame_colour") or base_row.get("prodigi_frame") or "",
+                "submitted_at": now if status == "Submitted" else merged.get("submitted_at") or "",
                 "source": "prodigi_dispatch_log",
                 "updated_at": now,
             }
@@ -3571,9 +3887,19 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
                 "notes": notes,
                 "qa_completed": status == "Submitted",
                 "qa_completed_at": now if status == "Submitted" else "",
+                "qa_confirmed": qa_confirmed,
+                "qa_notes": qa_notes,
                 "qa_answers": qa_answers,
                 "linked_order_line_id": base_row.get("shopify_line_item_id") or base_row.get("linked_order_line_id") or "",
                 "issue_reason": "; ".join(issue_reasons) if status == "Needs Review" else "",
+                "shopify_order_number": base_row.get("shopify_order_number") or base_row.get("shopify_order_name") or "",
+                "shopify_variant_title": base_row.get("shopify_variant_title") or base_row.get("variant_title") or "",
+                "sports_cave_frame": base_row.get("sports_cave_frame") or base_row.get("frame") or "",
+                "sports_cave_size": base_row.get("sports_cave_size") or base_row.get("size") or "",
+                "prodigi_product_name": base_row.get("prodigi_product_name") or "",
+                "prodigi_product_code": base_row.get("prodigi_product_code") or base_row.get("prodigi_code") or "",
+                "prodigi_frame_colour": base_row.get("prodigi_frame_colour") or base_row.get("prodigi_frame") or "",
+                "submitted_at": now if status == "Submitted" else "",
                 "source": "prodigi_dispatch_log",
                 "created_at": base_row.get("created_at") or now,
                 "updated_at": now,
@@ -3587,29 +3913,14 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
 def render_prodigi_page():
     st.title("Prodigi Dispatch Log")
     st.caption("Search an order, confirm the Prodigi checks, then save it to the dispatch log.")
+    st.link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
 
     stored_state = load_prodigi_tracker_state()
     tracker_rows = stored_state.get("rows") or []
 
     with st.expander("Prodigi Reference", expanded=False):
-        ref_columns = st.columns(3)
-        with ref_columns[0]:
-            st.markdown("**Size map**")
-            st.write("XL = A1")
-            st.write("L = A2")
-            st.write("M = A3")
-            st.write("S = A4")
-        with ref_columns[1]:
-            st.markdown("**Frame map**")
-            st.write("Black = Black")
-            st.write("Oak = Natural")
-            st.write("White = White")
-            st.write("Unframed = Fine Art Paper / No frame")
-        with ref_columns[2]:
-            st.markdown("**Codes**")
-            st.write("Framed = GLOBAL-CFP-A1 / A2 / A3 / A4")
-            st.write("Unframed = GLOBAL-FAP-A1 / A2 / A3 / A4")
-            st.markdown(f"Support: [{PRODIGI_SUPPORT_EMAIL}](mailto:{PRODIGI_SUPPORT_EMAIL})")
+        st.markdown(prodigi_reference_table_html(prodigi_reference_rows()), unsafe_allow_html=True)
+        st.caption(f"Support: {PRODIGI_SUPPORT_EMAIL}")
 
     search_columns = st.columns([3.2, 1])
     search_value = search_columns[0].text_input(
@@ -3636,7 +3947,7 @@ def render_prodigi_page():
     last_query = st.session_state.get("prodigi_dispatch_last_query") or ""
 
     if last_query and not matches:
-        st.warning("Order not found. Refresh Orders first, then try again.")
+        st.warning("Order not found. Sync New Orders first, then try again.")
 
     selected_row = None
     if matches:
@@ -3672,6 +3983,41 @@ def render_prodigi_page():
                 columns[4].write(row.get("shipping_method") or "-")
                 columns[5].write(row.get("certificate_status") or "-")
 
+        st.markdown("**Prodigi Product Confirmation**")
+        product_confirmations = {}
+        for row in matches:
+            row_id = row.get("row_id") or ""
+            row_key = safe_filename_part(row_id)
+            existing_line = _prodigi_existing_dispatch_row(tracker_rows, row_id) or row
+            defaults = prodigi_line_confirmation_defaults(existing_line)
+            has_mapping = bool(row.get("prodigi_product_name") and row.get("prodigi_code") and row.get("prodigi_frame_colour"))
+            with st.container(border=True):
+                st.markdown(f"**{row.get('product_title') or '-'}**")
+                st.caption(f"Shopify variant: {row.get('variant_title') or row.get('shopify_variant_title') or '-'}")
+                detail_columns = st.columns([2.4, 1, 1])
+                detail_columns[0].write(f"Required Prodigi product: {row.get('prodigi_product_name') or '-'}")
+                detail_columns[1].write(f"Prodigi code: {row.get('prodigi_code') or '-'}")
+                detail_columns[2].write(f"Frame colour: {row.get('prodigi_frame_colour') or row.get('prodigi_frame') or '-'}")
+                st.caption(prodigi_required_confirmation_question(row))
+                confirmed = st.checkbox(
+                    "Confirmed exact Prodigi product selected",
+                    value=bool(defaults["confirmed"] and has_mapping),
+                    disabled=not has_mapping,
+                    key=f"prodigi-dispatch-product-confirm-{row_key}",
+                )
+                confirmation_notes = defaults["notes"]
+                if not confirmed:
+                    confirmation_notes = st.text_input(
+                        "Notes if not confirmed",
+                        value=defaults["notes"],
+                        key=f"prodigi-dispatch-product-notes-{row_key}",
+                    )
+                product_confirmations[row_id] = {
+                    "confirmed": bool(confirmed),
+                    "notes": confirmation_notes,
+                    "has_mapping": has_mapping,
+                }
+
     if selected_row:
         existing = _prodigi_existing_dispatch_row(tracker_rows, selected_row.get("row_id"))
         already_submitted = existing and _prodigi_dispatch_status(existing) == "Submitted"
@@ -3703,11 +4049,24 @@ def render_prodigi_page():
 
         st.markdown("**Dispatch QA**")
         default_answers = prodigi_default_qa_answers(existing or selected_row)
-        qa_answers = {}
+        selected_confirmation = product_confirmations.get(selected_row.get("row_id") or "", {})
+        all_products_confirmed = bool(matches) and all(
+            confirmation.get("confirmed") and confirmation.get("has_mapping")
+            for confirmation in product_confirmations.values()
+        )
+        product_confirmation_notes = "; ".join(
+            f"{next((line.get('product_title') for line in matches if line.get('row_id') == row_id), 'Line')}: {confirmation.get('notes')}"
+            for row_id, confirmation in product_confirmations.items()
+            if confirmation.get("notes")
+        )
+        qa_answers = {
+            "product_option": "Yes" if all_products_confirmed else "No",
+            "product_confirmation": "Yes" if selected_confirmation.get("confirmed") else "No",
+            "product_confirmation_notes": product_confirmation_notes,
+        }
         qa_specs = [
             ("certificate", "Certificate", "Has the certificate been generated and uploaded?"),
             ("artwork_upload", "Artwork upload", "Did you upload the correct artwork file to Prodigi in excellent quality?"),
-            ("product_option", "Product option", "Did you select the exact Prodigi product option shown above?"),
             ("frame", "Frame", "Did you select the correct frame colour in Prodigi?"),
             ("size", "Size", "Did you select the correct Prodigi size?"),
             ("edition_number", "Edition number", "Does the artwork/certificate match this edition number?"),
@@ -3765,6 +4124,23 @@ def render_prodigi_page():
 
         issue_reasons = prodigi_dispatch_issue_reasons(selected_row, qa_answers)
         blockers = prodigi_dispatch_blockers(selected_row, qa_answers)
+        line_blockers = []
+        for row in matches:
+            row_id = row.get("row_id") or ""
+            line_confirmation = product_confirmations.get(row_id, {})
+            if not line_confirmation.get("has_mapping"):
+                line_blockers.append(f"{row.get('product_title') or 'Line'}: missing Prodigi mapping")
+            if not line_confirmation.get("confirmed"):
+                line_blockers.append(f"{row.get('product_title') or 'Line'}: exact Prodigi product not confirmed")
+            row_answers = dict(qa_answers)
+            if not _prodigi_is_limited_edition(row):
+                row_answers["certificate"] = "Not Required"
+                row_answers["edition_number"] = "Not Required"
+            elif _prodigi_certificate_uploaded(row):
+                row_answers["certificate"] = "Yes"
+            for blocker in prodigi_dispatch_blockers(row, row_answers):
+                line_blockers.append(f"{row.get('product_title') or 'Line'}: {blocker}")
+        completion_blockers = list(dict.fromkeys(blockers + line_blockers))
         notes = st.text_area(
             "Notes",
             value=(existing or {}).get("notes") or "",
@@ -3773,8 +4149,8 @@ def render_prodigi_page():
         )
         if issue_reasons:
             st.warning("Needs Review: " + "; ".join(issue_reasons))
-        if blockers:
-            for blocker in blockers:
+        if completion_blockers:
+            for blocker in completion_blockers:
                 st.warning(blocker)
 
         action_columns = st.columns([1, 1, 3])
@@ -3793,16 +4169,28 @@ def render_prodigi_page():
             "Complete Dispatch",
             type="primary",
             use_container_width=True,
-            disabled=bool(blockers) or bool(already_submitted),
+            disabled=bool(completion_blockers) or bool(already_submitted),
             key="prodigi-dispatch-complete",
         ):
-            saved_rows, _ = prodigi_upsert_dispatch_row(
-                tracker_rows,
-                selected_row,
-                status="Submitted",
-                notes=notes,
-                qa_answers=qa_answers,
-            )
+            saved_rows = tracker_rows
+            for line in matches:
+                line_confirmation = product_confirmations.get(line.get("row_id") or "", {})
+                line_answers = dict(qa_answers)
+                line_answers["product_option"] = "Yes"
+                line_answers["product_confirmation"] = "Yes"
+                line_answers["product_confirmation_notes"] = line_confirmation.get("notes") or ""
+                if not _prodigi_is_limited_edition(line):
+                    line_answers["certificate"] = "Not Required"
+                    line_answers["edition_number"] = "Not Required"
+                elif _prodigi_certificate_uploaded(line):
+                    line_answers["certificate"] = "Yes"
+                saved_rows, _ = prodigi_upsert_dispatch_row(
+                    saved_rows,
+                    line,
+                    status="Submitted",
+                    notes=notes if line.get("row_id") == selected_row.get("row_id") else line_confirmation.get("notes") or "",
+                    qa_answers=line_answers,
+                )
             save_prodigi_tracker_rows(saved_rows)
             st.session_state["prodigi_dispatch_matches"] = []
             st.session_state["prodigi_dispatch_selected_row_id"] = ""

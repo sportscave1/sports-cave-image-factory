@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import edition_ops
+import order_allocator
 import os_pages
 import orders_page
 import shopify_sync
@@ -39,6 +40,9 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn("st.data_editor", source)
         self.assertIn("edition_ops_products_snapshot.json", source)
+        self.assertIn("_load_supabase_snapshot", source)
+        self.assertIn("backend.list_edition_products", source)
+        self.assertIn("backend.update_edition_product", source)
         self.assertIn("Refresh Products", source)
         self.assertIn("Save Changed Rows", source)
         self.assertIn("Export CSV Backup", source)
@@ -64,8 +68,6 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("Shopify Metafield Setup", source)
         self.assertNotIn("Check Metafield Definitions", source)
         self.assertNotIn("Create Missing Metafield Definitions", source)
-        self.assertNotIn("import supabase", source.casefold())
-        self.assertNotIn("supabase_backend", source.casefold())
         self.assertNotIn("import google", source.casefold())
         self.assertNotIn("fetch_orders", source)
 
@@ -119,11 +121,15 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn("Prodigi Dispatch Log", prodigi_page)
         self.assertIn("Search an order, confirm the Prodigi checks, then save it to the dispatch log.", prodigi_page)
+        self.assertIn("Open Prodigi Dashboard", prodigi_page)
         self.assertIn("Prodigi Reference", prodigi_page)
+        self.assertIn("prodigi_reference_table_html", prodigi_page)
         self.assertIn("Enter Shopify Order #", prodigi_page)
         self.assertIn("Find Order", prodigi_page)
         self.assertIn("Order Summary", prodigi_page)
         self.assertIn("Select Artwork Line", prodigi_page)
+        self.assertIn("Prodigi Product Confirmation", prodigi_page)
+        self.assertIn("Confirmed exact Prodigi product selected", prodigi_page)
         self.assertIn("Prodigi Details", prodigi_page)
         self.assertIn("Dispatch QA", prodigi_page)
         self.assertIn("Save Issue", prodigi_page)
@@ -131,7 +137,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Submitted Dispatch Log", prodigi_page)
         self.assertIn("Last 7 Days", prodigi_page)
         self.assertIn("Copy Prodigi Details", prodigi_page)
-        self.assertIn("Order not found. Refresh Orders first, then try again.", prodigi_page)
+        self.assertIn("Order not found. Sync New Orders first, then try again.", prodigi_page)
         self.assertIn("Already submitted on", prodigi_page)
         self.assertIn("Last tracker save", prodigi_page)
         self.assertIn("order_allocator.load_orders_snapshot()", prodigi_page)
@@ -148,12 +154,68 @@ class EditionOpsUiTests(unittest.TestCase):
         rows = os_pages.prodigi_reference_rows()
 
         self.assertEqual(len(rows), 16)
+        self.assertEqual(
+            set(rows[0]),
+            {
+                "Sports Cave Variant",
+                "Sports Cave Frame",
+                "Sports Cave Size",
+                "Prodigi Product",
+                "Prodigi Code",
+                "Prodigi Frame Colour",
+            },
+        )
         self.assertIn("GLOBAL-CFP-A1", {row["Prodigi Code"] for row in rows})
         self.assertIn("GLOBAL-FAP-A4", {row["Prodigi Code"] for row in rows})
         self.assertEqual(
-            next(row for row in rows if row["Frame"] == "Oak" and row["Shopify Size"] == "L")["Prodigi Frame"],
+            next(row for row in rows if row["Sports Cave Frame"] == "Oak" and row["Sports Cave Size"].startswith("L "))["Prodigi Frame Colour"],
             "Natural",
         )
+        self.assertIn("prodigi-code-cell", os_pages.prodigi_reference_table_html(rows))
+
+    def test_prodigi_variant_mapping_uses_canonical_reference(self):
+        cases = [
+            (
+                "Black / XL - 62 \u00d7 87 cm (24.4 \u00d7 34.3 in)",
+                "GLOBAL-CFP-A1",
+                'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 59.4x84.1cm / 23.4x33.1" (A1)',
+                "Black",
+            ),
+            (
+                "Oak / L - 45 \u00d7 62 cm (17.7 \u00d7 24.4 in)",
+                "GLOBAL-CFP-A2",
+                'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 42x59.4cm/16.5x23.4" (A2)',
+                "Natural",
+            ),
+            (
+                "White / S- 21 \u00d7 30 cm (8.3 \u00d7 11.8 in)",
+                "GLOBAL-CFP-A4",
+                'Classic Frame, EMA 200gsm Fine Art Print, No Mount / No Mat, Perspex Glaze, 21x29.7cm / 8.3x11.7" (A4)',
+                "White",
+            ),
+            (
+                "Unframed / M - 30 \u00d7 45 cm (11.8 \u00d7 17.7 in)",
+                "GLOBAL-FAP-A3",
+                'EMA, Enhanced Matte Art Paper, 200gsm, 29.7x42cm / 11.7x16.5" (A3)',
+                "No frame",
+            ),
+        ]
+
+        for variant, code, product, frame_colour in cases:
+            row = os_pages.prodigi_tracker_row_from_order(
+                {
+                    "order": "#SC1",
+                    "customer": "Test Customer",
+                    "product": "Test Wall Art",
+                    "variant": variant,
+                    "edition_number": 1,
+                    "shipping": "Standard",
+                }
+            )
+            self.assertEqual(row["prodigi_code"], code)
+            self.assertEqual(row["prodigi_product_name"], product)
+            self.assertEqual(row["prodigi_frame_colour"], frame_colour)
+            self.assertIn(code, os_pages.prodigi_required_confirmation_question(row))
 
     def test_prodigi_tracker_builds_multiline_order_rows(self):
         order_rows = [
@@ -290,6 +352,12 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(len(saved_rows), 1)
         self.assertEqual(saved["prodigi_status"], "Needs Review")
+        self.assertEqual(saved_again["shopify_order_number"], "#SC2843")
+        self.assertEqual(saved_again["shopify_variant_title"], "Black / L")
+        self.assertEqual(saved_again["sports_cave_frame"], "Black")
+        self.assertEqual(saved_again["prodigi_product_code"], "GLOBAL-CFP-A2")
+        self.assertEqual(saved_again["prodigi_frame_colour"], "Black")
+        self.assertFalse(saved_again["qa_confirmed"])
         self.assertEqual(saved_again["notes"], "Still missing")
         self.assertIn("Certificate not uploaded", saved_again["issue_reason"])
 
@@ -490,6 +558,35 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(loaded["rows"][0]["tracking_number"], "TRACK123")
         self.assertEqual(loaded["rows"][0]["notes"], "Leave on tracker")
 
+    def test_prodigi_dispatch_log_uses_supabase_when_configured(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC2843",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 50,
+                "shipping": "Standard",
+            },
+            {"notes": "Submitted safely", "source": "prodigi_dispatch_log"},
+        )
+        with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
+            os_pages.supabase_backend,
+            "list_prodigi_dispatch_rows",
+            return_value=[row],
+        ) as list_rows, patch.object(
+            os_pages.supabase_backend,
+            "upsert_prodigi_dispatch_rows",
+            return_value={"upserted": 1},
+        ) as upsert_rows:
+            loaded = os_pages.load_prodigi_tracker_state()
+            saved = os_pages.save_prodigi_tracker_rows(loaded["rows"])
+
+        list_rows.assert_called_once()
+        upsert_rows.assert_called_once_with([row])
+        self.assertEqual(loaded["source"], "supabase")
+        self.assertEqual(saved["source"], "supabase")
+        self.assertEqual(loaded["rows"][0]["notes"], "Submitted safely")
+
     def test_render_uses_single_streamlit_process_for_free_instance(self):
         source = (ROOT / "render.yaml").read_text(encoding="utf-8")
 
@@ -544,6 +641,8 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("prompt_store.save_prompt", mockup_actions)
         self.assertIn("Developer password", mockup_actions)
         self.assertIn("mockup_prompt_edit", mockup_actions)
+        self.assertIn("window.parent.location.href", mockup_actions)
+        self.assertIn("encodeURIComponent(promptId)", mockup_actions)
         self.assertIn("stopPropagation", mockup_actions)
         self.assertIn("show_edit = True", mockup_actions)
         self.assertIn('target="_parent"', mockup_actions)
@@ -580,7 +679,8 @@ class EditionOpsUiTests(unittest.TestCase):
             ("order", "date", "customer", "edition", "certificate", "shipping", "product", "variant"),
         )
         self.assertIn("orders_allocation_snapshot.json", source)
-        self.assertIn("Refresh Orders", source)
+        self.assertIn("Sync New Orders", source)
+        self.assertIn("sync_new_orders_to_persistent_cache", source)
         self.assertIn("_render_orders_table", source)
         self.assertIn("st.dataframe", source)
         self.assertIn("selection_mode=\"multi-row\"", source)
@@ -632,7 +732,7 @@ class EditionOpsUiTests(unittest.TestCase):
         top_actions = inspect.getsource(orders_page._render_top_actions)
 
         for label in (
-            "Refresh Orders",
+            "Sync New Orders",
             "Generate Selected Certificates",
             "Upload Selected to Shopify",
             "Generate + Upload Selected",
@@ -750,6 +850,119 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC1234")
         self.assertEqual(set(fake_st.rendered_rows[0]), set(orders_page.VISIBLE_COLUMNS))
 
+    def test_order_allocator_loads_orders_snapshot_from_supabase_cache(self):
+        class FakeSupabase:
+            def list_orders(self, **kwargs):
+                self.kwargs = kwargs
+                return [
+                    {
+                        "shopify_order_id": "gid://shopify/Order/2843",
+                        "order_name": "#SC2843",
+                        "customer_name": "Ashkan Zand",
+                        "customer_email": "ashkan@example.com",
+                        "processed_at": "2026-06-23T10:00:00Z",
+                        "created_at": "2026-06-23T09:55:00Z",
+                        "order_raw_json": {"shipping_method": "US Standard Tracked Shipping"},
+                        "shopify_line_item_id": "gid://shopify/LineItem/1",
+                        "shopify_product_id": "gid://shopify/Product/1",
+                        "shopify_handle": "goat-debate-wall-art",
+                        "product_title": "GOAT Debate Wall Art",
+                        "variant_title": "Black / L",
+                        "quantity": 1,
+                        "assignments": [
+                            {
+                                "edition_number": 50,
+                                "edition_total": 100,
+                                "allocation_index": 1,
+                                "certificate_status": "Certificate Missing",
+                            }
+                        ],
+                    }
+                ]
+
+            def get_sync_state(self):
+                return {"last_successful_order_fetch_at": "2026-06-24T01:00:00Z"}
+
+            def get_order_summary(self):
+                return {"orders_synced": 12}
+
+        fake_backend = FakeSupabase()
+        with patch.object(order_allocator, "_configured_supabase_backend", return_value=fake_backend):
+            snapshot = order_allocator.load_supabase_orders_snapshot(limit=150)
+
+        self.assertEqual(snapshot["source"], "supabase")
+        self.assertEqual(snapshot["order_count"], 12)
+        self.assertEqual(snapshot["last_refreshed"], "2026-06-24T01:00:00Z")
+        self.assertEqual(snapshot["rows"][0]["edition"], "#050")
+        self.assertEqual(snapshot["rows"][0]["certificate_status"], "")
+        self.assertEqual(fake_backend.kwargs["limit"], 150)
+
+    def test_sync_new_orders_uses_persistent_supabase_cache_without_old_refresh_delete(self):
+        fake_st = SimpleNamespace(
+            session_state={
+                orders_page.ROWS_KEY: [],
+                orders_page.META_KEY: {"last_refreshed": "", "saved_at": ""},
+                orders_page.NOTICE_KEY: "",
+            }
+        )
+        snapshot = {
+            "source": "supabase",
+            "rows": [
+                {
+                    "order": "#SC2843",
+                    "date": "2026-06-23",
+                    "customer": "Ashkan Zand",
+                    "edition": "#050",
+                    "certificate": "Generate",
+                    "shipping": "US Standard Tracked Shipping",
+                    "product": "GOAT Debate Wall Art",
+                    "variant": "Black / L",
+                    "shopify_order_id": "gid://shopify/Order/2843",
+                    "shopify_line_item_id": "gid://shopify/LineItem/1",
+                    "shopify_product_id": "gid://shopify/Product/1",
+                }
+            ],
+            "last_refreshed": "2026-06-24T01:00:00Z",
+            "last_synced": "2026-06-24T01:00:00Z",
+            "saved_at": "2026-06-24T01:00:01Z",
+            "order_count": 12,
+            "row_count": 1,
+        }
+
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page.shopify_sync,
+            "get_config",
+            return_value={"configured": True},
+        ), patch.object(
+            orders_page.order_allocator,
+            "sync_new_orders_to_persistent_cache",
+            return_value={
+                "source": "supabase",
+                "orders_seen": 1,
+                "orders_imported": 1,
+                "assignments_created": 1,
+                "errors": [],
+            },
+        ) as sync_new, patch.object(
+            orders_page.order_allocator,
+            "load_orders_snapshot",
+            return_value=snapshot,
+        ), patch.object(
+            orders_page.shopify_sync,
+            "iter_order_pages",
+            side_effect=AssertionError("Persistent sync path should own Shopify fetching."),
+        ), patch.object(
+            orders_page.order_allocator,
+            "save_orders_snapshot",
+            side_effect=AssertionError("Supabase refresh must not rewrite the local snapshot as source of truth."),
+        ):
+            orders_page._refresh_orders()
+
+        sync_new.assert_called_once()
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY][0]["edition"], "#050")
+        self.assertEqual(fake_st.session_state[orders_page.META_KEY]["source"], "supabase")
+        self.assertIn("Synced 1 Shopify order", fake_st.session_state[orders_page.NOTICE_KEY])
+
     def test_refresh_orders_allocates_missing_paid_rows_before_saving_snapshot(self):
         fake_st = SimpleNamespace(
             session_state={
@@ -803,6 +1016,10 @@ class EditionOpsUiTests(unittest.TestCase):
             orders_page.shopify_sync,
             "get_config",
             return_value={"configured": True},
+        ), patch.object(
+            orders_page.order_allocator,
+            "sync_new_orders_to_persistent_cache",
+            return_value={"source": "local_snapshot", "skipped": True},
         ), patch.object(
             orders_page.shopify_sync,
             "iter_order_pages",
@@ -873,6 +1090,10 @@ class EditionOpsUiTests(unittest.TestCase):
             orders_page.shopify_sync,
             "get_config",
             return_value={"configured": True},
+        ), patch.object(
+            orders_page.order_allocator,
+            "sync_new_orders_to_persistent_cache",
+            return_value={"source": "local_snapshot", "skipped": True},
         ), patch.object(
             orders_page.shopify_sync,
             "iter_order_pages",
