@@ -1115,6 +1115,13 @@ mutation SportsCaveFileCreate($files: [FileCreateInput!]!) {
       ... on GenericFile {
         url
       }
+      ... on MediaImage {
+        image {
+          url
+          width
+          height
+        }
+      }
     }
     userErrors {
       field
@@ -1134,6 +1141,17 @@ query SportsCaveFileById($id: ID!) {
       fileStatus
       createdAt
       url
+    }
+    ... on MediaImage {
+      id
+      alt
+      fileStatus
+      createdAt
+      image {
+        url
+        width
+        height
+      }
     }
   }
 }
@@ -1421,7 +1439,7 @@ def upload_to_staged_target(target, file_path, mime_type="application/pdf", uplo
     return {"resource_url": target.get("resourceUrl") or "", "filename": file_path.name}
 
 
-def create_shopify_file(original_source, filename, alt="", config=None, request_post=None):
+def create_shopify_file(original_source, filename, alt="", content_type="FILE", config=None, request_post=None):
     config = config or get_config()
     data, served_version = graphql_request(
         FILE_CREATE_MUTATION,
@@ -1429,7 +1447,7 @@ def create_shopify_file(original_source, filename, alt="", config=None, request_
             "files": [
                 {
                     "originalSource": original_source,
-                    "contentType": "FILE",
+                    "contentType": content_type,
                     "filename": filename,
                     "alt": alt or filename,
                 }
@@ -1447,6 +1465,11 @@ def create_shopify_file(original_source, filename, alt="", config=None, request_
     return {"file": files[0], "api_version": served_version or config.get("api_version")}
 
 
+def _shopify_file_url(file_node):
+    image = file_node.get("image") or {}
+    return file_node.get("url") or image.get("url") or ""
+
+
 def fetch_shopify_file(file_id, config=None, request_post=None):
     if not file_id:
         raise ShopifyAPIError("Shopify file ID is missing.")
@@ -1461,6 +1484,49 @@ def fetch_shopify_file(file_id, config=None, request_post=None):
     return {"file": node, "api_version": served_version or config.get("api_version")}
 
 
+def upload_file_to_shopify_files(
+    file_path,
+    *,
+    filename="",
+    alt="",
+    mime_type="application/pdf",
+    content_type="FILE",
+    config=None,
+    request_post=None,
+    upload_post=None,
+    poll_attempts=5,
+    poll_sleep_seconds=0.5,
+):
+    file_path = Path(file_path)
+    filename = filename or file_path.name
+    staged = create_staged_upload(filename, mime_type, config=config, request_post=request_post)
+    upload_to_staged_target(staged["target"], file_path, mime_type, upload_post=upload_post)
+    created = create_shopify_file(
+        staged["target"].get("resourceUrl") or "",
+        filename,
+        alt=alt or filename,
+        content_type=content_type,
+        config=config,
+        request_post=request_post,
+    )
+    file_node = created.get("file") or {}
+    file_id = file_node.get("id") or ""
+    for _ in range(max(int(poll_attempts or 0), 0)):
+        if _shopify_file_url(file_node) and str(file_node.get("fileStatus") or "").upper() in {"READY", "UPLOADED"}:
+            break
+        if not file_id:
+            break
+        time.sleep(max(float(poll_sleep_seconds or 0), 0))
+        file_node = fetch_shopify_file(file_id, config=config, request_post=request_post).get("file") or file_node
+    return {
+        "file_id": file_id,
+        "url": _shopify_file_url(file_node),
+        "status": file_node.get("fileStatus") or "",
+        "filename": filename,
+        "resource_url": staged["target"].get("resourceUrl") or "",
+    }
+
+
 def upload_pdf_to_shopify_files(
     pdf_path,
     *,
@@ -1472,33 +1538,52 @@ def upload_pdf_to_shopify_files(
     poll_attempts=5,
     poll_sleep_seconds=0.5,
 ):
-    pdf_path = Path(pdf_path)
-    filename = filename or pdf_path.name
-    staged = create_staged_upload(filename, "application/pdf", config=config, request_post=request_post)
-    upload_to_staged_target(staged["target"], pdf_path, "application/pdf", upload_post=upload_post)
-    created = create_shopify_file(
-        staged["target"].get("resourceUrl") or "",
-        filename,
-        alt=alt or filename,
+    return upload_file_to_shopify_files(
+        pdf_path,
+        filename=filename,
+        alt=alt,
+        mime_type="application/pdf",
+        content_type="FILE",
         config=config,
         request_post=request_post,
+        upload_post=upload_post,
+        poll_attempts=poll_attempts,
+        poll_sleep_seconds=poll_sleep_seconds,
     )
-    file_node = created.get("file") or {}
-    file_id = file_node.get("id") or ""
-    for _ in range(max(int(poll_attempts or 0), 0)):
-        if file_node.get("url") and str(file_node.get("fileStatus") or "").upper() in {"READY", "UPLOADED"}:
-            break
-        if not file_id:
-            break
-        time.sleep(max(float(poll_sleep_seconds or 0), 0))
-        file_node = fetch_shopify_file(file_id, config=config, request_post=request_post).get("file") or file_node
-    return {
-        "file_id": file_id,
-        "url": file_node.get("url") or "",
-        "status": file_node.get("fileStatus") or "",
-        "filename": filename,
-        "resource_url": staged["target"].get("resourceUrl") or "",
-    }
+
+
+def upload_image_to_shopify_files(
+    image_path,
+    *,
+    filename="",
+    alt="",
+    mime_type="image/jpeg",
+    config=None,
+    request_post=None,
+    upload_post=None,
+    poll_attempts=5,
+    poll_sleep_seconds=0.5,
+):
+    image_path = Path(image_path)
+    suffix = image_path.suffix.lower()
+    if suffix == ".webp":
+        mime_type = "image/webp"
+    elif suffix in {".jpg", ".jpeg"}:
+        mime_type = "image/jpeg"
+    elif suffix == ".png":
+        mime_type = "image/png"
+    return upload_file_to_shopify_files(
+        image_path,
+        filename=filename or image_path.name,
+        alt=alt,
+        mime_type=mime_type,
+        content_type="IMAGE",
+        config=config,
+        request_post=request_post,
+        upload_post=upload_post,
+        poll_attempts=poll_attempts,
+        poll_sleep_seconds=poll_sleep_seconds,
+    )
 
 
 def fetch_limited_edition_products_page(after=None, search="", page_size=25, config=None, request_post=None):
@@ -2161,6 +2246,7 @@ def _positive_int(value, default=0):
 def _clean_certificate_status(record):
     url = (
         record.get("certificate_file_url")
+        or record.get("certificate_pdf_url")
         or record.get("pdf_url")
         or record.get("certificate_url")
         or record.get("shopify_file_url")
@@ -2170,7 +2256,11 @@ def _clean_certificate_status(record):
     raw_key = raw_status.casefold()
     if url and raw_key in {"ready", "uploaded", "certificate ready", "local pdf", ""}:
         return "Ready"
-    if url and (record.get("shopify_file_id") or record.get("pdf_shopify_file_id")):
+    if url and (
+        record.get("shopify_file_id")
+        or record.get("pdf_shopify_file_id")
+        or record.get("shopify_pdf_file_id")
+    ):
         return "Ready"
     if raw_key in {"upload error", "template missing", "error", "missing", "certificate missing"}:
         return "Missing"
@@ -2193,6 +2283,7 @@ def order_certificate_account_record(record):
     certificate_status = _clean_certificate_status(record)
     url = (
         record.get("certificate_file_url")
+        or record.get("certificate_pdf_url")
         or record.get("pdf_url")
         or record.get("certificate_url")
         or record.get("shopify_file_url")
@@ -2200,6 +2291,19 @@ def order_certificate_account_record(record):
     )
     if certificate_status != "Ready":
         url = ""
+    print_jpg_url = (
+        record.get("certificate_print_jpg_url")
+        or record.get("print_jpg_url")
+        or ""
+    )
+    preview_image_url = (
+        record.get("certificate_preview_image_url")
+        or record.get("preview_image_url")
+        or ""
+    )
+    if certificate_status != "Ready":
+        print_jpg_url = ""
+        preview_image_url = ""
     edition_total = _positive_int(record.get("edition_total"), 100) or 100
     edition_number = _positive_int(record.get("edition_number"), 0)
     created_at = (
@@ -2231,8 +2335,13 @@ def order_certificate_account_record(record):
         "display_edition": display_edition or edition_display,
         "certificate_id": str(record.get("certificate_id") or "").strip(),
         "shopify_file_id": str(record.get("shopify_file_id") or record.get("pdf_shopify_file_id") or record.get("certificate_shopify_file_id") or "").strip(),
+        "shopify_pdf_file_id": str(record.get("shopify_pdf_file_id") or record.get("pdf_shopify_file_id") or record.get("shopify_file_id") or "").strip(),
+        "shopify_print_jpg_file_id": str(record.get("shopify_print_jpg_file_id") or "").strip(),
+        "shopify_preview_file_id": str(record.get("shopify_preview_file_id") or record.get("certificate_preview_shopify_file_id") or "").strip(),
         "certificate_file_url": str(url or "").strip(),
         "certificate_pdf_url": str(url or "").strip(),
+        "certificate_print_jpg_url": str(print_jpg_url or "").strip(),
+        "certificate_preview_image_url": str(preview_image_url or "").strip(),
         "certificate_status": certificate_status,
         "shopify_file_status": _certificate_file_status(record, certificate_status),
         "purchase_date": str(record.get("purchase_date") or record.get("processed_at") or "").strip(),

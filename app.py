@@ -5512,7 +5512,27 @@ def render_settings_page():
                         st.caption(error)
             except Exception as error:
                 _developer_action_error("Sync Certificate to Shopify", error)
-        if st.button("Sync Unsynced Certificates", key="developer-sync-unsynced-certificates", use_container_width=True):
+        asset_cols = st.columns(2)
+        if asset_cols[0].button("Generate Missing Assets", key="developer-generate-missing-certificate-assets", use_container_width=True):
+            try:
+                sync = get_shopify_sync()
+                config = sync.get_config()
+                if not config.get("configured"):
+                    st.warning("Shopify is not configured. Certificate assets were not generated/uploaded.")
+                else:
+                    certificate_engine = importlib.import_module("certificate_engine")
+                    result = certificate_engine.generate_missing_certificate_assets_for_recent_orders(
+                        config=config,
+                        max_orders=100,
+                    )
+                    st.success(
+                        f"Certificate asset generation complete: {result.get('generated') or 0} certificate(s) updated."
+                    )
+                    if result.get("errors"):
+                        st.warning(f"{len(result.get('errors') or [])} asset generation/upload issue(s) need review.")
+            except Exception as error:
+                _developer_action_error("Generate Missing Assets", error)
+        if asset_cols[1].button("Sync Certificate Assets to Shopify", key="developer-sync-unsynced-certificates", use_container_width=True):
             try:
                 sync = get_shopify_sync()
                 config = sync.get_config()
@@ -5526,7 +5546,7 @@ def render_settings_page():
                         limit=250,
                     )
                     st.success(
-                        f"Unsynced certificate push complete: {result.get('synced') or 0} order(s) synced."
+                        f"Certificate asset sync complete: {result.get('synced') or 0} order(s) synced."
                     )
                     if result.get("failed"):
                         st.warning(f"{result.get('failed')} certificate metafield push(es) still need review.")
@@ -5540,6 +5560,11 @@ def render_settings_page():
                 st.write(f"**Certificates generated count:** {diagnostics.get('certificates_generated_count') or 0}")
                 st.write(f"**Certificates synced to Shopify count:** {diagnostics.get('certificates_synced_to_shopify_count') or 0}")
                 st.write(f"**Unsynced certificate count:** {diagnostics.get('unsynced_certificate_count') or 0}")
+                st.write(f"**PDF ready:** {diagnostics.get('pdf_ready_count') or 0}")
+                st.write(f"**Print JPG ready:** {diagnostics.get('print_jpg_ready_count') or 0}")
+                st.write(f"**Preview ready:** {diagnostics.get('preview_ready_count') or 0}")
+                st.write(f"**Missing print JPG:** {diagnostics.get('missing_print_jpg_count') or 0}")
+                st.write(f"**Missing preview:** {diagnostics.get('missing_preview_count') or 0}")
                 st.write(
                     f"**Last Shopify order metafield sync status:** "
                     f"{diagnostics.get('last_shopify_order_metafield_sync_status') or 'None'}"

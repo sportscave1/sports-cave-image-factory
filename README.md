@@ -129,6 +129,10 @@ Required Shopify app scopes for Phase 5B:
 - `read_products`
 - `write_products`
 - `read_orders`
+- `read_files`
+- `write_files`
+- `read_images`
+- `write_images`
 
 The backend database is the source of truth for edition numbers. Shopify
 metafields are only a storefront display mirror. Edition availability must not
@@ -137,6 +141,25 @@ be based on Shopify inventory, stock, or variant inventory.
 The storefront snippet lives at
 `shopify_theme/snippets/sports-cave-edition-pill.liquid` and reads only the
 `sports_cave` product metafields synced from Sports Cave OS.
+
+## Customer Certificate Vault
+
+The customer account certificate vault reads certificate ownership from Shopify
+order metafield `sports_cave.certificates_json`. Certificate PDFs, lightweight
+preview images, and print-quality JPG assets are stored in Shopify Files/CDN and
+mirrored into that order metafield for the logged-in customer's own orders.
+
+Customer Account API access requires:
+
+- `customer_read_customers`
+- `customer_read_orders`
+- `[extensions.capabilities] api_access = true`
+
+The print/preview certificate image upload path also requires Admin API image
+file scopes:
+
+- `read_images`
+- `write_images`
 
 Matching rules:
 

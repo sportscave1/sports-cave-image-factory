@@ -501,6 +501,13 @@ def _ensure_schema_uncached():
                     shopify_file_url TEXT,
                     certificate_file_url TEXT,
                     certificate_pdf_url TEXT,
+                    certificate_print_jpg_url TEXT,
+                    certificate_preview_image_url TEXT,
+                    shopify_pdf_file_id TEXT,
+                    shopify_print_jpg_file_id TEXT,
+                    shopify_preview_file_id TEXT,
+                    asset_sync_status TEXT DEFAULT 'pending',
+                    asset_sync_error TEXT,
                     certificate_shopify_file_id TEXT,
                     certificate_status TEXT DEFAULT 'Processing',
                     sync_status TEXT DEFAULT 'pending',
@@ -867,6 +874,13 @@ def _ensure_schema_uncached():
                     ("shopify_file_url", "TEXT"),
                     ("certificate_file_url", "TEXT"),
                     ("certificate_pdf_url", "TEXT"),
+                    ("certificate_print_jpg_url", "TEXT"),
+                    ("certificate_preview_image_url", "TEXT"),
+                    ("shopify_pdf_file_id", "TEXT"),
+                    ("shopify_print_jpg_file_id", "TEXT"),
+                    ("shopify_preview_file_id", "TEXT"),
+                    ("asset_sync_status", "TEXT DEFAULT 'pending'"),
+                    ("asset_sync_error", "TEXT"),
                     ("certificate_shopify_file_id", "TEXT"),
                     ("certificate_status", "TEXT DEFAULT 'Processing'"),
                     ("sync_status", "TEXT DEFAULT 'pending'"),
@@ -945,6 +959,13 @@ def _ensure_schema_uncached():
                     ("shopify_file_url", "TEXT"),
                     ("certificate_file_url", "TEXT"),
                     ("certificate_pdf_url", "TEXT"),
+                    ("certificate_print_jpg_url", "TEXT"),
+                    ("certificate_preview_image_url", "TEXT"),
+                    ("shopify_pdf_file_id", "TEXT"),
+                    ("shopify_print_jpg_file_id", "TEXT"),
+                    ("shopify_preview_file_id", "TEXT"),
+                    ("asset_sync_status", "TEXT DEFAULT 'pending'"),
+                    ("asset_sync_error", "TEXT"),
                     ("certificate_shopify_file_id", "TEXT"),
                     ("certificate_status", "TEXT DEFAULT 'Processing'"),
                     ("order_metafields_synced_at", "TIMESTAMPTZ"),
@@ -1433,6 +1454,14 @@ def ensure_order_read_schema():
                         shopify_file_status TEXT,
                         shopify_file_url TEXT,
                         certificate_file_url TEXT,
+                        certificate_pdf_url TEXT,
+                        certificate_print_jpg_url TEXT,
+                        certificate_preview_image_url TEXT,
+                        shopify_pdf_file_id TEXT,
+                        shopify_print_jpg_file_id TEXT,
+                        shopify_preview_file_id TEXT,
+                        asset_sync_status TEXT DEFAULT 'pending',
+                        asset_sync_error TEXT,
                         certificate_shopify_file_id TEXT,
                         certificate_status TEXT DEFAULT 'Processing',
                         purchase_date TIMESTAMPTZ,
@@ -1572,6 +1601,14 @@ def ensure_order_read_schema():
                         ("shopify_file_status", "TEXT"),
                         ("shopify_file_url", "TEXT"),
                         ("certificate_file_url", "TEXT"),
+                        ("certificate_pdf_url", "TEXT"),
+                        ("certificate_print_jpg_url", "TEXT"),
+                        ("certificate_preview_image_url", "TEXT"),
+                        ("shopify_pdf_file_id", "TEXT"),
+                        ("shopify_print_jpg_file_id", "TEXT"),
+                        ("shopify_preview_file_id", "TEXT"),
+                        ("asset_sync_status", "TEXT DEFAULT 'pending'"),
+                        ("asset_sync_error", "TEXT"),
                         ("certificate_shopify_file_id", "TEXT"),
                         ("certificate_status", "TEXT DEFAULT 'Processing'"),
                         ("purchase_date", "TIMESTAMPTZ"),
@@ -2972,7 +3009,9 @@ def _certificate_rows_for_order(shopify_order_id):
                 SELECT c.id AS certificate_row_id, c.certificate_id, c.edition_number,
                        c.edition_total,
                        COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
-                       c.shopify_file_id, c.shopify_file_status, c.certificate_status,
+                       c.certificate_pdf_url, c.certificate_print_jpg_url, c.certificate_preview_image_url,
+                       c.shopify_file_id, c.shopify_pdf_file_id, c.shopify_print_jpg_file_id, c.shopify_preview_file_id,
+                       c.shopify_file_status, c.certificate_status,
                        c.shopify_customer_id, c.customer_email, c.customer_name,
                        c.shopify_order_name, c.shopify_line_item_id, c.shopify_product_id,
                        c.shopify_variant_id, c.product_title AS certificate_product_title,
@@ -3024,10 +3063,16 @@ def sync_order_certificate_metafields(shopify_order_id, config=None, request_pos
                 ),
                 "certificate_id": row.get("certificate_id") or "",
                 "shopify_file_id": row.get("shopify_file_id") or "",
-                "pdf_shopify_file_id": row.get("shopify_file_id") or "",
+                "pdf_shopify_file_id": row.get("shopify_pdf_file_id") or row.get("shopify_file_id") or "",
+                "shopify_pdf_file_id": row.get("shopify_pdf_file_id") or row.get("shopify_file_id") or "",
+                "shopify_print_jpg_file_id": row.get("shopify_print_jpg_file_id") or "",
+                "shopify_preview_file_id": row.get("shopify_preview_file_id") or "",
                 "shopify_file_status": row.get("shopify_file_status") or "",
-                "certificate_url": row.get("shopify_file_url") or "",
-                "certificate_file_url": row.get("shopify_file_url") or "",
+                "certificate_url": row.get("shopify_file_url") or row.get("certificate_pdf_url") or "",
+                "certificate_file_url": row.get("shopify_file_url") or row.get("certificate_pdf_url") or "",
+                "certificate_pdf_url": row.get("certificate_pdf_url") or row.get("shopify_file_url") or "",
+                "certificate_print_jpg_url": row.get("certificate_print_jpg_url") or "",
+                "certificate_preview_image_url": row.get("certificate_preview_image_url") or "",
                 "line_item_unit_index": row.get("line_item_unit_index") or 1,
                 "certificate_status": row.get("certificate_status") or "",
                 "purchase_date": str(row.get("purchase_date") or ""),
@@ -3098,8 +3143,8 @@ def backfill_ready_certificate_order_metafields(config=None, request_post=None, 
                 FROM certificates
                 WHERE shopify_order_id IS NOT NULL
                   AND shopify_order_id <> ''
-                  AND COALESCE(NULLIF(shopify_file_url, ''), NULLIF(certificate_file_url, '')) IS NOT NULL
-                  AND COALESCE(NULLIF(shopify_file_url, ''), NULLIF(certificate_file_url, '')) <> ''
+                  AND COALESCE(NULLIF(certificate_pdf_url, ''), NULLIF(shopify_file_url, ''), NULLIF(certificate_file_url, '')) IS NOT NULL
+                  AND COALESCE(NULLIF(certificate_pdf_url, ''), NULLIF(shopify_file_url, ''), NULLIF(certificate_file_url, '')) <> ''
                   AND (
                     %s = FALSE
                     OR COALESCE(order_metafields_sync_status, '') <> 'Synced'
@@ -3187,6 +3232,11 @@ def certificate_vault_diagnostics():
         "certificates_generated_count": 0,
         "certificates_synced_to_shopify_count": 0,
         "unsynced_certificate_count": 0,
+        "pdf_ready_count": 0,
+        "print_jpg_ready_count": 0,
+        "preview_ready_count": 0,
+        "missing_print_jpg_count": 0,
+        "missing_preview_count": 0,
         "last_shopify_order_metafield_sync_status": "",
         "last_sync_error": "",
     }
@@ -3217,6 +3267,46 @@ def certificate_vault_diagnostics():
                 """
             )
             diagnostics["unsynced_certificate_count"] = int((cur.fetchone() or {}).get("count") or 0)
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(
+                            NULLIF(certificate_pdf_url, ''),
+                            NULLIF(shopify_file_url, ''),
+                            NULLIF(certificate_file_url, ''),
+                            ''
+                        ) <> ''
+                    ) AS pdf_ready,
+                    COUNT(*) FILTER (WHERE COALESCE(certificate_print_jpg_url, '') <> '') AS print_ready,
+                    COUNT(*) FILTER (WHERE COALESCE(certificate_preview_image_url, '') <> '') AS preview_ready,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(
+                            NULLIF(certificate_pdf_url, ''),
+                            NULLIF(shopify_file_url, ''),
+                            NULLIF(certificate_file_url, ''),
+                            ''
+                        ) <> ''
+                          AND COALESCE(certificate_print_jpg_url, '') = ''
+                    ) AS missing_print,
+                    COUNT(*) FILTER (
+                        WHERE COALESCE(
+                            NULLIF(certificate_pdf_url, ''),
+                            NULLIF(shopify_file_url, ''),
+                            NULLIF(certificate_file_url, ''),
+                            ''
+                        ) <> ''
+                          AND COALESCE(certificate_preview_image_url, '') = ''
+                    ) AS missing_preview
+                FROM certificates
+                """
+            )
+            asset_counts = cur.fetchone() or {}
+            diagnostics["pdf_ready_count"] = int(asset_counts.get("pdf_ready") or 0)
+            diagnostics["print_jpg_ready_count"] = int(asset_counts.get("print_ready") or 0)
+            diagnostics["preview_ready_count"] = int(asset_counts.get("preview_ready") or 0)
+            diagnostics["missing_print_jpg_count"] = int(asset_counts.get("missing_print") or 0)
+            diagnostics["missing_preview_count"] = int(asset_counts.get("missing_preview") or 0)
             cur.execute(
                 """
                 SELECT
@@ -5047,6 +5137,8 @@ def upsert_certificate_metadata(metadata):
     account_record = shopify_sync.order_certificate_account_record(metadata)
     now_value = datetime.now(timezone.utc).isoformat(timespec="seconds")
     certificate_url = account_record.get("certificate_file_url") or ""
+    print_jpg_url = account_record.get("certificate_print_jpg_url") or ""
+    preview_image_url = account_record.get("certificate_preview_image_url") or ""
     line_item_unit_index = _int_or_none(
         metadata.get("line_item_unit_index") or metadata.get("allocation_index")
     ) or 1
@@ -5079,6 +5171,15 @@ def upsert_certificate_metadata(metadata):
         "shopify_file_url": _none_if_blank(certificate_url),
         "certificate_file_url": _none_if_blank(certificate_url),
         "certificate_pdf_url": _none_if_blank(certificate_url),
+        "certificate_print_jpg_url": _none_if_blank(print_jpg_url),
+        "certificate_preview_image_url": _none_if_blank(preview_image_url),
+        "shopify_pdf_file_id": _none_if_blank(account_record.get("shopify_pdf_file_id") or account_record.get("shopify_file_id")),
+        "shopify_print_jpg_file_id": _none_if_blank(account_record.get("shopify_print_jpg_file_id")),
+        "shopify_preview_file_id": _none_if_blank(account_record.get("shopify_preview_file_id")),
+        "asset_sync_status": _none_if_blank(metadata.get("asset_sync_status")) or (
+            "ready" if print_jpg_url and preview_image_url else "pdf_ready"
+        ),
+        "asset_sync_error": _none_if_blank(metadata.get("asset_sync_error")),
         "certificate_shopify_file_id": _none_if_blank(account_record.get("shopify_file_id")),
         "certificate_status": _none_if_blank(account_record.get("certificate_status")) or "Processing",
         "sync_status": _none_if_blank(metadata.get("sync_status")) or "pending",
@@ -6558,6 +6659,9 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
                    COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url,
                    c.certificate_id, c.local_file_path,
                    COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
+                   c.certificate_pdf_url, c.certificate_print_jpg_url, c.certificate_preview_image_url,
+                   c.shopify_pdf_file_id, c.shopify_print_jpg_file_id, c.shopify_preview_file_id,
+                   c.asset_sync_status, c.asset_sync_error,
                    c.generated_at,
                    c.certificate_r2_bucket, c.certificate_r2_key,
                    c.certificate_preview_r2_bucket, c.certificate_preview_r2_key,
@@ -6598,6 +6702,14 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
                         'certificate_id', certificate_id,
                         'local_file_path', local_file_path,
                         'shopify_file_url', shopify_file_url,
+                        'certificate_pdf_url', certificate_pdf_url,
+                        'certificate_print_jpg_url', certificate_print_jpg_url,
+                        'certificate_preview_image_url', certificate_preview_image_url,
+                        'shopify_pdf_file_id', shopify_pdf_file_id,
+                        'shopify_print_jpg_file_id', shopify_print_jpg_file_id,
+                        'shopify_preview_file_id', shopify_preview_file_id,
+                        'asset_sync_status', asset_sync_status,
+                        'asset_sync_error', asset_sync_error,
                         'certificate_r2_bucket', certificate_r2_bucket,
                         'certificate_r2_key', certificate_r2_key,
                         'certificate_preview_r2_bucket', certificate_preview_r2_bucket,

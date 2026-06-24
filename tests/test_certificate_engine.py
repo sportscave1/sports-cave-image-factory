@@ -316,6 +316,8 @@ class CertificateEngineTests(unittest.TestCase):
                 "pdf_url": "https://cdn.example/certificate.pdf",
                 "local_pdf_path": "C:/local/certificate.pdf",
                 "preview_path": "C:/local/certificate.png",
+                "local_print_jpg_path": "C:/local/certificate-print.jpg",
+                "local_preview_image_path": "C:/local/certificate-preview.webp",
                 "pdf_size_bytes": 123,
             }
         )
@@ -324,6 +326,8 @@ class CertificateEngineTests(unittest.TestCase):
         self.assertEqual(record["pdf_size_bytes"], 123)
         self.assertNotIn("local_pdf_path", record)
         self.assertNotIn("preview_path", record)
+        self.assertNotIn("local_print_jpg_path", record)
+        self.assertNotIn("local_preview_image_path", record)
 
 
 if __name__ == "__main__":

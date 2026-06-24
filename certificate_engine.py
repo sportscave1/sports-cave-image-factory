@@ -13,7 +13,12 @@ BASE_DIR = Path(__file__).resolve().parent
 CERTIFICATE_OUTPUT_DIR = BASE_DIR / "output" / "certificates"
 SNAPSHOT_PATH = BASE_DIR / "output" / "_cache" / "certificates_snapshot.json"
 SNAPSHOT_VERSION = 1
-LOCAL_ONLY_CERTIFICATE_KEYS = {"local_pdf_path", "preview_path"}
+LOCAL_ONLY_CERTIFICATE_KEYS = {
+    "local_pdf_path",
+    "preview_path",
+    "local_print_jpg_path",
+    "local_preview_image_path",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +47,7 @@ def _parse_certificate_payload(value):
             "handle": "product_handle",
             "pdf_shopify_file_id": "shopify_file_id",
             "pdf_url": "certificate_file_url",
+            "certificate_pdf_url": "certificate_file_url",
             "status": "certificate_status",
         }
         for target, source in aliases.items():
@@ -207,8 +213,8 @@ def _existing_ready_certificate(existing, line_id, edition_number, unit_index):
     record = existing.get(key)
     if not record:
         return None
-    status = str(record.get("status") or "").casefold()
-    if status in {"ready", "uploaded"} and (record.get("pdf_url") or record.get("certificate_url")):
+    status = str(record.get("status") or record.get("certificate_status") or "").casefold()
+    if status in {"ready", "uploaded", "certificate ready"} and _certificate_has_pdf(record):
         return record
     return None
 
@@ -303,7 +309,13 @@ def certificate_record_from_order_row(row):
         "customer_email": row.get("customer_email") or "",
         "purchase_date": row.get("processed_at") or row.get("date") or "",
         "pdf_shopify_file_id": row.get("certificate_shopify_file_id") or "",
+        "shopify_pdf_file_id": row.get("shopify_pdf_file_id") or row.get("certificate_shopify_file_id") or "",
+        "shopify_print_jpg_file_id": row.get("shopify_print_jpg_file_id") or "",
+        "shopify_preview_file_id": row.get("shopify_preview_file_id") or "",
         "pdf_url": row.get("certificate_pdf_url") or "",
+        "certificate_pdf_url": row.get("certificate_pdf_url") or "",
+        "certificate_print_jpg_url": row.get("certificate_print_jpg_url") or "",
+        "certificate_preview_image_url": row.get("certificate_preview_image_url") or "",
         "local_pdf_path": row.get("certificate_pdf_path") or "",
         "generated_at": row.get("certificate_generated_at") or "",
         "created_at": created_at,
@@ -388,6 +400,99 @@ def _sync_order_certificate_records(order_gid, records, *, compare_digest=None, 
         return {"ok": False, "error": str(error)}
 
 
+def _generate_certificate_image_assets(record, output_dir):
+    updated = dict(record or {})
+    asset_errors = []
+    try:
+        updated["local_print_jpg_path"] = certificate_service.generate_certificate_print_jpg(
+            output_dir,
+            product_title=updated.get("product_title"),
+            edition_number=updated.get("edition_number"),
+            edition_total=updated.get("edition_total"),
+            order_name=updated.get("order_name"),
+            shopify_handle=updated.get("handle"),
+        )
+    except Exception as error:
+        asset_errors.append(f"Print JPG generation failed: {error}")
+    try:
+        updated["local_preview_image_path"] = certificate_service.generate_certificate_preview_webp(
+            output_dir,
+            product_title=updated.get("product_title"),
+            edition_number=updated.get("edition_number"),
+            edition_total=updated.get("edition_total"),
+            order_name=updated.get("order_name"),
+            shopify_handle=updated.get("handle"),
+        )
+    except Exception as error:
+        asset_errors.append(f"Preview image generation failed: {error}")
+    if asset_errors:
+        updated["asset_sync_status"] = "partial"
+        updated["asset_sync_error"] = "; ".join(asset_errors)
+    return updated
+
+
+def _upload_certificate_image_assets(updated, *, config=None, request_post=None, upload_post=None):
+    updated = dict(updated or {})
+    asset_errors = []
+    print_path_raw = str(updated.get("local_print_jpg_path") or "").strip()
+    if print_path_raw:
+        try:
+            print_path = Path(print_path_raw)
+            print_upload = shopify_sync.upload_image_to_shopify_files(
+                print_path,
+                filename=certificate_service.certificate_print_jpg_filename(
+                    updated.get("order_name") or updated.get("shopify_order_name"),
+                    updated.get("handle") or updated.get("product_handle"),
+                    updated.get("edition_number"),
+                ),
+                alt=f"{updated.get('certificate_id')} print certificate",
+                config=config,
+                request_post=request_post,
+                upload_post=upload_post,
+            )
+            if print_upload.get("file_id") and print_upload.get("url"):
+                updated["shopify_print_jpg_file_id"] = print_upload.get("file_id") or ""
+                updated["certificate_print_jpg_url"] = print_upload.get("url") or ""
+            else:
+                asset_errors.append("Shopify print JPG upload did not return a ready URL.")
+        except Exception as error:
+            asset_errors.append(f"Print JPG upload failed: {error}")
+    preview_path_raw = str(updated.get("local_preview_image_path") or "").strip()
+    if preview_path_raw:
+        try:
+            preview_path = Path(preview_path_raw)
+            preview_upload = shopify_sync.upload_image_to_shopify_files(
+                preview_path,
+                filename=certificate_service.certificate_preview_webp_filename(
+                    updated.get("order_name") or updated.get("shopify_order_name"),
+                    updated.get("handle") or updated.get("product_handle"),
+                    updated.get("edition_number"),
+                ),
+                alt=f"{updated.get('certificate_id')} certificate preview",
+                config=config,
+                request_post=request_post,
+                upload_post=upload_post,
+            )
+            if preview_upload.get("file_id") and preview_upload.get("url"):
+                updated["shopify_preview_file_id"] = preview_upload.get("file_id") or ""
+                updated["certificate_preview_shopify_file_id"] = preview_upload.get("file_id") or ""
+                updated["certificate_preview_image_url"] = preview_upload.get("url") or ""
+            else:
+                asset_errors.append("Shopify preview image upload did not return a ready URL.")
+        except Exception as error:
+            asset_errors.append(f"Preview image upload failed: {error}")
+    if asset_errors:
+        previous_error = str(updated.get("asset_sync_error") or "").strip()
+        updated["asset_sync_error"] = "; ".join([item for item in [previous_error, *asset_errors] if item])
+        updated["asset_sync_status"] = "partial"
+    elif updated.get("certificate_print_jpg_url") and updated.get("certificate_preview_image_url"):
+        updated["asset_sync_status"] = "ready"
+        updated["asset_sync_error"] = ""
+    else:
+        updated["asset_sync_status"] = updated.get("asset_sync_status") or "pdf_ready"
+    return updated
+
+
 def generate_local_certificate_for_record(record, output_dir=None):
     output_dir = Path(output_dir or CERTIFICATE_OUTPUT_DIR)
     updated = dict(record or {})
@@ -425,6 +530,7 @@ def generate_local_certificate_for_record(record, output_dir=None):
             )
         except Exception:
             preview_path = ""
+        updated = _generate_certificate_image_assets(updated, output_dir)
         updated["local_pdf_path"] = pdf_path
         updated["preview_path"] = preview_path
         updated["generated_at"] = now_iso()
@@ -479,9 +585,17 @@ def upload_generated_certificate_record(record, *, config=None, request_post=Non
     if upload_result.get("resource_url") and upload_result.get("url") == upload_result.get("resource_url"):
         raise shopify_sync.ShopifyAPIError("Shopify file upload returned a staged URL instead of a permanent file URL.")
     updated["pdf_shopify_file_id"] = upload_result.get("file_id") or ""
+    updated["shopify_pdf_file_id"] = upload_result.get("file_id") or ""
     updated["pdf_url"] = upload_result.get("url") or ""
+    updated["certificate_pdf_url"] = upload_result.get("url") or ""
     updated["pdf_size_bytes"] = len(local_bytes)
     updated["shopify_file_status"] = upload_result.get("status") or ""
+    updated = _upload_certificate_image_assets(
+        updated,
+        config=config,
+        request_post=request_post,
+        upload_post=upload_post,
+    )
     updated["status"] = "Ready"
     updated["sync_error"] = ""
     updated["generated_at"] = updated.get("generated_at") or now_iso()
@@ -702,6 +816,7 @@ def generate_missing_certificates_for_order(
                 filename=filename,
             )
             record["local_pdf_path"] = pdf_path
+            record = _generate_certificate_image_assets(record, output_dir)
             uploaded = upload_generated_certificate_record(
                 record,
                 config=config,
@@ -876,6 +991,88 @@ def generate_missing_certificates_for_recent_orders(config=None, request_post=No
             totals["generated"] += result.get("generated", 0)
             totals["skipped"] += result.get("skipped", 0)
             totals["errors"].extend(result.get("errors") or [])
+    refresh_certificates_snapshot(config=config, request_post=request_post, max_orders=max_orders)
+    return totals
+
+
+def _certificate_has_pdf(record):
+    return bool(
+        (record or {}).get("certificate_pdf_url")
+        or (record or {}).get("certificate_file_url")
+        or (record or {}).get("pdf_url")
+        or (record or {}).get("certificate_url")
+    )
+
+
+def _certificate_missing_customer_assets(record):
+    if not _certificate_has_pdf(record):
+        return False
+    return not (
+        (record or {}).get("certificate_print_jpg_url")
+        and (record or {}).get("certificate_preview_image_url")
+    )
+
+
+def generate_missing_certificate_assets_for_recent_orders(config=None, request_post=None, upload_post=None, *, max_orders=100):
+    config = config or shopify_sync.get_config()
+    totals = {"processed_orders": 0, "generated": 0, "skipped": 0, "errors": [], "metafield_errors": []}
+    output_dir = Path(CERTIFICATE_OUTPUT_DIR)
+    for page in shopify_sync.iter_order_pages(
+        days=30,
+        page_size=50,
+        max_orders=max_orders,
+        query="financial_status:paid",
+        default_paid_unfulfilled_filter=False,
+        config=config,
+        request_post=request_post,
+    ):
+        for order in page.get("orders") or []:
+            order_gid = order_allocator._order_identity(order)
+            if not order_gid:
+                continue
+            totals["processed_orders"] += 1
+            try:
+                state = read_order_certificate_state(order_gid, config=config, request_post=request_post)
+            except Exception as error:
+                totals["errors"].append(str(error))
+                continue
+            certificates = state.get("certificates") or []
+            changed = False
+            for certificate in list(certificates):
+                if not _certificate_missing_customer_assets(certificate):
+                    totals["skipped"] += 1
+                    continue
+                record = dict(certificate)
+                record.setdefault("order_name", record.get("shopify_order_name") or order.get("name") or order.get("order_name"))
+                record.setdefault("handle", record.get("product_handle") or record.get("shopify_handle"))
+                record.setdefault("edition_total", record.get("edition_limit") or record.get("edition_total") or 100)
+                try:
+                    record = _generate_certificate_image_assets(record, output_dir)
+                    record = _upload_certificate_image_assets(
+                        record,
+                        config=config,
+                        request_post=request_post,
+                        upload_post=upload_post,
+                    )
+                    record["status"] = record.get("status") or record.get("certificate_status") or "Ready"
+                    record["certificate_status"] = record.get("certificate_status") or "Ready"
+                    record_to_save = certificate_metafield_record(record)
+                    persist_certificate_record_to_supabase(record_to_save)
+                    certificates = _replace_certificate(certificates, record_to_save)
+                    changed = True
+                    totals["generated"] += 1
+                except Exception as error:
+                    totals["errors"].append(str(error))
+            if changed:
+                sync_result = _sync_order_certificate_records(
+                    order_gid,
+                    certificates,
+                    compare_digest=state.get("compare_digest"),
+                    config=config,
+                    request_post=request_post,
+                )
+                if not sync_result.get("ok"):
+                    totals["metafield_errors"].append(sync_result.get("error") or "Certificate asset metafield push failed.")
     refresh_certificates_snapshot(config=config, request_post=request_post, max_orders=max_orders)
     return totals
 

@@ -50,8 +50,14 @@ These are separate from Admin API scopes such as `read_customers` and
 
 This extension reads Shopify order metafields directly and does not call a
 Sports Cave OS or Supabase endpoint, so `network_access` is not enabled.
-Certificate PDFs are stored in Shopify Files/CDN; the extension only reads the
-mirrored order metafield metadata and opens the CDN PDF URL.
+Certificate PDFs, lightweight preview images, and print-quality JPG files are
+stored in Shopify Files/CDN; the extension only reads the mirrored order
+metafield metadata and opens the CDN asset URLs.
+
+The certificate image asset upload path also needs these Admin API scopes:
+
+- `read_images`
+- `write_images`
 
 ## Store Setup Verified
 
@@ -95,7 +101,7 @@ After any scope change:
 3. Approve/update the new permissions in Shopify Admin.
 4. If access denied persists, uninstall/reinstall the app after the new version is released.
 5. Test the customer account preview with a certificate order.
-6. Confirm the certificate card appears and Download Certificate opens the PDF.
+6. Confirm the certificate card appears and certificate links open in a new tab.
 
 ## Navigation
 
@@ -106,7 +112,7 @@ After deploy:
 3. Open the checkout and accounts editor.
 4. Add the full-page extension to the customer account header menu.
 5. Use menu label: `My Collection`.
-6. Page title shown by the extension: `My Sports Cave Collection`.
+6. Page title shown by the extension: `My Collection`.
 
 Shopify's full-page extension flow prompts for customer account menu placement
 when the extension is added.
@@ -119,7 +125,8 @@ when the extension is added.
 - Customer cannot see another customer's certificates because the query is
   scoped by Shopify customer authentication.
 - Customer with no certificates sees the empty state.
-- Missing or non-ready file shows `Certificate processing`.
+- Missing preview image shows the premium preview placeholder.
+- Missing or non-ready PDF shows `Certificate processing`.
 - Mobile uses stacked Shopify UI extension components.
 - Failure in this extension does not affect storefront, product page widget,
   Orders, edition allocation, certificate generation, or Shopify Files upload.

@@ -21,6 +21,8 @@ class CustomerCertificateVaultTests(unittest.TestCase):
             "write_products",
             "read_files",
             "write_files",
+            "read_images",
+            "write_images",
             "read_inventory",
             "read_locations",
             "read_markets",
@@ -62,11 +64,24 @@ class CustomerCertificateVaultTests(unittest.TestCase):
             "Certificate vault permissions are still being updated. Please try again shortly.",
             source,
         )
-        self.assertIn("No Sports Cave certificates found for this account yet.", source)
+        self.assertIn('heading="My Collection"', source)
+        self.assertIn("Your Sports Cave Collector Vault", source)
+        self.assertIn(
+            "Every numbered release in your collection is recorded here with its official certificate of authenticity.",
+            source,
+        )
+        self.assertIn("Your collection is waiting.", source)
+        self.assertIn("certificate_preview_image_url", source)
+        self.assertIn("certificate_print_jpg_url", source)
+        self.assertIn("View Certificate", source)
+        self.assertIn("Download Print Certificate", source)
+        self.assertIn("Download PDF", source)
+        self.assertIn("<s-button", source)
+        self.assertIn('target="_blank"', source)
         self.assertIn("matchesContext(record.shopify_customer_id, customer?.id)", source)
         self.assertIn("matchesContext(record.shopify_order_id, order?.id)", source)
         self.assertIn("Array.isArray(parsed)", source)
-        self.assertIn("record.certificate_file_url || record.certificate_pdf_url", source)
+        self.assertIn("record.certificate_pdf_url || record.certificate_file_url", source)
 
     def test_customer_vault_release_notes_are_documented(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")

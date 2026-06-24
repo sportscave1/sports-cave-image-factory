@@ -87,6 +87,20 @@ def certificate_pdf_filename(order_name, handle, edition_number, edition_total):
     )
 
 
+def certificate_print_jpg_filename(order_name, handle, edition_number):
+    return (
+        f"sports-cave-certificate-{safe_filename_part(order_name)}-"
+        f"{safe_filename_part(handle)}-edition-{int(edition_number):03d}-print.jpg"
+    )
+
+
+def certificate_preview_webp_filename(order_name, handle, edition_number):
+    return (
+        f"sports-cave-certificate-{safe_filename_part(order_name)}-"
+        f"{safe_filename_part(handle)}-edition-{int(edition_number):03d}-preview.webp"
+    )
+
+
 def certificate_template_status():
     return {
         "print_template_path": str(CERTIFICATE_TEMPLATE_PRINT_PATH),
@@ -151,94 +165,33 @@ def draw_fitted_text(draw, text, x_start, x_end, y_center, max_size, min_size):
     return fitted_text
 
 
-def generate_template_certificate_pdf(
-    output_dir,
+def render_template_certificate_image(
     *,
     product_title,
     edition_number,
     edition_total,
-    order_name,
-    shopify_handle="",
-    filename="",
+    template_path=None,
+    target_size=None,
 ):
     from PIL import Image, ImageDraw
 
-    if not CERTIFICATE_TEMPLATE_PRINT_PATH.exists():
-        raise FileNotFoundError(f"Certificate template missing: {CERTIFICATE_TEMPLATE_PRINT_PATH}")
-
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    handle_part = safe_filename_part(shopify_handle or product_title)
-    filename = filename or certificate_pdf_filename(order_name, handle_part, edition_number, edition_total)
-    pdf_path = output_dir / filename
-
-    with Image.open(CERTIFICATE_TEMPLATE_PRINT_PATH) as template:
-        certificate = template.convert("RGB")
-    draw = ImageDraw.Draw(certificate)
-    width, height = certificate.size
-
-    name_text = str(product_title or "Sports Cave Artwork")
-    edition_text = format_edition_number(edition_number, edition_total)
-    scale = width / 1536
-
-    draw_fitted_text(
-        draw,
-        name_text,
-        int(width * 0.41),
-        int(width * 0.82),
-        int(height * 0.682),
-        max_size=max(13, int(25 * scale)),
-        min_size=max(10, int(13 * scale)),
-    )
-    draw_fitted_text(
-        draw,
-        edition_text,
-        int(width * 0.43),
-        int(width * 0.54),
-        int(height * 0.744),
-        max_size=max(15, int(27 * scale)),
-        min_size=max(10, int(15 * scale)),
-    )
-
-    certificate.save(pdf_path, "PDF", resolution=300.0)
-    certificate.close()
-    return str(pdf_path)
-
-
-def generate_certificate_preview_png(
-    output_dir,
-    *,
-    product_title,
-    edition_number,
-    edition_total,
-    order_name,
-    shopify_handle="",
-):
-    from PIL import Image, ImageDraw
-
-    template_path = (
-        CERTIFICATE_TEMPLATE_PREVIEW_PATH
-        if CERTIFICATE_TEMPLATE_PREVIEW_PATH.exists()
-        else CERTIFICATE_TEMPLATE_PRINT_PATH
-    )
+    template_path = Path(template_path or CERTIFICATE_TEMPLATE_PRINT_PATH)
     if not template_path.exists():
         raise FileNotFoundError(f"Certificate template missing: {template_path}")
 
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    handle_part = safe_filename_part(shopify_handle or product_title)
-    filename = (
-        f"certificate_{safe_filename_part(order_name)}_{handle_part}"
-        f"_edition_{int(edition_number):03d}_preview.png"
-    )
-    preview_path = output_dir / filename
-
     with Image.open(template_path) as template:
         certificate = template.convert("RGB")
+    if target_size:
+        try:
+            resample = Image.Resampling.LANCZOS
+        except AttributeError:
+            resample = Image.LANCZOS
+        certificate = certificate.resize(tuple(int(item) for item in target_size), resample)
+
     draw = ImageDraw.Draw(certificate)
     width, height = certificate.size
-
     scale = width / 1536
+
     draw_fitted_text(
         draw,
         str(product_title or "Sports Cave Artwork"),
@@ -257,9 +210,144 @@ def generate_certificate_preview_png(
         max_size=max(15, int(27 * scale)),
         min_size=max(10, int(15 * scale)),
     )
+    return certificate
+
+
+def generate_template_certificate_pdf(
+    output_dir,
+    *,
+    product_title,
+    edition_number,
+    edition_total,
+    order_name,
+    shopify_handle="",
+    filename="",
+):
+    if not CERTIFICATE_TEMPLATE_PRINT_PATH.exists():
+        raise FileNotFoundError(f"Certificate template missing: {CERTIFICATE_TEMPLATE_PRINT_PATH}")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    handle_part = safe_filename_part(shopify_handle or product_title)
+    filename = filename or certificate_pdf_filename(order_name, handle_part, edition_number, edition_total)
+    pdf_path = output_dir / filename
+
+    certificate = render_template_certificate_image(
+        product_title=product_title,
+        edition_number=edition_number,
+        edition_total=edition_total,
+        template_path=CERTIFICATE_TEMPLATE_PRINT_PATH,
+    )
+
+    certificate.save(pdf_path, "PDF", resolution=300.0)
+    certificate.close()
+    return str(pdf_path)
+
+
+def generate_certificate_preview_png(
+    output_dir,
+    *,
+    product_title,
+    edition_number,
+    edition_total,
+    order_name,
+    shopify_handle="",
+):
+    template_path = (
+        CERTIFICATE_TEMPLATE_PREVIEW_PATH
+        if CERTIFICATE_TEMPLATE_PREVIEW_PATH.exists()
+        else CERTIFICATE_TEMPLATE_PRINT_PATH
+    )
+    if not template_path.exists():
+        raise FileNotFoundError(f"Certificate template missing: {template_path}")
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    handle_part = safe_filename_part(shopify_handle or product_title)
+    filename = (
+        f"certificate_{safe_filename_part(order_name)}_{handle_part}"
+        f"_edition_{int(edition_number):03d}_preview.png"
+    )
+    preview_path = output_dir / filename
+
+    certificate = render_template_certificate_image(
+        product_title=product_title,
+        edition_number=edition_number,
+        edition_total=edition_total,
+        template_path=template_path,
+    )
     certificate.save(preview_path, "PNG")
     certificate.close()
     return str(preview_path)
+
+
+def generate_certificate_print_jpg(
+    output_dir,
+    *,
+    product_title,
+    edition_number,
+    edition_total,
+    order_name,
+    shopify_handle="",
+    quality=94,
+):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    handle_part = safe_filename_part(shopify_handle or product_title)
+    output_path = output_dir / certificate_print_jpg_filename(order_name, handle_part, edition_number)
+    certificate = render_template_certificate_image(
+        product_title=product_title,
+        edition_number=edition_number,
+        edition_total=edition_total,
+        template_path=CERTIFICATE_TEMPLATE_PRINT_PATH,
+        target_size=(3508, 2480),
+    )
+    certificate.save(output_path, "JPEG", quality=int(quality), optimize=True, dpi=(300, 300))
+    certificate.close()
+    return str(output_path)
+
+
+def generate_certificate_preview_webp(
+    output_dir,
+    *,
+    product_title,
+    edition_number,
+    edition_total,
+    order_name,
+    shopify_handle="",
+    width=1200,
+    quality=82,
+):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    handle_part = safe_filename_part(shopify_handle or product_title)
+    output_path = output_dir / certificate_preview_webp_filename(order_name, handle_part, edition_number)
+    template_path = (
+        CERTIFICATE_TEMPLATE_PREVIEW_PATH
+        if CERTIFICATE_TEMPLATE_PREVIEW_PATH.exists()
+        else CERTIFICATE_TEMPLATE_PRINT_PATH
+    )
+    with render_template_certificate_image(
+        product_title=product_title,
+        edition_number=edition_number,
+        edition_total=edition_total,
+        template_path=template_path,
+    ) as certificate:
+        original_width, original_height = certificate.size
+        target_width = int(width)
+        target_height = max(1, round(original_height * (target_width / max(original_width, 1))))
+        try:
+            from PIL import Image
+
+            resample = Image.Resampling.LANCZOS
+        except AttributeError:
+            from PIL import Image
+
+            resample = Image.LANCZOS
+        preview = certificate.resize((target_width, target_height), resample)
+        preview.save(output_path, "WEBP", quality=int(quality), method=6)
+        preview.close()
+    return str(output_path)
 
 
 def generate_certificate_pdf(

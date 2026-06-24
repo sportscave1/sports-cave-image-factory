@@ -1,7 +1,7 @@
 api_version = "2026-04"
 
 [[extensions]]
-name = "My Sports Cave Collection"
+name = "My Collection"
 handle = "customer-certificate-vault"
 uid = "ba32a77c-8dd1-4bae-dae7-fe481a4d4e7723e3ca05"
 type = "ui_extension"

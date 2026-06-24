@@ -70,6 +70,10 @@ class ShopifySyncClientTests(unittest.TestCase):
                     "certificate_id": "SC-SC1234-012",
                     "pdf_shopify_file_id": "gid://shopify/GenericFile/1",
                     "pdf_url": "https://cdn.example/cert.pdf",
+                    "shopify_print_jpg_file_id": "gid://shopify/MediaImage/2",
+                    "shopify_preview_file_id": "gid://shopify/MediaImage/3",
+                    "certificate_print_jpg_url": "https://cdn.example/cert-print.jpg",
+                    "certificate_preview_image_url": "https://cdn.example/cert-preview.webp",
                     "status": "Ready",
                     "shopify_file_status": "READY",
                     "purchase_date": "2026-06-22T10:00:00Z",
@@ -97,10 +101,17 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(ready["edition_display"], "#012/100")
         self.assertEqual(ready["display_edition"], "Edition #012 of 100")
         self.assertEqual(ready["certificate_pdf_url"], "https://cdn.example/cert.pdf")
+        self.assertEqual(ready["certificate_print_jpg_url"], "https://cdn.example/cert-print.jpg")
+        self.assertEqual(ready["certificate_preview_image_url"], "https://cdn.example/cert-preview.webp")
+        self.assertEqual(ready["shopify_pdf_file_id"], "gid://shopify/GenericFile/1")
+        self.assertEqual(ready["shopify_print_jpg_file_id"], "gid://shopify/MediaImage/2")
+        self.assertEqual(ready["shopify_preview_file_id"], "gid://shopify/MediaImage/3")
         self.assertEqual(ready["certificate_status"], "Ready")
         self.assertEqual(ready["certificate_file_url"], "https://cdn.example/cert.pdf")
         self.assertEqual(processing["certificate_status"], "Processing")
         self.assertEqual(processing["certificate_file_url"], "")
+        self.assertEqual(processing["certificate_print_jpg_url"], "")
+        self.assertEqual(processing["certificate_preview_image_url"], "")
         self.assertEqual(inputs[2]["value"], "processing")
         self.assertEqual(inputs[3]["value"], "2")
 
