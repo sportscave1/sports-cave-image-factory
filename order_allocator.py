@@ -1422,3 +1422,408 @@ def load_orders_snapshot():
     payload.setdefault("saved_at", "")
     payload.setdefault("last_refreshed", "")
     return payload
+
+
+def _snapshot_row_unit_index(row):
+    try:
+        return int(row.get("line_item_unit_index") or int(row.get("edition_offset") or 0) + 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _snapshot_row_quantity(row):
+    try:
+        return max(int(row.get("line_quantity") or row.get("quantity") or 1), _snapshot_row_unit_index(row), 1)
+    except (TypeError, ValueError):
+        return max(_snapshot_row_unit_index(row), 1)
+
+
+def snapshot_override_row_id(row):
+    return "snapshot|" + "|".join(
+        [
+            order_gid(row.get("shopify_order_id") or row.get("order_gid")),
+            line_item_gid(row.get("shopify_line_item_id") or row.get("line_item_gid")),
+            str(_snapshot_row_unit_index(row)),
+            product_gid(row.get("shopify_product_id") or row.get("product_gid")),
+        ]
+    )
+
+
+def _snapshot_edition_number(row):
+    return _positive_int(row.get("edition_number") or row.get("edition") or row.get("assigned_edition_number"))
+
+
+def _snapshot_certificate_status(row):
+    status = str(row.get("certificate_status") or "").strip()
+    label = str(row.get("certificate") or "").strip()
+    if status:
+        return status
+    if label:
+        return f"Certificate {label}" if label == "Generate" else label
+    return "Certificate Generate"
+
+
+def _snapshot_row_to_override_record(row):
+    edition_number = _snapshot_edition_number(row)
+    if not edition_number:
+        return {}
+    return {
+        "id": snapshot_override_row_id(row),
+        "source": "snapshot_allocation",
+        "shopify_order_id": order_gid(row.get("shopify_order_id") or row.get("order_gid")),
+        "shopify_order_name": row.get("order") or row.get("order_name") or "",
+        "order_name": row.get("order") or row.get("order_name") or "",
+        "shopify_line_item_id": line_item_gid(row.get("shopify_line_item_id") or row.get("line_item_gid")),
+        "shopify_product_id": product_gid(row.get("shopify_product_id") or row.get("product_gid")),
+        "shopify_variant_id": row.get("variant_id") or row.get("variant_gid") or "",
+        "shopify_handle": row.get("product_handle") or row.get("handle") or "",
+        "product_handle": row.get("product_handle") or row.get("handle") or "",
+        "product_title": row.get("product") or row.get("product_title") or "",
+        "variant_title": row.get("variant") or row.get("variant_title") or "",
+        "customer_name": row.get("customer") or row.get("customer_name") or "",
+        "customer_email": row.get("customer_email") or "",
+        "edition_number": edition_number,
+        "edition_total": int(row.get("edition_total") or 100),
+        "allocation_index": _snapshot_row_unit_index(row),
+        "quantity": _snapshot_row_quantity(row),
+        "certificate_status": _snapshot_certificate_status(row),
+        "certificate_pdf_url": row.get("certificate_pdf_url") or "",
+        "certificate_pdf_path": row.get("certificate_pdf_path") or "",
+        "shopify_file_id": row.get("certificate_shopify_file_id") or "",
+        "created_at": row.get("created_at") or "",
+        "processed_at": row.get("processed_at") or "",
+        "_snapshot_row": dict(row),
+    }
+
+
+def _snapshot_search_matches(record, search):
+    raw = str(search or "").strip()
+    if not raw:
+        return True
+    haystack = " ".join(
+        str(record.get(key) or "")
+        for key in (
+            "id",
+            "shopify_order_name",
+            "order_name",
+            "shopify_order_id",
+            "customer_name",
+            "customer_email",
+            "product_title",
+            "variant_title",
+            "shopify_line_item_id",
+            "shopify_handle",
+            "product_handle",
+        )
+    ).casefold()
+    terms = {raw.casefold()}
+    if raw.startswith("#"):
+        terms.add(raw[1:].casefold())
+    else:
+        terms.add(f"#{raw}".casefold())
+    if any(term and term in haystack for term in terms):
+        return True
+    edition_match = re.fullmatch(r"#?0*(\d+)", raw)
+    return bool(edition_match and int(edition_match.group(1)) == int(record.get("edition_number") or 0))
+
+
+def snapshot_allocated_order_rows(search="", limit=50):
+    payload = load_orders_snapshot()
+    records = []
+    seen = set()
+    for row in payload.get("rows") or []:
+        record = _snapshot_row_to_override_record(row)
+        if not record or not _snapshot_search_matches(record, search):
+            continue
+        record_id = record.get("id")
+        if record_id in seen:
+            continue
+        seen.add(record_id)
+        records.append(record)
+    records.sort(
+        key=lambda row: (
+            _parse_datetime(row.get("processed_at")),
+            _parse_datetime(row.get("created_at")),
+            _parse_order_number(row.get("shopify_order_name") or row.get("order_name")),
+        ),
+        reverse=True,
+    )
+    return records[: max(int(limit or 50), 1)]
+
+
+def _snapshot_same_product(left, right):
+    left_product_id = product_gid(left.get("shopify_product_id") or left.get("product_gid"))
+    right_product_id = product_gid(right.get("shopify_product_id") or right.get("product_gid"))
+    if left_product_id and right_product_id:
+        return left_product_id == right_product_id
+    left_handle = str(left.get("product_handle") or left.get("shopify_handle") or left.get("handle") or "").casefold()
+    right_handle = str(right.get("product_handle") or right.get("shopify_handle") or right.get("handle") or "").casefold()
+    return bool(left_handle and right_handle and left_handle == right_handle)
+
+
+def _snapshot_row_matches_identity(row, selected):
+    return (
+        order_gid(row.get("shopify_order_id") or row.get("order_gid")) == order_gid(selected.get("shopify_order_id"))
+        and line_item_gid(row.get("shopify_line_item_id") or row.get("line_item_gid")) == line_item_gid(selected.get("shopify_line_item_id"))
+        and _snapshot_row_unit_index(row) == int(selected.get("allocation_index") or selected.get("line_item_unit_index") or 1)
+    )
+
+
+def _snapshot_line_numbers(rows, selected, replacement_number):
+    quantity = _snapshot_row_quantity(selected)
+    numbers = [None] * quantity
+    for row in rows:
+        if (
+            order_gid(row.get("shopify_order_id") or row.get("order_gid")) != order_gid(selected.get("shopify_order_id"))
+            or line_item_gid(row.get("shopify_line_item_id") or row.get("line_item_gid")) != line_item_gid(selected.get("shopify_line_item_id"))
+        ):
+            continue
+        unit_index = _snapshot_row_unit_index(row)
+        while len(numbers) < unit_index:
+            numbers.append(None)
+        numbers[unit_index - 1] = _positive_int(row.get("edition_number") or row.get("edition"))
+    selected_index = int(selected.get("allocation_index") or selected.get("line_item_unit_index") or 1)
+    while len(numbers) < selected_index:
+        numbers.append(None)
+    numbers[selected_index - 1] = int(replacement_number)
+    return numbers
+
+
+def _snapshot_product_state(rows, selected):
+    edition_total = int(selected.get("edition_total") or 100)
+    max_assigned = 0
+    for row in rows:
+        if not _snapshot_same_product(row, selected):
+            continue
+        number = _positive_int(row.get("edition_number") or row.get("edition"))
+        if number:
+            max_assigned = max(max_assigned, number)
+    next_number = max_assigned + 1
+    sold_out = next_number > edition_total
+    if sold_out:
+        next_number = edition_total
+    remaining = max(edition_total - (next_number - 1), 0)
+    return {
+        "shopify_product_id": product_gid(selected.get("shopify_product_id")),
+        "shopify_handle": selected.get("shopify_handle") or selected.get("product_handle") or "",
+        "product_title": selected.get("product_title") or selected.get("product") or "",
+        "edition_total": edition_total,
+        "max_assigned": max_assigned,
+        "next_edition_number": next_number,
+        "remaining_count": remaining,
+        "sold_out": sold_out,
+    }
+
+
+def _sync_snapshot_product_metafields(product_state, config=None, request_post=None):
+    product_id = product_state.get("shopify_product_id")
+    if not product_id:
+        return {"ok": False, "warning": "Shopify product ID is missing; product metafields were not synced."}
+    result = shopify_sync.sync_limited_edition_metafields_for_products(
+        [
+            {
+                "shopify_product_id": product_id,
+                "handle": product_state.get("shopify_handle") or "",
+                "title": product_state.get("product_title") or product_state.get("shopify_handle") or "",
+                "edition_enabled": True,
+                "edition_total": product_state.get("edition_total"),
+                "edition_next_number": product_state.get("next_edition_number"),
+                "edition_sold_count": product_state.get("max_assigned"),
+                "edition_remaining": product_state.get("remaining_count"),
+                "edition_status": shopify_sync.calculate_limited_edition_status(product_state.get("remaining_count")),
+            }
+        ],
+        config=config,
+        request_post=request_post,
+        raise_on_failure=True,
+    )
+    return {"ok": True, **result}
+
+
+def override_snapshot_allocation_row(selected_row, new_edition_number, *, reason="", config=None, sync_shopify=True, request_post=None):
+    selected = dict(selected_row or {})
+    new_number = _positive_int(new_edition_number)
+    if not new_number:
+        raise ValueError("New edition number must be at least 1.")
+    edition_total = int(selected.get("edition_total") or 100)
+    if new_number > edition_total:
+        raise ValueError(f"Edition number must be between 1 and {edition_total}.")
+
+    payload = load_orders_snapshot()
+    rows = [dict(row or {}) for row in payload.get("rows") or []]
+    target_index = None
+    for index, row in enumerate(rows):
+        if _snapshot_row_matches_identity(row, selected):
+            target_index = index
+            break
+    if target_index is None:
+        raise ValueError("Snapshot allocation row was not found.")
+
+    for row in rows:
+        if _snapshot_row_matches_identity(row, selected):
+            continue
+        if not _snapshot_same_product(row, selected):
+            continue
+        if _positive_int(row.get("edition_number") or row.get("edition")) == new_number:
+            order_label = row.get("order") or row.get("order_name") or row.get("shopify_order_id") or "another order"
+            raise ValueError(f"Edition #{new_number:03d} is already used by {order_label} for this product.")
+
+    old_number = _positive_int(rows[target_index].get("edition_number") or rows[target_index].get("edition"))
+    certificate_uploaded = bool(
+        rows[target_index].get("certificate_pdf_url")
+        or rows[target_index].get("certificate_shopify_file_id")
+        or str(rows[target_index].get("certificate") or "").strip() == "Uploaded"
+    )
+    certificate_status = "Needs regeneration" if certificate_uploaded else (rows[target_index].get("certificate_status") or "")
+    rows[target_index].update(
+        {
+            "edition_number": new_number,
+            "edition": f"#{new_number:03d}",
+            "has_saved_allocation": True,
+            "certificate_status": certificate_status,
+            "certificate": "Needs regeneration" if certificate_uploaded else rows[target_index].get("certificate") or "Generate",
+            "manual_override": True,
+            "override_old_edition_number": old_number,
+            "override_new_edition_number": new_number,
+            "override_timestamp": now_iso(),
+            "override_reason": reason or "Manual edition override",
+        }
+    )
+    if certificate_uploaded:
+        rows[target_index].update(
+            {
+                "certificate_pdf_url": "",
+                "certificate_pdf_path": "",
+                "certificate_shopify_file_id": "",
+                "certificate_file_url": "",
+                "shopify_file_status": "STALE",
+            }
+        )
+    product_state = _snapshot_product_state(rows, {**selected, "edition_number": new_number})
+    saved = save_orders_snapshot(rows, meta={"last_refreshed": payload.get("last_refreshed") or ""})
+
+    shopify_results = {}
+    warning = ""
+    if sync_shopify:
+        config = config or shopify_sync.get_config()
+        try:
+            state = read_order_allocation_state(selected.get("shopify_order_id"), config=config, request_post=request_post)
+            allocation_payload = parse_allocation_payload(state.get("payload") or {})
+            allocation_payload.update(
+                {
+                    "version": SNAPSHOT_VERSION,
+                    "source": "sports_cave_os_manual_override",
+                    "order_id": order_gid(selected.get("shopify_order_id")),
+                    "order_name": selected.get("shopify_order_name") or selected.get("order_name") or "",
+                    "updated_at": now_iso(),
+                }
+            )
+            line_id = line_item_gid(selected.get("shopify_line_item_id"))
+            line_items = dict(allocation_payload.get("line_items") or {})
+            allocation = dict(line_items.get(line_id) or {})
+            numbers = _snapshot_line_numbers(rows, selected, new_number)
+            positive_numbers = [number for number in numbers if number]
+            unit_index = int(selected.get("allocation_index") or selected.get("line_item_unit_index") or 1)
+            unit_allocations = [unit for unit in allocation.get("unit_allocations") or [] if isinstance(unit, dict)]
+            replaced_unit = False
+            for unit in unit_allocations:
+                if _positive_int(unit.get("line_item_unit_index")) == unit_index:
+                    unit.update(
+                        {
+                            "edition_number": new_number,
+                            "manual_override": True,
+                            "override_old_edition_number": old_number,
+                            "override_new_edition_number": new_number,
+                            "override_reason": reason or "Manual edition override",
+                            "override_timestamp": now_iso(),
+                        }
+                    )
+                    replaced_unit = True
+            if not replaced_unit:
+                unit_allocations.append(
+                    {
+                        "order_gid": order_gid(selected.get("shopify_order_id")),
+                        "line_item_gid": line_id,
+                        "line_item_unit_index": unit_index,
+                        "product_gid": product_gid(selected.get("shopify_product_id")),
+                        "variant_gid": selected.get("shopify_variant_id") or "",
+                        "edition_number": new_number,
+                        "manual_override": True,
+                        "override_old_edition_number": old_number,
+                        "override_new_edition_number": new_number,
+                        "override_reason": reason or "Manual edition override",
+                        "override_timestamp": now_iso(),
+                    }
+                )
+            allocation.update(
+                {
+                    "line_item_id": line_id,
+                    "order_id": order_gid(selected.get("shopify_order_id")),
+                    "product_id": product_gid(selected.get("shopify_product_id")),
+                    "variant_id": selected.get("shopify_variant_id") or "",
+                    "handle": selected.get("shopify_handle") or selected.get("product_handle") or "",
+                    "product_title": selected.get("product_title") or "",
+                    "variant_title": selected.get("variant_title") or "",
+                    "quantity": max(len(numbers), int(selected.get("quantity") or 1)),
+                    "edition_numbers": numbers,
+                    "edition_number": positive_numbers[0] if positive_numbers else new_number,
+                    "edition_total": edition_total,
+                    "edition_display": format_edition_numbers(positive_numbers, edition_total),
+                    "status": "Manual Override",
+                    "manual_override": True,
+                    "override_reason": reason or "Manual edition override",
+                    "override_timestamp": now_iso(),
+                    "unit_allocations": unit_allocations,
+                }
+            )
+            line_items[line_id] = allocation
+            allocation_payload["line_items"] = line_items
+            shopify_sync.sync_order_allocation_metafield(
+                selected.get("shopify_order_id"),
+                allocation_payload,
+                compare_digest=state.get("compare_digest"),
+                config=config,
+                request_post=request_post,
+            )
+            shopify_results["order_allocation"] = {"ok": True, "payload": allocation_payload}
+        except Exception as error:
+            warning = f"Shopify order allocation metafield sync failed: {error}"
+        try:
+            shopify_results["product_metafields"] = _sync_snapshot_product_metafields(
+                product_state,
+                config=config,
+                request_post=request_post,
+            )
+        except Exception as error:
+            product_warning = f"Shopify product metafield sync failed: {error}"
+            warning = f"{warning} {product_warning}".strip()
+
+    return {
+        "edition_order": rows[target_index],
+        "old_edition_number": old_number,
+        "new_edition_number": new_number,
+        "certificate_status": rows[target_index].get("certificate_status") or rows[target_index].get("certificate") or "Generate",
+        "product": product_state,
+        "shopify": shopify_results,
+        "snapshot": saved,
+        "warning": warning,
+    }
+
+
+def recalculate_snapshot_product_next_number(selected_row, *, config=None, sync_shopify=True, request_post=None):
+    selected = dict(selected_row or {})
+    rows = [dict(row or {}) for row in load_orders_snapshot().get("rows") or []]
+    product_state = _snapshot_product_state(rows, selected)
+    warning = ""
+    result = {"ok": False, "skipped": True}
+    if sync_shopify:
+        config = config or shopify_sync.get_config()
+        try:
+            result = _sync_snapshot_product_metafields(product_state, config=config, request_post=request_post)
+        except Exception as error:
+            warning = f"Shopify product metafield sync failed: {error}"
+    return {
+        **product_state,
+        "shopify": result,
+        "warning": warning,
+    }

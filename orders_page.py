@@ -19,6 +19,7 @@ SNAPSHOT_LOADED_KEY = "orders_allocation_snapshot_loaded"
 NOTICE_KEY = "orders_allocation_notice"
 SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
 GRID_KEY = "orders-fulfilment-grid"
+DEFAULT_VISIBLE_ROW_LIMIT = 150
 ALLOCATION_BLOCKER_STATUSES = {
     "Needs allocation",
     "Needs Review - Sold Out",
@@ -272,6 +273,11 @@ def _load_snapshot_once():
     }
     st.session_state[SNAPSHOT_LOADED_KEY] = True
     _perf_log("load snapshot", start, rows=len(st.session_state[ROWS_KEY]))
+    print("Orders load cached rows: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
+    print("Shopify fetch skipped on initial load", flush=True)
+    print("Allocation skipped on initial load", flush=True)
+    print("Metafield sync skipped on initial load", flush=True)
+    print("Certificate status load skipped on initial load", flush=True)
 
 
 def _write_snapshot(rows, meta=None):
@@ -918,6 +924,7 @@ def _render_orders_table(rows):
             key=GRID_KEY,
         )
     _perf_log("render table", start, rows=len(rows))
+    print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
 
 
 def render_page():
@@ -925,6 +932,7 @@ def render_page():
     _load_snapshot_once()
     rows = _apply_latest_product_numbers(st.session_state.get(ROWS_KEY, []))
     st.session_state[ROWS_KEY] = rows
+    visible_rows = rows[:DEFAULT_VISIBLE_ROW_LIMIT]
     meta = st.session_state.get(META_KEY) or {}
 
     st.title("Orders")
@@ -942,5 +950,8 @@ def render_page():
         st.info("No saved orders yet. Use Refresh Orders to load recent paid orders.")
         return
 
-    st.caption(f"{len(rows)} artwork rows shown.")
-    _render_orders_table(rows)
+    if len(rows) > len(visible_rows):
+        st.caption(f"Showing latest {len(visible_rows)} of {len(rows)} saved artwork rows.")
+    else:
+        st.caption(f"{len(rows)} artwork rows shown.")
+    _render_orders_table(visible_rows)

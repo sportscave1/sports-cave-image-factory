@@ -4645,6 +4645,73 @@ def _candidate_label(index, row):
     return f"{index}: " + " | ".join(part for part in parts if part)
 
 
+def _override_row_identity(row):
+    if str(row.get("id") or "").startswith("snapshot|"):
+        return str(row.get("id") or "")
+    return "|".join(
+        [
+            str(row.get("shopify_order_id") or ""),
+            str(row.get("shopify_line_item_id") or ""),
+            str(row.get("allocation_index") or 1),
+            str(row.get("edition_number") or ""),
+        ]
+    )
+
+
+def _load_manual_override_rows(search, allocator, limit=80):
+    rows = []
+    seen = set()
+    try:
+        supabase = importlib.import_module("supabase_backend")
+        if supabase.is_configured():
+            for row in supabase.list_edition_orders(search=search, limit=limit):
+                item = {**row, "source": row.get("source") or "edition_orders"}
+                identity = _override_row_identity(item)
+                if identity and identity not in seen:
+                    rows.append(item)
+                    seen.add(identity)
+    except Exception as error:
+        _developer_action_error("Load Supabase override rows", error)
+
+    try:
+        for row in allocator.snapshot_allocated_order_rows(search=search, limit=limit):
+            identity = _override_row_identity(row)
+            if identity and identity not in seen:
+                rows.append(row)
+                seen.add(identity)
+    except Exception as error:
+        _developer_action_error("Load snapshot override rows", error)
+
+    def sort_key(row):
+        def parse_date(value):
+            try:
+                return datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+            except ValueError:
+                return datetime.min
+
+        order_digits = re.findall(r"\d+", str(row.get("shopify_order_name") or row.get("order_name") or ""))
+        order_number = int(order_digits[-1]) if order_digits else 0
+        return (
+            parse_date(row.get("processed_at")),
+            parse_date(row.get("created_at")),
+            order_number,
+        )
+
+    return sorted(rows, key=sort_key, reverse=True)[: max(int(limit or 80), 1)]
+
+
+def _mark_orders_snapshot_for_reload():
+    st.session_state["orders_allocation_snapshot_loaded"] = False
+    with suppress(Exception):
+        allocator = importlib.import_module("order_allocator")
+        snapshot = allocator.load_orders_snapshot()
+        st.session_state["orders_allocation_rows"] = snapshot.get("rows") or []
+        st.session_state["orders_allocation_meta"] = {
+            "last_refreshed": snapshot.get("last_refreshed") or "",
+            "saved_at": snapshot.get("saved_at") or "",
+        }
+
+
 def _render_developer_allocation_tools():
     if not _developer_section_enabled("developer-load-allocation-tools", "Load Allocation Repair Tools"):
         return
@@ -4750,14 +4817,11 @@ def _render_developer_allocation_tools():
         key="developer-load-edition-override-rows",
         use_container_width=True,
     ):
-        try:
-            supabase = importlib.import_module("supabase_backend")
-            st.session_state.developer_edition_override_rows = supabase.list_edition_orders(
-                search=override_search,
-                limit=80,
-            )
-        except Exception as error:
-            _developer_action_error("Load override rows", error)
+        st.session_state.developer_edition_override_rows = _load_manual_override_rows(
+            override_search,
+            allocator,
+            limit=80,
+        )
 
     override_rows = st.session_state.get("developer_edition_override_rows") or []
     if override_rows:
@@ -4804,14 +4868,23 @@ def _render_developer_allocation_tools():
             use_container_width=True,
         ):
             try:
-                supabase = importlib.import_module("supabase_backend")
-                result = supabase.override_edition_order_number(
-                    selected_row.get("id"),
-                    int(new_number),
-                    reason=override_reason,
-                    config=config,
-                    sync_shopify=bool(config.get("configured")),
-                )
+                if str(selected_row.get("id") or "").startswith("snapshot|") or selected_row.get("source") == "snapshot_allocation":
+                    result = allocator.override_snapshot_allocation_row(
+                        selected_row,
+                        int(new_number),
+                        reason=override_reason,
+                        config=config,
+                        sync_shopify=bool(config.get("configured")),
+                    )
+                else:
+                    supabase = importlib.import_module("supabase_backend")
+                    result = supabase.override_edition_order_number(
+                        selected_row.get("id"),
+                        int(new_number),
+                        reason=override_reason,
+                        config=config,
+                        sync_shopify=bool(config.get("configured")),
+                    )
                 product = result.get("product") or {}
                 st.success(
                     f"Overrode edition #{result.get('old_edition_number'):03d} "
@@ -4822,8 +4895,10 @@ def _render_developer_allocation_tools():
                     st.warning("Product is sold out. Needs Review - Sold Out.")
                 if result.get("warning"):
                     st.warning(result["warning"])
-                st.session_state.developer_edition_override_rows = supabase.list_edition_orders(
-                    search=override_search,
+                _mark_orders_snapshot_for_reload()
+                st.session_state.developer_edition_override_rows = _load_manual_override_rows(
+                    override_search,
+                    allocator,
                     limit=80,
                 )
             except Exception as error:
@@ -4834,13 +4909,20 @@ def _render_developer_allocation_tools():
             use_container_width=True,
         ):
             try:
-                supabase = importlib.import_module("supabase_backend")
-                result = supabase.recalculate_next_edition_number(
-                    shopify_handle=selected_row.get("shopify_handle") or selected_row.get("product_handle") or "",
-                    shopify_product_id=selected_row.get("shopify_product_id") or "",
-                    sync_shopify=bool(config.get("configured")),
-                    config=config,
-                )
+                if str(selected_row.get("id") or "").startswith("snapshot|") or selected_row.get("source") == "snapshot_allocation":
+                    result = allocator.recalculate_snapshot_product_next_number(
+                        selected_row,
+                        sync_shopify=bool(config.get("configured")),
+                        config=config,
+                    )
+                else:
+                    supabase = importlib.import_module("supabase_backend")
+                    result = supabase.recalculate_next_edition_number(
+                        shopify_handle=selected_row.get("shopify_handle") or selected_row.get("product_handle") or "",
+                        shopify_product_id=selected_row.get("shopify_product_id") or "",
+                        sync_shopify=bool(config.get("configured")),
+                        config=config,
+                    )
                 st.success(
                     f"Recalculated {result.get('shopify_handle')}: "
                     f"next edition #{int(result.get('next_edition_number') or 0):03d}."
@@ -4857,16 +4939,24 @@ def _render_developer_allocation_tools():
             use_container_width=True,
         ):
             try:
-                supabase = importlib.import_module("supabase_backend")
                 handle = selected_row.get("shopify_handle") or selected_row.get("product_handle") or ""
                 if not handle:
                     raise ValueError("Selected row does not have a Shopify handle.")
-                result = supabase.sync_product_edition_metafields(handle, config=config)
-                payload = result.get("payload") or {}
-                st.success(
-                    f"Retried Shopify metafield sync for {result.get('shopify_handle') or handle}: "
-                    f"next edition #{int(payload.get('next_edition_number') or 0):03d}."
-                )
+                if str(selected_row.get("id") or "").startswith("snapshot|") or selected_row.get("source") == "snapshot_allocation":
+                    result = allocator.recalculate_snapshot_product_next_number(
+                        selected_row,
+                        sync_shopify=bool(config.get("configured")),
+                        config=config,
+                    )
+                    next_number = int(result.get("next_edition_number") or 0)
+                else:
+                    supabase = importlib.import_module("supabase_backend")
+                    result = supabase.sync_product_edition_metafields(handle, config=config)
+                    payload = result.get("payload") or {}
+                    next_number = int(payload.get("next_edition_number") or 0)
+                st.success(f"Retried Shopify metafield sync for {handle}: next edition #{next_number:03d}.")
+                if result.get("warning"):
+                    st.warning(result["warning"])
             except Exception as error:
                 _developer_action_error("Retry Shopify Metafield Sync", error)
 

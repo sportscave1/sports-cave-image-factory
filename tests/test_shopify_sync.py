@@ -1812,6 +1812,144 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertIn("updatedAt", shopify_sync.ORDERS_SAFE_QUERY)
         self.assertIn("totalPriceSet", shopify_sync.ORDERS_SAFE_QUERY)
 
+    def test_snapshot_override_search_returns_recent_allocated_order_lines(self):
+        rows = [
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 94,
+                "edition": "#094",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8431",
+                "shopify_product_id": "gid://shopify/Product/9001",
+                "product_handle": "goat-debate-wall-art",
+                "edition_offset": 0,
+                "line_quantity": 1,
+                "processed_at": "2026-06-23T10:00:00Z",
+                "created_at": "2026-06-23T09:55:00Z",
+            },
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / M",
+                "edition_number": 95,
+                "edition": "#095",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8432",
+                "shopify_product_id": "gid://shopify/Product/9001",
+                "product_handle": "goat-debate-wall-art",
+                "edition_offset": 0,
+                "line_quantity": 1,
+                "processed_at": "2026-06-23T10:00:00Z",
+                "created_at": "2026-06-23T09:55:00Z",
+            },
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant": "Black / L",
+                "edition_number": 36,
+                "edition": "#036",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8433",
+                "shopify_product_id": "gid://shopify/Product/9002",
+                "product_handle": "legends-never-die-messi-vs-ronaldo-wall-art",
+                "edition_offset": 0,
+                "line_quantity": 1,
+                "processed_at": "2026-06-23T10:00:00Z",
+                "created_at": "2026-06-23T09:55:00Z",
+            },
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant": "Black / M",
+                "edition_number": 37,
+                "edition": "#037",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8434",
+                "shopify_product_id": "gid://shopify/Product/9002",
+                "product_handle": "legends-never-die-messi-vs-ronaldo-wall-art",
+                "edition_offset": 0,
+                "line_quantity": 1,
+                "processed_at": "2026-06-23T10:00:00Z",
+                "created_at": "2026-06-23T09:55:00Z",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
+            order_allocator,
+            "SNAPSHOT_PATH",
+            Path(tmpdir) / "orders_allocation_snapshot.json",
+        ):
+            order_allocator.save_orders_snapshot(rows, meta={"last_refreshed": "2026-06-23T10:01:00Z"})
+
+            found = order_allocator.snapshot_allocated_order_rows("#SC2843", limit=50)
+
+        self.assertEqual(len(found), 4)
+        self.assertEqual([row["edition_number"] for row in found], [94, 95, 36, 37])
+        self.assertTrue(all(row["certificate_status"] == "Certificate Generate" for row in found))
+        self.assertTrue(all(str(row["id"]).startswith("snapshot|") for row in found))
+
+    def test_snapshot_manual_override_updates_only_selected_row_and_recalculates_product(self):
+        rows = [
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 94,
+                "edition": "#094",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8431",
+                "shopify_product_id": "gid://shopify/Product/9001",
+                "product_handle": "goat-debate-wall-art",
+                "edition_offset": 0,
+                "line_quantity": 1,
+            },
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / M",
+                "edition_number": 95,
+                "edition": "#095",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8432",
+                "shopify_product_id": "gid://shopify/Product/9001",
+                "product_handle": "goat-debate-wall-art",
+                "edition_offset": 0,
+                "line_quantity": 1,
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
+            order_allocator,
+            "SNAPSHOT_PATH",
+            Path(tmpdir) / "orders_allocation_snapshot.json",
+        ):
+            order_allocator.save_orders_snapshot(rows, meta={"last_refreshed": "2026-06-23T10:01:00Z"})
+            first, second = order_allocator.snapshot_allocated_order_rows("GOAT debate", limit=50)
+
+            first_result = order_allocator.override_snapshot_allocation_row(first, 50, sync_shopify=False)
+            second_result = order_allocator.override_snapshot_allocation_row(second, 51, sync_shopify=False)
+            saved = order_allocator.load_orders_snapshot()["rows"]
+
+        self.assertEqual(first_result["old_edition_number"], 94)
+        self.assertEqual(second_result["old_edition_number"], 95)
+        self.assertEqual([row["edition_number"] for row in saved], [50, 51])
+        self.assertEqual([row["edition"] for row in saved], ["#050", "#051"])
+        self.assertEqual(second_result["product"]["next_edition_number"], 52)
+        self.assertEqual(second_result["product"]["remaining_count"], 49)
+        self.assertTrue(all(row["certificate"] == "Generate" for row in saved))
+
 
 class SupabaseProductSyncLogicTests(unittest.TestCase):
     def setUp(self):
