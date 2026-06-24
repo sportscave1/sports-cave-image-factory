@@ -4026,7 +4026,7 @@ def render_prodigi_page():
     search_columns = st.columns([3.2, 1])
     search_value = search_columns[0].text_input(
         "Enter Shopify Order #",
-        placeholder="#SC2843",
+        placeholder="#",
         key="prodigi-dispatch-order-search",
     )
     if search_columns[1].button("Find Order", use_container_width=True, key="prodigi-dispatch-find-order"):
@@ -4106,11 +4106,6 @@ def render_prodigi_page():
                     disabled=not has_mapping,
                     key=f"prodigi-dispatch-product-confirm-{row_key}",
                 )
-                render_copy_text_button(
-                    prodigi_variant_copy_text(row),
-                    f"prodigi-dispatch-copy-variant-{row_key}",
-                    "Copy Prodigi Variant",
-                )
                 confirmation_notes = defaults["notes"]
                 if not confirmed:
                     confirmation_notes = st.text_input(
@@ -4147,11 +4142,6 @@ def render_prodigi_page():
             ]
             for index, (label, value) in enumerate(details):
                 detail_columns[index % 2].write(f"**{label}:** {value or '-'}")
-            render_copy_text_button(
-                prodigi_copy_details(selected_row),
-                f"prodigi-dispatch-copy-{safe_filename_part(selected_row.get('row_id') or '')}",
-                "Copy Prodigi Details",
-            )
 
         st.markdown("**Dispatch QA**")
         default_answers = prodigi_default_qa_answers(existing or selected_row)
@@ -4210,11 +4200,6 @@ def render_prodigi_page():
                     st.caption(f"Expected Prodigi variant: {selected_row.get('prodigi_product_name') or '-'}")
                     st.caption(f"Prodigi code: {selected_row.get('prodigi_code') or '-'}")
                     st.caption(f"Frame colour: {selected_row.get('prodigi_frame_colour') or selected_row.get('prodigi_frame') or '-'}")
-                    render_copy_text_button(
-                        prodigi_variant_copy_text(selected_row),
-                        f"prodigi-dispatch-qa-copy-variant-{safe_filename_part(selected_row.get('row_id') or '')}",
-                        "Copy Prodigi Variant",
-                    )
                 elif field == "edition_number":
                     if not _prodigi_is_limited_edition(selected_row):
                         st.caption("Not Required")
