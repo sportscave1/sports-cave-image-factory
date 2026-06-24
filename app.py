@@ -4632,7 +4632,18 @@ def _historical_backfill_candidates(rows):
         if not row.get("shopify_order_id") or not row.get("shopify_line_item_id") or not row.get("shopify_product_id"):
             continue
         candidates.append(row)
-    return candidates
+    allocator = importlib.import_module("order_allocator")
+
+    def sort_key(row):
+        order_digits = re.findall(r"\d+", str(row.get("order") or row.get("order_name") or ""))
+        order_number = int(order_digits[-1]) if order_digits else 0
+        return (
+            allocator.normalize_datetime_utc(row.get("processed_at") or row.get("processedAt")),
+            allocator.normalize_datetime_utc(row.get("created_at") or row.get("createdAt")),
+            order_number,
+        )
+
+    return sorted(candidates, key=sort_key, reverse=True)
 
 
 def _candidate_label(index, row):
@@ -4683,17 +4694,11 @@ def _load_manual_override_rows(search, allocator, limit=80):
         _developer_action_error("Load snapshot override rows", error)
 
     def sort_key(row):
-        def parse_date(value):
-            try:
-                return datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
-            except ValueError:
-                return datetime.min
-
         order_digits = re.findall(r"\d+", str(row.get("shopify_order_name") or row.get("order_name") or ""))
         order_number = int(order_digits[-1]) if order_digits else 0
         return (
-            parse_date(row.get("processed_at")),
-            parse_date(row.get("created_at")),
+            allocator.normalize_datetime_utc(row.get("processed_at")),
+            allocator.normalize_datetime_utc(row.get("created_at")),
             order_number,
         )
 

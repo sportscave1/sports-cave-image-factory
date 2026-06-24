@@ -99,6 +99,16 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("def _developer_action_error", source)
         self.assertIn("The rest of Developer is still available", source)
 
+    def test_developer_allocation_repair_uses_utc_datetime_sorting(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        helper = source[
+            source.index("def _historical_backfill_candidates") : source.index("\n\ndef _mark_orders_snapshot_for_reload")
+        ]
+
+        self.assertIn("allocator.normalize_datetime_utc", helper)
+        self.assertNotIn("datetime.fromisoformat", helper)
+        self.assertNotIn("datetime.min", helper)
+
     def test_render_uses_single_streamlit_process_for_free_instance(self):
         source = (ROOT / "render.yaml").read_text(encoding="utf-8")
 

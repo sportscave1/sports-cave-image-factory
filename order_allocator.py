@@ -13,6 +13,7 @@ CUTOVER_PATH = BASE_DIR / "output" / "_cache" / "limited_edition_cutover.json"
 SNAPSHOT_VERSION = 1
 CUTOVER_VERSION = 1
 AUTOMATION_STARTED_ENV = "LIMITED_EDITION_AUTOMATION_STARTED_AT"
+DATETIME_MIN_UTC = datetime.min.replace(tzinfo=timezone.utc)
 
 
 def now_iso():
@@ -20,8 +21,8 @@ def now_iso():
 
 
 def _safe_iso(value):
-    parsed = _parse_datetime(value)
-    if parsed == datetime.min.replace(tzinfo=timezone.utc):
+    parsed = normalize_datetime_utc(value)
+    if parsed == DATETIME_MIN_UTC:
         return ""
     return parsed.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -159,16 +160,33 @@ def _line_product_handle(line_item):
     return line_item.get("product_handle") or line_item.get("handle") or product.get("handle") or ""
 
 
-def _parse_datetime(value):
+def normalize_datetime_utc(value):
     if not value:
-        return datetime.min.replace(tzinfo=timezone.utc)
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return datetime.min.replace(tzinfo=timezone.utc)
+        return DATETIME_MIN_UTC
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        raw = str(value or "").strip()
+        if not raw:
+            return DATETIME_MIN_UTC
+        try:
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return DATETIME_MIN_UTC
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
-    return parsed
+    return parsed.astimezone(timezone.utc)
+
+
+def _parse_datetime(value):
+    return normalize_datetime_utc(value)
+
+
+def is_missing_datetime(value):
+    try:
+        return normalize_datetime_utc(value) == DATETIME_MIN_UTC
+    except Exception:
+        return True
 
 
 def _parse_order_number(value):
@@ -186,7 +204,7 @@ def allocation_order_key(order_payload):
 
 def _order_processed_datetime(order_payload):
     processed = _parse_datetime(order_payload.get("processedAt") or order_payload.get("processed_at"))
-    if processed != datetime.min.replace(tzinfo=timezone.utc):
+    if processed != DATETIME_MIN_UTC:
         return processed
     return _parse_datetime(order_payload.get("createdAt") or order_payload.get("created_at"))
 
@@ -363,7 +381,7 @@ def _automation_started_datetime(cutover_state=None):
     if not started_at:
         return None
     parsed = _parse_datetime(started_at)
-    if parsed == datetime.min.replace(tzinfo=timezone.utc):
+    if parsed == DATETIME_MIN_UTC:
         return None
     return parsed
 

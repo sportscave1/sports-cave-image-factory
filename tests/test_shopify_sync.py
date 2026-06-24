@@ -1897,6 +1897,76 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertTrue(all(row["certificate_status"] == "Certificate Generate" for row in found))
         self.assertTrue(all(str(row["id"]).startswith("snapshot|") for row in found))
 
+    def test_datetime_normalizer_returns_timezone_aware_utc(self):
+        naive = order_allocator.normalize_datetime_utc(datetime(2026, 6, 23, 10, 0))
+        aware = order_allocator.normalize_datetime_utc("2026-06-23T20:00:00+10:00")
+        bad = order_allocator.normalize_datetime_utc("not-a-date")
+
+        self.assertEqual(naive.tzinfo, timezone.utc)
+        self.assertEqual(naive.isoformat(), "2026-06-23T10:00:00+00:00")
+        self.assertEqual(aware.isoformat(), "2026-06-23T10:00:00+00:00")
+        self.assertEqual(bad, order_allocator.DATETIME_MIN_UTC)
+
+    def test_snapshot_override_search_sorts_mixed_dates_without_crashing(self):
+        rows = [
+            {
+                "order": "#SC3001",
+                "customer": "Date Test",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 41,
+                "edition": "#041",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/3001",
+                "shopify_line_item_id": "gid://shopify/LineItem/3001",
+                "shopify_product_id": "gid://shopify/Product/9001",
+                "product_handle": "goat-debate-wall-art",
+                "processed_at": "2026-06-23T20:00:00+10:00",
+                "created_at": "2026-06-23T09:55:00",
+            },
+            {
+                "order": "#SC3002",
+                "customer": "Date Test",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / M",
+                "edition_number": 42,
+                "edition": "#042",
+                "certificate": "Uploaded",
+                "shopify_order_id": "gid://shopify/Order/3002",
+                "shopify_line_item_id": "gid://shopify/LineItem/3002",
+                "shopify_product_id": "gid://shopify/Product/9001",
+                "product_handle": "goat-debate-wall-art",
+                "processed_at": "2026-06-23T11:00:00",
+                "created_at": "bad-date",
+            },
+            {
+                "order": "#SC3000",
+                "customer": "Date Test",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / S",
+                "edition_number": 40,
+                "edition": "#040",
+                "certificate": "Certificate Ready",
+                "shopify_order_id": "gid://shopify/Order/3000",
+                "shopify_line_item_id": "gid://shopify/LineItem/3000",
+                "shopify_product_id": "gid://shopify/Product/9001",
+                "product_handle": "goat-debate-wall-art",
+                "processed_at": "not-a-date",
+                "created_at": "",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir, patch.object(
+            order_allocator,
+            "SNAPSHOT_PATH",
+            Path(tmpdir) / "orders_allocation_snapshot.json",
+        ):
+            order_allocator.save_orders_snapshot(rows, meta={"last_refreshed": "2026-06-23T10:01:00Z"})
+
+            found = order_allocator.snapshot_allocated_order_rows("GOAT", limit=50)
+
+        self.assertEqual([row["shopify_order_name"] for row in found], ["#SC3002", "#SC3001", "#SC3000"])
+        self.assertEqual([row["certificate_status"] for row in found], ["Uploaded", "Certificate Generate", "Certificate Ready"])
+
     def test_snapshot_manual_override_updates_only_selected_row_and_recalculates_product(self):
         rows = [
             {

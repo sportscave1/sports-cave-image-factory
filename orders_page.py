@@ -45,11 +45,10 @@ VISIBLE_COLUMNS = (
 def _format_time(value):
     if not value:
         return "Never"
-    try:
-        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-        return parsed.astimezone().strftime("%d %b %Y %I:%M %p")
-    except ValueError:
+    parsed = order_allocator.normalize_datetime_utc(value)
+    if parsed == order_allocator.DATETIME_MIN_UTC:
         return str(value)
+    return parsed.astimezone().strftime("%d %b %Y %I:%M %p")
 
 
 def _now_iso():
@@ -70,12 +69,7 @@ def _ensure_state():
 
 
 def _parse_datetime(value):
-    if not value:
-        return datetime.min.replace(tzinfo=timezone.utc)
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return datetime.min.replace(tzinfo=timezone.utc)
+    return order_allocator.normalize_datetime_utc(value)
 
 
 def _parse_order_number(value):
