@@ -1,11 +1,13 @@
 import inspect
 import json
 from pathlib import Path
+import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import edition_ops
+import os_pages
 import orders_page
 import shopify_sync
 
@@ -108,6 +110,185 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("allocator.normalize_datetime_utc", helper)
         self.assertNotIn("datetime.fromisoformat", helper)
         self.assertNotIn("datetime.min", helper)
+
+    def test_prodigi_tracker_has_csv_import_export_and_support_email(self):
+        source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
+
+        self.assertIn("Prodigi Fulfilment Tracker", source)
+        self.assertIn("Import CSV", source)
+        self.assertIn("Export Tracker CSV", source)
+        self.assertIn("Export Selected CSV", source)
+        self.assertIn('PRODIGI_SUPPORT_EMAIL = "pro@prodigi.com"', source)
+        self.assertNotIn("support@prodigi.com", source)
+
+    def test_prodigi_reference_contains_all_16_code_mappings(self):
+        rows = os_pages.prodigi_reference_rows()
+
+        self.assertEqual(len(rows), 16)
+        self.assertIn("GLOBAL-CFP-A1", {row["Prodigi Code"] for row in rows})
+        self.assertIn("GLOBAL-FAP-A4", {row["Prodigi Code"] for row in rows})
+        self.assertEqual(
+            next(row for row in rows if row["Frame"] == "Oak" and row["Shopify Size"] == "L")["Prodigi Frame"],
+            "Natural",
+        )
+
+    def test_prodigi_tracker_builds_multiline_order_rows(self):
+        order_rows = [
+            {
+                "order": "#SC2843",
+                "date": "2026-06-23",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 94,
+                "edition_total": 100,
+                "shipping": "US Standard Tracked Shipping",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8431",
+                "shopify_product_id": "gid://shopify/Product/9001",
+                "edition_offset": 0,
+            },
+            {
+                "order": "#SC2843",
+                "date": "2026-06-23",
+                "customer": "Ashkan Zand",
+                "product": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant": "Unframed / M",
+                "edition_number": 37,
+                "edition_total": 100,
+                "shipping": "US Standard Tracked Shipping",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8432",
+                "shopify_product_id": "gid://shopify/Product/9002",
+                "edition_offset": 0,
+            },
+        ]
+
+        rows = os_pages.build_prodigi_tracker_rows(order_rows)
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[0]["prodigi_code"], "GLOBAL-CFP-A2")
+        self.assertEqual(rows[1]["prodigi_code"], "GLOBAL-FAP-A3")
+        self.assertTrue(all(row["prodigi_status"] == "Ready for Prodigi" for row in rows))
+
+    def test_prodigi_copy_details_contains_fulfilment_fields(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 50,
+                "shipping": "US Standard Tracked Shipping",
+            }
+        )
+
+        copied = os_pages.prodigi_copy_details(row)
+
+        self.assertIn("Shopify Order #: #SC2843", copied)
+        self.assertIn("Edition #: #050", copied)
+        self.assertIn("Prodigi Code: GLOBAL-CFP-A2", copied)
+        self.assertIn("Shipping: US Standard Tracked Shipping", copied)
+
+    def test_prodigi_submission_blocks_missing_code_and_duplicate_submit(self):
+        missing = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC1",
+                "customer": "Test",
+                "product": "Unknown Wall Art",
+                "variant": "Unknown",
+                "edition_number": 1,
+                "shipping": "Standard",
+                "shopify_order_id": "gid://shopify/Order/1",
+                "shopify_line_item_id": "gid://shopify/LineItem/1",
+                "shopify_product_id": "gid://shopify/Product/1",
+            }
+        )
+        submitted = os_pages.prodigi_tracker_row_from_order(
+            {
+                **missing,
+                "variant": "Black / L",
+                "prodigi_order_id": "P123",
+                "date_sent_to_prodigi": "2026-06-23T10:00:00Z",
+            },
+            {
+                **missing,
+                "variant": "Black / L",
+                "prodigi_order_id": "P123",
+                "date_sent_to_prodigi": "2026-06-23T10:00:00Z",
+            },
+        )
+
+        self.assertIn("Missing Prodigi code", os_pages.prodigi_submission_blockers(missing))
+        self.assertIn("Already submitted", os_pages.prodigi_submission_blockers(submitted))
+        result = os_pages.apply_prodigi_bulk_action([submitted], [submitted["row_id"]], "submitted")
+        self.assertTrue(result["errors"])
+
+    def test_prodigi_csv_import_matches_existing_rows_and_export_roundtrips(self):
+        rows = os_pages.build_prodigi_tracker_rows(
+            [
+                {
+                    "order": "#SC2843",
+                    "date": "2026-06-23",
+                    "customer": "Ashkan Zand",
+                    "product": "GOAT Debate Wall Art",
+                    "variant": "Black / L",
+                    "edition_number": 50,
+                    "edition_total": 100,
+                    "shipping": "US Standard Tracked Shipping",
+                    "shopify_order_id": "gid://shopify/Order/2843",
+                    "shopify_line_item_id": "gid://shopify/LineItem/8431",
+                    "shopify_product_id": "gid://shopify/Product/9001",
+                }
+            ]
+        )
+        csv_text = (
+            "Date Sent,Shopify Order #,Customer Name,Edition Name,Edition No.,Frame,Size,Prodigi Product Option,Shipping,Status,Notes\n"
+            "2026-06-23,#SC2843,Ashkan Zand,GOAT Debate Wall Art,50,Black,L,Classic Frame,Express,Submitted to Prodigi,Sent manually\n"
+        )
+
+        result = os_pages.import_prodigi_tracker_csv(csv_text, rows)
+        exported = os_pages.export_prodigi_tracker_csv(result["rows"]).decode("utf-8-sig")
+
+        self.assertEqual(result["matched"], 1)
+        self.assertEqual(result["created"], 0)
+        self.assertEqual(result["rows"][0]["prodigi_status"], "Submitted to Prodigi")
+        self.assertEqual(result["rows"][0]["shipping_method"], "Express")
+        self.assertIn("Sent manually", result["rows"][0]["notes"])
+        self.assertIn("prodigi_order_id", exported.splitlines()[0])
+
+    def test_prodigi_unmatched_csv_import_creates_needs_review_row(self):
+        csv_text = (
+            "Date Sent,Shopify Order #,Customer Name,Edition Name,Edition No.,Frame,Size,Prodigi Product Option,Shipping,Status,Notes\n"
+            "2026-06-23,#SC9999,No Match,Unknown Wall Art,1,Black,L,Classic Frame,Standard,Submitted,Legacy row\n"
+        )
+
+        result = os_pages.import_prodigi_tracker_csv(csv_text, [])
+
+        self.assertEqual(result["matched"], 0)
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(result["rows"][0]["prodigi_status"], "Needs Review")
+
+    def test_prodigi_notes_and_tracking_persist(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC1",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 1,
+                "shipping": "Standard",
+            },
+            {"tracking_number": "TRACK123", "notes": "Leave on tracker"},
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "prodigi.json"
+            os_pages.save_prodigi_tracker_rows([row], path=path)
+            loaded = os_pages.load_prodigi_tracker_state(path=path)
+
+        self.assertEqual(loaded["rows"][0]["tracking_number"], "TRACK123")
+        self.assertEqual(loaded["rows"][0]["notes"], "Leave on tracker")
 
     def test_render_uses_single_streamlit_process_for_free_instance(self):
         source = (ROOT / "render.yaml").read_text(encoding="utf-8")

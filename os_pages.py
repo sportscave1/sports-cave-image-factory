@@ -2,6 +2,7 @@ import csv
 import gc
 import html
 import io
+import importlib
 import json
 import os
 import re
@@ -127,6 +128,81 @@ PRODIGI_FRAME_OPTIONS = (
     ("White", "White", "Sports Cave White Frame"),
     ("Unframed", "No frame / Fine Art Paper", "Sports Cave Unframed"),
 )
+PRODIGI_SUPPORT_EMAIL = "pro@prodigi.com"
+PRODIGI_TRACKER_PATH = db.BASE_DIR / "output" / "_cache" / "prodigi_fulfillments.json"
+PRODIGI_TRACKER_VERSION = 1
+PRODIGI_STATUS_OPTIONS = (
+    "Needs Review",
+    "Ready for Prodigi",
+    "Double Checked",
+    "Submitted to Prodigi",
+    "In Production",
+    "Shipped",
+    "Fulfilled in Shopify",
+    "Issue / Hold",
+)
+PRODIGI_ACTIONABLE_STATUS_ORDER = {status: index for index, status in enumerate(PRODIGI_STATUS_OPTIONS)}
+PRODIGI_TRACKER_EXPORT_COLUMNS = (
+    "row_id",
+    "status",
+    "shopify_order_name",
+    "date",
+    "customer_name",
+    "customer_email",
+    "product_title",
+    "edition_number",
+    "edition_total",
+    "frame",
+    "size",
+    "prodigi_size",
+    "prodigi_product_option",
+    "prodigi_code",
+    "shipping_method",
+    "certificate_status",
+    "double_checked",
+    "checked_by",
+    "checked_at",
+    "prodigi_order_id",
+    "tracking_number",
+    "tracking_url",
+    "carrier",
+    "notes",
+    "shopify_order_id",
+    "shopify_line_item_id",
+    "shopify_product_id",
+    "shopify_variant_id",
+    "shopify_fulfillment_status",
+    "date_sent_to_prodigi",
+    "date_shipped",
+    "date_fulfilled_in_shopify",
+    "blockers",
+    "source",
+    "created_at",
+    "updated_at",
+)
+PRODIGI_EDITABLE_FIELDS = (
+    "prodigi_status",
+    "prodigi_order_id",
+    "tracking_number",
+    "tracking_url",
+    "carrier",
+    "notes",
+    "shipping_method",
+    "double_checked",
+)
+PRODIGI_GOOGLE_SHEET_HEADERS = (
+    "Date Sent",
+    "Shopify Order #",
+    "Customer Name",
+    "Edition Name",
+    "Edition No.",
+    "Frame",
+    "Size",
+    "Prodigi Product Option",
+    "Shipping",
+    "Status",
+    "Notes",
+)
 
 
 def render_page_intro(title, purpose, next_step, mistake_tip=None):
@@ -138,6 +214,459 @@ def render_page_intro(title, purpose, next_step, mistake_tip=None):
         st.write(f"**Next step:** {next_step}")
         if mistake_tip:
             st.caption(f"Avoid mistakes: {mistake_tip}")
+
+
+def prodigi_reference_rows():
+    rows = []
+    frame_rows = (
+        ("Black", "Black", False),
+        ("Oak", "Natural", False),
+        ("White", "White", False),
+        ("Unframed", "No frame / Fine Art Paper", True),
+    )
+    for frame, prodigi_frame, is_unframed in frame_rows:
+        for size_option in PRODIGI_SIZE_OPTIONS:
+            rows.append(
+                {
+                    "Frame": frame,
+                    "Shopify Size": size_option["shopify_size"],
+                    "Prodigi Size": size_option["prodigi_size"],
+                    "Prodigi Product Name": size_option["unframed_name"] if is_unframed else size_option["framed_name"],
+                    "Prodigi Code": size_option["unframed_code"] if is_unframed else size_option["framed_code"],
+                    "Prodigi Frame": prodigi_frame,
+                    "Copy Name": size_option["unframed_name"] if is_unframed else size_option["framed_name"],
+                    "Copy Code": size_option["unframed_code"] if is_unframed else size_option["framed_code"],
+                }
+            )
+    return rows
+
+
+def _prodigi_now_iso():
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _prodigi_clean(value):
+    return str(value or "").strip()
+
+
+def _prodigi_int(value, default=0):
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return int(value)
+    digits = re.findall(r"\d+", str(value or ""))
+    return int(digits[0]) if digits else default
+
+
+def _prodigi_bool(value):
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().casefold() in {"1", "true", "yes", "y", "checked", "double checked"}
+
+
+def _prodigi_normalise_order_name(value):
+    raw = _prodigi_clean(value)
+    if not raw:
+        return ""
+    digits = re.findall(r"\d+", raw)
+    return f"SC{digits[-1]}" if digits else raw.replace("#", "").casefold()
+
+
+def _prodigi_normalise_text(value):
+    return re.sub(r"\s+", " ", _prodigi_clean(value)).casefold()
+
+
+def _prodigi_frame_from_variant(variant, fallback=""):
+    text = f"{variant} {fallback}".casefold()
+    if "unframed" in text:
+        return "Unframed"
+    if "black" in text:
+        return "Black"
+    if "oak" in text or "natural" in text:
+        return "Oak"
+    if "white" in text:
+        return "White"
+    return ""
+
+
+def _prodigi_size_from_variant(variant, fallback=""):
+    text = f"{variant} {fallback}".upper()
+    for size in ("XL", "L", "M", "S"):
+        if re.search(rf"(^|[^A-Z0-9]){size}([^A-Z0-9]|$)", text):
+            return size
+    return ""
+
+
+def prodigi_mapping_for_frame_size(frame, size):
+    clean_frame = _prodigi_frame_from_variant(frame, frame) or _prodigi_clean(frame)
+    clean_size = _prodigi_size_from_variant(size, size) or _prodigi_clean(size).upper()
+    size_option = next(
+        (option for option in PRODIGI_SIZE_OPTIONS if option["shopify_size"] == clean_size),
+        None,
+    )
+    if not size_option or clean_frame not in {"Black", "Oak", "White", "Unframed"}:
+        return {
+            "frame": clean_frame,
+            "size": clean_size,
+            "prodigi_size": "",
+            "prodigi_product_option": "",
+            "prodigi_code": "",
+            "prodigi_frame": "",
+            "prodigi_product_name": "",
+        }
+    is_unframed = clean_frame == "Unframed"
+    prodigi_frame = "No frame / Fine Art Paper" if is_unframed else {"Black": "Black", "Oak": "Natural", "White": "White"}[clean_frame]
+    return {
+        "frame": clean_frame,
+        "size": clean_size,
+        "prodigi_size": size_option["prodigi_size"],
+        "prodigi_product_option": "Fine Art Paper" if is_unframed else "Classic Frame",
+        "prodigi_code": size_option["unframed_code"] if is_unframed else size_option["framed_code"],
+        "prodigi_frame": prodigi_frame,
+        "prodigi_product_name": size_option["unframed_name"] if is_unframed else size_option["framed_name"],
+    }
+
+
+def prodigi_tracker_row_id(row):
+    order_id = _prodigi_clean(row.get("shopify_order_id") or row.get("order_id") or row.get("shopify_order_name") or row.get("order"))
+    line_id = _prodigi_clean(row.get("shopify_line_item_id") or row.get("line_item_id") or row.get("product_title") or row.get("product"))
+    unit_index = _prodigi_int(row.get("line_item_unit_index"), 0) or _prodigi_int(row.get("allocation_index"), 0)
+    if not unit_index:
+        unit_index = _prodigi_int(row.get("edition_offset"), 0) + 1
+    return "|".join([order_id or "order-missing", line_id or "line-missing", str(max(unit_index, 1))])
+
+
+def _prodigi_status_from_sheet(value):
+    raw = _prodigi_normalise_text(value)
+    if not raw:
+        return ""
+    if "fulfill" in raw:
+        return "Fulfilled in Shopify"
+    if "ship" in raw or "tracking" in raw:
+        return "Shipped"
+    if "production" in raw:
+        return "In Production"
+    if "submitted" in raw or "prodigi" in raw or "sent" in raw:
+        return "Submitted to Prodigi"
+    if "double" in raw or "checked" in raw:
+        return "Double Checked"
+    if "hold" in raw or "issue" in raw or "review" in raw:
+        return "Issue / Hold"
+    if "ready" in raw:
+        return "Ready for Prodigi"
+    return value if value in PRODIGI_STATUS_OPTIONS else "Needs Review"
+
+
+def prodigi_submission_blockers(row):
+    blockers = []
+    if not _prodigi_clean(row.get("shopify_order_id") or row.get("shopify_order_name")):
+        blockers.append("Missing Shopify order line")
+    if not _prodigi_clean(row.get("shopify_line_item_id")):
+        blockers.append("Missing Shopify line item")
+    if not _prodigi_clean(row.get("shopify_product_id") or row.get("product_title")):
+        blockers.append("Product not matched")
+    if not _prodigi_clean(row.get("frame")):
+        blockers.append("Missing frame")
+    if not _prodigi_clean(row.get("size")):
+        blockers.append("Missing size")
+    if not _prodigi_clean(row.get("prodigi_size")):
+        blockers.append("Missing Prodigi size")
+    if not _prodigi_clean(row.get("prodigi_code")):
+        blockers.append("Missing Prodigi code")
+    if not _prodigi_clean(row.get("shipping_method")):
+        blockers.append("Missing shipping method")
+    if not _prodigi_int(row.get("edition_number"), 0):
+        blockers.append("Missing edition number")
+    if (
+        _prodigi_clean(row.get("date_sent_to_prodigi"))
+        or _prodigi_clean(row.get("prodigi_order_id"))
+        or row.get("prodigi_status") in {"Submitted to Prodigi", "In Production", "Shipped", "Fulfilled in Shopify"}
+    ):
+        blockers.append("Already submitted")
+    return blockers
+
+
+def _prodigi_default_status(row):
+    blockers = [blocker for blocker in prodigi_submission_blockers(row) if blocker != "Already submitted"]
+    if blockers:
+        return "Needs Review"
+    return "Ready for Prodigi"
+
+
+def prodigi_tracker_row_from_order(order_row, stored=None):
+    stored = stored or {}
+    variant = order_row.get("variant") or order_row.get("variant_title") or ""
+    frame = stored.get("frame") or _prodigi_frame_from_variant(variant)
+    size = stored.get("size") or _prodigi_size_from_variant(variant)
+    mapping = prodigi_mapping_for_frame_size(frame, size)
+    edition_number = _prodigi_int(order_row.get("edition_number") or order_row.get("edition"), 0)
+    created_at = stored.get("created_at") or _prodigi_now_iso()
+    row = {
+        "row_id": stored.get("row_id") or prodigi_tracker_row_id(order_row),
+        "edition_order_id": stored.get("edition_order_id") or order_row.get("edition_order_id") or "",
+        "shopify_order_id": order_row.get("shopify_order_id") or stored.get("shopify_order_id") or "",
+        "shopify_order_name": order_row.get("order") or order_row.get("order_name") or stored.get("shopify_order_name") or "",
+        "shopify_line_item_id": order_row.get("shopify_line_item_id") or stored.get("shopify_line_item_id") or "",
+        "customer_name": order_row.get("customer") or order_row.get("customer_name") or stored.get("customer_name") or "",
+        "customer_email": order_row.get("customer_email") or stored.get("customer_email") or "",
+        "product_title": order_row.get("product") or order_row.get("product_title") or stored.get("product_title") or "",
+        "shopify_product_id": order_row.get("shopify_product_id") or stored.get("shopify_product_id") or "",
+        "shopify_variant_id": order_row.get("variant_id") or order_row.get("shopify_variant_id") or stored.get("shopify_variant_id") or "",
+        "variant_title": variant or stored.get("variant_title") or "",
+        "edition_number": edition_number,
+        "edition_total": _prodigi_int(order_row.get("edition_total") or stored.get("edition_total"), 100),
+        "frame": mapping.get("frame") or frame,
+        "size": mapping.get("size") or size,
+        "prodigi_size": stored.get("prodigi_size") or mapping.get("prodigi_size") or "",
+        "prodigi_product_option": stored.get("prodigi_product_option") or mapping.get("prodigi_product_option") or "",
+        "prodigi_code": stored.get("prodigi_code") or mapping.get("prodigi_code") or "",
+        "prodigi_frame": stored.get("prodigi_frame") or mapping.get("prodigi_frame") or "",
+        "prodigi_product_name": stored.get("prodigi_product_name") or mapping.get("prodigi_product_name") or "",
+        "prodigi_order_id": stored.get("prodigi_order_id") or "",
+        "shipping_method": stored.get("shipping_method") or order_row.get("shipping") or order_row.get("shipping_method") or "",
+        "prodigi_status": stored.get("prodigi_status") or stored.get("status") or "",
+        "shopify_fulfillment_status": stored.get("shopify_fulfillment_status") or "",
+        "tracking_number": stored.get("tracking_number") or stored.get("tracking") or "",
+        "tracking_url": stored.get("tracking_url") or "",
+        "carrier": stored.get("carrier") or "",
+        "certificate_status": order_row.get("certificate") or order_row.get("certificate_status") or stored.get("certificate_status") or "",
+        "date": order_row.get("date") or stored.get("date") or "",
+        "date_sent_to_prodigi": stored.get("date_sent_to_prodigi") or "",
+        "date_shipped": stored.get("date_shipped") or "",
+        "date_fulfilled_in_shopify": stored.get("date_fulfilled_in_shopify") or "",
+        "double_checked": _prodigi_bool(stored.get("double_checked")),
+        "checked_by": stored.get("checked_by") or "",
+        "checked_at": stored.get("checked_at") or "",
+        "notes": stored.get("notes") or "",
+        "source": stored.get("source") or "orders_snapshot",
+        "created_at": created_at,
+        "updated_at": stored.get("updated_at") or created_at,
+    }
+    row["blockers"] = "; ".join(blocker for blocker in prodigi_submission_blockers(row) if blocker != "Already submitted")
+    if not row["prodigi_status"]:
+        row["prodigi_status"] = _prodigi_default_status(row)
+    return row
+
+
+def load_prodigi_tracker_state(path=None):
+    target = Path(path or PRODIGI_TRACKER_PATH)
+    if not target.exists():
+        return {"version": PRODIGI_TRACKER_VERSION, "rows": [], "updated_at": ""}
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except Exception:
+        return {"version": PRODIGI_TRACKER_VERSION, "rows": [], "updated_at": ""}
+    payload.setdefault("version", PRODIGI_TRACKER_VERSION)
+    payload.setdefault("rows", [])
+    payload.setdefault("updated_at", "")
+    return payload
+
+
+def save_prodigi_tracker_rows(rows, path=None):
+    payload = {
+        "version": PRODIGI_TRACKER_VERSION,
+        "updated_at": _prodigi_now_iso(),
+        "rows": rows or [],
+    }
+    target = Path(path or PRODIGI_TRACKER_PATH)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return payload
+
+
+def build_prodigi_tracker_rows(order_rows, stored_rows=None):
+    stored_by_id = {row.get("row_id"): row for row in stored_rows or [] if row.get("row_id")}
+    rows = []
+    seen = set()
+    for order_row in order_rows or []:
+        row_id = prodigi_tracker_row_id(order_row)
+        tracker_row = prodigi_tracker_row_from_order(order_row, stored_by_id.get(row_id))
+        rows.append(tracker_row)
+        seen.add(tracker_row["row_id"])
+    for row in stored_rows or []:
+        if row.get("row_id") and row["row_id"] not in seen:
+            preserved = prodigi_tracker_row_from_order(row, row)
+            preserved["source"] = row.get("source") or "tracker_import"
+            rows.append(preserved)
+    return sort_prodigi_tracker_rows(rows)
+
+
+def sort_prodigi_tracker_rows(rows):
+    def key(row):
+        status_rank = PRODIGI_ACTIONABLE_STATUS_ORDER.get(row.get("prodigi_status"), 99)
+        date_value = row.get("date") or row.get("created_at") or ""
+        order_number = _prodigi_int(row.get("shopify_order_name"), 0)
+        date_digits = "".join(re.findall(r"\d+", str(date_value or "")))
+        date_number = int(date_digits[:14] or 0)
+        return (status_rank, -date_number, -order_number)
+
+    return sorted(rows or [], key=key)
+
+
+def prodigi_copy_details(row):
+    lines = [
+        f"Shopify Order #: {row.get('shopify_order_name') or ''}",
+        f"Customer: {row.get('customer_name') or ''}",
+        f"Product: {row.get('product_title') or ''}",
+        f"Edition #: #{_prodigi_int(row.get('edition_number'), 0):03d}" if _prodigi_int(row.get("edition_number"), 0) else "Edition #:",
+        f"Frame: {row.get('frame') or ''}",
+        f"Size: {row.get('size') or ''}",
+        f"Prodigi Size: {row.get('prodigi_size') or ''}",
+        f"Prodigi Product Option: {row.get('prodigi_product_option') or ''}",
+        f"Prodigi Code: {row.get('prodigi_code') or ''}",
+        f"Shipping: {row.get('shipping_method') or ''}",
+    ]
+    return "\n".join(lines)
+
+
+def export_prodigi_tracker_csv(rows):
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=PRODIGI_TRACKER_EXPORT_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows or []:
+        writer.writerow({key: row.get(key, "") for key in PRODIGI_TRACKER_EXPORT_COLUMNS})
+    return buffer.getvalue().encode("utf-8-sig")
+
+
+def _prodigi_csv_text(uploaded_or_text):
+    if uploaded_or_text is None:
+        return ""
+    if isinstance(uploaded_or_text, str):
+        return uploaded_or_text
+    if isinstance(uploaded_or_text, bytes):
+        return uploaded_or_text.decode("utf-8-sig", errors="replace")
+    return uploaded_or_text.getvalue().decode("utf-8-sig", errors="replace")
+
+
+def _prodigi_csv_key(value):
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").casefold())
+
+
+def _prodigi_csv_value(row, *aliases):
+    normalised = {_prodigi_csv_key(key): value for key, value in (row or {}).items()}
+    for alias in aliases:
+        key = _prodigi_csv_key(alias)
+        if key in normalised:
+            return normalised[key]
+    return ""
+
+
+def _prodigi_import_match_key(row):
+    return (
+        _prodigi_normalise_order_name(row.get("shopify_order_name") or row.get("Shopify Order #")),
+        _prodigi_normalise_text(row.get("product_title") or row.get("Edition Name")),
+        _prodigi_normalise_text(row.get("frame") or row.get("Frame")),
+        _prodigi_normalise_text(row.get("size") or row.get("Size")),
+        _prodigi_int(row.get("edition_number") or row.get("Edition No."), 0),
+    )
+
+
+def _prodigi_import_row_from_csv(csv_row):
+    order_name = _prodigi_csv_value(csv_row, "Shopify Order #", "shopify_order_name", "Order #", "Order")
+    product_title = _prodigi_csv_value(csv_row, "Edition Name", "product_title", "Product")
+    frame = _prodigi_csv_value(csv_row, "Frame")
+    size = _prodigi_csv_value(csv_row, "Size")
+    mapping = prodigi_mapping_for_frame_size(frame, size)
+    status = _prodigi_status_from_sheet(_prodigi_csv_value(csv_row, "Status", "prodigi_status"))
+    date_sent = _prodigi_csv_value(csv_row, "Date Sent", "date_sent_to_prodigi")
+    row = {
+        "row_id": "",
+        "shopify_order_name": order_name,
+        "customer_name": _prodigi_csv_value(csv_row, "Customer Name", "customer_name"),
+        "product_title": product_title,
+        "edition_number": _prodigi_int(_prodigi_csv_value(csv_row, "Edition No.", "edition_number"), 0),
+        "frame": mapping.get("frame") or frame,
+        "size": mapping.get("size") or size,
+        "prodigi_size": _prodigi_csv_value(csv_row, "Prodigi Size", "prodigi_size") or mapping.get("prodigi_size") or "",
+        "prodigi_product_option": _prodigi_csv_value(csv_row, "Prodigi Product Option", "prodigi_product_option") or mapping.get("prodigi_product_option") or "",
+        "prodigi_code": _prodigi_csv_value(csv_row, "Prodigi Code", "prodigi_code") or mapping.get("prodigi_code") or "",
+        "shipping_method": _prodigi_csv_value(csv_row, "Shipping", "shipping_method"),
+        "prodigi_status": status or "Needs Review",
+        "notes": _prodigi_csv_value(csv_row, "Notes", "notes"),
+        "date_sent_to_prodigi": date_sent,
+        "source": "csv_import",
+        "created_at": _prodigi_now_iso(),
+        "updated_at": _prodigi_now_iso(),
+    }
+    row["row_id"] = "imported|" + "|".join(str(part or "") for part in _prodigi_import_match_key(row))
+    return prodigi_tracker_row_from_order(row, row)
+
+
+def import_prodigi_tracker_csv(uploaded_or_text, current_rows):
+    text = _prodigi_csv_text(uploaded_or_text)
+    if not text.strip():
+        return {"rows": current_rows or [], "read": 0, "matched": 0, "created": 0, "warnings": ["CSV was empty."]}
+    reader = csv.DictReader(io.StringIO(text))
+    rows = [dict(row) for row in current_rows or []]
+    by_key = {_prodigi_import_match_key(row): index for index, row in enumerate(rows)}
+    read = matched = created = 0
+    warnings = []
+    for csv_row in reader:
+        read += 1
+        imported = _prodigi_import_row_from_csv(csv_row)
+        key = _prodigi_import_match_key(imported)
+        if key in by_key:
+            index = by_key[key]
+            existing = dict(rows[index])
+            for field in (
+                "prodigi_status",
+                "notes",
+                "shipping_method",
+                "prodigi_product_option",
+                "prodigi_size",
+                "prodigi_code",
+                "date_sent_to_prodigi",
+            ):
+                if imported.get(field):
+                    existing[field] = imported[field]
+            existing["updated_at"] = _prodigi_now_iso()
+            rows[index] = prodigi_tracker_row_from_order(existing, existing)
+            matched += 1
+        else:
+            imported["prodigi_status"] = "Needs Review"
+            rows.append(prodigi_tracker_row_from_order(imported, imported))
+            by_key[key] = len(rows) - 1
+            created += 1
+            warnings.append(f"Imported unmatched row for {imported.get('shopify_order_name') or 'order missing'} as Needs Review.")
+    return {"rows": sort_prodigi_tracker_rows(rows), "read": read, "matched": matched, "created": created, "warnings": warnings}
+
+
+def apply_prodigi_bulk_action(rows, selected_ids, action, value=""):
+    selected = set(selected_ids or [])
+    updated = []
+    changed = 0
+    now = _prodigi_now_iso()
+    errors = []
+    for row in rows or []:
+        item = dict(row)
+        if item.get("row_id") not in selected:
+            updated.append(item)
+            continue
+        if action == "double_checked":
+            item["double_checked"] = True
+            item["checked_at"] = now
+            item["prodigi_status"] = "Double Checked"
+        elif action == "submitted":
+            blockers = prodigi_submission_blockers(item)
+            if blockers:
+                errors.append(f"{item.get('shopify_order_name')}: {', '.join(blockers)}")
+                updated.append(item)
+                continue
+            item["prodigi_status"] = "Submitted to Prodigi"
+            item["date_sent_to_prodigi"] = item.get("date_sent_to_prodigi") or now
+        elif action == "status":
+            item["prodigi_status"] = value if value in PRODIGI_STATUS_OPTIONS else item.get("prodigi_status")
+        elif action == "shipping":
+            item["shipping_method"] = value
+        elif action == "note":
+            note = _prodigi_clean(value)
+            if note:
+                item["notes"] = "\n".join(part for part in [item.get("notes"), note] if part)
+        item["updated_at"] = now
+        item = prodigi_tracker_row_from_order(item, item)
+        updated.append(item)
+        changed += 1
+    return {"rows": sort_prodigi_tracker_rows(updated), "changed": changed, "errors": errors}
 
 
 def status_badge(status):
@@ -2322,7 +2851,7 @@ def render_prodigi_page_legacy():
     st.link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
     st.markdown(
         "**Prodigi support for errors or warranty:** "
-        "[support@prodigi.com](mailto:support@prodigi.com)"
+        f"[{PRODIGI_SUPPORT_EMAIL}](mailto:{PRODIGI_SUPPORT_EMAIL})"
     )
 
     st.info(
@@ -2376,61 +2905,285 @@ def render_prodigi_page_legacy():
 
 
 def render_prodigi_page():
-    st.title("Prodigi")
-    st.caption("Compact Prodigi matching for Shopify order variants.")
-    st.link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
-    st.markdown(
-        "**Prodigi support for errors or warranty:** "
-        "[support@prodigi.com](mailto:support@prodigi.com)"
+    st.title("Prodigi Fulfilment Tracker")
+    st.caption("Fast-fill fulfilment tracker for Shopify artwork lines. Support: "
+               f"[{PRODIGI_SUPPORT_EMAIL}](mailto:{PRODIGI_SUPPORT_EMAIL})")
+
+    order_allocator = importlib.import_module("order_allocator")
+    stored_state = load_prodigi_tracker_state()
+    orders_snapshot = order_allocator.load_orders_snapshot()
+    rows = build_prodigi_tracker_rows(orders_snapshot.get("rows") or [], stored_state.get("rows") or [])
+    if not stored_state.get("rows") and rows:
+        save_prodigi_tracker_rows(rows)
+
+    if "prodigi_tracker_filter" not in st.session_state:
+        st.session_state.prodigi_tracker_filter = "All"
+
+    counts = {status: 0 for status in PRODIGI_STATUS_OPTIONS}
+    for row in rows:
+        counts[row.get("prodigi_status") or "Needs Review"] = counts.get(row.get("prodigi_status") or "Needs Review", 0) + 1
+
+    summary_labels = (
+        "Needs Review",
+        "Ready for Prodigi",
+        "Double Checked",
+        "Submitted to Prodigi",
+        "Shipped",
+        "Fulfilled in Shopify",
+        "Issue / Hold",
     )
-    st.info("XL=A1 - L=A2 - M=A3 - S=A4. Oak in Sports Cave = Natural in Prodigi. Framed = Classic Frame. Unframed = Fine Art Paper.")
-
-    st.subheader("Size map")
-    size_columns = st.columns(4)
-    for column, size_option in zip(size_columns, PRODIGI_SIZE_OPTIONS):
+    summary_columns = st.columns(len(summary_labels))
+    for column, label in zip(summary_columns, summary_labels):
         with column:
-            st.markdown(f"**{size_option['shopify_size']} = {size_option['prodigi_size']}**")
-            st.caption(size_option["dimensions"])
+            if st.button(f"{label}\n{counts.get(label, 0)}", key=f"prodigi-filter-card-{label}", use_container_width=True):
+                st.session_state.prodigi_tracker_filter = label
+                st.rerun()
 
-    st.subheader("Frame map")
-    frame_columns = st.columns(4)
-    for column, (shopify_frame, prodigi_frame, prodigi_note) in zip(frame_columns, PRODIGI_FRAME_OPTIONS):
-        with column:
-            st.markdown(f"**{shopify_frame}**")
-            st.caption(f"Select: {prodigi_frame}")
-            st.caption(prodigi_note)
-
-    st.subheader("Product codes")
-    header = st.columns([0.8, 0.55, 0.7, 2.9, 0.9, 0.9])
-    for column, label in zip(header, ("Frame", "Size", "Prodigi", "Product name / code", "Copy name", "Copy code")):
-        column.markdown(f"**{label}**")
-
-    frame_rows = (
-        ("Black", "Black", False),
-        ("Oak", "Natural", False),
-        ("White", "White", False),
-        ("Unframed", "No frame", True),
+    toolbar = st.columns([1.2, 1.2, 1.2, 1.2, 1.2])
+    toolbar[0].link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=True)
+    toolbar[1].download_button(
+        "Export Tracker CSV",
+        data=export_prodigi_tracker_csv(rows),
+        file_name=f"prodigi-fulfilment-tracker-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
+        mime="text/csv",
+        use_container_width=True,
     )
-    for frame_label, frame_colour, is_unframed in frame_rows:
-        for size_option in PRODIGI_SIZE_OPTIONS:
-            product_name = size_option["unframed_name"] if is_unframed else size_option["framed_name"]
-            product_code = size_option["unframed_code"] if is_unframed else size_option["framed_code"]
-            columns = st.columns([0.8, 0.55, 0.7, 2.9, 0.9, 0.9])
-            columns[0].write(frame_label)
-            columns[0].caption(f"Select {frame_colour}")
-            columns[1].write(size_option["shopify_size"])
-            columns[2].write(size_option["prodigi_size"])
-            columns[3].write(product_name)
-            columns[3].code(product_code, language=None)
-            key_base = f"prodigi-{frame_label.lower()}-{size_option['shopify_size'].lower()}"
-            with columns[4]:
-                render_copy_text_button(product_name, f"{key_base}-name", "Copy Name")
-            with columns[5]:
-                render_copy_text_button(product_code, f"{key_base}-code", "Copy Code")
+    with toolbar[2].popover("Import CSV", use_container_width=True):
+        st.caption("Imports the historical Google Sheet tracking CSV or a tracker export.")
+        uploaded_csv = st.file_uploader(
+            "Upload Prodigi tracker CSV",
+            type=["csv"],
+            key="prodigi-tracker-csv-import",
+        )
+        if st.button("Import CSV Into Tracker", disabled=uploaded_csv is None, use_container_width=True):
+            result = import_prodigi_tracker_csv(uploaded_csv, rows)
+            rows = result["rows"]
+            save_prodigi_tracker_rows(rows)
+            st.success(
+                f"Imported {result['read']} row(s). Matched {result['matched']}; created {result['created']} review row(s)."
+            )
+            for warning in result.get("warnings") or []:
+                st.warning(warning)
+            st.rerun()
+    toolbar[3].caption(f"Last tracker save: {stored_state.get('updated_at') or 'Not saved yet'}")
+    toolbar[4].caption(f"Orders snapshot: {orders_snapshot.get('last_refreshed') or orders_snapshot.get('saved_at') or 'Not loaded'}")
 
-    st.warning(
+    filters = st.columns([1.2, 2.4, 1])
+    status_filter = filters[0].selectbox(
+        "Status filter",
+        ("All", *PRODIGI_STATUS_OPTIONS),
+        index=("All", *PRODIGI_STATUS_OPTIONS).index(st.session_state.prodigi_tracker_filter)
+        if st.session_state.prodigi_tracker_filter in ("All", *PRODIGI_STATUS_OPTIONS)
+        else 0,
+        key="prodigi-tracker-status-filter",
+    )
+    st.session_state.prodigi_tracker_filter = status_filter
+    search = filters[1].text_input(
+        "Search",
+        placeholder="Order, customer, product, edition, tracking",
+        key="prodigi-tracker-search",
+    )
+    filters[2].caption("Tip: edit cells directly, then tab through the row.")
+
+    def row_matches(row):
+        if status_filter != "All" and row.get("prodigi_status") != status_filter:
+            return False
+        needle = _prodigi_normalise_text(search)
+        if not needle:
+            return True
+        haystack = _prodigi_normalise_text(
+            " ".join(
+                str(row.get(key) or "")
+                for key in (
+                    "shopify_order_name",
+                    "customer_name",
+                    "customer_email",
+                    "product_title",
+                    "variant_title",
+                    "edition_number",
+                    "tracking_number",
+                    "prodigi_order_id",
+                    "prodigi_code",
+                )
+            )
+        )
+        return needle in haystack
+
+    visible_rows = [row for row in rows if row_matches(row)][:150]
+    editor_rows = []
+    for row in visible_rows:
+        editor_rows.append(
+            {
+                "select": False,
+                "row_id": row["row_id"],
+                "Status": row.get("prodigi_status") or "Needs Review",
+                "Order #": row.get("shopify_order_name") or "",
+                "Date": row.get("date") or "",
+                "Customer": row.get("customer_name") or "",
+                "Product": row.get("product_title") or "",
+                "Edition #": f"#{int(row.get('edition_number') or 0):03d}" if int(row.get("edition_number") or 0) else "",
+                "Frame": row.get("frame") or "",
+                "Size": row.get("size") or "",
+                "Prodigi Size": row.get("prodigi_size") or "",
+                "Prodigi Code": row.get("prodigi_code") or "",
+                "Shipping": row.get("shipping_method") or "",
+                "Certificate": row.get("certificate_status") or "",
+                "Double Checked": bool(row.get("double_checked")),
+                "Prodigi Order ID": row.get("prodigi_order_id") or "",
+                "Tracking": row.get("tracking_number") or "",
+                "Carrier": row.get("carrier") or "",
+                "Notes": row.get("notes") or "",
+                "Actions": "Select + copy",
+            }
+        )
+
+    st.caption(f"{len(visible_rows)} tracker row(s) shown. Rows load from the saved Orders snapshot and local tracker cache.")
+    edited_rows = st.data_editor(
+        editor_rows,
+        hide_index=True,
+        use_container_width=True,
+        height=min(720, max(260, 44 + len(editor_rows) * 36)),
+        column_order=[
+            "select",
+            "Status",
+            "Order #",
+            "Date",
+            "Customer",
+            "Product",
+            "Edition #",
+            "Frame",
+            "Size",
+            "Prodigi Size",
+            "Prodigi Code",
+            "Shipping",
+            "Certificate",
+            "Double Checked",
+            "Prodigi Order ID",
+            "Tracking",
+            "Carrier",
+            "Notes",
+            "Actions",
+        ],
+        disabled=[
+            "Order #",
+            "Date",
+            "Customer",
+            "Product",
+            "Edition #",
+            "Frame",
+            "Size",
+            "Prodigi Size",
+            "Prodigi Code",
+            "Certificate",
+            "Actions",
+        ],
+        column_config={
+            "select": st.column_config.CheckboxColumn(""),
+            "Status": st.column_config.SelectboxColumn("Status", options=list(PRODIGI_STATUS_OPTIONS)),
+            "Double Checked": st.column_config.CheckboxColumn("Double Checked"),
+            "Notes": st.column_config.TextColumn("Notes", width="medium"),
+            "row_id": None,
+        },
+        key="prodigi-fulfilment-editor",
+    )
+
+    by_id = {row["row_id"]: row for row in rows}
+    edited_by_id = {}
+    for edited in edited_rows or []:
+        row_id = edited.get("row_id")
+        if not row_id or row_id not in by_id:
+            continue
+        updated = dict(by_id[row_id])
+        updated["prodigi_status"] = edited.get("Status") or updated.get("prodigi_status")
+        updated["prodigi_order_id"] = edited.get("Prodigi Order ID") or ""
+        updated["tracking_number"] = edited.get("Tracking") or ""
+        updated["carrier"] = edited.get("Carrier") or ""
+        updated["notes"] = edited.get("Notes") or ""
+        updated["shipping_method"] = edited.get("Shipping") or ""
+        updated["double_checked"] = bool(edited.get("Double Checked"))
+        updated["updated_at"] = _prodigi_now_iso()
+        edited_by_id[row_id] = prodigi_tracker_row_from_order(updated, updated)
+
+    changed = False
+    for index, row in enumerate(rows):
+        edited = edited_by_id.get(row.get("row_id"))
+        if edited and any(edited.get(field) != row.get(field) for field in PRODIGI_EDITABLE_FIELDS):
+            rows[index] = edited
+            changed = True
+    if changed:
+        save_prodigi_tracker_rows(rows)
+        st.success("Saved")
+
+    selected_ids = [edited.get("row_id") for edited in edited_rows or [] if edited.get("select")]
+    selected_rows = [row for row in rows if row.get("row_id") in set(selected_ids)]
+
+    st.subheader("Fast Fill / Bulk Actions Toolbar")
+    bulk = st.columns(7)
+    if bulk[0].button("Mark Selected Double Checked", disabled=not selected_ids, use_container_width=True):
+        result = apply_prodigi_bulk_action(rows, selected_ids, "double_checked")
+        save_prodigi_tracker_rows(result["rows"])
+        st.rerun()
+    if bulk[1].button("Mark Selected Submitted to Prodigi", disabled=not selected_ids, use_container_width=True):
+        result = apply_prodigi_bulk_action(rows, selected_ids, "submitted")
+        if result["errors"]:
+            for error in result["errors"]:
+                st.error(error)
+        save_prodigi_tracker_rows(result["rows"])
+        st.rerun()
+    bulk_status = bulk[2].selectbox("Bulk Set Status", PRODIGI_STATUS_OPTIONS, key="prodigi-bulk-status")
+    if bulk[3].button("Apply Status", disabled=not selected_ids, use_container_width=True):
+        result = apply_prodigi_bulk_action(rows, selected_ids, "status", bulk_status)
+        save_prodigi_tracker_rows(result["rows"])
+        st.rerun()
+    bulk_shipping = bulk[4].text_input("Bulk Set Shipping", key="prodigi-bulk-shipping")
+    if bulk[5].button("Apply Shipping", disabled=not selected_ids or not bulk_shipping.strip(), use_container_width=True):
+        result = apply_prodigi_bulk_action(rows, selected_ids, "shipping", bulk_shipping)
+        save_prodigi_tracker_rows(result["rows"])
+        st.rerun()
+    if bulk[6].download_button(
+        "Export Selected CSV",
+        data=export_prodigi_tracker_csv(selected_rows),
+        file_name=f"prodigi-selected-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
+        mime="text/csv",
+        disabled=not selected_rows,
+        use_container_width=True,
+    ):
+        pass
+
+    note_cols = st.columns([3, 1, 1])
+    bulk_note = note_cols[0].text_input("Bulk Add Note", key="prodigi-bulk-note")
+    if note_cols[1].button("Add Note", disabled=not selected_ids or not bulk_note.strip(), use_container_width=True):
+        result = apply_prodigi_bulk_action(rows, selected_ids, "note", bulk_note)
+        save_prodigi_tracker_rows(result["rows"])
+        st.rerun()
+    with note_cols[2]:
+        render_copy_text_button(
+            "\n\n---\n\n".join(prodigi_copy_details(row) for row in selected_rows),
+            "prodigi-selected-copy-pack",
+            "Copy Selected Prodigi Details",
+        )
+
+    if selected_rows:
+        selected = selected_rows[0]
+        with st.expander("Selected row details", expanded=False):
+            st.write(f"**Order:** {selected.get('shopify_order_name')}")
+            st.write(f"**Customer:** {selected.get('customer_name')} / {selected.get('customer_email')}")
+            st.write(f"**Product:** {selected.get('product_title')}")
+            st.write(f"**Variant:** {selected.get('variant_title')}")
+            st.write(f"**Certificate:** {selected.get('certificate_status')}")
+            st.write(f"**Tracking URL:** {selected.get('tracking_url') or '-'}")
+            st.write(f"**Blockers:** {selected.get('blockers') or 'None'}")
+            st.write(f"**Notes:** {selected.get('notes') or '-'}")
+            render_copy_text_button(prodigi_copy_details(selected), f"prodigi-row-copy-{selected.get('row_id')}", "Copy Prodigi Details")
+
+    with st.expander("Prodigi Product Code Reference", expanded=False):
+        reference_rows = prodigi_reference_rows()
+        st.dataframe(reference_rows, hide_index=True, use_container_width=True)
+        st.caption("XL=A1, L=A2, M=A3, S=A4. Oak in Sports Cave = Natural in Prodigi.")
+
+    st.caption(
         "Before sending to production: confirm XL=A1, L=A2, M=A3, S=A4, Classic Frame or Fine Art Paper, "
-        "and the exact frame colour. For print errors, damage, or warranty support, email support@prodigi.com."
+        f"and the exact frame colour. For print errors, damage, or warranty support, email {PRODIGI_SUPPORT_EMAIL}."
     )
 
 
