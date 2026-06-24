@@ -540,7 +540,25 @@ def prodigi_required_confirmation_question(row):
         suffix = "No frame"
     else:
         suffix = f"Frame colour: {frame_colour or '-'}"
-    return f"Is the selected Prodigi product exactly {code} - {product}, {suffix}?"
+    return f"Is the selected Prodigi variant exactly {code} - {product}, {suffix}?"
+
+
+def prodigi_shopify_variant_label(row):
+    frame = row.get("sports_cave_frame") or row.get("frame") or ""
+    size = row.get("size") or ""
+    if frame and size:
+        return f"{frame} / {size}"
+    return row.get("variant_title") or row.get("shopify_variant_title") or ""
+
+
+def prodigi_variant_copy_text(row):
+    return "\n".join(
+        [
+            f"Expected Prodigi variant: {row.get('prodigi_product_name') or ''}",
+            f"Prodigi code: {row.get('prodigi_product_code') or row.get('prodigi_code') or ''}",
+            f"Frame colour: {row.get('prodigi_frame_colour') or row.get('prodigi_frame') or ''}",
+        ]
+    )
 
 
 def prodigi_reference_table_html(rows):
@@ -3554,9 +3572,9 @@ PRODIGI_DISPATCH_REQUIRED_FIELDS = (
 PRODIGI_DISPATCH_REASON_LABELS = {
     "certificate": "Certificate not uploaded",
     "artwork_upload": "Artwork quality not confirmed",
-    "product_option": "Product option mismatch",
+    "product_option": "Prodigi variant not confirmed",
     "frame": "Frame mismatch",
-    "size": "Size mismatch",
+    "size": "Prodigi variant mismatch",
     "edition_number": "Edition number mismatch",
     "shipping": "Shipping not confirmed",
     "sent_to_production": "Not sent to production",
@@ -3690,6 +3708,84 @@ def prodigi_find_order_rows(order_rows, search_text, stored_rows=None):
     return sort_prodigi_tracker_rows(rows)
 
 
+def _prodigi_log_timing(label, started_at, extra=""):
+    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+    suffix = f" {extra}" if extra else ""
+    print(f"PERF Prodigi {label}: {elapsed_ms} ms{suffix}")
+
+
+def prodigi_load_dispatch_summary():
+    started = time.perf_counter()
+    if supabase_backend.is_configured():
+        try:
+            summary = supabase_backend.get_prodigi_dispatch_summary()
+            _prodigi_log_timing("dispatch summary", started, f"rows={summary.get('rows_saved', 0)}")
+            return summary
+        except Exception as error:
+            supabase_backend.log_app_error("prodigi_dispatch_summary_failed", str(error), {"source": "prodigi_page"})
+    _prodigi_log_timing("dispatch summary", started, "source=unavailable rows=0")
+    return {"rows_saved": 0, "last_saved_at": ""}
+
+
+def prodigi_load_dispatch_rows(tab_name="Last 7 Days", search_text="", limit=50):
+    started = time.perf_counter()
+    limit_value = max(min(int(limit or 50), 150), 1)
+    if supabase_backend.is_configured():
+        kwargs = {"limit": limit_value, "search": search_text}
+        if not _prodigi_clean(search_text):
+            if tab_name == "Last 7 Days":
+                kwargs["days"] = 7
+            elif tab_name == "Needs Review":
+                kwargs["status"] = "Needs Review"
+            elif tab_name == "Submitted":
+                kwargs["status"] = "Submitted"
+                kwargs["days"] = 7
+            elif tab_name == "History":
+                kwargs["older_than_days"] = 7
+        try:
+            rows = supabase_backend.list_prodigi_dispatch_rows(**kwargs)
+            _prodigi_log_timing("dispatch rows", started, f"view={tab_name} rows={len(rows)}")
+            return rows
+        except Exception as error:
+            supabase_backend.log_app_error("prodigi_dispatch_rows_failed", str(error), {"source": "prodigi_page", "view": tab_name})
+    _prodigi_log_timing("dispatch rows", started, f"view={tab_name} source=unavailable rows=0")
+    return []
+
+
+def prodigi_find_order_rows_from_cache(search_text):
+    query = _prodigi_clean(search_text)
+    if not query:
+        return [], []
+    started = time.perf_counter()
+    if supabase_backend.is_configured():
+        try:
+            order_allocator = importlib.import_module("order_allocator")
+            raw_rows = supabase_backend.list_orders(search=query, sort="Date newest", status_filter="All", limit=50)
+            order_rows = order_allocator._snapshot_rows_from_supabase_order_rows(raw_rows)
+            existing_rows = prodigi_load_dispatch_rows("Search", search_text=query, limit=100)
+            matches = prodigi_find_order_rows(order_rows, query, existing_rows)
+            _prodigi_log_timing("order lookup", started, f"source=supabase rows={len(matches)}")
+            return matches, existing_rows
+        except Exception as error:
+            supabase_backend.log_app_error("prodigi_order_lookup_failed", str(error), {"source": "prodigi_page", "query": query})
+
+    order_allocator = importlib.import_module("order_allocator")
+    orders_snapshot = order_allocator.load_orders_snapshot()
+    matches = prodigi_find_order_rows(orders_snapshot.get("rows") or [], query, [])
+    _prodigi_log_timing("order lookup", started, f"source=local_snapshot rows={len(matches)}")
+    return matches, []
+
+
+def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None):
+    _, saved = prodigi_upsert_dispatch_row([], base_row, status=status, notes=notes, qa_answers=qa_answers)
+    if not supabase_backend.is_configured():
+        raise RuntimeError("Supabase dispatch storage is not configured.")
+    started = time.perf_counter()
+    supabase_backend.upsert_prodigi_dispatch_row(saved)
+    _prodigi_log_timing("dispatch save", started, f"status={status} row_id={saved.get('row_id') or ''}")
+    return saved
+
+
 def prodigi_dispatch_rows_for_tab(rows, tab_name, search_text="", *, today=None):
     today = today or date.today()
     search = _prodigi_normalise_text(search_text)
@@ -3726,19 +3822,22 @@ def prodigi_dispatch_rows_for_tab(rows, tab_name, search_text="", *, today=None)
 def prodigi_dispatch_table_records(rows):
     records = []
     for row in rows or []:
+        edition_number = _prodigi_int(row.get("edition_number"), 0)
         records.append(
             {
-                "Date Sent": _prodigi_display_date(row.get("date_sent_to_prodigi")),
-                "Shopify Order #": row.get("shopify_order_name") or "",
-                "Customer Name": row.get("customer_name") or "",
-                "Product": row.get("product_title") or "",
-                "Edition No.": f"#{_prodigi_int(row.get('edition_number'), 0):03d}" if _prodigi_int(row.get("edition_number"), 0) else "",
-                "Frame": row.get("frame") or "",
-                "Size": row.get("size") or "",
-                "Prodigi Product Option": prodigi_product_option_display(row),
-                "Shipping": row.get("shipping_method") or "",
+                "Submitted At": row.get("submitted_at") or _prodigi_display_date(row.get("date_sent_to_prodigi")) or row.get("updated_at") or "",
                 "Status": _prodigi_dispatch_status(row),
-                "Notes": row.get("notes") or row.get("issue_reason") or "",
+                "Order": row.get("shopify_order_name") or row.get("shopify_order_number") or "",
+                "Customer": row.get("customer_name") or "",
+                "Product": row.get("product_title") or "",
+                "Variant": row.get("shopify_variant_title") or row.get("variant_title") or "",
+                "Size": row.get("sports_cave_size") or row.get("size") or "",
+                "Frame": row.get("sports_cave_frame") or row.get("frame") or "",
+                "Prodigi Code": row.get("prodigi_product_code") or row.get("prodigi_code") or "",
+                "Prodigi Product": row.get("prodigi_product_name") or prodigi_product_option_display(row),
+                "Edition": f"#{edition_number:03d}" if edition_number else "",
+                "QA": "Yes" if _prodigi_bool(row.get("qa_confirmed")) else "No",
+                "Notes": row.get("notes") or row.get("qa_notes") or row.get("issue_reason") or "",
             }
         )
     return records
@@ -3911,16 +4010,18 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
 
 
 def render_prodigi_page():
+    page_started = time.perf_counter()
     st.title("Prodigi Dispatch Log")
     st.caption("Search an order, confirm the Prodigi checks, then save it to the dispatch log.")
     st.link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
-
-    stored_state = load_prodigi_tracker_state()
-    tracker_rows = stored_state.get("rows") or []
+    print("Prodigi Shopify fetch skipped on initial load")
+    print("Prodigi full order snapshot skipped on initial load")
 
     with st.expander("Prodigi Reference", expanded=False):
         st.markdown(prodigi_reference_table_html(prodigi_reference_rows()), unsafe_allow_html=True)
         st.caption(f"Support: {PRODIGI_SUPPORT_EMAIL}")
+
+    dispatch_summary = prodigi_load_dispatch_summary()
 
     search_columns = st.columns([3.2, 1])
     search_value = search_columns[0].text_input(
@@ -3933,10 +4034,9 @@ def render_prodigi_page():
         if not query:
             st.warning("Enter a Shopify order number first.")
         else:
-            order_allocator = importlib.import_module("order_allocator")
-            orders_snapshot = order_allocator.load_orders_snapshot()
-            matches = prodigi_find_order_rows(orders_snapshot.get("rows") or [], query, tracker_rows)
+            matches, existing_rows = prodigi_find_order_rows_from_cache(query)
             st.session_state["prodigi_dispatch_matches"] = matches
+            st.session_state["prodigi_dispatch_existing_rows"] = existing_rows
             st.session_state["prodigi_dispatch_last_query"] = query
             st.session_state["prodigi_dispatch_selected_row_id"] = matches[0]["row_id"] if len(matches) == 1 else ""
             if not matches:
@@ -3944,12 +4044,14 @@ def render_prodigi_page():
             st.rerun()
 
     matches = st.session_state.get("prodigi_dispatch_matches") or []
+    existing_dispatch_rows = st.session_state.get("prodigi_dispatch_existing_rows") or []
     last_query = st.session_state.get("prodigi_dispatch_last_query") or ""
 
     if last_query and not matches:
         st.warning("Order not found. Sync New Orders first, then try again.")
 
     selected_row = None
+    product_confirmations = {}
     if matches:
         selected_id = st.session_state.get("prodigi_dispatch_selected_row_id") or (matches[0]["row_id"] if len(matches) == 1 else "")
         selected_row = next((row for row in matches if row.get("row_id") == selected_id), None)
@@ -3984,26 +4086,30 @@ def render_prodigi_page():
                 columns[5].write(row.get("certificate_status") or "-")
 
         st.markdown("**Prodigi Product Confirmation**")
-        product_confirmations = {}
         for row in matches:
             row_id = row.get("row_id") or ""
             row_key = safe_filename_part(row_id)
-            existing_line = _prodigi_existing_dispatch_row(tracker_rows, row_id) or row
+            existing_line = _prodigi_existing_dispatch_row(existing_dispatch_rows, row_id) or row
             defaults = prodigi_line_confirmation_defaults(existing_line)
             has_mapping = bool(row.get("prodigi_product_name") and row.get("prodigi_code") and row.get("prodigi_frame_colour"))
             with st.container(border=True):
                 st.markdown(f"**{row.get('product_title') or '-'}**")
-                st.caption(f"Shopify variant: {row.get('variant_title') or row.get('shopify_variant_title') or '-'}")
+                st.caption(f"Shopify variant: {prodigi_shopify_variant_label(row) or '-'}")
                 detail_columns = st.columns([2.4, 1, 1])
-                detail_columns[0].write(f"Required Prodigi product: {row.get('prodigi_product_name') or '-'}")
+                detail_columns[0].write(f"Expected Prodigi variant: {row.get('prodigi_product_name') or '-'}")
                 detail_columns[1].write(f"Prodigi code: {row.get('prodigi_code') or '-'}")
                 detail_columns[2].write(f"Frame colour: {row.get('prodigi_frame_colour') or row.get('prodigi_frame') or '-'}")
                 st.caption(prodigi_required_confirmation_question(row))
                 confirmed = st.checkbox(
-                    "Confirmed exact Prodigi product selected",
+                    "Confirmed exact Prodigi variant selected",
                     value=bool(defaults["confirmed"] and has_mapping),
                     disabled=not has_mapping,
                     key=f"prodigi-dispatch-product-confirm-{row_key}",
+                )
+                render_copy_text_button(
+                    prodigi_variant_copy_text(row),
+                    f"prodigi-dispatch-copy-variant-{row_key}",
+                    "Copy Prodigi Variant",
                 )
                 confirmation_notes = defaults["notes"]
                 if not confirmed:
@@ -4019,7 +4125,7 @@ def render_prodigi_page():
                 }
 
     if selected_row:
-        existing = _prodigi_existing_dispatch_row(tracker_rows, selected_row.get("row_id"))
+        existing = _prodigi_existing_dispatch_row(existing_dispatch_rows, selected_row.get("row_id"))
         already_submitted = existing and _prodigi_dispatch_status(existing) == "Submitted"
         if already_submitted:
             st.info(f"Already submitted on {_prodigi_display_date(existing.get('date_sent_to_prodigi'))}.")
@@ -4034,9 +4140,9 @@ def render_prodigi_page():
                 ("Edition No.", _prodigi_edition_label(selected_row)),
                 ("Frame", selected_row.get("frame") or ""),
                 ("Shopify Size", selected_row.get("size") or ""),
-                ("Prodigi Size", selected_row.get("prodigi_size") or ""),
-                ("Prodigi Product Option", prodigi_product_option_display(selected_row)),
+                ("Prodigi Variant", selected_row.get("prodigi_product_name") or ""),
                 ("Prodigi Code", selected_row.get("prodigi_code") or ""),
+                ("Frame Colour", selected_row.get("prodigi_frame_colour") or selected_row.get("prodigi_frame") or ""),
                 ("Shipping", selected_row.get("shipping_method") or ""),
             ]
             for index, (label, value) in enumerate(details):
@@ -4068,7 +4174,7 @@ def render_prodigi_page():
             ("certificate", "Certificate", "Has the certificate been generated and uploaded?"),
             ("artwork_upload", "Artwork upload", "Did you upload the correct artwork file to Prodigi in excellent quality?"),
             ("frame", "Frame", "Did you select the correct frame colour in Prodigi?"),
-            ("size", "Size", "Did you select the correct Prodigi size?"),
+            ("size", "Prodigi Variant", "Did you select the correct Prodigi variant?"),
             ("edition_number", "Edition number", "Does the artwork/certificate match this edition number?"),
             ("shipping", "Shipping", "Did you select the correct shipping method?"),
             ("sent_to_production", "Sent to production", "Has this order been sent to production in Prodigi?"),
@@ -4100,8 +4206,15 @@ def render_prodigi_page():
                     st.caption(f"Sports Cave frame: {selected_row.get('frame') or '-'}")
                     st.caption(f"Prodigi frame: {selected_row.get('prodigi_frame') or '-'}")
                 elif field == "size":
-                    st.caption(f"Shopify size: {selected_row.get('size') or '-'}")
-                    st.caption(f"Prodigi size: {selected_row.get('prodigi_size') or '-'}")
+                    st.caption(f"Shopify variant: {prodigi_shopify_variant_label(selected_row) or '-'}")
+                    st.caption(f"Expected Prodigi variant: {selected_row.get('prodigi_product_name') or '-'}")
+                    st.caption(f"Prodigi code: {selected_row.get('prodigi_code') or '-'}")
+                    st.caption(f"Frame colour: {selected_row.get('prodigi_frame_colour') or selected_row.get('prodigi_frame') or '-'}")
+                    render_copy_text_button(
+                        prodigi_variant_copy_text(selected_row),
+                        f"prodigi-dispatch-qa-copy-variant-{safe_filename_part(selected_row.get('row_id') or '')}",
+                        "Copy Prodigi Variant",
+                    )
                 elif field == "edition_number":
                     if not _prodigi_is_limited_edition(selected_row):
                         st.caption("Not Required")
@@ -4131,7 +4244,7 @@ def render_prodigi_page():
             if not line_confirmation.get("has_mapping"):
                 line_blockers.append(f"{row.get('product_title') or 'Line'}: missing Prodigi mapping")
             if not line_confirmation.get("confirmed"):
-                line_blockers.append(f"{row.get('product_title') or 'Line'}: exact Prodigi product not confirmed")
+                line_blockers.append(f"{row.get('product_title') or 'Line'}: exact Prodigi variant not confirmed")
             row_answers = dict(qa_answers)
             if not _prodigi_is_limited_edition(row):
                 row_answers["certificate"] = "Not Required"
@@ -4155,16 +4268,19 @@ def render_prodigi_page():
 
         action_columns = st.columns([1, 1, 3])
         if action_columns[0].button("Save Issue", use_container_width=True, key="prodigi-dispatch-save-issue"):
-            saved_rows, _ = prodigi_upsert_dispatch_row(
-                tracker_rows,
-                selected_row,
-                status="Needs Review",
-                notes=notes,
-                qa_answers=qa_answers,
-            )
-            save_prodigi_tracker_rows(saved_rows)
-            st.success("Issue saved to dispatch log.")
-            st.rerun()
+            try:
+                prodigi_save_dispatch_row(
+                    selected_row,
+                    status="Needs Review",
+                    notes=notes,
+                    qa_answers=qa_answers,
+                )
+                st.session_state["prodigi_dispatch_log_view"] = "Needs Review"
+                st.success("Issue saved to dispatch log.")
+                st.rerun()
+            except Exception as error:
+                supabase_backend.log_app_error("prodigi_dispatch_issue_save_failed", str(error), {"source": "prodigi_page"})
+                st.error("Dispatch issue save failed. Check Supabase connection and Render logs.")
         if action_columns[1].button(
             "Complete Dispatch",
             type="primary",
@@ -4172,49 +4288,62 @@ def render_prodigi_page():
             disabled=bool(completion_blockers) or bool(already_submitted),
             key="prodigi-dispatch-complete",
         ):
-            saved_rows = tracker_rows
-            for line in matches:
-                line_confirmation = product_confirmations.get(line.get("row_id") or "", {})
-                line_answers = dict(qa_answers)
-                line_answers["product_option"] = "Yes"
-                line_answers["product_confirmation"] = "Yes"
-                line_answers["product_confirmation_notes"] = line_confirmation.get("notes") or ""
-                if not _prodigi_is_limited_edition(line):
-                    line_answers["certificate"] = "Not Required"
-                    line_answers["edition_number"] = "Not Required"
-                elif _prodigi_certificate_uploaded(line):
-                    line_answers["certificate"] = "Yes"
-                saved_rows, _ = prodigi_upsert_dispatch_row(
-                    saved_rows,
-                    line,
-                    status="Submitted",
-                    notes=notes if line.get("row_id") == selected_row.get("row_id") else line_confirmation.get("notes") or "",
-                    qa_answers=line_answers,
-                )
-            save_prodigi_tracker_rows(saved_rows)
-            st.session_state["prodigi_dispatch_matches"] = []
-            st.session_state["prodigi_dispatch_selected_row_id"] = ""
-            st.session_state["prodigi_dispatch_last_query"] = ""
-            st.success("Dispatch row saved")
-            st.rerun()
+            try:
+                for line in matches:
+                    line_confirmation = product_confirmations.get(line.get("row_id") or "", {})
+                    line_answers = dict(qa_answers)
+                    line_answers["product_option"] = "Yes"
+                    line_answers["product_confirmation"] = "Yes"
+                    line_answers["product_confirmation_notes"] = line_confirmation.get("notes") or ""
+                    if not _prodigi_is_limited_edition(line):
+                        line_answers["certificate"] = "Not Required"
+                        line_answers["edition_number"] = "Not Required"
+                    elif _prodigi_certificate_uploaded(line):
+                        line_answers["certificate"] = "Yes"
+                    prodigi_save_dispatch_row(
+                        line,
+                        status="Submitted",
+                        notes=notes if line.get("row_id") == selected_row.get("row_id") else line_confirmation.get("notes") or "",
+                        qa_answers=line_answers,
+                    )
+                st.session_state["prodigi_dispatch_matches"] = []
+                st.session_state["prodigi_dispatch_existing_rows"] = []
+                st.session_state["prodigi_dispatch_selected_row_id"] = ""
+                st.session_state["prodigi_dispatch_last_query"] = ""
+                st.session_state["prodigi_dispatch_log_view"] = "Last 7 Days"
+                st.success("Dispatch row saved")
+                st.rerun()
+            except Exception as error:
+                supabase_backend.log_app_error("prodigi_dispatch_complete_save_failed", str(error), {"source": "prodigi_page"})
+                st.error("Dispatch save failed. Check Supabase connection and Render logs.")
 
     st.divider()
     st.subheader("Submitted Dispatch Log")
-    st.caption(f"Last tracker save: {stored_state.get('updated_at') or 'Not saved yet'}")
+    st.caption(f"Dispatch rows saved: {dispatch_summary.get('rows_saved', 0)}")
+    st.caption(f"Last tracker save: {dispatch_summary.get('last_saved_at') or 'Not saved yet'}")
     log_search = st.text_input(
         "Search dispatch log",
         placeholder="Order, customer, product, edition, notes",
         key="prodigi-dispatch-log-search",
     )
-    tabs = st.tabs(["Last 7 Days", "Needs Review", "Submitted", "History"])
-    for tab, tab_name in zip(tabs, ["Last 7 Days", "Needs Review", "Submitted", "History"]):
-        with tab:
-            table_rows = prodigi_dispatch_rows_for_tab(tracker_rows, tab_name, log_search)
-            records = prodigi_dispatch_table_records(table_rows)
-            if records:
-                st.dataframe(records, hide_index=True, use_container_width=True)
-            else:
-                st.info("No dispatch rows to show.")
+    selected_log_view = st.radio(
+        "Dispatch log view",
+        ("Last 7 Days", "Needs Review", "Submitted", "History"),
+        horizontal=True,
+        key="prodigi_dispatch_log_view",
+        label_visibility="collapsed",
+    )
+    log_started = time.perf_counter()
+    table_rows = prodigi_load_dispatch_rows(selected_log_view, log_search, limit=50)
+    records = prodigi_dispatch_table_records(table_rows)
+    _prodigi_log_timing("dispatch table render", log_started, f"view={selected_log_view} rows={len(records)}")
+    if records:
+        st.dataframe(records, hide_index=True, use_container_width=True)
+    elif dispatch_summary.get("rows_saved"):
+        st.info("No dispatch rows in this view.")
+    else:
+        st.info("No dispatch rows saved yet.")
+    _prodigi_log_timing("page render", page_started)
 
 
 def fetch_latest_shopify_products(config):

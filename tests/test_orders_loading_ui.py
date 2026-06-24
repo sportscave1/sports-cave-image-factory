@@ -129,7 +129,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Order Summary", prodigi_page)
         self.assertIn("Select Artwork Line", prodigi_page)
         self.assertIn("Prodigi Product Confirmation", prodigi_page)
-        self.assertIn("Confirmed exact Prodigi product selected", prodigi_page)
+        self.assertIn("Confirmed exact Prodigi variant selected", prodigi_page)
         self.assertIn("Prodigi Details", prodigi_page)
         self.assertIn("Dispatch QA", prodigi_page)
         self.assertIn("Save Issue", prodigi_page)
@@ -140,7 +140,17 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Order not found. Sync New Orders first, then try again.", prodigi_page)
         self.assertIn("Already submitted on", prodigi_page)
         self.assertIn("Last tracker save", prodigi_page)
-        self.assertIn("order_allocator.load_orders_snapshot()", prodigi_page)
+        self.assertIn("Dispatch rows saved", prodigi_page)
+        self.assertIn("prodigi_find_order_rows_from_cache", prodigi_page)
+        self.assertIn("prodigi_load_dispatch_rows", prodigi_page)
+        self.assertIn("Did you select the correct Prodigi variant?", prodigi_page)
+        self.assertIn("Expected Prodigi variant", prodigi_page)
+        self.assertIn("Copy Prodigi Variant", prodigi_page)
+        self.assertIn("Prodigi Shopify fetch skipped on initial load", prodigi_page)
+        self.assertIn("Prodigi full order snapshot skipped on initial load", prodigi_page)
+        self.assertNotIn("order_allocator.load_orders_snapshot()", prodigi_page)
+        self.assertNotIn("orders_snapshot = order_allocator.load_orders_snapshot()", prodigi_page)
+        self.assertNotIn("Prodigi size:", prodigi_page)
         self.assertNotIn("Ready to Send", prodigi_page)
         self.assertNotIn("Active Rows", prodigi_page)
         self.assertNotIn("Open Checklist", prodigi_page)
@@ -216,6 +226,7 @@ class EditionOpsUiTests(unittest.TestCase):
             self.assertEqual(row["prodigi_product_name"], product)
             self.assertEqual(row["prodigi_frame_colour"], frame_colour)
             self.assertIn(code, os_pages.prodigi_required_confirmation_question(row))
+            self.assertIn(product, os_pages.prodigi_variant_copy_text(row))
 
     def test_prodigi_tracker_builds_multiline_order_rows(self):
         order_rows = [
@@ -317,6 +328,126 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual({row["shopify_order_name"] for row in rows}, {"#SC2843"})
         self.assertEqual({row["product_title"] for row in rows}, {"GOAT Debate Wall Art", "Legends Never Die Messi vs Ronaldo Wall Art"})
 
+    def test_prodigi_find_order_uses_supabase_direct_lookup_not_full_snapshot(self):
+        raw_rows = [
+            {
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "order_name": "#SC2843",
+                "customer_name": "Ashkan Zand",
+                "customer_email": "ashkan@example.com",
+                "processed_at": "2026-06-23T10:00:00Z",
+                "created_at": "2026-06-23T09:55:00Z",
+                "order_raw_json": {"shipping_lines": [{"title": "US Standard Tracked Shipping"}]},
+                "shopify_line_item_id": "gid://shopify/LineItem/8431",
+                "shopify_product_id": "gid://shopify/Product/9001",
+                "product_title": "GOAT Debate Wall Art",
+                "variant_title": "Black / XL - 62 \u00d7 87 cm",
+                "quantity": 1,
+                "assignments": [
+                    {
+                        "edition_number": 50,
+                        "edition_total": 100,
+                        "allocation_index": 1,
+                        "certificate_status": "Uploaded",
+                    }
+                ],
+            }
+        ]
+        existing_rows = [{"row_id": "existing", "shopify_order_name": "#SC2843", "source": "prodigi_dispatch_log"}]
+
+        with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
+            os_pages.supabase_backend,
+            "list_orders",
+            return_value=raw_rows,
+        ) as list_orders, patch.object(
+            os_pages,
+            "prodigi_load_dispatch_rows",
+            return_value=existing_rows,
+        ) as load_dispatch, patch.object(
+            order_allocator,
+            "load_orders_snapshot",
+            side_effect=AssertionError("Prodigi lookup should not load the full order snapshot when Supabase is available."),
+        ):
+            rows, existing = os_pages.prodigi_find_order_rows_from_cache("#SC2843")
+
+        list_orders.assert_called_once()
+        load_dispatch.assert_called_once_with("Search", search_text="#SC2843", limit=100)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["shopify_order_name"], "#SC2843")
+        self.assertEqual(rows[0]["prodigi_code"], "GLOBAL-CFP-A1")
+        self.assertEqual(existing, existing_rows)
+
+    def test_prodigi_dispatch_save_writes_single_persistent_supabase_row(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / XL - 62 \u00d7 87 cm",
+                "edition_number": 50,
+                "edition_total": 100,
+                "shipping": "US Standard Tracked Shipping",
+                "certificate": "Uploaded",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8431",
+                "shopify_product_id": "gid://shopify/Product/9001",
+            }
+        )
+        answers = {
+            "certificate": "Yes",
+            "artwork_upload": "Yes",
+            "product_option": "Yes",
+            "frame": "Yes",
+            "size": "Yes",
+            "edition_number": "Yes",
+            "shipping": "Yes",
+            "sent_to_production": "Yes",
+            "final_check": "Yes",
+        }
+
+        with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
+            os_pages.supabase_backend,
+            "upsert_prodigi_dispatch_row",
+            return_value={"upserted": 1},
+        ) as upsert_row:
+            saved = os_pages.prodigi_save_dispatch_row(row, status="Submitted", notes="Sent", qa_answers=answers)
+
+        upsert_row.assert_called_once()
+        persisted = upsert_row.call_args.args[0]
+        self.assertEqual(persisted["row_id"], saved["row_id"])
+        self.assertEqual(persisted["prodigi_status"], "Submitted")
+        self.assertEqual(persisted["prodigi_product_code"], "GLOBAL-CFP-A1")
+        self.assertTrue(persisted["qa_confirmed"])
+
+    def test_prodigi_issue_save_writes_needs_review_row(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 50,
+                "shipping": "US Standard Tracked Shipping",
+                "certificate": "Generate",
+            }
+        )
+        with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
+            os_pages.supabase_backend,
+            "upsert_prodigi_dispatch_row",
+            return_value={"upserted": 1},
+        ) as upsert_row:
+            saved = os_pages.prodigi_save_dispatch_row(
+                row,
+                status="Needs Review",
+                notes="Certificate missing",
+                qa_answers={"certificate": "No", "product_option": "No"},
+            )
+
+        persisted = upsert_row.call_args.args[0]
+        self.assertEqual(saved["prodigi_status"], "Needs Review")
+        self.assertEqual(persisted["prodigi_status"], "Needs Review")
+        self.assertIn("Certificate missing", persisted["notes"])
+
     def test_prodigi_dispatch_blocks_missing_certificate_and_upserts_single_row(self):
         row = os_pages.prodigi_tracker_row_from_order(
             {
@@ -391,6 +522,103 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual([row["row_id"] for row in recent], ["recent"])
         self.assertEqual([row["row_id"] for row in history], ["old"])
         self.assertEqual([row["row_id"] for row in searched], ["old"])
+
+    def test_prodigi_dispatch_log_views_query_limited_supabase_rows(self):
+        with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
+            os_pages.supabase_backend,
+            "list_prodigi_dispatch_rows",
+            return_value=[],
+        ) as list_rows:
+            os_pages.prodigi_load_dispatch_rows("Last 7 Days", limit=50)
+            os_pages.prodigi_load_dispatch_rows("Needs Review", limit=25)
+            os_pages.prodigi_load_dispatch_rows("Submitted", limit=25)
+            os_pages.prodigi_load_dispatch_rows("History", limit=25)
+
+        self.assertEqual(list_rows.call_args_list[0].kwargs["days"], 7)
+        self.assertEqual(list_rows.call_args_list[0].kwargs["limit"], 50)
+        self.assertEqual(list_rows.call_args_list[1].kwargs["status"], "Needs Review")
+        self.assertEqual(list_rows.call_args_list[2].kwargs["status"], "Submitted")
+        self.assertEqual(list_rows.call_args_list[2].kwargs["days"], 7)
+        self.assertEqual(list_rows.call_args_list[3].kwargs["older_than_days"], 7)
+
+    def test_prodigi_dispatch_rows_remain_after_rerun_and_order_sync_does_not_delete(self):
+        saved_row = {
+            "row_id": "stable-row",
+            "prodigi_status": "Submitted",
+            "shopify_order_name": "#SC2843",
+            "source": "prodigi_dispatch_log",
+        }
+
+        with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
+            os_pages.supabase_backend,
+            "list_prodigi_dispatch_rows",
+            return_value=[saved_row],
+        ):
+            first_load = os_pages.prodigi_load_dispatch_rows("Last 7 Days")
+            second_load = os_pages.prodigi_load_dispatch_rows("Last 7 Days")
+
+        backend_source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
+
+        self.assertEqual(first_load, [saved_row])
+        self.assertEqual(second_load, [saved_row])
+        self.assertNotIn("DELETE FROM prodigi_dispatch_rows", backend_source)
+        self.assertNotIn("TRUNCATE prodigi_dispatch_rows", backend_source)
+
+    def test_prodigi_duplicate_complete_upsert_keeps_one_row(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / XL",
+                "edition_number": 50,
+                "shipping": "US Standard Tracked Shipping",
+                "certificate": "Uploaded",
+            }
+        )
+        answers = {
+            "certificate": "Yes",
+            "artwork_upload": "Yes",
+            "product_option": "Yes",
+            "frame": "Yes",
+            "size": "Yes",
+            "edition_number": "Yes",
+            "shipping": "Yes",
+            "sent_to_production": "Yes",
+            "final_check": "Yes",
+        }
+
+        saved_rows, _ = os_pages.prodigi_upsert_dispatch_row([], row, status="Submitted", notes="First", qa_answers=answers)
+        saved_rows, saved_again = os_pages.prodigi_upsert_dispatch_row(saved_rows, row, status="Submitted", notes="Second", qa_answers=answers)
+
+        self.assertEqual(len(saved_rows), 1)
+        self.assertEqual(saved_again["notes"], "Second")
+
+    def test_prodigi_variant_confirmation_blocks_completion_until_yes(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / XL",
+                "edition_number": 50,
+                "shipping": "US Standard Tracked Shipping",
+                "certificate": "Uploaded",
+            }
+        )
+        answers = {
+            "certificate": "Yes",
+            "artwork_upload": "Yes",
+            "product_option": "No",
+            "frame": "Yes",
+            "size": "Yes",
+            "edition_number": "Yes",
+            "shipping": "Yes",
+            "sent_to_production": "Yes",
+            "final_check": "Yes",
+        }
+
+        self.assertIn("Prodigi variant not confirmed", os_pages.prodigi_dispatch_blockers(row, answers))
 
     def test_prodigi_submission_blocks_missing_code_and_duplicate_submit(self):
         missing = os_pages.prodigi_tracker_row_from_order(

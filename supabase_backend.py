@@ -3217,35 +3217,142 @@ def _prodigi_bool_value(value):
     return str(value or "").strip().casefold() in {"1", "true", "yes", "y", "checked"}
 
 
-def list_prodigi_dispatch_rows(limit=1000):
+def _prodigi_dispatch_time_sql():
+    return """
+        COALESCE(
+            submitted_at,
+            CASE
+                WHEN COALESCE(date_sent_to_prodigi, '') ~ '^\\d{4}-\\d{2}-\\d{2}'
+                    THEN date_sent_to_prodigi::timestamptz
+                ELSE NULL
+            END,
+            updated_at,
+            created_at
+        )
+    """
+
+
+def _prodigi_payload_from_db_row(row):
+    payload = row.get("row_json") or {}
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except (TypeError, ValueError):
+            payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    for key in (
+        "row_id",
+        "shopify_order_id",
+        "shopify_order_name",
+        "shopify_order_number",
+        "shopify_line_item_id",
+        "customer_name",
+        "product_title",
+        "shopify_variant_title",
+        "edition_number",
+        "sports_cave_frame",
+        "sports_cave_size",
+        "prodigi_product_name",
+        "prodigi_product_code",
+        "prodigi_frame_colour",
+        "prodigi_status",
+        "date_sent_to_prodigi",
+        "submitted_at",
+        "qa_confirmed",
+        "qa_notes",
+        "notes",
+        "source",
+    ):
+        value = row.get(key)
+        if value is not None and not payload.get(key):
+            payload[key] = value
+    if row.get("updated_at") and not payload.get("updated_at"):
+        payload["updated_at"] = str(row.get("updated_at"))
+    if row.get("created_at") and not payload.get("created_at"):
+        payload["created_at"] = str(row.get("created_at"))
+    return payload
+
+
+def list_prodigi_dispatch_rows(status=None, days=None, older_than_days=None, limit=1000, search=""):
     ensure_schema()
     limit_value = max(min(int(limit or 1000), 5000), 1)
+    where_clauses = []
+    params = []
+    clean_status = str(status or "").strip()
+    if clean_status == "Submitted":
+        where_clauses.append("prodigi_status IN ('Submitted', 'Submitted to Prodigi')")
+    elif clean_status == "Needs Review":
+        where_clauses.append("prodigi_status = 'Needs Review'")
+    elif clean_status:
+        where_clauses.append("prodigi_status = %s")
+        params.append(clean_status)
+    if days:
+        where_clauses.append(f"{_prodigi_dispatch_time_sql()} >= now() - (%s * interval '1 day')")
+        params.append(int(days))
+    if older_than_days:
+        where_clauses.append(f"{_prodigi_dispatch_time_sql()} < now() - (%s * interval '1 day')")
+        params.append(int(older_than_days))
+    search_value = str(search or "").strip().lower()
+    if search_value:
+        where_clauses.append(
+            """
+            LOWER(
+                COALESCE(shopify_order_name, '') || ' ' ||
+                COALESCE(shopify_order_number, '') || ' ' ||
+                COALESCE(customer_name, '') || ' ' ||
+                COALESCE(product_title, '') || ' ' ||
+                COALESCE(shopify_variant_title, '') || ' ' ||
+                COALESCE(prodigi_product_code, '') || ' ' ||
+                COALESCE(prodigi_product_name, '') || ' ' ||
+                COALESCE(notes, '') || ' ' ||
+                COALESCE(qa_notes, '')
+            ) LIKE %s
+            """
+        )
+        params.append(f"%{search_value}%")
+    where_sql = f"WHERE {' AND '.join(f'({clause})' for clause in where_clauses)}" if where_clauses else ""
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    row_id, shopify_order_id, shopify_order_name, shopify_order_number,
+                    shopify_line_item_id, customer_name, product_title, shopify_variant_title,
+                    edition_number, sports_cave_frame, sports_cave_size, prodigi_product_name,
+                    prodigi_product_code, prodigi_frame_colour, prodigi_status,
+                    date_sent_to_prodigi, submitted_at, qa_confirmed, qa_notes,
+                    notes, source, row_json, created_at, updated_at
+                FROM prodigi_dispatch_rows
+                {where_sql}
+                ORDER BY {_prodigi_dispatch_time_sql()} DESC NULLS LAST, shopify_order_name DESC NULLS LAST
+                LIMIT %s
+                """,
+                (*params, limit_value),
+            )
+            rows = cur.fetchall()
+    return [_prodigi_payload_from_db_row(row) for row in rows]
+
+
+def get_prodigi_dispatch_summary():
+    ensure_schema()
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT row_json, updated_at
+                SELECT COUNT(*) AS rows_saved, MAX(updated_at) AS last_saved_at
                 FROM prodigi_dispatch_rows
-                ORDER BY updated_at DESC NULLS LAST, shopify_order_name DESC NULLS LAST
-                LIMIT %s
-                """,
-                (limit_value,),
+                """
             )
-            rows = cur.fetchall()
-    output = []
-    for row in rows:
-        payload = row.get("row_json") or {}
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except (TypeError, ValueError):
-                payload = {}
-        if not isinstance(payload, dict):
-            payload = {}
-        if row.get("updated_at") and not payload.get("updated_at"):
-            payload["updated_at"] = str(row.get("updated_at"))
-        output.append(payload)
-    return output
+            row = cur.fetchone() or {}
+    return {
+        "rows_saved": _prodigi_int_value(row.get("rows_saved"), 0),
+        "last_saved_at": str(row.get("last_saved_at") or ""),
+    }
+
+
+def upsert_prodigi_dispatch_row(row):
+    return upsert_prodigi_dispatch_rows([row])
 
 
 def upsert_prodigi_dispatch_rows(rows):
@@ -3285,7 +3392,7 @@ def upsert_prodigi_dispatch_rows(rows):
                         prodigi_frame_colour=EXCLUDED.prodigi_frame_colour,
                         prodigi_status=EXCLUDED.prodigi_status,
                         date_sent_to_prodigi=EXCLUDED.date_sent_to_prodigi,
-                        submitted_at=EXCLUDED.submitted_at,
+                        submitted_at=COALESCE(prodigi_dispatch_rows.submitted_at, EXCLUDED.submitted_at),
                         qa_confirmed=EXCLUDED.qa_confirmed,
                         qa_notes=EXCLUDED.qa_notes,
                         notes=EXCLUDED.notes,
