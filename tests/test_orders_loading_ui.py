@@ -111,25 +111,35 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("datetime.fromisoformat", helper)
         self.assertNotIn("datetime.min", helper)
 
-    def test_prodigi_tracker_has_csv_import_export_and_support_email(self):
+    def test_prodigi_dispatch_page_is_search_first_and_lightweight(self):
         source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
         prodigi_page = source[
-            source.index("def render_prodigi_page") : source.index("\n\ndef fetch_latest_shopify_products")
+            source.index("def render_prodigi_page():") : source.index("\n\ndef fetch_latest_shopify_products")
         ]
 
-        self.assertIn("Prodigi Fulfilment Inbox", prodigi_page)
-        self.assertIn("Ready to Send", prodigi_page)
+        self.assertIn("Prodigi Dispatch Log", prodigi_page)
+        self.assertIn("Search an order, confirm the Prodigi checks, then save it to the dispatch log.", prodigi_page)
+        self.assertIn("Prodigi Reference", prodigi_page)
+        self.assertIn("Enter Shopify Order #", prodigi_page)
+        self.assertIn("Find Order", prodigi_page)
+        self.assertIn("Order Summary", prodigi_page)
+        self.assertIn("Select Artwork Line", prodigi_page)
+        self.assertIn("Prodigi Details", prodigi_page)
+        self.assertIn("Dispatch QA", prodigi_page)
+        self.assertIn("Save Issue", prodigi_page)
+        self.assertIn("Complete Dispatch", prodigi_page)
+        self.assertIn("Submitted Dispatch Log", prodigi_page)
+        self.assertIn("Last 7 Days", prodigi_page)
         self.assertIn("Copy Prodigi Details", prodigi_page)
-        self.assertIn("Open Checklist", prodigi_page)
-        self.assertIn("Mark Submitted", prodigi_page)
-        self.assertIn("Hold / Issue", prodigi_page)
-        self.assertIn("No orders ready for Prodigi.", prodigi_page)
-        self.assertIn("Load from Orders", prodigi_page)
-        self.assertIn("Import CSV", prodigi_page)
-        self.assertIn("Export Tracker CSV", prodigi_page)
-        self.assertIn("Export Selected CSV", prodigi_page)
-        self.assertIn("Last Orders snapshot", prodigi_page)
+        self.assertIn("Order not found. Refresh Orders first, then try again.", prodigi_page)
+        self.assertIn("Already submitted on", prodigi_page)
         self.assertIn("Last tracker save", prodigi_page)
+        self.assertIn("order_allocator.load_orders_snapshot()", prodigi_page)
+        self.assertNotIn("Ready to Send", prodigi_page)
+        self.assertNotIn("Active Rows", prodigi_page)
+        self.assertNotIn("Open Checklist", prodigi_page)
+        self.assertNotIn("progress_text", prodigi_page)
+        self.assertNotIn("Export Selected CSV", prodigi_page)
         self.assertNotIn("st.data_editor", prodigi_page)
         self.assertIn('PRODIGI_SUPPORT_EMAIL = "pro@prodigi.com"', source)
         self.assertNotIn("support@prodigi.com", source)
@@ -203,7 +213,116 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Shopify Order #: #SC2843", copied)
         self.assertIn("Edition #: #050", copied)
         self.assertIn("Prodigi Code: GLOBAL-CFP-A2", copied)
+        self.assertIn("Classic Frame, EMA 200gsm Fine Art Print", copied)
         self.assertIn("Shipping: US Standard Tracked Shipping", copied)
+
+    def test_prodigi_dispatch_search_finds_only_matching_order_lines(self):
+        order_rows = [
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 50,
+                "shipping": "US Standard Tracked Shipping",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8431",
+                "shopify_product_id": "gid://shopify/Product/9001",
+            },
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant": "Black / M",
+                "edition_number": 37,
+                "shipping": "US Standard Tracked Shipping",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8432",
+                "shopify_product_id": "gid://shopify/Product/9002",
+            },
+            {
+                "order": "#SC2844",
+                "customer": "Someone Else",
+                "product": "Other Wall Art",
+                "variant": "Black / L",
+                "edition_number": 1,
+            },
+        ]
+
+        rows = os_pages.prodigi_find_order_rows(order_rows, "#SC2843")
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row["shopify_order_name"] for row in rows}, {"#SC2843"})
+        self.assertEqual({row["product_title"] for row in rows}, {"GOAT Debate Wall Art", "Legends Never Die Messi vs Ronaldo Wall Art"})
+
+    def test_prodigi_dispatch_blocks_missing_certificate_and_upserts_single_row(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 50,
+                "edition_total": 100,
+                "shipping": "US Standard Tracked Shipping",
+                "certificate": "Generate",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8431",
+                "shopify_product_id": "gid://shopify/Product/9001",
+            }
+        )
+        answers = {
+            "certificate": "No",
+            "artwork_upload": "Yes",
+            "product_option": "Yes",
+            "frame": "Yes",
+            "size": "Yes",
+            "edition_number": "Yes",
+            "shipping": "Yes",
+            "sent_to_production": "Yes",
+            "final_check": "Yes",
+        }
+
+        blockers = os_pages.prodigi_dispatch_blockers(row, answers)
+        self.assertIn("Generate/upload certificate before dispatch completion.", blockers)
+        saved_rows, saved = os_pages.prodigi_upsert_dispatch_row([], row, status="Needs Review", notes="Cert missing", qa_answers=answers)
+        saved_rows, saved_again = os_pages.prodigi_upsert_dispatch_row(saved_rows, row, status="Needs Review", notes="Still missing", qa_answers=answers)
+
+        self.assertEqual(len(saved_rows), 1)
+        self.assertEqual(saved["prodigi_status"], "Needs Review")
+        self.assertEqual(saved_again["notes"], "Still missing")
+        self.assertIn("Certificate not uploaded", saved_again["issue_reason"])
+
+    def test_prodigi_dispatch_recent_log_filters_last_7_days_and_searches_history(self):
+        today = os_pages.date(2026, 6, 24)
+        rows = [
+            {
+                "row_id": "recent",
+                "prodigi_status": "Submitted",
+                "date_sent_to_prodigi": "2026-06-23",
+                "shopify_order_name": "#SC2843",
+                "customer_name": "Ashkan Zand",
+                "product_title": "GOAT Debate Wall Art",
+                "source": "prodigi_dispatch_log",
+            },
+            {
+                "row_id": "old",
+                "prodigi_status": "Submitted",
+                "date_sent_to_prodigi": "2026-05-01",
+                "shopify_order_name": "#SC2000",
+                "customer_name": "Old Customer",
+                "product_title": "Old Wall Art",
+                "source": "prodigi_dispatch_log",
+            },
+        ]
+
+        recent = os_pages.prodigi_dispatch_rows_for_tab(rows, "Last 7 Days", today=today)
+        history = os_pages.prodigi_dispatch_rows_for_tab(rows, "History", today=today)
+        searched = os_pages.prodigi_dispatch_rows_for_tab(rows, "Last 7 Days", "#SC2000", today=today)
+
+        self.assertEqual([row["row_id"] for row in recent], ["recent"])
+        self.assertEqual([row["row_id"] for row in history], ["old"])
+        self.assertEqual([row["row_id"] for row in searched], ["old"])
 
     def test_prodigi_submission_blocks_missing_code_and_duplicate_submit(self):
         missing = os_pages.prodigi_tracker_row_from_order(
@@ -335,7 +454,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(result["matched"], 1)
         self.assertEqual(result["created"], 0)
-        self.assertEqual(result["rows"][0]["prodigi_status"], "Submitted to Prodigi")
+        self.assertEqual(result["rows"][0]["prodigi_status"], "Submitted")
         self.assertEqual(result["rows"][0]["shipping_method"], "Express")
         self.assertIn("Sent manually", result["rows"][0]["notes"])
         self.assertIn("prodigi_order_id", exported.splitlines()[0])
@@ -426,7 +545,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Developer password", mockup_actions)
         self.assertIn("mockup_prompt_edit", mockup_actions)
         self.assertIn("stopPropagation", mockup_actions)
-        self.assertIn("developer_unlocked", mockup_actions)
+        self.assertIn("show_edit = True", mockup_actions)
         self.assertIn('target="_parent"', mockup_actions)
         self.assertNotIn("Preview", mockup_actions)
         self.assertNotIn("preview", mockup_actions.casefold())

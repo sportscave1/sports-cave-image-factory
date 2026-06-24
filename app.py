@@ -3542,7 +3542,7 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text):
 def render_mockup_prompt_bar(prompt_text, key, prompt_id):
     prompt_text_json = json.dumps(prompt_text)
     bar_id = f"mockup-prompt-bar-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
-    show_edit = bool(st.session_state.get("developer_unlocked"))
+    show_edit = True
     edit_href = f"?mockup_prompt_edit={quote(prompt_id, safe='')}"
     edit_markup = (
         f"""
