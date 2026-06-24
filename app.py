@@ -16,7 +16,7 @@ import shutil
 import tempfile
 import time
 import traceback
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, urlparse
 
 APP_START_TIME = time.perf_counter()
 LAST_STARTUP_STAGE_TIME = APP_START_TIME
@@ -3541,19 +3541,19 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text):
 
 def render_mockup_prompt_bar(prompt_text, key, prompt_id):
     prompt_text_json = json.dumps(prompt_text)
+    prompt_id_json = json.dumps(prompt_id)
     bar_id = f"mockup-prompt-bar-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
     show_edit = True
-    edit_href = f"?mockup_prompt_edit={quote(prompt_id, safe='')}"
     edit_markup = (
         f"""
         <a
           id="{bar_id}-edit"
           class="mockup-prompt-edit"
-          href="{edit_href}"
+          href="#"
           target="_parent"
           title="Edit prompt"
           aria-label="Edit prompt"
-        >✎</a>
+        >&#9998;</a>
         """
         if show_edit
         else ""
@@ -3637,11 +3637,20 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id):
           const bar = document.getElementById("{bar_id}");
           const edit = document.getElementById("{bar_id}-edit");
           const promptText = {prompt_text_json};
+          const promptId = {prompt_id_json};
           const originalLabel = "Copy Prompt";
 
           if (edit) {{
             edit.addEventListener("click", (event) => {{
+              event.preventDefault();
               event.stopPropagation();
+              try {{
+                const target = new URL(window.parent.location.href);
+                target.searchParams.set("mockup_prompt_edit", promptId);
+                window.parent.location.href = target.toString();
+              }} catch (error) {{
+                window.open("?mockup_prompt_edit=" + encodeURIComponent(promptId), "_parent");
+              }}
             }});
           }}
 
@@ -5226,6 +5235,49 @@ def _render_developer_allocation_tools():
                 _developer_action_error("Retry Shopify Metafield Sync", error)
 
 
+def _extract_toml_scopes(text):
+    match = re.search(r'^\s*scopes\s*=\s*"([^"]*)"', text or "", flags=re.MULTILINE)
+    if not match:
+        return set()
+    return {scope.strip() for scope in match.group(1).split(",") if scope.strip()}
+
+
+def _customer_certificate_vault_config_status():
+    app_config = BASE_DIR / "shopify_customer_account" / "shopify.app.toml"
+    extension_config = (
+        BASE_DIR
+        / "shopify_customer_account"
+        / "extensions"
+        / "customer-certificate-vault"
+        / "shopify.extension.toml"
+    )
+    extension_source = (
+        BASE_DIR
+        / "shopify_customer_account"
+        / "extensions"
+        / "customer-certificate-vault"
+        / "src"
+        / "MySportsCaveCollection.jsx"
+    )
+    app_text = ""
+    extension_text = ""
+    source_text = ""
+    with suppress(Exception):
+        app_text = app_config.read_text(encoding="utf-8")
+    with suppress(Exception):
+        extension_text = extension_config.read_text(encoding="utf-8")
+    with suppress(Exception):
+        source_text = extension_source.read_text(encoding="utf-8")
+    scopes = _extract_toml_scopes(app_text)
+    return {
+        "customer_read_customers": "customer_read_customers" in scopes,
+        "customer_read_orders": "customer_read_orders" in scopes,
+        "api_access": bool(re.search(r"^\s*api_access\s*=\s*true\s*$", extension_text, flags=re.MULTILINE)),
+        "network_access": bool(re.search(r"^\s*network_access\s*=\s*true\s*$", extension_text, flags=re.MULTILINE)),
+        "uses_external_endpoint": "fetch(\"http" in source_text or "fetch('http" in source_text,
+    }
+
+
 def render_settings_page():
     if not _developer_unlocked():
         _render_developer_password_gate()
@@ -5420,6 +5472,82 @@ def render_settings_page():
             "Repairs Shopify order certificate metafields for ready certificates. "
             "Runs only when clicked and never generates certificates."
         )
+        vault_status = _customer_certificate_vault_config_status()
+        st.write("**Customer Certificate Vault**")
+        st.write(f"**customer_read_customers configured:** {'Yes' if vault_status['customer_read_customers'] else 'No'}")
+        st.write(f"**customer_read_orders configured:** {'Yes' if vault_status['customer_read_orders'] else 'No'}")
+        st.write(f"**Customer extension api_access enabled:** {'Yes' if vault_status['api_access'] else 'No'}")
+        st.write(
+            f"**Customer extension network_access enabled:** "
+            f"{'Yes' if vault_status['network_access'] else 'No'}"
+            f"{' (not needed)' if not vault_status['uses_external_endpoint'] else ''}"
+        )
+        cert_sync_cols = st.columns(2)
+        single_sync_value = cert_sync_cols[0].text_input(
+            "Sync Certificate to Shopify",
+            value="",
+            placeholder="#SC2847, order GID, or certificate ID",
+            key="developer-sync-single-certificate-to-shopify",
+        )
+        if cert_sync_cols[1].button(
+            "Sync Certificate to Shopify",
+            key="developer-sync-single-certificate-button",
+            use_container_width=True,
+        ):
+            try:
+                sync = get_shopify_sync()
+                config = sync.get_config()
+                if not config.get("configured"):
+                    st.warning("Shopify is not configured. Certificate metafields were not pushed.")
+                else:
+                    supabase = importlib.import_module("supabase_backend")
+                    result = supabase.sync_certificate_to_shopify(single_sync_value, config=config)
+                    if result.get("skipped"):
+                        st.warning(result.get("reason") or "No certificate was synced.")
+                    elif result.get("failed"):
+                        st.warning(f"{result.get('failed')} certificate sync attempt(s) failed.")
+                    else:
+                        st.success(f"Synced {result.get('synced') or 0} Shopify order certificate metafield set(s).")
+                    for error in result.get("errors") or []:
+                        st.caption(error)
+            except Exception as error:
+                _developer_action_error("Sync Certificate to Shopify", error)
+        if st.button("Sync Unsynced Certificates", key="developer-sync-unsynced-certificates", use_container_width=True):
+            try:
+                sync = get_shopify_sync()
+                config = sync.get_config()
+                if not config.get("configured"):
+                    st.warning("Shopify is not configured. Certificate metafields were not pushed.")
+                else:
+                    supabase = importlib.import_module("supabase_backend")
+                    result = supabase.backfill_ready_certificate_order_metafields(
+                        config=config,
+                        only_unsynced=True,
+                        limit=250,
+                    )
+                    st.success(
+                        f"Unsynced certificate push complete: {result.get('synced') or 0} order(s) synced."
+                    )
+                    if result.get("failed"):
+                        st.warning(f"{result.get('failed')} certificate metafield push(es) still need review.")
+            except Exception as error:
+                _developer_action_error("Sync Unsynced Certificates", error)
+        if st.button("Load Customer Certificate Vault Diagnostics", key="developer-load-customer-vault-diagnostics", use_container_width=True):
+            try:
+                supabase = importlib.import_module("supabase_backend")
+                diagnostics = supabase.certificate_vault_diagnostics()
+                st.write(f"**Supabase configured:** {'Yes' if diagnostics.get('configured') else 'No'}")
+                st.write(f"**Certificates generated count:** {diagnostics.get('certificates_generated_count') or 0}")
+                st.write(f"**Certificates synced to Shopify count:** {diagnostics.get('certificates_synced_to_shopify_count') or 0}")
+                st.write(f"**Unsynced certificate count:** {diagnostics.get('unsynced_certificate_count') or 0}")
+                st.write(
+                    f"**Last Shopify order metafield sync status:** "
+                    f"{diagnostics.get('last_shopify_order_metafield_sync_status') or 'None'}"
+                )
+                if diagnostics.get("last_sync_error"):
+                    st.caption(f"Last sync error: {diagnostics.get('last_sync_error')}")
+            except Exception as error:
+                _developer_action_error("Customer Certificate Vault diagnostics", error)
         if st.button("Retry Certificate Metafield Push", key="developer-retry-certificate-metafield-push", use_container_width=True):
             try:
                 sync = get_shopify_sync()

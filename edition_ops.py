@@ -1,6 +1,7 @@
 from copy import deepcopy
 import csv
 from datetime import datetime, timezone
+import importlib
 import io
 import json
 from pathlib import Path
@@ -257,6 +258,72 @@ def _row_from_product(product):
     return _normalise_row(row)
 
 
+def _configured_supabase_backend():
+    try:
+        backend = importlib.import_module("supabase_backend")
+    except Exception:
+        return None
+    try:
+        if not backend.is_configured():
+            return None
+    except Exception:
+        return None
+    return backend
+
+
+def _row_from_supabase_product(product):
+    next_number = _coerce_int(product.get("next_edition_number"), 1)
+    total = _coerce_int(product.get("edition_total"), 100)
+    sold = _sold_count(next_number)
+    remaining = _remaining_from_sold(total, sold)
+    status = product.get("status") or ""
+    row = {
+        "shopify_product_gid": product.get("shopify_product_id") or product.get("shopify_product_gid") or "",
+        "legacy_resource_id": product.get("legacy_resource_id") or "",
+        "thumbnail_url": product.get("display_image_url") or product.get("featured_image_url") or "",
+        "product_title": product.get("product_title") or product.get("title") or "Untitled Product",
+        "handle": product.get("shopify_handle") or product.get("handle") or "",
+        "status": product.get("shopify_status") or "ACTIVE",
+        "edition_enabled": status != "inactive" and bool(product.get("active", True)),
+        "edition_total": total,
+        "edition_next_number": next_number,
+        "edition_sold_count": sold,
+        "edition_remaining": remaining,
+        "edition_status": _widget_status(remaining),
+        "edition_label": product.get("edition_name") or product.get("edition_label") or "Numbered Edition",
+        "online_store_url": product.get("online_store_url") or "",
+        "admin_url": product.get("admin_url") or "",
+        "last_synced_at": product.get("updated_at") or "",
+        "sync_status": "Loaded",
+        "sync_error": "",
+    }
+    return _normalise_row(row)
+
+
+def _load_supabase_snapshot():
+    backend = _configured_supabase_backend()
+    if not backend:
+        return None
+    products = backend.list_edition_products(search="", limit=5000)
+    rows = [_row_from_supabase_product(product) for product in products or []]
+    try:
+        sync_state = backend.get_sync_state()
+    except Exception:
+        sync_state = {}
+    last_synced = sync_state.get("last_successful_product_sync_at") or max(
+        (str(row.get("last_synced_at") or "") for row in rows),
+        default="",
+    )
+    return {
+        "version": SNAPSHOT_VERSION,
+        "rows": rows,
+        "original_rows": deepcopy(rows),
+        "last_refreshed_from_shopify": last_synced,
+        "saved_at": last_synced,
+        "source": "supabase",
+    }
+
+
 def _ensure_state():
     st.session_state.setdefault(ROWS_KEY, [])
     st.session_state.setdefault(ORIGINAL_ROWS_KEY, [])
@@ -278,6 +345,13 @@ def _bump_editor_version():
 
 
 def _load_snapshot():
+    try:
+        supabase_snapshot = _load_supabase_snapshot()
+    except Exception as error:
+        print(f"WARN Edition Ops Supabase snapshot fallback: {error}", flush=True)
+        supabase_snapshot = None
+    if supabase_snapshot is not None:
+        return supabase_snapshot
     if not SNAPSHOT_PATH.exists():
         return None
     try:
@@ -393,6 +467,28 @@ def _load_active_products_from_shopify():
         raise ValueError(
             "Store connection is not configured yet. Ask a developer before refreshing products."
         )
+    backend = _configured_supabase_backend()
+    if backend:
+        result = backend.sync_shopify_products_to_supabase(config=config, mode="incremental")
+        snapshot = _load_supabase_snapshot() or {
+            "rows": [],
+            "original_rows": [],
+            "last_refreshed_from_shopify": _now_iso(),
+        }
+        st.session_state[ROWS_KEY] = snapshot["rows"]
+        st.session_state[ORIGINAL_ROWS_KEY] = snapshot["original_rows"]
+        st.session_state[ERRORS_KEY] = {}
+        st.session_state[IMPORT_WARNINGS_KEY] = []
+        st.session_state[META_KEY] = {
+            "last_refreshed_from_shopify": snapshot.get("last_refreshed_from_shopify") or _now_iso(),
+            "saved_at": snapshot.get("saved_at") or _now_iso(),
+        }
+        _write_snapshot(snapshot["rows"], snapshot["original_rows"], meta=st.session_state[META_KEY])
+        st.session_state[NOTICE_KEY] = (
+            f"Synced products into Supabase. {result.get('products_seen', len(snapshot['rows']))} product(s) checked."
+        )
+        _bump_editor_version()
+        return
     loaded = shopify_sync.fetch_edition_ops_active_products(
         max_products=config.get("edition_ops_max_products", 500),
         page_size=50,
@@ -459,6 +555,37 @@ def _save_changed_rows():
     if not config.get("configured"):
         st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before saving rows."
         return
+    backend = _configured_supabase_backend()
+    supabase_errors = {}
+    if backend:
+        for row in rows_to_save:
+            normalised = _normalise_row(row, preserve_derived=False)
+            try:
+                backend.update_edition_product(
+                    normalised.get("handle"),
+                    edition_name=normalised.get("edition_label"),
+                    edition_total=normalised.get("edition_total"),
+                    next_edition_number=normalised.get("edition_next_number"),
+                    active=bool(normalised.get("edition_enabled")),
+                    sold_out=normalised.get("edition_remaining") <= 0,
+                    reason="Edition Ops save",
+                )
+            except Exception as error:
+                supabase_errors[normalised.get("shopify_product_gid") or normalised.get("handle")] = str(error)
+        if supabase_errors:
+            updated_rows = []
+            for row in rows:
+                normalised = _normalise_row(row)
+                key = normalised.get("shopify_product_gid") or normalised.get("handle")
+                if key in supabase_errors:
+                    normalised["sync_status"] = "Error"
+                    normalised["sync_error"] = supabase_errors[key]
+                updated_rows.append(normalised)
+            st.session_state[ROWS_KEY] = updated_rows
+            st.session_state[ERRORS_KEY] = supabase_errors
+            _write_snapshot(updated_rows, originals)
+            st.session_state[NOTICE_KEY] = f"{len(supabase_errors)} row(s) could not be saved to Supabase."
+            return
     result = shopify_sync.sync_limited_edition_metafields_for_products(
         [_shopify_values_from_row(row) for row in rows_to_save],
         config=config,

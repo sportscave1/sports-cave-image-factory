@@ -755,7 +755,28 @@ ORDER_ALLOCATION_METAFIELD_DEFINITIONS = [
         "type": "json",
         "ownerType": "ORDER",
     },
+    {
+        "name": "Sports Cave Certificate Status",
+        "namespace": "sports_cave",
+        "key": "certificate_status",
+        "type": "single_line_text_field",
+        "ownerType": "ORDER",
+    },
+    {
+        "name": "Sports Cave Certificate Count",
+        "namespace": "sports_cave",
+        "key": "certificate_count",
+        "type": "number_integer",
+        "ownerType": "ORDER",
+    },
 ]
+
+ORDER_CERTIFICATE_METAFIELD_KEYS = {
+    "certificates",
+    "certificates_json",
+    "certificate_status",
+    "certificate_count",
+}
 
 
 def _metafields_by_key(metafields):
@@ -2187,12 +2208,16 @@ def order_certificate_account_record(record):
         or record.get("purchase_date")
         or ""
     )
+    shopify_order_name = str(record.get("shopify_order_name") or record.get("order_name") or "").strip()
+    edition_display = _certificate_display({"edition_number": edition_number, "edition_total": edition_total})
+    display_edition = f"Edition #{edition_number:03d} of {edition_total}" if edition_number else ""
     return {
         "shopify_customer_id": str(record.get("shopify_customer_id") or record.get("customer_id") or "").strip(),
         "customer_email": str(record.get("customer_email") or "").strip(),
         "customer_name": str(record.get("customer_name") or "").strip(),
         "shopify_order_id": shopify_gid("Order", record.get("shopify_order_id") or record.get("order_gid")),
-        "shopify_order_name": str(record.get("shopify_order_name") or record.get("order_name") or "").strip(),
+        "shopify_order_name": shopify_order_name,
+        "order_name": shopify_order_name,
         "shopify_line_item_id": shopify_gid("LineItem", record.get("shopify_line_item_id") or record.get("line_item_id")),
         "shopify_product_id": shopify_gid("Product", record.get("shopify_product_id") or record.get("product_gid")),
         "shopify_variant_id": shopify_gid("ProductVariant", record.get("shopify_variant_id") or record.get("variant_gid")),
@@ -2201,10 +2226,13 @@ def order_certificate_account_record(record):
         "variant_title": str(record.get("variant_title") or "").strip(),
         "edition_number": edition_number,
         "edition_total": edition_total,
-        "edition_display": _certificate_display({"edition_number": edition_number, "edition_total": edition_total}),
+        "edition_limit": edition_total,
+        "edition_display": edition_display,
+        "display_edition": display_edition or edition_display,
         "certificate_id": str(record.get("certificate_id") or "").strip(),
         "shopify_file_id": str(record.get("shopify_file_id") or record.get("pdf_shopify_file_id") or record.get("certificate_shopify_file_id") or "").strip(),
         "certificate_file_url": str(url or "").strip(),
+        "certificate_pdf_url": str(url or "").strip(),
         "certificate_status": certificate_status,
         "shopify_file_status": _certificate_file_status(record, certificate_status),
         "purchase_date": str(record.get("purchase_date") or record.get("processed_at") or "").strip(),
@@ -2287,10 +2315,47 @@ def order_certificates_json_metafield_input(order_gid, certificates):
     )
 
 
+def order_certificate_status_value(certificates):
+    records = [order_certificate_account_record(certificate) for certificate in certificates or []]
+    if not records:
+        return "missing"
+    if all(record.get("certificate_status") == "Ready" for record in records):
+        return "ready"
+    if any(record.get("certificate_status") == "Missing" for record in records):
+        return "missing"
+    return "processing"
+
+
+def order_certificate_count_value(certificates):
+    return len([certificate for certificate in certificates or [] if certificate])
+
+
+def order_certificate_status_metafield_input(order_gid, certificates):
+    owner_id = shopify_gid("Order", order_gid)
+    return _metafield_input(
+        owner_id,
+        "certificate_status",
+        "single_line_text_field",
+        order_certificate_status_value(certificates),
+    )
+
+
+def order_certificate_count_metafield_input(order_gid, certificates):
+    owner_id = shopify_gid("Order", order_gid)
+    return _metafield_input(
+        owner_id,
+        "certificate_count",
+        "number_integer",
+        order_certificate_count_value(certificates),
+    )
+
+
 def order_certificate_metafield_inputs(order_gid, certificates, compare_digest=None):
     return [
         order_certificate_metafield_input(order_gid, certificates, compare_digest=compare_digest),
         order_certificates_json_metafield_input(order_gid, certificates),
+        order_certificate_status_metafield_input(order_gid, certificates),
+        order_certificate_count_metafield_input(order_gid, certificates),
     ]
 
 
@@ -2306,7 +2371,7 @@ def sync_order_certificate_metafields(order_gid, certificates, compare_digest=No
         missing_inputs = [
             item
             for item in inputs
-            if item.get("key") in {"certificates", "certificates_json"} and item.get("key") not in written_keys
+            if item.get("key") in ORDER_CERTIFICATE_METAFIELD_KEYS and item.get("key") not in written_keys
         ]
         if missing_inputs:
             fallback_metafields = list(result.get("metafields") or [])

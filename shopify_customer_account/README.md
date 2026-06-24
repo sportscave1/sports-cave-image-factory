@@ -11,8 +11,10 @@ Customer Account API:
 
 ```graphql
 customer {
+  id
   orders(first: 50, reverse: true) {
     nodes {
+      id
       name
       processedAt
       metafield(namespace: "sports_cave", key: "certificates_json") {
@@ -34,6 +36,22 @@ The source of truth is the Shopify order metafield:
 The extension does not accept customer IDs, order IDs, emails, or line item IDs
 from frontend input. Shopify scopes the query to the currently authenticated
 customer.
+
+## Required Access
+
+The Shopify app config must request these Customer Account API scopes:
+
+- `customer_read_customers`
+- `customer_read_orders`
+
+These are separate from Admin API scopes such as `read_customers` and
+`read_orders`. Keep `[extensions.capabilities] api_access = true` in
+`extensions/customer-certificate-vault/shopify.extension.toml`.
+
+This extension reads Shopify order metafields directly and does not call a
+Sports Cave OS or Supabase endpoint, so `network_access` is not enabled.
+Certificate PDFs are stored in Shopify Files/CDN; the extension only reads the
+mirrored order metafield metadata and opens the CDN PDF URL.
 
 ## Store Setup Verified
 
@@ -69,6 +87,15 @@ shopify app deploy
 The app needs customer/order access suitable for reading the logged-in
 customer's order history and order metafields. Protected customer data access
 must be approved in Shopify before the extension can go live.
+
+After any scope change:
+
+1. Release a new Shopify app version.
+2. Confirm the app scopes include `customer_read_customers` and `customer_read_orders`.
+3. Approve/update the new permissions in Shopify Admin.
+4. If access denied persists, uninstall/reinstall the app after the new version is released.
+5. Test the customer account preview with a certificate order.
+6. Confirm the certificate card appears and Download Certificate opens the PDF.
 
 ## Navigation
 

@@ -86,16 +86,23 @@ class ShopifySyncClientTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual([item["key"] for item in inputs], ["certificates", "certificates_json"])
+        self.assertEqual(
+            [item["key"] for item in inputs],
+            ["certificates", "certificates_json", "certificate_status", "certificate_count"],
+        )
         payload = json.loads(inputs[1]["value"])
         self.assertEqual(payload["version"], 1)
         self.assertEqual(payload["source"], "sports_cave_os")
         ready, processing = payload["certificates"]
         self.assertEqual(ready["edition_display"], "#012/100")
+        self.assertEqual(ready["display_edition"], "Edition #012 of 100")
+        self.assertEqual(ready["certificate_pdf_url"], "https://cdn.example/cert.pdf")
         self.assertEqual(ready["certificate_status"], "Ready")
         self.assertEqual(ready["certificate_file_url"], "https://cdn.example/cert.pdf")
         self.assertEqual(processing["certificate_status"], "Processing")
         self.assertEqual(processing["certificate_file_url"], "")
+        self.assertEqual(inputs[2]["value"], "processing")
+        self.assertEqual(inputs[3]["value"], "2")
 
     def test_order_certificate_sync_retries_missing_vault_json_metafield(self):
         requests_seen = []
@@ -122,6 +129,7 @@ class ShopifySyncClientTests(unittest.TestCase):
                         }
                     }
                 )
+            requested = kwargs["json"]["variables"]["metafields"][0]
             return FakeResponse(
                 {
                     "data": {
@@ -129,9 +137,9 @@ class ShopifySyncClientTests(unittest.TestCase):
                             "metafields": [
                                 {
                                     "namespace": "sports_cave",
-                                    "key": "certificates_json",
+                                    "key": requested["key"],
                                     "type": "json",
-                                    "value": kwargs["json"]["variables"]["metafields"][0]["value"],
+                                    "value": requested["value"],
                                     "compareDigest": "json-digest",
                                 }
                             ],
@@ -158,10 +166,18 @@ class ShopifySyncClientTests(unittest.TestCase):
             request_post=fake_post,
         )
 
-        self.assertEqual(len(requests_seen), 2)
-        self.assertEqual([item["key"] for item in requests_seen[0]["variables"]["metafields"]], ["certificates", "certificates_json"])
+        self.assertEqual(len(requests_seen), 4)
+        self.assertEqual(
+            [item["key"] for item in requests_seen[0]["variables"]["metafields"]],
+            ["certificates", "certificates_json", "certificate_status", "certificate_count"],
+        )
         self.assertEqual([item["key"] for item in requests_seen[1]["variables"]["metafields"]], ["certificates_json"])
-        self.assertEqual({item["key"] for item in result["metafields"]}, {"certificates", "certificates_json"})
+        self.assertEqual([item["key"] for item in requests_seen[2]["variables"]["metafields"]], ["certificate_status"])
+        self.assertEqual([item["key"] for item in requests_seen[3]["variables"]["metafields"]], ["certificate_count"])
+        self.assertEqual(
+            {item["key"] for item in result["metafields"]},
+            {"certificates", "certificates_json", "certificate_status", "certificate_count"},
+        )
 
     def test_environment_config_prefers_client_credentials_over_legacy_admin_token(self):
         environment = {

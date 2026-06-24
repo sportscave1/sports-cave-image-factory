@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import importlib
 import json
 import os
 from pathlib import Path
@@ -1417,6 +1418,235 @@ def historical_backfill_order_rows(rows, config=None, request_post=None, cutover
     }
 
 
+def _configured_supabase_backend():
+    try:
+        backend = importlib.import_module("supabase_backend")
+    except Exception:
+        return None
+    try:
+        if not backend.is_configured():
+            return None
+    except Exception:
+        return None
+    return backend
+
+
+def _as_dict(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _raw_line_for_id(order_raw, line_item_id):
+    raw_line_id = str(line_item_id or "").strip()
+    for line in (_as_dict(order_raw).get("line_items") or []):
+        if not isinstance(line, dict):
+            continue
+        candidate = str(
+            line.get("shopify_line_item_id")
+            or line.get("admin_graphql_api_id")
+            or line.get("id")
+            or ""
+        ).strip()
+        if candidate == raw_line_id or line_item_gid(candidate) == raw_line_id:
+            return line
+    return {}
+
+
+def _shipping_method_from_raw(order_raw):
+    payload = _as_dict(order_raw)
+    shipping = (
+        payload.get("shipping_method")
+        or payload.get("shippingMethod")
+        or payload.get("shipping_title")
+        or payload.get("shippingTitle")
+        or ""
+    )
+    if shipping:
+        return str(shipping)
+    shipping_lines = payload.get("shipping_lines") or payload.get("shippingLines") or []
+    if isinstance(shipping_lines, dict):
+        shipping_lines = shipping_lines.get("nodes") or []
+    first = shipping_lines[0] if shipping_lines and isinstance(shipping_lines[0], dict) else {}
+    return str(first.get("title") or first.get("code") or "")
+
+
+def _date_label(value):
+    parsed = normalize_datetime_utc(value)
+    if parsed == DATETIME_MIN_UTC:
+        return ""
+    return parsed.date().isoformat()
+
+
+def _assignment_list(value):
+    if isinstance(value, list):
+        return [dict(item) for item in value if isinstance(item, dict)]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+        return _assignment_list(parsed)
+    return []
+
+
+def _certificate_status_from_assignment(assignment):
+    status = str((assignment or {}).get("certificate_status") or "").strip()
+    if status and status != "Certificate Missing":
+        return status
+    return ""
+
+
+def _snapshot_rows_from_supabase_order_rows(raw_rows):
+    rows = []
+    for raw in raw_rows or []:
+        row = dict(raw or {})
+        order_raw = _as_dict(row.get("order_raw_json"))
+        line_id = str(row.get("shopify_line_item_id") or "").strip()
+        line_raw = _raw_line_for_id(order_raw, line_id)
+        quantity = _coerce_quantity(row.get("quantity") or line_raw.get("quantity") or 1)
+        order_name = str(row.get("order_name") or row.get("shopify_order_name") or "")
+        processed_at = _safe_iso(row.get("processed_at") or order_raw.get("processed_at") or order_raw.get("processedAt"))
+        created_at = _safe_iso(row.get("created_at") or order_raw.get("created_at") or order_raw.get("createdAt"))
+        date_value = _date_label(processed_at or created_at)
+        shipping = _shipping_method_from_raw(order_raw)
+        product_title = str(row.get("product_title") or line_raw.get("product_title") or line_raw.get("title") or "")
+        variant_title = str(row.get("variant_title") or line_raw.get("variant_title") or line_raw.get("variantTitle") or "")
+        product_handle = str(row.get("shopify_handle") or line_raw.get("product_handle") or line_raw.get("handle") or "")
+        product_id = str(row.get("shopify_product_id") or line_raw.get("shopify_product_id") or line_raw.get("product_id") or "")
+        variant_id = str(
+            row.get("shopify_variant_id")
+            or line_raw.get("shopify_variant_id")
+            or line_raw.get("variant_id")
+            or ""
+        )
+        base = {
+            "order": order_name,
+            "date": date_value,
+            "customer": str(row.get("customer_name") or order_raw.get("customer_name") or ""),
+            "customer_email": str(row.get("customer_email") or order_raw.get("customer_email") or order_raw.get("email") or ""),
+            "shipping": shipping,
+            "product": product_title,
+            "variant": variant_title,
+            "line_quantity": quantity,
+            "shopify_order_id": str(row.get("shopify_order_id") or ""),
+            "legacy_resource_id": str(order_raw.get("legacy_resource_id") or ""),
+            "shopify_line_item_id": line_id,
+            "shopify_product_id": product_id,
+            "variant_id": variant_id,
+            "product_handle": product_handle,
+            "shopify_customer_id": str(row.get("shopify_customer_id") or order_raw.get("shopify_customer_id") or order_raw.get("customer_id") or ""),
+            "processed_at": processed_at,
+            "created_at": created_at,
+            "order_number_sort": _parse_order_number(order_name or row.get("order_number")),
+        }
+        assignments = _assignment_list(row.get("assignments"))
+        if assignments:
+            for assignment in assignments:
+                edition_number = _positive_int(assignment.get("edition_number"))
+                if not edition_number:
+                    continue
+                allocation_index = _positive_int(assignment.get("allocation_index"), 1)
+                certificate_url = str(assignment.get("shopify_file_url") or "")
+                certificate_path = str(assignment.get("local_file_path") or "")
+                rows.append(
+                    {
+                        **base,
+                        "edition_number": edition_number,
+                        "edition": f"#{edition_number:03d}",
+                        "edition_total": _positive_int(assignment.get("edition_total"), 100),
+                        "has_saved_allocation": True,
+                        "edition_offset": max(allocation_index - 1, 0),
+                        "certificate_id": str(assignment.get("certificate_id") or ""),
+                        "certificate_status": _certificate_status_from_assignment(assignment),
+                        "certificate_pdf_path": certificate_path,
+                        "certificate_pdf_url": certificate_url,
+                        "certificate_shopify_file_id": str(assignment.get("shopify_file_id") or ""),
+                        "certificate_generated_at": _safe_iso(assignment.get("generated_at") or assignment.get("assigned_at")),
+                        "certificate_preview_path": str(assignment.get("certificate_preview_r2_key") or ""),
+                    }
+                )
+            continue
+
+        status = str(row.get("assignment_status") or "").strip()
+        blocker = ""
+        if status in {"Product Not Found"}:
+            blocker = "Product not matched"
+        elif status in {"Needs Edition Setup"}:
+            blocker = "Edition disabled"
+        elif status in {"Sold Out"}:
+            blocker = "Needs Review - Sold Out"
+        elif status in {"Error"}:
+            blocker = "Allocation error"
+        elif status == "Historical Order":
+            blocker = "Historical backfill required"
+        else:
+            blocker = "Needs allocation"
+        for index in range(quantity):
+            rows.append(
+                {
+                    **base,
+                    "edition_number": None,
+                    "edition": blocker,
+                    "edition_total": 100,
+                    "has_saved_allocation": False,
+                    "edition_offset": index,
+                    "certificate_status": blocker,
+                    "certificate_error": str(row.get("last_error") or ""),
+                }
+            )
+    return sorted(rows, key=_row_allocation_key, reverse=True)
+
+
+def load_supabase_orders_snapshot(limit=1000):
+    backend = _configured_supabase_backend()
+    if not backend:
+        return None
+    raw_rows = backend.list_orders(search="", sort="Date newest", status_filter="All", limit=max(int(limit or 1000), 1))
+    sync_state = backend.get_sync_state()
+    try:
+        summary = backend.get_order_summary()
+    except Exception:
+        summary = {}
+    last_synced = (
+        sync_state.get("last_successful_order_fetch_at")
+        or sync_state.get("last_successful_order_sync_at")
+        or ""
+    )
+    rows = _snapshot_rows_from_supabase_order_rows(raw_rows)
+    return {
+        "version": SNAPSHOT_VERSION,
+        "saved_at": now_iso(),
+        "last_refreshed": last_synced,
+        "last_synced": last_synced,
+        "source": "supabase",
+        "order_count": int(summary.get("orders_synced") or 0),
+        "row_count": len(rows),
+        "rows": rows,
+    }
+
+
+def sync_new_orders_to_persistent_cache(config=None, *, max_orders=100, sync_product_metafields=True):
+    backend = _configured_supabase_backend()
+    if not backend:
+        return {"source": "local_snapshot", "skipped": True, "reason": "Supabase is not configured."}
+    return {
+        "source": "supabase",
+        **backend.sync_shopify_orders_to_supabase(
+            config=config,
+            max_orders=max_orders,
+            generate_certificates=False,
+            sync_product_metafields=sync_product_metafields,
+        ),
+    }
+
+
 def save_orders_snapshot(rows, meta=None):
     SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -1430,6 +1660,13 @@ def save_orders_snapshot(rows, meta=None):
 
 
 def load_orders_snapshot():
+    try:
+        supabase_payload = load_supabase_orders_snapshot()
+    except Exception as error:
+        print(f"WARN Orders Supabase snapshot fallback: {error}", flush=True)
+        supabase_payload = None
+    if supabase_payload is not None:
+        return supabase_payload
     if not SNAPSHOT_PATH.exists():
         return {"version": SNAPSHOT_VERSION, "saved_at": "", "last_refreshed": "", "rows": []}
     try:

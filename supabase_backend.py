@@ -490,7 +490,9 @@ def _ensure_schema_uncached():
                     certificate_id TEXT,
                     edition_number INTEGER,
                     edition_total INTEGER,
+                    edition_limit INTEGER,
                     edition_display TEXT,
+                    display_edition TEXT,
                     line_item_unit_index INTEGER DEFAULT 1,
                     pdf_filename TEXT,
                     local_file_path TEXT,
@@ -498,8 +500,11 @@ def _ensure_schema_uncached():
                     shopify_file_status TEXT,
                     shopify_file_url TEXT,
                     certificate_file_url TEXT,
+                    certificate_pdf_url TEXT,
                     certificate_shopify_file_id TEXT,
                     certificate_status TEXT DEFAULT 'Processing',
+                    sync_status TEXT DEFAULT 'pending',
+                    last_sync_error TEXT,
                     purchase_date TIMESTAMPTZ,
                     source TEXT DEFAULT 'sports_cave_os',
                     generated_at TIMESTAMPTZ DEFAULT now(),
@@ -852,15 +857,20 @@ def _ensure_schema_uncached():
                     ("certificate_id", "TEXT"),
                     ("edition_number", "INTEGER"),
                     ("edition_total", "INTEGER"),
+                    ("edition_limit", "INTEGER"),
                     ("edition_display", "TEXT"),
+                    ("display_edition", "TEXT"),
                     ("line_item_unit_index", "INTEGER DEFAULT 1"),
                     ("local_file_path", "TEXT"),
                     ("shopify_file_id", "TEXT"),
                     ("shopify_file_status", "TEXT"),
                     ("shopify_file_url", "TEXT"),
                     ("certificate_file_url", "TEXT"),
+                    ("certificate_pdf_url", "TEXT"),
                     ("certificate_shopify_file_id", "TEXT"),
                     ("certificate_status", "TEXT DEFAULT 'Processing'"),
+                    ("sync_status", "TEXT DEFAULT 'pending'"),
+                    ("last_sync_error", "TEXT"),
                     ("purchase_date", "TIMESTAMPTZ"),
                     ("source", "TEXT DEFAULT 'sports_cave_os'"),
                     ("created_at", "TIMESTAMPTZ DEFAULT now()"),
@@ -924,7 +934,9 @@ def _ensure_schema_uncached():
                     ("certificate_id", "TEXT"),
                     ("edition_number", "INTEGER"),
                     ("edition_total", "INTEGER"),
+                    ("edition_limit", "INTEGER"),
                     ("edition_display", "TEXT"),
+                    ("display_edition", "TEXT"),
                     ("line_item_unit_index", "INTEGER DEFAULT 1"),
                     ("pdf_filename", "TEXT"),
                     ("local_file_path", "TEXT"),
@@ -932,11 +944,14 @@ def _ensure_schema_uncached():
                     ("shopify_file_status", "TEXT"),
                     ("shopify_file_url", "TEXT"),
                     ("certificate_file_url", "TEXT"),
+                    ("certificate_pdf_url", "TEXT"),
                     ("certificate_shopify_file_id", "TEXT"),
                     ("certificate_status", "TEXT DEFAULT 'Processing'"),
                     ("order_metafields_synced_at", "TIMESTAMPTZ"),
                     ("order_metafields_sync_status", "TEXT DEFAULT 'Never Synced'"),
                     ("order_metafields_error", "TEXT"),
+                    ("sync_status", "TEXT DEFAULT 'pending'"),
+                    ("last_sync_error", "TEXT"),
                     ("purchase_date", "TIMESTAMPTZ"),
                     ("source", "TEXT DEFAULT 'sports_cave_os'"),
                     ("created_at", "TIMESTAMPTZ DEFAULT now()"),
@@ -3034,7 +3049,9 @@ def sync_order_certificate_metafields(shopify_order_id, config=None, request_pos
                     UPDATE certificates
                     SET order_metafields_synced_at=now(),
                         order_metafields_sync_status='Synced',
-                        order_metafields_error=''
+                        order_metafields_error='',
+                        sync_status='synced',
+                        last_sync_error=''
                     WHERE shopify_order_id=%s
                     """,
                     (order_id,),
@@ -3048,10 +3065,12 @@ def sync_order_certificate_metafields(shopify_order_id, config=None, request_pos
                     """
                     UPDATE certificates
                     SET order_metafields_sync_status='Failed',
-                        order_metafields_error=%s
+                        order_metafields_error=%s,
+                        sync_status='failed',
+                        last_sync_error=%s
                     WHERE shopify_order_id=%s
                     """,
-                    (str(error)[:1000], order_id),
+                    (str(error)[:1000], str(error)[:1000], order_id),
                 )
             conn.commit()
         log_app_error(
@@ -3067,7 +3086,7 @@ def sync_order_certificate_metafields(shopify_order_id, config=None, request_pos
         }
 
 
-def backfill_ready_certificate_order_metafields(config=None, request_post=None, limit=100):
+def backfill_ready_certificate_order_metafields(config=None, request_post=None, limit=100, only_unsynced=False):
     if not is_configured():
         return {"attempted": 0, "synced": 0, "failed": 0, "skipped": True, "reason": "Supabase is not configured."}
     ensure_schema()
@@ -3081,10 +3100,15 @@ def backfill_ready_certificate_order_metafields(config=None, request_post=None, 
                   AND shopify_order_id <> ''
                   AND COALESCE(NULLIF(shopify_file_url, ''), NULLIF(certificate_file_url, '')) IS NOT NULL
                   AND COALESCE(NULLIF(shopify_file_url, ''), NULLIF(certificate_file_url, '')) <> ''
+                  AND (
+                    %s = FALSE
+                    OR COALESCE(order_metafields_sync_status, '') <> 'Synced'
+                    OR COALESCE(sync_status, '') <> 'synced'
+                  )
                 ORDER BY shopify_order_id
                 LIMIT %s
                 """,
-                (max(int(limit or 100), 1),),
+                (bool(only_unsynced), max(int(limit or 100), 1)),
             )
             order_ids = [row.get("shopify_order_id") for row in cur.fetchall() if row.get("shopify_order_id")]
     attempted = 0
@@ -3105,6 +3129,108 @@ def backfill_ready_certificate_order_metafields(config=None, request_post=None, 
         "failed": failed,
         "errors": errors[:10],
     }
+
+
+def sync_certificate_to_shopify(identifier, config=None, request_post=None):
+    cleaned = str(identifier or "").strip()
+    if not cleaned:
+        return {"attempted": 0, "synced": 0, "failed": 0, "skipped": True, "reason": "Enter an order ID, order name, or certificate ID."}
+    if not is_configured():
+        return {"attempted": 0, "synced": 0, "failed": 0, "skipped": True, "reason": "Supabase is not configured."}
+    ensure_schema()
+    order_ids = []
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT DISTINCT shopify_order_id
+                FROM certificates
+                WHERE shopify_order_id IS NOT NULL
+                  AND shopify_order_id <> ''
+                  AND (
+                    shopify_order_id=%s
+                    OR shopify_order_name=%s
+                    OR certificate_id=%s
+                  )
+                ORDER BY shopify_order_id
+                LIMIT 20
+                """,
+                (cleaned, cleaned, cleaned),
+            )
+            order_ids = [row.get("shopify_order_id") for row in cur.fetchall() if row.get("shopify_order_id")]
+    if not order_ids:
+        return {"attempted": 0, "synced": 0, "failed": 0, "skipped": True, "reason": "No certificate record matched that order or certificate ID."}
+
+    attempted = 0
+    synced = 0
+    failed = 0
+    errors = []
+    for order_id in order_ids:
+        attempted += 1
+        result = sync_order_certificate_metafields(order_id, config=config, request_post=request_post)
+        if result.get("failed"):
+            failed += 1
+            errors.append(result.get("error") or f"Failed for {order_id}")
+        else:
+            synced += 1
+    return {
+        "attempted": attempted,
+        "synced": synced,
+        "failed": failed,
+        "errors": errors[:10],
+    }
+
+
+def certificate_vault_diagnostics():
+    diagnostics = {
+        "configured": is_configured(),
+        "certificates_generated_count": 0,
+        "certificates_synced_to_shopify_count": 0,
+        "unsynced_certificate_count": 0,
+        "last_shopify_order_metafield_sync_status": "",
+        "last_sync_error": "",
+    }
+    if not is_configured():
+        return diagnostics
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS count FROM certificates")
+            diagnostics["certificates_generated_count"] = int((cur.fetchone() or {}).get("count") or 0)
+            cur.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM certificates
+                WHERE COALESCE(order_metafields_sync_status, '') = 'Synced'
+                   OR COALESCE(sync_status, '') = 'synced'
+                """
+            )
+            diagnostics["certificates_synced_to_shopify_count"] = int((cur.fetchone() or {}).get("count") or 0)
+            cur.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM certificates
+                WHERE NOT (
+                    COALESCE(order_metafields_sync_status, '') = 'Synced'
+                    OR COALESCE(sync_status, '') = 'synced'
+                )
+                """
+            )
+            diagnostics["unsynced_certificate_count"] = int((cur.fetchone() or {}).get("count") or 0)
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(order_metafields_sync_status, sync_status, '') AS status,
+                    COALESCE(order_metafields_error, last_sync_error, '') AS error
+                FROM certificates
+                ORDER BY COALESCE(order_metafields_synced_at, updated_at, created_at) DESC NULLS LAST, id DESC
+                LIMIT 1
+                """
+            )
+            latest = cur.fetchone() or {}
+            diagnostics["last_shopify_order_metafield_sync_status"] = latest.get("status") or ""
+            diagnostics["last_sync_error"] = latest.get("error") or ""
+    return diagnostics
 
 
 def persistence_counts():
@@ -4942,7 +5068,9 @@ def upsert_certificate_metadata(metadata):
         "certificate_id": _none_if_blank(account_record.get("certificate_id")),
         "edition_number": _int_or_none(account_record.get("edition_number")),
         "edition_total": _int_or_none(account_record.get("edition_total")) or 100,
+        "edition_limit": _int_or_none(account_record.get("edition_limit") or account_record.get("edition_total")) or 100,
         "edition_display": _none_if_blank(account_record.get("edition_display")),
+        "display_edition": _none_if_blank(account_record.get("display_edition") or account_record.get("edition_display")),
         "line_item_unit_index": line_item_unit_index,
         "pdf_filename": _none_if_blank(metadata.get("pdf_filename") or Path(str(metadata.get("local_pdf_path") or "")).name),
         "local_file_path": _none_if_blank(metadata.get("local_pdf_path")),
@@ -4950,8 +5078,11 @@ def upsert_certificate_metadata(metadata):
         "shopify_file_status": _none_if_blank(account_record.get("shopify_file_status")),
         "shopify_file_url": _none_if_blank(certificate_url),
         "certificate_file_url": _none_if_blank(certificate_url),
+        "certificate_pdf_url": _none_if_blank(certificate_url),
         "certificate_shopify_file_id": _none_if_blank(account_record.get("shopify_file_id")),
         "certificate_status": _none_if_blank(account_record.get("certificate_status")) or "Processing",
+        "sync_status": _none_if_blank(metadata.get("sync_status")) or "pending",
+        "last_sync_error": _none_if_blank(metadata.get("last_sync_error") or metadata.get("sync_error")),
         "purchase_date": _none_if_blank(account_record.get("purchase_date")),
         "source": "sports_cave_os",
         "generated_at": _none_if_blank(metadata.get("generated_at") or account_record.get("created_at")),

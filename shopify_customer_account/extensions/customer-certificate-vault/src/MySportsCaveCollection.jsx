@@ -7,8 +7,10 @@ const API_VERSION = "2026-04";
 
 const CERTIFICATES_QUERY = `query SportsCaveCustomerCertificates {
   customer {
+    id
     orders(first: 50, reverse: true) {
       nodes {
+        id
         name
         processedAt
         metafield(namespace: "sports_cave", key: "certificates_json") {
@@ -45,17 +47,18 @@ function Extension() {
         );
         const payload = await response.json();
         if (payload.errors?.length) {
-          throw new Error(payload.errors[0]?.message || "Customer certificates could not be loaded.");
+          throw new Error(customerSafeErrorMessage(payload.errors));
         }
-        const orderNodes = payload.data?.customer?.orders?.nodes || [];
-        const rows = collectCertificates(orderNodes);
+        const customer = payload.data?.customer || {};
+        const orderNodes = customer.orders?.nodes || [];
+        const rows = collectCertificates(orderNodes, customer);
         if (mounted) {
           setCertificates(rows);
           setStatus("ready");
         }
       } catch (error) {
         if (mounted) {
-          setErrorMessage(error instanceof Error ? error.message : "Customer certificates could not be loaded.");
+          setErrorMessage(customerSafeErrorMessage(error));
           setStatus("error");
         }
       }
@@ -105,7 +108,7 @@ function EmptyState() {
     <s-section heading="No certificates yet">
       <s-stack gap="base">
         <s-text>
-          Limited edition certificates will appear here after your certificate PDF is ready.
+          No Sports Cave certificates found for this account yet.
         </s-text>
         <s-link href="shopify:customer-account/orders">View your orders</s-link>
       </s-stack>
@@ -116,7 +119,7 @@ function EmptyState() {
 function ErrorState({message}) {
   return (
     <s-banner heading="Certificates unavailable" tone="critical">
-      {message || "We could not load your Sports Cave certificates. Please try again later."}
+      {message || "Certificate vault permissions are still being updated. Please try again shortly."}
     </s-banner>
   );
 }
@@ -158,14 +161,14 @@ function CertificateDetail({label, value}) {
   );
 }
 
-function collectCertificates(orders) {
+function collectCertificates(orders, customer) {
   const seen = new Set();
   const rows = [];
 
   for (const order of orders || []) {
     const certificates = certificatesFromMetafield(order.metafield);
     for (const certificate of certificates) {
-      const normalized = normalizeCertificate(certificate, order);
+      const normalized = normalizeCertificate(certificate, order, customer);
       if (!normalized) continue;
       if (seen.has(normalized.key)) continue;
       seen.add(normalized.key);
@@ -180,19 +183,26 @@ function certificatesFromMetafield(metafield) {
   if (!metafield) return [];
   const raw = metafield.jsonValue ?? metafield.value;
   const parsed = typeof raw === "string" ? parseJson(raw) : raw;
+  if (Array.isArray(parsed)) return parsed;
   return Array.isArray(parsed?.certificates) ? parsed.certificates : [];
 }
 
-function normalizeCertificate(record, order) {
+function normalizeCertificate(record, order, customer) {
   if (!record || typeof record !== "object") return null;
-  const orderName = stringValue(record.shopify_order_name || order.name);
+  if (!matchesContext(record.shopify_customer_id, customer?.id)) return null;
+  if (!matchesContext(record.shopify_order_id, order?.id)) return null;
+  const recordOrderName = stringValue(record.shopify_order_name || record.order_name);
+  if (recordOrderName && order?.name && recordOrderName !== order.name) return null;
+
+  const orderName = stringValue(recordOrderName || order.name);
   const lineItemId = stringValue(record.shopify_line_item_id);
   const editionNumber = positiveInt(record.edition_number);
   const unitIndex = positiveInt(record.line_item_unit_index) || 1;
   const certificateId = stringValue(record.certificate_id);
-  const url = safeHttpsUrl(record.certificate_file_url);
-  const status = stringValue(record.certificate_status);
-  const ready = status.toLowerCase() === "ready" && Boolean(url);
+  const url = safeHttpsUrl(record.certificate_file_url || record.certificate_pdf_url);
+  const status = stringValue(record.certificate_status || record.shopify_file_status);
+  const statusKey = status.toLowerCase();
+  const ready = ["ready", "uploaded", "certificate ready"].includes(statusKey) && Boolean(url);
 
   return {
     key: [
@@ -208,11 +218,17 @@ function normalizeCertificate(record, order) {
     edition_display: editionDisplay(record),
     certificate_id: certificateId,
     shopify_order_name: orderName,
-    purchase_date: stringValue(record.purchase_date || order.processedAt),
-    purchase_date_display: dateDisplay(record.purchase_date || order.processedAt),
+    purchase_date: stringValue(record.purchase_date || record.created_at || order.processedAt),
+    purchase_date_display: dateDisplay(record.purchase_date || record.created_at || order.processedAt),
     certificate_file_url: ready ? url : "",
     certificate_status: ready ? "Ready" : "Processing",
   };
+}
+
+function matchesContext(recordValue, contextValue) {
+  const recordText = stringValue(recordValue);
+  const contextText = stringValue(contextValue);
+  return !recordText || !contextText || recordText === contextText;
 }
 
 function parseJson(value) {
@@ -234,10 +250,10 @@ function positiveInt(value) {
 
 function editionDisplay(record) {
   const number = positiveInt(record.edition_number);
-  const total = positiveInt(record.edition_total);
-  if (number && total) return `#${String(number).padStart(3, "0")} / ${total}`;
+  const total = positiveInt(record.edition_limit || record.edition_total);
+  if (number && total) return `Edition #${String(number).padStart(3, "0")} of ${total}`;
 
-  const display = stringValue(record.edition_display);
+  const display = stringValue(record.display_edition || record.edition_display);
   return display.includes("/") ? display.replace("/", " / ") : display;
 }
 
@@ -262,4 +278,22 @@ function safeHttpsUrl(value) {
   } catch (_error) {
     return "";
   }
+}
+
+function customerSafeErrorMessage(error) {
+  const raw = Array.isArray(error)
+    ? error.map((item) => item?.message || "").join(" ")
+    : error instanceof Error
+      ? error.message
+      : stringValue(error);
+  const normalized = raw.toLowerCase();
+  if (
+    normalized.includes("access denied")
+    || normalized.includes("customer_read_customers")
+    || normalized.includes("customer_read_orders")
+    || normalized.includes("scope")
+  ) {
+    return "Certificate vault permissions are still being updated. Please try again shortly.";
+  }
+  return "We could not load your Sports Cave certificates. Please try again later.";
 }

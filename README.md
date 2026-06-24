@@ -24,6 +24,27 @@ Customer Certificate Vault V1 is a Shopify Customer Account UI Extension in
 `shopify_customer_account/` and reads Shopify order metafield
 `sports_cave.certificates_json`.
 
+## Customer Account Certificate Vault
+
+The customer account vault requires the Shopify Customer Account API scopes
+`customer_read_customers` and `customer_read_orders` in addition to the Admin API
+scopes used by Sports Cave OS. The customer account extension must keep
+`api_access = true`; `network_access` is only needed if an external Sports Cave
+OS endpoint is introduced later.
+
+Certificate PDFs are stored in Shopify Files/CDN. Certificate ownership records
+are stored in Supabase for Sports Cave OS operations, and Shopify order
+metafields mirror the customer-facing certificate metadata:
+
+- `sports_cave.certificate_status`
+- `sports_cave.certificate_count`
+- `sports_cave.certificates_json`
+
+After changing scopes, release a new Shopify app version, approve the updated
+permissions in Shopify Admin, and reinstall/update the app if access-denied
+messages persist. Then test the customer account page with a real certificate
+order and confirm the Download Certificate button opens the Shopify CDN PDF.
+
 ## Database
 
 Product, asset status, and limited-edition records are stored in SQLite at

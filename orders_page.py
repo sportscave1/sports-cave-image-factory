@@ -264,6 +264,10 @@ def _load_snapshot_once():
     st.session_state[META_KEY] = {
         "last_refreshed": payload.get("last_refreshed") or "",
         "saved_at": payload.get("saved_at") or "",
+        "last_synced": payload.get("last_synced") or payload.get("last_refreshed") or "",
+        "order_count": payload.get("order_count") or 0,
+        "row_count": payload.get("row_count") or len(payload.get("rows") or []),
+        "source": payload.get("source") or "local_snapshot",
     }
     st.session_state[SNAPSHOT_LOADED_KEY] = True
     _perf_log("load snapshot", start, rows=len(st.session_state[ROWS_KEY]))
@@ -283,6 +287,10 @@ def _write_snapshot(rows, meta=None):
     st.session_state[META_KEY] = {
         "last_refreshed": payload.get("last_refreshed") or "",
         "saved_at": payload.get("saved_at") or "",
+        "last_synced": payload.get("last_synced") or payload.get("last_refreshed") or "",
+        "order_count": payload.get("order_count") or 0,
+        "row_count": payload.get("row_count") or len(payload.get("rows") or []),
+        "source": payload.get("source") or "local_snapshot",
     }
 
 
@@ -552,6 +560,48 @@ def _refresh_orders():
     if not config.get("configured"):
         st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before refreshing orders."
         return
+    sync_start = time.perf_counter()
+    try:
+        persistent_result = order_allocator.sync_new_orders_to_persistent_cache(
+            config=config,
+            max_orders=100,
+            sync_product_metafields=True,
+        )
+    except Exception as error:
+        print(f"Orders persistent sync failed: {error}", flush=True)
+        st.session_state[NOTICE_KEY] = f"Sync New Orders failed: {error}"
+        return
+    if persistent_result.get("source") == "supabase":
+        payload = order_allocator.load_orders_snapshot()
+        sorted_rows = _sort_rows(payload.get("rows") or [])
+        st.session_state[ROWS_KEY] = sorted_rows
+        st.session_state[META_KEY] = {
+            "last_refreshed": payload.get("last_refreshed") or "",
+            "saved_at": payload.get("saved_at") or "",
+            "last_synced": payload.get("last_synced") or payload.get("last_refreshed") or "",
+            "order_count": payload.get("order_count") or 0,
+            "row_count": payload.get("row_count") or len(sorted_rows),
+            "source": payload.get("source") or "supabase",
+        }
+        _perf_log(
+            "refresh Shopify",
+            sync_start,
+            source="supabase_incremental",
+            orders=persistent_result.get("orders_seen", 0),
+        )
+        assignments = int(persistent_result.get("assignments_created") or 0)
+        imported = int(persistent_result.get("orders_imported") or 0)
+        seen = int(persistent_result.get("orders_seen") or 0)
+        errors = persistent_result.get("errors") or []
+        suffix = f" Created {assignments} edition assignment(s)." if assignments else ""
+        if errors:
+            suffix += f" {len(errors)} sync issue(s) need review."
+        st.session_state[NOTICE_KEY] = (
+            f"Synced {seen} Shopify order(s). Imported {imported} new order(s). "
+            f"Loaded {len(sorted_rows)} saved artwork row(s).{suffix}"
+        )
+        return
+
     existing_rows = st.session_state.get(ROWS_KEY, [])
     orders = _fetch_recent_paid_orders(config)
     allocation_start = time.perf_counter()
@@ -866,8 +916,8 @@ def _render_top_actions(rows):
     open_url = _first_pdf_url(selected_rows)
 
     action_cols = st.columns([1.1, 1.55, 1.45, 1.55, 1.2])
-    if action_cols[0].button("Refresh Orders", type="primary", use_container_width=True):
-        with st.spinner("Refreshing recent paid orders..."):
+    if action_cols[0].button("Sync New Orders", type="primary", use_container_width=True):
+        with st.spinner("Syncing new paid orders..."):
             _refresh_orders()
         st.rerun()
     if action_cols[1].button(
@@ -931,7 +981,9 @@ def render_page():
 
     st.title("Orders")
     st.caption("Clean fulfilment mirror. Edition numbers are controlled from Shopify/order allocations.")
-    st.caption(f"Last refreshed: {_format_time(meta.get('last_refreshed'))}")
+    order_count = int(meta.get("order_count") or 0)
+    count_label = f" | Cached orders: {order_count}" if order_count else ""
+    st.caption(f"Last synced: {_format_time(meta.get('last_synced') or meta.get('last_refreshed'))}{count_label}")
 
     notice = st.session_state.get(NOTICE_KEY)
     if notice:
@@ -941,7 +993,7 @@ def render_page():
     _render_top_actions(rows)
 
     if not rows:
-        st.info("No saved orders yet. Use Refresh Orders to load recent paid orders.")
+        st.info("No saved orders yet. Use Sync New Orders to load recent paid orders.")
         return
 
     if len(rows) > len(visible_rows):
