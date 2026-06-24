@@ -16,7 +16,7 @@ import shutil
 import tempfile
 import time
 import traceback
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 APP_START_TIME = time.perf_counter()
 LAST_STARTUP_STAGE_TIME = APP_START_TIME
@@ -3472,80 +3472,254 @@ def render_copyable_prompt(title, prompt_text, key, show_title=True, prompt_id=N
         )
 
 
-def _mockup_prompt_dialog_key(kind, prompt_id):
-    return f"mockup-prompt-{kind}::{prompt_id}"
+def _mockup_prompt_edit_key(prompt_id):
+    return f"mockup-prompt-edit::{prompt_id}"
 
 
-def _close_mockup_prompt_dialog(kind, prompt_id):
-    st.session_state[_mockup_prompt_dialog_key(kind, prompt_id)] = False
+def _clear_mockup_prompt_edit_query():
+    try:
+        if "mockup_prompt_edit" in st.query_params:
+            del st.query_params["mockup_prompt_edit"]
+    except Exception:
+        pass
 
 
-def render_mockup_prompt_dialogs(title, prompt_id, prompt_text):
-    edit_key = _mockup_prompt_dialog_key("edit", prompt_id)
-    preview_key = _mockup_prompt_dialog_key("preview", prompt_id)
+def _consume_mockup_prompt_edit_request(prompt_id):
+    try:
+        requested_prompt_id = st.query_params.get("mockup_prompt_edit", "")
+    except Exception:
+        requested_prompt_id = ""
+    if isinstance(requested_prompt_id, list):
+        requested_prompt_id = requested_prompt_id[0] if requested_prompt_id else ""
+    if requested_prompt_id != prompt_id:
+        return
+    st.session_state[_mockup_prompt_edit_key(prompt_id)] = True
+    _clear_mockup_prompt_edit_query()
+    st.rerun()
 
-    if st.session_state.get(edit_key):
-        @st.dialog(f"Edit prompt: {title}", width="large")
-        def _edit_prompt_dialog():
-            st.caption("Developer only. Saved changes replace this prompt everywhere it is used.")
-            edited_text = st.text_area(
-                "Prompt text",
-                value=prompt_text,
-                height=520,
-                key=f"mockup-prompt-edit-text::{prompt_id}",
-            )
-            password = st.text_input(
-                "Developer password",
-                type="password",
-                key=f"mockup-prompt-edit-password::{prompt_id}",
-            )
-            cols = st.columns([1, 1, 3])
-            if cols[0].button("Save", key=f"mockup-prompt-edit-save::{prompt_id}", type="primary", use_container_width=True):
-                if password != DEVELOPER_PAGE_PASSWORD:
-                    st.error("Developer password is incorrect.")
-                else:
-                    prompt_store.save_prompt(prompt_id, title, edited_text)
-                    _close_mockup_prompt_dialog("edit", prompt_id)
-                    st.success("Prompt saved")
-                    st.rerun()
-            if cols[1].button("Cancel", key=f"mockup-prompt-edit-cancel::{prompt_id}", use_container_width=True):
-                _close_mockup_prompt_dialog("edit", prompt_id)
+
+def _close_mockup_prompt_editor(prompt_id):
+    st.session_state[_mockup_prompt_edit_key(prompt_id)] = False
+    _clear_mockup_prompt_edit_query()
+
+
+def render_mockup_prompt_editor(title, prompt_id, prompt_text):
+    _consume_mockup_prompt_edit_request(prompt_id)
+    edit_key = _mockup_prompt_edit_key(prompt_id)
+    if not st.session_state.get(edit_key):
+        return
+
+    @st.dialog(f"Edit prompt: {title}", width="large")
+    def _edit_prompt_dialog():
+        st.caption("Developer only. Saved changes replace this prompt everywhere it is used.")
+        edited_text = st.text_area(
+            "Prompt text",
+            value=prompt_text,
+            height=520,
+            key=f"mockup-prompt-edit-text::{prompt_id}",
+        )
+        password = st.text_input(
+            "Developer password",
+            type="password",
+            key=f"mockup-prompt-edit-password::{prompt_id}",
+        )
+        cols = st.columns([1, 1, 3])
+        if cols[0].button("Save", key=f"mockup-prompt-edit-save::{prompt_id}", type="primary", use_container_width=True):
+            if password != DEVELOPER_PAGE_PASSWORD:
+                st.error("Developer password is incorrect.")
+            else:
+                prompt_store.save_prompt(prompt_id, title, edited_text)
+                _close_mockup_prompt_editor(prompt_id)
+                st.session_state["mockup_prompt_notice"] = "Prompt saved"
                 st.rerun()
+        if cols[1].button("Cancel", key=f"mockup-prompt-edit-cancel::{prompt_id}", use_container_width=True):
+            _close_mockup_prompt_editor(prompt_id)
+            st.rerun()
 
-        _edit_prompt_dialog()
+    _edit_prompt_dialog()
 
-    if st.session_state.get(preview_key):
-        @st.dialog(f"Prompt preview: {title}", width="large")
-        def _preview_prompt_dialog():
-            st.caption("Read-only preview. Copy uses the complete stored prompt text.")
-            st.text_area(
-                "Full prompt",
-                value=prompt_text,
-                height=520,
-                disabled=True,
-                key=f"mockup-prompt-preview-text::{prompt_id}",
-            )
-            if st.button("Close", key=f"mockup-prompt-preview-close::{prompt_id}", use_container_width=True):
-                _close_mockup_prompt_dialog("preview", prompt_id)
-                st.rerun()
 
-        _preview_prompt_dialog()
+def render_mockup_prompt_bar(prompt_text, key, prompt_id):
+    prompt_text_json = json.dumps(prompt_text)
+    bar_id = f"mockup-prompt-bar-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
+    show_edit = bool(st.session_state.get("developer_unlocked"))
+    edit_href = f"?mockup_prompt_edit={quote(prompt_id, safe='')}"
+    edit_markup = (
+        f"""
+        <a
+          id="{bar_id}-edit"
+          class="mockup-prompt-edit"
+          href="{edit_href}"
+          target="_parent"
+          title="Edit prompt"
+          aria-label="Edit prompt"
+        >✎</a>
+        """
+        if show_edit
+        else ""
+    )
+
+    get_components_module().html(
+        f"""
+        <style>
+        #{bar_id} {{
+            position: relative;
+            width: 100%;
+            height: 46px;
+            border: 1px solid rgba(212, 165, 76, 0.55);
+            border-radius: 14px;
+            background: #F5F2EA;
+            color: #0B0B0D;
+            box-sizing: border-box;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 44px 0 16px;
+            font-weight: 800;
+            font-size: 0.95rem;
+            line-height: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            user-select: none;
+            box-shadow: none;
+            filter: none;
+            transform: none;
+        }}
+        #{bar_id}:hover,
+        #{bar_id}:focus,
+        #{bar_id}:active {{
+            background: #F5F2EA;
+            color: #0B0B0D;
+            border-color: rgba(212, 165, 76, 0.55);
+            box-shadow: none;
+            filter: none;
+            transform: none;
+            outline: none;
+        }}
+        #{bar_id} .mockup-prompt-label {{
+            color: #0B0B0D;
+            white-space: nowrap;
+            pointer-events: none;
+        }}
+        #{bar_id} .mockup-prompt-edit {{
+            position: absolute;
+            top: 5px;
+            right: 6px;
+            width: 28px;
+            height: 28px;
+            border-radius: 999px;
+            color: #0B0B0D;
+            background: transparent;
+            border: 1px solid transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 900;
+            line-height: 1;
+        }}
+        #{bar_id} .mockup-prompt-edit:hover,
+        #{bar_id} .mockup-prompt-edit:focus {{
+            color: #0B0B0D;
+            background: rgba(212, 165, 76, 0.16);
+            border-color: rgba(212, 165, 76, 0.30);
+            outline: none;
+        }}
+        </style>
+        <div id="{bar_id}" role="button" tabindex="0" aria-label="Copy prompt">
+          <span class="mockup-prompt-label">Copy Prompt</span>
+          {edit_markup}
+        </div>
+        <script>
+        (() => {{
+          const bar = document.getElementById("{bar_id}");
+          const edit = document.getElementById("{bar_id}-edit");
+          const promptText = {prompt_text_json};
+          const originalLabel = "Copy Prompt";
+
+          if (edit) {{
+            edit.addEventListener("click", (event) => {{
+              event.stopPropagation();
+            }});
+          }}
+
+          async function copyPrompt(event) {{
+            if (event.target && event.target.closest && event.target.closest(".mockup-prompt-edit")) {{
+              return;
+            }}
+            event.preventDefault();
+            event.stopPropagation();
+            try {{
+              if (navigator.clipboard && window.isSecureContext) {{
+                await navigator.clipboard.writeText(promptText);
+              }} else {{
+                const textarea = document.createElement("textarea");
+                textarea.value = promptText;
+                textarea.style.position = "fixed";
+                textarea.style.opacity = "0";
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                document.execCommand("copy");
+                document.body.removeChild(textarea);
+              }}
+            }} catch (error) {{
+              const textarea = document.createElement("textarea");
+              textarea.value = promptText;
+              textarea.style.position = "fixed";
+              textarea.style.opacity = "0";
+              document.body.appendChild(textarea);
+              textarea.focus();
+              textarea.select();
+              document.execCommand("copy");
+              document.body.removeChild(textarea);
+            }}
+
+            const toast = document.createElement("div");
+            toast.innerText = "Prompt copied";
+            toast.style.position = "fixed";
+            toast.style.bottom = "22px";
+            toast.style.right = "22px";
+            toast.style.zIndex = "999999";
+            toast.style.background = "#F5F2EA";
+            toast.style.color = "#0B0B0D";
+            toast.style.border = "1px solid rgba(212,165,76,0.85)";
+            toast.style.borderRadius = "999px";
+            toast.style.padding = "10px 14px";
+            toast.style.fontWeight = "700";
+            toast.style.boxShadow = "0 12px 32px rgba(0,0,0,0.32)";
+            document.body.appendChild(toast);
+            bar.querySelector(".mockup-prompt-label").innerText = "Prompt copied";
+            setTimeout(() => {{
+              if (toast.parentNode) {{
+                toast.parentNode.removeChild(toast);
+              }}
+              bar.querySelector(".mockup-prompt-label").innerText = originalLabel;
+            }}, 1400);
+          }}
+
+          bar.addEventListener("click", copyPrompt);
+          bar.addEventListener("keydown", (event) => {{
+            if (event.key === "Enter" || event.key === " ") {{
+              copyPrompt(event);
+            }}
+          }});
+        }})();
+        </script>
+        """,
+        height=54,
+    )
 
 
 def render_mockup_prompt_action_row(title, prompt_text, key, prompt_id):
     prompt_text = current_prompt_text(prompt_id, prompt_text).strip()
-    action_cols = st.columns([1.35, 0.34, 0.62, 2.2])
-    with action_cols[0]:
-        render_copy_prompt_button(prompt_text, f"mockup-copy::{key}", label="Copy Prompt")
-    with action_cols[1]:
-        if st.button("✎", key=f"mockup-edit-prompt::{key}", help="Edit prompt. Developer password required.", use_container_width=True):
-            st.session_state[_mockup_prompt_dialog_key("edit", prompt_id)] = True
-            st.rerun()
-    with action_cols[2]:
-        if st.button("Preview", key=f"mockup-preview-prompt::{key}", help="Open a read-only prompt preview.", use_container_width=True):
-            st.session_state[_mockup_prompt_dialog_key("preview", prompt_id)] = True
-            st.rerun()
-    render_mockup_prompt_dialogs(title, prompt_id, prompt_text)
+    notice = st.session_state.pop("mockup_prompt_notice", "")
+    if notice:
+        st.success(notice)
+    render_mockup_prompt_bar(prompt_text, f"mockup-copy::{key}", prompt_id)
+    render_mockup_prompt_editor(title, prompt_id, prompt_text)
 
 
 def prime_asset_selection_state(result):

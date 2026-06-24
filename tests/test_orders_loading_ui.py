@@ -409,7 +409,7 @@ class EditionOpsUiTests(unittest.TestCase):
             source.index("def render_prompt_cards") : source.index("\n\ndef render_optional_package_controls")
         ]
         mockup_actions = source[
-            source.index("def render_mockup_prompt_dialogs") : source.index("\n\ndef prime_asset_selection_state")
+            source.index("def render_mockup_prompt_editor") : source.index("\n\ndef prime_asset_selection_state")
         ]
 
         self.assertIn("render_mockup_prompt_action_row", prompt_cards)
@@ -418,11 +418,20 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("View Prompt", prompt_cards)
         self.assertNotIn("st.expander", prompt_cards)
         self.assertNotIn("render_copyable_prompt", prompt_cards)
+        self.assertIn("render_mockup_prompt_bar", mockup_actions)
         self.assertIn("st.dialog", mockup_actions)
         self.assertIn("Prompt saved", mockup_actions)
-        self.assertIn("Prompt copied", source)
+        self.assertIn("Prompt copied", mockup_actions)
         self.assertIn("prompt_store.save_prompt", mockup_actions)
         self.assertIn("Developer password", mockup_actions)
+        self.assertIn("mockup_prompt_edit", mockup_actions)
+        self.assertIn("stopPropagation", mockup_actions)
+        self.assertIn("developer_unlocked", mockup_actions)
+        self.assertIn('target="_parent"', mockup_actions)
+        self.assertNotIn("Preview", mockup_actions)
+        self.assertNotIn("preview", mockup_actions.casefold())
+        self.assertNotIn("mockup-preview", mockup_actions)
+        self.assertNotIn("Read-only preview", mockup_actions)
 
     def test_product_uploads_shows_only_two_embedded_product_prompts(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
