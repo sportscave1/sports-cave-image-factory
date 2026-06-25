@@ -658,31 +658,69 @@ def positive_int(value: Any) -> int | None:
     return number if number > 0 else None
 
 
-def allocation_numbers(allocation: dict[str, Any], quantity: int) -> list[int | None]:
-    numbers: list[int | None] = []
-    raw_numbers = allocation.get("edition_numbers")
-    if isinstance(raw_numbers, list):
-        numbers = [positive_int(item) for item in raw_numbers]
+def truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "manual_override"}
 
-    unit_allocations = allocation.get("unit_allocations")
-    if isinstance(unit_allocations, list):
-        for unit in unit_allocations:
-            if not isinstance(unit, dict):
+
+def allocation_unit_rows(allocation: dict[str, Any], quantity: int) -> list[dict[str, Any]]:
+    quantity = positive_int(quantity) or 1
+    top_level_manual_override = allocation.get("manual_override")
+    unit_allocations = [
+        unit
+        for unit in (allocation.get("unit_allocations") or [])
+        if isinstance(unit, dict)
+    ]
+    if unit_allocations:
+        rows: list[dict[str, Any]] = []
+        used_indexes: set[int] = set()
+        for position, unit in enumerate(unit_allocations, start=1):
+            if quantity == 1:
+                quantity_index = 1
+            else:
+                quantity_index = positive_int(unit.get("unit_index")) or position
+            if quantity_index > quantity or quantity_index in used_indexes:
                 continue
-            unit_index = positive_int(unit.get("unit_index")) or (len(numbers) + 1)
-            while len(numbers) < unit_index:
-                numbers.append(None)
-            numbers[unit_index - 1] = positive_int(unit.get("edition_number"))
+            used_indexes.add(quantity_index)
+            rows.append(
+                {
+                    "quantity_index": quantity_index,
+                    "edition_number": positive_int(unit.get("edition_number")),
+                    "manual_override": unit.get("manual_override", top_level_manual_override),
+                    "unit_payload": unit,
+                }
+            )
+        return sorted(rows, key=lambda row: int(row.get("quantity_index") or 0))
 
+    raw_numbers = allocation.get("edition_numbers")
+    numbers = [positive_int(item) for item in raw_numbers] if isinstance(raw_numbers, list) else []
+    numbers = numbers[:quantity]
     if not numbers:
         single = positive_int(allocation.get("edition_number"))
         if single:
             numbers = [single]
 
-    target_length = max(quantity, len(numbers), 1)
-    while len(numbers) < target_length:
-        numbers.append(None)
-    return numbers
+    if not numbers:
+        return [
+            {
+                "quantity_index": 1,
+                "edition_number": None,
+                "manual_override": top_level_manual_override,
+                "unit_payload": {},
+            }
+        ]
+
+    return [
+        {
+            "quantity_index": index,
+            "edition_number": number,
+            "manual_override": top_level_manual_override,
+            "unit_payload": {},
+        }
+        for index, number in enumerate(numbers, start=1)
+        if index <= quantity
+    ]
 
 
 def product_key(product_handle: str, product_title: str, product_id: str) -> str:
@@ -691,6 +729,28 @@ def product_key(product_handle: str, product_title: str, product_id: str) -> str
         or str(product_title or "").strip().lower()
         or str(product_id or "").strip().lower()
     )
+
+
+def allocation_row_dedupe_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        row.get("order_id") or "",
+        row.get("line_item_shopify_id") or row.get("line_item_id") or "",
+        row.get("product_id") or row.get("product_handle") or row.get("product_key") or "",
+        row.get("edition_number") or "",
+        row.get("quantity_index") or "",
+    )
+
+
+def dedupe_allocation_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+    for row in rows:
+        key = allocation_row_dedupe_key(row)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
 
 
 def recover_allocations(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -707,7 +767,7 @@ def recover_allocations(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
             line = lookup.get(str(line_id)) or lookup.get(normalize_gid_tail(line_id)) or {}
             product = line.get("product") or {}
             quantity = positive_int(line.get("quantity")) or positive_int(allocation.get("quantity")) or 1
-            numbers = allocation_numbers(allocation, quantity)
+            unit_rows = allocation_unit_rows(allocation, quantity)
             product_title = (
                 allocation.get("product_title")
                 or allocation.get("product")
@@ -718,10 +778,9 @@ def recover_allocations(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
             product_handle = allocation.get("product_handle") or allocation.get("handle") or product.get("handle") or ""
             product_id = allocation.get("product_id") or allocation.get("shopify_product_id") or product.get("id") or ""
             variant = line.get("variant") or {}
-            for quantity_index, edition_number in enumerate(numbers, start=1):
-                if not edition_number:
-                    if quantity_index > quantity and any(numbers):
-                        continue
+            for unit_row in unit_rows:
+                quantity_index = positive_int(unit_row.get("quantity_index")) or 1
+                edition_number = positive_int(unit_row.get("edition_number"))
                 rows.append(
                     {
                         "source": "shopify_order_metafield",
@@ -749,10 +808,16 @@ def recover_allocations(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         "edition_total": allocation.get("edition_total") or "",
                         "edition_display": allocation.get("edition_display") or "",
                         "status": allocation.get("status") or "",
+                        "manual_override": "yes" if truthy(unit_row.get("manual_override")) else "no",
+                        "unit_payload": json.dumps(
+                            unit_row.get("unit_payload") or {},
+                            ensure_ascii=True,
+                            separators=(",", ":"),
+                        ),
                         "allocation_payload": json.dumps(allocation, ensure_ascii=True, separators=(",", ":")),
                     }
                 )
-    return rows
+    return dedupe_allocation_rows(rows)
 
 
 def recover_certificates(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -843,25 +908,33 @@ def classify_allocations(
     conflicts: list[dict[str, Any]] = []
     safe: list[dict[str, Any]] = []
     by_product_edition: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    deduped_allocations = dedupe_allocation_rows(allocations)
 
-    for row in allocations:
+    for row in deduped_allocations:
         edition_number = positive_int(row.get("edition_number"))
         if edition_number:
             by_product_edition[(row.get("product_key") or "", edition_number)].append(row)
 
+    def real_unit_identity(row: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            row.get("order_id") or "",
+            row.get("line_item_shopify_id") or row.get("line_item_id") or "",
+            row.get("quantity_index") or "",
+        )
+
     duplicate_keys = {
         key: rows
         for key, rows in by_product_edition.items()
-        if key[0] and len(rows) > 1
+        if key[0] and len({real_unit_identity(row) for row in rows}) > 1
     }
 
     duplicate_row_ids = {
-        (row.get("order_id"), row.get("line_item_id"), row.get("quantity_index"))
+        real_unit_identity(row)
         for rows in duplicate_keys.values()
         for row in rows
     }
 
-    for row in allocations:
+    for row in deduped_allocations:
         problems: list[str] = []
         if not row.get("order_id"):
             problems.append("missing_order_id")
@@ -871,7 +944,7 @@ def classify_allocations(
             problems.append("missing_product")
         if not positive_int(row.get("edition_number")):
             problems.append("missing_edition_number")
-        row_id = (row.get("order_id"), row.get("line_item_id"), row.get("quantity_index"))
+        row_id = real_unit_identity(row)
         if row_id in duplicate_row_ids:
             problems.append("duplicate_product_edition_number")
         if problems:
@@ -886,7 +959,7 @@ def classify_allocations(
             safe.append(row)
 
     found_by_title: dict[str, set[int]] = defaultdict(set)
-    for row in allocations:
+    for row in deduped_allocations:
         number = positive_int(row.get("edition_number"))
         title = str(row.get("product_title") or "")
         if number:
@@ -902,20 +975,6 @@ def classify_allocations(
             "missing_expected": sorted(expected - set(found)),
             "all_found": found,
         }
-        for missing in sorted(expected - set(found)):
-            conflicts.append(
-                {
-                    "source": "sequence_check",
-                    "order_id": "",
-                    "order_name": "",
-                    "line_item_id": "",
-                    "product_title": title,
-                    "product_handle": "",
-                    "edition_number": missing,
-                    "conflict_type": "sequence_number_not_found_in_fetched_shopify_order_metafields",
-                    "review_note": "May be outside the fetched order window or absent from Shopify metafields.",
-                }
-            )
 
     return safe, conflicts, {"duplicates": duplicate_keys, "sequences": sequence_summary}
 
@@ -1065,7 +1124,8 @@ def write_summary(
         "",
         "## H. Conflict rows / needs review",
         f"- Needs review: {len(conflicts)}",
-        "- Review CSV includes duplicate product edition numbers, missing identifiers, missing edition numbers, and focused sequence numbers not found in fetched Shopify metafields.",
+        "- Review CSV includes duplicate product edition numbers on different order-line/unit identities, missing identifiers, and missing edition numbers.",
+        "- Focused sequence gaps are informational only and do not block import by themselves.",
         "",
         "## I. GOAT Debate #050/#051 investigation",
         f"- GOAT #050/#051 found in fetched Shopify order metafields: {'yes' if goat_050_051 else 'no'}",
