@@ -4043,6 +4043,19 @@ def render_prodigi_page():
                 st.session_state["prodigi_dispatch_selected_row_id"] = ""
             st.rerun()
 
+    autoload_query = _prodigi_clean(st.session_state.get("prodigi_dispatch_autoload_query") or "")
+    last_query = st.session_state.get("prodigi_dispatch_last_query") or ""
+    if autoload_query and autoload_query != last_query:
+        matches, existing_rows = prodigi_find_order_rows_from_cache(autoload_query)
+        st.session_state["prodigi_dispatch_matches"] = matches
+        st.session_state["prodigi_dispatch_existing_rows"] = existing_rows
+        st.session_state["prodigi_dispatch_last_query"] = autoload_query
+        st.session_state["prodigi_dispatch_selected_row_id"] = matches[0]["row_id"] if len(matches) == 1 else ""
+        if not matches:
+            st.session_state["prodigi_dispatch_selected_row_id"] = ""
+        st.session_state["prodigi_dispatch_autoload_query"] = ""
+        st.rerun()
+
     matches = st.session_state.get("prodigi_dispatch_matches") or []
     existing_dispatch_rows = st.session_state.get("prodigi_dispatch_existing_rows") or []
     last_query = st.session_state.get("prodigi_dispatch_last_query") or ""

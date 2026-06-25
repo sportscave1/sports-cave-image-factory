@@ -22,11 +22,10 @@ SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
 GRID_KEY = "orders-fulfilment-grid"
 SYNC_RESULT_KEY = "orders_sync_result"
 BACKFILL_RESULT_KEY = "orders_backfill_result"
-SYNC_ENABLE_KEY = "orders_sync_controls_enabled"
-SYNC_DRY_RUN_KEY = "orders_sync_dry_run"
-SYNC_CONFIRM_KEY = "orders_sync_confirm_apply"
-BACKFILL_CONFIRM_KEY = "orders_backfill_confirm_apply"
-DEFAULT_VISIBLE_ROW_LIMIT = 150
+LATEST_FETCH_PREVIEW_KEY = "orders_latest_fetch_preview"
+SEARCH_KEY = "orders_search_text"
+SHOW_ALL_KEY = "orders_show_all_rows"
+DEFAULT_VISIBLE_ROW_LIMIT = 50
 ALLOCATION_BLOCKER_STATUSES = {
     "Needs allocation",
     "Needs Review - Sold Out",
@@ -41,14 +40,11 @@ VISIBLE_COLUMNS = (
     "order",
     "date",
     "customer",
-    "customer_email",
-    "edition",
-    "edition_total",
-    "certificate",
-    "shipping",
     "product",
     "variant",
-    "admin_url",
+    "edition",
+    "shipping",
+    "prodigi",
 )
 
 
@@ -78,10 +74,9 @@ def _ensure_state():
     st.session_state.setdefault(NOTICE_KEY, "")
     st.session_state.setdefault(SYNC_RESULT_KEY, {})
     st.session_state.setdefault(BACKFILL_RESULT_KEY, {})
-    st.session_state.setdefault(SYNC_ENABLE_KEY, False)
-    st.session_state.setdefault(SYNC_DRY_RUN_KEY, True)
-    st.session_state.setdefault(SYNC_CONFIRM_KEY, False)
-    st.session_state.setdefault(BACKFILL_CONFIRM_KEY, False)
+    st.session_state.setdefault(LATEST_FETCH_PREVIEW_KEY, {})
+    st.session_state.setdefault(SEARCH_KEY, "")
+    st.session_state.setdefault(SHOW_ALL_KEY, False)
 
 
 def _configured_supabase_backend():
@@ -165,9 +160,56 @@ def _format_edition(value):
     return f"#{number:03d}" if number else ""
 
 
+def _format_edition_with_total(number, total=None):
+    edition = _format_edition(number)
+    total_number = int(total or 0)
+    if not edition:
+        return ""
+    if total_number > 0:
+        return f"{edition}/{total_number}"
+    return edition
+
+
 def _placeholder_text(value, *, missing="Missing from ledger"):
     text = str(value or "").strip()
     return text if text else missing
+
+
+def _display_shipping_label(value):
+    text = str(value or "").strip()
+    if not text:
+        return "Missing shipping"
+    lowered = text.casefold()
+    if any(token in lowered for token in ("express", "priority", "rush")):
+        return "Express"
+    if any(token in lowered for token in ("standard", "economy", "regular")):
+        return "Standard"
+    return text
+
+
+def _display_variant_label(value):
+    text = str(value or "").strip()
+    return text if text else "Missing variant"
+
+
+def _display_prodigi_status(value):
+    status = str(value or "").strip()
+    if not status:
+        return "Not started"
+    lowered = status.casefold()
+    if lowered in {"needs review", "hold / issue"} or "issue" in lowered:
+        return "Issue"
+    if lowered in {"ready to send", "submitted"}:
+        return "In progress"
+    if lowered in {"submitted to prodigi", "in production", "awaiting tracking", "shipped"}:
+        return "Sent to Prodigi"
+    if lowered == "fulfilled in shopify":
+        return "Complete"
+    return status
+
+
+def _developer_mode():
+    return bool(st.session_state.get("developer_unlocked"))
 
 
 def _certificate_label(row):
@@ -228,12 +270,17 @@ def _normalise_row(row):
     updated["order"] = str(updated.get("order") or "")
     updated["date"] = str(updated.get("date") or "")
     updated["customer"] = _placeholder_text(updated.get("customer"))
-    updated["shipping"] = _placeholder_text(updated.get("shipping") or updated.get("shipping_method"))
+    updated["shipping_method"] = str(updated.get("shipping_method") or "")
+    updated["shipping"] = _display_shipping_label(updated.get("shipping_method") or updated.get("shipping"))
     updated["product"] = _placeholder_text(updated.get("product"))
-    updated["variant"] = _placeholder_text(updated.get("variant"))
+    updated["variant"] = _display_variant_label(updated.get("variant"))
     updated["edition_number"] = edition_number
-    updated["edition"] = _format_edition(edition_number) if edition_number else raw_edition
     updated["edition_total"] = int(updated.get("edition_total") or 100)
+    updated["edition"] = (
+        _format_edition_with_total(edition_number, updated["edition_total"])
+        if edition_number
+        else raw_edition
+    )
     updated["has_saved_allocation"] = bool(updated.get("has_saved_allocation"))
     updated["edition_offset"] = int(updated.get("edition_offset") or 0)
     updated["line_quantity"] = int(updated.get("line_quantity") or 1)
@@ -249,6 +296,9 @@ def _normalise_row(row):
     updated["created_at"] = str(updated.get("created_at") or "")
     updated["order_number_sort"] = int(updated.get("order_number_sort") or _parse_order_number(updated["order"]))
     updated["admin_url"] = str(updated.get("admin_url") or "")
+    updated["prodigi_status"] = str(updated.get("prodigi_status") or "")
+    updated["prodigi_row_id"] = str(updated.get("prodigi_row_id") or "")
+    updated["prodigi"] = _display_prodigi_status(updated.get("prodigi_status"))
     updated["certificate_id"] = str(updated.get("certificate_id") or "")
     updated["certificate_status"] = str(updated.get("certificate_status") or "")
     updated["certificate"] = _certificate_label(updated)
@@ -637,31 +687,27 @@ def _save_refreshed_rows(rows, existing_rows, refreshed_at=None):
     return sorted_rows
 
 
-def _refresh_orders(*, dry_run=True, max_orders=100):
+def _refresh_orders(*, latest_paid_only=True, max_orders=50):
     backend = _configured_supabase_backend()
     if not backend:
         st.session_state[NOTICE_KEY] = "Supabase is not configured. Stage 4B sync cannot run from local fallback mode."
         return
-    if dry_run:
-        result = backend.preview_shopify_orders_to_supabase(max_orders=max_orders)
-        st.session_state[SYNC_RESULT_KEY] = result
-        st.session_state[NOTICE_KEY] = (
-            f"Dry-run complete: fetched {int(result.get('shopify_orders_fetched') or 0)} Shopify orders, "
-            f"would insert {int(result.get('new_orders_inserted') or 0)} new orders and "
-            f"{int(result.get('edition_allocations_created') or 0)} edition allocations."
+    if latest_paid_only:
+        result = backend.sync_latest_paid_orders_to_supabase(limit=max_orders)
+    else:
+        result = backend.sync_shopify_orders_to_supabase(
+            max_orders=max_orders,
+            generate_certificates=False,
+            sync_product_metafields=False,
         )
-        return
-    result = backend.sync_shopify_orders_to_supabase(
-        max_orders=max_orders,
-        generate_certificates=False,
-        sync_product_metafields=False,
-    )
     st.session_state[SYNC_RESULT_KEY] = result
     _reload_orders_from_source()
     st.session_state[NOTICE_KEY] = (
-        f"Sync applied: fetched {int(result.get('shopify_orders_fetched') or 0)} Shopify orders, "
-        f"inserted {int(result.get('new_orders_inserted') or 0)} new orders and "
-        f"created {int(result.get('edition_allocations_created') or 0)} edition allocations."
+        f"New orders imported: {int(result.get('new_orders_inserted') or 0)} | "
+        f"Existing orders preserved: {int(result.get('existing_orders_skipped') or 0)} | "
+        f"Edition numbers assigned: {int(result.get('edition_allocations_created') or 0)} | "
+        f"Missing product mapping: {int(result.get('missing_mapping_skipped') or 0)} | "
+        f"Errors: {len(result.get('errors') or [])}"
     )
 
 
@@ -678,6 +724,18 @@ def _backfill_missing_order_details(*, dry_run=True, limit=100):
     st.session_state[NOTICE_KEY] = (
         f"{mode_label}: {int(result.get('orders_updated') or 0)} order(s) with missing details "
         f"and {int(result.get('variant_rows_filled') or 0)} variant row(s) improved."
+    )
+
+
+def _preview_latest_paid_orders(*, limit=50):
+    backend = _configured_supabase_backend()
+    if not backend:
+        st.session_state[NOTICE_KEY] = "Supabase is not configured. Latest Shopify fetch preview is unavailable."
+        return
+    result = backend.preview_latest_paid_orders_sync(limit=limit)
+    st.session_state[LATEST_FETCH_PREVIEW_KEY] = result
+    st.session_state[NOTICE_KEY] = (
+        f"Fetched preview for {int(result.get('shopify_orders_fetched') or 0)} latest paid Shopify order(s)."
     )
 
 
@@ -894,6 +952,43 @@ def _selected_rows_from_state(rows):
         if 0 <= index < len(normalised_rows):
             selected.append(normalised_rows[index])
     return selected
+
+
+def _search_blob(row):
+    normalised = _normalise_row(row)
+    fields = (
+        normalised.get("order"),
+        normalised.get("customer"),
+        normalised.get("product"),
+        normalised.get("variant"),
+        normalised.get("edition"),
+    )
+    return " ".join(str(value or "").casefold() for value in fields)
+
+
+def _filter_rows(rows, search_text):
+    query = str(search_text or "").strip().casefold()
+    if not query:
+        return [_normalise_row(row) for row in rows or []]
+    return [row for row in [_normalise_row(item) for item in rows or []] if query in _search_blob(row)]
+
+
+def _open_prodigi_for_row(row):
+    target_order = str((row or {}).get("order") or "").strip()
+    if not target_order:
+        st.session_state[NOTICE_KEY] = "Select one order row first."
+        return
+    st.session_state["selected_page"] = "Prodigi"
+    st.session_state["prodigi_dispatch_autoload_query"] = target_order
+    st.session_state["prodigi-dispatch-order-search"] = target_order
+
+
+def _selected_admin_url(rows):
+    for row in rows or []:
+        admin_url = str((_normalise_row(row)).get("admin_url") or "").strip()
+        if admin_url:
+            return admin_url
+    return ""
 
 
 def _current_row_for(row):
@@ -1125,6 +1220,173 @@ def _render_ledger_diagnostics():
             st.caption(f"{label}: {int(counts.get(key) or 0)}")
 
 
+def _display_rows(rows):
+    output = []
+    for row in [_normalise_row(item) for item in rows or []]:
+        output.append({column: row.get(column, "") for column in VISIBLE_COLUMNS})
+    return output
+
+
+def _column_config():
+    return {
+        "order": st.column_config.TextColumn("Order", width="medium"),
+        "date": st.column_config.TextColumn("Date", width="small"),
+        "customer": st.column_config.TextColumn("Customer", width="medium"),
+        "product": st.column_config.TextColumn("Product", width="large"),
+        "variant": st.column_config.TextColumn("Variant", width="medium"),
+        "edition": st.column_config.TextColumn("Edition", width="small"),
+        "shipping": st.column_config.TextColumn("Shipping", width="medium"),
+        "prodigi": st.column_config.TextColumn("Prodigi", width="small"),
+    }
+
+
+def _render_top_actions(rows):
+    selected_rows = _selected_rows_from_state(rows)
+    selected_count = len(selected_rows)
+    backend = _configured_supabase_backend()
+    admin_url = _selected_admin_url(selected_rows)
+    action_cols = st.columns([1.35, 1.1, 1.1, 2.45])
+    if action_cols[0].button(
+        "Refresh Latest Paid Orders",
+        type="primary",
+        use_container_width=True,
+        disabled=not backend,
+    ):
+        with st.spinner("Refreshing latest paid Shopify orders..."):
+            _refresh_orders(latest_paid_only=True, max_orders=50)
+        st.rerun()
+    if action_cols[1].button(
+        "Start Prodigi Dispatch",
+        use_container_width=True,
+        disabled=selected_count != 1,
+    ):
+        _open_prodigi_for_row(selected_rows[0])
+        st.rerun()
+    if admin_url:
+        action_cols[2].link_button("Open Shopify Admin", admin_url, use_container_width=True)
+    else:
+        action_cols[2].button("Open Shopify Admin", use_container_width=True, disabled=True)
+    action_cols[3].caption(f"{selected_count} row(s) selected.")
+    if not backend:
+        st.caption("Supabase ledger is not available in this runtime, so Shopify refresh is disabled.")
+
+
+def _render_admin_result(title, result):
+    if not result:
+        return
+    st.markdown(f"**{title}**")
+    for label, key in (
+        ("Mode", "mode"),
+        ("Shopify orders fetched", "shopify_orders_fetched"),
+        ("Existing orders skipped", "existing_orders_skipped"),
+        ("New orders inserted", "new_orders_inserted"),
+        ("New lines inserted", "new_lines_inserted"),
+        ("Edition allocations created", "edition_allocations_created"),
+        ("Existing allocations preserved", "existing_allocations_preserved"),
+        ("Missing mapping skipped", "missing_mapping_skipped"),
+        ("Historical orders skipped", "historical_orders_skipped"),
+        ("Orders updated", "orders_updated"),
+        ("Variant rows filled", "variant_rows_filled"),
+        ("Shipping rows filled", "shipping_rows_filled"),
+        ("Email rows filled", "email_rows_filled"),
+        ("Query", "query"),
+    ):
+        if key in result:
+            st.caption(f"{label}: {result.get(key)}")
+    errors = result.get("errors") or []
+    if errors:
+        st.caption(f"Errors: {len(errors)}")
+        for error in errors[:5]:
+            st.caption(f"- {error}")
+
+
+def _missing_data_counts(rows):
+    counts = {
+        "missing_variant": 0,
+        "missing_shipping": 0,
+        "missing_customer": 0,
+        "missing_product": 0,
+        "missing_edition_number": 0,
+    }
+    for row in [_normalise_row(item) for item in (rows or [])]:
+        if row.get("variant") == "Missing variant":
+            counts["missing_variant"] += 1
+        if row.get("shipping") == "Missing shipping":
+            counts["missing_shipping"] += 1
+        if row.get("customer") == "Missing from ledger":
+            counts["missing_customer"] += 1
+        if row.get("product") == "Missing from ledger":
+            counts["missing_product"] += 1
+        if not row.get("edition_number"):
+            counts["missing_edition_number"] += 1
+    return counts
+
+
+def _render_missing_data_diagnostics(rows):
+    counts = _missing_data_counts(rows)
+    st.caption(f"Rows with missing variant: {counts['missing_variant']}")
+    st.caption(f"Rows with missing shipping: {counts['missing_shipping']}")
+    st.caption(f"Rows with missing customer: {counts['missing_customer']}")
+    st.caption(f"Rows with missing product title: {counts['missing_product']}")
+    st.caption(f"Rows with missing edition number: {counts['missing_edition_number']}")
+
+
+def _render_ledger_diagnostics():
+    status = _ledger_status()
+    if not status.get("configured"):
+        return
+    counts = _ledger_counts()
+    st.caption("Supabase connected" if status.get("connected") else "Supabase connection failed")
+    st.caption("Source: Supabase ledger" if status.get("connected") else "Source: fallback cache")
+    if status.get("warning"):
+        st.caption(status.get("warning"))
+    for label, key in (
+        ("shopify_orders", "shopify_orders"),
+        ("shopify_order_lines", "shopify_order_lines"),
+        ("edition_orders", "edition_orders"),
+        ("edition_products", "edition_products"),
+        ("audit_logs", "audit_logs"),
+    ):
+        st.caption(f"{label}: {int(counts.get(key) or 0)}")
+
+
+def _render_admin_panel(rows):
+    if not _developer_mode():
+        return
+    backend = _configured_supabase_backend()
+    with st.expander("Admin Order Sync + Diagnostics", expanded=False):
+        admin_cols = st.columns([1.15, 1.15, 1.15, 1.2])
+        if admin_cols[0].button("Preview Latest Paid Fetch", use_container_width=True, disabled=not backend):
+            with st.spinner("Previewing latest paid Shopify orders..."):
+                _preview_latest_paid_orders(limit=50)
+            st.rerun()
+        if admin_cols[1].button("Apply Latest Paid Sync", use_container_width=True, disabled=not backend):
+            with st.spinner("Applying latest paid Shopify sync..."):
+                _refresh_orders(latest_paid_only=True, max_orders=50)
+            st.rerun()
+        if admin_cols[2].button("Backfill Missing Shopify Details", use_container_width=True, disabled=not backend):
+            with st.spinner("Backfilling missing Shopify details..."):
+                _backfill_missing_order_details(dry_run=False, limit=100)
+            st.rerun()
+        if admin_cols[3].button("Backfill Dry Run", use_container_width=True, disabled=not backend):
+            with st.spinner("Previewing missing Shopify details..."):
+                _backfill_missing_order_details(dry_run=True, limit=100)
+            st.rerun()
+
+        preview = st.session_state.get(LATEST_FETCH_PREVIEW_KEY) or {}
+        if preview:
+            _render_admin_result("Latest paid fetch preview", preview)
+            preview_rows = preview.get("preview_rows") or []
+            if preview_rows:
+                st.dataframe(preview_rows, hide_index=True, use_container_width=True)
+        _render_admin_result("Latest sync summary", st.session_state.get(SYNC_RESULT_KEY) or {})
+        _render_admin_result("Latest backfill summary", st.session_state.get(BACKFILL_RESULT_KEY) or {})
+        st.markdown("**Supabase diagnostics**")
+        _render_ledger_diagnostics()
+        st.markdown("**Orders read completeness diagnostics**")
+        _render_missing_data_diagnostics(rows)
+
+
 def _render_orders_table(rows):
     start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
@@ -1150,18 +1412,15 @@ def render_page():
     _load_snapshot_once()
     rows = _apply_latest_product_numbers(st.session_state.get(ROWS_KEY, []))
     st.session_state[ROWS_KEY] = rows
-    visible_rows = rows[:DEFAULT_VISIBLE_ROW_LIMIT]
     meta = st.session_state.get(META_KEY) or {}
     ledger_status = _ledger_status()
     source_label = "Supabase ledger" if meta.get("source") == "supabase" and ledger_status.get("connected") else "Local fallback cache"
 
     st.title("Orders")
-    st.caption("Operational orders ledger. Edition numbers load from Supabase first.")
+    st.caption("Supabase ledger-backed orders for fulfilment and Prodigi dispatch.")
     st.caption("Supabase connected" if ledger_status.get("connected") else "Supabase connection failed")
     st.caption(f"Source: {source_label}")
-    order_count = int(meta.get("order_count") or 0)
-    count_label = f" | Cached orders: {order_count}" if order_count else ""
-    st.caption(f"Last synced: {_format_time(meta.get('last_synced') or meta.get('last_refreshed'))}{count_label}")
+    st.caption(f"Last synced: {_format_time(meta.get('last_synced') or meta.get('last_refreshed'))}")
 
     notice = st.session_state.get(NOTICE_KEY)
     if notice:
@@ -1169,17 +1428,28 @@ def render_page():
         st.session_state[NOTICE_KEY] = ""
 
     _render_top_actions(rows)
-    _render_stage4b_result("Latest Stage 4B sync summary", st.session_state.get(SYNC_RESULT_KEY) or {})
-    _render_stage4b_result("Latest Stage 4B backfill summary", st.session_state.get(BACKFILL_RESULT_KEY) or {})
-    _render_ledger_diagnostics()
-    _render_missing_data_diagnostics(rows)
+
+    search_cols = st.columns([3.2, 1])
+    search_text = search_cols[0].text_input(
+        "Search orders",
+        key=SEARCH_KEY,
+        placeholder="Order, customer, product, variant, edition",
+    )
+    show_all = search_cols[1].checkbox("Show all rows", key=SHOW_ALL_KEY)
+
+    filtered_rows = _filter_rows(rows, search_text)
+    visible_limit = len(filtered_rows) if show_all else DEFAULT_VISIBLE_ROW_LIMIT
+    visible_rows = filtered_rows[:visible_limit]
 
     if not rows:
         st.info("No saved orders are available in the operational ledger yet.")
+        _render_admin_panel(rows)
         return
 
-    if len(rows) > len(visible_rows):
-        st.caption(f"Showing latest {len(visible_rows)} of {len(rows)} saved artwork rows.")
+    if len(filtered_rows) > len(visible_rows):
+        st.caption(f"Showing latest {len(visible_rows)} of {len(filtered_rows)} matching ledger rows.")
     else:
-        st.caption(f"{len(rows)} artwork rows shown.")
+        st.caption(f"{len(visible_rows)} ledger row(s) shown.")
+
     _render_orders_table(visible_rows)
+    _render_admin_panel(rows)

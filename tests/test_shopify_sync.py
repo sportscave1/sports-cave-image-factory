@@ -1840,6 +1840,33 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertIn("updatedAt", shopify_sync.ORDERS_SAFE_QUERY)
         self.assertIn("totalPriceSet", shopify_sync.ORDERS_SAFE_QUERY)
 
+    @patch.object(shopify_sync, "iter_order_pages")
+    def test_fetch_latest_paid_orders_uses_created_at_and_not_unfulfilled_filter(self, iter_order_pages):
+        iter_order_pages.return_value = [{"orders": [{"order_name": "#SC3000"}]}]
+
+        result = shopify_sync.fetch_latest_paid_orders(limit=50, lookback_days=14, config=self.config)
+
+        self.assertEqual(result["orders"][0]["order_name"], "#SC3000")
+        self.assertIn("financial_status:paid", iter_order_pages.call_args.kwargs["query"])
+        self.assertIn("created_at:>=", iter_order_pages.call_args.kwargs["query"])
+        self.assertNotIn("fulfillment_status:unfulfilled", iter_order_pages.call_args.kwargs["query"])
+        self.assertEqual(iter_order_pages.call_args.kwargs["sort_key"], "CREATED_AT")
+        self.assertTrue(iter_order_pages.call_args.kwargs["reverse"])
+        self.assertFalse(iter_order_pages.call_args.kwargs["default_paid_unfulfilled_filter"])
+
+    @patch.object(shopify_sync, "iter_order_pages")
+    def test_fetch_latest_paid_orders_falls_back_to_broad_paid_query(self, iter_order_pages):
+        iter_order_pages.side_effect = [
+            [{"orders": []}],
+            [{"orders": [{"order_name": "#SC3001"}]}],
+        ]
+
+        result = shopify_sync.fetch_latest_paid_orders(limit=50, lookback_days=14, config=self.config)
+
+        self.assertEqual(result["orders"][0]["order_name"], "#SC3001")
+        self.assertEqual(result["query"], "financial_status:paid")
+        self.assertEqual(iter_order_pages.call_count, 2)
+
     def test_snapshot_override_search_returns_recent_allocated_order_lines(self):
         rows = [
             {
@@ -2535,6 +2562,56 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["new_lines_inserted"], 2)
         self.assertEqual(result["edition_allocations_created"], 2)
         self.assertEqual(seen_line_ids, ["gid://shopify/LineItem/2001", "gid://shopify/LineItem/2002"])
+
+    @patch.object(supabase_backend, "_latest_paid_orders_payload")
+    @patch.object(supabase_backend, "sync_shopify_orders_to_supabase")
+    def test_sync_latest_paid_orders_to_supabase_uses_broader_latest_paid_query(
+        self,
+        sync_shopify_orders_to_supabase,
+        latest_paid_orders_payload,
+    ):
+        latest_paid_orders_payload.return_value = {
+            "orders": [],
+            "query": "financial_status:paid created_at:>=2026-06-11",
+            "limit": 50,
+            "lookback_days": 14,
+        }
+        sync_shopify_orders_to_supabase.return_value = {"shopify_orders_fetched": 6}
+
+        result = supabase_backend.sync_latest_paid_orders_to_supabase(config=self.config, limit=50, lookback_days=14)
+
+        self.assertEqual(result["query"], "financial_status:paid created_at:>=2026-06-11")
+        self.assertEqual(sync_shopify_orders_to_supabase.call_args.kwargs["query"], "financial_status:paid created_at:>=2026-06-11")
+        self.assertEqual(sync_shopify_orders_to_supabase.call_args.kwargs["max_orders"], 50)
+        self.assertFalse(sync_shopify_orders_to_supabase.call_args.kwargs["generate_certificates"])
+        self.assertFalse(sync_shopify_orders_to_supabase.call_args.kwargs["sync_product_metafields"])
+
+    @patch.object(supabase_backend, "ensure_schema")
+    @patch.object(supabase_backend, "ensure_edition_tracking_start", return_value=datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc))
+    @patch.object(supabase_backend, "get_sync_state", return_value={"edition_tracking_start_at": "2026-06-01T00:00:00Z"})
+    @patch.object(supabase_backend, "_latest_paid_orders_payload")
+    @patch.object(supabase_backend, "_analyze_fetched_orders_for_preview")
+    def test_preview_latest_paid_orders_sync_uses_latest_paid_payload(
+        self,
+        analyze_preview,
+        latest_paid_orders_payload,
+        _sync_state,
+        _tracking_start,
+        _ensure_schema,
+    ):
+        latest_paid_orders_payload.return_value = {
+            "orders": [{"order_name": "#SC3002"}],
+            "query": "financial_status:paid created_at:>=2026-06-11",
+            "limit": 50,
+            "lookback_days": 14,
+        }
+        analyze_preview.return_value = {"mode": "latest_paid_dry_run", "shopify_orders_fetched": 1}
+
+        result = supabase_backend.preview_latest_paid_orders_sync(config=self.config, limit=50, lookback_days=14)
+
+        self.assertEqual(result["query"], "financial_status:paid created_at:>=2026-06-11")
+        self.assertEqual(result["mode"], "latest_paid_dry_run")
+        self.assertEqual(analyze_preview.call_args.kwargs["mode_label"], "latest_paid_dry_run")
 
     @patch.object(supabase_backend, "ensure_schema")
     def test_backfill_missing_shopify_order_details_dry_run_does_not_write(self, _ensure_schema):

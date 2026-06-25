@@ -1545,6 +1545,7 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
         created_at = _safe_iso(row.get("created_at") or order_raw.get("created_at") or order_raw.get("createdAt"))
         date_value = _date_label(processed_at or created_at)
         shipping = _shipping_summary_from_raw(order_raw) or _shipping_method_from_raw(order_raw)
+        shipping_method = _shipping_method_from_raw(order_raw)
         product_title = str(row.get("product_title") or line_raw.get("product_title") or line_raw.get("title") or "")
         variant_title = str(row.get("variant_title") or line_raw.get("variant_title") or line_raw.get("variantTitle") or "")
         product_handle = str(row.get("shopify_handle") or line_raw.get("product_handle") or line_raw.get("handle") or "")
@@ -1561,9 +1562,12 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
             "customer": str(row.get("customer_name") or order_raw.get("customer_name") or ""),
             "customer_email": str(row.get("customer_email") or order_raw.get("customer_email") or order_raw.get("email") or ""),
             "shipping": shipping,
+            "shipping_method": shipping_method,
             "product": product_title,
             "variant": variant_title,
             "admin_url": str(row.get("admin_url") or ""),
+            "prodigi_status": str(row.get("prodigi_status") or ""),
+            "prodigi_row_id": str(row.get("prodigi_row_id") or ""),
             "line_quantity": quantity,
             "shopify_order_id": str(row.get("shopify_order_id") or ""),
             "legacy_resource_id": str(order_raw.get("legacy_resource_id") or ""),

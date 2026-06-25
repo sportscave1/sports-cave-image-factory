@@ -33,6 +33,8 @@ DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES = 10
 DEFAULT_INITIAL_ORDER_BOOTSTRAP_DAYS = 30
 DEFAULT_INITIAL_ORDER_ASSIGNMENT_WINDOW_DAYS = 7
 DEFAULT_INCREMENTAL_ORDER_FETCH_LIMIT = 100
+DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT = 50
+DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS = 14
 DATETIME_MAX_UTC = datetime.max.replace(tzinfo=timezone.utc)
 DEFAULT_PSD_MASTER_FOLDER_SETTING = {
     "url": "https://drive.google.com/drive/folders/1UCs_EsyjVXZUNclAfnmO7y2x7rKutwhH",
@@ -6264,6 +6266,7 @@ def process_paid_order(
         raise ValueError("Shopify order ID is missing.")
     assignments_created = 0
     existing_assignments_skipped = 0
+    missing_mapping_skipped = 0
     changed_handles = set()
     generated_certificates = 0
     errors = []
@@ -6274,6 +6277,7 @@ def process_paid_order(
         return {
             "assignments_created": 0,
             "existing_assignments_skipped": 0,
+            "missing_mapping_skipped": 0,
             "generated_certificates": 0,
             "historical_lines_marked": 0,
             "changed_handles": [],
@@ -6283,6 +6287,7 @@ def process_paid_order(
         return {
             "assignments_created": 0,
             "existing_assignments_skipped": 0,
+            "missing_mapping_skipped": 0,
             "generated_certificates": 0,
             "historical_lines_marked": _mark_order_lines_historical(
                 order.get("shopify_order_id"),
@@ -6354,6 +6359,7 @@ def process_paid_order(
 
         handle = (product or {}).get("handle") or line_item.get("product_handle") or ""
         if not handle:
+            missing_mapping_skipped += quantity
             errors.append(f"Missing product handle for line item {line_item_id}.")
             with connect() as conn:
                 with conn.cursor() as cur:
@@ -6458,6 +6464,7 @@ def process_paid_order(
     return {
         "assignments_created": assignments_created,
         "existing_assignments_skipped": existing_assignments_skipped,
+        "missing_mapping_skipped": missing_mapping_skipped,
         "generated_certificates": generated_certificates,
         "historical_lines_marked": 0,
         "changed_handles": sorted(changed_handles),
@@ -6539,6 +6546,152 @@ def _preview_product_counter_state(cur, line_item, cache):
     }
     cache[handle] = state
     return state
+
+
+def _latest_paid_orders_payload(config=None, *, limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT, lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS):
+    config = config or shopify_sync.get_config()
+    fetched = shopify_sync.fetch_latest_paid_orders(
+        limit=limit,
+        lookback_days=lookback_days,
+        config=config,
+    )
+    return {
+        "orders": fetched.get("orders") or [],
+        "query": str(fetched.get("query") or ""),
+        "limit": int(fetched.get("limit") or limit or DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT),
+        "lookback_days": int(fetched.get("lookback_days") or lookback_days or DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS),
+    }
+
+
+def _analyze_fetched_orders_for_preview(
+    fetched_orders,
+    *,
+    tracking_start,
+    mode_label="dry_run",
+):
+    seen = len(fetched_orders)
+    imported_orders = 0
+    new_lines_imported = 0
+    existing_lines_preserved = 0
+    assignments = 0
+    existing_assignments_preserved = 0
+    missing_mapping_skipped = 0
+    historical_orders_skipped = 0
+    historical_lines_skipped = 0
+    sold_out_skipped = 0
+    preview_rows = []
+
+    order_ids = [order.get("shopify_order_id") for order in fetched_orders]
+    line_item_ids = []
+    for order in fetched_orders:
+        for line_item in order.get("line_items") or []:
+            line_id = str(line_item.get("shopify_line_item_id") or "").strip()
+            if line_id:
+                line_item_ids.append(line_id)
+    existing_order_ids = list_existing_shopify_order_ids(order_ids)
+    existing_line_ids = list_existing_shopify_line_item_ids(line_item_ids)
+    assignment_snapshot = get_order_line_assignment_snapshot(line_item_ids)
+    imported_orders = sum(
+        1 for order in fetched_orders if str(order.get("shopify_order_id") or "").strip() not in existing_order_ids
+    )
+    new_lines_imported = sum(1 for line_id in line_item_ids if line_id not in existing_line_ids)
+    existing_lines_preserved = max(len(line_item_ids) - new_lines_imported, 0)
+
+    product_state_cache = {}
+    with connect() as conn:
+        with conn.cursor() as cur:
+            for order in sorted(fetched_orders, key=order_allocation_sort_key):
+                should_assign_editions = True
+                order_datetime = _order_effective_datetime(order)
+                if order_datetime and tracking_start and order_datetime < tracking_start:
+                    should_assign_editions = False
+                    historical_orders_skipped += 1
+                order_missing_mapping = False
+                order_would_allocate = 0
+                for line_index, line_item in enumerate(order.get("line_items") or [], start=1):
+                    if not isinstance(line_item, dict):
+                        line_item = {}
+                    quantity = max(1, int(line_item.get("quantity") or 1))
+                    line_item_id = str(
+                        line_item.get("shopify_line_item_id")
+                        or f"{order.get('shopify_order_id') or 'order'}:line:{line_index}"
+                    )
+                    snapshot = assignment_snapshot.get(line_item_id) or {}
+                    existing_indexes = {
+                        int(item.get("allocation_index") or 0)
+                        for item in (snapshot.get("assignments") or [])
+                        if int(item.get("allocation_index") or 0) > 0
+                    }
+                    if not should_assign_editions:
+                        historical_lines_skipped += max(quantity - len(existing_indexes), 0)
+                        existing_assignments_preserved += len(existing_indexes)
+                        continue
+                    product_state = _preview_product_counter_state(cur, line_item, product_state_cache)
+                    handle = str(product_state.get("handle") or line_item.get("product_handle") or "").strip()
+                    if not handle:
+                        missing_mapping_skipped += max(quantity - len(existing_indexes), 0)
+                        existing_assignments_preserved += len(existing_indexes)
+                        order_missing_mapping = True
+                        continue
+                    for allocation_index in range(1, quantity + 1):
+                        if allocation_index in existing_indexes:
+                            existing_assignments_preserved += 1
+                            continue
+                        next_number = int(product_state.get("next_edition_number") or 1)
+                        edition_total = int(product_state.get("edition_total") or 100)
+                        is_sold_out = (
+                            product_state.get("run_status") == SOLD_OUT_RUN_STATUS
+                            or bool(product_state.get("sold_out"))
+                            or next_number > edition_total
+                        )
+                        if is_sold_out:
+                            sold_out_skipped += 1
+                            continue
+                        assignments += 1
+                        order_would_allocate += 1
+                        product_state["next_edition_number"] = next_number + 1
+                preview_rows.append(
+                    {
+                        "order_name": str(order.get("order_name") or ""),
+                        "date": str(order.get("processed_at") or order.get("created_at") or "")[:10],
+                        "customer_name": str(order.get("customer_name") or order.get("customer_email") or ""),
+                        "financial_status": str(order.get("financial_status") or ""),
+                        "fulfillment_status": str(order.get("fulfillment_status") or ""),
+                        "line_item_count": len(order.get("line_items") or []),
+                        "already_exists": str(order.get("shopify_order_id") or "").strip() in existing_order_ids,
+                        "would_insert": str(order.get("shopify_order_id") or "").strip() not in existing_order_ids,
+                        "missing_mapping": order_missing_mapping,
+                        "would_allocate": order_would_allocate,
+                        "shopify_order_id": str(order.get("shopify_order_id") or ""),
+                    }
+                )
+
+    existing_orders_skipped = max(seen - imported_orders, 0)
+    preview_rows = sorted(
+        preview_rows,
+        key=lambda row: (
+            _allocation_datetime_sort_value(row.get("date")),
+            _numeric_sort_value(row.get("order_name")),
+        ),
+        reverse=True,
+    )
+    return {
+        "mode": mode_label,
+        "orders_seen": seen,
+        "shopify_orders_fetched": seen,
+        "existing_orders_skipped": existing_orders_skipped,
+        "new_orders_inserted": imported_orders,
+        "new_lines_inserted": new_lines_imported,
+        "existing_lines_preserved": existing_lines_preserved,
+        "edition_allocations_created": assignments,
+        "existing_allocations_preserved": existing_assignments_preserved,
+        "missing_mapping_skipped": missing_mapping_skipped,
+        "historical_orders_skipped": historical_orders_skipped,
+        "historical_lines_skipped": historical_lines_skipped,
+        "sold_out_skipped": sold_out_skipped,
+        "preview_rows": preview_rows[:10],
+        "errors": [],
+    }
 
 
 def preview_shopify_orders_to_supabase(
@@ -6691,6 +6844,53 @@ def preview_shopify_orders_to_supabase(
         "fetch_duration_ms": int((time.perf_counter() - total_started) * 1000),
         "errors": errors[:10],
     }
+
+
+def preview_latest_paid_orders_sync(
+    config=None,
+    *,
+    limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT,
+    lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
+):
+    ensure_schema()
+    config = config or shopify_sync.get_config()
+    total_started = time.perf_counter()
+    state = get_sync_state()
+    tracking_start = _parse_datetime(state.get("edition_tracking_start_at"))
+    if not tracking_start:
+        tracking_start = ensure_edition_tracking_start()
+    payload = _latest_paid_orders_payload(config, limit=limit, lookback_days=lookback_days)
+    result = _analyze_fetched_orders_for_preview(
+        payload.get("orders") or [],
+        tracking_start=tracking_start,
+        mode_label="latest_paid_dry_run",
+    )
+    result["query"] = payload.get("query") or ""
+    result["lookback_days"] = payload.get("lookback_days") or lookback_days
+    result["limit"] = payload.get("limit") or limit
+    result["fetch_duration_ms"] = int((time.perf_counter() - total_started) * 1000)
+    return result
+
+
+def sync_latest_paid_orders_to_supabase(
+    config=None,
+    *,
+    limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT,
+    lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
+):
+    payload = _latest_paid_orders_payload(config, limit=limit, lookback_days=lookback_days)
+    result = sync_shopify_orders_to_supabase(
+        config=config,
+        query=payload.get("query") or "",
+        max_orders=payload.get("limit") or limit,
+        days=payload.get("lookback_days") or lookback_days,
+        generate_certificates=False,
+        sync_product_metafields=False,
+    )
+    result["query"] = payload.get("query") or ""
+    result["lookback_days"] = payload.get("lookback_days") or lookback_days
+    result["limit"] = payload.get("limit") or limit
+    return result
 
 
 def backfill_missing_shopify_order_details(config=None, *, limit=100, dry_run=True):
@@ -7049,6 +7249,7 @@ def sync_shopify_orders_to_supabase(
     assignments = 0
     existing_skipped = 0
     generated_certificates = 0
+    missing_mapping_skipped = 0
     changed_handles = set()
     errors = []
     sync_from = None
@@ -7167,6 +7368,7 @@ def sync_shopify_orders_to_supabase(
                 historical_orders_synced += 1
             assignments += int(result.get("assignments_created") or 0)
             existing_skipped += int(result.get("existing_assignments_skipped") or 0)
+            missing_mapping_skipped += int(result.get("missing_mapping_skipped") or 0)
             generated_certificates += int(result.get("generated_certificates") or 0)
             historical_lines_marked += int(result.get("historical_lines_marked") or 0)
             changed_handles.update(result.get("changed_handles") or [])
@@ -7206,6 +7408,7 @@ def sync_shopify_orders_to_supabase(
             "edition_allocations_created": assignments,
             "existing_assignments_skipped": existing_skipped,
             "existing_allocations_preserved": existing_skipped,
+            "missing_mapping_skipped": missing_mapping_skipped,
             "generated_certificates": generated_certificates,
             "certificates_deferred": max(assignments - generated_certificates, 0),
             "product_metafields_deferred": len(changed_handles) if not sync_product_metafields_now else 0,
@@ -7270,11 +7473,13 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
                    eo.id AS edition_order_id,
                    COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AS shopify_handle,
                    COALESCE(NULLIF(eo.shopify_product_id, ''), NULLIF(li.shopify_product_id, '')) AS shopify_product_id,
-                   COALESCE(NULLIF(eo.product_title, ''), NULLIF(li.product_title, '')) AS product_title,
-                   COALESCE(NULLIF(eo.variant_title, ''), NULLIF(li.variant_title, '')) AS variant_title,
+                   COALESCE(NULLIF(li.product_title, ''), NULLIF(eo.product_title, '')) AS product_title,
+                   COALESCE(NULLIF(li.variant_title, ''), NULLIF(eo.variant_title, '')) AS variant_title,
                    COALESCE(NULLIF(eo.sku, ''), NULLIF(li.sku, '')) AS sku,
                    eo.edition_number,
                    eo.edition_total, eo.allocation_index, eo.assigned_at, eo.certificate_status, eo.status AS edition_order_status,
+                   COALESCE(pd.prodigi_status, '') AS prodigi_status,
+                   COALESCE(pd.row_id, '') AS prodigi_row_id,
                    COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url,
                    c.certificate_id, c.local_file_path,
                    COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
@@ -7291,6 +7496,18 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
             LEFT JOIN edition_orders eo ON eo.shopify_line_item_id = li.shopify_line_item_id
             LEFT JOIN edition_products ep ON ep.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
             LEFT JOIN shopify_products sp ON sp.handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, ''))
+            LEFT JOIN LATERAL (
+                SELECT pd.row_id, pd.prodigi_status
+                FROM prodigi_dispatch_rows pd
+                WHERE pd.shopify_line_item_id = COALESCE(eo.shopify_line_item_id, li.shopify_line_item_id)
+                  AND (
+                      eo.edition_number IS NULL
+                      OR pd.edition_number IS NULL
+                      OR pd.edition_number = eo.edition_number
+                  )
+                ORDER BY pd.updated_at DESC NULLS LAST, pd.submitted_at DESC NULLS LAST
+                LIMIT 1
+            ) pd ON TRUE
             LEFT JOIN certificates c ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
             LEFT JOIN product_assets psd ON psd.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND psd.asset_type = 'psd_master_file' AND psd.is_primary IS DISTINCT FROM FALSE
             LEFT JOIN product_assets prodigi ON prodigi.shopify_handle = COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AND prodigi.asset_type = 'prodigi_link'
@@ -7305,6 +7522,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
             order_line_id, shopify_line_item_id, quantity,
             assignment_status, last_error,
             shopify_handle, shopify_product_id, product_title, variant_title, sku,
+            prodigi_status, prodigi_row_id,
             COALESCE(image_url, '') AS image_url,
             COALESCE(psd_url, '') AS psd_url,
             COALESCE(prodigi_url, '') AS prodigi_url,
@@ -7350,6 +7568,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
             order_line_id, shopify_line_item_id, quantity,
             assignment_status, last_error,
             shopify_handle, shopify_product_id, product_title, variant_title, sku,
+            prodigi_status, prodigi_row_id,
             image_url, psd_url, prodigi_url
     """
     where_clauses = []

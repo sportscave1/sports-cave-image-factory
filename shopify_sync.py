@@ -1159,8 +1159,8 @@ query SportsCaveFileById($id: ID!) {
 
 
 ORDERS_QUERY = """
-query SportsCaveOrders($first: Int!, $after: String, $query: String) {
-  orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
+query SportsCaveOrders($first: Int!, $after: String, $query: String, $sortKey: OrderSortKeys!, $reverse: Boolean!) {
+  orders(first: $first, after: $after, query: $query, sortKey: $sortKey, reverse: $reverse) {
     pageInfo {
       hasNextPage
       endCursor
@@ -1259,8 +1259,8 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
 """
 
 ORDERS_SAFE_QUERY = """
-query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
-  orders(first: $first, after: $after, query: $query, sortKey: UPDATED_AT, reverse: true) {
+query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String, $sortKey: OrderSortKeys!, $reverse: Boolean!) {
+  orders(first: $first, after: $after, query: $query, sortKey: $sortKey, reverse: $reverse) {
     pageInfo {
       hasNextPage
       endCursor
@@ -2767,6 +2767,8 @@ def fetch_orders_page(
     request_post=None,
     query=None,
     default_paid_unfulfilled_filter=True,
+    sort_key="UPDATED_AT",
+    reverse=True,
 ):
     config = config or get_config()
     first = min(max(int(page_size), 1), 100)
@@ -2775,7 +2777,13 @@ def fetch_orders_page(
         query = f"financial_status:paid fulfillment_status:unfulfilled updated_at:>={created_after}"
     elif query is not None:
         query = str(query).strip() or None
-    variables = {"first": first, "after": after, "query": query}
+    variables = {
+        "first": first,
+        "after": after,
+        "query": query,
+        "sortKey": str(sort_key or "UPDATED_AT"),
+        "reverse": bool(reverse),
+    }
     try:
         data, served_version = graphql_request(
             ORDERS_QUERY,
@@ -2810,6 +2818,8 @@ def iter_order_pages(
     query=None,
     max_orders=None,
     default_paid_unfulfilled_filter=True,
+    sort_key="UPDATED_AT",
+    reverse=True,
 ):
     config = config or get_config()
     after = None
@@ -2824,6 +2834,8 @@ def iter_order_pages(
             request_post=request_post,
             query=query,
             default_paid_unfulfilled_filter=default_paid_unfulfilled_filter,
+            sort_key=sort_key,
+            reverse=reverse,
         )
         if not page["orders"]:
             break
@@ -2855,6 +2867,49 @@ def fetch_orders_by_ids(order_ids, config=None, request_post=None):
                 continue
             all_orders.append(normalize_order(node, config["store_domain"]))
     return all_orders
+
+
+def fetch_latest_paid_orders(
+    *,
+    limit=50,
+    lookback_days=14,
+    config=None,
+    request_post=None,
+):
+    config = config or get_config()
+    order_limit = max(1, int(limit or DEFAULT_MAX_ORDERS))
+    lookback = max(1, int(lookback_days or 14))
+    created_after = (datetime.now(timezone.utc) - timedelta(days=lookback)).date().isoformat()
+    queries = [
+        f"financial_status:paid created_at:>={created_after}",
+        "financial_status:paid",
+    ]
+    orders = []
+    query_used = queries[-1]
+    for candidate_query in queries:
+        fetched = []
+        for page in iter_order_pages(
+            query=candidate_query,
+            days=lookback,
+            max_orders=order_limit,
+            page_size=min(DEFAULT_PAGE_SIZE, order_limit),
+            config=config,
+            request_post=request_post,
+            default_paid_unfulfilled_filter=False,
+            sort_key="CREATED_AT",
+            reverse=True,
+        ):
+            fetched.extend(page.get("orders") or [])
+        if fetched:
+            orders = fetched[:order_limit]
+            query_used = candidate_query
+            break
+    return {
+        "orders": orders,
+        "query": query_used,
+        "lookback_days": lookback,
+        "limit": order_limit,
+    }
 
 
 def fetch_catalog_page(after=None, search="", page_size=DEFAULT_PAGE_SIZE, config=None, request_post=None):

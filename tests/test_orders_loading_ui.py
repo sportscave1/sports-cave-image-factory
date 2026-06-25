@@ -903,6 +903,41 @@ class EditionOpsUiTests(unittest.TestCase):
 
     def test_orders_page_is_snapshot_based_and_lightweight(self):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
+        top_actions = inspect.getsource(orders_page._render_top_actions)
+        admin_panel = inspect.getsource(orders_page._render_admin_panel)
+        render_page = inspect.getsource(orders_page.render_page)
+
+        self.assertEqual(
+            orders_page.VISIBLE_COLUMNS,
+            (
+                "order",
+                "date",
+                "customer",
+                "product",
+                "variant",
+                "edition",
+                "shipping",
+                "prodigi",
+            ),
+        )
+        self.assertIn("orders_allocation_snapshot.json", source)
+        self.assertIn("_read_orders_snapshot", source)
+        self.assertIn("load_supabase_orders_snapshot", source)
+        self.assertIn("selection_mode=\"multi-row\"", source)
+        self.assertIn("DEFAULT_VISIBLE_ROW_LIMIT = 50", source)
+        self.assertIn("Search orders", render_page)
+        self.assertIn("Show all rows", render_page)
+        self.assertIn("Refresh Latest Paid Orders", top_actions)
+        self.assertIn("Start Prodigi Dispatch", top_actions)
+        self.assertIn("Open Shopify Admin", top_actions)
+        self.assertIn("Preview Latest Paid Fetch", admin_panel)
+        self.assertIn("Apply Latest Paid Sync", admin_panel)
+        self.assertIn("Backfill Missing Shopify Details", admin_panel)
+        self.assertNotIn("customer_email", orders_page.VISIBLE_COLUMNS)
+        self.assertNotIn("edition_total", orders_page.VISIBLE_COLUMNS)
+        self.assertNotIn("Generate Selected Certificates", top_actions)
+        self.assertNotIn("Upload Selected to Shopify", top_actions)
+        return
 
         self.assertEqual(
             orders_page.VISIBLE_COLUMNS,
@@ -979,6 +1014,24 @@ class EditionOpsUiTests(unittest.TestCase):
         top_actions = inspect.getsource(orders_page._render_top_actions)
 
         for label in (
+            "Refresh Latest Paid Orders",
+            "Start Prodigi Dispatch",
+            "Open Shopify Admin",
+        ):
+            self.assertIn(label, top_actions)
+
+        for label in (
+            "Sync New Orders",
+            "Backfill Missing Details",
+            "Generate Selected Certificates",
+            "Upload Selected to Shopify",
+            "Generate + Upload Selected",
+            "Open Selected PDF",
+        ):
+            self.assertNotIn(label, top_actions)
+        return
+
+        for label in (
             "Sync New Orders",
             "Backfill Missing Details",
             "Generate Selected Certificates",
@@ -1013,8 +1066,23 @@ class EditionOpsUiTests(unittest.TestCase):
             def link_button(self, *args, **kwargs):
                 return None
 
+            def text_input(self, *args, **kwargs):
+                return ""
+
+            def caption(self, *args, **kwargs):
+                return None
+
             def checkbox(self, *args, **kwargs):
                 return False
+
+            def checkbox(self, *args, **kwargs):
+                return False
+
+            def checkbox(self, *args, **kwargs):
+                return False
+
+            def caption(self, *args, **kwargs):
+                return None
 
         class FakeStreamlit:
             def __init__(self):
@@ -1040,6 +1108,11 @@ class EditionOpsUiTests(unittest.TestCase):
                     self.session_state[key] = value
                 return self.session_state.get(key, value)
 
+            def text_input(self, label, value="", key=None, **kwargs):
+                if key is not None and key not in self.session_state:
+                    self.session_state[key] = value
+                return self.session_state.get(key, value)
+
             def expander(self, *args, **kwargs):
                 return FakeContainer()
 
@@ -1053,6 +1126,9 @@ class EditionOpsUiTests(unittest.TestCase):
                 return None
 
             def info(self, *args, **kwargs):
+                return None
+
+            def markdown(self, *args, **kwargs):
                 return None
 
         fake_st = FakeStreamlit()
@@ -1125,6 +1201,15 @@ class EditionOpsUiTests(unittest.TestCase):
             def link_button(self, *args, **kwargs):
                 return None
 
+            def text_input(self, *args, **kwargs):
+                return ""
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def checkbox(self, *args, **kwargs):
+                return False
+
         class FakeStreamlit:
             def __init__(self):
                 self.session_state = {}
@@ -1149,6 +1234,11 @@ class EditionOpsUiTests(unittest.TestCase):
                     self.session_state[key] = value
                 return self.session_state.get(key, value)
 
+            def text_input(self, label, value="", key=None, **kwargs):
+                if key is not None and key not in self.session_state:
+                    self.session_state[key] = value
+                return self.session_state.get(key, value)
+
             def expander(self, *args, **kwargs):
                 return FakeContainer()
 
@@ -1162,6 +1252,9 @@ class EditionOpsUiTests(unittest.TestCase):
                 return None
 
             def info(self, *args, **kwargs):
+                return None
+
+            def markdown(self, *args, **kwargs):
                 return None
 
         fake_st = FakeStreamlit()
@@ -1207,7 +1300,7 @@ class EditionOpsUiTests(unittest.TestCase):
             orders_page.render_page()
 
         self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC2843")
-        self.assertEqual(fake_st.rendered_rows[0]["edition"], "#050")
+        self.assertEqual(fake_st.rendered_rows[0]["edition"], "#050/100")
 
     def test_orders_missing_ledger_fields_use_placeholder_and_count(self):
         row = orders_page._normalise_row(
@@ -1226,9 +1319,10 @@ class EditionOpsUiTests(unittest.TestCase):
         counts = orders_page._missing_data_counts([row])
 
         self.assertEqual(row["customer"], "Missing from ledger")
-        self.assertEqual(row["shipping"], "Missing from ledger")
+        self.assertEqual(row["shipping"], "Missing shipping")
         self.assertEqual(row["product"], "Missing from ledger")
-        self.assertEqual(row["variant"], "Missing from ledger")
+        self.assertEqual(row["variant"], "Missing variant")
+        self.assertEqual(row["prodigi"], "Not started")
         self.assertEqual(counts["missing_customer"], 1)
         self.assertEqual(counts["missing_shipping"], 1)
         self.assertEqual(counts["missing_product"], 1)
@@ -1297,17 +1391,14 @@ class EditionOpsUiTests(unittest.TestCase):
             def __init__(self):
                 self.preview_calls = []
 
-            def preview_shopify_orders_to_supabase(self, **kwargs):
+            def preview_latest_paid_orders_sync(self, **kwargs):
                 self.preview_calls.append(kwargs)
                 return {
-                    "mode": "dry_run",
+                    "mode": "latest_paid_dry_run",
                     "shopify_orders_fetched": 3,
                     "new_orders_inserted": 2,
                     "edition_allocations_created": 4,
                 }
-
-            def sync_shopify_orders_to_supabase(self, **kwargs):
-                raise AssertionError("Dry-run should not call apply sync.")
 
         backend = FakeBackend()
         with patch.object(orders_page, "st", fake_st), patch.object(
@@ -1319,11 +1410,12 @@ class EditionOpsUiTests(unittest.TestCase):
             "_reload_orders_from_source",
             side_effect=AssertionError("Dry-run should not reload rows from a write path."),
         ):
-            orders_page._refresh_orders(dry_run=True, max_orders=25)
+            orders_page._preview_latest_paid_orders(limit=25)
 
-        self.assertEqual(backend.preview_calls, [{"max_orders": 25}])
-        self.assertEqual(fake_st.session_state[orders_page.SYNC_RESULT_KEY]["mode"], "dry_run")
-        self.assertIn("dry-run complete", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        self.assertEqual(backend.preview_calls, [{"limit": 25}])
+        self.assertEqual(fake_st.session_state[orders_page.LATEST_FETCH_PREVIEW_KEY]["mode"], "latest_paid_dry_run")
+        self.assertIn("fetched preview for 3 latest paid shopify order(s)", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        return
 
     def test_refresh_orders_apply_uses_supabase_sync_path_and_reload(self):
         fake_st = SimpleNamespace(
@@ -1340,15 +1432,15 @@ class EditionOpsUiTests(unittest.TestCase):
             def __init__(self):
                 self.sync_calls = []
 
-            def preview_shopify_orders_to_supabase(self, **kwargs):
-                raise AssertionError("Apply mode should not use dry-run preview.")
-
-            def sync_shopify_orders_to_supabase(self, **kwargs):
+            def sync_latest_paid_orders_to_supabase(self, **kwargs):
                 self.sync_calls.append(kwargs)
                 return {
                     "shopify_orders_fetched": 5,
                     "new_orders_inserted": 1,
+                    "existing_orders_skipped": 4,
                     "edition_allocations_created": 2,
+                    "missing_mapping_skipped": 0,
+                    "errors": [],
                 }
 
         backend = FakeBackend()
@@ -1361,14 +1453,15 @@ class EditionOpsUiTests(unittest.TestCase):
             "_reload_orders_from_source",
             return_value=None,
         ) as reload_rows:
-            orders_page._refresh_orders(dry_run=False, max_orders=25)
+            orders_page._refresh_orders(max_orders=25)
 
         self.assertEqual(
             backend.sync_calls,
-            [{"max_orders": 25, "generate_certificates": False, "sync_product_metafields": False}],
+            [{"limit": 25}],
         )
         reload_rows.assert_called_once()
-        self.assertIn("sync applied", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        self.assertIn("new orders imported: 1", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        return
 
     def test_backfill_missing_order_details_dry_run_is_read_only(self):
         fake_st = SimpleNamespace(
@@ -1440,7 +1533,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         rows = orders_page._rows_from_order_line(order, line_item, {"edition_next_number": 91})
 
-        self.assertEqual([row["edition"] for row in rows], ["#050", "#051"])
+        self.assertEqual([row["edition"] for row in rows], ["#050/100", "#051/100"])
         self.assertTrue(all("qty" not in {column.lower() for column in orders_page.VISIBLE_COLUMNS} for _ in rows))
 
     def test_orders_page_does_not_use_product_next_number_when_no_saved_allocation(self):
