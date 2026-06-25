@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import html
 import importlib
 import json
 from pathlib import Path
@@ -6,6 +7,7 @@ import re
 import time
 
 import streamlit as st
+import streamlit.components.v1 as components
 try:
     import pandas as pd
 except Exception:  # pragma: no cover - optional at import time
@@ -1648,6 +1650,7 @@ def _render_orders_table(rows):
     start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
     with st.container(border=True):
+        _render_order_copy_buttons(rows)
         st.dataframe(
             _display_table_payload(rows),
             hide_index=True,
@@ -1662,6 +1665,103 @@ def _render_orders_table(rows):
         )
     _perf_log("render table", start, rows=len(rows))
     print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
+
+
+def _render_order_copy_buttons(rows):
+    orders = []
+    seen = set()
+    for row in rows or []:
+        order_name = str((row or {}).get("order") or "").strip()
+        if not order_name or order_name in seen:
+            continue
+        seen.add(order_name)
+        orders.append(order_name)
+        if len(orders) >= 8:
+            break
+    if not orders:
+        return
+    buttons = []
+    for index, order_name in enumerate(orders):
+        escaped = html.escape(order_name)
+        value_json = json.dumps(order_name)
+        buttons.append(
+            f"""
+            <button class="copy-order-button" title="Copy order number" data-copy-value={html.escape(value_json, quote=True)}>
+              <span aria-hidden="true">⧉</span><span>{escaped}</span>
+            </button>
+            """
+        )
+    components.html(
+        f"""
+        <style>
+          .copy-order-wrap {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin: 0 0 8px;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          }}
+          .copy-order-label {{
+            color: #A6A19A;
+            font-size: 12px;
+            margin-right: 2px;
+          }}
+          .copy-order-button {{
+            border: 1px solid rgba(212, 165, 76, 0.42);
+            background: rgba(245, 242, 234, 0.08);
+            color: #F5F2EA;
+            border-radius: 6px;
+            padding: 4px 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            line-height: 1;
+            font-size: 12px;
+            cursor: pointer;
+          }}
+          .copy-order-button.copied {{
+            border-color: rgba(47, 158, 68, 0.85);
+            color: #9BE7B1;
+          }}
+        </style>
+        <div class="copy-order-wrap">
+          <span class="copy-order-label">Copy order</span>
+          {''.join(buttons)}
+        </div>
+        <script>
+          const buttons = document.querySelectorAll(".copy-order-button");
+          buttons.forEach((button) => {{
+            button.addEventListener("click", async () => {{
+              const value = button.dataset.copyValue || "";
+              try {{
+                if (navigator.clipboard && window.isSecureContext) {{
+                  await navigator.clipboard.writeText(value);
+                }} else {{
+                  const textarea = document.createElement("textarea");
+                  textarea.value = value;
+                  textarea.style.position = "fixed";
+                  textarea.style.opacity = "0";
+                  document.body.appendChild(textarea);
+                  textarea.focus();
+                  textarea.select();
+                  document.execCommand("copy");
+                  document.body.removeChild(textarea);
+                }}
+                button.classList.add("copied");
+                const previous = button.innerHTML;
+                button.innerHTML = "<span>Copied</span>";
+                setTimeout(() => {{
+                  button.innerHTML = previous;
+                  button.classList.remove("copied");
+                }}, 1000);
+              }} catch (error) {{}}
+            }});
+          }});
+        </script>
+        """,
+        height=42,
+    )
 
 
 def render_page():

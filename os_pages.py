@@ -3901,20 +3901,19 @@ def prodigi_dispatch_table_records(rows):
     records = []
     for row in rows or []:
         edition_number = _prodigi_int(row.get("edition_number"), 0)
+        status = _prodigi_dispatch_status(row)
+        qa_status = "Complete" if status in {"Submitted", "Complete"} else status or "Not Started"
         records.append(
             {
-                "Submitted At": row.get("submitted_at") or _prodigi_display_date(row.get("date_sent_to_prodigi")) or row.get("updated_at") or "",
-                "Status": _prodigi_dispatch_status(row),
+                "Completed At": row.get("submitted_at") or _prodigi_display_date(row.get("date_sent_to_prodigi")) or row.get("updated_at") or "",
                 "Order": row.get("shopify_order_name") or row.get("shopify_order_number") or "",
                 "Customer": row.get("customer_name") or "",
                 "Product": row.get("product_title") or "",
+                "Edition #": f"#{edition_number:03d}" if edition_number else "",
                 "Variant": row.get("shopify_variant_title") or row.get("variant_title") or "",
-                "Size": row.get("sports_cave_size") or row.get("size") or "",
-                "Frame": row.get("sports_cave_frame") or row.get("frame") or "",
                 "Prodigi Code": row.get("prodigi_product_code") or row.get("prodigi_code") or "",
-                "Prodigi Product": row.get("prodigi_product_name") or prodigi_product_option_display(row),
-                "Edition": f"#{edition_number:03d}" if edition_number else "",
-                "QA": "Yes" if _prodigi_bool(row.get("qa_confirmed")) else "No",
+                "QA Status": qa_status,
+                "Certificate Status": row.get("certificate_status") or ("Uploaded" if _prodigi_certificate_uploaded(row) else ""),
                 "Notes": row.get("notes") or row.get("qa_notes") or row.get("issue_reason") or "",
             }
         )
@@ -4086,6 +4085,105 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
     return sort_prodigi_tracker_rows(updated_rows), saved
 
 
+def _prodigi_status_label(row, existing=None, selected=False):
+    existing = existing or {}
+    status = _prodigi_dispatch_status(existing) if existing else _prodigi_dispatch_status(row)
+    if status in {"Submitted", "Complete"}:
+        return "Complete"
+    if status == "Needs Review":
+        return "Needs Review"
+    return "In QA" if selected else "Not Started"
+
+
+def _prodigi_status_pill(label):
+    label = label or "Not Started"
+    tone = {
+        "Complete": ("#DFF6E6", "#176B38"),
+        "In QA": ("#FFF2CC", "#795700"),
+        "Needs Review": ("#FCE1DC", "#A33A27"),
+        "Not Started": ("#E8E8EA", "#3A3A40"),
+    }.get(label, ("#E8E8EA", "#3A3A40"))
+    return (
+        f'<span style="display:inline-flex;align-items:center;border-radius:999px;'
+        f'padding:3px 8px;font-size:12px;font-weight:700;background:{tone[0]};'
+        f'color:{tone[1]};white-space:nowrap;">{html.escape(label)}</span>'
+    )
+
+
+def _prodigi_order_line_table(matches, existing_dispatch_rows, selected_id):
+    st.markdown("**Order lines found**")
+    header = st.columns([0.72, 1.05, 1.35, 2.1, 0.82, 1.25, 1.35, 1.2, 1.0])
+    labels = (
+        "Select",
+        "Order",
+        "Customer",
+        "Product",
+        "Edition #",
+        "Variant",
+        "Expected Prodigi Code",
+        "Shipping",
+        "QA Status",
+    )
+    for column, label in zip(header, labels):
+        column.caption(label)
+
+    for row in matches:
+        row_id = row.get("row_id") or ""
+        row_key = safe_filename_part(row_id)
+        existing = _prodigi_existing_dispatch_row(existing_dispatch_rows, row_id)
+        selected = row_id == selected_id or (not selected_id and len(matches) == 1)
+        status_label = _prodigi_status_label(row, existing, selected=selected)
+        already_complete = status_label == "Complete"
+        with st.container(border=True):
+            columns = st.columns([0.72, 1.05, 1.35, 2.1, 0.82, 1.25, 1.35, 1.2, 1.0])
+            if already_complete:
+                columns[0].button("Done", key=f"prodigi-dispatch-done-{row_key}", disabled=True, use_container_width=True)
+            elif selected:
+                columns[0].button("Selected", key=f"prodigi-dispatch-selected-{row_key}", disabled=True, use_container_width=True)
+            elif columns[0].button("Select", key=f"prodigi-dispatch-select-{row_key}", use_container_width=True):
+                st.session_state["prodigi_dispatch_selected_row_id"] = row_id
+                st.rerun()
+            columns[1].write(row.get("shopify_order_name") or "-")
+            columns[2].write(row.get("customer_name") or "-")
+            columns[3].write(row.get("product_title") or "-")
+            columns[4].write(_prodigi_edition_label(row))
+            columns[5].write(prodigi_shopify_variant_label(row) or "-")
+            columns[6].write(row.get("prodigi_code") or row.get("prodigi_product_code") or "-")
+            columns[7].write(row.get("shipping_method") or "-")
+            columns[8].markdown(_prodigi_status_pill(status_label), unsafe_allow_html=True)
+
+
+def _prodigi_selected_line_summary(row):
+    st.markdown("**Selected line**")
+    with st.container(border=True):
+        columns = st.columns([1, 1.25, 2.1, 0.85, 1.25, 1.2])
+        columns[0].caption("Order")
+        columns[0].write(row.get("shopify_order_name") or "-")
+        columns[1].caption("Customer")
+        columns[1].write(row.get("customer_name") or "-")
+        columns[2].caption("Product")
+        columns[2].write(row.get("product_title") or "-")
+        columns[3].caption("Edition #")
+        columns[3].write(_prodigi_edition_label(row))
+        columns[4].caption("Shopify variant")
+        columns[4].write(prodigi_shopify_variant_label(row) or "-")
+        columns[5].caption("Expected Prodigi code")
+        columns[5].write(row.get("prodigi_code") or row.get("prodigi_product_code") or "-")
+
+
+def _prodigi_qa_step(number, title, question, *, key, default=False, helper_text="", note_default=""):
+    with st.container(border=True):
+        st.markdown(f"**{number}. {title}**")
+        st.write(question)
+        if helper_text:
+            st.caption(helper_text)
+        confirmed = st.checkbox("Confirmed", value=bool(default), key=f"{key}-confirmed")
+        notes = ""
+        if not confirmed:
+            notes = st.text_input("Notes if not confirmed", value=note_default or "", key=f"{key}-notes")
+        return confirmed, notes
+
+
 def render_prodigi_page():
     page_started = time.perf_counter()
     st.title("Prodigi Dispatch Log")
@@ -4141,73 +4239,10 @@ def render_prodigi_page():
         st.warning("Order not found. Sync New Orders first, then try again.")
 
     selected_row = None
-    product_confirmations = {}
     if matches:
         selected_id = st.session_state.get("prodigi_dispatch_selected_row_id") or (matches[0]["row_id"] if len(matches) == 1 else "")
         selected_row = next((row for row in matches if row.get("row_id") == selected_id), None)
-        summary_row = matches[0]
-        with st.container(border=True):
-            st.markdown("**Order Summary**")
-            summary_columns = st.columns(5)
-            summary_columns[0].write(f"Order: {summary_row.get('shopify_order_name') or '-'}")
-            summary_columns[1].write(f"Customer: {summary_row.get('customer_name') or '-'}")
-            summary_columns[2].write(f"Date: {summary_row.get('date') or '-'}")
-            summary_columns[3].write(f"Email: {summary_row.get('customer_email') or '-'}")
-            summary_columns[4].write(f"Shipping: {summary_row.get('shipping_method') or '-'}")
-
-        st.markdown("**Select Artwork Line**")
-        header = st.columns([0.8, 2.8, 0.8, 1.4, 1.4, 1.2])
-        for column, label in zip(header, ("Select", "Product", "Edition #", "Variant", "Shipping", "Certificate Status")):
-            column.caption(label)
-        for row in matches:
-            row_id = row.get("row_id")
-            row_key = safe_filename_part(row_id or "")
-            with st.container(border=True):
-                columns = st.columns([0.8, 2.8, 0.8, 1.4, 1.4, 1.2])
-                if len(matches) == 1:
-                    columns[0].write("Selected")
-                elif columns[0].button("Select", key=f"prodigi-dispatch-select-{row_key}", use_container_width=True):
-                    st.session_state["prodigi_dispatch_selected_row_id"] = row_id
-                    st.rerun()
-                columns[1].write(row.get("product_title") or "-")
-                columns[2].write(f"#{_prodigi_int(row.get('edition_number'), 0):03d}" if _prodigi_int(row.get("edition_number"), 0) else "Not Required")
-                columns[3].write(row.get("variant_title") or "-")
-                columns[4].write(row.get("shipping_method") or "-")
-                columns[5].write(row.get("certificate_status") or "-")
-
-        st.markdown("**Prodigi Product Confirmation**")
-        for row in matches:
-            row_id = row.get("row_id") or ""
-            row_key = safe_filename_part(row_id)
-            existing_line = _prodigi_existing_dispatch_row(existing_dispatch_rows, row_id) or row
-            defaults = prodigi_line_confirmation_defaults(existing_line)
-            has_mapping = bool(row.get("prodigi_product_name") and row.get("prodigi_code") and row.get("prodigi_frame_colour"))
-            with st.container(border=True):
-                st.markdown(f"**{row.get('product_title') or '-'}**")
-                st.caption(f"Shopify variant: {prodigi_shopify_variant_label(row) or '-'}")
-                detail_columns = st.columns([2.4, 1, 1])
-                detail_columns[0].write(f"Expected Prodigi variant: {row.get('prodigi_product_name') or '-'}")
-                detail_columns[1].write(f"Prodigi code: {row.get('prodigi_code') or '-'}")
-                detail_columns[2].write(f"Frame colour: {row.get('prodigi_frame_colour') or row.get('prodigi_frame') or '-'}")
-                st.caption(prodigi_required_confirmation_question(row))
-                confirmed = st.checkbox(
-                    "Confirmed exact Prodigi variant selected",
-                    value=bool(defaults["confirmed"] and has_mapping),
-                    disabled=not has_mapping,
-                    key=f"prodigi-dispatch-product-confirm-{row_key}",
-                )
-                confirmation_notes = defaults["notes"]
-                if not confirmed:
-                    confirmation_notes = st.text_input(
-                        "Notes if not confirmed",
-                        value=defaults["notes"],
-                        key=f"prodigi-dispatch-product-notes-{row_key}",
-                    )
-                product_confirmations[row_id] = {
-                    "confirmed": bool(confirmed),
-                    "notes": confirmation_notes,
-                    "has_mapping": has_mapping,
-                }
+        _prodigi_order_line_table(matches, existing_dispatch_rows, selected_id)
 
     if selected_row:
         existing = _prodigi_existing_dispatch_row(existing_dispatch_rows, selected_row.get("row_id"))
@@ -4215,94 +4250,98 @@ def render_prodigi_page():
         if already_submitted:
             st.info(f"Already submitted on {_prodigi_display_date(existing.get('date_sent_to_prodigi'))}.")
 
-        with st.container(border=True):
-            st.markdown("**Prodigi Details**")
-            detail_columns = st.columns(2)
-            details = [
-                ("Shopify Order #", selected_row.get("shopify_order_name") or ""),
-                ("Customer Name", selected_row.get("customer_name") or ""),
-                ("Product", selected_row.get("product_title") or ""),
-                ("Edition No.", _prodigi_edition_label(selected_row)),
-                ("Frame", selected_row.get("frame") or ""),
-                ("Shopify Size", selected_row.get("size") or ""),
-                ("Prodigi Variant", selected_row.get("prodigi_product_name") or ""),
-                ("Prodigi Code", selected_row.get("prodigi_code") or ""),
-                ("Frame Colour", selected_row.get("prodigi_frame_colour") or selected_row.get("prodigi_frame") or ""),
-                ("Shipping", selected_row.get("shipping_method") or ""),
-            ]
-            for index, (label, value) in enumerate(details):
-                detail_columns[index % 2].write(f"**{label}:** {value or '-'}")
+        _prodigi_selected_line_summary(selected_row)
 
-        st.markdown("**Dispatch QA**")
+        st.markdown("**QA checklist**")
         default_answers = prodigi_default_qa_answers(existing or selected_row)
-        selected_confirmation = product_confirmations.get(selected_row.get("row_id") or "", {})
-        product_confirmation_notes = str(selected_confirmation.get("notes") or "")
-        selected_has_mapping = bool(selected_confirmation.get("has_mapping"))
-        selected_product_confirmed = bool(selected_confirmation.get("confirmed") and selected_has_mapping)
         row_key = safe_filename_part(selected_row.get("row_id") or "")
+        has_mapping = bool(selected_row.get("prodigi_product_name") and selected_row.get("prodigi_code") and selected_row.get("prodigi_frame_colour"))
+        stored_confirmation = prodigi_line_confirmation_defaults(existing or selected_row)
+        expected_code = selected_row.get("prodigi_product_code") or selected_row.get("prodigi_code") or "-"
+        expected_variant = selected_row.get("prodigi_product_name") or "-"
+        expected_frame = selected_row.get("prodigi_frame_colour") or selected_row.get("prodigi_frame") or "-"
+        shopify_size = selected_row.get("sports_cave_size") or selected_row.get("size") or "-"
+        shipping_summary = selected_row.get("shipping_method") or "-"
         qa_answers = {
             "certificate": "Yes" if _prodigi_is_limited_edition(selected_row) else "Not Required",
-            "product_option": "Yes" if selected_product_confirmed else "No",
-            "product_confirmation": "Yes" if selected_confirmation.get("confirmed") else "No",
-            "product_confirmation_notes": product_confirmation_notes,
         }
-        correct_order = st.checkbox(
-            "Correct order selected",
-            value=default_answers.get("correct_order") == "Yes",
-            key=f"prodigi-dispatch-qa-correct-order-{row_key}",
+        product_confirmed, product_notes = _prodigi_qa_step(
+            1,
+            "Prodigi product/variant",
+            f"Does the Prodigi product/variant exactly match {expected_code}?",
+            helper_text=expected_variant,
+            default=bool(stored_confirmation["confirmed"] and has_mapping) or default_answers.get("product_option") == "Yes",
+            note_default=stored_confirmation["notes"],
+            key=f"prodigi-dispatch-qa-product-{row_key}",
         )
-        qa_answers["correct_order"] = "Yes" if correct_order else "No"
-        qa_answers["product_option"] = "Yes" if selected_product_confirmed else "No"
-        variant_checked = st.checkbox(
-            "Variant/size/frame checked",
-            value=default_answers.get("frame") == "Yes" and default_answers.get("size") == "Yes",
-            key=f"prodigi-dispatch-qa-variant-{row_key}",
+        qa_answers["product_option"] = "Yes" if product_confirmed and has_mapping else "No"
+        qa_answers["product_confirmation"] = "Yes" if product_confirmed else "No"
+        qa_answers["product_confirmation_notes"] = product_notes
+        upload_confirmed, upload_notes = _prodigi_qa_step(
+            2,
+            "Artwork upload quality",
+            "Has the final artwork been uploaded to Prodigi in excellent print quality?",
+            default=default_answers.get("artwork_upload") == "Yes",
+            key=f"prodigi-dispatch-qa-upload-{row_key}",
         )
-        qa_answers["frame"] = "Yes" if variant_checked else "No"
-        qa_answers["size"] = "Yes" if variant_checked else "No"
-        if _prodigi_is_limited_edition(selected_row):
-            edition_checked = st.checkbox(
-                "Edition number checked",
-                value=default_answers.get("edition_number") == "Yes",
-                key=f"prodigi-dispatch-qa-edition-{row_key}",
-            )
-            qa_answers["edition_number"] = "Yes" if edition_checked else "No"
-        else:
-            qa_answers["edition_number"] = "Not Required"
-        shipping_checked = st.checkbox(
-            "Shipping method checked",
-            value=default_answers.get("shipping") == "Yes",
+        qa_answers["artwork_upload"] = "Yes" if upload_confirmed else "No"
+        qa_answers["artwork_upload_notes"] = upload_notes
+        crop_confirmed, crop_notes = _prodigi_qa_step(
+            3,
+            "Artwork crop / orientation",
+            "Is the artwork crop, orientation, and full image preview correct?",
+            default=default_answers.get("sent_to_production") == "Yes",
+            key=f"prodigi-dispatch-qa-crop-{row_key}",
+        )
+        qa_answers["sent_to_production"] = "Yes" if crop_confirmed else "No"
+        qa_answers["crop_orientation_notes"] = crop_notes
+        frame_confirmed, frame_notes = _prodigi_qa_step(
+            4,
+            "Frame colour",
+            f"Is the frame colour set to {expected_frame}?",
+            default=default_answers.get("frame") == "Yes",
+            key=f"prodigi-dispatch-qa-frame-{row_key}",
+        )
+        qa_answers["frame"] = "Yes" if frame_confirmed else "No"
+        qa_answers["frame_notes"] = frame_notes
+        size_confirmed, size_notes = _prodigi_qa_step(
+            5,
+            "Size",
+            f"Does the Prodigi size match the Shopify size {shopify_size}?",
+            default=default_answers.get("size") == "Yes",
+            key=f"prodigi-dispatch-qa-size-{row_key}",
+        )
+        qa_answers["size"] = "Yes" if size_confirmed else "No"
+        qa_answers["size_notes"] = size_notes
+        shipping_confirmed, shipping_notes = _prodigi_qa_step(
+            6,
+            "Shipping",
+            f"Is shipping set correctly to {shipping_summary} and is the customer address correct?",
+            helper_text=shipping_summary,
+            default=default_answers.get("shipping") == "Yes",
             key=f"prodigi-dispatch-qa-shipping-{row_key}",
         )
-        qa_answers["shipping"] = "Yes" if shipping_checked else "No"
-        file_ready = st.checkbox(
-            "Final file/Prodigi file ready",
-            value=default_answers.get("artwork_upload") == "Yes" and default_answers.get("sent_to_production") == "Yes",
-            key=f"prodigi-dispatch-qa-file-ready-{row_key}",
+        qa_answers["shipping"] = "Yes" if shipping_confirmed else "No"
+        qa_answers["shipping_notes"] = shipping_notes
+        final_confirmed, final_notes = _prodigi_qa_step(
+            7,
+            "Final error check",
+            "Is this order error-free and ready to finalise?",
+            default=default_answers.get("final_check") == "Yes",
+            key=f"prodigi-dispatch-qa-final-{row_key}",
         )
-        qa_answers["artwork_upload"] = "Yes" if file_ready else "No"
-        qa_answers["sent_to_production"] = "Yes" if file_ready else "No"
-        no_errors = st.checkbox(
-            "No errors found",
-            value=default_answers.get("final_check") == "Yes",
-            key=f"prodigi-dispatch-qa-no-errors-{row_key}",
-        )
-        qa_answers["final_check"] = "Yes" if no_errors else "No"
-        final_confirmed = st.checkbox(
-            "There are no errors. The edition number is correct.",
-            value=False,
-            key=f"prodigi-dispatch-final-confirm-{row_key}",
-        )
+        qa_answers["final_check"] = "Yes" if final_confirmed else "No"
+        qa_answers["final_check_notes"] = final_notes
+        qa_answers["edition_number"] = "Yes" if _prodigi_is_limited_edition(selected_row) else "Not Required"
+        qa_answers["correct_order"] = "Yes"
 
         issue_reasons = prodigi_dispatch_issue_reasons(selected_row, qa_answers)
         blockers = prodigi_dispatch_blockers(selected_row, qa_answers)
         line_blockers = []
-        if not selected_has_mapping:
+        if not has_mapping:
             line_blockers.append(f"{selected_row.get('product_title') or 'Line'}: missing Prodigi mapping")
-        if not selected_product_confirmed:
+        if qa_answers.get("product_option") != "Yes":
             line_blockers.append(f"{selected_row.get('product_title') or 'Line'}: exact Prodigi variant not confirmed")
-        if qa_answers.get("correct_order") != "Yes":
-            line_blockers.append("Correct order not confirmed")
         if not final_confirmed:
             line_blockers.append("Final confirmation required")
         completion_blockers = list(dict.fromkeys(blockers + line_blockers))
