@@ -1477,6 +1477,35 @@ def _shipping_method_from_raw(order_raw):
     return str(first.get("title") or first.get("code") or "")
 
 
+def _shipping_summary_from_raw(order_raw):
+    payload = _as_dict(order_raw)
+    shipping_method = _shipping_method_from_raw(payload)
+    shipping_address = payload.get("shipping_address") or payload.get("shippingAddress") or {}
+    if not isinstance(shipping_address, dict):
+        shipping_address = {}
+    name = str(
+        shipping_address.get("name")
+        or " ".join(
+            part
+            for part in (
+                shipping_address.get("first_name"),
+                shipping_address.get("last_name"),
+            )
+            if part
+        ).strip()
+        or ""
+    ).strip()
+    location_parts = [
+        str(shipping_address.get("city") or "").strip(),
+        str(shipping_address.get("province") or shipping_address.get("province_code") or "").strip(),
+        str(shipping_address.get("zip") or shipping_address.get("postal_code") or "").strip(),
+        str(shipping_address.get("country") or shipping_address.get("country_code") or "").strip(),
+    ]
+    location = ", ".join(part for part in location_parts if part)
+    summary_parts = [part for part in (shipping_method, name, location) if part]
+    return " | ".join(summary_parts)
+
+
 def _date_label(value):
     parsed = normalize_datetime_utc(value)
     if parsed == DATETIME_MIN_UTC:
@@ -1515,7 +1544,7 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
         processed_at = _safe_iso(row.get("processed_at") or order_raw.get("processed_at") or order_raw.get("processedAt"))
         created_at = _safe_iso(row.get("created_at") or order_raw.get("created_at") or order_raw.get("createdAt"))
         date_value = _date_label(processed_at or created_at)
-        shipping = _shipping_method_from_raw(order_raw)
+        shipping = _shipping_summary_from_raw(order_raw) or _shipping_method_from_raw(order_raw)
         product_title = str(row.get("product_title") or line_raw.get("product_title") or line_raw.get("title") or "")
         variant_title = str(row.get("variant_title") or line_raw.get("variant_title") or line_raw.get("variantTitle") or "")
         product_handle = str(row.get("shopify_handle") or line_raw.get("product_handle") or line_raw.get("handle") or "")
@@ -1534,6 +1563,7 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
             "shipping": shipping,
             "product": product_title,
             "variant": variant_title,
+            "admin_url": str(row.get("admin_url") or ""),
             "line_quantity": quantity,
             "shopify_order_id": str(row.get("shopify_order_id") or ""),
             "legacy_resource_id": str(order_raw.get("legacy_resource_id") or ""),

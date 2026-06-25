@@ -35,11 +35,14 @@ VISIBLE_COLUMNS = (
     "order",
     "date",
     "customer",
+    "customer_email",
     "edition",
+    "edition_total",
     "certificate",
     "shipping",
     "product",
     "variant",
+    "admin_url",
 )
 
 
@@ -150,6 +153,11 @@ def _format_edition(value):
     return f"#{number:03d}" if number else ""
 
 
+def _placeholder_text(value, *, missing="Missing from ledger"):
+    text = str(value or "").strip()
+    return text if text else missing
+
+
 def _certificate_label(row):
     if row.get("certificate_pdf_url"):
         return "Uploaded"
@@ -207,10 +215,10 @@ def _normalise_row(row):
     )
     updated["order"] = str(updated.get("order") or "")
     updated["date"] = str(updated.get("date") or "")
-    updated["customer"] = str(updated.get("customer") or "")
-    updated["shipping"] = str(updated.get("shipping") or updated.get("shipping_method") or "")
-    updated["product"] = str(updated.get("product") or "")
-    updated["variant"] = str(updated.get("variant") or "")
+    updated["customer"] = _placeholder_text(updated.get("customer"))
+    updated["shipping"] = _placeholder_text(updated.get("shipping") or updated.get("shipping_method"))
+    updated["product"] = _placeholder_text(updated.get("product"))
+    updated["variant"] = _placeholder_text(updated.get("variant"))
     updated["edition_number"] = edition_number
     updated["edition"] = _format_edition(edition_number) if edition_number else raw_edition
     updated["edition_total"] = int(updated.get("edition_total") or 100)
@@ -224,10 +232,11 @@ def _normalise_row(row):
     updated["variant_id"] = str(updated.get("variant_id") or "")
     updated["product_handle"] = str(updated.get("product_handle") or updated.get("handle") or "")
     updated["shopify_customer_id"] = str(updated.get("shopify_customer_id") or updated.get("customer_id") or "")
-    updated["customer_email"] = str(updated.get("customer_email") or "")
+    updated["customer_email"] = _placeholder_text(updated.get("customer_email"), missing="")
     updated["processed_at"] = str(updated.get("processed_at") or "")
     updated["created_at"] = str(updated.get("created_at") or "")
     updated["order_number_sort"] = int(updated.get("order_number_sort") or _parse_order_number(updated["order"]))
+    updated["admin_url"] = str(updated.get("admin_url") or "")
     updated["certificate_id"] = str(updated.get("certificate_id") or "")
     updated["certificate_status"] = str(updated.get("certificate_status") or "")
     updated["certificate"] = _certificate_label(updated)
@@ -625,11 +634,14 @@ def _column_config():
         "order": st.column_config.TextColumn("Order", width="small"),
         "date": st.column_config.TextColumn("Date", width="small"),
         "customer": st.column_config.TextColumn("Customer", width="medium"),
+        "customer_email": st.column_config.TextColumn("Email", width="medium"),
         "edition": st.column_config.TextColumn("Edition", width="small"),
-        "certificate": st.column_config.TextColumn("Certificate", width="small"),
-        "shipping": st.column_config.TextColumn("Shipping", width="medium"),
+        "edition_total": st.column_config.NumberColumn("Edition total", width="small"),
+        "certificate": st.column_config.TextColumn("Certificate status", width="small"),
+        "shipping": st.column_config.TextColumn("Shipping summary", width="large"),
         "product": st.column_config.TextColumn("Product", width="large"),
         "variant": st.column_config.TextColumn("Variant", width="large"),
+        "admin_url": st.column_config.LinkColumn("Open Admin", display_text="Open"),
     }
 
 
@@ -884,6 +896,7 @@ def _render_top_actions(rows):
     selected_rows = _selected_rows_from_state(rows)
     selected_count = len(selected_rows)
     open_url = _first_pdf_url(selected_rows)
+    locked_help = "Locked until Stage 4B/Certificate stage"
 
     action_cols = st.columns([1.1, 1.55, 1.45, 1.55, 1.2])
     if action_cols[0].button("Sync New Orders", type="primary", use_container_width=True, disabled=True):
@@ -893,7 +906,8 @@ def _render_top_actions(rows):
     if action_cols[1].button(
         "Generate Selected Certificates",
         use_container_width=True,
-        disabled=selected_count == 0,
+        disabled=True,
+        help=locked_help,
     ):
         with st.spinner("Generating selected certificates..."):
             _generate_selected_certificates(selected_rows)
@@ -901,7 +915,8 @@ def _render_top_actions(rows):
     if action_cols[2].button(
         "Upload Selected to Shopify",
         use_container_width=True,
-        disabled=selected_count == 0,
+        disabled=True,
+        help=locked_help,
     ):
         with st.spinner("Uploading selected certificates..."):
             _upload_selected_certificates(selected_rows)
@@ -909,7 +924,8 @@ def _render_top_actions(rows):
     if action_cols[3].button(
         "Generate + Upload Selected",
         use_container_width=True,
-        disabled=selected_count == 0,
+        disabled=True,
+        help=locked_help,
     ):
         with st.spinner("Generating and uploading selected certificates..."):
             _generate_upload_selected_certificates(selected_rows)
@@ -917,9 +933,44 @@ def _render_top_actions(rows):
     if open_url:
         action_cols[4].link_button("Open Selected PDF", open_url, use_container_width=True)
     else:
-        action_cols[4].button("Open Selected PDF", use_container_width=True, disabled=True)
+        action_cols[4].button("Open Selected PDF", use_container_width=True, disabled=True, help=locked_help)
     st.caption(f"{selected_count} row(s) selected. Tip: scroll sideways to view all fulfilment fields.")
     st.caption("New-order sync stays locked here until the backfill and verification stages are approved.")
+
+
+def _missing_data_counts(rows):
+    counts = {
+        "missing_variant": 0,
+        "missing_shipping": 0,
+        "missing_customer": 0,
+        "missing_product": 0,
+        "missing_edition_number": 0,
+    }
+    for row in [_normalise_row(item) for item in (rows or [])]:
+        if row.get("variant") == "Missing from ledger":
+            counts["missing_variant"] += 1
+        if row.get("shipping") == "Missing from ledger":
+            counts["missing_shipping"] += 1
+        if row.get("customer") == "Missing from ledger":
+            counts["missing_customer"] += 1
+        if row.get("product") == "Missing from ledger":
+            counts["missing_product"] += 1
+        if not row.get("edition_number"):
+            counts["missing_edition_number"] += 1
+    return counts
+
+
+def _render_missing_data_diagnostics(rows):
+    counts = _missing_data_counts(rows)
+    expander = getattr(st, "expander", None)
+    if not expander:
+        return
+    with expander("Orders read completeness diagnostics", expanded=False):
+        st.caption(f"Rows with missing variant: {counts['missing_variant']}")
+        st.caption(f"Rows with missing shipping: {counts['missing_shipping']}")
+        st.caption(f"Rows with missing customer: {counts['missing_customer']}")
+        st.caption(f"Rows with missing product title: {counts['missing_product']}")
+        st.caption(f"Rows with missing edition number: {counts['missing_edition_number']}")
 
 
 def _render_ledger_diagnostics():
@@ -990,6 +1041,7 @@ def render_page():
 
     _render_top_actions(rows)
     _render_ledger_diagnostics()
+    _render_missing_data_diagnostics(rows)
 
     if not rows:
         st.info("No saved orders are available in the operational ledger yet.")

@@ -906,7 +906,19 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(
             orders_page.VISIBLE_COLUMNS,
-            ("order", "date", "customer", "edition", "certificate", "shipping", "product", "variant"),
+            (
+                "order",
+                "date",
+                "customer",
+                "customer_email",
+                "edition",
+                "edition_total",
+                "certificate",
+                "shipping",
+                "product",
+                "variant",
+                "admin_url",
+            ),
         )
         self.assertIn("orders_allocation_snapshot.json", source)
         self.assertIn("Sync New Orders", source)
@@ -956,7 +968,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn('"qty"', source)
         self.assertNotIn('"allocation_status"', source)
         self.assertNotIn('"sync_status"', source)
-        self.assertNotIn('"admin_url"', source)
+        self.assertIn('"admin_url"', source)
         self.assertIn("_configured_supabase_backend", source)
 
     def test_orders_main_toolbar_only_contains_daily_actions(self):
@@ -1002,7 +1014,11 @@ class EditionOpsUiTests(unittest.TestCase):
         class FakeStreamlit:
             def __init__(self):
                 self.session_state = {}
-                self.column_config = SimpleNamespace(TextColumn=lambda *args, **kwargs: None)
+                self.column_config = SimpleNamespace(
+                    TextColumn=lambda *args, **kwargs: None,
+                    NumberColumn=lambda *args, **kwargs: None,
+                    LinkColumn=lambda *args, **kwargs: None,
+                )
                 self.rendered_rows = None
 
             def columns(self, spec):
@@ -1099,7 +1115,11 @@ class EditionOpsUiTests(unittest.TestCase):
         class FakeStreamlit:
             def __init__(self):
                 self.session_state = {}
-                self.column_config = SimpleNamespace(TextColumn=lambda *args, **kwargs: None)
+                self.column_config = SimpleNamespace(
+                    TextColumn=lambda *args, **kwargs: None,
+                    NumberColumn=lambda *args, **kwargs: None,
+                    LinkColumn=lambda *args, **kwargs: None,
+                )
                 self.rendered_rows = None
 
             def columns(self, spec):
@@ -1167,6 +1187,32 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC2843")
         self.assertEqual(fake_st.rendered_rows[0]["edition"], "#050")
+
+    def test_orders_missing_ledger_fields_use_placeholder_and_count(self):
+        row = orders_page._normalise_row(
+            {
+                "order": "#SC9999",
+                "date": "2026-06-25",
+                "customer": "",
+                "customer_email": "",
+                "edition_total": 100,
+                "shipping": "",
+                "product": "",
+                "variant": "",
+            }
+        )
+
+        counts = orders_page._missing_data_counts([row])
+
+        self.assertEqual(row["customer"], "Missing from ledger")
+        self.assertEqual(row["shipping"], "Missing from ledger")
+        self.assertEqual(row["product"], "Missing from ledger")
+        self.assertEqual(row["variant"], "Missing from ledger")
+        self.assertEqual(counts["missing_customer"], 1)
+        self.assertEqual(counts["missing_shipping"], 1)
+        self.assertEqual(counts["missing_product"], 1)
+        self.assertEqual(counts["missing_variant"], 1)
+        self.assertEqual(counts["missing_edition_number"], 1)
 
     def test_order_allocator_loads_orders_snapshot_from_supabase_cache(self):
         class FakeSupabase:
