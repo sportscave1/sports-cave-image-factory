@@ -4351,7 +4351,217 @@ def _normalize_product_title_key(value):
     return text.casefold()
 
 
+def _shopify_identifier_candidates(resource_type, value):
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    candidates = {raw}
+    prefix = f"gid://shopify/{resource_type}/"
+    if raw.startswith(prefix):
+        legacy_id = raw.removeprefix(prefix).strip()
+        if legacy_id:
+            candidates.add(legacy_id)
+    else:
+        candidates.add(f"{prefix}{raw}")
+    return [candidate for candidate in candidates if candidate]
+
+
+def _edition_product_row_for_output(row, *, match_method="", reason=""):
+    if not row:
+        return {}
+    active_value = row.get("active")
+    is_active_value = row.get("is_active")
+    active = True
+    if active_value is not None:
+        active = bool(active_value)
+    if is_active_value is not None:
+        active = active and bool(is_active_value)
+    return {
+        **dict(row),
+        "edition_product_id": row.get("id"),
+        "shopify_product_id": row.get("shopify_product_id") or row.get("shopify_product_gid") or "",
+        "handle": row.get("shopify_handle") or "",
+        "title": row.get("product_title") or "",
+        "active": active,
+        "is_active": active,
+        "match_method": match_method,
+        "match_reason": reason,
+    }
+
+
+def _unique_edition_product_match(rows, *, match_method, missing_reason, ambiguous_reason):
+    clean_rows = [row for row in (rows or []) if row]
+    if len(clean_rows) == 1:
+        return {
+            "product": _edition_product_row_for_output(
+                clean_rows[0],
+                match_method=match_method,
+                reason=f"Matched Edition Ops product by {match_method}.",
+            ),
+            "status": "matched",
+            "reason": f"Matched Edition Ops product by {match_method}.",
+            "candidates": [],
+        }
+    if len(clean_rows) > 1:
+        return {
+            "product": {},
+            "status": "ambiguous",
+            "reason": ambiguous_reason,
+            "candidates": [
+                {
+                    "shopify_handle": row.get("shopify_handle") or "",
+                    "product_title": row.get("product_title") or "",
+                    "shopify_product_id": row.get("shopify_product_id") or row.get("shopify_product_gid") or "",
+                }
+                for row in clean_rows[:5]
+            ],
+        }
+    return {"product": {}, "status": "missing", "reason": missing_reason, "candidates": []}
+
+
+def _resolve_edition_product_for_order_line_with_cursor(cur, line_item, *, lock=False):
+    line_item = line_item or {}
+    product_ids = _shopify_identifier_candidates(
+        "Product",
+        line_item.get("shopify_product_id") or line_item.get("product_id") or line_item.get("product_gid"),
+    )
+    variant_ids = _shopify_identifier_candidates(
+        "ProductVariant",
+        line_item.get("shopify_variant_id") or line_item.get("variant_id") or line_item.get("variant_gid"),
+    )
+    handle = _normalize_handle(
+        line_item.get("product_handle")
+        or line_item.get("shopify_handle")
+        or line_item.get("handle")
+    )
+    title = str(line_item.get("product_title") or line_item.get("title") or "").strip()
+    title_key = _normalize_product_title_key(title)
+    lock_sql = " FOR UPDATE" if lock else ""
+
+    if product_ids:
+        cur.execute(
+            f"""
+            SELECT ep.*
+            FROM edition_products ep
+            WHERE ep.shopify_product_id = ANY(%s)
+               OR ep.shopify_product_gid = ANY(%s)
+            ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
+            {lock_sql}
+            """,
+            (product_ids, product_ids),
+        )
+        result = _unique_edition_product_match(
+            cur.fetchall() or [],
+            match_method="shopify_product_id",
+            missing_reason="No Edition Ops product matched the Shopify product ID.",
+            ambiguous_reason="Multiple Edition Ops products matched the Shopify product ID.",
+        )
+        if result["status"] != "missing":
+            return result
+
+    if variant_ids:
+        cur.execute(
+            f"""
+            SELECT ep.*
+            FROM shopify_variants sv
+            JOIN edition_products ep
+              ON ep.shopify_product_id = sv.shopify_product_id
+              OR ep.shopify_product_gid = sv.shopify_product_id
+            WHERE sv.shopify_variant_id = ANY(%s)
+               OR sv.legacy_resource_id = ANY(%s)
+            ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
+            {lock_sql}
+            """,
+            (variant_ids, variant_ids),
+        )
+        result = _unique_edition_product_match(
+            cur.fetchall() or [],
+            match_method="shopify_variant_id",
+            missing_reason="No Edition Ops product matched the Shopify variant ID.",
+            ambiguous_reason="Multiple Edition Ops products matched the Shopify variant ID.",
+        )
+        if result["status"] != "missing":
+            return result
+
+    if handle:
+        cur.execute(
+            f"""
+            SELECT ep.*
+            FROM edition_products ep
+            WHERE ep.shopify_handle=%s
+            ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
+            {lock_sql}
+            """,
+            (handle,),
+        )
+        result = _unique_edition_product_match(
+            cur.fetchall() or [],
+            match_method="shopify_handle",
+            missing_reason="No Edition Ops product matched the Shopify handle.",
+            ambiguous_reason="Multiple Edition Ops products matched the Shopify handle.",
+        )
+        if result["status"] != "missing":
+            return result
+
+    if title_key:
+        cur.execute(
+            f"""
+            SELECT ep.*
+            FROM edition_products ep
+            WHERE COALESCE(ep.product_title, '') <> ''
+            ORDER BY ep.updated_at DESC NULLS LAST, ep.id DESC
+            {lock_sql}
+            """,
+        )
+        rows = [
+            row
+            for row in (cur.fetchall() or [])
+            if _normalize_product_title_key(row.get("product_title")) == title_key
+        ]
+        result = _unique_edition_product_match(
+            rows,
+            match_method="normalized_product_title",
+            missing_reason="No Edition Ops product matched the normalized product title.",
+            ambiguous_reason="Multiple Edition Ops products matched the normalized product title.",
+        )
+        if result["status"] != "missing":
+            return result
+
+    return {
+        "product": {},
+        "status": "missing",
+        "reason": "No Edition Ops product matched by product ID, variant ID, handle, or normalized title.",
+        "candidates": [],
+    }
+
+
+def resolve_edition_product_for_order_line(line_item, *, fetch_missing_products=True):
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            result = _resolve_edition_product_for_order_line_with_cursor(cur, line_item)
+    if result.get("product") or not fetch_missing_products or not line_item.get("shopify_product_id"):
+        return result
+    fetched = shopify_sync.fetch_product_by_shopify_id(line_item["shopify_product_id"])
+    upsert_products([fetched])
+    with connect() as conn:
+        with conn.cursor() as cur:
+            return _resolve_edition_product_for_order_line_with_cursor(cur, line_item)
+
+
 def _match_product_handle(cur, *, handle="", shopify_product_id="", product_title=""):
+    matched = _resolve_edition_product_for_order_line_with_cursor(
+        cur,
+        {
+            "product_handle": handle,
+            "shopify_product_id": shopify_product_id,
+            "product_title": product_title,
+        },
+    )
+    matched_product = matched.get("product") or {}
+    if matched_product.get("handle"):
+        return matched_product["handle"]
+
     normalized_handle = _normalize_handle(handle)
     if normalized_handle:
         cur.execute(
@@ -5595,6 +5805,11 @@ def _backfill_edition_customer_details(cur, order):
 
 
 def _lookup_product_by_handle_or_id(cur, line_item):
+    matched = _resolve_edition_product_for_order_line_with_cursor(cur, line_item)
+    matched_product = matched.get("product") or {}
+    if matched_product:
+        return matched_product
+
     handle = line_item.get("product_handle") or ""
     product_id = line_item.get("shopify_product_id") or ""
     variant_id = line_item.get("shopify_variant_id") or line_item.get("variant_id") or ""
@@ -6848,13 +7063,20 @@ def process_paid_order(
             str(line_item.get("shopify_variant_id") or line_item.get("variant_id") or "").strip(),
             str(line_item.get("product_handle") or "").strip().lower(),
             str(line_item.get("product_title") or "").strip().lower(),
+            _normalize_product_title_key(line_item.get("product_title")),
         ]
         cached_product = next((product_cache[key] for key in line_cache_keys if key and key in product_cache), None)
+        match_result = {}
         try:
-            product = cached_product if cached_product is not None else resolve_product_for_line(
-                line_item,
-                fetch_missing_products=fetch_missing_products,
-            )
+            if cached_product is not None:
+                product = cached_product
+                match_result = {"product": product, "status": "matched", "reason": "Matched from order sync product cache."}
+            else:
+                match_result = resolve_edition_product_for_order_line(
+                    line_item,
+                    fetch_missing_products=fetch_missing_products,
+                )
+                product = match_result.get("product") or {}
         except Exception as error:
             product = None
             errors.append(f"Product fetch failed for {line_item.get('product_title')}: {error}")
@@ -6881,15 +7103,17 @@ def process_paid_order(
                 str(line_item.get("shopify_variant_id") or line_item.get("variant_id") or "").strip(),
                 str(product.get("handle") or "").strip().lower(),
                 str(product.get("title") or "").strip().lower(),
+                _normalize_product_title_key(product.get("title")),
                 *line_cache_keys,
             ):
                 if cache_key:
                     product_cache[cache_key] = product
 
-        handle = (product or {}).get("handle") or line_item.get("product_handle") or ""
+        handle = (product or {}).get("handle") or ""
         if not handle:
             missing_mapping_skipped += quantity
-            errors.append(f"Missing product handle for line item {line_item_id}.")
+            mapping_reason = (match_result or {}).get("reason") or "Could not confidently match the line to an Edition Ops product."
+            errors.append(f"Missing product mapping for line item {line_item_id}: {mapping_reason}")
             with connect() as conn:
                 with conn.cursor() as cur:
                     _set_order_line_status(
@@ -6901,7 +7125,27 @@ def process_paid_order(
                         product_title=(product or {}).get("title") or line_item.get("product_title") or "",
                         variant_title=line_item.get("variant_title") or "",
                         sku=line_item.get("sku") or "",
-                        last_error="Missing product handle returned from Shopify.",
+                        last_error=mapping_reason,
+                    )
+                conn.commit()
+            continue
+        if product and not bool(product.get("active", True)):
+            missing_mapping_skipped += quantity
+            setup_reason = "Matched Edition Ops product is disabled."
+            errors.append(f"Edition setup disabled for line item {line_item_id}: {handle}.")
+            with connect() as conn:
+                with conn.cursor() as cur:
+                    _set_order_line_status(
+                        cur,
+                        line_item_id,
+                        "Needs Edition Setup",
+                        shopify_product_id=product.get("shopify_product_id") or line_item.get("shopify_product_id") or "",
+                        shopify_variant_id=line_item.get("shopify_variant_id") or line_item.get("variant_id") or "",
+                        shopify_handle=handle,
+                        product_title=product.get("title") or line_item.get("product_title") or "",
+                        variant_title=line_item.get("variant_title") or "",
+                        sku=line_item.get("sku") or "",
+                        last_error=setup_reason,
                     )
                 conn.commit()
             continue
@@ -7033,9 +7277,12 @@ def process_shopify_order_for_editions(
 
 
 def _preview_product_counter_state(cur, line_item, cache):
-    product = _lookup_product_by_handle_or_id(cur, line_item) or {}
-    handle = str(product.get("handle") or line_item.get("product_handle") or "").strip()
+    product_result = _resolve_edition_product_for_order_line_with_cursor(cur, line_item)
+    product = product_result.get("product") or {}
+    handle = str(product.get("handle") or "").strip()
     if not handle:
+        return {}
+    if not bool(product.get("active", True)):
         return {}
     cached = cache.get(handle)
     if cached is not None:
@@ -7994,6 +8241,7 @@ def _missing_edition_candidate_rows(limit=100, statuses=None):
                     o.shopify_order_id,
                     o.order_name,
                     COALESCE(o.processed_at, o.created_at, o.synced_at) AS order_date,
+                    COALESCE(o.customer_name, '') AS customer_name,
                     li.shopify_line_item_id,
                     li.shopify_handle,
                     li.shopify_product_id,
@@ -8020,22 +8268,45 @@ def _missing_edition_candidate_rows(limit=100, statuses=None):
 
 def preview_missing_edition_repairs(limit=100, statuses=None):
     candidate_rows = _missing_edition_candidate_rows(limit=limit, statuses=statuses)
+    preview_rows = []
+    if candidate_rows:
+        state_cache = {}
+        with connect() as conn:
+            with conn.cursor() as cur:
+                for row in candidate_rows[:50]:
+                    line_item = dict(row)
+                    match = _resolve_edition_product_for_order_line_with_cursor(cur, line_item)
+                    product = match.get("product") or {}
+                    state = _preview_product_counter_state(cur, line_item, state_cache) if product else {}
+                    proposed_number = _int_value(state.get("next_edition_number"), 0)
+                    edition_total = _int_value(state.get("edition_total"), _int_value(product.get("edition_total"), 100))
+                    preview_rows.append(
+                        {
+                            "order_name": str(row.get("order_name") or ""),
+                            "date": str(row.get("order_date") or "")[:10],
+                            "customer_name": str(row.get("customer_name") or ""),
+                            "product_title": str(row.get("product_title") or ""),
+                            "variant_title": str(row.get("variant_title") or ""),
+                            "quantity": int(row.get("quantity") or 1),
+                            "shopify_product_id": str(row.get("shopify_product_id") or ""),
+                            "shopify_handle": str(row.get("shopify_handle") or ""),
+                            "matched_handle": str(product.get("handle") or ""),
+                            "match_status": str(match.get("status") or ""),
+                            "match_reason": str(match.get("reason") or ""),
+                            "proposed_edition": (
+                                format_edition_display_number(proposed_number, edition_total)
+                                if proposed_number
+                                else ""
+                            ),
+                            "assignment_status": str(row.get("assignment_status") or ""),
+                            "last_error": str(row.get("last_error") or ""),
+                        }
+                    )
     return {
         "mode": "dry_run",
         "candidate_rows": len(candidate_rows),
         "candidate_orders": len({str(row.get("shopify_order_id") or "") for row in candidate_rows}),
-        "preview_rows": [
-            {
-                "order_name": str(row.get("order_name") or ""),
-                "date": str(row.get("order_date") or "")[:10],
-                "product_title": str(row.get("product_title") or ""),
-                "variant_title": str(row.get("variant_title") or ""),
-                "quantity": int(row.get("quantity") or 1),
-                "assignment_status": str(row.get("assignment_status") or ""),
-                "last_error": str(row.get("last_error") or ""),
-            }
-            for row in candidate_rows[:10]
-        ],
+        "preview_rows": preview_rows[:50],
         "errors": [],
     }
 
@@ -8209,11 +8480,15 @@ def _known_missing_edition_repair_plan():
                     "product_handle": row.get("shopify_handle") or "",
                     "variant_id": "",
                 }
-                product = _lookup_product_by_handle_or_id(cur, lookup_line) or {}
+                lookup_result = _resolve_edition_product_for_order_line_with_cursor(cur, lookup_line)
+                product = lookup_result.get("product") or {}
                 plan["product"] = product
-                handle = product.get("handle") or row.get("shopify_handle") or ""
+                handle = product.get("handle") or ""
                 if not handle:
-                    plan.update(status="missing_mapping", reason="Could not confidently match the line to an edition product.")
+                    plan.update(
+                        status="missing_mapping",
+                        reason=lookup_result.get("reason") or "Could not confidently match the line to an edition product.",
+                    )
                     plans.append(plan)
                     continue
 
@@ -9022,39 +9297,8 @@ def mark_certificates_checked(edition_order_ids):
 
 
 def _edition_product_for_order_row(cur, row, *, lock=False):
-    lock_sql = " FOR UPDATE" if lock else ""
-    handle = str(row.get("shopify_handle") or row.get("product_handle") or "").strip()
-    product_id = str(row.get("shopify_product_id") or "").strip()
-    if handle:
-        cur.execute(
-            f"""
-            SELECT *
-            FROM edition_products
-            WHERE shopify_handle=%s
-            {lock_sql}
-            """,
-            (handle,),
-        )
-        product = cur.fetchone()
-        if product:
-            return product
-    if product_id:
-        cur.execute(
-            f"""
-            SELECT *
-            FROM edition_products
-            WHERE shopify_product_id=%s
-               OR shopify_product_gid=%s
-            ORDER BY updated_at DESC NULLS LAST
-            LIMIT 1
-            {lock_sql}
-            """,
-            (product_id, product_id),
-        )
-        product = cur.fetchone()
-        if product:
-            return product
-    return None
+    result = _resolve_edition_product_for_order_line_with_cursor(cur, row, lock=lock)
+    return result.get("product") or None
 
 
 def _edition_conflict_for_number(cur, *, row, product, edition_number):

@@ -1587,11 +1587,11 @@ def _render_admin_panel(rows):
             with st.spinner("Previewing missing Shopify details..."):
                 _backfill_missing_order_details(dry_run=True, limit=100)
             st.rerun()
-        if admin_cols[4].button("Preview Missing Editions", use_container_width=True, disabled=not backend):
+        if admin_cols[4].button("Preview Missing Edition Mapping Repair", use_container_width=True, disabled=not backend):
             with st.spinner("Previewing missing edition repairs..."):
                 _repair_missing_editions(dry_run=True, limit=100)
             st.rerun()
-        if admin_cols[5].button("Assign Missing Editions", use_container_width=True, disabled=not backend):
+        if admin_cols[5].button("Apply Missing Edition Mapping Repair", use_container_width=True, disabled=not backend):
             with st.spinner("Assigning missing editions..."):
                 _repair_missing_editions(dry_run=False, limit=100)
             st.rerun()

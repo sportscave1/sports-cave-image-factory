@@ -2192,6 +2192,145 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             ],
         }
 
+    class EditionProductCursor:
+        def __init__(self, products, variants=None):
+            self.products = products
+            self.variants = variants or {}
+            self.rows = []
+
+        def execute(self, sql, params=()):
+            if "ep.shopify_product_id = ANY" in sql:
+                ids = set(params[0])
+                self.rows = [
+                    product
+                    for product in self.products
+                    if product.get("shopify_product_id") in ids or product.get("shopify_product_gid") in ids
+                ]
+            elif "FROM shopify_variants sv" in sql:
+                variant_ids = set(params[0])
+                product_ids = {
+                    self.variants[variant_id]
+                    for variant_id in variant_ids
+                    if variant_id in self.variants
+                }
+                self.rows = [
+                    product
+                    for product in self.products
+                    if product.get("shopify_product_id") in product_ids or product.get("shopify_product_gid") in product_ids
+                ]
+            elif "WHERE ep.shopify_handle=%s" in sql:
+                handle = params[0]
+                self.rows = [product for product in self.products if product.get("shopify_handle") == handle]
+            elif "COALESCE(ep.product_title" in sql:
+                self.rows = list(self.products)
+            else:
+                self.rows = []
+
+        def fetchall(self):
+            return self.rows
+
+        def fetchone(self):
+            return self.rows[0] if self.rows else None
+
+    def edition_product(self, **overrides):
+        row = {
+            "id": 1,
+            "shopify_product_id": "gid://shopify/Product/999",
+            "shopify_product_gid": "gid://shopify/Product/999",
+            "shopify_handle": "cristiano-ronaldo-football-framed-wall-art",
+            "product_title": "Cristiano Ronaldo The Captain's Last Dance Wall Art",
+            "edition_total": 100,
+            "next_edition_number": 75,
+            "active": True,
+            "is_active": True,
+        }
+        row.update(overrides)
+        return row
+
+    def test_edition_product_resolver_matches_by_product_id(self):
+        cursor = self.EditionProductCursor([self.edition_product()])
+
+        result = supabase_backend._resolve_edition_product_for_order_line_with_cursor(
+            cursor,
+            {
+                "shopify_product_id": "999",
+                "product_title": "Different title",
+            },
+        )
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["product"]["handle"], "cristiano-ronaldo-football-framed-wall-art")
+        self.assertEqual(result["product"]["match_method"], "shopify_product_id")
+
+    def test_edition_product_resolver_matches_by_handle(self):
+        cursor = self.EditionProductCursor([self.edition_product(shopify_product_id="", shopify_product_gid="")])
+
+        result = supabase_backend._resolve_edition_product_for_order_line_with_cursor(
+            cursor,
+            {
+                "product_handle": "cristiano-ronaldo-football-framed-wall-art",
+                "product_title": "Different title",
+            },
+        )
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["product"]["match_method"], "shopify_handle")
+
+    def test_edition_product_resolver_matches_cristiano_by_normalized_title(self):
+        cursor = self.EditionProductCursor(
+            [
+                self.edition_product(
+                    shopify_product_id="",
+                    shopify_product_gid="",
+                    shopify_handle="cristiano-ronaldo-football-framed-wall-art",
+                )
+            ]
+        )
+
+        result = supabase_backend._resolve_edition_product_for_order_line_with_cursor(
+            cursor,
+            {
+                "shopify_product_id": "",
+                "product_handle": "",
+                "product_title": "Cristiano Ronaldo The Captain\u2019s Last Dance Wall Art",
+            },
+        )
+
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["product"]["handle"], "cristiano-ronaldo-football-framed-wall-art")
+        self.assertEqual(result["product"]["next_edition_number"], 75)
+        self.assertEqual(result["product"]["match_method"], "normalized_product_title")
+
+    def test_edition_product_resolver_blocks_ambiguous_normalized_title(self):
+        cursor = self.EditionProductCursor(
+            [
+                self.edition_product(id=1, shopify_handle="cristiano-one"),
+                self.edition_product(id=2, shopify_handle="cristiano-two"),
+            ]
+        )
+
+        result = supabase_backend._resolve_edition_product_for_order_line_with_cursor(
+            cursor,
+            {
+                "shopify_product_id": "",
+                "product_handle": "",
+                "product_title": "Cristiano Ronaldo The Captain's Last Dance Wall Art",
+            },
+        )
+
+        self.assertEqual(result["status"], "ambiguous")
+        self.assertFalse(result["product"])
+
+    def test_live_order_allocation_uses_edition_ops_resolver(self):
+        process_source = inspect.getsource(supabase_backend.process_paid_order)
+        repair_source = inspect.getsource(supabase_backend._known_missing_edition_repair_plan)
+        preview_source = inspect.getsource(supabase_backend.preview_missing_edition_repairs)
+
+        self.assertIn("resolve_edition_product_for_order_line", process_source)
+        self.assertNotIn("resolve_product_for_line(\n                line_item", process_source)
+        self.assertIn("_resolve_edition_product_for_order_line_with_cursor", repair_source)
+        self.assertIn("_resolve_edition_product_for_order_line_with_cursor", preview_source)
+
     @patch.object(supabase_backend, "finish_sync_run")
     @patch.object(supabase_backend, "start_sync_run", return_value="run-1")
     @patch.object(supabase_backend, "_set_sync_success")
