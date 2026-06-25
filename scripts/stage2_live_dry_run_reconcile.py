@@ -2,8 +2,9 @@
 """Read-only Stage 2 live reconciliation for Sports Cave OS.
 
 This script is intended for Render Shell or a Render one-off job where the
-live DATABASE_URL and Shopify Admin credentials are present. It only performs
-Postgres SELECTs and Shopify Admin GraphQL queries.
+live DATABASE_URL and Shopify credentials are present. It only performs
+Postgres SELECTs, Shopify token acquisition when needed, and Shopify Admin
+GraphQL queries.
 """
 
 from __future__ import annotations
@@ -29,8 +30,12 @@ from psycopg.rows import dict_row
 REQUIRED_ENV_VARS = (
     "DATABASE_URL",
     "SHOPIFY_STORE_DOMAIN",
-    "SHOPIFY_ADMIN_ACCESS_TOKEN",
     "SHOPIFY_API_VERSION",
+)
+
+SHOPIFY_AUTH_ENV_OPTIONS = (
+    "SHOPIFY_ADMIN_ACCESS_TOKEN",
+    "SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET",
 )
 
 REQUIRED_TABLES = (
@@ -229,13 +234,24 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def missing_env_report() -> bool:
     missing = [key for key in REQUIRED_ENV_VARS if not os.getenv(key, "").strip()]
-    if not missing:
+    has_admin_token = bool(os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN", "").strip())
+    has_client_credentials = bool(
+        os.getenv("SHOPIFY_CLIENT_ID", "").strip()
+        and os.getenv("SHOPIFY_CLIENT_SECRET", "").strip()
+    )
+    missing_auth = not (has_admin_token or has_client_credentials)
+    if not missing and not missing_auth:
         return False
 
     print("Stage 2 live dry-run cannot run because required env vars are missing.")
-    print("Missing:")
-    for key in missing:
-        print(f"  - {key}")
+    if missing:
+        print("Missing required base env vars:")
+        for key in missing:
+            print(f"  - {key}")
+    if missing_auth:
+        print("Missing Shopify authentication. Provide either:")
+        for option in SHOPIFY_AUTH_ENV_OPTIONS:
+            print(f"  - {option}")
     print("No Supabase connection was opened.")
     print("No Shopify request was made.")
     print("No report files were written.")
@@ -250,6 +266,20 @@ def normalize_store_domain(value: str) -> str:
         raw = f"https://{raw}"
     parsed = urlparse(raw)
     return (parsed.hostname or "").strip(".")
+
+
+def redact_secret(text: Any) -> str:
+    value = str(text or "")
+    for env_key in (
+        "SHOPIFY_ADMIN_ACCESS_TOKEN",
+        "SHOPIFY_CLIENT_ID",
+        "SHOPIFY_CLIENT_SECRET",
+        "DATABASE_URL",
+    ):
+        secret = os.getenv(env_key, "").strip()
+        if secret:
+            value = value.replace(secret, "[redacted]")
+    return value[:2000]
 
 
 def safe_database_label(database_url: str) -> str:
@@ -362,6 +392,75 @@ def graphql_request(
     if payload.get("errors"):
         raise RuntimeError(json.dumps(payload["errors"], ensure_ascii=True))
     return payload.get("data") or {}
+
+
+def parse_scopes(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return sorted({str(item).strip() for item in value if str(item).strip()})
+    return sorted(
+        {
+            part.strip()
+            for part in str(value or "").replace(",", " ").split()
+            if part.strip()
+        }
+    )
+
+
+def acquire_shopify_access_token(
+    *,
+    store_domain: str,
+    admin_access_token: str,
+    client_id: str,
+    client_secret: str,
+) -> dict[str, Any]:
+    if admin_access_token:
+        return {
+            "access_token": admin_access_token,
+            "auth_mode": "SHOPIFY_ADMIN_ACCESS_TOKEN",
+            "scope": "",
+            "scopes": [],
+            "expires_in": "",
+        }
+
+    endpoint = f"https://{store_domain}/admin/oauth/access_token"
+    try:
+        response = requests.post(
+            endpoint,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except requests.RequestException as error:
+        response = getattr(error, "response", None)
+        body = getattr(response, "text", "") if response is not None else ""
+        status_code = getattr(response, "status_code", "unknown") if response is not None else "unknown"
+        raise RuntimeError(
+            "Shopify client credentials token request failed. "
+            f"Status: {status_code}. Response: {redact_secret(body)}"
+        ) from error
+    except ValueError as error:
+        raise RuntimeError("Shopify client credentials token response was not valid JSON.") from error
+
+    access_token = str(payload.get("access_token") or "").strip()
+    if not access_token:
+        raise RuntimeError(
+            "Shopify client credentials token response did not include access_token."
+        )
+
+    scope = str(payload.get("scope") or "")
+    return {
+        "access_token": access_token,
+        "auth_mode": "SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET",
+        "scope": scope,
+        "scopes": parse_scopes(scope),
+        "expires_in": payload.get("expires_in") or "",
+    }
 
 
 def order_search_query(order_name: str) -> str:
@@ -938,6 +1037,8 @@ def write_summary(
         "## B. Shopify connection status",
         f"- Store: {shopify_status.get('store_domain')}",
         f"- API version: {shopify_status.get('api_version')}",
+        f"- Auth mode: {shopify_status.get('auth_mode') or 'not authenticated'}",
+        f"- Token scopes: {', '.join(shopify_status.get('scopes') or []) or 'not reported'}",
         f"- Orders fetched: {len(orders)}",
         f"- Error: {shopify_status.get('error') or 'none'}",
         "",
@@ -1007,7 +1108,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     store_domain = normalize_store_domain(os.environ["SHOPIFY_STORE_DOMAIN"])
-    access_token = os.environ["SHOPIFY_ADMIN_ACCESS_TOKEN"].strip()
+    admin_access_token = os.getenv("SHOPIFY_ADMIN_ACCESS_TOKEN", "").strip()
+    client_id = os.getenv("SHOPIFY_CLIENT_ID", "").strip()
+    client_secret = os.getenv("SHOPIFY_CLIENT_SECRET", "").strip()
     api_version = os.environ["SHOPIFY_API_VERSION"].strip()
     database_url = os.environ["DATABASE_URL"].strip()
     output_dir = ensure_output_dir(args.output_dir)
@@ -1017,6 +1120,9 @@ def main(argv: list[str] | None = None) -> int:
     shopify_status = {
         "store_domain": store_domain,
         "api_version": api_version,
+        "auth_mode": "",
+        "scopes": [],
+        "token_expires_in": "",
         "error": "",
     }
     orders: list[dict[str, Any]] = []
@@ -1024,6 +1130,16 @@ def main(argv: list[str] | None = None) -> int:
     searched_products: list[dict[str, Any]] = []
 
     try:
+        token_details = acquire_shopify_access_token(
+            store_domain=store_domain,
+            admin_access_token=admin_access_token,
+            client_id=client_id,
+            client_secret=client_secret,
+        )
+        access_token = token_details["access_token"]
+        shopify_status["auth_mode"] = token_details.get("auth_mode") or ""
+        shopify_status["scopes"] = token_details.get("scopes") or []
+        shopify_status["token_expires_in"] = token_details.get("expires_in") or ""
         orders = fetch_shopify_orders(
             store_domain=store_domain,
             api_version=api_version,
@@ -1074,12 +1190,14 @@ def main(argv: list[str] | None = None) -> int:
             )
         time.sleep(0.1)
     except Exception as error:
-        shopify_status["error"] = str(error)
+        shopify_status["error"] = redact_secret(error)
 
     raw_payload = {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "store_domain": store_domain,
         "api_version": api_version,
+        "shopify_auth_mode": shopify_status.get("auth_mode") or "",
+        "shopify_scopes": shopify_status.get("scopes") or [],
         "orders": orders,
         "products_by_id": products_by_id,
         "searched_products": searched_products,
