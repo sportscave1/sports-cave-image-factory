@@ -182,13 +182,13 @@ class EditionOpsUiTests(unittest.TestCase):
     def test_orders_page_has_copy_order_number_button(self):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
         render_table = inspect.getsource(orders_page._render_orders_table)
-        copy_buttons = inspect.getsource(orders_page._render_order_copy_buttons)
+        display_rows = orders_page._display_rows([{"order": "#SC2858"}])
 
-        self.assertIn("_render_order_copy_buttons(rows)", render_table)
-        self.assertIn("Copy order number", copy_buttons)
-        self.assertIn("navigator.clipboard.writeText(value)", copy_buttons)
-        self.assertIn("copy-order-button", copy_buttons)
-        self.assertIn("components.html", copy_buttons)
+        self.assertEqual(display_rows[0]["order"], f"{orders_page.COPY_ORDER_ICON} #SC2858")
+        self.assertNotIn("_render_order_copy_buttons", source)
+        self.assertNotIn("Copy order</span>", source)
+        self.assertNotIn("copy-order-button", source)
+        self.assertNotIn("components.html", render_table)
 
     def test_prodigi_reference_contains_all_16_code_mappings(self):
         rows = os_pages.prodigi_reference_rows()
@@ -1531,7 +1531,7 @@ class EditionOpsUiTests(unittest.TestCase):
         ):
             orders_page.render_page()
 
-        self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC1234")
+        self.assertEqual(fake_st.rendered_rows[0]["order"], f"{orders_page.COPY_ORDER_ICON} #SC1234")
         self.assertEqual(set(fake_st.rendered_rows[0]), set(orders_page.VISIBLE_COLUMNS))
 
     def test_orders_page_prefers_supabase_ledger_rows_when_available(self):
@@ -1651,7 +1651,7 @@ class EditionOpsUiTests(unittest.TestCase):
         ):
             orders_page.render_page()
 
-        self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC2843")
+        self.assertEqual(fake_st.rendered_rows[0]["order"], f"{orders_page.COPY_ORDER_ICON} #SC2843")
         self.assertEqual(fake_st.rendered_rows[0]["edition"], "#050")
 
     def test_orders_reads_hybrid_supabase_directly_without_shopify(self):
