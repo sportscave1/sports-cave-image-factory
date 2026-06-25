@@ -71,6 +71,62 @@ CSV_COLUMNS = (
 )
 
 
+def _render_import_popover_styles():
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stPopover"] div[role="dialog"],
+        div[data-testid="stPopover"] [data-testid="stPopoverBody"] {
+            background: #FFFFFF !important;
+            color: #111111 !important;
+        }
+
+        div[data-testid="stPopover"] div[role="dialog"] *,
+        div[data-testid="stPopover"] [data-testid="stPopoverBody"] *,
+        div[data-testid="stPopover"] [data-testid="stFileUploader"] *,
+        div[data-testid="stPopover"] section[data-testid="stFileUploaderDropzone"] * {
+            color: #111111 !important;
+            -webkit-text-fill-color: #111111 !important;
+            fill: #111111 !important;
+            stroke: #111111 !important;
+        }
+
+        div[data-testid="stPopover"] [data-testid="stFileUploader"],
+        div[data-testid="stPopover"] section[data-testid="stFileUploaderDropzone"],
+        div[data-testid="stPopover"] [data-testid="stFileUploaderFile"],
+        div[data-testid="stPopover"] [data-baseweb="tag"] {
+            background: #FFFFFF !important;
+            color: #111111 !important;
+            border-color: #D5D5D5 !important;
+        }
+
+        div[data-testid="stPopover"] > button,
+        div[data-testid="stPopover"] div[data-testid="stButton"] button,
+        div[data-testid="stPopover"] div[data-testid="stFileUploader"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]),
+        div[data-testid="stPopover"] section[data-testid="stFileUploaderDropzone"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) {
+            background: #111111 !important;
+            border-color: #111111 !important;
+            color: #FFFFFF !important;
+            -webkit-text-fill-color: #FFFFFF !important;
+        }
+
+        div[data-testid="stPopover"] > button *,
+        div[data-testid="stPopover"] div[data-testid="stButton"] button *,
+        div[data-testid="stPopover"] div[data-testid="stButton"] button p,
+        div[data-testid="stPopover"] div[data-testid="stButton"] button span,
+        div[data-testid="stPopover"] div[data-testid="stFileUploader"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) *,
+        div[data-testid="stPopover"] section[data-testid="stFileUploaderDropzone"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) * {
+            color: #FFFFFF !important;
+            -webkit-text-fill-color: #FFFFFF !important;
+            fill: #FFFFFF !important;
+            stroke: #FFFFFF !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -879,13 +935,21 @@ def _apply_csv_updates_to_rows(rows, csv_text):
 def _apply_csv_import(uploaded_file):
     if uploaded_file is None:
         st.session_state[IMPORT_WARNINGS_KEY] = ["Choose a CSV file first."]
-        return
+        return False
 
-    text = uploaded_file.getvalue().decode("utf-8-sig")
-    rows, changed_rows, changed_count, warnings = _apply_csv_updates_to_rows(
-        st.session_state.get(ROWS_KEY, []),
-        text,
-    )
+    try:
+        raw_csv = uploaded_file.getvalue()
+        try:
+            text = raw_csv.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw_csv.decode("utf-8", errors="replace")
+        rows, changed_rows, changed_count, warnings = _apply_csv_updates_to_rows(
+            st.session_state.get(ROWS_KEY, []),
+            text,
+        )
+    except Exception as error:
+        st.session_state[IMPORT_WARNINGS_KEY] = [f"CSV import failed: {error}"]
+        return False
 
     originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
     st.session_state[ROWS_KEY] = rows
@@ -894,6 +958,7 @@ def _apply_csv_import(uploaded_file):
     st.session_state[ORIGINAL_ROWS_KEY] = originals
     _write_snapshot(rows, originals)
     _bump_editor_version()
+    return True
 
 
 def _column_config():
@@ -939,6 +1004,7 @@ def render_page():
     started = datetime.now(timezone.utc)
     _ensure_state()
     _hydrate_from_snapshot_once()
+    _render_import_popover_styles()
     config = shopify_sync.get_config()
     rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
     originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
@@ -987,9 +1053,11 @@ def render_page():
             type=["csv"],
             key="edition-ops-import-csv",
         )
-        if st.button("Replace Table From CSV", use_container_width=True, disabled=uploaded_csv is None):
-            _apply_csv_import(uploaded_csv)
-            st.rerun()
+        if uploaded_csv is not None:
+            st.caption(f"Ready to import: {uploaded_csv.name}")
+        if st.button("Replace Table From CSV", use_container_width=True):
+            if _apply_csv_import(uploaded_csv):
+                st.rerun()
 
     if rows:
         rows_to_save = _rows_to_save(rows, originals)

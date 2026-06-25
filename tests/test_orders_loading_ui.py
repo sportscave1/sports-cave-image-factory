@@ -2175,6 +2175,51 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(updated_rows[0]["edition_status"], "Limited Edition")
         self.assertEqual(updated_rows[0]["sync_status"], "Needs Sync")
 
+    def test_csv_import_action_is_clickable_and_readable(self):
+        source = (ROOT / "edition_ops.py").read_text(encoding="utf-8")
+        render_page = source[source.index("def render_page():") :]
+
+        self.assertIn("_render_import_popover_styles()", render_page)
+        self.assertIn('if st.button("Replace Table From CSV", use_container_width=True):', render_page)
+        self.assertNotIn("disabled=uploaded_csv is None", render_page)
+        self.assertIn("background: #FFFFFF", source)
+        self.assertIn("color: #FFFFFF", source)
+        self.assertIn("-webkit-text-fill-color: #FFFFFF", source)
+
+    def test_apply_csv_import_updates_session_rows(self):
+        row = edition_ops._normalise_row(
+            {
+                "shopify_product_gid": "gid://shopify/Product/1",
+                "handle": "all-rise-wall-art",
+                "edition_enabled": False,
+                "edition_total": 100,
+                "edition_next_number": 1,
+            }
+        )
+        fake_st = SimpleNamespace(
+            session_state={
+                edition_ops.ROWS_KEY: [row],
+                edition_ops.ORIGINAL_ROWS_KEY: [row],
+            }
+        )
+        upload = SimpleNamespace(
+            name="edition-ops-backup.csv",
+            getvalue=lambda: b"Handle,Enabled,Edition total,Next edition number\nall-rise-wall-art,TRUE,150,72\n",
+        )
+
+        with patch.object(edition_ops, "st", fake_st), patch.object(
+            edition_ops, "_write_snapshot"
+        ) as write_snapshot, patch.object(edition_ops, "_bump_editor_version") as bump_version:
+            result = edition_ops._apply_csv_import(upload)
+
+        self.assertTrue(result)
+        self.assertEqual(fake_st.session_state[edition_ops.IMPORT_WARNINGS_KEY], [])
+        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_total"], 150)
+        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_next_number"], 72)
+        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["sync_status"], "Needs Sync")
+        write_snapshot.assert_called_once()
+        bump_version.assert_called_once()
+
     def test_csv_import_overwrites_current_next_number_even_when_lower(self):
         rows = [
             edition_ops._normalise_row(
