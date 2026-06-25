@@ -4067,8 +4067,18 @@ def _normalize_product_title_key(value):
     text = str(value or "").strip()
     if not text:
         return ""
-    text = text.replace("\u2019", "'").replace("\u2018", "'").replace("\u201c", '"').replace("\u201d", '"')
-    text = re.sub(r"\s+", " ", text)
+    replacements = {
+        "\u2019": "'",
+        "\u2018": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+    }
+    for source, target in replacements.items():
+        text = text.replace(source, target)
+    text = re.sub(r"[^\w\s'&/+.-]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
     return text.casefold()
 
 
@@ -5070,6 +5080,14 @@ def _upsert_order(cur, order):
 
 
 def _upsert_order_lines(cur, order):
+    has_line_variant_id = _column_exists(cur, "shopify_order_lines", "shopify_variant_id")
+    variant_column = ", shopify_variant_id" if has_line_variant_id else ""
+    variant_value = ", %s" if has_line_variant_id else ""
+    variant_update = (
+        "\n                shopify_variant_id=COALESCE(NULLIF(EXCLUDED.shopify_variant_id, ''), shopify_order_lines.shopify_variant_id),"
+        if has_line_variant_id
+        else ""
+    )
     for line_index, line_item in enumerate(order.get("line_items") or [], start=1):
         line_item_id = str(
             line_item.get("shopify_line_item_id")
@@ -5091,17 +5109,16 @@ def _upsert_order_lines(cur, order):
             product_title=product_title,
         )
         cur.execute(
-            """
+            f"""
             INSERT INTO shopify_order_lines(
-                shopify_line_item_id, shopify_order_id, shopify_product_id, shopify_variant_id, shopify_handle,
+                shopify_line_item_id, shopify_order_id, shopify_product_id{variant_column}, shopify_handle,
                 product_title, variant_title, sku, quantity, assignment_status, last_error,
                 raw_json, synced_at, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'Needs Edition', '', %s::jsonb, now(), now())
+            VALUES (%s, %s, %s{variant_value}, %s, %s, %s, %s, %s, 'Needs Edition', '', %s::jsonb, now(), now())
             ON CONFLICT (shopify_line_item_id) DO UPDATE SET
                 shopify_order_id=EXCLUDED.shopify_order_id,
-                shopify_product_id=COALESCE(NULLIF(EXCLUDED.shopify_product_id, ''), shopify_order_lines.shopify_product_id),
-                shopify_variant_id=COALESCE(NULLIF(EXCLUDED.shopify_variant_id, ''), shopify_order_lines.shopify_variant_id),
+                shopify_product_id=COALESCE(NULLIF(EXCLUDED.shopify_product_id, ''), shopify_order_lines.shopify_product_id),{variant_update}
                 shopify_handle=COALESCE(NULLIF(EXCLUDED.shopify_handle, ''), shopify_order_lines.shopify_handle),
                 product_title=COALESCE(NULLIF(EXCLUDED.product_title, ''), shopify_order_lines.product_title),
                 variant_title=COALESCE(NULLIF(EXCLUDED.variant_title, ''), shopify_order_lines.variant_title),
@@ -5111,17 +5128,21 @@ def _upsert_order_lines(cur, order):
                 synced_at=now(),
                 updated_at=now()
             """,
-            (
+            tuple(
+                value
+                for value in (
                 line_item_id,
                 order.get("shopify_order_id") or "",
                 shopify_product_id,
-                shopify_variant_id,
+                shopify_variant_id if has_line_variant_id else None,
                 matched_handle,
                 product_title,
                 line_item.get("variant_title") or "",
                 line_item.get("sku") or "",
                 max(1, int(line_item.get("quantity") or 1)),
                 json_dumps(line_item),
+                )
+                if value is not None
             ),
         )
 
@@ -5368,38 +5389,30 @@ def _lookup_product_by_handle_or_id(cur, line_item):
             """
             SELECT sp.shopify_product_id, sp.handle, sp.title
             FROM shopify_products sp
-            WHERE LOWER(
-                REGEXP_REPLACE(
-                    REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(sp.title, ''), '’', '''), '‘', '''), '“', '"'), '”', '"'),
-                    '\\s+',
-                    ' ',
-                    'g'
-                )
-            ) = %s
-            LIMIT 2
+            WHERE COALESCE(sp.title, '') <> ''
             """,
-            (normalized_title,),
         )
-        rows = cur.fetchall()
+        rows = [
+            row
+            for row in (cur.fetchall() or [])
+            if _normalize_product_title_key(row.get("title")) == normalized_title
+        ]
         if len(rows) == 1:
             return rows[0]
+        if len(rows) > 1:
+            return None
         cur.execute(
             """
             SELECT ep.shopify_product_id, ep.shopify_handle AS handle, ep.product_title AS title
             FROM edition_products ep
-            WHERE LOWER(
-                REGEXP_REPLACE(
-                    REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(ep.product_title, ''), '’', '''), '‘', '''), '“', '"'), '”', '"'),
-                    '\\s+',
-                    ' ',
-                    'g'
-                )
-            ) = %s
-            LIMIT 2
+            WHERE COALESCE(ep.product_title, '') <> ''
             """,
-            (normalized_title,),
         )
-        rows = cur.fetchall()
+        rows = [
+            row
+            for row in (cur.fetchall() or [])
+            if _normalize_product_title_key(row.get("title")) == normalized_title
+        ]
         if len(rows) == 1:
             return rows[0]
     return None
@@ -7692,9 +7705,22 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
                    eo.id AS edition_order_id,
                    COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AS shopify_handle,
                    COALESCE(NULLIF(eo.shopify_product_id, ''), NULLIF(li.shopify_product_id, '')) AS shopify_product_id,
-                   COALESCE(NULLIF(eo.shopify_variant_id, ''), NULLIF(li.shopify_variant_id, '')) AS shopify_variant_id,
+                   COALESCE(
+                       NULLIF(eo.shopify_variant_id, ''),
+                       NULLIF(c.shopify_variant_id, ''),
+                       NULLIF(li.raw_json->>'shopify_variant_id', ''),
+                       NULLIF(li.raw_json->>'variant_id', ''),
+                       NULLIF(li.raw_json->'variant'->>'id', '')
+                   ) AS shopify_variant_id,
                    COALESCE(NULLIF(li.product_title, ''), NULLIF(eo.product_title, '')) AS product_title,
-                   COALESCE(NULLIF(li.variant_title, ''), NULLIF(eo.variant_title, '')) AS variant_title,
+                   COALESCE(
+                       NULLIF(li.variant_title, ''),
+                       NULLIF(eo.variant_title, ''),
+                       NULLIF(c.variant_title, ''),
+                       NULLIF(li.raw_json->>'variant_title', ''),
+                       NULLIF(li.raw_json->>'variantTitle', ''),
+                       NULLIF(li.raw_json->'variant'->>'title', '')
+                   ) AS variant_title,
                    COALESCE(NULLIF(eo.sku, ''), NULLIF(li.sku, '')) AS sku,
                    eo.edition_number,
                    eo.edition_total, eo.allocation_index, eo.assigned_at, eo.certificate_status, eo.status AS edition_order_status,

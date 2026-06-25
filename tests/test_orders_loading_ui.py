@@ -961,8 +961,10 @@ class EditionOpsUiTests(unittest.TestCase):
     def test_orders_page_is_snapshot_based_and_lightweight(self):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
         top_actions = inspect.getsource(orders_page._render_top_actions)
-        admin_panel = inspect.getsource(orders_page._render_admin_panel)
         render_page = inspect.getsource(orders_page.render_page)
+        list_orders = inspect.getsource(supabase_backend.list_orders)
+        upsert_order_lines = inspect.getsource(supabase_backend._upsert_order_lines)
+        product_lookup = inspect.getsource(supabase_backend._lookup_product_by_handle_or_id)
 
         self.assertEqual(
             orders_page.VISIBLE_COLUMNS,
@@ -980,8 +982,9 @@ class EditionOpsUiTests(unittest.TestCase):
         )
         self.assertIn("orders_allocation_snapshot.json", source)
         self.assertIn("_read_orders_snapshot", source)
-        self.assertIn("_cached_supabase_orders_snapshot", source)
-        self.assertIn("_invalidate_orders_snapshot_cache", source)
+        self.assertNotIn("_cached_supabase_orders_snapshot", source)
+        self.assertNotIn("_invalidate_orders_snapshot_cache", source)
+        self.assertNotIn("ORDERS_CACHE_VERSION_KEY", source)
         self.assertIn("load_supabase_orders_snapshot", source)
         self.assertIn("_display_table_payload", source)
         self.assertIn("_compact_variant_label", source)
@@ -989,27 +992,28 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("DEFAULT_VISIBLE_ROW_LIMIT = 50", source)
         self.assertIn("Search orders", render_page)
         self.assertNotIn("Show all rows", render_page)
+        self.assertNotIn("_render_admin_panel", render_page)
         self.assertIn("Refresh Orders", top_actions)
-        self.assertIn("Generate Certificate", top_actions)
+        self.assertIn("Preview Certificate", top_actions)
         self.assertIn("Generate + Upload Certificate", top_actions)
         self.assertIn("Reupload Certificate", top_actions)
         self.assertIn("Open Certificate", top_actions)
-        self.assertIn("Start Prodigi Dispatch", top_actions)
+        self.assertIn("Start Prodigi QA", top_actions)
+        self.assertNotIn("Start Prodigi Dispatch", top_actions)
         self.assertNotIn("Open Shopify Admin", top_actions)
-        self.assertIn("Preview Latest Paid Fetch", admin_panel)
-        self.assertIn("Apply Latest Paid Sync", admin_panel)
-        self.assertIn("Backfill Missing Shopify Details", admin_panel)
-        self.assertIn("Preview Missing Editions", admin_panel)
-        self.assertIn("Assign Missing Editions", admin_panel)
-        self.assertIn("Reload Orders from Supabase", admin_panel)
-        self.assertIn("Orders load diagnostics", admin_panel)
         self.assertNotIn("customer_email", orders_page.VISIBLE_COLUMNS)
         self.assertNotIn("edition_total", orders_page.VISIBLE_COLUMNS)
-        self.assertIn("Select an order, generate the certificate, then send to Prodigi.", render_page)
+        self.assertIn("Select an order, complete QA, then generate and upload the certificate.", render_page)
         self.assertIn("Assign edition number before certificate generation.", top_actions)
         self.assertNotIn("Supabase ledger-backed orders for fulfilment and Prodigi dispatch.", render_page)
         self.assertNotIn("Source: Supabase ledger", render_page)
         self.assertNotIn("Last synced:", render_page)
+        self.assertNotIn("li.shopify_variant_id", list_orders)
+        self.assertIn("li.raw_json->>'variant_id'", list_orders)
+        self.assertIn("_column_exists(cur, \"shopify_order_lines\", \"shopify_variant_id\")", upsert_order_lines)
+        self.assertIn("variant_column", upsert_order_lines)
+        self.assertNotIn("REGEXP_REPLACE", product_lookup)
+        self.assertNotIn("REPLACE(REPLACE", product_lookup)
         return
 
         self.assertEqual(
@@ -1088,11 +1092,11 @@ class EditionOpsUiTests(unittest.TestCase):
 
         for label in (
             "Refresh Orders",
-            "Generate Certificate",
+            "Preview Certificate",
             "Generate + Upload Certificate",
             "Reupload Certificate",
             "Open Certificate",
-            "Start Prodigi Dispatch",
+            "Start Prodigi QA",
         ):
             self.assertIn(label, top_actions)
 
@@ -1415,16 +1419,13 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC2843")
         self.assertEqual(fake_st.rendered_rows[0]["edition"], "#050")
 
-    def test_orders_empty_cache_falls_back_to_direct_supabase_read(self):
+    def test_orders_reads_supabase_directly_without_custom_cache(self):
         fake_st = SimpleNamespace(
             session_state={
-                orders_page.ORDERS_CACHE_VERSION_KEY: 0,
                 orders_page.LOAD_ERROR_KEY: "",
-                orders_page.LOAD_DIAGNOSTICS_KEY: {},
             }
         )
-        cached_empty = {"source": "supabase", "rows": [], "saved_at": "2026-06-25T08:00:00Z"}
-        direct_payload = {
+        payload = {
             "source": "supabase",
             "rows": [{"order": "#SC2843", "edition_number": 50}],
             "saved_at": "2026-06-25T08:01:00Z",
@@ -1435,31 +1436,22 @@ class EditionOpsUiTests(unittest.TestCase):
             "_configured_supabase_backend",
             return_value=object(),
         ), patch.object(
-            orders_page,
-            "_ledger_counts",
-            return_value={"shopify_orders": 95, "shopify_order_lines": 127, "edition_orders": 115},
-        ), patch.object(
-            orders_page,
-            "_cached_supabase_orders_snapshot",
-            return_value=cached_empty,
-        ), patch.object(
-            orders_page,
-            "_read_supabase_orders_snapshot_direct",
-            return_value=direct_payload,
+            orders_page.order_allocator,
+            "load_supabase_orders_snapshot",
+            return_value=payload,
         ) as direct_read:
             payload = orders_page._read_orders_snapshot()
 
         direct_read.assert_called_once_with(limit=1000)
         self.assertEqual(payload["rows"][0]["order"], "#SC2843")
-        self.assertEqual(fake_st.session_state[orders_page.LOAD_ERROR_KEY], "")
-        self.assertEqual(fake_st.session_state[orders_page.LOAD_DIAGNOSTICS_KEY]["supabase_live_row_count"], 127)
+        self.assertNotIn("ORDERS_CACHE_VERSION_KEY", (ROOT / "orders_page.py").read_text(encoding="utf-8"))
 
     def test_orders_supabase_read_error_is_not_reported_as_empty_ledger(self):
         fake_st = SimpleNamespace(
             session_state={
-                orders_page.ORDERS_CACHE_VERSION_KEY: 0,
+                orders_page.ROWS_KEY: [{"order": "#old"}],
+                orders_page.META_KEY: {},
                 orders_page.LOAD_ERROR_KEY: "",
-                orders_page.LOAD_DIAGNOSTICS_KEY: {},
             }
         )
 
@@ -1468,24 +1460,16 @@ class EditionOpsUiTests(unittest.TestCase):
             "_configured_supabase_backend",
             return_value=object(),
         ), patch.object(
-            orders_page,
-            "_ledger_counts",
-            return_value={"shopify_orders": 95, "shopify_order_lines": 127, "edition_orders": 115},
-        ), patch.object(
-            orders_page,
-            "_cached_supabase_orders_snapshot",
-            return_value={"source": "supabase", "rows": []},
-        ), patch.object(
-            orders_page,
-            "_read_supabase_orders_snapshot_direct",
+            orders_page.order_allocator,
+            "load_supabase_orders_snapshot",
             side_effect=RuntimeError("connection dropped"),
         ):
-            payload = orders_page._read_orders_snapshot()
+            orders_page._load_snapshot_once()
 
-        self.assertEqual(payload["source"], "supabase_error")
-        self.assertIn("connection dropped", payload["error"])
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [])
+        self.assertEqual(fake_st.session_state[orders_page.META_KEY]["source"], "supabase_error")
+        self.assertIn("connection dropped", fake_st.session_state[orders_page.META_KEY]["error"])
         self.assertIn("connection dropped", fake_st.session_state[orders_page.LOAD_ERROR_KEY])
-        self.assertEqual(fake_st.session_state[orders_page.LOAD_DIAGNOSTICS_KEY]["supabase_live_row_count"], 127)
 
     def test_orders_missing_ledger_fields_use_placeholder_and_count(self):
         row = orders_page._normalise_row(

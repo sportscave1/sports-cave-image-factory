@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 import importlib
 import json
-import os
 from pathlib import Path
 import re
 import time
@@ -32,11 +31,7 @@ REPAIR_RESULT_KEY = "orders_missing_edition_repair_result"
 SEARCH_KEY = "orders_search_text"
 SHOW_ALL_KEY = "orders_show_all_rows"
 LOAD_ERROR_KEY = "orders_load_error"
-LOAD_DIAGNOSTICS_KEY = "orders_load_diagnostics"
 DEFAULT_VISIBLE_ROW_LIMIT = 50
-ORDERS_CACHE_VERSION_KEY = "orders-ledger-cache-version"
-EDITION_OPS_CACHE_VERSION_KEY = "edition-ops-ledger-cache-version"
-ORDERS_CACHE_TTL_SECONDS = max(int(os.getenv("SUPABASE_ORDERS_CACHE_TTL_SECONDS", "120")), 30)
 ALLOCATION_BLOCKER_STATUSES = {
     "Needs allocation",
     "Needs Review - Sold Out",
@@ -91,51 +86,6 @@ def _ensure_state():
     st.session_state.setdefault(SEARCH_KEY, "")
     st.session_state.setdefault(SHOW_ALL_KEY, False)
     st.session_state.setdefault(LOAD_ERROR_KEY, "")
-    st.session_state.setdefault(LOAD_DIAGNOSTICS_KEY, {})
-
-
-def _cache_version(key):
-    st.session_state.setdefault(key, 0)
-    return int(st.session_state[key])
-
-
-def _bump_cache_versions(*keys):
-    for key in keys:
-        st.session_state[key] = int(st.session_state.get(key, 0)) + 1
-
-
-def _invalidate_orders_snapshot_cache(*, bump_edition_ops=False):
-    _bump_cache_versions(ORDERS_CACHE_VERSION_KEY, *( [EDITION_OPS_CACHE_VERSION_KEY] if bump_edition_ops else []))
-    st.session_state[SNAPSHOT_LOADED_KEY] = False
-
-
-@st.cache_data(ttl=ORDERS_CACHE_TTL_SECONDS, show_spinner=False)
-def _cached_supabase_orders_snapshot(limit, cache_version):
-    return order_allocator.load_supabase_orders_snapshot(limit=limit)
-
-
-def _snapshot_row_count(payload):
-    if not isinstance(payload, dict):
-        return 0
-    return len(payload.get("rows") or [])
-
-
-def _ledger_count_hint(counts):
-    return max(
-        int((counts or {}).get("shopify_order_lines") or 0),
-        int((counts or {}).get("edition_orders") or 0),
-        int((counts or {}).get("shopify_orders") or 0),
-    )
-
-
-def _set_load_diagnostics(**values):
-    current = dict(st.session_state.get(LOAD_DIAGNOSTICS_KEY) or {})
-    current.update(values)
-    st.session_state[LOAD_DIAGNOSTICS_KEY] = current
-
-
-def _read_supabase_orders_snapshot_direct(limit=1000):
-    return order_allocator.load_supabase_orders_snapshot(limit=limit)
 
 
 def _configured_supabase_backend():
@@ -151,91 +101,10 @@ def _configured_supabase_backend():
     return backend
 
 
-def _read_orders_snapshot(*, bypass_cache=False):
+def _read_orders_snapshot():
     backend = _configured_supabase_backend()
     if backend:
-        counts = _ledger_counts()
-        ledger_hint = _ledger_count_hint(counts)
-        cached_error = ""
-        direct_error = ""
-        payload = None
-        source = "cache"
-        if not bypass_cache:
-            try:
-                payload = _cached_supabase_orders_snapshot(1000, _cache_version(ORDERS_CACHE_VERSION_KEY))
-            except Exception as error:
-                cached_error = str(error)
-                print(f"WARN Orders Supabase cached snapshot failed: {error}", flush=True)
-
-        cached_rows = _snapshot_row_count(payload)
-        cache_unexpectedly_empty = payload is not None and cached_rows == 0 and ledger_hint > 0
-        if bypass_cache or payload is None or cache_unexpectedly_empty:
-            source = "direct"
-            try:
-                payload = _read_supabase_orders_snapshot_direct(limit=1000)
-            except Exception as error:
-                direct_error = str(error)
-                print(f"ERROR Orders Supabase direct snapshot failed: {error}", flush=True)
-                st.session_state[LOAD_ERROR_KEY] = direct_error or cached_error
-                _set_load_diagnostics(
-                    source="supabase_error",
-                    cache_rows=cached_rows,
-                    supabase_live_row_count=ledger_hint,
-                    last_supabase_read_error=st.session_state[LOAD_ERROR_KEY],
-                    last_cache_refresh="",
-                )
-                return {
-                    "version": order_allocator.SNAPSHOT_VERSION,
-                    "saved_at": _now_iso(),
-                    "last_refreshed": "",
-                    "last_synced": "",
-                    "source": "supabase_error",
-                    "order_count": ledger_hint,
-                    "row_count": 0,
-                    "rows": [],
-                    "error": st.session_state[LOAD_ERROR_KEY],
-                }
-
-        row_count = _snapshot_row_count(payload)
-        if row_count == 0 and ledger_hint > 0:
-            message = (
-                "Supabase returned zero order rows even though ledger tables contain data. "
-                "Use Reload Orders from Supabase in Developer diagnostics."
-            )
-            st.session_state[LOAD_ERROR_KEY] = message
-            _set_load_diagnostics(
-                source=source,
-                cache_rows=cached_rows,
-                supabase_live_row_count=ledger_hint,
-                last_supabase_read_error=message,
-                last_cache_refresh=(payload or {}).get("saved_at") or "",
-            )
-            return {
-                **(payload or {}),
-                "source": "supabase_error",
-                "error": message,
-                "rows": [],
-                "row_count": 0,
-                "order_count": ledger_hint,
-            }
-
-        st.session_state[LOAD_ERROR_KEY] = ""
-        _set_load_diagnostics(
-            source=source,
-            cache_rows=cached_rows,
-            supabase_live_row_count=ledger_hint,
-            last_supabase_read_error="",
-            last_cache_refresh=(payload or {}).get("saved_at") or "",
-        )
-        if payload is not None:
-            return payload
-
-        try:
-            payload = _read_supabase_orders_snapshot_direct(limit=1000)
-            return payload
-        except Exception as error:
-            st.session_state[LOAD_ERROR_KEY] = str(error)
-            return {"rows": [], "source": "supabase_error", "error": str(error), "row_count": 0}
+        return order_allocator.load_supabase_orders_snapshot(limit=1000)
     return order_allocator.load_orders_snapshot()
 
 
@@ -592,16 +461,29 @@ def _update_matching_row(target_row, updates):
 
 
 def _load_snapshot_once():
-    if st.session_state.get(SNAPSHOT_LOADED_KEY):
-        return
     start = time.perf_counter()
-    payload = _read_orders_snapshot()
+    try:
+        payload = _read_orders_snapshot()
+    except Exception as error:
+        st.session_state[ROWS_KEY] = []
+        st.session_state[META_KEY] = {
+            "last_refreshed": "",
+            "saved_at": "",
+            "last_synced": "",
+            "order_count": 0,
+            "row_count": 0,
+            "source": "supabase_error",
+            "error": str(error),
+        }
+        st.session_state[LOAD_ERROR_KEY] = str(error)
+        print(f"ERROR Orders Supabase snapshot failed: {error}", flush=True)
+        _perf_log("load snapshot failed", start)
+        return
+    st.session_state[LOAD_ERROR_KEY] = ""
     _apply_snapshot_payload(payload)
-    if payload and payload.get("source") == "supabase":
-        _write_snapshot(payload.get("rows") or [], meta=payload)
     st.session_state[SNAPSHOT_LOADED_KEY] = True
     _perf_log("load snapshot", start, rows=len(st.session_state[ROWS_KEY]))
-    print("Orders load cached rows: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
+    print("Orders load persisted rows: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
     print("Shopify fetch skipped on initial load", flush=True)
     print("Allocation skipped on initial load", flush=True)
     print("Metafield sync skipped on initial load", flush=True)
@@ -622,13 +504,9 @@ def _apply_snapshot_payload(payload):
     }
 
 
-def _reload_orders_from_source(*, bypass_cache=False):
-    if bypass_cache:
-        _invalidate_orders_snapshot_cache()
-    payload = _read_orders_snapshot(bypass_cache=bypass_cache)
+def _reload_orders_from_source():
+    payload = _read_orders_snapshot()
     _apply_snapshot_payload(payload)
-    if payload and payload.get("source") == "supabase":
-        _write_snapshot(payload.get("rows") or [], meta=payload)
     st.session_state[SNAPSHOT_LOADED_KEY] = True
 
 
@@ -924,9 +802,6 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50):
             sync_product_metafields=False,
         )
     st.session_state[SYNC_RESULT_KEY] = result
-    _invalidate_orders_snapshot_cache(
-        bump_edition_ops=bool(int(result.get("edition_allocations_created") or 0) > 0)
-    )
     _reload_orders_from_source()
     st.session_state[NOTICE_KEY] = (
         f"New orders imported: {int(result.get('new_orders_inserted') or 0)} | "
@@ -945,7 +820,6 @@ def _backfill_missing_order_details(*, dry_run=True, limit=100):
     result = backend.backfill_missing_shopify_order_details(limit=limit, dry_run=dry_run)
     st.session_state[BACKFILL_RESULT_KEY] = result
     if not dry_run:
-        _invalidate_orders_snapshot_cache()
         _reload_orders_from_source()
     mode_label = "Dry-run" if dry_run else "Backfill applied"
     st.session_state[NOTICE_KEY] = (
@@ -975,7 +849,6 @@ def _repair_missing_editions(*, dry_run=True, limit=100):
         result = backend.preview_missing_edition_repairs(limit=limit)
     else:
         result = backend.repair_missing_edition_orders(limit=limit)
-        _invalidate_orders_snapshot_cache(bump_edition_ops=True)
         _reload_orders_from_source()
     st.session_state[REPAIR_RESULT_KEY] = result
     st.session_state[NOTICE_KEY] = (
@@ -1112,7 +985,6 @@ def _generate_certificate_for_row(row):
             raise ValueError("This row is missing its Supabase edition record. Ask a developer to repair missing editions first.")
         if backend:
             backend.generate_certificate_for_edition_order(row.get("edition_order_id"))
-            _invalidate_orders_snapshot_cache()
             _reload_orders_from_source()
             refreshed = _current_row_for(row)
             st.session_state[NOTICE_KEY] = (
@@ -1162,7 +1034,6 @@ def _upload_certificate_for_row(row):
             return
         if backend and not str(row.get("certificate_pdf_path") or "").strip():
             backend.generate_certificate_for_edition_order(row.get("edition_order_id"))
-            _invalidate_orders_snapshot_cache()
             _reload_orders_from_source()
             row = _current_row_for(row)
         record = certificate_engine.certificate_record_from_order_row(row)
@@ -1171,7 +1042,6 @@ def _upload_certificate_for_row(row):
             record = certificate_engine.generate_local_certificate_for_record(record)
         uploaded = certificate_engine.upload_generated_certificate_record(record, config=config)
         saved = certificate_engine.save_certificate_record_to_order(uploaded, config=config)
-        _invalidate_orders_snapshot_cache()
         _reload_orders_from_source()
         if saved.get("metafields_synced") is False:
             st.session_state[NOTICE_KEY] = (
@@ -1557,7 +1427,7 @@ def _render_top_actions(rows):
             _refresh_orders(latest_paid_only=True, max_orders=50)
         st.rerun()
     if action_cols[1].button(
-        "Preview Certificate / Generate Certificate",
+        "Preview Certificate",
         use_container_width=True,
         disabled=not can_generate,
     ):
@@ -1577,7 +1447,7 @@ def _render_top_actions(rows):
     else:
         action_cols[3].button("Open Certificate", use_container_width=True, disabled=True)
     if action_cols[4].button(
-        "Start Prodigi Dispatch",
+        "Start Prodigi QA",
         use_container_width=True,
         disabled=not can_dispatch,
     ):
@@ -1585,7 +1455,7 @@ def _render_top_actions(rows):
         st.rerun()
     action_cols[5].caption(f"{selected_count} selected")
     if not backend:
-        st.caption("Order refresh is unavailable in this runtime because the ledger connection is missing.")
+        st.caption("Order refresh is unavailable right now.")
     elif selected_rows and not can_generate:
         st.caption("Assign edition number before certificate generation.")
 
@@ -1673,17 +1543,15 @@ def _render_ledger_diagnostics():
 
 
 def _render_orders_load_diagnostics(rows):
-    diagnostics = st.session_state.get(LOAD_DIAGNOSTICS_KEY) or {}
     meta = st.session_state.get(META_KEY) or {}
     search_text = str(st.session_state.get(SEARCH_KEY) or "")
     filtered_count = len(_filter_rows(rows, search_text))
-    st.caption(f"Orders cache row count: {len(st.session_state.get(ROWS_KEY, []) or [])}")
-    st.caption(f"Supabase live row count hint: {diagnostics.get('supabase_live_row_count', 0)}")
-    st.caption(f"Last cache refresh: {_format_time(diagnostics.get('last_cache_refresh') or meta.get('saved_at'))}")
-    st.caption(f"Last Supabase read error: {diagnostics.get('last_supabase_read_error') or 'None'}")
+    st.caption(f"Orders rows loaded: {len(st.session_state.get(ROWS_KEY, []) or [])}")
+    st.caption(f"Last Supabase read: {_format_time(meta.get('saved_at'))}")
+    st.caption(f"Last Supabase read error: {meta.get('error') or 'None'}")
     st.caption(f"Current filter/search: {search_text or 'None'}")
     st.caption(f"Rows after filtering: {filtered_count}")
-    st.caption(f"Snapshot source: {diagnostics.get('source') or meta.get('source') or 'unknown'}")
+    st.caption(f"Snapshot source: {meta.get('source') or 'unknown'}")
 
 
 def _render_admin_panel(rows):
@@ -1691,7 +1559,7 @@ def _render_admin_panel(rows):
         return
     backend = _configured_supabase_backend()
     with st.expander("Admin Order Sync + Diagnostics", expanded=False):
-        admin_cols = st.columns([1.05, 1.05, 1.05, 1.05, 1, 1, 1.1])
+        admin_cols = st.columns([1.05, 1.05, 1.05, 1.05, 1, 1])
         if admin_cols[0].button("Preview Latest Paid Fetch", use_container_width=True, disabled=not backend):
             with st.spinner("Previewing latest paid Shopify orders..."):
                 _preview_latest_paid_orders(limit=50)
@@ -1716,14 +1584,6 @@ def _render_admin_panel(rows):
             with st.spinner("Assigning missing editions..."):
                 _repair_missing_editions(dry_run=False, limit=100)
             st.rerun()
-        if admin_cols[6].button("Reload Orders from Supabase", use_container_width=True, disabled=not backend):
-            with st.spinner("Reloading orders from Supabase..."):
-                _reload_orders_from_source(bypass_cache=True)
-                st.session_state[NOTICE_KEY] = (
-                    f"Reloaded {len(st.session_state.get(ROWS_KEY, []) or [])} order row(s) from Supabase."
-                )
-            st.rerun()
-
         preview = st.session_state.get(LATEST_FETCH_PREVIEW_KEY) or {}
         if preview:
             _render_admin_result("Latest paid fetch preview", preview)
@@ -1740,8 +1600,6 @@ def _render_admin_panel(rows):
                 st.dataframe(preview_rows, hide_index=True, use_container_width=True)
         st.markdown("**Supabase diagnostics**")
         _render_ledger_diagnostics()
-        st.markdown("**Orders load diagnostics**")
-        _render_orders_load_diagnostics(rows)
         st.markdown("**Orders read completeness diagnostics**")
         _render_missing_data_diagnostics(rows)
 
@@ -1773,7 +1631,7 @@ def render_page():
     st.session_state[ROWS_KEY] = rows
 
     st.title("Orders")
-    st.caption("Select an order, generate the certificate, then send to Prodigi.")
+    st.caption("Select an order, complete QA, then generate and upload the certificate.")
 
     notice = st.session_state.get(NOTICE_KEY)
     if notice:
@@ -1789,13 +1647,11 @@ def render_page():
     search_cols[1].caption("Latest 50")
 
     if not rows:
-        diagnostics = st.session_state.get(LOAD_DIAGNOSTICS_KEY) or {}
         load_error = st.session_state.get(LOAD_ERROR_KEY) or (st.session_state.get(META_KEY) or {}).get("error") or ""
-        if load_error or int(diagnostics.get("supabase_live_row_count") or 0) > 0:
-            st.error("Orders could not be loaded. Open Developer diagnostics.")
+        if load_error:
+            st.error("Orders could not be loaded. Please check Developer diagnostics.")
         else:
             st.info("No saved orders are available in the operational ledger yet.")
-        _render_admin_panel(rows)
         return
 
     filtered_rows = _filter_rows(rows, search_text)
@@ -1809,4 +1665,3 @@ def render_page():
         st.caption(f"{len(visible_rows)} order row(s) shown.")
 
     _render_orders_table(visible_rows)
-    _render_admin_panel(rows)
