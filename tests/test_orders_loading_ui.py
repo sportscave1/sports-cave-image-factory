@@ -11,6 +11,7 @@ import order_allocator
 import os_pages
 import orders_page
 import shopify_sync
+import supabase_backend
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -137,7 +138,8 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Prodigi Details", prodigi_page)
         self.assertIn("Dispatch QA", prodigi_page)
         self.assertIn("Save Issue", prodigi_page)
-        self.assertIn("Complete Dispatch", prodigi_page)
+        self.assertIn("Generate + Upload Certificate", prodigi_page)
+        self.assertIn("There are no errors. The edition number is correct.", prodigi_page)
         self.assertIn("Submitted Dispatch Log", prodigi_page)
         self.assertIn("Last 7 Days", prodigi_page)
         self.assertNotIn("Copy Prodigi Details", prodigi_page)
@@ -147,7 +149,9 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Dispatch rows saved", prodigi_page)
         self.assertIn("prodigi_find_order_rows_from_cache", prodigi_page)
         self.assertIn("prodigi_load_dispatch_rows", prodigi_page)
-        self.assertIn("Did you select the correct Prodigi variant?", prodigi_page)
+        self.assertIn("Variant/size/frame checked", prodigi_page)
+        self.assertIn("Final file/Prodigi file ready", prodigi_page)
+        self.assertIn("No errors found", prodigi_page)
         self.assertIn("Expected Prodigi variant", prodigi_page)
         self.assertNotIn("Copy Prodigi Variant", prodigi_page)
         self.assertIn("Prodigi Shopify fetch skipped on initial load", prodigi_page)
@@ -452,7 +456,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(persisted["prodigi_status"], "Needs Review")
         self.assertIn("Certificate missing", persisted["notes"])
 
-    def test_prodigi_dispatch_blocks_missing_certificate_and_upserts_single_row(self):
+    def test_prodigi_dispatch_final_certificate_action_upserts_single_row(self):
         row = os_pages.prodigi_tracker_row_from_order(
             {
                 "order": "#SC2843",
@@ -481,7 +485,7 @@ class EditionOpsUiTests(unittest.TestCase):
         }
 
         blockers = os_pages.prodigi_dispatch_blockers(row, answers)
-        self.assertIn("Generate/upload certificate before dispatch completion.", blockers)
+        self.assertNotIn("Generate/upload certificate before dispatch completion.", blockers)
         saved_rows, saved = os_pages.prodigi_upsert_dispatch_row([], row, status="Needs Review", notes="Cert missing", qa_answers=answers)
         saved_rows, saved_again = os_pages.prodigi_upsert_dispatch_row(saved_rows, row, status="Needs Review", notes="Still missing", qa_answers=answers)
 
@@ -495,6 +499,57 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertFalse(saved_again["qa_confirmed"])
         self.assertEqual(saved_again["notes"], "Still missing")
         self.assertIn("Certificate not uploaded", saved_again["issue_reason"])
+
+    def test_prodigi_complete_status_is_per_line_and_confirmed(self):
+        row = os_pages.prodigi_tracker_row_from_order(
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 50,
+                "edition_total": 100,
+                "shipping": "US Standard Tracked Shipping",
+                "certificate": "Uploaded",
+                "shopify_order_id": "gid://shopify/Order/2843",
+                "shopify_line_item_id": "gid://shopify/LineItem/8431",
+                "shopify_product_id": "gid://shopify/Product/9001",
+            }
+        )
+        other_line = {
+            **row,
+            "row_id": "other-line",
+            "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+            "edition_number": 41,
+            "shopify_line_item_id": "gid://shopify/LineItem/8432",
+            "prodigi_status": "",
+        }
+        answers = {
+            "certificate": "Yes",
+            "artwork_upload": "Yes",
+            "product_option": "Yes",
+            "frame": "Yes",
+            "size": "Yes",
+            "edition_number": "Yes",
+            "shipping": "Yes",
+            "sent_to_production": "Yes",
+            "final_check": "Yes",
+        }
+
+        saved_rows, saved = os_pages.prodigi_upsert_dispatch_row([other_line], row, status="Complete", notes="Done", qa_answers=answers)
+
+        self.assertEqual(len(saved_rows), 2)
+        self.assertEqual(saved["prodigi_status"], "Complete")
+        self.assertTrue(saved["qa_confirmed"])
+        self.assertEqual(other_line["prodigi_status"], "")
+
+    def test_prodigi_final_qa_generates_certificate_after_confirmation(self):
+        source = inspect.getsource(os_pages.render_prodigi_page)
+
+        self.assertIn("There are no errors. The edition number is correct.", source)
+        self.assertIn("Generate + Upload Certificate", source)
+        self.assertIn("prodigi_generate_upload_certificate_for_row(completion_row)", source)
+        self.assertIn('status="Complete"', source)
 
     def test_prodigi_dispatch_recent_log_filters_last_7_days_and_searches_history(self):
         today = os_pages.date(2026, 6, 24)
@@ -937,6 +992,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Refresh Orders", top_actions)
         self.assertIn("Generate Certificate", top_actions)
         self.assertIn("Generate + Upload Certificate", top_actions)
+        self.assertIn("Reupload Certificate", top_actions)
         self.assertIn("Open Certificate", top_actions)
         self.assertIn("Start Prodigi Dispatch", top_actions)
         self.assertNotIn("Open Shopify Admin", top_actions)
@@ -945,6 +1001,8 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Backfill Missing Shopify Details", admin_panel)
         self.assertIn("Preview Missing Editions", admin_panel)
         self.assertIn("Assign Missing Editions", admin_panel)
+        self.assertIn("Reload Orders from Supabase", admin_panel)
+        self.assertIn("Orders load diagnostics", admin_panel)
         self.assertNotIn("customer_email", orders_page.VISIBLE_COLUMNS)
         self.assertNotIn("edition_total", orders_page.VISIBLE_COLUMNS)
         self.assertIn("Select an order, generate the certificate, then send to Prodigi.", render_page)
@@ -1032,6 +1090,7 @@ class EditionOpsUiTests(unittest.TestCase):
             "Refresh Orders",
             "Generate Certificate",
             "Generate + Upload Certificate",
+            "Reupload Certificate",
             "Open Certificate",
             "Start Prodigi Dispatch",
         ):
@@ -1356,6 +1415,78 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC2843")
         self.assertEqual(fake_st.rendered_rows[0]["edition"], "#050")
 
+    def test_orders_empty_cache_falls_back_to_direct_supabase_read(self):
+        fake_st = SimpleNamespace(
+            session_state={
+                orders_page.ORDERS_CACHE_VERSION_KEY: 0,
+                orders_page.LOAD_ERROR_KEY: "",
+                orders_page.LOAD_DIAGNOSTICS_KEY: {},
+            }
+        )
+        cached_empty = {"source": "supabase", "rows": [], "saved_at": "2026-06-25T08:00:00Z"}
+        direct_payload = {
+            "source": "supabase",
+            "rows": [{"order": "#SC2843", "edition_number": 50}],
+            "saved_at": "2026-06-25T08:01:00Z",
+        }
+
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page,
+            "_configured_supabase_backend",
+            return_value=object(),
+        ), patch.object(
+            orders_page,
+            "_ledger_counts",
+            return_value={"shopify_orders": 95, "shopify_order_lines": 127, "edition_orders": 115},
+        ), patch.object(
+            orders_page,
+            "_cached_supabase_orders_snapshot",
+            return_value=cached_empty,
+        ), patch.object(
+            orders_page,
+            "_read_supabase_orders_snapshot_direct",
+            return_value=direct_payload,
+        ) as direct_read:
+            payload = orders_page._read_orders_snapshot()
+
+        direct_read.assert_called_once_with(limit=1000)
+        self.assertEqual(payload["rows"][0]["order"], "#SC2843")
+        self.assertEqual(fake_st.session_state[orders_page.LOAD_ERROR_KEY], "")
+        self.assertEqual(fake_st.session_state[orders_page.LOAD_DIAGNOSTICS_KEY]["supabase_live_row_count"], 127)
+
+    def test_orders_supabase_read_error_is_not_reported_as_empty_ledger(self):
+        fake_st = SimpleNamespace(
+            session_state={
+                orders_page.ORDERS_CACHE_VERSION_KEY: 0,
+                orders_page.LOAD_ERROR_KEY: "",
+                orders_page.LOAD_DIAGNOSTICS_KEY: {},
+            }
+        )
+
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page,
+            "_configured_supabase_backend",
+            return_value=object(),
+        ), patch.object(
+            orders_page,
+            "_ledger_counts",
+            return_value={"shopify_orders": 95, "shopify_order_lines": 127, "edition_orders": 115},
+        ), patch.object(
+            orders_page,
+            "_cached_supabase_orders_snapshot",
+            return_value={"source": "supabase", "rows": []},
+        ), patch.object(
+            orders_page,
+            "_read_supabase_orders_snapshot_direct",
+            side_effect=RuntimeError("connection dropped"),
+        ):
+            payload = orders_page._read_orders_snapshot()
+
+        self.assertEqual(payload["source"], "supabase_error")
+        self.assertIn("connection dropped", payload["error"])
+        self.assertIn("connection dropped", fake_st.session_state[orders_page.LOAD_ERROR_KEY])
+        self.assertEqual(fake_st.session_state[orders_page.LOAD_DIAGNOSTICS_KEY]["supabase_live_row_count"], 127)
+
     def test_orders_missing_ledger_fields_use_placeholder_and_count(self):
         row = orders_page._normalise_row(
             {
@@ -1516,6 +1647,24 @@ class EditionOpsUiTests(unittest.TestCase):
         reload_rows.assert_called_once()
         self.assertIn("new orders imported: 1", fake_st.session_state[orders_page.NOTICE_KEY].lower())
         return
+
+    def test_latest_paid_sync_allocates_without_historical_tracking_guard(self):
+        latest_sync_source = inspect.getsource(supabase_backend.sync_latest_paid_orders_to_supabase)
+        preview_source = inspect.getsource(supabase_backend.preview_latest_paid_orders_sync)
+        general_sync_source = inspect.getsource(supabase_backend.sync_shopify_orders_to_supabase)
+
+        self.assertIn("respect_tracking_start=False", latest_sync_source)
+        self.assertIn("respect_tracking_start=False", preview_source)
+        self.assertIn("respect_tracking_start=True", general_sync_source)
+
+    def test_missing_edition_repair_preview_is_chronological(self):
+        source = inspect.getsource(supabase_backend._missing_edition_candidate_rows)
+        repair_source = inspect.getsource(supabase_backend.repair_missing_edition_orders)
+
+        self.assertIn("COALESCE(o.created_at, o.processed_at, o.synced_at) ASC", source)
+        self.assertIn("o.order_name ASC", source)
+        self.assertNotIn("o.order_name DESC", source)
+        self.assertIn("respect_tracking_start=False", repair_source)
 
     def test_backfill_missing_order_details_dry_run_is_read_only(self):
         fake_st = SimpleNamespace(

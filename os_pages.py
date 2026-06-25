@@ -678,7 +678,7 @@ def prodigi_submission_blockers(row):
     if (
         _prodigi_clean(row.get("date_sent_to_prodigi"))
         or _prodigi_clean(row.get("prodigi_order_id"))
-        or row.get("prodigi_status") in {"Submitted", "Submitted to Prodigi", "In Production", "Shipped", "Fulfilled in Shopify"}
+        or row.get("prodigi_status") in {"Submitted", "Complete", "Submitted to Prodigi", "In Production", "Shipped", "Fulfilled in Shopify"}
     ):
         blockers.append("Already submitted")
     return blockers
@@ -709,7 +709,7 @@ def _prodigi_certificate_uploaded(row):
 
 def _prodigi_submitted(row):
     return bool(
-        row.get("prodigi_status") in {"Submitted", "Submitted to Prodigi", "In Production", "Awaiting Tracking", "Shipped", "Fulfilled in Shopify"}
+        row.get("prodigi_status") in {"Submitted", "Complete", "Submitted to Prodigi", "In Production", "Awaiting Tracking", "Shipped", "Fulfilled in Shopify"}
         or _prodigi_clean(row.get("date_sent_to_prodigi"))
         or _prodigi_clean(row.get("prodigi_order_id"))
     )
@@ -3640,13 +3640,13 @@ def _prodigi_dispatch_log_candidates(rows):
     candidates = []
     for row in rows or []:
         status = _prodigi_dispatch_status(row)
-        if status in {"Submitted", "Needs Review"} and (
+        if status in {"Submitted", "Complete", "Needs Review"} and (
             row.get("source") == "prodigi_dispatch_log"
             or row.get("date_sent_to_prodigi")
             or row.get("qa_answers")
             or row.get("issue_reason")
             or row.get("prodigi_order_id")
-            or status == "Submitted"
+            or status in {"Submitted", "Complete"}
         ):
             candidates.append(row)
     return sort_prodigi_tracker_rows(candidates)
@@ -3789,6 +3789,81 @@ def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None):
     return saved
 
 
+def prodigi_generate_upload_certificate_for_row(row, *, config=None):
+    if not _prodigi_is_limited_edition(row):
+        return {"skipped": True, "record": {}, "metafields_synced": True}
+    if not _prodigi_int(row.get("edition_number"), 0):
+        raise ValueError("Assign edition number before certificate generation.")
+    if _prodigi_certificate_uploaded(row):
+        return {
+            "skipped_existing": True,
+            "metafields_synced": True,
+            "record": {
+                "certificate_pdf_url": row.get("certificate_pdf_url") or row.get("shopify_file_url") or "",
+                "pdf_url": row.get("certificate_pdf_url") or row.get("shopify_file_url") or "",
+                "status": "Ready",
+            },
+        }
+
+    config = config or shopify_sync.get_config()
+    if not config.get("configured"):
+        raise RuntimeError("Store connection is not configured for certificate upload.")
+
+    certificate_engine = importlib.import_module("certificate_engine")
+    edition_order_id = str(row.get("edition_order_id") or "").strip()
+    if edition_order_id:
+        try:
+            supabase_backend.generate_certificate_for_edition_order(edition_order_id)
+        except Exception as error:
+            supabase_backend.log_app_error(
+                "prodigi_certificate_supabase_generation_failed",
+                str(error),
+                {"edition_order_id": edition_order_id, "row_id": row.get("row_id") or ""},
+            )
+
+    order_row = {
+        "order": row.get("shopify_order_name") or row.get("shopify_order_number") or "",
+        "order_name": row.get("shopify_order_name") or row.get("shopify_order_number") or "",
+        "customer": row.get("customer_name") or "",
+        "customer_name": row.get("customer_name") or "",
+        "customer_email": row.get("customer_email") or "",
+        "shopify_customer_id": row.get("shopify_customer_id") or "",
+        "product": row.get("product_title") or "",
+        "product_title": row.get("product_title") or "",
+        "product_handle": row.get("product_handle") or row.get("shopify_handle") or "",
+        "variant": row.get("shopify_variant_title") or row.get("variant_title") or "",
+        "variant_title": row.get("shopify_variant_title") or row.get("variant_title") or "",
+        "edition_number": row.get("edition_number"),
+        "edition_total": row.get("edition_total") or 100,
+        "edition_order_id": edition_order_id,
+        "shopify_order_id": row.get("shopify_order_id") or "",
+        "shopify_line_item_id": row.get("shopify_line_item_id") or "",
+        "shopify_product_id": row.get("shopify_product_id") or "",
+        "variant_id": row.get("shopify_variant_id") or "",
+        "shopify_variant_id": row.get("shopify_variant_id") or "",
+        "edition_offset": max(_prodigi_int(row.get("line_item_unit_index"), 1) - 1, 0),
+        "processed_at": row.get("date") or "",
+        "date": row.get("date") or "",
+        "certificate_pdf_path": row.get("certificate_pdf_path") or "",
+        "certificate_pdf_url": row.get("certificate_pdf_url") or row.get("shopify_file_url") or "",
+        "certificate_shopify_file_id": row.get("certificate_shopify_file_id") or "",
+        "certificate_generated_at": row.get("certificate_generated_at") or "",
+    }
+    record = certificate_engine.certificate_record_from_order_row(order_row)
+    if not str(record.get("local_pdf_path") or "").strip():
+        record = certificate_engine.generate_local_certificate_for_record(record)
+    if not str(record.get("local_pdf_path") or "").strip():
+        raise RuntimeError(record.get("sync_error") or "Certificate PDF was not generated.")
+    uploaded = certificate_engine.upload_generated_certificate_record(record, config=config)
+    saved = certificate_engine.save_certificate_record_to_order(uploaded, config=config)
+    if saved.get("metafields_synced") is False:
+        raise RuntimeError(saved.get("metafield_error") or "Certificate uploaded, but Shopify certificate mirror failed. Retry.")
+    bump_supabase_cache_version("orders", "order-summary")
+    st.session_state["orders_allocation_snapshot_loaded"] = False
+    st.session_state["orders-ledger-cache-version"] = int(st.session_state.get("orders-ledger-cache-version", 0)) + 1
+    return saved
+
+
 def prodigi_dispatch_rows_for_tab(rows, tab_name, search_text="", *, today=None):
     today = today or date.today()
     search = _prodigi_normalise_text(search_text)
@@ -3809,7 +3884,7 @@ def prodigi_dispatch_rows_for_tab(rows, tab_name, search_text="", *, today=None)
         return [
             row
             for row in candidates
-            if _prodigi_dispatch_status(row) == "Submitted"
+            if _prodigi_dispatch_status(row) in {"Submitted", "Complete"}
             and (sent_date := _prodigi_dispatch_date(row))
             and seven_days_ago <= sent_date <= today
         ][:150]
@@ -3910,8 +3985,6 @@ def prodigi_dispatch_blockers(row, answers):
         blockers.append("Missing shipping method")
 
     limited = _prodigi_is_limited_edition(row)
-    if limited and not _prodigi_certificate_uploaded(row):
-        blockers.append("Generate/upload certificate before dispatch completion.")
     for field in PRODIGI_DISPATCH_REQUIRED_FIELDS:
         if answers.get(field) != "Yes":
             blockers.append(PRODIGI_DISPATCH_REASON_LABELS[field])
@@ -3926,7 +3999,8 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
     row_id = base_row.get("row_id") or prodigi_tracker_row_id(base_row)
     today_sent = date.today().isoformat()
     issue_reasons = prodigi_dispatch_issue_reasons(base_row, qa_answers)
-    qa_confirmed = status == "Submitted" and all(
+    completed_status = status in {"Submitted", "Complete"}
+    qa_confirmed = completed_status and all(
         qa_answers.get(field) in {"Yes", "Not Required"}
         for field in (
             "certificate",
@@ -3958,8 +4032,8 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
                 "prodigi_status": status,
                 "date_sent_to_prodigi": merged.get("date_sent_to_prodigi") or today_sent,
                 "notes": notes,
-                "qa_completed": status == "Submitted",
-                "qa_completed_at": now if status == "Submitted" else merged.get("qa_completed_at") or "",
+                "qa_completed": completed_status,
+                "qa_completed_at": now if completed_status else merged.get("qa_completed_at") or "",
                 "qa_confirmed": qa_confirmed,
                 "qa_notes": qa_notes,
                 "qa_answers": qa_answers,
@@ -3972,7 +4046,7 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
                 "prodigi_product_name": base_row.get("prodigi_product_name") or "",
                 "prodigi_product_code": base_row.get("prodigi_product_code") or base_row.get("prodigi_code") or "",
                 "prodigi_frame_colour": base_row.get("prodigi_frame_colour") or base_row.get("prodigi_frame") or "",
-                "submitted_at": now if status == "Submitted" else merged.get("submitted_at") or "",
+                "submitted_at": now if completed_status else merged.get("submitted_at") or "",
                 "source": "prodigi_dispatch_log",
                 "updated_at": now,
             }
@@ -3987,8 +4061,8 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
                 "prodigi_status": status,
                 "date_sent_to_prodigi": today_sent,
                 "notes": notes,
-                "qa_completed": status == "Submitted",
-                "qa_completed_at": now if status == "Submitted" else "",
+                "qa_completed": completed_status,
+                "qa_completed_at": now if completed_status else "",
                 "qa_confirmed": qa_confirmed,
                 "qa_notes": qa_notes,
                 "qa_answers": qa_answers,
@@ -4001,7 +4075,7 @@ def prodigi_upsert_dispatch_row(rows, base_row, *, status, notes="", qa_answers=
                 "prodigi_product_name": base_row.get("prodigi_product_name") or "",
                 "prodigi_product_code": base_row.get("prodigi_product_code") or base_row.get("prodigi_code") or "",
                 "prodigi_frame_colour": base_row.get("prodigi_frame_colour") or base_row.get("prodigi_frame") or "",
-                "submitted_at": now if status == "Submitted" else "",
+                "submitted_at": now if completed_status else "",
                 "source": "prodigi_dispatch_log",
                 "created_at": base_row.get("created_at") or now,
                 "updated_at": now,
@@ -4137,7 +4211,7 @@ def render_prodigi_page():
 
     if selected_row:
         existing = _prodigi_existing_dispatch_row(existing_dispatch_rows, selected_row.get("row_id"))
-        already_submitted = existing and _prodigi_dispatch_status(existing) == "Submitted"
+        already_submitted = existing and _prodigi_dispatch_status(existing) in {"Submitted", "Complete"}
         if already_submitted:
             st.info(f"Already submitted on {_prodigi_display_date(existing.get('date_sent_to_prodigi'))}.")
 
@@ -4162,98 +4236,75 @@ def render_prodigi_page():
         st.markdown("**Dispatch QA**")
         default_answers = prodigi_default_qa_answers(existing or selected_row)
         selected_confirmation = product_confirmations.get(selected_row.get("row_id") or "", {})
-        all_products_confirmed = bool(matches) and all(
-            confirmation.get("confirmed") and confirmation.get("has_mapping")
-            for confirmation in product_confirmations.values()
-        )
-        product_confirmation_notes = "; ".join(
-            f"{next((line.get('product_title') for line in matches if line.get('row_id') == row_id), 'Line')}: {confirmation.get('notes')}"
-            for row_id, confirmation in product_confirmations.items()
-            if confirmation.get("notes")
-        )
+        product_confirmation_notes = str(selected_confirmation.get("notes") or "")
+        selected_has_mapping = bool(selected_confirmation.get("has_mapping"))
+        selected_product_confirmed = bool(selected_confirmation.get("confirmed") and selected_has_mapping)
+        row_key = safe_filename_part(selected_row.get("row_id") or "")
         qa_answers = {
-            "product_option": "Yes" if all_products_confirmed else "No",
+            "certificate": "Yes" if _prodigi_is_limited_edition(selected_row) else "Not Required",
+            "product_option": "Yes" if selected_product_confirmed else "No",
             "product_confirmation": "Yes" if selected_confirmation.get("confirmed") else "No",
             "product_confirmation_notes": product_confirmation_notes,
         }
-        qa_specs = [
-            ("certificate", "Certificate", "Has the certificate been generated and uploaded?"),
-            ("artwork_upload", "Artwork upload", "Did you upload the correct artwork file to Prodigi in excellent quality?"),
-            ("frame", "Frame", "Did you select the correct frame colour in Prodigi?"),
-            ("size", "Prodigi Variant", "Did you select the correct Prodigi variant?"),
-            ("edition_number", "Edition number", "Does the artwork/certificate match this edition number?"),
-            ("shipping", "Shipping", "Did you select the correct shipping method?"),
-            ("sent_to_production", "Sent to production", "Has this order been sent to production in Prodigi?"),
-            ("final_check", "Final check", "Is this order fully checked with no errors?"),
-        ]
-        for field, title, question in qa_specs:
-            with st.container(border=True):
-                st.markdown(f"**{title}**")
-                st.write(question)
-                if field == "certificate" and not _prodigi_is_limited_edition(selected_row):
-                    st.caption("Not Required")
-                    qa_answers[field] = "Not Required"
-                    continue
-                if field == "certificate":
-                    if _prodigi_certificate_uploaded(selected_row):
-                        st.success("Certificate uploaded.")
-                        qa_answers[field] = "Yes"
-                    else:
-                        st.warning("Certificate not uploaded.")
-                        qa_answers[field] = st.radio(
-                            "Certificate uploaded?",
-                            ("Yes", "No"),
-                            index=1,
-                            horizontal=True,
-                            key=f"prodigi-dispatch-qa-{field}-{safe_filename_part(selected_row.get('row_id') or '')}",
-                        )
-                    continue
-                if field == "frame":
-                    st.caption(f"Sports Cave frame: {selected_row.get('frame') or '-'}")
-                    st.caption(f"Prodigi frame: {selected_row.get('prodigi_frame') or '-'}")
-                elif field == "size":
-                    st.caption(f"Shopify variant: {prodigi_shopify_variant_label(selected_row) or '-'}")
-                    st.caption(f"Expected Prodigi variant: {selected_row.get('prodigi_product_name') or '-'}")
-                    st.caption(f"Prodigi code: {selected_row.get('prodigi_code') or '-'}")
-                    st.caption(f"Frame colour: {selected_row.get('prodigi_frame_colour') or selected_row.get('prodigi_frame') or '-'}")
-                elif field == "edition_number":
-                    if not _prodigi_is_limited_edition(selected_row):
-                        st.caption("Not Required")
-                        qa_answers[field] = "Not Required"
-                        continue
-                    st.caption(f"Edition {_prodigi_edition_label(selected_row)}")
-                elif field == "shipping":
-                    st.caption(f"Shipping method from Shopify: {selected_row.get('shipping_method') or '-'}")
-
-                stored_answer = default_answers.get(field)
-                index = None if stored_answer not in {"Yes", "No"} else ("Yes", "No").index(stored_answer)
-                qa_answers[field] = st.radio(
-                    title,
-                    ("Yes", "No"),
-                    index=index,
-                    horizontal=True,
-                    key=f"prodigi-dispatch-qa-{field}-{safe_filename_part(selected_row.get('row_id') or '')}",
-                    label_visibility="collapsed",
-                )
+        correct_order = st.checkbox(
+            "Correct order selected",
+            value=default_answers.get("correct_order") == "Yes",
+            key=f"prodigi-dispatch-qa-correct-order-{row_key}",
+        )
+        qa_answers["correct_order"] = "Yes" if correct_order else "No"
+        qa_answers["product_option"] = "Yes" if selected_product_confirmed else "No"
+        variant_checked = st.checkbox(
+            "Variant/size/frame checked",
+            value=default_answers.get("frame") == "Yes" and default_answers.get("size") == "Yes",
+            key=f"prodigi-dispatch-qa-variant-{row_key}",
+        )
+        qa_answers["frame"] = "Yes" if variant_checked else "No"
+        qa_answers["size"] = "Yes" if variant_checked else "No"
+        if _prodigi_is_limited_edition(selected_row):
+            edition_checked = st.checkbox(
+                "Edition number checked",
+                value=default_answers.get("edition_number") == "Yes",
+                key=f"prodigi-dispatch-qa-edition-{row_key}",
+            )
+            qa_answers["edition_number"] = "Yes" if edition_checked else "No"
+        else:
+            qa_answers["edition_number"] = "Not Required"
+        shipping_checked = st.checkbox(
+            "Shipping method checked",
+            value=default_answers.get("shipping") == "Yes",
+            key=f"prodigi-dispatch-qa-shipping-{row_key}",
+        )
+        qa_answers["shipping"] = "Yes" if shipping_checked else "No"
+        file_ready = st.checkbox(
+            "Final file/Prodigi file ready",
+            value=default_answers.get("artwork_upload") == "Yes" and default_answers.get("sent_to_production") == "Yes",
+            key=f"prodigi-dispatch-qa-file-ready-{row_key}",
+        )
+        qa_answers["artwork_upload"] = "Yes" if file_ready else "No"
+        qa_answers["sent_to_production"] = "Yes" if file_ready else "No"
+        no_errors = st.checkbox(
+            "No errors found",
+            value=default_answers.get("final_check") == "Yes",
+            key=f"prodigi-dispatch-qa-no-errors-{row_key}",
+        )
+        qa_answers["final_check"] = "Yes" if no_errors else "No"
+        final_confirmed = st.checkbox(
+            "There are no errors. The edition number is correct.",
+            value=False,
+            key=f"prodigi-dispatch-final-confirm-{row_key}",
+        )
 
         issue_reasons = prodigi_dispatch_issue_reasons(selected_row, qa_answers)
         blockers = prodigi_dispatch_blockers(selected_row, qa_answers)
         line_blockers = []
-        for row in matches:
-            row_id = row.get("row_id") or ""
-            line_confirmation = product_confirmations.get(row_id, {})
-            if not line_confirmation.get("has_mapping"):
-                line_blockers.append(f"{row.get('product_title') or 'Line'}: missing Prodigi mapping")
-            if not line_confirmation.get("confirmed"):
-                line_blockers.append(f"{row.get('product_title') or 'Line'}: exact Prodigi variant not confirmed")
-            row_answers = dict(qa_answers)
-            if not _prodigi_is_limited_edition(row):
-                row_answers["certificate"] = "Not Required"
-                row_answers["edition_number"] = "Not Required"
-            elif _prodigi_certificate_uploaded(row):
-                row_answers["certificate"] = "Yes"
-            for blocker in prodigi_dispatch_blockers(row, row_answers):
-                line_blockers.append(f"{row.get('product_title') or 'Line'}: {blocker}")
+        if not selected_has_mapping:
+            line_blockers.append(f"{selected_row.get('product_title') or 'Line'}: missing Prodigi mapping")
+        if not selected_product_confirmed:
+            line_blockers.append(f"{selected_row.get('product_title') or 'Line'}: exact Prodigi variant not confirmed")
+        if qa_answers.get("correct_order") != "Yes":
+            line_blockers.append("Correct order not confirmed")
+        if not final_confirmed:
+            line_blockers.append("Final confirmation required")
         completion_blockers = list(dict.fromkeys(blockers + line_blockers))
         notes = st.text_area(
             "Notes",
@@ -4283,36 +4334,35 @@ def render_prodigi_page():
                 supabase_backend.log_app_error("prodigi_dispatch_issue_save_failed", str(error), {"source": "prodigi_page"})
                 st.error("Dispatch issue save failed. Check Supabase connection and Render logs.")
         if action_columns[1].button(
-            "Complete Dispatch",
+            "Generate + Upload Certificate",
             type="primary",
             use_container_width=True,
             disabled=bool(completion_blockers) or bool(already_submitted),
             key="prodigi-dispatch-complete",
         ):
             try:
-                for line in matches:
-                    line_confirmation = product_confirmations.get(line.get("row_id") or "", {})
-                    line_answers = dict(qa_answers)
-                    line_answers["product_option"] = "Yes"
-                    line_answers["product_confirmation"] = "Yes"
-                    line_answers["product_confirmation_notes"] = line_confirmation.get("notes") or ""
-                    if not _prodigi_is_limited_edition(line):
-                        line_answers["certificate"] = "Not Required"
-                        line_answers["edition_number"] = "Not Required"
-                    elif _prodigi_certificate_uploaded(line):
-                        line_answers["certificate"] = "Yes"
-                    prodigi_save_dispatch_row(
-                        line,
-                        status="Submitted",
-                        notes=notes if line.get("row_id") == selected_row.get("row_id") else line_confirmation.get("notes") or "",
-                        qa_answers=line_answers,
+                completion_row = dict(selected_row)
+                if _prodigi_is_limited_edition(completion_row):
+                    certificate_result = prodigi_generate_upload_certificate_for_row(completion_row)
+                    record = certificate_result.get("record") or {}
+                    completion_row.update(
+                        {
+                            "certificate_status": "Uploaded",
+                            "certificate_pdf_url": record.get("certificate_pdf_url") or record.get("pdf_url") or completion_row.get("certificate_pdf_url") or "",
+                            "shopify_file_url": record.get("certificate_file_url") or record.get("shopify_file_url") or completion_row.get("shopify_file_url") or "",
+                        }
                     )
-                st.session_state["prodigi_dispatch_matches"] = []
-                st.session_state["prodigi_dispatch_existing_rows"] = []
-                st.session_state["prodigi_dispatch_selected_row_id"] = ""
-                st.session_state["prodigi_dispatch_last_query"] = ""
+                    qa_answers["certificate"] = "Yes"
+                prodigi_save_dispatch_row(
+                    completion_row,
+                    status="Complete",
+                    notes=notes,
+                    qa_answers=qa_answers,
+                )
+                st.session_state["prodigi_dispatch_existing_rows"] = prodigi_load_dispatch_rows("Search", search_text=last_query, limit=100)
+                st.session_state["prodigi_dispatch_selected_row_id"] = completion_row.get("row_id") or ""
                 st.session_state["prodigi_dispatch_log_view"] = "Last 7 Days"
-                st.success("Dispatch row saved")
+                st.success("Certificate uploaded and dispatch completed.")
                 st.rerun()
             except Exception as error:
                 supabase_backend.log_app_error("prodigi_dispatch_complete_save_failed", str(error), {"source": "prodigi_page"})

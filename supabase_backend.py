@@ -6698,6 +6698,7 @@ def _analyze_fetched_orders_for_preview(
     *,
     tracking_start,
     mode_label="dry_run",
+    respect_tracking_start=True,
 ):
     seen = len(fetched_orders)
     imported_orders = 0
@@ -6733,7 +6734,7 @@ def _analyze_fetched_orders_for_preview(
             for order in sorted(fetched_orders, key=order_allocation_sort_key):
                 should_assign_editions = True
                 order_datetime = _order_effective_datetime(order)
-                if order_datetime and tracking_start and order_datetime < tracking_start:
+                if respect_tracking_start and order_datetime and tracking_start and order_datetime < tracking_start:
                     should_assign_editions = False
                     historical_orders_skipped += 1
                 order_missing_mapping = False
@@ -6994,6 +6995,7 @@ def preview_latest_paid_orders_sync(
         payload.get("orders") or [],
         tracking_start=tracking_start,
         mode_label="latest_paid_dry_run",
+        respect_tracking_start=False,
     )
     result["query"] = payload.get("query") or ""
     result["lookback_days"] = payload.get("lookback_days") or lookback_days
@@ -7016,6 +7018,7 @@ def sync_latest_paid_orders_to_supabase(
         days=payload.get("lookback_days") or lookback_days,
         generate_certificates=False,
         sync_product_metafields=False,
+        respect_tracking_start=False,
     )
     result["query"] = payload.get("query") or ""
     result["lookback_days"] = payload.get("lookback_days") or lookback_days
@@ -7277,6 +7280,7 @@ def reprocess_cached_problem_orders(
     statuses=None,
     generate_certificates=False,
     sync_product_metafields=False,
+    respect_tracking_start=True,
 ):
     ensure_schema()
     selected_statuses = tuple(statuses or REPAIRABLE_ORDER_LINE_STATUSES)
@@ -7319,6 +7323,7 @@ def reprocess_cached_problem_orders(
     historical_lines_marked = 0
     skipped_missing_snapshot = 0
     errors = []
+    normalized_snapshots = []
 
     for row in snapshots:
         order = _normalize_cached_order_snapshot(row.get("raw_json"))
@@ -7328,10 +7333,13 @@ def reprocess_cached_problem_orders(
                 f"Skipped cached repair for {row.get('shopify_order_id') or 'unknown order'} because no reusable order snapshot was stored."
             )
             continue
+        normalized_snapshots.append((row, order))
+
+    for row, order in sorted(normalized_snapshots, key=lambda item: order_allocation_sort_key(item[1])):
         should_assign_editions = True
         allocation_skip_reason = ""
         order_datetime = _order_effective_datetime(order)
-        if order_datetime and tracking_start and order_datetime < tracking_start:
+        if respect_tracking_start and order_datetime and tracking_start and order_datetime < tracking_start:
             should_assign_editions = False
             allocation_skip_reason = HISTORICAL_ORDER_NOTE
         result = process_paid_order(
@@ -7386,8 +7394,9 @@ def _missing_edition_candidate_rows(limit=100, statuses=None):
                 LEFT JOIN edition_orders eo ON eo.shopify_line_item_id = li.shopify_line_item_id
                 WHERE eo.id IS NULL
                   AND COALESCE(li.assignment_status, '') IN ({placeholders})
-                ORDER BY COALESCE(o.processed_at, o.created_at, o.synced_at) DESC NULLS LAST,
-                         o.order_name DESC,
+                ORDER BY COALESCE(o.created_at, o.processed_at, o.synced_at) ASC NULLS LAST,
+                         COALESCE(o.processed_at, o.created_at, o.synced_at) ASC NULLS LAST,
+                         o.order_name ASC,
                          li.shopify_line_item_id ASC
                 LIMIT %s
                 """,
@@ -7424,6 +7433,7 @@ def repair_missing_edition_orders(limit=100, statuses=None):
         statuses=statuses or MISSING_EDITION_REPAIRABLE_STATUSES,
         generate_certificates=False,
         sync_product_metafields=False,
+        respect_tracking_start=False,
     )
     return {
         "mode": "apply",
@@ -7446,6 +7456,7 @@ def sync_shopify_orders_to_supabase(
     days=365,
     generate_certificates=False,
     sync_product_metafields=False,
+    respect_tracking_start=True,
 ):
     ensure_schema()
     config = config or shopify_sync.get_config()
@@ -7556,7 +7567,7 @@ def sync_shopify_orders_to_supabase(
         for order in sorted(fetched_orders, key=order_allocation_sort_key):
             should_assign_editions = True
             allocation_skip_reason = ""
-            if not historical_backfill:
+            if not historical_backfill and respect_tracking_start:
                 order_datetime = _order_effective_datetime(order)
                 if order_datetime and tracking_start and order_datetime < tracking_start:
                     should_assign_editions = False
