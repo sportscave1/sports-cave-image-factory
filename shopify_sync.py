@@ -1193,6 +1193,14 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
         name
         firstName
         lastName
+        address1
+        address2
+        city
+        province
+        provinceCode
+        zip
+        country
+        countryCodeV2
       }
       shippingLine {
         title
@@ -1208,6 +1216,14 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String) {
         name
         firstName
         lastName
+        address1
+        address2
+        city
+        province
+        provinceCode
+        zip
+        country
+        countryCodeV2
       }
       metafields(first: 20, namespace: "sports_cave") {
         nodes {
@@ -1277,11 +1293,27 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
         name
         firstName
         lastName
+        address1
+        address2
+        city
+        province
+        provinceCode
+        zip
+        country
+        countryCodeV2
       }
       billingAddress {
         name
         firstName
         lastName
+        address1
+        address2
+        city
+        province
+        provinceCode
+        zip
+        country
+        countryCodeV2
       }
       shippingLine {
         title
@@ -1292,6 +1324,102 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String) {
           title
           code
         }
+      }
+      metafields(first: 20, namespace: "sports_cave") {
+        nodes {
+          namespace
+          key
+          type
+          value
+          compareDigest
+        }
+      }
+      lineItems(first: 100) {
+        nodes {
+          id
+          title
+          quantity
+          variantTitle
+          sku
+          variant {
+            id
+            title
+            sku
+          }
+          product {
+            id
+            title
+            handle
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+ORDERS_BY_IDS_QUERY = """
+query SportsCaveOrdersByIds($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on Order {
+      id
+      legacyResourceId
+      name
+      createdAt
+      updatedAt
+      processedAt
+      cancelledAt
+      displayFinancialStatus
+      displayFulfillmentStatus
+      email
+      totalPriceSet {
+        shopMoney {
+          amount
+          currencyCode
+        }
+      }
+      customer {
+        id
+        displayName
+        firstName
+        lastName
+        email
+      }
+      shippingAddress {
+        name
+        firstName
+        lastName
+        address1
+        address2
+        city
+        province
+        provinceCode
+        zip
+        country
+        countryCodeV2
+      }
+      shippingLine {
+        title
+        code
+      }
+      shippingLines(first: 1) {
+        nodes {
+          title
+          code
+        }
+      }
+      billingAddress {
+        name
+        firstName
+        lastName
+        address1
+        address2
+        city
+        province
+        provinceCode
+        zip
+        country
+        countryCodeV2
       }
       metafields(first: 20, namespace: "sports_cave") {
         nodes {
@@ -2513,6 +2641,36 @@ def build_orders_admin_url(store_domain):
     return f"https://admin.shopify.com/store/{store_slug}/orders"
 
 
+def _compact_address_parts(*parts):
+    values = []
+    seen = set()
+    for part in parts:
+        cleaned = str(part or "").strip()
+        if not cleaned:
+            continue
+        lowered = cleaned.casefold()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        values.append(cleaned)
+    return values
+
+
+def _address_summary(address):
+    if not isinstance(address, dict):
+        return ""
+    return ", ".join(
+        _compact_address_parts(
+            address.get("address1"),
+            address.get("address2"),
+            address.get("city"),
+            address.get("provinceCode") or address.get("province"),
+            address.get("zip"),
+            address.get("countryCodeV2") or address.get("country"),
+        )
+    )
+
+
 def normalize_order(node, store_domain):
     customer = node.get("customer") or {}
     shipping_address = node.get("shippingAddress") or {}
@@ -2540,6 +2698,13 @@ def normalize_order(node, store_domain):
         or customer_email
         or ""
     )
+    shipping_name = (
+        shipping_address.get("name")
+        or shipping_full_name
+        or customer_name
+        or ""
+    )
+    shipping_address_summary = _address_summary(shipping_address)
     line_items = []
     for item in (node.get("lineItems") or {}).get("nodes") or []:
         product = item.get("product") or {}
@@ -2576,9 +2741,16 @@ def normalize_order(node, store_domain):
         "customer_name": customer_name,
         "customer_email": customer_email,
         "customer_raw": customer,
+        "shipping_name": shipping_name,
+        "shipping_address": shipping_address,
+        "shipping_address_summary": shipping_address_summary,
+        "shipping_country": shipping_address.get("countryCodeV2") or shipping_address.get("country") or "",
+        "shipping_state": shipping_address.get("provinceCode") or shipping_address.get("province") or "",
+        "shipping_postcode": shipping_address.get("zip") or "",
         "shipping_title": shipping_line.get("title") or shipping_line.get("code") or "",
         "shipping_method": shipping_line.get("title") or shipping_line.get("code") or "",
         "shipping_line": shipping_line,
+        "billing_address": billing_address,
         "total_price": str(total_price.get("amount") or ""),
         "currency": total_price.get("currencyCode") or "",
         "cancelled_at": node.get("cancelledAt") or "",
@@ -2660,6 +2832,29 @@ def iter_order_pages(
         if not page["has_next_page"] or not page["end_cursor"]:
             break
         after = page["end_cursor"]
+
+
+def fetch_orders_by_ids(order_ids, config=None, request_post=None):
+    config = config or get_config()
+    ids = [str(order_id or "").strip() for order_id in (order_ids or []) if str(order_id or "").strip()]
+    if not ids:
+        return []
+    all_orders = []
+    for offset in range(0, len(ids), 50):
+        batch_ids = ids[offset : offset + 50]
+        data, served_version = graphql_request(
+            ORDERS_BY_IDS_QUERY,
+            variables={"ids": batch_ids},
+            config=config,
+            request_post=request_post,
+        )
+        _ = served_version
+        nodes = data.get("nodes") or []
+        for node in nodes:
+            if not isinstance(node, dict) or not node.get("id"):
+                continue
+            all_orders.append(normalize_order(node, config["store_domain"]))
+    return all_orders
 
 
 def fetch_catalog_page(after=None, search="", page_size=DEFAULT_PAGE_SIZE, config=None, request_post=None):

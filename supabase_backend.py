@@ -3564,6 +3564,24 @@ def list_existing_shopify_order_ids(order_ids):
             return {str(row.get("shopify_order_id") or "").strip() for row in cur.fetchall() if row.get("shopify_order_id")}
 
 
+def list_existing_shopify_line_item_ids(line_item_ids):
+    ensure_schema()
+    values = [str(line_item_id or "").strip() for line_item_id in (line_item_ids or []) if str(line_item_id or "").strip()]
+    if not values:
+        return set()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT shopify_line_item_id FROM shopify_order_lines WHERE shopify_line_item_id = ANY(%s)",
+                (values,),
+            )
+            return {
+                str(row.get("shopify_line_item_id") or "").strip()
+                for row in cur.fetchall()
+                if row.get("shopify_line_item_id")
+            }
+
+
 def get_order_line_assignment_snapshot(line_item_ids):
     ensure_order_read_schema()
     values = [str(line_item_id or "").strip() for line_item_id in (line_item_ids or []) if str(line_item_id or "").strip()]
@@ -5257,6 +5275,17 @@ def _lookup_product_by_handle_or_id(cur, line_item):
         row = cur.fetchone()
         if row:
             return row
+        cur.execute(
+            """
+            SELECT ep.shopify_product_id, ep.shopify_handle AS handle, ep.product_title AS title
+            FROM edition_products ep
+            WHERE ep.shopify_product_id=%s
+            """,
+            (product_id,),
+        )
+        row = cur.fetchone()
+        if row:
+            return row
     if handle:
         cur.execute(
             """
@@ -5269,12 +5298,35 @@ def _lookup_product_by_handle_or_id(cur, line_item):
         row = cur.fetchone()
         if row:
             return row
+        cur.execute(
+            """
+            SELECT ep.shopify_product_id, ep.shopify_handle AS handle, ep.product_title AS title
+            FROM edition_products ep
+            WHERE ep.shopify_handle=%s
+            """,
+            (handle,),
+        )
+        row = cur.fetchone()
+        if row:
+            return row
     if title:
         cur.execute(
             """
             SELECT sp.shopify_product_id, sp.handle, sp.title
             FROM shopify_products sp
             WHERE LOWER(COALESCE(sp.title, '')) = LOWER(%s)
+            LIMIT 2
+            """,
+            (title,),
+        )
+        rows = cur.fetchall()
+        if len(rows) == 1:
+            return rows[0]
+        cur.execute(
+            """
+            SELECT ep.shopify_product_id, ep.shopify_handle AS handle, ep.product_title AS title
+            FROM edition_products ep
+            WHERE LOWER(COALESCE(ep.product_title, '')) = LOWER(%s)
             LIMIT 2
             """,
             (title,),
@@ -6169,6 +6221,27 @@ def allocate_edition_for_order_line(
                     ),
                 )
                 inserted["order_name"] = shopify_order_name
+                _insert_audit_log(
+                    cur,
+                    event_type="edition_order_auto_allocation",
+                    entity_type="edition_order",
+                    entity_id=str(inserted.get("id") or ""),
+                    shopify_order_id=shopify_order_id,
+                    shopify_line_item_id=shopify_line_item_id,
+                    shopify_handle=shopify_handle,
+                    old_value={},
+                    new_value={
+                        "edition_number": next_number,
+                        "edition_total": edition_total,
+                        "allocation_index": allocation_index,
+                        "shopify_order_name": shopify_order_name,
+                        "variant_title": variant_title or "",
+                        "sku": sku or "",
+                    },
+                    reason="Auto allocation during Shopify order sync.",
+                    actor="sports_cave_os_sync",
+                    source="supabase_ledger",
+                )
                 conn.commit()
                 return {"created": True, "assignment": inserted, "sold_out": False, "error": ""}
         except Exception:
@@ -6417,6 +6490,332 @@ def process_shopify_order_for_editions(
     )
 
 
+def _preview_product_counter_state(cur, line_item, cache):
+    product = _lookup_product_by_handle_or_id(cur, line_item) or {}
+    handle = str(product.get("handle") or line_item.get("product_handle") or "").strip()
+    if not handle:
+        return {}
+    cached = cache.get(handle)
+    if cached is not None:
+        return cached
+    cur.execute(
+        """
+        SELECT
+            ep.shopify_product_id,
+            ep.shopify_handle,
+            ep.product_title,
+            COALESCE(NULLIF(er.next_edition_number, 0), NULLIF(ep.next_edition_number, 0), 1) AS next_edition_number,
+            COALESCE(NULLIF(er.edition_total, 0), NULLIF(ep.edition_total, 0), 100) AS edition_total,
+            COALESCE(er.status, %s) AS run_status,
+            COALESCE(ep.sold_out, FALSE) AS sold_out
+        FROM edition_products ep
+        LEFT JOIN edition_runs er
+          ON er.shopify_handle = ep.shopify_handle
+         AND er.status IN (%s, %s)
+        WHERE ep.shopify_handle=%s
+        ORDER BY CASE WHEN er.status=%s THEN 0 ELSE 1 END, er.updated_at DESC NULLS LAST
+        LIMIT 1
+        """,
+        (
+            ACTIVE_RUN_STATUS,
+            ACTIVE_RUN_STATUS,
+            SOLD_OUT_RUN_STATUS,
+            handle,
+            ACTIVE_RUN_STATUS,
+        ),
+    )
+    row = cur.fetchone() or {}
+    if not row:
+        cache[handle] = {}
+        return {}
+    state = {
+        "shopify_product_id": str(row.get("shopify_product_id") or product.get("shopify_product_id") or line_item.get("shopify_product_id") or ""),
+        "handle": handle,
+        "title": str(row.get("product_title") or product.get("title") or line_item.get("product_title") or ""),
+        "next_edition_number": max(int(row.get("next_edition_number") or 1), 1),
+        "edition_total": max(int(row.get("edition_total") or 100), 1),
+        "sold_out": bool(row.get("sold_out")),
+        "run_status": _clean_edition_run_status(row.get("run_status")),
+    }
+    cache[handle] = state
+    return state
+
+
+def preview_shopify_orders_to_supabase(
+    config=None,
+    *,
+    query=None,
+    max_orders=DEFAULT_INCREMENTAL_ORDER_FETCH_LIMIT,
+    days=365,
+):
+    ensure_schema()
+    config = config or shopify_sync.get_config()
+    seen = 0
+    pages_fetched = 0
+    imported_orders = 0
+    new_lines_imported = 0
+    existing_lines_preserved = 0
+    assignments = 0
+    existing_assignments_preserved = 0
+    missing_mapping_skipped = 0
+    historical_orders_skipped = 0
+    historical_lines_skipped = 0
+    sold_out_skipped = 0
+    errors = []
+    sync_from = None
+    bootstrap_recent_orders = False
+    fetched_orders = []
+    total_started = time.perf_counter()
+
+    state = get_sync_state()
+    tracking_start = _parse_datetime(state.get("edition_tracking_start_at"))
+    if not tracking_start:
+        tracking_start = ensure_edition_tracking_start()
+    last_success = _parse_datetime(
+        state.get("last_successful_order_fetch_at") or state.get("last_successful_order_sync_at")
+    )
+    if not last_success and count_shopify_orders() == 0:
+        bootstrap_recent_orders = True
+        bootstrap_now = utc_now_datetime()
+        sync_from = bootstrap_now - timedelta(days=DEFAULT_INITIAL_ORDER_BOOTSTRAP_DAYS)
+        if not state.get("edition_tracking_start_at"):
+            tracking_start = bootstrap_now - timedelta(days=DEFAULT_INITIAL_ORDER_ASSIGNMENT_WINDOW_DAYS)
+    else:
+        last_success = last_success or tracking_start
+        sync_from = last_success - timedelta(
+            minutes=state.get("sync_lookback_buffer_minutes") or DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES
+        )
+    effective_query = query or (
+        f"financial_status:paid fulfillment_status:unfulfilled "
+        f"updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
+    )
+    sync_config = dict(config)
+    sync_limit = max(int(max_orders or DEFAULT_INCREMENTAL_ORDER_FETCH_LIMIT), 1)
+    sync_config["max_orders"] = sync_limit
+    for page in shopify_sync.iter_order_pages(
+        query=effective_query,
+        days=days,
+        max_orders=sync_limit,
+        page_size=50,
+        config=sync_config,
+    ):
+        pages_fetched += 1
+        page_orders = page.get("orders") or []
+        seen += len(page_orders)
+        fetched_orders.extend(page_orders)
+
+    order_ids = [order.get("shopify_order_id") for order in fetched_orders]
+    line_item_ids = []
+    for order in fetched_orders:
+        for line_item in order.get("line_items") or []:
+            line_id = str(line_item.get("shopify_line_item_id") or "").strip()
+            if line_id:
+                line_item_ids.append(line_id)
+    existing_order_ids = list_existing_shopify_order_ids(order_ids)
+    existing_line_ids = list_existing_shopify_line_item_ids(line_item_ids)
+    assignment_snapshot = get_order_line_assignment_snapshot(line_item_ids)
+    imported_orders = sum(
+        1 for order in fetched_orders if str(order.get("shopify_order_id") or "").strip() not in existing_order_ids
+    )
+    new_lines_imported = sum(1 for line_id in line_item_ids if line_id not in existing_line_ids)
+    existing_lines_preserved = max(len(line_item_ids) - new_lines_imported, 0)
+
+    product_state_cache = {}
+    with connect() as conn:
+        with conn.cursor() as cur:
+            for order in sorted(fetched_orders, key=order_allocation_sort_key):
+                should_assign_editions = True
+                order_datetime = _order_effective_datetime(order)
+                if order_datetime and tracking_start and order_datetime < tracking_start:
+                    should_assign_editions = False
+                    historical_orders_skipped += 1
+                for line_index, line_item in enumerate(order.get("line_items") or [], start=1):
+                    if not isinstance(line_item, dict):
+                        line_item = {}
+                    quantity = max(1, int(line_item.get("quantity") or 1))
+                    line_item_id = str(
+                        line_item.get("shopify_line_item_id")
+                        or f"{order.get('shopify_order_id') or 'order'}:line:{line_index}"
+                    )
+                    snapshot = assignment_snapshot.get(line_item_id) or {}
+                    existing_indexes = {
+                        int(item.get("allocation_index") or 0)
+                        for item in (snapshot.get("assignments") or [])
+                        if int(item.get("allocation_index") or 0) > 0
+                    }
+                    if not should_assign_editions:
+                        historical_lines_skipped += max(quantity - len(existing_indexes), 0)
+                        existing_assignments_preserved += len(existing_indexes)
+                        continue
+                    product_state = _preview_product_counter_state(cur, line_item, product_state_cache)
+                    handle = str(product_state.get("handle") or line_item.get("product_handle") or "").strip()
+                    if not handle:
+                        missing_mapping_skipped += max(quantity - len(existing_indexes), 0)
+                        existing_assignments_preserved += len(existing_indexes)
+                        continue
+                    for allocation_index in range(1, quantity + 1):
+                        if allocation_index in existing_indexes:
+                            existing_assignments_preserved += 1
+                            continue
+                        next_number = int(product_state.get("next_edition_number") or 1)
+                        edition_total = int(product_state.get("edition_total") or 100)
+                        is_sold_out = (
+                            product_state.get("run_status") == SOLD_OUT_RUN_STATUS
+                            or bool(product_state.get("sold_out"))
+                            or next_number > edition_total
+                        )
+                        if is_sold_out:
+                            sold_out_skipped += 1
+                            continue
+                        assignments += 1
+                        product_state["next_edition_number"] = next_number + 1
+
+    existing_orders_skipped = max(seen - imported_orders, 0)
+    return {
+        "mode": "dry_run",
+        "orders_seen": seen,
+        "shopify_orders_fetched": seen,
+        "pages_fetched": pages_fetched,
+        "existing_orders_skipped": existing_orders_skipped,
+        "new_orders_inserted": imported_orders,
+        "new_lines_inserted": new_lines_imported,
+        "existing_lines_preserved": existing_lines_preserved,
+        "edition_allocations_created": assignments,
+        "existing_allocations_preserved": existing_assignments_preserved,
+        "missing_mapping_skipped": missing_mapping_skipped,
+        "historical_orders_skipped": historical_orders_skipped,
+        "historical_lines_skipped": historical_lines_skipped,
+        "sold_out_skipped": sold_out_skipped,
+        "sync_from": _datetime_to_setting(sync_from) if sync_from else "",
+        "bootstrap_recent_orders": bootstrap_recent_orders,
+        "fetch_duration_ms": int((time.perf_counter() - total_started) * 1000),
+        "errors": errors[:10],
+    }
+
+
+def backfill_missing_shopify_order_details(config=None, *, limit=100, dry_run=True):
+    ensure_schema()
+    config = config or shopify_sync.get_config()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    o.shopify_order_id,
+                    o.order_name,
+                    COALESCE(NULLIF(o.customer_email, ''), '') AS customer_email,
+                    COALESCE(NULLIF(o.raw_json->>'shipping_address_summary', ''), '') AS shipping_address_summary,
+                    COUNT(*) FILTER (WHERE COALESCE(NULLIF(li.variant_title, ''), '') = '') AS missing_variant_rows,
+                    COUNT(*) FILTER (WHERE COALESCE(NULLIF(li.product_title, ''), '') = '') AS missing_product_rows
+                FROM shopify_orders o
+                LEFT JOIN shopify_order_lines li ON li.shopify_order_id = o.shopify_order_id
+                WHERE COALESCE(NULLIF(o.customer_email, ''), '') = ''
+                   OR COALESCE(NULLIF(o.raw_json->>'shipping_address_summary', ''), '') = ''
+                   OR EXISTS (
+                       SELECT 1
+                       FROM shopify_order_lines li2
+                       WHERE li2.shopify_order_id = o.shopify_order_id
+                         AND COALESCE(NULLIF(li2.variant_title, ''), '') = ''
+                   )
+                GROUP BY o.shopify_order_id, o.order_name, o.customer_email, o.raw_json->>'shipping_address_summary'
+                ORDER BY COALESCE(o.processed_at, o.created_at, o.synced_at) DESC NULLS LAST, o.order_name DESC
+                LIMIT %s
+                """,
+                (max(int(limit or 100), 1),),
+            )
+            candidate_rows = cur.fetchall()
+    if not candidate_rows:
+        return {
+            "mode": "dry_run" if dry_run else "apply",
+            "candidate_orders": 0,
+            "orders_fetched": 0,
+            "orders_updated": 0,
+            "variant_rows_filled": 0,
+            "shipping_rows_filled": 0,
+            "email_rows_filled": 0,
+            "errors": [],
+        }
+
+    by_order_id = {str(row.get("shopify_order_id") or ""): row for row in candidate_rows}
+    fetched_orders = shopify_sync.fetch_orders_by_ids(by_order_id.keys(), config=config)
+    updates = []
+    for order in fetched_orders:
+        order_id = str(order.get("shopify_order_id") or "").strip()
+        existing = by_order_id.get(order_id) or {}
+        shipping_summary = str(order.get("shipping_address_summary") or "").strip()
+        variant_rows_filled = (
+            sum(
+                1
+                for line_item in order.get("line_items") or []
+                if str(line_item.get("variant_title") or "").strip()
+            )
+            if int(existing.get("missing_variant_rows") or 0) > 0
+            else 0
+        )
+        email_filled = int(
+            bool(str(order.get("customer_email") or "").strip() and not str(existing.get("customer_email") or "").strip())
+        )
+        shipping_filled = int(bool(shipping_summary and not str(existing.get("shipping_address_summary") or "").strip()))
+        if not any((variant_rows_filled, email_filled, shipping_filled)):
+            continue
+        updates.append(
+            {
+                "shopify_order_id": order_id,
+                "order_name": str(order.get("order_name") or existing.get("order_name") or ""),
+                "variant_rows_filled": variant_rows_filled,
+                "email_filled": email_filled,
+                "shipping_filled": shipping_filled,
+                "order": order,
+                "old_value": {
+                    "customer_email": existing.get("customer_email") or "",
+                    "shipping_address_summary": existing.get("shipping_address_summary") or "",
+                    "missing_variant_rows": int(existing.get("missing_variant_rows") or 0),
+                },
+                "new_value": {
+                    "customer_email": order.get("customer_email") or "",
+                    "shipping_address_summary": shipping_summary,
+                    "line_items": [
+                        {
+                            "shopify_line_item_id": item.get("shopify_line_item_id") or "",
+                            "variant_title": item.get("variant_title") or "",
+                        }
+                        for item in (order.get("line_items") or [])
+                    ],
+                },
+            }
+        )
+
+    if not dry_run:
+        for update in updates:
+            _persist_order_snapshot(update["order"])
+            with connect() as conn:
+                with conn.cursor() as cur:
+                    _insert_audit_log(
+                        cur,
+                        event_type="shopify_order_details_backfill",
+                        entity_type="shopify_order",
+                        entity_id=update["shopify_order_id"],
+                        shopify_order_id=update["shopify_order_id"],
+                        old_value=update["old_value"],
+                        new_value=update["new_value"],
+                        reason="Filled missing Shopify order fulfilment details from live Shopify order data.",
+                        actor="sports_cave_os_sync",
+                        source="shopify_backfill",
+                    )
+                conn.commit()
+
+    return {
+        "mode": "dry_run" if dry_run else "apply",
+        "candidate_orders": len(candidate_rows),
+        "orders_fetched": len(fetched_orders),
+        "orders_updated": len(updates),
+        "variant_rows_filled": sum(item["variant_rows_filled"] for item in updates),
+        "shipping_rows_filled": sum(item["shipping_filled"] for item in updates),
+        "email_rows_filled": sum(item["email_filled"] for item in updates),
+        "errors": [],
+    }
+
+
 def _name_from_address(address):
     if not isinstance(address, dict):
         return ""
@@ -6655,6 +7054,7 @@ def sync_shopify_orders_to_supabase(
     sync_from = None
     bootstrap_recent_orders = False
     imported_orders = 0
+    imported_lines = 0
     pages_fetched = 0
     total_started = time.perf_counter()
     db_load_ms = 0.0
@@ -6726,9 +7126,17 @@ def sync_shopify_orders_to_supabase(
             existing_order_ids = list_existing_shopify_order_ids(
                 order.get("shopify_order_id") for order in page_orders
             )
+            page_line_item_ids = [
+                str(line_item.get("shopify_line_item_id") or "").strip()
+                for order in page_orders
+                for line_item in (order.get("line_items") or [])
+                if str(line_item.get("shopify_line_item_id") or "").strip()
+            ]
+            existing_line_item_ids = list_existing_shopify_line_item_ids(page_line_item_ids)
             imported_orders += sum(
                 1 for order in page_orders if str(order.get("shopify_order_id") or "").strip() not in existing_order_ids
             )
+            imported_lines += sum(1 for line_id in page_line_item_ids if line_id not in existing_line_item_ids)
             fetched_orders.extend(page_orders)
             seen += len(page_orders)
             del page
@@ -6787,11 +7195,17 @@ def sync_shopify_orders_to_supabase(
         )
         return {
             "orders_seen": seen,
+            "shopify_orders_fetched": seen,
             "orders_processed": processed_orders,
             "orders_inserted_or_updated": processed_orders,
             "orders_imported": imported_orders,
+            "existing_orders_skipped": max(seen - imported_orders, 0),
+            "new_orders_inserted": imported_orders,
+            "new_lines_inserted": imported_lines,
             "assignments_created": assignments,
+            "edition_allocations_created": assignments,
             "existing_assignments_skipped": existing_skipped,
+            "existing_allocations_preserved": existing_skipped,
             "generated_certificates": generated_certificates,
             "certificates_deferred": max(assignments - generated_certificates, 0),
             "product_metafields_deferred": len(changed_handles) if not sync_product_metafields_now else 0,

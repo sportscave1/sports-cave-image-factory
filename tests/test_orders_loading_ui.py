@@ -943,7 +943,11 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Open Selected PDF", source)
         self.assertIn("Upload", source)
         self.assertIn("Operational orders ledger. Edition numbers load from Supabase first.", source)
-        self.assertIn("Sync New Orders is locked for this stage.", source)
+        self.assertIn("Enable Stage 4B order sync controls", source)
+        self.assertIn("Dry run only — show what would be imported.", source)
+        self.assertIn("Backfill Missing Details", source)
+        self.assertIn("I understand this will import new paid Shopify orders into Supabase.", source)
+        self.assertIn("I understand this will backfill missing Shopify order details in Supabase.", source)
         self.assertIn("Tip: scroll sideways to view all fulfilment fields.", source)
         self.assertNotIn("Save Changed Order Editions", source)
         self.assertNotIn("Allocate Selected From Product Counter", source)
@@ -976,6 +980,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         for label in (
             "Sync New Orders",
+            "Backfill Missing Details",
             "Generate Selected Certificates",
             "Upload Selected to Shopify",
             "Generate + Upload Selected",
@@ -1029,6 +1034,14 @@ class EditionOpsUiTests(unittest.TestCase):
 
             def dataframe(self, rows, **kwargs):
                 self.rendered_rows = rows
+
+            def checkbox(self, label, value=False, key=None, **kwargs):
+                if key is not None and key not in self.session_state:
+                    self.session_state[key] = value
+                return self.session_state.get(key, value)
+
+            def expander(self, *args, **kwargs):
+                return FakeContainer()
 
             def title(self, *args, **kwargs):
                 return None
@@ -1130,6 +1143,14 @@ class EditionOpsUiTests(unittest.TestCase):
 
             def dataframe(self, rows, **kwargs):
                 self.rendered_rows = rows
+
+            def checkbox(self, label, value=False, key=None, **kwargs):
+                if key is not None and key not in self.session_state:
+                    self.session_state[key] = value
+                return self.session_state.get(key, value)
+
+            def expander(self, *args, **kwargs):
+                return FakeContainer()
 
             def title(self, *args, **kwargs):
                 return None
@@ -1261,165 +1282,130 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(snapshot["rows"][0]["certificate_status"], "")
         self.assertEqual(fake_backend.kwargs["limit"], 150)
 
-    def test_sync_new_orders_is_locked_during_supabase_source_of_truth_stage(self):
+    def test_refresh_orders_dry_run_uses_supabase_preview_only(self):
         fake_st = SimpleNamespace(
             session_state={
                 orders_page.ROWS_KEY: [],
                 orders_page.META_KEY: {"last_refreshed": "", "saved_at": ""},
                 orders_page.NOTICE_KEY: "",
+                orders_page.SYNC_RESULT_KEY: {},
+                orders_page.BACKFILL_RESULT_KEY: {},
             }
         )
-        snapshot = {
-            "source": "supabase",
-            "rows": [
-                {
-                    "order": "#SC2843",
-                    "date": "2026-06-23",
-                    "customer": "Ashkan Zand",
-                    "edition": "#050",
-                    "certificate": "Generate",
-                    "shipping": "US Standard Tracked Shipping",
-                    "product": "GOAT Debate Wall Art",
-                    "variant": "Black / L",
-                    "shopify_order_id": "gid://shopify/Order/2843",
-                    "shopify_line_item_id": "gid://shopify/LineItem/1",
-                    "shopify_product_id": "gid://shopify/Product/1",
+
+        class FakeBackend:
+            def __init__(self):
+                self.preview_calls = []
+
+            def preview_shopify_orders_to_supabase(self, **kwargs):
+                self.preview_calls.append(kwargs)
+                return {
+                    "mode": "dry_run",
+                    "shopify_orders_fetched": 3,
+                    "new_orders_inserted": 2,
+                    "edition_allocations_created": 4,
                 }
-            ],
-            "last_refreshed": "2026-06-24T01:00:00Z",
-            "last_synced": "2026-06-24T01:00:00Z",
-            "saved_at": "2026-06-24T01:00:01Z",
-            "order_count": 12,
-            "row_count": 1,
-        }
 
+            def sync_shopify_orders_to_supabase(self, **kwargs):
+                raise AssertionError("Dry-run should not call apply sync.")
+
+        backend = FakeBackend()
         with patch.object(orders_page, "st", fake_st), patch.object(
-            orders_page.order_allocator,
-            "sync_new_orders_to_persistent_cache",
-            side_effect=AssertionError("Stage 4 should not trigger new-order sync from Orders page."),
-        ) as sync_new, patch.object(
-            orders_page.order_allocator,
-            "load_orders_snapshot",
-            return_value=snapshot,
+            orders_page,
+            "_configured_supabase_backend",
+            return_value=backend,
         ), patch.object(
-            orders_page.shopify_sync,
-            "iter_order_pages",
-            side_effect=AssertionError("Persistent sync path should own Shopify fetching."),
-        ), patch.object(
-            orders_page.order_allocator,
-            "save_orders_snapshot",
-            side_effect=AssertionError("Supabase refresh must not rewrite the local snapshot as source of truth."),
+            orders_page,
+            "_reload_orders_from_source",
+            side_effect=AssertionError("Dry-run should not reload rows from a write path."),
         ):
-            orders_page._refresh_orders()
+            orders_page._refresh_orders(dry_run=True, max_orders=25)
 
-        sync_new.assert_not_called()
-        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [])
-        self.assertIn("locked", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        self.assertEqual(backend.preview_calls, [{"max_orders": 25}])
+        self.assertEqual(fake_st.session_state[orders_page.SYNC_RESULT_KEY]["mode"], "dry_run")
+        self.assertIn("dry-run complete", fake_st.session_state[orders_page.NOTICE_KEY].lower())
 
-    def test_refresh_orders_does_not_allocate_missing_paid_rows_during_locked_stage(self):
+    def test_refresh_orders_apply_uses_supabase_sync_path_and_reload(self):
         fake_st = SimpleNamespace(
             session_state={
                 orders_page.ROWS_KEY: [],
                 orders_page.META_KEY: {"last_refreshed": "", "saved_at": ""},
                 orders_page.NOTICE_KEY: "",
+                orders_page.SYNC_RESULT_KEY: {},
+                orders_page.BACKFILL_RESULT_KEY: {},
             }
         )
-        line_item_id = "gid://shopify/LineItem/555"
-        order_payload = {
-            "shopify_order_id": "gid://shopify/Order/1234",
-            "order_name": "#SC1234",
-            "processed_at": "2026-06-23T10:00:00Z",
-            "created_at": "2026-06-23T09:55:00Z",
-            "customer_name": "Justin Collector",
-            "shipping_method": "US Standard Tracked Shipping",
-            "metafields": [],
-            "line_items": [
-                {
-                    "shopify_line_item_id": line_item_id,
-                    "shopify_product_id": "gid://shopify/Product/777",
-                    "product_title": "Justin Gaethje Undisputed Wall Art",
-                    "variant_title": "Black / XL",
-                    "quantity": 1,
+
+        class FakeBackend:
+            def __init__(self):
+                self.sync_calls = []
+
+            def preview_shopify_orders_to_supabase(self, **kwargs):
+                raise AssertionError("Apply mode should not use dry-run preview.")
+
+            def sync_shopify_orders_to_supabase(self, **kwargs):
+                self.sync_calls.append(kwargs)
+                return {
+                    "shopify_orders_fetched": 5,
+                    "new_orders_inserted": 1,
+                    "edition_allocations_created": 2,
                 }
-            ],
-        }
 
+        backend = FakeBackend()
         with patch.object(orders_page, "st", fake_st), patch.object(
-            orders_page.order_allocator,
-            "sync_new_orders_to_persistent_cache",
-            side_effect=AssertionError("Stage 4 should not trigger new-order sync from Orders page."),
+            orders_page,
+            "_configured_supabase_backend",
+            return_value=backend,
         ), patch.object(
-            orders_page.shopify_sync,
-            "iter_order_pages",
-            side_effect=AssertionError("Locked Stage 4 refresh should not fetch Shopify orders."),
-        ), patch.object(
-            orders_page.shopify_sync,
-            "fetch_metafields",
-            side_effect=AssertionError("Orders page should leave product/order metafield fetches to the allocator."),
-        ), patch.object(
-            orders_page.order_allocator,
-            "process_recent_paid_orders_for_editions",
-            side_effect=AssertionError("Stage 4 should not allocate on Orders page refresh."),
-        ) as process_orders, patch.object(
-            orders_page.order_allocator,
-            "save_orders_snapshot",
-            side_effect=AssertionError("Locked Stage 4 refresh should not rewrite snapshot state."),
-        ):
-            orders_page._refresh_orders()
+            orders_page,
+            "_reload_orders_from_source",
+            return_value=None,
+        ) as reload_rows:
+            orders_page._refresh_orders(dry_run=False, max_orders=25)
 
-        process_orders.assert_not_called()
-        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [])
-        self.assertIn("locked", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        self.assertEqual(
+            backend.sync_calls,
+            [{"max_orders": 25, "generate_certificates": False, "sync_product_metafields": False}],
+        )
+        reload_rows.assert_called_once()
+        self.assertIn("sync applied", fake_st.session_state[orders_page.NOTICE_KEY].lower())
 
-    def test_refresh_orders_does_not_replace_rows_with_blocker_reason_during_locked_stage(self):
+    def test_backfill_missing_order_details_dry_run_is_read_only(self):
         fake_st = SimpleNamespace(
             session_state={
                 orders_page.ROWS_KEY: [],
                 orders_page.META_KEY: {"last_refreshed": "", "saved_at": ""},
                 orders_page.NOTICE_KEY: "",
+                orders_page.SYNC_RESULT_KEY: {},
+                orders_page.BACKFILL_RESULT_KEY: {},
             }
         )
-        line_item_id = "gid://shopify/LineItem/555"
-        order_payload = {
-            "shopify_order_id": "gid://shopify/Order/1234",
-            "order_name": "#SC1234",
-            "processed_at": "2026-06-23T10:00:00Z",
-            "created_at": "2026-06-23T09:55:00Z",
-            "customer_name": "Justin Collector",
-            "shipping_method": "US Standard Tracked Shipping",
-            "metafields": [],
-            "line_items": [
-                {
-                    "shopify_line_item_id": line_item_id,
-                    "shopify_product_id": "gid://shopify/Product/777",
-                    "product_title": "Justin Gaethje Undisputed Wall Art",
-                    "variant_title": "Black / XL",
-                    "quantity": 1,
+
+        class FakeBackend:
+            def backfill_missing_shopify_order_details(self, **kwargs):
+                self.kwargs = kwargs
+                return {
+                    "mode": "dry_run",
+                    "orders_updated": 2,
+                    "variant_rows_filled": 6,
+                    "shipping_rows_filled": 2,
                 }
-            ],
-        }
 
+        backend = FakeBackend()
         with patch.object(orders_page, "st", fake_st), patch.object(
-            orders_page.order_allocator,
-            "sync_new_orders_to_persistent_cache",
-            side_effect=AssertionError("Stage 4 should not trigger new-order sync from Orders page."),
+            orders_page,
+            "_configured_supabase_backend",
+            return_value=backend,
         ), patch.object(
-            orders_page.shopify_sync,
-            "iter_order_pages",
-            side_effect=AssertionError("Locked Stage 4 refresh should not fetch Shopify orders."),
-        ), patch.object(
-            orders_page.order_allocator,
-            "process_recent_paid_orders_for_editions",
-            side_effect=AssertionError("Stage 4 should not allocate on Orders page refresh."),
-        ), patch.object(
-            orders_page.order_allocator,
-            "save_orders_snapshot",
-            side_effect=AssertionError("Locked Stage 4 refresh should not rewrite snapshot state."),
+            orders_page,
+            "_reload_orders_from_source",
+            side_effect=AssertionError("Dry-run backfill should not reload rows from a write path."),
         ):
-            orders_page._refresh_orders()
+            orders_page._backfill_missing_order_details(dry_run=True, limit=50)
 
-        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [])
-        self.assertIn("locked", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        self.assertEqual(backend.kwargs, {"limit": 50, "dry_run": True})
+        self.assertEqual(fake_st.session_state[orders_page.BACKFILL_RESULT_KEY]["mode"], "dry_run")
+        self.assertIn("dry-run", fake_st.session_state[orders_page.NOTICE_KEY].lower())
 
     def test_orders_page_formats_single_edition_numbers(self):
         self.assertEqual(orders_page._format_edition("50"), "#050")

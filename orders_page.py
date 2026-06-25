@@ -20,6 +20,12 @@ SNAPSHOT_LOADED_KEY = "orders_allocation_snapshot_loaded"
 NOTICE_KEY = "orders_allocation_notice"
 SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
 GRID_KEY = "orders-fulfilment-grid"
+SYNC_RESULT_KEY = "orders_sync_result"
+BACKFILL_RESULT_KEY = "orders_backfill_result"
+SYNC_ENABLE_KEY = "orders_sync_controls_enabled"
+SYNC_DRY_RUN_KEY = "orders_sync_dry_run"
+SYNC_CONFIRM_KEY = "orders_sync_confirm_apply"
+BACKFILL_CONFIRM_KEY = "orders_backfill_confirm_apply"
 DEFAULT_VISIBLE_ROW_LIMIT = 150
 ALLOCATION_BLOCKER_STATUSES = {
     "Needs allocation",
@@ -70,6 +76,12 @@ def _ensure_state():
     st.session_state.setdefault(ROWS_KEY, [])
     st.session_state.setdefault(META_KEY, {"last_refreshed": "", "saved_at": ""})
     st.session_state.setdefault(NOTICE_KEY, "")
+    st.session_state.setdefault(SYNC_RESULT_KEY, {})
+    st.session_state.setdefault(BACKFILL_RESULT_KEY, {})
+    st.session_state.setdefault(SYNC_ENABLE_KEY, False)
+    st.session_state.setdefault(SYNC_DRY_RUN_KEY, True)
+    st.session_state.setdefault(SYNC_CONFIRM_KEY, False)
+    st.session_state.setdefault(BACKFILL_CONFIRM_KEY, False)
 
 
 def _configured_supabase_backend():
@@ -321,6 +333,17 @@ def _load_snapshot_once():
         return
     start = time.perf_counter()
     payload = _read_orders_snapshot()
+    _apply_snapshot_payload(payload)
+    st.session_state[SNAPSHOT_LOADED_KEY] = True
+    _perf_log("load snapshot", start, rows=len(st.session_state[ROWS_KEY]))
+    print("Orders load cached rows: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
+    print("Shopify fetch skipped on initial load", flush=True)
+    print("Allocation skipped on initial load", flush=True)
+    print("Metafield sync skipped on initial load", flush=True)
+    print("Certificate status load skipped on initial load", flush=True)
+
+
+def _apply_snapshot_payload(payload):
     st.session_state[ROWS_KEY] = _sort_rows(payload.get("rows") or [])
     st.session_state[META_KEY] = {
         "last_refreshed": payload.get("last_refreshed") or "",
@@ -330,13 +353,11 @@ def _load_snapshot_once():
         "row_count": payload.get("row_count") or len(payload.get("rows") or []),
         "source": payload.get("source") or "local_snapshot",
     }
-    st.session_state[SNAPSHOT_LOADED_KEY] = True
-    _perf_log("load snapshot", start, rows=len(st.session_state[ROWS_KEY]))
-    print("Orders load cached rows: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
-    print("Shopify fetch skipped on initial load", flush=True)
-    print("Allocation skipped on initial load", flush=True)
-    print("Metafield sync skipped on initial load", flush=True)
-    print("Certificate status load skipped on initial load", flush=True)
+
+
+def _reload_orders_from_source():
+    payload = _read_orders_snapshot()
+    _apply_snapshot_payload(payload)
 
 
 def _write_snapshot(rows, meta=None):
@@ -616,9 +637,47 @@ def _save_refreshed_rows(rows, existing_rows, refreshed_at=None):
     return sorted_rows
 
 
-def _refresh_orders():
+def _refresh_orders(*, dry_run=True, max_orders=100):
+    backend = _configured_supabase_backend()
+    if not backend:
+        st.session_state[NOTICE_KEY] = "Supabase is not configured. Stage 4B sync cannot run from local fallback mode."
+        return
+    if dry_run:
+        result = backend.preview_shopify_orders_to_supabase(max_orders=max_orders)
+        st.session_state[SYNC_RESULT_KEY] = result
+        st.session_state[NOTICE_KEY] = (
+            f"Dry-run complete: fetched {int(result.get('shopify_orders_fetched') or 0)} Shopify orders, "
+            f"would insert {int(result.get('new_orders_inserted') or 0)} new orders and "
+            f"{int(result.get('edition_allocations_created') or 0)} edition allocations."
+        )
+        return
+    result = backend.sync_shopify_orders_to_supabase(
+        max_orders=max_orders,
+        generate_certificates=False,
+        sync_product_metafields=False,
+    )
+    st.session_state[SYNC_RESULT_KEY] = result
+    _reload_orders_from_source()
     st.session_state[NOTICE_KEY] = (
-        "Sync New Orders is locked for this stage. Orders are loading from the Supabase ledger only."
+        f"Sync applied: fetched {int(result.get('shopify_orders_fetched') or 0)} Shopify orders, "
+        f"inserted {int(result.get('new_orders_inserted') or 0)} new orders and "
+        f"created {int(result.get('edition_allocations_created') or 0)} edition allocations."
+    )
+
+
+def _backfill_missing_order_details(*, dry_run=True, limit=100):
+    backend = _configured_supabase_backend()
+    if not backend:
+        st.session_state[NOTICE_KEY] = "Supabase is not configured. Shopify detail backfill cannot run from local fallback mode."
+        return
+    result = backend.backfill_missing_shopify_order_details(limit=limit, dry_run=dry_run)
+    st.session_state[BACKFILL_RESULT_KEY] = result
+    if not dry_run:
+        _reload_orders_from_source()
+    mode_label = "Dry-run" if dry_run else "Backfill applied"
+    st.session_state[NOTICE_KEY] = (
+        f"{mode_label}: {int(result.get('orders_updated') or 0)} order(s) with missing details "
+        f"and {int(result.get('variant_rows_filled') or 0)} variant row(s) improved."
     )
 
 
@@ -897,13 +956,45 @@ def _render_top_actions(rows):
     selected_count = len(selected_rows)
     open_url = _first_pdf_url(selected_rows)
     locked_help = "Locked until Stage 4B/Certificate stage"
+    backend = _configured_supabase_backend()
+    stage4b_enabled = st.checkbox(
+        "Enable Stage 4B order sync controls",
+        key=SYNC_ENABLE_KEY,
+        help="Required before any dry-run or apply action can run.",
+    )
+    dry_run_only = st.checkbox(
+        "Dry run only — show what would be imported.",
+        key=SYNC_DRY_RUN_KEY,
+        value=True,
+    )
+    sync_confirmed = st.checkbox(
+        "I understand this will import new paid Shopify orders into Supabase.",
+        key=SYNC_CONFIRM_KEY,
+        disabled=dry_run_only,
+    )
+    backfill_confirmed = st.checkbox(
+        "I understand this will backfill missing Shopify order details in Supabase.",
+        key=BACKFILL_CONFIRM_KEY,
+        disabled=dry_run_only,
+    )
 
-    action_cols = st.columns([1.1, 1.55, 1.45, 1.55, 1.2])
-    if action_cols[0].button("Sync New Orders", type="primary", use_container_width=True, disabled=True):
-        with st.spinner("Syncing new paid orders..."):
-            _refresh_orders()
+    sync_disabled = (not backend) or (not stage4b_enabled) or (not dry_run_only and not sync_confirmed)
+    backfill_disabled = (not backend) or (not stage4b_enabled) or (not dry_run_only and not backfill_confirmed)
+
+    action_cols = st.columns([1.2, 1.55, 1.55, 1.45, 1.55, 1.2])
+    if action_cols[0].button("Sync New Orders", type="primary", use_container_width=True, disabled=sync_disabled):
+        with st.spinner("Reviewing new paid Shopify orders..."):
+            _refresh_orders(dry_run=dry_run_only)
         st.rerun()
     if action_cols[1].button(
+        "Backfill Missing Details",
+        use_container_width=True,
+        disabled=backfill_disabled,
+    ):
+        with st.spinner("Reviewing missing Shopify order details..."):
+            _backfill_missing_order_details(dry_run=dry_run_only)
+        st.rerun()
+    if action_cols[2].button(
         "Generate Selected Certificates",
         use_container_width=True,
         disabled=True,
@@ -912,7 +1003,7 @@ def _render_top_actions(rows):
         with st.spinner("Generating selected certificates..."):
             _generate_selected_certificates(selected_rows)
         st.rerun()
-    if action_cols[2].button(
+    if action_cols[3].button(
         "Upload Selected to Shopify",
         use_container_width=True,
         disabled=True,
@@ -921,7 +1012,7 @@ def _render_top_actions(rows):
         with st.spinner("Uploading selected certificates..."):
             _upload_selected_certificates(selected_rows)
         st.rerun()
-    if action_cols[3].button(
+    if action_cols[4].button(
         "Generate + Upload Selected",
         use_container_width=True,
         disabled=True,
@@ -931,11 +1022,49 @@ def _render_top_actions(rows):
             _generate_upload_selected_certificates(selected_rows)
         st.rerun()
     if open_url:
-        action_cols[4].link_button("Open Selected PDF", open_url, use_container_width=True)
+        action_cols[5].link_button("Open Selected PDF", open_url, use_container_width=True)
     else:
-        action_cols[4].button("Open Selected PDF", use_container_width=True, disabled=True, help=locked_help)
+        action_cols[5].button("Open Selected PDF", use_container_width=True, disabled=True, help=locked_help)
     st.caption(f"{selected_count} row(s) selected. Tip: scroll sideways to view all fulfilment fields.")
-    st.caption("New-order sync stays locked here until the backfill and verification stages are approved.")
+    if not backend:
+        st.caption("Supabase ledger is not available in this runtime, so Stage 4B sync controls stay disabled.")
+    elif not stage4b_enabled:
+        st.caption("Sync and backfill stay disabled until the Stage 4B control flag is enabled.")
+    elif dry_run_only:
+        st.caption("Dry-run mode is active. No Supabase writes or Shopify updates will be made.")
+    else:
+        st.caption("Apply mode is armed. Only Supabase ledger rows will be written; Shopify remains read-only here.")
+
+
+def _render_stage4b_result(title, result):
+    if not result:
+        return
+    expander = getattr(st, "expander", None)
+    if not expander:
+        return
+    with expander(title, expanded=False):
+        for label, key in (
+            ("Mode", "mode"),
+            ("Shopify orders fetched", "shopify_orders_fetched"),
+            ("Existing orders skipped", "existing_orders_skipped"),
+            ("New orders inserted", "new_orders_inserted"),
+            ("New lines inserted", "new_lines_inserted"),
+            ("Edition allocations created", "edition_allocations_created"),
+            ("Existing allocations preserved", "existing_allocations_preserved"),
+            ("Missing mapping skipped", "missing_mapping_skipped"),
+            ("Historical orders skipped", "historical_orders_skipped"),
+            ("Orders updated", "orders_updated"),
+            ("Variant rows filled", "variant_rows_filled"),
+            ("Shipping rows filled", "shipping_rows_filled"),
+            ("Email rows filled", "email_rows_filled"),
+        ):
+            if key in result:
+                st.caption(f"{label}: {result.get(key)}")
+        errors = result.get("errors") or []
+        if errors:
+            st.caption(f"Errors: {len(errors)}")
+            for error in errors[:5]:
+                st.caption(f"- {error}")
 
 
 def _missing_data_counts(rows):
@@ -1040,6 +1169,8 @@ def render_page():
         st.session_state[NOTICE_KEY] = ""
 
     _render_top_actions(rows)
+    _render_stage4b_result("Latest Stage 4B sync summary", st.session_state.get(SYNC_RESULT_KEY) or {})
+    _render_stage4b_result("Latest Stage 4B backfill summary", st.session_state.get(BACKFILL_RESULT_KEY) or {})
     _render_ledger_diagnostics()
     _render_missing_data_diagnostics(rows)
 

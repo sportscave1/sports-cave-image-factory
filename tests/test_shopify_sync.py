@@ -2192,12 +2192,14 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(supabase_backend.shopify_sync, "iter_order_pages")
     @patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set())
+    @patch.object(supabase_backend, "list_existing_shopify_line_item_ids", return_value=set())
     @patch.object(supabase_backend, "_record_order_fetch_metrics")
     @patch.object(supabase_backend, "process_shopify_order_for_editions")
     def test_initial_order_sync_bootstraps_recent_orders_window(
         self,
         process_shopify_order_for_editions,
         _record_order_fetch_metrics,
+        _existing_line_ids,
         _existing_order_ids,
         iter_order_pages,
         _ensure_schema,
@@ -2268,12 +2270,14 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(supabase_backend.shopify_sync, "iter_order_pages")
     @patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set())
+    @patch.object(supabase_backend, "list_existing_shopify_line_item_ids", return_value=set())
     @patch.object(supabase_backend, "_record_order_fetch_metrics")
     @patch.object(supabase_backend, "process_shopify_order_for_editions")
     def test_incremental_sync_keeps_historical_updates_but_skips_auto_assignment(
         self,
         process_shopify_order_for_editions,
         _record_order_fetch_metrics,
+        _existing_line_ids,
         _existing_order_ids,
         iter_order_pages,
         _ensure_schema,
@@ -2332,12 +2336,14 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(supabase_backend.shopify_sync, "iter_order_pages")
     @patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set())
+    @patch.object(supabase_backend, "list_existing_shopify_line_item_ids", return_value=set())
     @patch.object(supabase_backend, "_record_order_fetch_metrics")
     @patch.object(supabase_backend, "process_shopify_order_for_editions")
     def test_supabase_order_sync_allocates_newest_first_response_oldest_first(
         self,
         process_shopify_order_for_editions,
         _record_order_fetch_metrics,
+        _existing_line_ids,
         _existing_order_ids,
         iter_order_pages,
         _ensure_schema,
@@ -2391,6 +2397,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertIn("sorted(fetched_orders, key=order_allocation_sort_key)", source)
         self.assertNotIn("load_orders_snapshot", source)
         self.assertNotIn("orders_allocation_snapshot", source)
+        self.assertIn("new_lines_inserted", source)
 
     def test_missing_database_url_reports_fallback_mode(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -2433,6 +2440,171 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertIn("AND eo.allocation_index=%s", allocation_source)
         self.assertIn("return {\"created\": False", allocation_source)
         self.assertIn("ON CONFLICT DO NOTHING", allocation_source)
+        self.assertIn("edition_order_auto_allocation", allocation_source)
+
+    @patch.object(supabase_backend, "ensure_schema")
+    @patch.object(
+        supabase_backend,
+        "get_sync_state",
+        return_value={
+            "last_successful_order_fetch_at": "2026-06-16T02:00:00Z",
+            "edition_tracking_start_at": "2026-06-01T00:00:00Z",
+            "sync_lookback_buffer_minutes": 10,
+        },
+    )
+    @patch.object(
+        supabase_backend,
+        "ensure_edition_tracking_start",
+        return_value=datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    @patch.object(supabase_backend.shopify_sync, "iter_order_pages")
+    @patch.object(supabase_backend, "count_shopify_orders", return_value=95)
+    @patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set())
+    @patch.object(supabase_backend, "list_existing_shopify_line_item_ids", return_value=set())
+    @patch.object(supabase_backend, "get_order_line_assignment_snapshot", return_value={})
+    @patch.object(supabase_backend, "_preview_product_counter_state")
+    def test_preview_shopify_order_sync_is_read_only_and_oldest_first(
+        self,
+        preview_product_state,
+        _assignment_snapshot,
+        _existing_line_ids,
+        _existing_order_ids,
+        _count_orders,
+        iter_order_pages,
+        _tracking_start,
+        _sync_state,
+        _ensure_schema,
+    ):
+        newer_order = self.paid_order(
+            order_id="gid://shopify/Order/1002",
+            order_name="#1002",
+            line_item_id="gid://shopify/LineItem/2002",
+            created_at="2026-06-18T00:00:00Z",
+            processed_at="2026-06-18T00:05:00Z",
+            remote_updated_at="2026-06-19T02:00:00Z",
+        )
+        older_order = self.paid_order(
+            order_id="gid://shopify/Order/1001",
+            order_name="#1001",
+            line_item_id="gid://shopify/LineItem/2001",
+            created_at="2026-06-17T00:00:00Z",
+            processed_at="2026-06-17T00:05:00Z",
+            remote_updated_at="2026-06-19T03:00:00Z",
+        )
+        iter_order_pages.return_value = [{"orders": [newer_order, older_order]}]
+        seen_line_ids = []
+
+        def fake_preview_state(_cur, line_item, cache):
+            seen_line_ids.append(line_item["shopify_line_item_id"])
+            return cache.setdefault(
+                "messi-the-final-crown-wall-art",
+                {
+                    "handle": "messi-the-final-crown-wall-art",
+                    "next_edition_number": 12,
+                    "edition_total": 100,
+                    "sold_out": False,
+                    "run_status": supabase_backend.ACTIVE_RUN_STATUS,
+                },
+            )
+
+        preview_product_state.side_effect = fake_preview_state
+
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeConnection:
+            def cursor(self):
+                return FakeCursor()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with patch.object(supabase_backend, "connect", return_value=FakeConnection()):
+            result = supabase_backend.preview_shopify_orders_to_supabase(config=self.config, max_orders=25)
+
+        self.assertEqual(result["mode"], "dry_run")
+        self.assertEqual(result["shopify_orders_fetched"], 2)
+        self.assertEqual(result["new_orders_inserted"], 2)
+        self.assertEqual(result["new_lines_inserted"], 2)
+        self.assertEqual(result["edition_allocations_created"], 2)
+        self.assertEqual(seen_line_ids, ["gid://shopify/LineItem/2001", "gid://shopify/LineItem/2002"])
+
+    @patch.object(supabase_backend, "ensure_schema")
+    def test_backfill_missing_shopify_order_details_dry_run_does_not_write(self, _ensure_schema):
+        class FakeCursor:
+            def execute(self, sql, params):
+                self.sql = sql
+                self.params = params
+
+            def fetchall(self):
+                return [
+                    {
+                        "shopify_order_id": "gid://shopify/Order/2843",
+                        "order_name": "#SC2843",
+                        "customer_email": "",
+                        "shipping_address_summary": "",
+                        "missing_variant_rows": 1,
+                        "missing_product_rows": 0,
+                    }
+                ]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeConnection:
+            def cursor(self):
+                return FakeCursor()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        fetched_order = {
+            "shopify_order_id": "gid://shopify/Order/2843",
+            "order_name": "#SC2843",
+            "customer_email": "ashkan@example.com",
+            "shipping_address_summary": "Austin, TX, US",
+            "line_items": [
+                {
+                    "shopify_line_item_id": "gid://shopify/LineItem/1",
+                    "variant_title": "Black / L",
+                }
+            ],
+        }
+
+        with patch.object(supabase_backend, "connect", return_value=FakeConnection()), patch.object(
+            supabase_backend.shopify_sync,
+            "fetch_orders_by_ids",
+            return_value=[fetched_order],
+        ), patch.object(
+            supabase_backend,
+            "_persist_order_snapshot",
+            side_effect=AssertionError("Dry-run backfill must not write order snapshots."),
+        ):
+            result = supabase_backend.backfill_missing_shopify_order_details(
+                config=self.config,
+                limit=10,
+                dry_run=True,
+            )
+
+        self.assertEqual(result["mode"], "dry_run")
+        self.assertEqual(result["candidate_orders"], 1)
+        self.assertEqual(result["orders_updated"], 1)
+        self.assertEqual(result["variant_rows_filled"], 1)
+        self.assertEqual(result["shipping_rows_filled"], 1)
+        self.assertEqual(result["email_rows_filled"], 1)
 
     def test_manual_edition_counter_ahead_of_history_is_respected(self):
         result = supabase_backend._resolve_next_edition_number_state(75, 12, False)
