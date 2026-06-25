@@ -1,4 +1,5 @@
 import os
+import inspect
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -2129,14 +2130,24 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             "configured": True,
         }
 
-    def paid_order(self, *, processed_at, remote_updated_at):
+    def paid_order(
+        self,
+        *,
+        processed_at,
+        remote_updated_at,
+        created_at="2026-06-01T00:00:00Z",
+        order_id="gid://shopify/Order/1000",
+        order_name="#1000",
+        line_item_id="gid://shopify/LineItem/1",
+        line_position=1,
+    ):
         return {
-            "shopify_order_id": "gid://shopify/Order/1000",
-            "legacy_resource_id": "1000",
-            "order_name": "#1000",
-            "order_number": "1000",
-            "admin_url": "https://admin.shopify.com/store/sports-cave/orders/1000",
-            "created_at": "2026-06-01T00:00:00Z",
+            "shopify_order_id": order_id,
+            "legacy_resource_id": order_id.rsplit("/", 1)[-1],
+            "order_name": order_name,
+            "order_number": order_name.lstrip("#"),
+            "admin_url": f"https://admin.shopify.com/store/sports-cave/orders/{order_id.rsplit('/', 1)[-1]}",
+            "created_at": created_at,
             "processed_at": processed_at,
             "remote_updated_at": remote_updated_at,
             "paid_at": processed_at,
@@ -2146,11 +2157,12 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             "customer_email": "collector@example.com",
             "line_items": [
                 {
-                    "shopify_line_item_id": "gid://shopify/LineItem/1",
+                    "shopify_line_item_id": line_item_id,
                     "shopify_product_id": "gid://shopify/Product/999",
                     "product_title": "Messi The Final Crown Wall Art",
                     "product_handle": "messi-the-final-crown-wall-art",
                     "variant_title": "Black / XL",
+                    "position": line_position,
                     "quantity": 1,
                 }
             ],
@@ -2297,6 +2309,130 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertFalse(kwargs["assign_editions"])
         self.assertFalse(kwargs["generate_certificates"])
         self.assertEqual(kwargs["allocation_skip_reason"], supabase_backend.HISTORICAL_ORDER_NOTE)
+
+    @patch.object(supabase_backend, "finish_sync_run")
+    @patch.object(supabase_backend, "start_sync_run", return_value="run-1")
+    @patch.object(supabase_backend, "_set_sync_success")
+    @patch.object(supabase_backend, "_set_sync_attempt")
+    @patch.object(supabase_backend, "set_app_setting")
+    @patch.object(
+        supabase_backend,
+        "get_sync_state",
+        return_value={
+            "last_successful_order_sync_at": "2026-06-16T02:00:00Z",
+            "edition_tracking_start_at": "2026-06-01T00:00:00Z",
+            "sync_lookback_buffer_minutes": 10,
+        },
+    )
+    @patch.object(
+        supabase_backend,
+        "ensure_edition_tracking_start",
+        return_value=datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    @patch.object(supabase_backend, "ensure_schema")
+    @patch.object(supabase_backend.shopify_sync, "iter_order_pages")
+    @patch.object(supabase_backend, "list_existing_shopify_order_ids", return_value=set())
+    @patch.object(supabase_backend, "_record_order_fetch_metrics")
+    @patch.object(supabase_backend, "process_shopify_order_for_editions")
+    def test_supabase_order_sync_allocates_newest_first_response_oldest_first(
+        self,
+        process_shopify_order_for_editions,
+        _record_order_fetch_metrics,
+        _existing_order_ids,
+        iter_order_pages,
+        _ensure_schema,
+        _tracking_start,
+        _sync_state,
+        _set_app_setting,
+        _set_attempt,
+        _set_success,
+        _start_run,
+        _finish_run,
+    ):
+        newer_order = self.paid_order(
+            order_id="gid://shopify/Order/1002",
+            order_name="#1002",
+            line_item_id="gid://shopify/LineItem/2002",
+            created_at="2026-06-18T00:00:00Z",
+            processed_at="2026-06-18T00:05:00Z",
+            remote_updated_at="2026-06-19T02:00:00Z",
+        )
+        older_order = self.paid_order(
+            order_id="gid://shopify/Order/1001",
+            order_name="#1001",
+            line_item_id="gid://shopify/LineItem/2001",
+            created_at="2026-06-17T00:00:00Z",
+            processed_at="2026-06-17T00:05:00Z",
+            remote_updated_at="2026-06-19T03:00:00Z",
+        )
+        iter_order_pages.return_value = [{"orders": [newer_order, older_order]}]
+        process_shopify_order_for_editions.return_value = {
+            "assignments_created": 1,
+            "existing_assignments_skipped": 0,
+            "generated_certificates": 0,
+            "historical_lines_marked": 0,
+            "changed_handles": [],
+            "errors": [],
+        }
+
+        result = supabase_backend.sync_shopify_orders_to_supabase(config=self.config, max_orders=25)
+
+        self.assertEqual(result["orders_seen"], 2)
+        self.assertEqual(result["orders_processed"], 2)
+        processed_order_names = [
+            call.args[0]["order_name"]
+            for call in process_shopify_order_for_editions.call_args_list
+        ]
+        self.assertEqual(processed_order_names, ["#1001", "#1002"])
+
+    def test_supabase_order_sync_does_not_use_local_snapshot_or_display_order(self):
+        source = inspect.getsource(supabase_backend.sync_shopify_orders_to_supabase)
+
+        self.assertIn("sorted(fetched_orders, key=order_allocation_sort_key)", source)
+        self.assertNotIn("load_orders_snapshot", source)
+        self.assertNotIn("orders_allocation_snapshot", source)
+
+    def test_missing_database_url_reports_fallback_mode(self):
+        with patch.dict(os.environ, {}, clear=True):
+            diagnostic = supabase_backend.database_mode_diagnostic()
+            status = supabase_backend.database_status(run_schema_check=False)
+
+        self.assertFalse(diagnostic["configured"])
+        self.assertEqual(diagnostic["mode"], "Local/fallback only")
+        self.assertIn("DATABASE_URL", diagnostic["warning"])
+        self.assertFalse(status["connected"])
+        self.assertEqual(status["mode"], "Local/fallback only")
+
+    def test_stage1_migration_contains_required_tables_and_safe_guards(self):
+        sql = Path("migrations/20260625_stage1_supabase_operational_ledger.sql").read_text(encoding="utf-8")
+
+        for table_name in (
+            "edition_products",
+            "edition_orders",
+            "shopify_orders",
+            "shopify_order_lines",
+            "certificates",
+            "app_sync_state",
+            "audit_logs",
+        ):
+            self.assertIn(f"CREATE TABLE IF NOT EXISTS {table_name}", sql)
+        for unsafe in ("DROP ", "DELETE ", "TRUNCATE ", "UPDATE "):
+            self.assertNotIn(unsafe, sql.upper())
+        self.assertIn("idx_edition_orders_line_allocation_unique", sql)
+        self.assertIn("idx_edition_orders_run_number_active_unique", sql)
+        self.assertIn("idx_edition_orders_handle_number_unrun_unique", sql)
+
+    def test_duplicate_and_existing_assignment_guards_are_present(self):
+        migration_sql = Path("migrations/20260625_stage1_supabase_operational_ledger.sql").read_text(encoding="utf-8")
+        allocation_source = inspect.getsource(supabase_backend.allocate_edition_for_order_line)
+
+        self.assertIn("UNIQUE (shopify_line_item_id, allocation_index)", migration_sql)
+        self.assertIn("idx_edition_orders_line_allocation_unique", migration_sql)
+        self.assertIn("WHERE eo.shopify_order_id=%s", allocation_source)
+        self.assertIn("AND eo.shopify_line_item_id=%s", allocation_source)
+        self.assertIn("AND eo.allocation_index=%s", allocation_source)
+        self.assertIn("return {\"created\": False", allocation_source)
+        self.assertIn("ON CONFLICT DO NOTHING", allocation_source)
 
     def test_manual_edition_counter_ahead_of_history_is_respected(self):
         result = supabase_backend._resolve_next_edition_number_state(75, 12, False)

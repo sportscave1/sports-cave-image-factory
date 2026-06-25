@@ -33,6 +33,7 @@ DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES = 10
 DEFAULT_INITIAL_ORDER_BOOTSTRAP_DAYS = 30
 DEFAULT_INITIAL_ORDER_ASSIGNMENT_WINDOW_DAYS = 7
 DEFAULT_INCREMENTAL_ORDER_FETCH_LIMIT = 100
+DATETIME_MAX_UTC = datetime.max.replace(tzinfo=timezone.utc)
 DEFAULT_PSD_MASTER_FOLDER_SETTING = {
     "url": "https://drive.google.com/drive/folders/1UCs_EsyjVXZUNclAfnmO7y2x7rKutwhH",
     "name": "Sports Cave PSD Master Folder",
@@ -53,6 +54,7 @@ DATABASE_URL_ENV_KEYS = (
     "DATABASE_PUBLIC_URL",
     "RENDER_DATABASE_URL",
 )
+REQUIRED_DATABASE_ENV_VARS = ("DATABASE_URL",)
 _SCHEMA_READY = False
 _ORDER_READ_SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
@@ -142,6 +144,61 @@ def _order_effective_datetime(order):
     )
 
 
+def _allocation_datetime_sort_value(value):
+    return _parse_datetime(value) or DATETIME_MAX_UTC
+
+
+def _numeric_sort_value(value):
+    digits = re.findall(r"\d+", str(value or ""))
+    return int(digits[-1]) if digits else 0
+
+
+def _line_item_position(line_item, fallback):
+    for key in ("position", "line_item_position", "current_position", "index"):
+        try:
+            value = int(line_item.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    return fallback
+
+
+def _line_item_sort_identity(line_item):
+    return str(
+        line_item.get("shopify_line_item_id")
+        or line_item.get("line_item_id")
+        or line_item.get("id")
+        or ""
+    )
+
+
+def order_allocation_sort_key(order):
+    """Stable oldest-first key for edition allocation, independent of API/display order."""
+    line_items = order.get("line_items") or [{}]
+    line_keys = []
+    for fallback_position, line_item in enumerate(line_items, start=1):
+        if not isinstance(line_item, dict):
+            line_item = {}
+        quantity = max(_int_value(line_item.get("quantity"), 1), 1)
+        for quantity_index in range(1, quantity + 1):
+            line_keys.append(
+                (
+                    _line_item_position(line_item, fallback_position),
+                    _line_item_sort_identity(line_item),
+                    quantity_index,
+                )
+            )
+    line_key = min(line_keys or [(1, "", 1)])
+    return (
+        _allocation_datetime_sort_value(order.get("created_at") or order.get("createdAt")),
+        _allocation_datetime_sort_value(order.get("processed_at") or order.get("processedAt") or order.get("paid_at")),
+        _numeric_sort_value(order.get("order_number") or order.get("shopify_order_number") or order.get("order_name")),
+        str(order.get("shopify_order_id") or order.get("id") or ""),
+        *line_key,
+    )
+
+
 def get_database_url_source():
     for key in DATABASE_URL_ENV_KEYS:
         if os.getenv(key, "").strip():
@@ -159,6 +216,30 @@ def get_database_url():
 
 def is_configured():
     return bool(get_database_url())
+
+
+def database_mode_diagnostic():
+    """Return safe database mode details without exposing connection strings."""
+    source = get_database_url_source()
+    if source:
+        return {
+            "mode": "Supabase/Postgres configured",
+            "configured": True,
+            "url_source": source,
+            "required_env_vars": REQUIRED_DATABASE_ENV_VARS,
+            "accepted_env_vars": DATABASE_URL_ENV_KEYS,
+            "host_reference": safe_database_reference(),
+            "warning": "",
+        }
+    return {
+        "mode": "Local/fallback only",
+        "configured": False,
+        "url_source": "",
+        "required_env_vars": REQUIRED_DATABASE_ENV_VARS,
+        "accepted_env_vars": DATABASE_URL_ENV_KEYS,
+        "host_reference": "Local/fallback only",
+        "warning": "DATABASE_URL missing. Set DATABASE_URL for the durable Supabase/Postgres ledger.",
+    }
 
 
 def safe_database_reference():
@@ -209,19 +290,22 @@ def database_status(run_schema_check=True):
     """Return safe database diagnostics without exposing DATABASE_URL credentials."""
     global _LAST_DATABASE_STATUS
     checked_at = utc_now()
+    mode = database_mode_diagnostic()
     if not is_configured():
         status = {
-            "mode": "SQLite fallback",
+            "mode": mode["mode"],
             "configured": False,
             "connected": False,
             "tables_ready": False,
-            "host_reference": "Local SQLite fallback",
+            "host_reference": mode["host_reference"],
             "url_source": "",
+            "required_env_vars": mode["required_env_vars"],
+            "accepted_env_vars": mode["accepted_env_vars"],
             "checked_at": checked_at,
             "connect_time_seconds": 0.0,
             "migration_time_seconds": 0.0,
             "error_type": "",
-            "warning": "DATABASE_URL is not configured. App is using local SQLite fallback.",
+            "warning": mode["warning"],
         }
         _LAST_DATABASE_STATUS = status
         return status
@@ -254,12 +338,14 @@ def database_status(run_schema_check=True):
         flush=True,
     )
     status = {
-        "mode": "Supabase/Postgres",
+        "mode": mode["mode"],
         "configured": True,
         "connected": connected,
         "tables_ready": tables_ready,
         "host_reference": safe_database_reference(),
         "url_source": get_database_url_source(),
+        "required_env_vars": mode["required_env_vars"],
+        "accepted_env_vars": mode["accepted_env_vars"],
         "checked_at": checked_at,
         "connect_time_seconds": round(connect_time, 3),
         "migration_time_seconds": round(migration_time, 3),
@@ -664,6 +750,39 @@ def _ensure_schema_uncached():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS app_sync_state (
+                    key TEXT PRIMARY KEY,
+                    value JSONB DEFAULT '{}'::jsonb,
+                    cursor_value TEXT,
+                    last_success_at TIMESTAMPTZ,
+                    last_attempt_at TIMESTAMPTZ,
+                    status TEXT DEFAULT 'idle',
+                    error_message TEXT,
+                    updated_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS audit_logs (
+                    id BIGSERIAL PRIMARY KEY,
+                    event_type TEXT NOT NULL,
+                    entity_type TEXT,
+                    entity_id TEXT,
+                    shopify_order_id TEXT,
+                    shopify_line_item_id TEXT,
+                    shopify_handle TEXT,
+                    old_value JSONB DEFAULT '{}'::jsonb,
+                    new_value JSONB DEFAULT '{}'::jsonb,
+                    reason TEXT,
+                    actor TEXT DEFAULT 'sports_cave_os',
+                    source TEXT DEFAULT 'sports_cave_os',
+                    created_at TIMESTAMPTZ DEFAULT now()
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS webhook_events (
                     webhook_id TEXT PRIMARY KEY,
                     topic TEXT,
@@ -1057,6 +1176,30 @@ def _ensure_schema_uncached():
                     ("value", "JSONB DEFAULT '{}'::jsonb"),
                     ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
+                "app_sync_state": (
+                    ("key", "TEXT"),
+                    ("value", "JSONB DEFAULT '{}'::jsonb"),
+                    ("cursor_value", "TEXT"),
+                    ("last_success_at", "TIMESTAMPTZ"),
+                    ("last_attempt_at", "TIMESTAMPTZ"),
+                    ("status", "TEXT DEFAULT 'idle'"),
+                    ("error_message", "TEXT"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
+                ),
+                "audit_logs": (
+                    ("event_type", "TEXT"),
+                    ("entity_type", "TEXT"),
+                    ("entity_id", "TEXT"),
+                    ("shopify_order_id", "TEXT"),
+                    ("shopify_line_item_id", "TEXT"),
+                    ("shopify_handle", "TEXT"),
+                    ("old_value", "JSONB DEFAULT '{}'::jsonb"),
+                    ("new_value", "JSONB DEFAULT '{}'::jsonb"),
+                    ("reason", "TEXT"),
+                    ("actor", "TEXT DEFAULT 'sports_cave_os'"),
+                    ("source", "TEXT DEFAULT 'sports_cave_os'"),
+                    ("created_at", "TIMESTAMPTZ DEFAULT now()"),
+                ),
             }
             for table_name, columns in additive_columns.items():
                 if not table_exists(cur, table_name):
@@ -1149,6 +1292,7 @@ def _ensure_schema_uncached():
                 "file_assets",
                 "sync_runs",
                 "app_errors",
+                "audit_logs",
             )
             pgcrypto_ready = False
             for table_name in uuid_id_tables:
@@ -1229,6 +1373,12 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_file_assets_handle ON file_assets(related_shopify_handle)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_file_assets_order ON file_assets(related_shopify_order_id)")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_app_settings_key_unique ON app_settings(key)", "idx_app_settings_key_unique")
+            _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_app_sync_state_key_unique ON app_sync_state(key)", "idx_app_sync_state_key_unique")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_app_sync_state_updated_at ON app_sync_state(updated_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_order_line ON audit_logs(shopify_order_id, shopify_line_item_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_handle ON audit_logs(shopify_handle)")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_id_unique ON webhook_events(webhook_id)", "idx_webhook_events_id_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_title ON shopify_products(title)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_updated_at ON shopify_products(updated_at DESC)")
@@ -6031,7 +6181,17 @@ def process_paid_order(
     order_customer_email = str(order.get("customer_email") or order.get("email") or "").strip()
     new_assignments = []
     product_cache = {}
-    for line_index, line_item in enumerate(order.get("line_items") or [], start=1):
+    line_items_for_allocation = sorted(
+        enumerate(order.get("line_items") or [], start=1),
+        key=lambda item: (
+            _line_item_position(item[1] if isinstance(item[1], dict) else {}, item[0]),
+            _line_item_sort_identity(item[1] if isinstance(item[1], dict) else {}),
+            item[0],
+        ),
+    )
+    for line_index, line_item in line_items_for_allocation:
+        if not isinstance(line_item, dict):
+            line_item = {}
         quantity = max(1, int(line_item.get("quantity") or 1))
         line_item_id = str(
             line_item.get("shopify_line_item_id")
@@ -6459,6 +6619,7 @@ def sync_shopify_orders_to_supabase(
     shopify_ms = 0.0
     assign_ms = 0.0
     db_write_ms = 0.0
+    fetched_orders = []
     try:
         _set_sync_attempt(LAST_ATTEMPTED_ORDER_SYNC_KEY)
         if not historical_backfill:
@@ -6526,40 +6687,42 @@ def sync_shopify_orders_to_supabase(
             imported_orders += sum(
                 1 for order in page_orders if str(order.get("shopify_order_id") or "").strip() not in existing_order_ids
             )
-            page_processing_started = time.perf_counter()
-            assign_before_page = assign_ms
-            for order in page["orders"]:
-                should_assign_editions = True
-                allocation_skip_reason = ""
-                if not historical_backfill:
-                    order_datetime = _order_effective_datetime(order)
-                    if order_datetime and tracking_start and order_datetime < tracking_start:
-                        should_assign_editions = False
-                        allocation_skip_reason = HISTORICAL_ORDER_NOTE
-                order_assign_started = time.perf_counter()
-                result = process_shopify_order_for_editions(
-                    order,
-                    allocation_status=allocation_status,
-                    generate_certificates=generate_certificates_now,
-                    sync_product_metafields=sync_product_metafields_now,
-                    assign_editions=should_assign_editions,
-                    allocation_skip_reason=allocation_skip_reason,
-                )
-                assign_ms += (time.perf_counter() - order_assign_started) * 1000
-                processed_orders += 1
-                if not should_assign_editions:
-                    historical_orders_synced += 1
-                assignments += int(result.get("assignments_created") or 0)
-                existing_skipped += int(result.get("existing_assignments_skipped") or 0)
-                generated_certificates += int(result.get("generated_certificates") or 0)
-                historical_lines_marked += int(result.get("historical_lines_marked") or 0)
-                changed_handles.update(result.get("changed_handles") or [])
-                errors.extend(result.get("errors") or [])
-            page_processing_ms = (time.perf_counter() - page_processing_started) * 1000
-            db_write_ms += max(page_processing_ms - (assign_ms - assign_before_page), 0)
+            fetched_orders.extend(page_orders)
             seen += len(page_orders)
             del page
             gc.collect()
+
+        page_processing_started = time.perf_counter()
+        assign_before_batch = assign_ms
+        for order in sorted(fetched_orders, key=order_allocation_sort_key):
+            should_assign_editions = True
+            allocation_skip_reason = ""
+            if not historical_backfill:
+                order_datetime = _order_effective_datetime(order)
+                if order_datetime and tracking_start and order_datetime < tracking_start:
+                    should_assign_editions = False
+                    allocation_skip_reason = HISTORICAL_ORDER_NOTE
+            order_assign_started = time.perf_counter()
+            result = process_shopify_order_for_editions(
+                order,
+                allocation_status=allocation_status,
+                generate_certificates=generate_certificates_now,
+                sync_product_metafields=sync_product_metafields_now,
+                assign_editions=should_assign_editions,
+                allocation_skip_reason=allocation_skip_reason,
+            )
+            assign_ms += (time.perf_counter() - order_assign_started) * 1000
+            processed_orders += 1
+            if not should_assign_editions:
+                historical_orders_synced += 1
+            assignments += int(result.get("assignments_created") or 0)
+            existing_skipped += int(result.get("existing_assignments_skipped") or 0)
+            generated_certificates += int(result.get("generated_certificates") or 0)
+            historical_lines_marked += int(result.get("historical_lines_marked") or 0)
+            changed_handles.update(result.get("changed_handles") or [])
+            errors.extend(result.get("errors") or [])
+        batch_processing_ms = (time.perf_counter() - page_processing_started) * 1000
+        db_write_ms += max(batch_processing_ms - (assign_ms - assign_before_batch), 0)
         if not historical_backfill:
             success_timestamp = _set_sync_success(LAST_SUCCESSFUL_ORDER_SYNC_KEY)
             last_fetch_status = "No New Orders" if seen == 0 else ("Success With Warnings" if errors else "Success")
