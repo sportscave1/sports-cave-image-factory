@@ -2134,6 +2134,7 @@ class EditionOpsUiTests(unittest.TestCase):
         original = edition_ops._normalise_row(
             {
                 "shopify_product_gid": "gid://shopify/Product/1",
+                "handle": "legends-never-die",
                 "edition_total": 100,
                 "edition_next_number": 1,
                 "sync_status": "Loaded",
@@ -2147,6 +2148,105 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(edition_ops._changed_rows([changed], [original]), [changed])
         self.assertEqual(edition_ops._changed_rows([unchanged_status_only], [original]), [])
+
+    def test_edition_ops_uses_stable_handle_key_when_product_gid_missing(self):
+        original = edition_ops._normalise_row(
+            {
+                "handle": "legends-never-die",
+                "edition_total": 100,
+                "edition_next_number": 41,
+            }
+        )
+        same_values = edition_ops._normalise_row(
+            {
+                "handle": "legends-never-die",
+                "edition_total": "100",
+                "edition_next_number": "41",
+                "edition_sold_count": 88,
+                "edition_remaining": 12,
+                "edition_status": "Final Editions",
+            }
+        )
+
+        self.assertEqual(edition_ops._changed_rows([same_values], [original]), [])
+
+    def test_edition_ops_page_load_starts_with_zero_dirty_rows(self):
+        rows = [
+            edition_ops._normalise_row(
+                {
+                    "edition_product_id": "101",
+                    "handle": "goat-debate-wall-art",
+                    "edition_total": 100,
+                    "edition_next_number": 52,
+                }
+            )
+        ]
+
+        self.assertEqual(edition_ops._rows_to_save(rows, rows), [])
+
+    def test_edition_ops_row_order_changes_do_not_mark_rows_dirty(self):
+        original_a = edition_ops._normalise_row(
+            {"edition_product_id": "101", "handle": "goat-debate-wall-art", "edition_total": 100, "edition_next_number": 52}
+        )
+        original_b = edition_ops._normalise_row(
+            {"edition_product_id": "102", "handle": "legends-never-die", "edition_total": 100, "edition_next_number": 46}
+        )
+
+        self.assertEqual(edition_ops._changed_rows([original_b, original_a], [original_a, original_b]), [])
+
+    def test_edition_ops_string_bool_and_int_values_compare_equal(self):
+        original = edition_ops._normalise_row(
+            {"edition_product_id": "101", "handle": "legends-never-die", "edition_enabled": True, "edition_total": 100, "edition_next_number": 42}
+        )
+        editor_row = {
+            "edition_product_id": "101",
+            "handle": "legends-never-die",
+            "edition_enabled": "true",
+            "edition_total": "100",
+            "edition_next_number": "42",
+        }
+
+        self.assertEqual(edition_ops._changed_rows([editor_row], [original]), [])
+
+    def test_edition_ops_derived_fields_do_not_mark_row_dirty(self):
+        original = edition_ops._normalise_row(
+            {"edition_product_id": "101", "handle": "legends-never-die", "edition_total": 100, "edition_next_number": 42}
+        )
+        changed = dict(original)
+        changed["edition_sold_count"] = 99
+        changed["edition_remaining"] = 1
+        changed["edition_status"] = "Final Editions"
+
+        self.assertEqual(edition_ops._changed_rows([changed], [original]), [])
+
+    def test_edition_ops_reload_products_uses_supabase_and_clears_dirty_state(self):
+        row = edition_ops._normalise_row(
+            {"edition_product_id": "101", "handle": "legends-never-die", "edition_total": 100, "edition_next_number": 42}
+        )
+        fake_st = SimpleNamespace(
+            session_state={
+                edition_ops.ROWS_KEY: [],
+                edition_ops.ORIGINAL_ROWS_KEY: [],
+                edition_ops.META_KEY: {},
+                edition_ops.ERRORS_KEY: {},
+                edition_ops.IMPORT_WARNINGS_KEY: [],
+            }
+        )
+        snapshot = {"rows": [row], "original_rows": [row], "saved_at": "2026-06-25T10:00:00Z"}
+
+        with patch.object(edition_ops, "st", fake_st), patch.object(
+            edition_ops, "_configured_supabase_backend", return_value=object()
+        ), patch.object(edition_ops, "_invalidate_edition_ops_cache") as invalidate_cache, patch.object(
+            edition_ops, "_load_supabase_snapshot", return_value=snapshot
+        ), patch.object(edition_ops, "_write_snapshot") as write_snapshot, patch.object(
+            edition_ops, "_bump_editor_version"
+        ) as bump_editor:
+            edition_ops._reload_products_from_supabase()
+
+        self.assertEqual(edition_ops._rows_to_save(fake_st.session_state[edition_ops.ROWS_KEY], fake_st.session_state[edition_ops.ORIGINAL_ROWS_KEY]), [])
+        invalidate_cache.assert_called_once()
+        write_snapshot.assert_called_once()
+        bump_editor.assert_called_once()
 
     def test_csv_import_accepts_visible_headers_and_excel_numbers(self):
         rows = [
@@ -2304,6 +2404,31 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(updated_rows[0]["edition_remaining"], 5)
         self.assertEqual(updated_rows[0]["edition_status"], "Final Editions")
 
+    def test_csv_import_unchanged_rows_do_not_get_marked_needs_sync(self):
+        rows = [
+            edition_ops._normalise_row(
+                {
+                    "edition_product_id": "101",
+                    "shopify_product_gid": "gid://shopify/Product/1",
+                    "handle": "legacy-wall-art",
+                    "edition_enabled": True,
+                    "edition_total": 100,
+                    "edition_next_number": 96,
+                }
+            )
+        ]
+        csv_text = (
+            "shopify_product_gid,handle,edition_enabled,edition_total,edition_next_number\n"
+            "gid://shopify/Product/1,legacy-wall-art,true,100,96\n"
+        )
+
+        updated_rows, changed_rows, changed_count, warnings = edition_ops._apply_csv_updates_to_rows(rows, csv_text)
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(changed_count, 0)
+        self.assertEqual(changed_rows, [])
+        self.assertEqual(updated_rows[0]["sync_status"], "Loaded")
+
     def test_rows_to_save_includes_needs_sync_even_without_edit_diff(self):
         original = edition_ops._normalise_row(
             {
@@ -2317,6 +2442,56 @@ class EditionOpsUiTests(unittest.TestCase):
         imported["sync_status"] = "Needs Sync"
 
         self.assertEqual(edition_ops._rows_to_save([imported], [original]), [imported])
+
+    def test_save_changed_rows_updates_only_changed_rows(self):
+        original = edition_ops._normalise_row(
+            {"edition_product_id": "101", "handle": "legends-never-die", "edition_total": 100, "edition_next_number": 42}
+        )
+        changed = dict(original)
+        changed["edition_next_number"] = 43
+        untouched = edition_ops._normalise_row(
+            {"edition_product_id": "102", "handle": "goat-debate-wall-art", "edition_total": 100, "edition_next_number": 52}
+        )
+        fake_st = SimpleNamespace(
+            session_state={
+                edition_ops.ROWS_KEY: [changed, untouched],
+                edition_ops.ORIGINAL_ROWS_KEY: [original, untouched],
+                edition_ops.NOTICE_KEY: "",
+            }
+        )
+        fake_backend = SimpleNamespace(
+            update_edition_products_batch=lambda rows, reason=None: [{"ok": True, "handle": rows[0]["handle"], "key": rows[0]["edition_product_id"]}],
+        )
+
+        with patch.object(edition_ops, "st", fake_st), patch.object(
+            edition_ops, "_configured_supabase_backend", return_value=fake_backend
+        ), patch.object(edition_ops.shopify_sync, "get_config", return_value={"configured": False}), patch.object(
+            edition_ops, "_mark_supabase_saved_without_shopify"
+        ) as mark_pending:
+            edition_ops._save_changed_rows()
+
+        mark_pending.assert_called_once()
+        saved_keys = mark_pending.call_args.args[2]
+        self.assertEqual(len(saved_keys), 1)
+        self.assertIn("edition_product:101", saved_keys[0])
+        self.assertIn("Changed rows saved: 1", fake_st.session_state[edition_ops.NOTICE_KEY])
+
+    def test_save_changed_rows_reports_no_changes(self):
+        row = edition_ops._normalise_row(
+            {"edition_product_id": "101", "handle": "legends-never-die", "edition_total": 100, "edition_next_number": 42}
+        )
+        fake_st = SimpleNamespace(
+            session_state={
+                edition_ops.ROWS_KEY: [row],
+                edition_ops.ORIGINAL_ROWS_KEY: [row],
+                edition_ops.NOTICE_KEY: "",
+            }
+        )
+
+        with patch.object(edition_ops, "st", fake_st):
+            edition_ops._save_changed_rows()
+
+        self.assertEqual(fake_st.session_state[edition_ops.NOTICE_KEY], "No changes to save.")
 
     def test_editor_changes_recalculate_derived_fields_without_order_data(self):
         source = edition_ops._normalise_row(

@@ -2703,111 +2703,187 @@ def update_edition_product(
         raise ValueError("Shopify handle is required.")
     with connect() as conn:
         with conn.cursor() as cur:
-            product, run = _get_active_edition_run_for_handle(cur, handle, lock=True, create_missing=True)
-            if not product or not run:
-                raise ValueError(f"No edition product found for {handle}.")
-
-            old_next = max(_int_value(run.get("next_edition_number"), 1), 1)
-            old_total = max(_int_value(run.get("edition_total"), 100), 1)
-            new_total = max(_int_value(edition_total, old_total), 1)
-            if current_edition is not None:
-                current = _int_value(current_edition, 0)
-                if current < 0:
-                    raise ValueError("Latest sent cannot be below 0.")
-                proposed_next = current + 1
-            elif next_edition_number is not None:
-                proposed_next = _int_value(next_edition_number, old_next)
-            else:
-                proposed_next = old_next
-            if proposed_next < 1:
-                raise ValueError("Next edition number must be at least 1.")
-            if new_total < 1:
-                raise ValueError("Edition total must be at least 1.")
-
-            requested_status = _clean_edition_run_status(
-                status,
-                active=bool(active if active is not None else run.get("status") == ACTIVE_RUN_STATUS),
-                sold_out=bool(sold_out if sold_out is not None else run.get("status") == SOLD_OUT_RUN_STATUS),
-            )
-            if sold_out is True or proposed_next > new_total:
-                requested_status = SOLD_OUT_RUN_STATUS
-            elif active is False and status is None:
-                requested_status = INACTIVE_RUN_STATUS
-            elif active is True and sold_out is False and status is None:
-                requested_status = ACTIVE_RUN_STATUS
-
-            latest_sent = proposed_next - 1
-            remaining = new_total - latest_sent
-
-            new_name = str(edition_name or run.get("edition_name") or DEFAULT_EDITION_NAME).strip() or DEFAULT_EDITION_NAME
-            cur.execute(
-                """
-                UPDATE edition_runs
-                SET edition_name=%s,
-                    edition_total=%s,
-                    next_edition_number=%s,
-                    status=%s,
-                    archived_at=CASE WHEN %s = 'archived' THEN COALESCE(archived_at, now()) ELSE archived_at END,
-                    updated_at=now()
-                WHERE id=%s
-                RETURNING *
-                """,
-                (
-                    new_name,
-                    new_total,
-                    proposed_next,
-                    requested_status,
-                    requested_status,
-                    run.get("id"),
-                ),
-            )
-            updated_run = cur.fetchone() or run
-            flags = _status_flags_from_run(requested_status)
-            cur.execute(
-                """
-                UPDATE edition_products
-                SET active_edition_run_id=%s,
-                    edition_name=%s,
-                    edition_total=%s,
-                    next_edition_number=%s,
-                    last_assigned_edition=%s,
-                    remaining_count=%s,
-                    active=%s,
-                    is_active=%s,
-                    sold_out=%s,
-                    is_sold_out=%s,
-                    allow_counter_history_override=%s,
-                    updated_at=now()
-                WHERE shopify_handle=%s
-                """,
-                (
-                    updated_run.get("id"),
-                    new_name,
-                    new_total,
-                    proposed_next,
-                    latest_sent,
-                    max(remaining, 0),
-                    flags["active"],
-                    flags["active"],
-                    flags["sold_out"],
-                    flags["sold_out"],
-                    bool(allow_history_override),
-                    handle,
-                ),
-            )
-            _insert_edition_adjustment_with_cursor(
+            _update_edition_product_with_cursor(
                 cur,
-                product=product,
-                run=updated_run,
-                old_next=old_next,
-                new_next=proposed_next,
-                old_total=old_total,
-                new_total=new_total,
+                handle,
+                edition_name=edition_name,
+                edition_total=edition_total,
+                next_edition_number=next_edition_number,
+                active=active,
+                sold_out=sold_out,
+                status=status,
+                current_edition=current_edition,
+                allow_history_override=allow_history_override,
                 reason=reason,
-                source="manual_app",
             )
         conn.commit()
     return get_edition_counter_state(handle)
+
+
+def _update_edition_product_with_cursor(
+    cur,
+    shopify_handle,
+    *,
+    edition_name=None,
+    edition_total=None,
+    next_edition_number=None,
+    active=None,
+    sold_out=None,
+    status=None,
+    current_edition=None,
+    allow_history_override=False,
+    reason="Manual edition edit",
+):
+    handle = str(shopify_handle or "").strip()
+    if not handle:
+        raise ValueError("Shopify handle is required.")
+    product, run = _get_active_edition_run_for_handle(cur, handle, lock=True, create_missing=True)
+    if not product or not run:
+        raise ValueError(f"No edition product found for {handle}.")
+
+    old_next = max(_int_value(run.get("next_edition_number"), 1), 1)
+    old_total = max(_int_value(run.get("edition_total"), 100), 1)
+    new_total = max(_int_value(edition_total, old_total), 1)
+    if current_edition is not None:
+        current = _int_value(current_edition, 0)
+        if current < 0:
+            raise ValueError("Latest sent cannot be below 0.")
+        proposed_next = current + 1
+    elif next_edition_number is not None:
+        proposed_next = _int_value(next_edition_number, old_next)
+    else:
+        proposed_next = old_next
+
+    cur.execute(
+        """
+        SELECT COALESCE(MAX(edition_number), 0) AS max_assigned
+        FROM edition_orders
+        WHERE shopify_handle = %s
+        """,
+        (handle,),
+    )
+    max_assigned = _int_value((cur.fetchone() or {}).get("max_assigned"), 0)
+    if not allow_history_override:
+        proposed_next = max(proposed_next, max_assigned + 1 if max_assigned > 0 else 1)
+
+    if proposed_next < 1:
+        raise ValueError("Next edition number must be at least 1.")
+    if new_total < 1:
+        raise ValueError("Edition total must be at least 1.")
+
+    requested_status = _clean_edition_run_status(
+        status,
+        active=bool(active if active is not None else run.get("status") == ACTIVE_RUN_STATUS),
+        sold_out=bool(sold_out if sold_out is not None else run.get("status") == SOLD_OUT_RUN_STATUS),
+    )
+    if sold_out is True or proposed_next > new_total:
+        requested_status = SOLD_OUT_RUN_STATUS
+    elif active is False and status is None:
+        requested_status = INACTIVE_RUN_STATUS
+    elif active is True and sold_out is False and status is None:
+        requested_status = ACTIVE_RUN_STATUS
+
+    latest_sent = proposed_next - 1
+    remaining = new_total - latest_sent
+
+    new_name = str(edition_name or run.get("edition_name") or DEFAULT_EDITION_NAME).strip() or DEFAULT_EDITION_NAME
+    cur.execute(
+        """
+        UPDATE edition_runs
+        SET edition_name=%s,
+            edition_total=%s,
+            next_edition_number=%s,
+            status=%s,
+            archived_at=CASE WHEN %s = 'archived' THEN COALESCE(archived_at, now()) ELSE archived_at END,
+            updated_at=now()
+        WHERE id=%s
+        RETURNING *
+        """,
+        (
+            new_name,
+            new_total,
+            proposed_next,
+            requested_status,
+            requested_status,
+            run.get("id"),
+        ),
+    )
+    updated_run = cur.fetchone() or run
+    flags = _status_flags_from_run(requested_status)
+    cur.execute(
+        """
+        UPDATE edition_products
+        SET active_edition_run_id=%s,
+            edition_name=%s,
+            edition_total=%s,
+            next_edition_number=%s,
+            last_assigned_edition=%s,
+            remaining_count=%s,
+            active=%s,
+            is_active=%s,
+            sold_out=%s,
+            is_sold_out=%s,
+            allow_counter_history_override=%s,
+            updated_at=now()
+        WHERE shopify_handle=%s
+        """,
+        (
+            updated_run.get("id"),
+            new_name,
+            new_total,
+            proposed_next,
+            latest_sent,
+            max(remaining, 0),
+            flags["active"],
+            flags["active"],
+            flags["sold_out"],
+            flags["sold_out"],
+            bool(allow_history_override),
+            handle,
+        ),
+    )
+    _insert_edition_adjustment_with_cursor(
+        cur,
+        product=product,
+        run=updated_run,
+        old_next=old_next,
+        new_next=proposed_next,
+        old_total=old_total,
+        new_total=new_total,
+        reason=reason,
+        source="manual_app",
+    )
+    return {"handle": handle, "next_edition_number": proposed_next, "edition_total": new_total}
+
+
+def update_edition_products_batch(rows, reason="Manual edition edit"):
+    ensure_schema()
+    results = []
+    with connect() as conn:
+        with conn.cursor() as cur:
+            for row in rows or []:
+                handle = str((row or {}).get("handle") or (row or {}).get("shopify_handle") or "").strip()
+                key = str((row or {}).get("edition_product_id") or handle or "")
+                cur.execute("SAVEPOINT edition_ops_batch_row")
+                try:
+                    _update_edition_product_with_cursor(
+                        cur,
+                        handle,
+                        edition_name=(row or {}).get("edition_name"),
+                        edition_total=(row or {}).get("edition_total"),
+                        next_edition_number=(row or {}).get("next_edition_number"),
+                        active=(row or {}).get("active"),
+                        sold_out=(row or {}).get("sold_out"),
+                        allow_history_override=bool((row or {}).get("allow_history_override")),
+                        reason=reason,
+                    )
+                    results.append({"ok": True, "handle": handle, "key": key})
+                    cur.execute("RELEASE SAVEPOINT edition_ops_batch_row")
+                except Exception as error:
+                    cur.execute("ROLLBACK TO SAVEPOINT edition_ops_batch_row")
+                    results.append({"ok": False, "handle": handle, "key": key, "message": str(error)})
+        conn.commit()
+    return results
 
 
 def start_new_edition_run(shopify_handle, *, edition_name="", edition_total=100, notes="", reason="Start new edition run"):
