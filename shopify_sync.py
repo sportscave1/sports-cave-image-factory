@@ -2906,13 +2906,16 @@ def fetch_latest_paid_orders(
     *,
     limit=50,
     lookback_days=14,
+    query=None,
+    sort_key="CREATED_AT",
+    reverse=True,
     config=None,
     request_post=None,
 ):
     config = config or get_config()
     order_limit = max(1, int(limit or DEFAULT_MAX_ORDERS))
     lookback = max(1, int(lookback_days or 14))
-    queries = ["financial_status:paid"]
+    queries = [str(query).strip()] if str(query or "").strip() else ["financial_status:paid"]
     orders = []
     query_used = queries[-1]
     last_error = None
@@ -2927,8 +2930,8 @@ def fetch_latest_paid_orders(
                 config=config,
                 request_post=request_post,
                 default_paid_unfulfilled_filter=False,
-                sort_key="CREATED_AT",
-                reverse=True,
+                sort_key=sort_key,
+                reverse=reverse,
             ):
                 fetched.extend(page.get("orders") or [])
         except ShopifyAPIError as error:

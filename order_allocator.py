@@ -1645,29 +1645,34 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
     return sorted(rows, key=_row_allocation_key, reverse=True)
 
 
-def load_supabase_orders_snapshot(limit=1000):
+def load_supabase_orders_snapshot(limit=1000, *, include_summary=True):
     backend = _configured_supabase_backend()
     if not backend:
         return None
     raw_rows = backend.list_orders(search="", sort="Date newest", status_filter="All", limit=max(int(limit or 1000), 1))
     sync_state = backend.get_sync_state()
-    try:
-        summary = backend.get_order_summary()
-    except Exception:
-        summary = {}
+    summary = {}
+    if include_summary:
+        try:
+            summary = backend.get_order_summary()
+        except Exception:
+            summary = {}
     last_synced = (
         sync_state.get("last_successful_order_fetch_at")
         or sync_state.get("last_successful_order_sync_at")
         or ""
     )
     rows = _snapshot_rows_from_supabase_order_rows(raw_rows)
+    order_count = int(summary.get("orders_synced") or 0)
+    if not order_count:
+        order_count = len({str(row.get("shopify_order_id") or "") for row in raw_rows if row.get("shopify_order_id")})
     return {
         "version": SNAPSHOT_VERSION,
         "saved_at": now_iso(),
         "last_refreshed": last_synced,
         "last_synced": last_synced,
         "source": "supabase",
-        "order_count": int(summary.get("orders_synced") or 0),
+        "order_count": order_count,
         "row_count": len(rows),
         "rows": rows,
     }

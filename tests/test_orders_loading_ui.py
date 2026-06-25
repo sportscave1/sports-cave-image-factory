@@ -1559,7 +1559,7 @@ class EditionOpsUiTests(unittest.TestCase):
         ) as direct_read:
             payload = orders_page._read_orders_snapshot()
 
-        direct_read.assert_called_once_with(limit=1000)
+        direct_read.assert_called_once_with(limit=1000, include_summary=False)
         self.assertEqual(payload["rows"][0]["order"], "#SC2843")
         self.assertNotIn("ORDERS_CACHE_VERSION_KEY", (ROOT / "orders_page.py").read_text(encoding="utf-8"))
 
@@ -1649,6 +1649,7 @@ class EditionOpsUiTests(unittest.TestCase):
                 return {"last_successful_order_fetch_at": "2026-06-24T01:00:00Z"}
 
             def get_order_summary(self):
+                self.summary_called = True
                 return {"orders_synced": 12}
 
         fake_backend = FakeSupabase()
@@ -1661,6 +1662,45 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(snapshot["rows"][0]["edition"], "#050")
         self.assertEqual(snapshot["rows"][0]["certificate_status"], "")
         self.assertEqual(fake_backend.kwargs["limit"], 150)
+        self.assertTrue(fake_backend.summary_called)
+
+    def test_order_allocator_loads_orders_snapshot_without_summary_for_fast_orders_page(self):
+        class FakeSupabase:
+            def __init__(self):
+                self.summary_called = False
+
+            def list_orders(self, **kwargs):
+                return [
+                    {
+                        "shopify_order_id": "gid://shopify/Order/2843",
+                        "order_name": "#SC2843",
+                        "customer_name": "Ashkan Zand",
+                        "customer_email": "ashkan@example.com",
+                        "processed_at": "2026-06-23T10:00:00Z",
+                        "created_at": "2026-06-23T09:55:00Z",
+                        "shopify_line_item_id": "gid://shopify/LineItem/1",
+                        "shopify_product_id": "gid://shopify/Product/1",
+                        "shopify_handle": "goat-debate-wall-art",
+                        "product_title": "GOAT Debate Wall Art",
+                        "variant_title": "Black / L",
+                        "quantity": 1,
+                        "assignments": [],
+                    }
+                ]
+
+            def get_sync_state(self):
+                return {"last_successful_order_fetch_at": "2026-06-24T01:00:00Z"}
+
+            def get_order_summary(self):
+                self.summary_called = True
+                return {"orders_synced": 12}
+
+        fake_backend = FakeSupabase()
+        with patch.object(order_allocator, "_configured_supabase_backend", return_value=fake_backend):
+            snapshot = order_allocator.load_supabase_orders_snapshot(limit=150, include_summary=False)
+
+        self.assertEqual(snapshot["order_count"], 1)
+        self.assertFalse(fake_backend.summary_called)
 
     def test_refresh_orders_dry_run_uses_supabase_preview_only(self):
         fake_st = SimpleNamespace(
@@ -1754,7 +1794,8 @@ class EditionOpsUiTests(unittest.TestCase):
         preview_source = inspect.getsource(supabase_backend.preview_latest_paid_orders_sync)
         general_sync_source = inspect.getsource(supabase_backend.sync_shopify_orders_to_supabase)
 
-        self.assertIn("_persist_order_snapshot(order)", latest_sync_source)
+        self.assertIn("_latest_paid_order_needs_sync", latest_sync_source)
+        self.assertIn("list_existing_shopify_order_states", latest_sync_source)
         self.assertIn("apply_known_missing_edition_repair()", latest_sync_source)
         self.assertIn("process_shopify_order_for_editions", latest_sync_source)
         self.assertIn("assign_editions=True", latest_sync_source)

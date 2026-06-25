@@ -7095,9 +7095,25 @@ def _preview_product_counter_state(cur, line_item, cache):
 
 def _latest_paid_orders_payload(config=None, *, limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT, lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS):
     config = config or shopify_sync.get_config()
+    state = get_sync_state()
+    last_success = _parse_datetime(
+        state.get("last_successful_order_fetch_at") or state.get("last_successful_order_sync_at")
+    )
+    sync_from = None
+    query = ""
+    sort_key = "CREATED_AT"
+    if last_success:
+        sync_from = last_success - timedelta(
+            minutes=state.get("sync_lookback_buffer_minutes") or DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES
+        )
+        query = f"financial_status:paid updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
+        sort_key = "UPDATED_AT"
     fetched = shopify_sync.fetch_latest_paid_orders(
         limit=limit,
         lookback_days=lookback_days,
+        query=query or None,
+        sort_key=sort_key,
+        reverse=True,
         config=config,
     )
     return {
@@ -7105,7 +7121,60 @@ def _latest_paid_orders_payload(config=None, *, limit=DEFAULT_LATEST_PAID_ORDER_
         "query": str(fetched.get("query") or ""),
         "limit": int(fetched.get("limit") or limit or DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT),
         "lookback_days": int(fetched.get("lookback_days") or lookback_days or DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS),
+        "sync_from": _datetime_to_setting(sync_from) if sync_from else "",
     }
+
+
+def list_existing_shopify_order_states(order_ids):
+    ensure_schema()
+    values = [str(order_id or "").strip() for order_id in (order_ids or []) if str(order_id or "").strip()]
+    if not values:
+        return {}
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT shopify_order_id, remote_updated_at, created_at, synced_at
+                FROM shopify_orders
+                WHERE shopify_order_id = ANY(%s)
+                """,
+                (values,),
+            )
+            rows = cur.fetchall()
+    return {
+        str(row.get("shopify_order_id") or "").strip(): {
+            "remote_updated_at": row.get("remote_updated_at"),
+            "created_at": row.get("created_at"),
+            "synced_at": row.get("synced_at"),
+        }
+        for row in rows
+        if row.get("shopify_order_id")
+    }
+
+
+def _latest_paid_order_needs_sync(order, existing_order_ids, existing_line_item_ids, existing_order_states):
+    order_id = str(order.get("shopify_order_id") or "").strip()
+    if not order_id:
+        return False
+    if order_id not in existing_order_ids:
+        return True
+    for line_item in order.get("line_items") or []:
+        line_item_id = str(line_item.get("shopify_line_item_id") or "").strip()
+        if line_item_id and line_item_id not in existing_line_item_ids:
+            return True
+    existing = existing_order_states.get(order_id) or {}
+    incoming_updated = _parse_datetime(
+        order.get("remote_updated_at")
+        or order.get("updated_at")
+        or order.get("processed_at")
+        or order.get("created_at")
+    )
+    stored_updated = _parse_datetime(
+        existing.get("remote_updated_at")
+        or existing.get("created_at")
+        or existing.get("synced_at")
+    )
+    return incoming_updated > stored_updated
 
 
 def _analyze_fetched_orders_for_preview(
@@ -7455,21 +7524,33 @@ def sync_latest_paid_orders_to_supabase(
         ]
         existing_order_ids = list_existing_shopify_order_ids(order_ids)
         existing_line_item_ids = list_existing_shopify_line_item_ids(line_item_ids)
+        existing_order_states = list_existing_shopify_order_states(order_ids)
         imported_orders = sum(
             1 for order in fetched_orders if str(order.get("shopify_order_id") or "").strip() not in existing_order_ids
         )
         imported_lines = sum(1 for line_id in line_item_ids if line_id not in existing_line_item_ids)
-
-        for order in fetched_orders:
-            _persist_order_snapshot(order)
-
-        known_repair = apply_known_missing_edition_repair()
+        candidate_orders = [
+            order
+            for order in fetched_orders
+            if _latest_paid_order_needs_sync(order, existing_order_ids, existing_line_item_ids, existing_order_states)
+        ]
+        known_repair_candidates = {
+            str(order.get("order_name") or "").strip()
+            for order in candidate_orders
+            if str(order.get("order_name") or "").strip()
+        }
+        known_repair = (
+            apply_known_missing_edition_repair()
+            if known_repair_candidates
+            and any(repair.get("order_name") in known_repair_candidates for repair in KNOWN_MISSING_EDITION_REPAIRS)
+            else {"applied_rows": 0, "already_exists_consistent": 0, "errors": []}
+        )
         known_applied = int(known_repair.get("applied_rows") or 0)
         known_consistent = int(known_repair.get("already_exists_consistent") or 0)
         if known_repair.get("errors"):
             errors.extend(known_repair.get("errors") or [])
 
-        for order in sorted(fetched_orders, key=order_allocation_sort_key):
+        for order in sorted(candidate_orders, key=order_allocation_sort_key):
             result = process_shopify_order_for_editions(
                 order,
                 allocation_status="assigned",
@@ -7513,7 +7594,7 @@ def sync_latest_paid_orders_to_supabase(
             "orders_processed": processed_orders,
             "orders_inserted_or_updated": processed_orders,
             "orders_imported": imported_orders,
-            "existing_orders_skipped": max(seen - imported_orders, 0),
+            "existing_orders_skipped": max(seen - processed_orders, 0),
             "new_orders_inserted": imported_orders,
             "new_lines_inserted": imported_lines,
             "assignments_created": assignments,
@@ -7529,6 +7610,7 @@ def sync_latest_paid_orders_to_supabase(
             "query": payload.get("query") or "",
             "lookback_days": payload.get("lookback_days") or lookback_days,
             "limit": payload.get("limit") or limit,
+            "sync_from": payload.get("sync_from") or "",
             "fetch_duration_ms": duration_ms,
             "last_order_fetch_status": status,
             "errors": errors[:10],

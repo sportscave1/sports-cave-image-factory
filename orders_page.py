@@ -104,7 +104,7 @@ def _configured_supabase_backend():
 def _read_orders_snapshot():
     backend = _configured_supabase_backend()
     if backend:
-        return order_allocator.load_supabase_orders_snapshot(limit=1000)
+        return order_allocator.load_supabase_orders_snapshot(limit=1000, include_summary=False)
     return order_allocator.load_orders_snapshot()
 
 
