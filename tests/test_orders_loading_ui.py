@@ -910,7 +910,8 @@ class EditionOpsUiTests(unittest.TestCase):
         )
         self.assertIn("orders_allocation_snapshot.json", source)
         self.assertIn("Sync New Orders", source)
-        self.assertIn("sync_new_orders_to_persistent_cache", source)
+        self.assertIn("_read_orders_snapshot", source)
+        self.assertIn("load_supabase_orders_snapshot", source)
         self.assertIn("_render_orders_table", source)
         self.assertIn("st.dataframe", source)
         self.assertIn("selection_mode=\"multi-row\"", source)
@@ -919,7 +920,6 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("PERF Orders", source)
         self.assertIn('"load snapshot"', source)
         self.assertIn('"render table"', source)
-        self.assertIn('"refresh Shopify"', source)
         self.assertIn("DEFAULT_VISIBLE_ROW_LIMIT = 150", source)
         self.assertIn("Orders load cached rows:", source)
         self.assertIn("Shopify fetch skipped on initial load", source)
@@ -930,7 +930,8 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Generate + Upload Selected", source)
         self.assertIn("Open Selected PDF", source)
         self.assertIn("Upload", source)
-        self.assertIn("Clean fulfilment mirror. Edition numbers are controlled from Shopify/order allocations.", source)
+        self.assertIn("Operational orders ledger. Edition numbers load from Supabase first.", source)
+        self.assertIn("Sync New Orders is locked for this stage.", source)
         self.assertIn("Tip: scroll sideways to view all fulfilment fields.", source)
         self.assertNotIn("Save Changed Order Editions", source)
         self.assertNotIn("Allocate Selected From Product Counter", source)
@@ -956,7 +957,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn('"allocation_status"', source)
         self.assertNotIn('"sync_status"', source)
         self.assertNotIn('"admin_url"', source)
-        self.assertNotIn("supabase_backend", source)
+        self.assertIn("_configured_supabase_backend", source)
 
     def test_orders_main_toolbar_only_contains_daily_actions(self):
         top_actions = inspect.getsource(orders_page._render_top_actions)
@@ -1080,6 +1081,93 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC1234")
         self.assertEqual(set(fake_st.rendered_rows[0]), set(orders_page.VISIBLE_COLUMNS))
 
+    def test_orders_page_prefers_supabase_ledger_rows_when_available(self):
+        class FakeContainer:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeColumn:
+            def button(self, *args, **kwargs):
+                return False
+
+            def link_button(self, *args, **kwargs):
+                return None
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {}
+                self.column_config = SimpleNamespace(TextColumn=lambda *args, **kwargs: None)
+                self.rendered_rows = None
+
+            def columns(self, spec):
+                return [FakeColumn() for _ in spec]
+
+            def container(self, *args, **kwargs):
+                return FakeContainer()
+
+            def dataframe(self, rows, **kwargs):
+                self.rendered_rows = rows
+
+            def title(self, *args, **kwargs):
+                return None
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def success(self, *args, **kwargs):
+                return None
+
+            def info(self, *args, **kwargs):
+                return None
+
+        fake_st = FakeStreamlit()
+        snapshot = {
+            "source": "supabase",
+            "order_count": 95,
+            "rows": [
+                {
+                    "order": "#SC2843",
+                    "date": "2026-06-23",
+                    "customer": "Ashkan Zand",
+                    "edition": "#050",
+                    "certificate": "Generate",
+                    "shipping": "US Standard Tracked Shipping",
+                    "product": "GOAT Debate Wall Art",
+                    "variant": "Black / L",
+                    "shopify_order_id": "gid://shopify/Order/2843",
+                    "shopify_line_item_id": "gid://shopify/LineItem/1",
+                    "shopify_product_id": "gid://shopify/Product/1",
+                }
+            ],
+            "last_refreshed": "2026-06-25T08:00:00Z",
+            "saved_at": "2026-06-25T08:00:01Z",
+        }
+
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page,
+            "_configured_supabase_backend",
+            return_value=object(),
+        ), patch.object(
+            orders_page.order_allocator,
+            "load_supabase_orders_snapshot",
+            return_value=snapshot,
+        ), patch.object(
+            orders_page.order_allocator,
+            "load_orders_snapshot",
+            side_effect=AssertionError("Orders page should not fall back when Supabase ledger is available."),
+        ), patch.object(
+            orders_page,
+            "_render_ledger_diagnostics",
+            return_value=None,
+        ):
+            orders_page.render_page()
+
+        self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC2843")
+        self.assertEqual(fake_st.rendered_rows[0]["edition"], "#050")
+
     def test_order_allocator_loads_orders_snapshot_from_supabase_cache(self):
         class FakeSupabase:
             def list_orders(self, **kwargs):
@@ -1127,7 +1215,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(snapshot["rows"][0]["certificate_status"], "")
         self.assertEqual(fake_backend.kwargs["limit"], 150)
 
-    def test_sync_new_orders_uses_persistent_supabase_cache_without_old_refresh_delete(self):
+    def test_sync_new_orders_is_locked_during_supabase_source_of_truth_stage(self):
         fake_st = SimpleNamespace(
             session_state={
                 orders_page.ROWS_KEY: [],
@@ -1160,19 +1248,9 @@ class EditionOpsUiTests(unittest.TestCase):
         }
 
         with patch.object(orders_page, "st", fake_st), patch.object(
-            orders_page.shopify_sync,
-            "get_config",
-            return_value={"configured": True},
-        ), patch.object(
             orders_page.order_allocator,
             "sync_new_orders_to_persistent_cache",
-            return_value={
-                "source": "supabase",
-                "orders_seen": 1,
-                "orders_imported": 1,
-                "assignments_created": 1,
-                "errors": [],
-            },
+            side_effect=AssertionError("Stage 4 should not trigger new-order sync from Orders page."),
         ) as sync_new, patch.object(
             orders_page.order_allocator,
             "load_orders_snapshot",
@@ -1188,12 +1266,11 @@ class EditionOpsUiTests(unittest.TestCase):
         ):
             orders_page._refresh_orders()
 
-        sync_new.assert_called_once()
-        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY][0]["edition"], "#050")
-        self.assertEqual(fake_st.session_state[orders_page.META_KEY]["source"], "supabase")
-        self.assertIn("Synced 1 Shopify order", fake_st.session_state[orders_page.NOTICE_KEY])
+        sync_new.assert_not_called()
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [])
+        self.assertIn("locked", fake_st.session_state[orders_page.NOTICE_KEY].lower())
 
-    def test_refresh_orders_allocates_missing_paid_rows_before_saving_snapshot(self):
+    def test_refresh_orders_does_not_allocate_missing_paid_rows_during_locked_stage(self):
         fake_st = SimpleNamespace(
             session_state={
                 orders_page.ROWS_KEY: [],
@@ -1221,39 +1298,14 @@ class EditionOpsUiTests(unittest.TestCase):
             ],
         }
 
-        saved_payloads = []
-
-        def fake_save_snapshot(rows, meta=None):
-            payload = {
-                "rows": rows,
-                "last_refreshed": (meta or {}).get("last_refreshed") or "",
-                "saved_at": "2026-06-23T10:00:01Z",
-            }
-            saved_payloads.append(payload)
-            return payload
-
-        allocation_payload = {
-            "line_items": {
-                line_item_id: {
-                    "edition_numbers": [14],
-                    "edition_total": 100,
-                    "status": "Allocated",
-                }
-            }
-        }
-
         with patch.object(orders_page, "st", fake_st), patch.object(
-            orders_page.shopify_sync,
-            "get_config",
-            return_value={"configured": True},
-        ), patch.object(
             orders_page.order_allocator,
             "sync_new_orders_to_persistent_cache",
-            return_value={"source": "local_snapshot", "skipped": True},
+            side_effect=AssertionError("Stage 4 should not trigger new-order sync from Orders page."),
         ), patch.object(
             orders_page.shopify_sync,
             "iter_order_pages",
-            return_value=[{"orders": [order_payload]}],
+            side_effect=AssertionError("Locked Stage 4 refresh should not fetch Shopify orders."),
         ), patch.object(
             orders_page.shopify_sync,
             "fetch_metafields",
@@ -1261,34 +1313,19 @@ class EditionOpsUiTests(unittest.TestCase):
         ), patch.object(
             orders_page.order_allocator,
             "process_recent_paid_orders_for_editions",
-            return_value={
-                "processed_orders": 1,
-                "assignments_created": 1,
-                "errors": [],
-                "results": [
-                    {
-                        "order_id": "gid://shopify/Order/1234",
-                        "allocation_payload": allocation_payload,
-                    }
-                ],
-            },
+            side_effect=AssertionError("Stage 4 should not allocate on Orders page refresh."),
         ) as process_orders, patch.object(
             orders_page.order_allocator,
             "save_orders_snapshot",
-            side_effect=fake_save_snapshot,
+            side_effect=AssertionError("Locked Stage 4 refresh should not rewrite snapshot state."),
         ):
             orders_page._refresh_orders()
 
-        process_orders.assert_called_once()
-        _, process_kwargs = process_orders.call_args
-        self.assertEqual(process_kwargs["config"], {"configured": True})
-        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY][0]["edition"], "#014")
-        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY][0]["certificate"], "Generate")
-        self.assertIn("Refreshed 1 artwork rows", fake_st.session_state[orders_page.NOTICE_KEY])
-        self.assertIn("Allocated 1 new edition", fake_st.session_state[orders_page.NOTICE_KEY])
-        self.assertEqual(saved_payloads[0]["rows"][0]["shopify_product_id"], "gid://shopify/Product/777")
+        process_orders.assert_not_called()
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [])
+        self.assertIn("locked", fake_st.session_state[orders_page.NOTICE_KEY].lower())
 
-    def test_refresh_orders_shows_allocation_blocker_reason(self):
+    def test_refresh_orders_does_not_replace_rows_with_blocker_reason_during_locked_stage(self):
         fake_st = SimpleNamespace(
             session_state={
                 orders_page.ROWS_KEY: [],
@@ -1317,46 +1354,26 @@ class EditionOpsUiTests(unittest.TestCase):
         }
 
         with patch.object(orders_page, "st", fake_st), patch.object(
-            orders_page.shopify_sync,
-            "get_config",
-            return_value={"configured": True},
-        ), patch.object(
             orders_page.order_allocator,
             "sync_new_orders_to_persistent_cache",
-            return_value={"source": "local_snapshot", "skipped": True},
+            side_effect=AssertionError("Stage 4 should not trigger new-order sync from Orders page."),
         ), patch.object(
             orders_page.shopify_sync,
             "iter_order_pages",
-            return_value=[{"orders": [order_payload]}],
+            side_effect=AssertionError("Locked Stage 4 refresh should not fetch Shopify orders."),
         ), patch.object(
             orders_page.order_allocator,
             "process_recent_paid_orders_for_editions",
-            return_value={
-                "processed_orders": 1,
-                "assignments_created": 0,
-                "errors": [],
-                "results": [
-                    {
-                        "order_id": "gid://shopify/Order/1234",
-                        "issues": [{"line_item_id": line_item_id, "status": "Edition Disabled"}],
-                        "allocation_payload": {},
-                    }
-                ],
-            },
+            side_effect=AssertionError("Stage 4 should not allocate on Orders page refresh."),
         ), patch.object(
             orders_page.order_allocator,
             "save_orders_snapshot",
-            side_effect=lambda rows, meta=None: {
-                "rows": rows,
-                "last_refreshed": (meta or {}).get("last_refreshed") or "",
-                "saved_at": "2026-06-23T10:00:01Z",
-            },
+            side_effect=AssertionError("Locked Stage 4 refresh should not rewrite snapshot state."),
         ):
             orders_page._refresh_orders()
 
-        row = fake_st.session_state[orders_page.ROWS_KEY][0]
-        self.assertEqual(row["edition"], "Edition disabled")
-        self.assertEqual(row["certificate"], "Edition disabled")
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [])
+        self.assertIn("locked", fake_st.session_state[orders_page.NOTICE_KEY].lower())
 
     def test_orders_page_formats_single_edition_numbers(self):
         self.assertEqual(orders_page._format_edition("50"), "#050")
@@ -1657,6 +1674,26 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(exported[0].split(","), list(edition_ops.CSV_COLUMNS))
         self.assertIn("48", exported[1])
         self.assertIn("Limited Edition", exported[1])
+
+    def test_edition_ops_supabase_row_uses_stored_counters(self):
+        row = edition_ops._row_from_supabase_product(
+            {
+                "shopify_product_id": "gid://shopify/Product/77",
+                "shopify_handle": "goat-debate-wall-art",
+                "product_title": "GOAT Debate Wall Art",
+                "edition_total": 100,
+                "next_edition_number": 96,
+                "sold_count": 50,
+                "remaining_count": 50,
+                "active": True,
+                "status": "active",
+            }
+        )
+
+        self.assertEqual(row["edition_next_number"], 96)
+        self.assertEqual(row["edition_sold_count"], 50)
+        self.assertEqual(row["edition_remaining"], 50)
+        self.assertEqual(row["sync_status"], "Loaded from Supabase")
 
     def test_edition_ops_changed_rows_only_consider_editable_fields(self):
         original = edition_ops._normalise_row(

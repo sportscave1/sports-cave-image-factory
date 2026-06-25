@@ -4941,9 +4941,11 @@ def _override_row_identity(row):
 def _load_manual_override_rows(search, allocator, limit=80):
     rows = []
     seen = set()
+    supabase_available = False
     try:
         supabase = importlib.import_module("supabase_backend")
         if supabase.is_configured():
+            supabase_available = True
             for row in supabase.list_edition_orders(search=search, limit=limit):
                 item = {**row, "source": row.get("source") or "edition_orders"}
                 identity = _override_row_identity(item)
@@ -4953,14 +4955,15 @@ def _load_manual_override_rows(search, allocator, limit=80):
     except Exception as error:
         _developer_action_error("Load Supabase override rows", error)
 
-    try:
-        for row in allocator.snapshot_allocated_order_rows(search=search, limit=limit):
-            identity = _override_row_identity(row)
-            if identity and identity not in seen:
-                rows.append(row)
-                seen.add(identity)
-    except Exception as error:
-        _developer_action_error("Load snapshot override rows", error)
+    if not supabase_available:
+        try:
+            for row in allocator.snapshot_allocated_order_rows(search=search, limit=limit):
+                identity = _override_row_identity(row)
+                if identity and identity not in seen:
+                    rows.append(row)
+                    seen.add(identity)
+        except Exception as error:
+            _developer_action_error("Load snapshot override rows", error)
 
     def sort_key(row):
         order_digits = re.findall(r"\d+", str(row.get("shopify_order_name") or row.get("order_name") or ""))
@@ -5142,6 +5145,12 @@ def _render_developer_allocation_tools():
             use_container_width=True,
         ):
             try:
+                supabase = importlib.import_module("supabase_backend")
+                if supabase.is_configured() and (
+                    str(selected_row.get("id") or "").startswith("snapshot|")
+                    or selected_row.get("source") == "snapshot_allocation"
+                ):
+                    raise ValueError("Supabase is configured. Manual overrides must target Supabase ledger rows only.")
                 if str(selected_row.get("id") or "").startswith("snapshot|") or selected_row.get("source") == "snapshot_allocation":
                     result = allocator.override_snapshot_allocation_row(
                         selected_row,
@@ -5151,7 +5160,6 @@ def _render_developer_allocation_tools():
                         sync_shopify=bool(config.get("configured")),
                     )
                 else:
-                    supabase = importlib.import_module("supabase_backend")
                     result = supabase.override_edition_order_number(
                         selected_row.get("id"),
                         int(new_number),
@@ -5167,6 +5175,8 @@ def _render_developer_allocation_tools():
                 )
                 if product.get("sold_out"):
                     st.warning("Product is sold out. Needs Review - Sold Out.")
+                if result.get("shopify_mirror_status"):
+                    st.caption(f"Shopify mirror {result.get('shopify_mirror_status')}")
                 if result.get("warning"):
                     st.warning(result["warning"])
                 _mark_orders_snapshot_for_reload()

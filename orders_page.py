@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import importlib
 import json
 from pathlib import Path
 import re
@@ -66,6 +67,57 @@ def _ensure_state():
     st.session_state.setdefault(ROWS_KEY, [])
     st.session_state.setdefault(META_KEY, {"last_refreshed": "", "saved_at": ""})
     st.session_state.setdefault(NOTICE_KEY, "")
+
+
+def _configured_supabase_backend():
+    try:
+        backend = importlib.import_module("supabase_backend")
+    except Exception:
+        return None
+    try:
+        if not backend.is_configured():
+            return None
+    except Exception:
+        return None
+    return backend
+
+
+def _read_orders_snapshot():
+    backend = _configured_supabase_backend()
+    if backend:
+        try:
+            payload = order_allocator.load_supabase_orders_snapshot(limit=1000)
+        except Exception as error:
+            print(f"WARN Orders Supabase snapshot fallback: {error}", flush=True)
+        else:
+            if payload is not None:
+                return payload
+    return order_allocator.load_orders_snapshot()
+
+
+def _ledger_status():
+    backend = _configured_supabase_backend()
+    if not backend:
+        return {"configured": False, "connected": False, "mode": "Local/fallback only", "warning": ""}
+    try:
+        return backend.database_status(run_schema_check=False)
+    except Exception as error:
+        return {
+            "configured": True,
+            "connected": False,
+            "mode": "Supabase/Postgres configured",
+            "warning": str(error),
+        }
+
+
+def _ledger_counts():
+    backend = _configured_supabase_backend()
+    if not backend:
+        return {}
+    try:
+        return backend.persistence_counts()
+    except Exception:
+        return {}
 
 
 def _parse_datetime(value):
@@ -259,7 +311,7 @@ def _load_snapshot_once():
     if st.session_state.get(SNAPSHOT_LOADED_KEY):
         return
     start = time.perf_counter()
-    payload = order_allocator.load_orders_snapshot()
+    payload = _read_orders_snapshot()
     st.session_state[ROWS_KEY] = _sort_rows(payload.get("rows") or [])
     st.session_state[META_KEY] = {
         "last_refreshed": payload.get("last_refreshed") or "",
@@ -556,91 +608,9 @@ def _save_refreshed_rows(rows, existing_rows, refreshed_at=None):
 
 
 def _refresh_orders():
-    config = shopify_sync.get_config()
-    if not config.get("configured"):
-        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before refreshing orders."
-        return
-    sync_start = time.perf_counter()
-    try:
-        persistent_result = order_allocator.sync_new_orders_to_persistent_cache(
-            config=config,
-            max_orders=100,
-            sync_product_metafields=True,
-        )
-    except Exception as error:
-        print(f"Orders persistent sync failed: {error}", flush=True)
-        st.session_state[NOTICE_KEY] = f"Sync New Orders failed: {error}"
-        return
-    if persistent_result.get("source") == "supabase":
-        payload = order_allocator.load_orders_snapshot()
-        sorted_rows = _sort_rows(payload.get("rows") or [])
-        st.session_state[ROWS_KEY] = sorted_rows
-        st.session_state[META_KEY] = {
-            "last_refreshed": payload.get("last_refreshed") or "",
-            "saved_at": payload.get("saved_at") or "",
-            "last_synced": payload.get("last_synced") or payload.get("last_refreshed") or "",
-            "order_count": payload.get("order_count") or 0,
-            "row_count": payload.get("row_count") or len(sorted_rows),
-            "source": payload.get("source") or "supabase",
-        }
-        _perf_log(
-            "refresh Shopify",
-            sync_start,
-            source="supabase_incremental",
-            orders=persistent_result.get("orders_seen", 0),
-        )
-        assignments = int(persistent_result.get("assignments_created") or 0)
-        imported = int(persistent_result.get("orders_imported") or 0)
-        seen = int(persistent_result.get("orders_seen") or 0)
-        errors = persistent_result.get("errors") or []
-        suffix = f" Created {assignments} edition assignment(s)." if assignments else ""
-        if errors:
-            suffix += f" {len(errors)} sync issue(s) need review."
-        st.session_state[NOTICE_KEY] = (
-            f"Synced {seen} Shopify order(s). Imported {imported} new order(s). "
-            f"Loaded {len(sorted_rows)} saved artwork row(s).{suffix}"
-        )
-        return
-
-    existing_rows = st.session_state.get(ROWS_KEY, [])
-    orders = _fetch_recent_paid_orders(config)
-    allocation_start = time.perf_counter()
-    try:
-        allocation_result = order_allocator.process_recent_paid_orders_for_editions(
-            orders,
-            config=config,
-        )
-    except Exception as error:
-        print(f"Orders allocation refresh failed: {error}", flush=True)
-        allocation_result = {
-            "processed_orders": 0,
-            "assignments_created": 0,
-            "errors": [{"error": str(error)}],
-            "results": [
-                {
-                    "order_id": _order_identity(order),
-                    "error": str(error),
-                    "issues": [],
-                }
-                for order in orders
-            ],
-        }
-    _perf_log(
-        "allocate missing paid orders",
-        allocation_start,
-        orders=allocation_result.get("processed_orders", 0),
-        assignments=allocation_result.get("assignments_created", 0),
-        errors=len(allocation_result.get("errors") or []),
+    st.session_state[NOTICE_KEY] = (
+        "Sync New Orders is locked for this stage. Orders are loading from the Supabase ledger only."
     )
-    allocation_payloads = _allocation_payloads_from_refresh(orders, allocation_result)
-    rows = _rows_from_orders(orders, allocation_payloads=allocation_payloads)
-    sorted_rows = _save_refreshed_rows(rows, existing_rows)
-    assignments = int(allocation_result.get("assignments_created") or 0)
-    errors = allocation_result.get("errors") or []
-    suffix = f" Allocated {assignments} new edition(s)." if assignments else ""
-    if errors:
-        suffix += f" {len(errors)} allocation issue(s) need review."
-    st.session_state[NOTICE_KEY] = f"Refreshed {len(sorted_rows)} artwork rows from Shopify.{suffix}"
 
 
 def _display_rows(rows):
@@ -916,7 +886,7 @@ def _render_top_actions(rows):
     open_url = _first_pdf_url(selected_rows)
 
     action_cols = st.columns([1.1, 1.55, 1.45, 1.55, 1.2])
-    if action_cols[0].button("Sync New Orders", type="primary", use_container_width=True):
+    if action_cols[0].button("Sync New Orders", type="primary", use_container_width=True, disabled=True):
         with st.spinner("Syncing new paid orders..."):
             _refresh_orders()
         st.rerun()
@@ -949,6 +919,30 @@ def _render_top_actions(rows):
     else:
         action_cols[4].button("Open Selected PDF", use_container_width=True, disabled=True)
     st.caption(f"{selected_count} row(s) selected. Tip: scroll sideways to view all fulfilment fields.")
+    st.caption("New-order sync stays locked here until the backfill and verification stages are approved.")
+
+
+def _render_ledger_diagnostics():
+    status = _ledger_status()
+    if not status.get("configured"):
+        return
+    counts = _ledger_counts()
+    expander = getattr(st, "expander", None)
+    if not expander:
+        return
+    with expander("Supabase ledger diagnostics", expanded=False):
+        st.caption("Supabase connected" if status.get("connected") else "Supabase connection failed")
+        st.caption("Source: Supabase ledger" if status.get("connected") else "Source: fallback cache")
+        if status.get("warning"):
+            st.caption(status.get("warning"))
+        for label, key in (
+            ("shopify_orders", "shopify_orders"),
+            ("shopify_order_lines", "shopify_order_lines"),
+            ("edition_orders", "edition_orders"),
+            ("edition_products", "edition_products"),
+            ("audit_logs", "audit_logs"),
+        ):
+            st.caption(f"{label}: {int(counts.get(key) or 0)}")
 
 
 def _render_orders_table(rows):
@@ -978,9 +972,13 @@ def render_page():
     st.session_state[ROWS_KEY] = rows
     visible_rows = rows[:DEFAULT_VISIBLE_ROW_LIMIT]
     meta = st.session_state.get(META_KEY) or {}
+    ledger_status = _ledger_status()
+    source_label = "Supabase ledger" if meta.get("source") == "supabase" and ledger_status.get("connected") else "Local fallback cache"
 
     st.title("Orders")
-    st.caption("Clean fulfilment mirror. Edition numbers are controlled from Shopify/order allocations.")
+    st.caption("Operational orders ledger. Edition numbers load from Supabase first.")
+    st.caption("Supabase connected" if ledger_status.get("connected") else "Supabase connection failed")
+    st.caption(f"Source: {source_label}")
     order_count = int(meta.get("order_count") or 0)
     count_label = f" | Cached orders: {order_count}" if order_count else ""
     st.caption(f"Last synced: {_format_time(meta.get('last_synced') or meta.get('last_refreshed'))}{count_label}")
@@ -991,9 +989,10 @@ def render_page():
         st.session_state[NOTICE_KEY] = ""
 
     _render_top_actions(rows)
+    _render_ledger_diagnostics()
 
     if not rows:
-        st.info("No saved orders yet. Use Sync New Orders to load recent paid orders.")
+        st.info("No saved orders are available in the operational ledger yet.")
         return
 
     if len(rows) > len(visible_rows):

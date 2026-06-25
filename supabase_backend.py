@@ -1837,6 +1837,46 @@ def log_app_error(error_type, message, context=None):
         pass
 
 
+def _insert_audit_log(
+    cur,
+    *,
+    event_type,
+    entity_type="",
+    entity_id="",
+    shopify_order_id="",
+    shopify_line_item_id="",
+    shopify_handle="",
+    old_value=None,
+    new_value=None,
+    reason="",
+    actor="sports_cave_os",
+    source="sports_cave_os",
+):
+    cur.execute(
+        """
+        INSERT INTO audit_logs(
+            event_type, entity_type, entity_id,
+            shopify_order_id, shopify_line_item_id, shopify_handle,
+            old_value, new_value, reason, actor, source
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
+        """,
+        (
+            str(event_type or "").strip() or "unknown_event",
+            str(entity_type or "").strip(),
+            str(entity_id or "").strip(),
+            str(shopify_order_id or "").strip(),
+            str(shopify_line_item_id or "").strip(),
+            str(shopify_handle or "").strip(),
+            json_dumps(old_value or {}),
+            json_dumps(new_value or {}),
+            str(reason or "").strip(),
+            str(actor or "").strip() or "sports_cave_os",
+            str(source or "").strip() or "sports_cave_os",
+        ),
+    )
+
+
 def start_sync_run(sync_type):
     ensure_schema()
     with connect() as conn:
@@ -3478,10 +3518,12 @@ def persistence_counts():
     tables = (
         "edition_products",
         "edition_orders",
+        "shopify_order_lines",
         "product_assets",
         "certificates",
         "shopify_products",
         "shopify_orders",
+        "audit_logs",
     )
     counts = {}
     with connect() as conn:
@@ -7660,10 +7702,41 @@ def override_edition_order_number(edition_order_id, new_edition_number, *, reaso
                 run,
                 reason=reason or "Manual edition override",
             )
+            _insert_audit_log(
+                cur,
+                event_type="edition_order_manual_override",
+                entity_type="edition_order",
+                entity_id=updated_row.get("id"),
+                shopify_order_id=updated_row.get("shopify_order_id"),
+                shopify_line_item_id=updated_row.get("shopify_line_item_id"),
+                shopify_handle=updated_row.get("shopify_handle") or updated_row.get("product_handle"),
+                old_value={
+                    "edition_order_id": row.get("id"),
+                    "edition_number": old_number,
+                    "edition_total": row.get("edition_total"),
+                    "certificate_status": row.get("certificate_status"),
+                    "manual_override": bool(row.get("manual_override")),
+                    "status": row.get("status"),
+                },
+                new_value={
+                    "edition_order_id": updated_row.get("id"),
+                    "edition_number": new_number,
+                    "edition_total": updated_row.get("edition_total"),
+                    "certificate_status": certificate_status,
+                    "manual_override": True,
+                    "status": updated_row.get("status"),
+                    "next_edition_number": product_state.get("next_edition_number"),
+                },
+                reason=reason or "Manual edition override",
+                actor="sports_cave_os",
+                source="sports_cave_os_manual_override",
+            )
         conn.commit()
 
     shopify_results = {}
+    shopify_mirror_status = "pending"
     if sync_shopify:
+        shopify_mirror_status = "updated"
         try:
             shopify_results["order_allocation"] = _sync_shopify_order_allocation_override(
                 updated_row,
@@ -7673,6 +7746,7 @@ def override_edition_order_number(edition_order_id, new_edition_number, *, reaso
             )
         except Exception as error:
             shopify_warning = f"Shopify order allocation metafield sync failed: {error}"
+            shopify_mirror_status = "failed"
             log_app_error("manual_override_order_metafield_sync_failed", str(error), {"edition_order_id": row_id})
         try:
             product_for_sync = {**product_state, "product_title": product.get("product_title") or ""}
@@ -7683,6 +7757,7 @@ def override_edition_order_number(edition_order_id, new_edition_number, *, reaso
         except Exception as error:
             warning = f"Shopify product metafield sync failed: {error}"
             shopify_warning = f"{shopify_warning} {warning}".strip()
+            shopify_mirror_status = "failed"
             log_app_error("manual_override_product_metafield_sync_failed", str(error), {"edition_order_id": row_id})
 
     return {
@@ -7692,6 +7767,7 @@ def override_edition_order_number(edition_order_id, new_edition_number, *, reaso
         "certificate_status": certificate_status,
         "product": product_state,
         "shopify": shopify_results,
+        "shopify_mirror_status": shopify_mirror_status,
         "warning": shopify_warning,
     }
 

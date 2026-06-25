@@ -271,12 +271,47 @@ def _configured_supabase_backend():
     return backend
 
 
+def _ledger_status():
+    backend = _configured_supabase_backend()
+    if not backend:
+        return {"configured": False, "connected": False, "mode": "Local/fallback only", "warning": ""}
+    try:
+        return backend.database_status(run_schema_check=False)
+    except Exception as error:
+        return {
+            "configured": True,
+            "connected": False,
+            "mode": "Supabase/Postgres configured",
+            "warning": str(error),
+        }
+
+
+def _ledger_counts():
+    backend = _configured_supabase_backend()
+    if not backend:
+        return {}
+    try:
+        return backend.persistence_counts()
+    except Exception:
+        return {}
+
+
 def _row_from_supabase_product(product):
-    next_number = _coerce_int(product.get("next_edition_number"), 1)
+    next_number = _coerce_int(
+        product.get("run_next_edition_number") or product.get("next_edition_number"),
+        1,
+    )
     total = _coerce_int(product.get("edition_total"), 100)
-    sold = _sold_count(next_number)
-    remaining = _remaining_from_sold(total, sold)
-    status = product.get("status") or ""
+    sold = _coerce_nonnegative_int(
+        product.get("sold_count"),
+        _coerce_nonnegative_int(product.get("last_assigned_edition"), _sold_count(next_number)),
+    )
+    remaining = _coerce_nonnegative_int(
+        product.get("remaining_count"),
+        _coerce_nonnegative_int(product.get("remaining_editions"), _remaining_from_sold(total, sold)),
+    )
+    status = str(product.get("status") or "").strip()
+    sold_out = bool(product.get("sold_out")) or status.casefold() == "sold_out"
     row = {
         "shopify_product_gid": product.get("shopify_product_id") or product.get("shopify_product_gid") or "",
         "legacy_resource_id": product.get("legacy_resource_id") or "",
@@ -289,12 +324,12 @@ def _row_from_supabase_product(product):
         "edition_next_number": next_number,
         "edition_sold_count": sold,
         "edition_remaining": remaining,
-        "edition_status": _widget_status(remaining),
+        "edition_status": "Sold Out Archive" if sold_out else _widget_status(remaining),
         "edition_label": product.get("edition_name") or product.get("edition_label") or "Numbered Edition",
         "online_store_url": product.get("online_store_url") or "",
         "admin_url": product.get("admin_url") or "",
         "last_synced_at": product.get("updated_at") or "",
-        "sync_status": "Loaded",
+        "sync_status": "Loaded from Supabase",
         "sync_error": "",
     }
     return _normalise_row(row)
@@ -321,6 +356,7 @@ def _load_supabase_snapshot():
         "last_refreshed_from_shopify": last_synced,
         "saved_at": last_synced,
         "source": "supabase",
+        "mirror_status": "",
     }
 
 
@@ -332,6 +368,7 @@ def _ensure_state():
         {
             "last_refreshed_from_shopify": "",
             "saved_at": "",
+            "mirror_status": "",
         },
     )
     st.session_state.setdefault(ERRORS_KEY, {})
@@ -389,6 +426,7 @@ def _write_snapshot(rows, originals=None, meta=None):
     st.session_state[META_KEY] = {
         "last_refreshed_from_shopify": payload["last_refreshed_from_shopify"],
         "saved_at": payload["saved_at"],
+        "mirror_status": metadata.get("mirror_status") or "",
     }
 
 
@@ -402,6 +440,7 @@ def _hydrate_from_snapshot_once():
         st.session_state[META_KEY] = {
             "last_refreshed_from_shopify": snapshot.get("last_refreshed_from_shopify") or "",
             "saved_at": snapshot.get("saved_at") or "",
+            "mirror_status": snapshot.get("mirror_status") or "",
         }
     st.session_state[SNAPSHOT_LOADED_KEY] = True
 
@@ -525,14 +564,15 @@ def _mark_synced(rows, originals, results):
         product_id = row.get("shopify_product_gid")
         updated = _normalise_row(row)
         if product_id in ok_ids:
-            updated["sync_status"] = "Synced"
+            updated["sync_status"] = "Shopify mirror updated"
             updated["sync_error"] = ""
             updated["last_synced_at"] = now
             new_originals.append(deepcopy(updated))
         elif product_id in failed:
-            updated["sync_status"] = "Error"
+            updated["sync_status"] = "Shopify mirror failed / retry"
             updated["sync_error"] = failed[product_id]
-            new_originals.append(deepcopy(original_by_id.get(product_id, updated)))
+            updated["last_synced_at"] = now
+            new_originals.append(deepcopy(updated))
         else:
             new_originals.append(deepcopy(original_by_id.get(product_id, updated)))
         new_rows.append(updated)
@@ -540,7 +580,34 @@ def _mark_synced(rows, originals, results):
     st.session_state[ROWS_KEY] = new_rows
     st.session_state[ORIGINAL_ROWS_KEY] = new_originals
     st.session_state[ERRORS_KEY] = failed
-    _write_snapshot(new_rows, new_originals)
+    _write_snapshot(
+        new_rows,
+        new_originals,
+        meta={"mirror_status": "failed" if failed else "updated"},
+    )
+    _bump_editor_version()
+
+
+def _mark_supabase_saved_without_shopify(rows, originals, row_ids):
+    now = _now_iso()
+    saved_ids = set(row_ids or [])
+    new_rows = []
+    new_originals = []
+    for row in rows:
+        updated = _normalise_row(row)
+        product_id = updated.get("shopify_product_gid")
+        if product_id in saved_ids:
+            updated["sync_status"] = "Shopify mirror pending"
+            updated["sync_error"] = ""
+            updated["last_synced_at"] = now
+            new_originals.append(deepcopy(updated))
+        else:
+            new_originals.append(deepcopy(_normalise_row(row)))
+        new_rows.append(updated)
+    st.session_state[ROWS_KEY] = new_rows
+    st.session_state[ORIGINAL_ROWS_KEY] = new_originals
+    st.session_state[ERRORS_KEY] = {}
+    _write_snapshot(new_rows, new_originals, meta={"mirror_status": "pending"})
     _bump_editor_version()
 
 
@@ -551,11 +618,13 @@ def _save_changed_rows():
     if not rows_to_save:
         st.session_state[NOTICE_KEY] = "No changed rows to save."
         return
-    config = shopify_sync.get_config()
-    if not config.get("configured"):
-        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before saving rows."
-        return
     backend = _configured_supabase_backend()
+    if not backend:
+        st.session_state[NOTICE_KEY] = (
+            "Supabase is not configured. Edition Ops saves stay locked until the ledger is available."
+        )
+        return
+    config = shopify_sync.get_config()
     supabase_errors = {}
     if backend:
         for row in rows_to_save:
@@ -586,6 +655,16 @@ def _save_changed_rows():
             _write_snapshot(updated_rows, originals)
             st.session_state[NOTICE_KEY] = f"{len(supabase_errors)} row(s) could not be saved to Supabase."
             return
+    if not config.get("configured"):
+        _mark_supabase_saved_without_shopify(
+            rows,
+            originals,
+            [row.get("shopify_product_gid") for row in rows_to_save],
+        )
+        st.session_state[NOTICE_KEY] = (
+            f"Saved {len(rows_to_save)} changed row(s) to Supabase. Shopify mirror pending."
+        )
+        return
     result = shopify_sync.sync_limited_edition_metafields_for_products(
         [_shopify_values_from_row(row) for row in rows_to_save],
         config=config,
@@ -593,11 +672,13 @@ def _save_changed_rows():
     _mark_synced(rows, originals, result.get("results") or [])
     if result.get("failed"):
         st.session_state[NOTICE_KEY] = (
-            f"Saved {result.get('synced', 0)} changed rows. "
-            f"{result.get('failed', 0)} rows need review."
+            f"Saved {len(rows_to_save)} changed row(s) to Supabase. "
+            f"{result.get('failed', 0)} Shopify mirror update(s) failed."
         )
     else:
-        st.session_state[NOTICE_KEY] = f"Saved {result.get('synced', 0)} changed rows."
+        st.session_state[NOTICE_KEY] = (
+            f"Saved {len(rows_to_save)} changed row(s) to Supabase and updated Shopify mirrors."
+        )
 
 
 def _rows_from_editor(value):
@@ -803,6 +884,29 @@ def _column_config():
     }
 
 
+def _render_ledger_diagnostics():
+    status = _ledger_status()
+    if not status.get("configured"):
+        return
+    counts = _ledger_counts()
+    expander = getattr(st, "expander", None)
+    if not expander:
+        return
+    with expander("Supabase ledger diagnostics", expanded=False):
+        st.caption("Supabase connected" if status.get("connected") else "Supabase connection failed")
+        st.caption("Source: Supabase ledger" if status.get("connected") else "Source: fallback cache")
+        if status.get("warning"):
+            st.caption(status.get("warning"))
+        for label, key in (
+            ("shopify_orders", "shopify_orders"),
+            ("shopify_order_lines", "shopify_order_lines"),
+            ("edition_orders", "edition_orders"),
+            ("edition_products", "edition_products"),
+            ("audit_logs", "audit_logs"),
+        ):
+            st.caption(f"{label}: {int(counts.get(key) or 0)}")
+
+
 def render_page():
     started = datetime.now(timezone.utc)
     _ensure_state()
@@ -812,9 +916,14 @@ def render_page():
     originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
     rows_to_save = _rows_to_save(rows, originals)
     meta = st.session_state.get(META_KEY) or {}
+    ledger_status = _ledger_status()
 
     st.title("Edition Ops")
-    st.caption("Use this page to manage limited edition numbers.")
+    st.caption("Use this page to manage limited edition numbers from the Supabase ledger.")
+    st.caption("Supabase connected" if ledger_status.get("connected") else "Supabase connection failed")
+    st.caption("Source: Supabase ledger" if ledger_status.get("connected") else "Source: fallback cache")
+    if meta.get("mirror_status"):
+        st.caption(f"Shopify mirror {meta.get('mirror_status')}")
     st.markdown(
         "1. Refresh products when new products are added.\n"
         "2. Import CSV and Replace Table when you have a new spreadsheet.\n"
@@ -832,6 +941,7 @@ def render_page():
     for warning in warnings:
         st.warning(warning)
     st.session_state[IMPORT_WARNINGS_KEY] = []
+    _render_ledger_diagnostics()
 
     action_cols = st.columns([1, 1, 1, 1])
     if action_cols[0].button("Refresh Products", type="primary", use_container_width=True, disabled=not config.get("configured")):
