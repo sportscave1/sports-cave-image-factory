@@ -13,7 +13,7 @@ import os
 import re
 import sys
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,7 @@ from psycopg.rows import dict_row
 DATABASE_ENV_VAR = "DATABASE_URL"
 DEFAULT_STAGE2D_GLOB = "stage2d_manual_truth_compare_*"
 DEFAULT_OUTPUT_PREFIX = "stage3_supabase_import_"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 APPROVED_INPUTS = (
     ("import_ready_manual_matches_shopify.csv", "manual_truth_matches_shopify_20260625"),
@@ -71,6 +72,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="Apply approved Stage 2D rows into Supabase. Default mode is dry-run."
     )
     parser.add_argument("--apply", action="store_true", help="Apply writes to Supabase.")
+    parser.add_argument("--verify", action="store_true", help="Read-only verification of current Supabase state.")
     parser.add_argument(
         "--stage2d-dir",
         default="",
@@ -81,7 +83,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default="",
         help="Output folder. Defaults to output/stage3_supabase_import_YYYYMMDD_HHMM.",
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.apply and args.verify:
+        parser.error("--apply and --verify cannot be used together.")
+    return args
 
 
 def now_stamp() -> str:
@@ -104,6 +109,42 @@ def truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
+
+
+def normalize_text_compare(value: Any) -> str:
+    return normalize_whitespace(value).lower()
+
+
+def parse_timestampish(value: Any) -> datetime | date | None:
+    text = normalize_whitespace(value)
+    if not text:
+        return None
+    candidates = [text]
+    if text.endswith("Z"):
+        candidates.append(text[:-1] + "+00:00")
+    if " " in text and "T" not in text:
+        candidates.append(text.replace(" ", "T", 1))
+    for candidate in candidates:
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            pass
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def timestamps_equal(left: Any, right: Any) -> bool:
+    left_parsed = parse_timestampish(left)
+    right_parsed = parse_timestampish(right)
+    if left_parsed is not None and right_parsed is not None:
+        if isinstance(left_parsed, datetime):
+            left_parsed = left_parsed.date()
+        if isinstance(right_parsed, datetime):
+            right_parsed = right_parsed.date()
+        return left_parsed == right_parsed
+    return normalize_text_compare(left) == normalize_text_compare(right)
 
 
 def find_latest_stage2d_dir(explicit: str) -> Path | None:
@@ -368,6 +409,7 @@ def connect_db(database_url: str, *, readonly: bool):
         row_factory=dict_row,
         autocommit=readonly,
         options=options,
+        prepare_threshold=None,
     )
 
 
@@ -580,10 +622,10 @@ def mutable_order_fields_changed(existing: dict[str, Any], incoming: dict[str, A
                 return True
             continue
         if existing_key in {"purchase_date"}:
-            if normalize_whitespace(new_value) and normalize_whitespace(new_value) != normalize_whitespace(old_value):
+            if normalize_whitespace(new_value) and not timestamps_equal(new_value, old_value):
                 return True
             continue
-        if normalize_whitespace(new_value) and normalize_whitespace(new_value) != normalize_whitespace(old_value):
+        if normalize_whitespace(new_value) and normalize_text_compare(new_value) != normalize_text_compare(old_value):
             return True
     if truthy(existing.get("manual_override")) != bool(incoming.get("manual_override")):
         return True
@@ -1071,6 +1113,38 @@ def insert_or_update_edition_order(cur, row: dict[str, Any]) -> dict[str, Any]:
 
 
 def insert_audit_log(cur, *, event_type: str, row: dict[str, Any], entity_id: str = "", reason: str = "", old_value: Any = None, new_value: Any = None) -> None:
+    old_json = json_dumps(old_value or {})
+    new_json = json_dumps(new_value or {})
+    cur.execute(
+        """
+        SELECT 1
+        FROM audit_logs
+        WHERE event_type = %s
+          AND COALESCE(entity_type, '') = 'edition_order'
+          AND COALESCE(entity_id, '') = %s
+          AND COALESCE(shopify_order_id, '') = %s
+          AND COALESCE(shopify_line_item_id, '') = %s
+          AND COALESCE(shopify_handle, '') = %s
+          AND COALESCE(reason, '') = %s
+          AND COALESCE(source, '') = %s
+          AND COALESCE(old_value, '{}'::jsonb) = %s::jsonb
+          AND COALESCE(new_value, '{}'::jsonb) = %s::jsonb
+        LIMIT 1
+        """,
+        (
+            event_type,
+            entity_id or "",
+            row.get("order_id") or "",
+            row.get("line_item_id") or "",
+            row.get("product_handle") or "",
+            reason or "",
+            row.get("assignment_source") or "sports_cave_os",
+            old_json,
+            new_json,
+        ),
+    )
+    if cur.fetchone():
+        return
     cur.execute(
         """
         INSERT INTO audit_logs(
@@ -1086,8 +1160,8 @@ def insert_audit_log(cur, *, event_type: str, row: dict[str, Any], entity_id: st
             row.get("order_id") or "",
             row.get("line_item_id") or "",
             row.get("product_handle") or "",
-            json_dumps(old_value or {}),
-            json_dumps(new_value or {}),
+            old_json,
+            new_json,
             reason or "",
             row.get("assignment_source") or "sports_cave_os",
         ),
@@ -1132,6 +1206,66 @@ def fetch_edition_products_after(conn, rows: list[dict[str, Any]]) -> list[dict[
             ),
         )
         return [dict(row) for row in cur.fetchall()]
+
+
+def fetch_goat_rows(conn) -> list[dict[str, Any]]:
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT
+                eo.id::text AS edition_order_id,
+                eo.shopify_order_id,
+                eo.shopify_order_name,
+                eo.shopify_line_item_id,
+                eo.shopify_handle,
+                eo.product_title,
+                eo.customer_name,
+                eo.customer_email,
+                eo.edition_number,
+                eo.edition_total,
+                eo.allocation_index,
+                eo.source,
+                eo.manual_override,
+                eo.assigned_at,
+                eo.purchase_date
+            FROM edition_orders eo
+            WHERE COALESCE(eo.product_title, '') ILIKE '%GOAT Debate%'
+               OR COALESCE(eo.shopify_handle, '') ILIKE '%goat%'
+               OR COALESCE(eo.product_handle, '') ILIKE '%goat%'
+            ORDER BY eo.edition_number, eo.shopify_order_name, eo.allocation_index
+            """
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+
+def verify_stage3_state(conn, stage2d_dir: Path, ready_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    counts = get_counts(conn)
+    existing_state = load_existing_state(conn, ready_rows)
+    plan = build_plan(ready_rows, existing_state)
+    goat_rows = fetch_goat_rows(conn)
+    goat_focus = [
+        row for row in goat_rows
+        if positive_int(row.get("edition_number")) in {50, 51}
+    ]
+    appears_complete = (
+        len(plan["to_apply"]) == 0
+        and len(plan["conflicts"]) == 0
+        and counts.get("edition_orders", 0) > 0
+    )
+    return {
+        "stage2d_dir": str(stage2d_dir),
+        "counts": counts,
+        "to_apply_count": len(plan["to_apply"]),
+        "skipped_count": len(plan["skipped"]),
+        "conflicts_count": len(plan["conflicts"]),
+        "already_exists_consistent_count": sum(
+            1 for row in plan["skipped"]
+            if str(row.get("reason") or "") == "already_present_consistent"
+        ),
+        "goat_focus_rows": goat_focus,
+        "goat_all_rows": goat_rows,
+        "appears_complete": appears_complete,
+    }
 
 
 def projected_product_states(rows_to_apply: list[dict[str, Any]], existing_state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1181,7 +1315,6 @@ def projected_product_states(rows_to_apply: list[dict[str, Any]], existing_state
 
 
 def projected_counts(counts_before: dict[str, int], plan: dict[str, Any], existing_state: dict[str, Any]) -> dict[str, dict[str, int]]:
-    line_keys_existing = set(existing_state["existing_line_index"].keys())
     inserts = sum(
         1
         for row in plan["to_apply"]
@@ -1210,8 +1343,6 @@ def projected_counts(counts_before: dict[str, int], plan: dict[str, Any], existi
         for row in plan["to_apply"]
         if product_identity_key(row) and product_identity_key(row) not in product_keys_existing
     }
-    conflict_logs = len(plan["conflicts"])
-    applied_logs = len(plan["to_apply"])
     return {
         "shopify_orders": {
             "before": counts_before["shopify_orders"],
@@ -1231,7 +1362,7 @@ def projected_counts(counts_before: dict[str, int], plan: dict[str, Any], existi
         },
         "audit_logs": {
             "before": counts_before["audit_logs"],
-            "after": counts_before["audit_logs"] + conflict_logs + applied_logs,
+            "after": counts_before["audit_logs"],
         },
     }
 
@@ -1289,6 +1420,8 @@ def execute_apply(conn, plan: dict[str, Any], existing_state: dict[str, Any]) ->
     counts_after = get_counts(conn)
 
     try:
+        if str(PROJECT_ROOT) not in sys.path:
+            sys.path.insert(0, str(PROJECT_ROOT))
         import order_allocator  # Local safe cache writer; no Shopify writes.
 
         payload = order_allocator.load_supabase_orders_snapshot(limit=5000)
@@ -1313,6 +1446,7 @@ def write_summary(
     rows_attempted: int,
     rows_applied: int,
     rows_skipped: int,
+    already_exists_consistent: int,
     conflicts_skipped: int,
     product_counter_rows: int,
     counts_rows: list[dict[str, Any]],
@@ -1325,6 +1459,7 @@ def write_summary(
         f"- Rows attempted: {rows_attempted}",
         f"- Rows applied: {rows_applied}",
         f"- Rows skipped: {rows_skipped}",
+        f"- Already exists consistent: {already_exists_consistent}",
         f"- Conflicts skipped: {conflicts_skipped}",
         f"- Product counters updated: {product_counter_rows}",
         f"- Cache rebuild: {cache_status}",
@@ -1391,6 +1526,57 @@ def main(argv: list[str] | None = None) -> int:
         plan["skipped"] = pre_skipped_rows + plan["skipped"]
         plan["conflicts"] = pre_conflicts + plan["conflicts"]
 
+        if args.verify:
+            verification = verify_stage3_state(conn, stage2d_dir, ready_rows)
+            counts_csv_rows = [
+                {
+                    "table_name": table_name,
+                    "before_count": verification["counts"].get(table_name, 0),
+                    "after_count": verification["counts"].get(table_name, 0),
+                    "mode": "verify",
+                }
+                for table_name in TOUCHED_TABLES
+            ]
+            write_summary(
+                output_dir / "stage3_summary.md",
+                mode="verify",
+                rows_attempted=len(ready_rows),
+                rows_applied=0,
+                rows_skipped=verification["skipped_count"],
+                already_exists_consistent=verification["already_exists_consistent_count"],
+                conflicts_skipped=verification["conflicts_count"],
+                product_counter_rows=verification["counts"].get("edition_products", 0),
+                counts_rows=counts_csv_rows,
+                cache_status="verify_read_only",
+            )
+            write_csv(output_dir / "applied_edition_orders.csv", [])
+            write_csv(output_dir / "skipped_rows.csv", plan["skipped"])
+            write_csv(output_dir / "conflicts_not_applied.csv", plan["conflicts"])
+            write_csv(output_dir / "edition_products_after_import.csv", fetch_edition_products_after(conn, ready_rows))
+            write_csv(output_dir / "supabase_counts_after_import.csv", counts_csv_rows)
+            write_next_steps(output_dir / "next_steps.md", mode="verify")
+            write_csv(output_dir / "goat_verify_rows.csv", verification["goat_all_rows"])
+            print("Stage 3 verify completed in read-only mode.")
+            print(f"Stage 2D source folder: {stage2d_dir}")
+            print(f"Output folder: {output_dir}")
+            print(
+                "Counts: "
+                + ", ".join(
+                    f"{table}={verification['counts'].get(table, 0)}"
+                    for table in TOUCHED_TABLES
+                )
+            )
+            if verification["goat_focus_rows"]:
+                print("GOAT focus rows found for editions #050/#051.")
+            else:
+                print("GOAT focus rows for editions #050/#051 were not found.")
+            print(
+                "Stage 3 import appears complete."
+                if verification["appears_complete"]
+                else "Stage 3 import does not yet appear complete."
+            )
+            return 0
+
         if args.apply:
             applied_rows, skipped_rows, conflicts, counts_after, cache_status = execute_apply(conn, plan, existing_state)
             product_rows = fetch_edition_products_after(conn, applied_rows)
@@ -1438,6 +1624,10 @@ def main(argv: list[str] | None = None) -> int:
         rows_attempted=len(ready_rows),
         rows_applied=len(applied_rows),
         rows_skipped=len(skipped_rows),
+        already_exists_consistent=sum(
+            1 for row in skipped_rows
+            if str(row.get("reason") or "") == "already_present_consistent"
+        ),
         conflicts_skipped=len(conflicts),
         product_counter_rows=len(product_rows),
         counts_rows=counts_csv_rows,
