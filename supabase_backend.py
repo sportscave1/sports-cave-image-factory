@@ -7349,20 +7349,126 @@ def sync_latest_paid_orders_to_supabase(
     limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT,
     lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
 ):
+    ensure_schema()
+    config = config or shopify_sync.get_config()
+    run_id = start_sync_run("shopify_orders_latest_paid")
+    total_started = time.perf_counter()
     payload = _latest_paid_orders_payload(config, limit=limit, lookback_days=lookback_days)
-    result = sync_shopify_orders_to_supabase(
-        config=config,
-        query=payload.get("query") or "",
-        max_orders=payload.get("limit") or limit,
-        days=payload.get("lookback_days") or lookback_days,
-        generate_certificates=False,
-        sync_product_metafields=False,
-        respect_tracking_start=False,
-    )
-    result["query"] = payload.get("query") or ""
-    result["lookback_days"] = payload.get("lookback_days") or lookback_days
-    result["limit"] = payload.get("limit") or limit
-    return result
+    fetched_orders = payload.get("orders") or []
+    seen = len(fetched_orders)
+    processed_orders = 0
+    assignments = 0
+    existing_skipped = 0
+    missing_mapping_skipped = 0
+    errors = []
+    changed_handles = set()
+    imported_orders = 0
+    imported_lines = 0
+    shopify_ms = int((time.perf_counter() - total_started) * 1000)
+    db_write_started = time.perf_counter()
+
+    try:
+        _set_sync_attempt(LAST_ATTEMPTED_ORDER_SYNC_KEY)
+        set_app_setting(LAST_ORDER_FETCH_STATUS_KEY, "Running")
+        order_ids = [order.get("shopify_order_id") for order in fetched_orders]
+        line_item_ids = [
+            str(line_item.get("shopify_line_item_id") or "").strip()
+            for order in fetched_orders
+            for line_item in (order.get("line_items") or [])
+            if str(line_item.get("shopify_line_item_id") or "").strip()
+        ]
+        existing_order_ids = list_existing_shopify_order_ids(order_ids)
+        existing_line_item_ids = list_existing_shopify_line_item_ids(line_item_ids)
+        imported_orders = sum(
+            1 for order in fetched_orders if str(order.get("shopify_order_id") or "").strip() not in existing_order_ids
+        )
+        imported_lines = sum(1 for line_id in line_item_ids if line_id not in existing_line_item_ids)
+
+        for order in fetched_orders:
+            _persist_order_snapshot(order)
+
+        known_repair = apply_known_missing_edition_repair()
+        known_applied = int(known_repair.get("applied_rows") or 0)
+        known_consistent = int(known_repair.get("already_exists_consistent") or 0)
+        if known_repair.get("errors"):
+            errors.extend(known_repair.get("errors") or [])
+
+        for order in sorted(fetched_orders, key=order_allocation_sort_key):
+            result = process_shopify_order_for_editions(
+                order,
+                allocation_status="assigned",
+                generate_certificates=False,
+                sync_product_metafields=False,
+                assign_editions=True,
+            )
+            processed_orders += 1
+            assignments += int(result.get("assignments_created") or 0)
+            existing_skipped += int(result.get("existing_assignments_skipped") or 0)
+            missing_mapping_skipped += int(result.get("missing_mapping_skipped") or 0)
+            changed_handles.update(result.get("changed_handles") or [])
+            errors.extend(result.get("errors") or [])
+
+        assignments += known_applied
+        existing_skipped += known_consistent
+        success_timestamp = _set_sync_success(LAST_SUCCESSFUL_ORDER_SYNC_KEY)
+        status = "No New Orders" if seen == 0 and known_applied == 0 else ("Success With Warnings" if errors else "Success")
+        duration_ms = int((time.perf_counter() - total_started) * 1000)
+        _record_order_fetch_metrics(
+            status=status,
+            duration_ms=duration_ms,
+            imported_count=imported_orders,
+            assignments_created=assignments,
+            success_timestamp=success_timestamp,
+        )
+        finish_sync_run(run_id, "Complete" if not errors else "Complete With Warnings", seen, processed_orders)
+        _log_order_fetch_timing(
+            total_ms=duration_ms,
+            shopify_ms=shopify_ms,
+            pages=1 if seen else 0,
+            orders=seen,
+            db_load_ms=0,
+            assign_ms=0,
+            db_write_ms=(time.perf_counter() - db_write_started) * 1000,
+        )
+        return {
+            "mode": "latest_paid_sync",
+            "orders_seen": seen,
+            "shopify_orders_fetched": seen,
+            "orders_processed": processed_orders,
+            "orders_inserted_or_updated": processed_orders,
+            "orders_imported": imported_orders,
+            "existing_orders_skipped": max(seen - imported_orders, 0),
+            "new_orders_inserted": imported_orders,
+            "new_lines_inserted": imported_lines,
+            "assignments_created": assignments,
+            "edition_allocations_created": assignments,
+            "existing_assignments_skipped": existing_skipped,
+            "existing_allocations_preserved": existing_skipped,
+            "known_missing_repairs_applied": known_applied,
+            "known_missing_repairs_already_consistent": known_consistent,
+            "missing_mapping_skipped": missing_mapping_skipped,
+            "generated_certificates": 0,
+            "certificates_deferred": assignments,
+            "product_metafields_deferred": len(changed_handles),
+            "query": payload.get("query") or "",
+            "lookback_days": payload.get("lookback_days") or lookback_days,
+            "limit": payload.get("limit") or limit,
+            "fetch_duration_ms": duration_ms,
+            "last_order_fetch_status": status,
+            "errors": errors[:10],
+        }
+    except Exception as error:
+        duration_ms = int((time.perf_counter() - total_started) * 1000)
+        _record_order_fetch_metrics(
+            status="Failed",
+            duration_ms=duration_ms,
+            imported_count=imported_orders,
+            assignments_created=assignments,
+            success_timestamp="",
+        )
+        finish_sync_run(run_id, "Failed", seen, processed_orders, "Latest paid Shopify order sync failed.")
+        log_app_error("latest_paid_order_sync_failed", str(error), {"records_seen": seen})
+        raise
 
 
 def backfill_missing_shopify_order_details(config=None, *, limit=100, dry_run=True):

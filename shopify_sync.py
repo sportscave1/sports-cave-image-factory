@@ -2912,31 +2912,34 @@ def fetch_latest_paid_orders(
     config = config or get_config()
     order_limit = max(1, int(limit or DEFAULT_MAX_ORDERS))
     lookback = max(1, int(lookback_days or 14))
-    created_after = (datetime.now(timezone.utc) - timedelta(days=lookback)).date().isoformat()
-    queries = [
-        f"financial_status:paid created_at:>={created_after}",
-        "financial_status:paid",
-    ]
+    queries = ["financial_status:paid"]
     orders = []
     query_used = queries[-1]
+    last_error = None
     for candidate_query in queries:
         fetched = []
-        for page in iter_order_pages(
-            query=candidate_query,
-            days=lookback,
-            max_orders=order_limit,
-            page_size=min(DEFAULT_PAGE_SIZE, order_limit),
-            config=config,
-            request_post=request_post,
-            default_paid_unfulfilled_filter=False,
-            sort_key="CREATED_AT",
-            reverse=True,
-        ):
-            fetched.extend(page.get("orders") or [])
+        try:
+            for page in iter_order_pages(
+                query=candidate_query,
+                days=lookback,
+                max_orders=order_limit,
+                page_size=min(DEFAULT_PAGE_SIZE, order_limit),
+                config=config,
+                request_post=request_post,
+                default_paid_unfulfilled_filter=False,
+                sort_key="CREATED_AT",
+                reverse=True,
+            ):
+                fetched.extend(page.get("orders") or [])
+        except ShopifyAPIError as error:
+            last_error = error
+            continue
         if fetched:
             orders = fetched[:order_limit]
             query_used = candidate_query
             break
+    if not orders and last_error:
+        raise last_error
     return {
         "orders": orders,
         "query": query_used,

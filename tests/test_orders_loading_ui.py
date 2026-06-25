@@ -1754,7 +1754,13 @@ class EditionOpsUiTests(unittest.TestCase):
         preview_source = inspect.getsource(supabase_backend.preview_latest_paid_orders_sync)
         general_sync_source = inspect.getsource(supabase_backend.sync_shopify_orders_to_supabase)
 
-        self.assertIn("respect_tracking_start=False", latest_sync_source)
+        self.assertIn("_persist_order_snapshot(order)", latest_sync_source)
+        self.assertIn("apply_known_missing_edition_repair()", latest_sync_source)
+        self.assertIn("process_shopify_order_for_editions", latest_sync_source)
+        self.assertIn("assign_editions=True", latest_sync_source)
+        self.assertIn("generate_certificates=False", latest_sync_source)
+        self.assertIn("sync_product_metafields=False", latest_sync_source)
+        self.assertNotIn("sync_shopify_orders_to_supabase(", latest_sync_source)
         self.assertIn("respect_tracking_start=False", preview_source)
         self.assertIn("respect_tracking_start=True", general_sync_source)
 

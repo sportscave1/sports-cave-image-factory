@@ -461,6 +461,17 @@ def _update_matching_row(target_row, updates):
 
 
 def _load_snapshot_once():
+    if (
+        st.session_state.get(SNAPSHOT_LOADED_KEY)
+        and st.session_state.get(ROWS_KEY)
+        and not st.session_state.get(LOAD_ERROR_KEY)
+    ):
+        print(f"Orders load cached rows: {len(st.session_state.get(ROWS_KEY) or [])}", flush=True)
+        print("Shopify fetch skipped on initial load", flush=True)
+        print("Allocation skipped on initial load", flush=True)
+        print("Metafield sync skipped on initial load", flush=True)
+        print("Certificate status load skipped on initial load", flush=True)
+        return
     start = time.perf_counter()
     try:
         payload = _read_orders_snapshot()

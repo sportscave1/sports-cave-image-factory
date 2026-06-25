@@ -1841,31 +1841,28 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertIn("totalPriceSet", shopify_sync.ORDERS_SAFE_QUERY)
 
     @patch.object(shopify_sync, "iter_order_pages")
-    def test_fetch_latest_paid_orders_uses_created_at_and_not_unfulfilled_filter(self, iter_order_pages):
+    def test_fetch_latest_paid_orders_uses_paid_query_and_not_unfulfilled_filter(self, iter_order_pages):
         iter_order_pages.return_value = [{"orders": [{"order_name": "#SC3000"}]}]
 
         result = shopify_sync.fetch_latest_paid_orders(limit=50, lookback_days=14, config=self.config)
 
         self.assertEqual(result["orders"][0]["order_name"], "#SC3000")
-        self.assertIn("financial_status:paid", iter_order_pages.call_args.kwargs["query"])
-        self.assertIn("created_at:>=", iter_order_pages.call_args.kwargs["query"])
+        self.assertEqual(iter_order_pages.call_args.kwargs["query"], "financial_status:paid")
+        self.assertNotIn("created_at", iter_order_pages.call_args.kwargs["query"])
         self.assertNotIn("fulfillment_status:unfulfilled", iter_order_pages.call_args.kwargs["query"])
         self.assertEqual(iter_order_pages.call_args.kwargs["sort_key"], "CREATED_AT")
         self.assertTrue(iter_order_pages.call_args.kwargs["reverse"])
         self.assertFalse(iter_order_pages.call_args.kwargs["default_paid_unfulfilled_filter"])
 
     @patch.object(shopify_sync, "iter_order_pages")
-    def test_fetch_latest_paid_orders_falls_back_to_broad_paid_query(self, iter_order_pages):
-        iter_order_pages.side_effect = [
-            [{"orders": []}],
-            [{"orders": [{"order_name": "#SC3001"}]}],
-        ]
+    def test_fetch_latest_paid_orders_uses_one_broad_paid_query(self, iter_order_pages):
+        iter_order_pages.return_value = [{"orders": [{"order_name": "#SC3001"}]}]
 
         result = shopify_sync.fetch_latest_paid_orders(limit=50, lookback_days=14, config=self.config)
 
         self.assertEqual(result["orders"][0]["order_name"], "#SC3001")
         self.assertEqual(result["query"], "financial_status:paid")
-        self.assertEqual(iter_order_pages.call_count, 2)
+        self.assertEqual(iter_order_pages.call_count, 1)
 
     def test_snapshot_override_search_returns_recent_allocated_order_lines(self):
         rows = [
@@ -2563,28 +2560,77 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["edition_allocations_created"], 2)
         self.assertEqual(seen_line_ids, ["gid://shopify/LineItem/2001", "gid://shopify/LineItem/2002"])
 
-    @patch.object(supabase_backend, "_latest_paid_orders_payload")
-    @patch.object(supabase_backend, "sync_shopify_orders_to_supabase")
-    def test_sync_latest_paid_orders_to_supabase_uses_broader_latest_paid_query(
-        self,
-        sync_shopify_orders_to_supabase,
-        latest_paid_orders_payload,
-    ):
-        latest_paid_orders_payload.return_value = {
-            "orders": [],
-            "query": "financial_status:paid created_at:>=2026-06-11",
+    def test_sync_latest_paid_orders_to_supabase_mirrors_then_repairs_then_allocates(self):
+        events = []
+        payload = {
+            "orders": [
+                {
+                    "shopify_order_id": "gid://shopify/Order/3001",
+                    "order_name": "#SC3001",
+                    "financial_status": "PAID",
+                    "line_items": [
+                        {
+                            "shopify_line_item_id": "gid://shopify/LineItem/3001",
+                            "quantity": 1,
+                            "shopify_product_id": "gid://shopify/Product/1",
+                            "product_handle": "legends-never-die",
+                            "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                        }
+                    ],
+                }
+            ],
+            "query": "financial_status:paid",
             "limit": 50,
             "lookback_days": 14,
         }
-        sync_shopify_orders_to_supabase.return_value = {"shopify_orders_fetched": 6}
+        with patch.object(supabase_backend, "ensure_schema"), patch.object(
+            supabase_backend, "start_sync_run", return_value="run-1"
+        ), patch.object(supabase_backend, "_set_sync_attempt"), patch.object(
+            supabase_backend, "set_app_setting"
+        ), patch.object(
+            supabase_backend, "_latest_paid_orders_payload", return_value=payload
+        ), patch.object(
+            supabase_backend, "list_existing_shopify_order_ids", return_value=set()
+        ), patch.object(
+            supabase_backend, "list_existing_shopify_line_item_ids", return_value=set()
+        ), patch.object(
+            supabase_backend,
+            "_persist_order_snapshot",
+            side_effect=lambda order: events.append("persist"),
+        ), patch.object(
+            supabase_backend,
+            "apply_known_missing_edition_repair",
+            side_effect=lambda: events.append("known_repair")
+            or {"applied_rows": 1, "already_exists_consistent": 0, "errors": []},
+        ), patch.object(
+            supabase_backend,
+            "process_shopify_order_for_editions",
+            side_effect=lambda *args, **kwargs: events.append("allocate")
+            or {
+                "assignments_created": 2,
+                "existing_assignments_skipped": 0,
+                "missing_mapping_skipped": 0,
+                "changed_handles": ["legends-never-die"],
+                "errors": [],
+            },
+        ), patch.object(
+            supabase_backend, "_set_sync_success", return_value="2026-06-25T00:00:00Z"
+        ), patch.object(
+            supabase_backend, "_record_order_fetch_metrics"
+        ), patch.object(
+            supabase_backend, "finish_sync_run"
+        ), patch.object(
+            supabase_backend, "_log_order_fetch_timing"
+        ):
+            result = supabase_backend.sync_latest_paid_orders_to_supabase(config=self.config, limit=50, lookback_days=14)
 
-        result = supabase_backend.sync_latest_paid_orders_to_supabase(config=self.config, limit=50, lookback_days=14)
-
-        self.assertEqual(result["query"], "financial_status:paid created_at:>=2026-06-11")
-        self.assertEqual(sync_shopify_orders_to_supabase.call_args.kwargs["query"], "financial_status:paid created_at:>=2026-06-11")
-        self.assertEqual(sync_shopify_orders_to_supabase.call_args.kwargs["max_orders"], 50)
-        self.assertFalse(sync_shopify_orders_to_supabase.call_args.kwargs["generate_certificates"])
-        self.assertFalse(sync_shopify_orders_to_supabase.call_args.kwargs["sync_product_metafields"])
+        self.assertEqual(events, ["persist", "known_repair", "allocate"])
+        self.assertEqual(result["query"], "financial_status:paid")
+        self.assertEqual(result["shopify_orders_fetched"], 1)
+        self.assertEqual(result["new_orders_inserted"], 1)
+        self.assertEqual(result["new_lines_inserted"], 1)
+        self.assertEqual(result["edition_allocations_created"], 3)
+        self.assertEqual(result["known_missing_repairs_applied"], 1)
 
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(supabase_backend, "ensure_edition_tracking_start", return_value=datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc))
