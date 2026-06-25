@@ -383,10 +383,16 @@ def _cached_supabase_products_snapshot(cache_version):
     backend = _configured_supabase_backend()
     if not backend:
         return None
-    products = backend.list_edition_products(search="", limit=5000)
+    if hasattr(backend, "list_edition_products_read_only"):
+        products = backend.list_edition_products_read_only(search="", limit=5000)
+    else:
+        products = backend.list_edition_products(search="", limit=5000)
     rows = [_row_from_supabase_product(product) for product in products or []]
     try:
-        sync_state = backend.get_sync_state()
+        if hasattr(backend, "get_sync_state_read_only"):
+            sync_state = backend.get_sync_state_read_only()
+        else:
+            sync_state = backend.get_sync_state()
     except Exception:
         sync_state = {}
     last_synced = sync_state.get("last_successful_product_sync_at") or max(
@@ -1184,8 +1190,6 @@ def render_page():
         current_rows = _mark_current_changes(_merge_visible_rows(_rows_from_editor(edited), rows), originals)
         st.session_state[ROWS_KEY] = current_rows
         st.session_state[ORIGINAL_ROWS_KEY] = originals
-        if current_rows != rows:
-            _write_snapshot(current_rows, originals)
 
         errors = {row["product_title"]: row["sync_error"] for row in current_rows if row.get("sync_error")}
         if errors:

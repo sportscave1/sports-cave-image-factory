@@ -5711,6 +5711,15 @@ def render_settings_page():
                 st.caption(f"Server time: {result.get('server_time')}")
             except Exception as error:
                 _developer_action_error("Database connection test", error)
+        if st.button("Run DB Health / Repair", key="developer-db-health-repair", use_container_width=True):
+            try:
+                supabase_backend = importlib.import_module("supabase_backend")
+                result = supabase_backend.run_db_health_repair()
+                st.success("DB health / repair completed.")
+                st.caption(f"Duration: {result.get('duration_ms')} ms")
+                st.caption(f"Active-run rows touched: {result.get('active_run_rows_touched')}")
+            except Exception as error:
+                _developer_action_error("DB Health / Repair", error)
 
     with st.expander("Google Drive / R2", expanded=False):
         st.write(f"**Google Drive lightweight flag:** {'Enabled' if ENABLE_GOOGLE_DRIVE else 'Disabled'}")

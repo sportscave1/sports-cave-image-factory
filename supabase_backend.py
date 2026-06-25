@@ -2627,6 +2627,165 @@ def list_edition_products(search="", limit=500, offset=0):
             return _normalize_edition_product_rows(cur.fetchall())
 
 
+def list_edition_products_read_only(search="", limit=500, offset=0):
+    search_value = f"%{search.strip().lower()}%" if search.strip() else None
+    limit_value = max(min(int(limit or 500), 5000), 1)
+    offset_value = max(int(offset or 0), 0)
+    started = time.perf_counter()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            active_run_join = _active_run_lateral_sql()
+            if search_value:
+                cur.execute(
+                    f"""
+                    SELECT ep.*, sp.admin_url, sp.online_store_url,
+                           er.id AS edition_run_id,
+                           er.edition_name AS run_edition_name,
+                           er.edition_total AS run_edition_total,
+                           er.next_edition_number AS run_next_edition_number,
+                           er.status AS run_status,
+                           er.updated_at AS run_updated_at,
+                           COALESCE((
+                               SELECT MAX(eo.edition_number)
+                               FROM edition_orders eo
+                               WHERE eo.edition_run_id = er.id
+                           ), 0) AS active_run_max_assigned,
+                           COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS display_image_url,
+                           CASE
+                               WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                               ELSE GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   COALESCE((
+                                       SELECT MAX(eo.edition_number)
+                                       FROM edition_orders eo
+                                       WHERE eo.shopify_handle = ep.shopify_handle
+                                   ), 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                           END AS last_assigned_edition,
+                           (
+                               SELECT COUNT(*)
+                               FROM edition_orders eo
+                               WHERE eo.shopify_handle = ep.shopify_handle
+                           ) AS sold_count,
+                           GREATEST(COALESCE(ep.edition_total, 100) - CASE
+                               WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                               ELSE GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   COALESCE((
+                                       SELECT MAX(eo.edition_number)
+                                       FROM edition_orders eo
+                                       WHERE eo.shopify_handle = ep.shopify_handle
+                                   ), 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                           END, 0) AS remaining_count,
+                           GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
+                    FROM edition_products ep
+                    {active_run_join}
+                    LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
+                    WHERE LOWER(COALESCE(ep.product_title, '')) LIKE %s
+                       OR LOWER(COALESCE(ep.shopify_handle, '')) LIKE %s
+                       OR EXISTS (
+                           SELECT 1
+                           FROM shopify_variants sv
+                           WHERE sv.shopify_product_id = ep.shopify_product_id
+                             AND LOWER(COALESCE(sv.sku, '')) LIKE %s
+                       )
+                    ORDER BY ep.product_title NULLS LAST, ep.shopify_handle
+                    LIMIT %s OFFSET %s
+                    """,
+                    (search_value, search_value, search_value, limit_value, offset_value),
+                )
+            else:
+                cur.execute(
+                    f"""
+                    SELECT ep.*, sp.admin_url, sp.online_store_url,
+                           er.id AS edition_run_id,
+                           er.edition_name AS run_edition_name,
+                           er.edition_total AS run_edition_total,
+                           er.next_edition_number AS run_next_edition_number,
+                           er.status AS run_status,
+                           er.updated_at AS run_updated_at,
+                           COALESCE((
+                               SELECT MAX(eo.edition_number)
+                               FROM edition_orders eo
+                               WHERE eo.edition_run_id = er.id
+                           ), 0) AS active_run_max_assigned,
+                           COALESCE(NULLIF(ep.featured_image_url, ''), NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS display_image_url,
+                           CASE
+                               WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                               ELSE GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   COALESCE((
+                                       SELECT MAX(eo.edition_number)
+                                       FROM edition_orders eo
+                                       WHERE eo.shopify_handle = ep.shopify_handle
+                                   ), 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                           END AS last_assigned_edition,
+                           (
+                               SELECT COUNT(*)
+                               FROM edition_orders eo
+                               WHERE eo.shopify_handle = ep.shopify_handle
+                           ) AS sold_count,
+                           GREATEST(COALESCE(ep.edition_total, 100) - CASE
+                               WHEN COALESCE(ep.allow_counter_history_override, FALSE) THEN GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                               ELSE GREATEST(
+                                   COALESCE(ep.last_assigned_edition, 0),
+                                   COALESCE((
+                                       SELECT MAX(eo.edition_number)
+                                       FROM edition_orders eo
+                                       WHERE eo.shopify_handle = ep.shopify_handle
+                                   ), 0),
+                                   GREATEST(COALESCE(ep.next_edition_number, 1) - 1, 0)
+                               )
+                           END, 0) AS remaining_count,
+                           GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions
+                    FROM edition_products ep
+                    {active_run_join}
+                    LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
+                    ORDER BY ep.product_title NULLS LAST, ep.shopify_handle
+                    LIMIT %s OFFSET %s
+                    """,
+                    (limit_value, offset_value),
+                )
+            rows = _normalize_edition_product_rows(cur.fetchall())
+    print(f"PERF Edition Ops read-only products {(time.perf_counter() - started):.3f}s rows={len(rows)}", flush=True)
+    return rows
+
+
+def run_db_health_repair():
+    started = time.perf_counter()
+    ensure_schema()
+    repaired = 0
+    with connect() as conn:
+        with conn.cursor() as cur:
+            before = conn.info.transaction_status if hasattr(conn, "info") else None
+            _ = before
+            _ensure_active_edition_runs_for_products(cur)
+            repaired = cur.rowcount if getattr(cur, "rowcount", -1) and cur.rowcount > 0 else 0
+        conn.commit()
+    return {
+        "ok": True,
+        "active_run_rows_touched": repaired,
+        "duration_ms": int((time.perf_counter() - started) * 1000),
+    }
+
+
 def get_edition_counter_state(shopify_handle):
     ensure_schema()
     handle = str(shopify_handle or "").strip()
@@ -4091,6 +4250,44 @@ def get_sync_state():
         "last_successful_product_sync_at": get_sync_setting(LAST_SUCCESSFUL_PRODUCT_SYNC_KEY, ""),
         "last_attempted_product_sync_at": get_sync_setting(LAST_ATTEMPTED_PRODUCT_SYNC_KEY, ""),
         "sync_lookback_buffer_minutes": _sync_lookback_minutes(),
+    }
+
+
+def get_sync_state_read_only():
+    keys = (
+        LAST_SUCCESSFUL_ORDER_SYNC_KEY,
+        LAST_ATTEMPTED_ORDER_SYNC_KEY,
+        LAST_SUCCESSFUL_ORDER_FETCH_KEY,
+        LAST_ORDER_FETCH_STATUS_KEY,
+        LAST_ORDER_FETCH_DURATION_KEY,
+        LAST_ORDERS_IMPORTED_COUNT_KEY,
+        LAST_ASSIGNMENTS_CREATED_COUNT_KEY,
+        EDITION_TRACKING_START_KEY,
+        LAST_SUCCESSFUL_PRODUCT_SYNC_KEY,
+        LAST_ATTEMPTED_PRODUCT_SYNC_KEY,
+        SYNC_LOOKBACK_BUFFER_KEY,
+    )
+    values = {}
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT key, value FROM app_settings WHERE key = ANY(%s)", (list(keys),))
+            for row in cur.fetchall():
+                raw_value = row.get("value")
+                if isinstance(raw_value, dict):
+                    raw_value = raw_value.get("value", "")
+                values[row.get("key")] = raw_value
+    return {
+        "last_successful_order_sync_at": values.get(LAST_SUCCESSFUL_ORDER_SYNC_KEY, ""),
+        "last_attempted_order_sync_at": values.get(LAST_ATTEMPTED_ORDER_SYNC_KEY, ""),
+        "last_successful_order_fetch_at": values.get(LAST_SUCCESSFUL_ORDER_FETCH_KEY, ""),
+        "last_order_fetch_status": values.get(LAST_ORDER_FETCH_STATUS_KEY, ""),
+        "last_order_fetch_duration_ms": _int_value(values.get(LAST_ORDER_FETCH_DURATION_KEY), 0),
+        "last_orders_imported_count": _int_value(values.get(LAST_ORDERS_IMPORTED_COUNT_KEY), 0),
+        "last_assignments_created_count": _int_value(values.get(LAST_ASSIGNMENTS_CREATED_COUNT_KEY), 0),
+        "edition_tracking_start_at": values.get(EDITION_TRACKING_START_KEY, ""),
+        "last_successful_product_sync_at": values.get(LAST_SUCCESSFUL_PRODUCT_SYNC_KEY, ""),
+        "last_attempted_product_sync_at": values.get(LAST_ATTEMPTED_PRODUCT_SYNC_KEY, ""),
+        "sync_lookback_buffer_minutes": _int_value(values.get(SYNC_LOOKBACK_BUFFER_KEY), DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES),
     }
 
 
@@ -8862,6 +9059,185 @@ def _order_sort_clause(sort):
         "Customer": "customer_name ASC NULLS LAST, order_name ASC",
         "Edition number": "first_edition_number ASC NULLS LAST, order_name DESC",
     }.get(sort, "COALESCE(created_at, synced_at) DESC NULLS LAST, order_name DESC")
+
+
+def list_hybrid_order_rows(limit=250):
+    total_started = time.perf_counter()
+    base_started = time.perf_counter()
+    limit_value = max(min(int(limit or 250), 1000), 1)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    o.shopify_order_id,
+                    o.order_name,
+                    o.order_number,
+                    o.admin_url,
+                    o.customer_name,
+                    o.customer_email,
+                    o.financial_status,
+                    o.fulfillment_status,
+                    o.total_price,
+                    o.currency,
+                    o.created_at,
+                    o.remote_updated_at,
+                    o.processed_at,
+                    o.cancelled_at,
+                    o.synced_at,
+                    o.raw_json AS order_raw_json,
+                    li.id AS order_line_id,
+                    li.shopify_line_item_id,
+                    li.quantity,
+                    li.assignment_status,
+                    li.last_error,
+                    li.shopify_handle,
+                    li.shopify_product_id,
+                    COALESCE(NULLIF(li.raw_json->>'shopify_variant_id', ''), NULLIF(li.raw_json->>'variant_id', ''), NULLIF(li.raw_json->'variant'->>'id', '')) AS shopify_variant_id,
+                    COALESCE(NULLIF(li.product_title, ''), NULLIF(li.raw_json->>'product_title', ''), NULLIF(li.raw_json->>'title', '')) AS product_title,
+                    COALESCE(NULLIF(li.variant_title, ''), NULLIF(li.raw_json->>'variant_title', ''), NULLIF(li.raw_json->>'variantTitle', ''), NULLIF(li.raw_json->'variant'->>'title', '')) AS variant_title,
+                    li.sku,
+                    COALESCE(pd.prodigi_status, '') AS prodigi_status,
+                    COALESCE(pd.row_id, '') AS prodigi_row_id,
+                    COALESCE(NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url
+                FROM shopify_orders o
+                LEFT JOIN shopify_order_lines li ON li.shopify_order_id = o.shopify_order_id
+                LEFT JOIN shopify_products sp ON sp.handle = li.shopify_handle
+                LEFT JOIN LATERAL (
+                    SELECT pd.row_id, pd.prodigi_status
+                    FROM prodigi_dispatch_rows pd
+                    WHERE pd.shopify_line_item_id = li.shopify_line_item_id
+                    ORDER BY pd.updated_at DESC NULLS LAST, pd.submitted_at DESC NULLS LAST
+                    LIMIT 1
+                ) pd ON TRUE
+                ORDER BY COALESCE(o.created_at, o.synced_at) DESC NULLS LAST,
+                         o.order_name DESC,
+                         li.id ASC NULLS LAST
+                LIMIT %s
+                """,
+                (limit_value,),
+            )
+            base_rows = cur.fetchall()
+            print(
+                f"PERF Orders base rows load {(time.perf_counter() - base_started):.3f}s rows={len(base_rows)}",
+                flush=True,
+            )
+
+            line_ids = [
+                str(row.get("shopify_line_item_id") or "").strip()
+                for row in base_rows
+                if str(row.get("shopify_line_item_id") or "").strip()
+            ]
+            overlay_started = time.perf_counter()
+            edition_rows = []
+            if line_ids:
+                cur.execute(
+                    """
+                    SELECT
+                        eo.id AS edition_order_id,
+                        eo.shopify_order_id,
+                        eo.shopify_order_name,
+                        eo.shopify_line_item_id,
+                        eo.shopify_product_id,
+                        eo.shopify_variant_id,
+                        eo.shopify_handle,
+                        eo.product_handle,
+                        eo.product_title,
+                        eo.variant_title,
+                        eo.sku,
+                        eo.customer_name,
+                        eo.customer_email,
+                        eo.edition_number,
+                        eo.edition_total,
+                        eo.allocation_index,
+                        eo.assigned_at,
+                        eo.certificate_status,
+                        eo.status AS edition_order_status,
+                        eo.source AS assignment_source,
+                        eo.manual_override,
+                        c.certificate_id,
+                        c.local_file_path,
+                        COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
+                        c.certificate_pdf_url,
+                        c.certificate_print_jpg_url,
+                        c.certificate_preview_image_url,
+                        c.shopify_pdf_file_id,
+                        c.shopify_print_jpg_file_id,
+                        c.shopify_preview_file_id,
+                        c.asset_sync_status,
+                        c.asset_sync_error,
+                        c.generated_at,
+                        c.certificate_r2_bucket,
+                        c.certificate_r2_key,
+                        c.certificate_preview_r2_bucket,
+                        c.certificate_preview_r2_key
+                    FROM edition_orders eo
+                    LEFT JOIN certificates c
+                      ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
+                    WHERE eo.shopify_line_item_id = ANY(%s)
+                    ORDER BY eo.shopify_line_item_id ASC,
+                             eo.allocation_index ASC NULLS LAST,
+                             eo.edition_number ASC NULLS LAST
+                    """,
+                    (line_ids,),
+                )
+                edition_rows = cur.fetchall()
+            print(
+                f"PERF Orders Supabase edition overlay load {(time.perf_counter() - overlay_started):.3f}s rows={len(edition_rows)}",
+                flush=True,
+            )
+
+    merge_started = time.perf_counter()
+    assignments_by_line = {}
+    for edition_row in edition_rows:
+        line_id = str(edition_row.get("shopify_line_item_id") or "").strip()
+        if not line_id:
+            continue
+        assignments_by_line.setdefault(line_id, []).append(
+            {
+                "edition_order_id": edition_row.get("edition_order_id"),
+                "edition_number": edition_row.get("edition_number"),
+                "edition_total": edition_row.get("edition_total"),
+                "allocation_index": edition_row.get("allocation_index"),
+                "assigned_at": edition_row.get("assigned_at"),
+                "certificate_status": edition_row.get("certificate_status"),
+                "assignment_status": edition_row.get("edition_order_status") or "Assigned",
+                "assignment_source": edition_row.get("assignment_source"),
+                "manual_override": edition_row.get("manual_override"),
+                "certificate_id": edition_row.get("certificate_id"),
+                "local_file_path": edition_row.get("local_file_path"),
+                "shopify_file_url": edition_row.get("shopify_file_url") or edition_row.get("certificate_pdf_url"),
+                "certificate_pdf_url": edition_row.get("certificate_pdf_url"),
+                "certificate_print_jpg_url": edition_row.get("certificate_print_jpg_url"),
+                "certificate_preview_image_url": edition_row.get("certificate_preview_image_url"),
+                "shopify_file_id": edition_row.get("shopify_pdf_file_id") or edition_row.get("shopify_file_id"),
+                "shopify_pdf_file_id": edition_row.get("shopify_pdf_file_id"),
+                "shopify_print_jpg_file_id": edition_row.get("shopify_print_jpg_file_id"),
+                "shopify_preview_file_id": edition_row.get("shopify_preview_file_id"),
+                "asset_sync_status": edition_row.get("asset_sync_status"),
+                "asset_sync_error": edition_row.get("asset_sync_error"),
+                "generated_at": edition_row.get("generated_at"),
+                "certificate_r2_bucket": edition_row.get("certificate_r2_bucket"),
+                "certificate_r2_key": edition_row.get("certificate_r2_key"),
+                "certificate_preview_r2_bucket": edition_row.get("certificate_preview_r2_bucket"),
+                "certificate_preview_r2_key": edition_row.get("certificate_preview_r2_key"),
+            }
+        )
+    merged_rows = []
+    for row in base_rows:
+        line_id = str(row.get("shopify_line_item_id") or "").strip()
+        merged = dict(row)
+        merged["assignments"] = assignments_by_line.get(line_id, [])
+        merged_rows.append(merged)
+    print(
+        f"PERF Orders merge time {(time.perf_counter() - merge_started):.3f}s rows={len(merged_rows)}",
+        flush=True,
+    )
+    print(
+        f"PERF Orders hybrid read total {(time.perf_counter() - total_started):.3f}s rows={len(merged_rows)}",
+        flush=True,
+    )
+    return merged_rows
 
 
 def list_orders(search="", sort="Date newest", status_filter="All", limit=250):

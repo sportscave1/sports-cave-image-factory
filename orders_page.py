@@ -32,6 +32,7 @@ SEARCH_KEY = "orders_search_text"
 SHOW_ALL_KEY = "orders_show_all_rows"
 LOAD_ERROR_KEY = "orders_load_error"
 DEFAULT_VISIBLE_ROW_LIMIT = 50
+HYBRID_FAST_ORDERS_ENABLED = True
 ALLOCATION_BLOCKER_STATUSES = {
     "Needs allocation",
     "Needs Review - Sold Out",
@@ -104,6 +105,8 @@ def _configured_supabase_backend():
 def _read_orders_snapshot():
     backend = _configured_supabase_backend()
     if backend:
+        if HYBRID_FAST_ORDERS_ENABLED and hasattr(order_allocator, "load_hybrid_orders_snapshot"):
+            return order_allocator.load_hybrid_orders_snapshot(limit=1000)
         return order_allocator.load_supabase_orders_snapshot(limit=1000, include_summary=False)
     return order_allocator.load_orders_snapshot()
 
@@ -476,6 +479,32 @@ def _load_snapshot_once():
     try:
         payload = _read_orders_snapshot()
     except Exception as error:
+        existing_rows = st.session_state.get(ROWS_KEY) or []
+        existing_meta = st.session_state.get(META_KEY) or {}
+        existing_source = str(existing_meta.get("source") or "")
+        if existing_rows and "supabase" in existing_source:
+            updated_meta = dict(existing_meta)
+            updated_meta["error"] = str(error)
+            st.session_state[META_KEY] = updated_meta
+            st.session_state[LOAD_ERROR_KEY] = str(error)
+            st.session_state[SNAPSHOT_LOADED_KEY] = True
+            print(f"WARN Orders hybrid load failed; keeping existing Supabase rows: {error}", flush=True)
+            _perf_log("load snapshot failed kept existing", start, rows=len(existing_rows))
+            return
+        try:
+            fallback_payload = order_allocator.load_orders_snapshot()
+        except Exception:
+            fallback_payload = None
+        if fallback_payload and fallback_payload.get("rows"):
+            fallback_payload = dict(fallback_payload)
+            fallback_payload["source"] = "local_snapshot_read_only_fallback"
+            fallback_payload["error"] = str(error)
+            _apply_snapshot_payload(fallback_payload)
+            st.session_state[LOAD_ERROR_KEY] = str(error)
+            st.session_state[SNAPSHOT_LOADED_KEY] = True
+            print(f"WARN Orders hybrid load failed; rendered local read-only fallback: {error}", flush=True)
+            _perf_log("load snapshot fallback", start, rows=len(st.session_state.get(ROWS_KEY) or []))
+            return
         st.session_state[ROWS_KEY] = []
         st.session_state[META_KEY] = {
             "last_refreshed": "",
@@ -1638,11 +1667,19 @@ def _render_orders_table(rows):
 def render_page():
     _ensure_state()
     _load_snapshot_once()
+    prep_started = time.perf_counter()
     rows = _apply_latest_product_numbers(st.session_state.get(ROWS_KEY, []))
     st.session_state[ROWS_KEY] = rows
+    _perf_log("table render prep", prep_started, rows=len(rows))
 
     st.title("Orders")
     st.caption("Select an order, complete QA, then generate and upload the certificate.")
+    meta = st.session_state.get(META_KEY) or {}
+    st.caption("Source: Shopify mirror + Supabase edition ledger")
+    st.caption("Edition source: Supabase")
+    st.caption(f"Shopify mirror last synced: {_format_time(meta.get('last_synced') or meta.get('last_refreshed'))}")
+    if meta.get("error"):
+        st.caption(f"Orders load warning: {meta.get('error')}")
 
     notice = st.session_state.get(NOTICE_KEY)
     if notice:

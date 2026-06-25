@@ -982,10 +982,8 @@ class EditionOpsUiTests(unittest.TestCase):
         )
         self.assertIn("orders_allocation_snapshot.json", source)
         self.assertIn("_read_orders_snapshot", source)
-        self.assertNotIn("_cached_supabase_orders_snapshot", source)
-        self.assertNotIn("_invalidate_orders_snapshot_cache", source)
-        self.assertNotIn("ORDERS_CACHE_VERSION_KEY", source)
-        self.assertIn("load_supabase_orders_snapshot", source)
+        self.assertIn("HYBRID_FAST_ORDERS_ENABLED = True", source)
+        self.assertIn("load_hybrid_orders_snapshot", source)
         self.assertIn("_display_table_payload", source)
         self.assertIn("_compact_variant_label", source)
         self.assertIn("selection_mode=\"multi-row\"", source)
@@ -1005,9 +1003,9 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("edition_total", orders_page.VISIBLE_COLUMNS)
         self.assertIn("Select an order, complete QA, then generate and upload the certificate.", render_page)
         self.assertIn("Assign edition number before certificate generation.", top_actions)
-        self.assertNotIn("Supabase ledger-backed orders for fulfilment and Prodigi dispatch.", render_page)
-        self.assertNotIn("Source: Supabase ledger", render_page)
-        self.assertNotIn("Last synced:", render_page)
+        self.assertIn("Source: Shopify mirror + Supabase edition ledger", render_page)
+        self.assertIn("Edition source: Supabase", render_page)
+        self.assertIn("Shopify mirror last synced:", render_page)
         self.assertNotIn("li.shopify_variant_id", list_orders)
         self.assertIn("li.raw_json->>'variant_id'", list_orders)
         self.assertIn("column_exists(cur, \"shopify_order_lines\", \"shopify_variant_id\")", upsert_order_lines)
@@ -1285,6 +1283,100 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("Edit Enabled, Edition Total, and Next Edition Number.", render_page)
         self.assertNotIn("Export a CSV backup after major edits.", render_page)
 
+    def test_edition_ops_render_does_not_write_local_snapshot(self):
+        original = edition_ops._normalise_row(
+            {
+                "edition_product_id": "101",
+                "handle": "goat-debate-wall-art",
+                "edition_total": 100,
+                "edition_next_number": 52,
+            }
+        )
+        edited = dict(original)
+        edited["edition_next_number"] = 53
+
+        class FakePopover:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeColumn:
+            def button(self, *args, **kwargs):
+                return False
+
+            def download_button(self, *args, **kwargs):
+                return None
+
+            def popover(self, *args, **kwargs):
+                return FakePopover()
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {
+                    edition_ops.SNAPSHOT_LOADED_KEY: True,
+                    edition_ops.ROWS_KEY: [original],
+                    edition_ops.ORIGINAL_ROWS_KEY: [original],
+                    edition_ops.META_KEY: {},
+                    edition_ops.ERRORS_KEY: {},
+                    edition_ops.IMPORT_WARNINGS_KEY: [],
+                    edition_ops.NOTICE_KEY: "",
+                    edition_ops.EDITOR_VERSION_KEY: 0,
+                }
+                self.column_config = SimpleNamespace(
+                    TextColumn=lambda *args, **kwargs: None,
+                    NumberColumn=lambda *args, **kwargs: None,
+                    CheckboxColumn=lambda *args, **kwargs: None,
+                    LinkColumn=lambda *args, **kwargs: None,
+                )
+
+            def markdown(self, *args, **kwargs):
+                return None
+
+            def title(self, *args, **kwargs):
+                return None
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def success(self, *args, **kwargs):
+                return None
+
+            def warning(self, *args, **kwargs):
+                return None
+
+            def info(self, *args, **kwargs):
+                return None
+
+            def columns(self, spec):
+                return [FakeColumn() for _ in spec]
+
+            def data_editor(self, *args, **kwargs):
+                return [edited]
+
+            def file_uploader(self, *args, **kwargs):
+                return None
+
+            def button(self, *args, **kwargs):
+                return False
+
+        fake_st = FakeStreamlit()
+        with patch.object(edition_ops, "st", fake_st), patch.object(
+            edition_ops, "_write_snapshot", side_effect=AssertionError("Edition Ops render must not write local JSON.")
+        ), patch.object(
+            edition_ops.shopify_sync,
+            "fetch_edition_ops_active_products",
+            side_effect=AssertionError("Edition Ops render must not call Shopify."),
+        ), patch.object(
+            supabase_backend,
+            "ensure_schema",
+            side_effect=AssertionError("Edition Ops render must not run schema DDL."),
+        ):
+            edition_ops.render_page()
+
+        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_next_number"], 53)
+
     def test_orders_page_open_renders_snapshot_without_shopify_or_allocation_work(self):
         class FakeContainer:
             def __enter__(self):
@@ -1520,8 +1612,12 @@ class EditionOpsUiTests(unittest.TestCase):
             return_value=object(),
         ), patch.object(
             orders_page.order_allocator,
-            "load_supabase_orders_snapshot",
+            "load_hybrid_orders_snapshot",
             return_value=snapshot,
+        ), patch.object(
+            orders_page.order_allocator,
+            "load_supabase_orders_snapshot",
+            side_effect=AssertionError("Orders page should use hybrid read when enabled."),
         ), patch.object(
             orders_page.order_allocator,
             "load_orders_snapshot",
@@ -1536,7 +1632,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC2843")
         self.assertEqual(fake_st.rendered_rows[0]["edition"], "#050")
 
-    def test_orders_reads_supabase_directly_without_custom_cache(self):
+    def test_orders_reads_hybrid_supabase_directly_without_shopify(self):
         fake_st = SimpleNamespace(
             session_state={
                 orders_page.LOAD_ERROR_KEY: "",
@@ -1554,14 +1650,177 @@ class EditionOpsUiTests(unittest.TestCase):
             return_value=object(),
         ), patch.object(
             orders_page.order_allocator,
-            "load_supabase_orders_snapshot",
+            "load_hybrid_orders_snapshot",
             return_value=payload,
         ) as direct_read:
             payload = orders_page._read_orders_snapshot()
 
-        direct_read.assert_called_once_with(limit=1000, include_summary=False)
+        direct_read.assert_called_once_with(limit=1000)
         self.assertEqual(payload["rows"][0]["order"], "#SC2843")
-        self.assertNotIn("ORDERS_CACHE_VERSION_KEY", (ROOT / "orders_page.py").read_text(encoding="utf-8"))
+
+    def test_hybrid_orders_overlay_protects_goat_supabase_editions(self):
+        class FakeSupabase:
+            def list_hybrid_order_rows(self, **kwargs):
+                self.kwargs = kwargs
+                return [
+                    {
+                        "shopify_order_id": "gid://shopify/Order/2843",
+                        "order_name": "#SC2843",
+                        "customer_name": "Ashkan Zand",
+                        "customer_email": "ashkan@example.com",
+                        "processed_at": "2026-06-23T10:00:00Z",
+                        "created_at": "2026-06-23T09:55:00Z",
+                        "order_raw_json": {
+                            "shipping_method": "US Standard Tracked Shipping",
+                            "line_items": [
+                                {
+                                    "shopify_line_item_id": "gid://shopify/LineItem/goat",
+                                    "product_title": "GOAT Debate Wall Art",
+                                    "variant_title": "Black / L",
+                                    "custom_attributes": [
+                                        {"key": "edition_number", "value": "#094/100"},
+                                        {"key": "edition_number", "value": "#095/100"},
+                                    ],
+                                }
+                            ],
+                        },
+                        "shopify_line_item_id": "gid://shopify/LineItem/goat",
+                        "shopify_product_id": "gid://shopify/Product/goat",
+                        "shopify_handle": "goat-debate-wall-art",
+                        "product_title": "GOAT Debate Wall Art",
+                        "variant_title": "Black / L",
+                        "quantity": 2,
+                        "assignments": [
+                            {
+                                "edition_order_id": "eo-50",
+                                "edition_number": 50,
+                                "edition_total": 100,
+                                "allocation_index": 1,
+                                "assignment_status": "assigned",
+                            },
+                            {
+                                "edition_order_id": "eo-51",
+                                "edition_number": 51,
+                                "edition_total": 100,
+                                "allocation_index": 2,
+                                "assignment_status": "assigned",
+                            },
+                        ],
+                    }
+                ]
+
+            def get_sync_state_read_only(self):
+                return {"last_successful_order_fetch_at": "2026-06-25T08:00:00Z"}
+
+        fake_backend = FakeSupabase()
+        with patch.object(order_allocator, "_configured_supabase_backend", return_value=fake_backend):
+            snapshot = order_allocator.load_hybrid_orders_snapshot(limit=1000)
+
+        editions = [orders_page._normalise_row(row)["edition"] for row in snapshot["rows"]]
+        self.assertEqual(editions, ["#051/100", "#050/100"])
+        self.assertNotIn("#094/100", editions)
+        self.assertNotIn("#095/100", editions)
+        self.assertEqual(snapshot["source"], "shopify_mirror_supabase_edition_ledger")
+
+    def test_orders_normal_render_does_not_call_shopify_or_schema_writes(self):
+        class FakeContainer:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeColumn:
+            def button(self, *args, **kwargs):
+                return False
+
+            def link_button(self, *args, **kwargs):
+                return None
+
+            def text_input(self, *args, **kwargs):
+                return ""
+
+            def caption(self, *args, **kwargs):
+                return None
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {}
+                self.column_config = SimpleNamespace(TextColumn=lambda *args, **kwargs: None)
+                self.rendered_rows = None
+
+            def columns(self, spec):
+                return [FakeColumn() for _ in spec]
+
+            def container(self, *args, **kwargs):
+                return FakeContainer()
+
+            def dataframe(self, rows, **kwargs):
+                self.rendered_rows = rows
+
+            def text_input(self, label, value="", key=None, **kwargs):
+                if key is not None and key not in self.session_state:
+                    self.session_state[key] = value
+                return self.session_state.get(key, value)
+
+            def title(self, *args, **kwargs):
+                return None
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def success(self, *args, **kwargs):
+                return None
+
+            def info(self, *args, **kwargs):
+                return None
+
+        fake_st = FakeStreamlit()
+        snapshot = {
+            "source": "shopify_mirror_supabase_edition_ledger",
+            "rows": [
+                {
+                    "order": "#SC2843",
+                    "edition_number": 50,
+                    "edition_total": 100,
+                    "customer": "Ashkan Zand",
+                    "product": "GOAT Debate Wall Art",
+                    "variant": "Black / L",
+                    "shipping": "Standard",
+                }
+            ],
+        }
+
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page, "_configured_supabase_backend", return_value=object()
+        ), patch.object(
+            orders_page.order_allocator, "load_hybrid_orders_snapshot", return_value=snapshot
+        ), patch.object(
+            orders_page.shopify_sync,
+            "iter_order_pages",
+            side_effect=AssertionError("Orders render must not call Shopify."),
+        ), patch.object(
+            supabase_backend,
+            "ensure_order_read_schema",
+            side_effect=AssertionError("Orders render must not run schema DDL."),
+        ), patch.object(
+            supabase_backend,
+            "ensure_schema",
+            side_effect=AssertionError("Orders render must not run full schema."),
+        ):
+            orders_page.render_page()
+
+        self.assertEqual(fake_st.rendered_rows[0]["edition"], "#050/100")
+
+    def test_pure_read_loaders_do_not_run_schema_or_repair_guards(self):
+        hybrid_source = inspect.getsource(supabase_backend.list_hybrid_order_rows)
+        edition_source = inspect.getsource(supabase_backend.list_edition_products_read_only)
+
+        self.assertNotIn("ensure_order_read_schema", hybrid_source)
+        self.assertNotIn("ensure_schema", hybrid_source)
+        self.assertNotIn("_ensure_active_edition_runs_for_products", hybrid_source)
+        self.assertNotIn("ensure_schema", edition_source)
+        self.assertNotIn("_ensure_active_edition_runs_for_products", edition_source)
 
     def test_orders_supabase_read_error_is_not_reported_as_empty_ledger(self):
         fake_st = SimpleNamespace(
@@ -1578,9 +1837,9 @@ class EditionOpsUiTests(unittest.TestCase):
             return_value=object(),
         ), patch.object(
             orders_page.order_allocator,
-            "load_supabase_orders_snapshot",
+            "load_hybrid_orders_snapshot",
             side_effect=RuntimeError("connection dropped"),
-        ):
+        ), patch.object(orders_page.order_allocator, "load_orders_snapshot", return_value=None):
             orders_page._load_snapshot_once()
 
         self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [])
