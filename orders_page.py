@@ -23,6 +23,7 @@ GRID_KEY = "orders-fulfilment-grid"
 SYNC_RESULT_KEY = "orders_sync_result"
 BACKFILL_RESULT_KEY = "orders_backfill_result"
 LATEST_FETCH_PREVIEW_KEY = "orders_latest_fetch_preview"
+REPAIR_RESULT_KEY = "orders_missing_edition_repair_result"
 SEARCH_KEY = "orders_search_text"
 SHOW_ALL_KEY = "orders_show_all_rows"
 DEFAULT_VISIBLE_ROW_LIMIT = 50
@@ -38,12 +39,13 @@ ALLOCATION_BLOCKER_STATUSES = {
 }
 VISIBLE_COLUMNS = (
     "order",
-    "date",
+    "edition",
     "customer",
     "product",
     "variant",
-    "edition",
     "shipping",
+    "date",
+    "certificate",
     "prodigi",
 )
 
@@ -74,6 +76,7 @@ def _ensure_state():
     st.session_state.setdefault(NOTICE_KEY, "")
     st.session_state.setdefault(SYNC_RESULT_KEY, {})
     st.session_state.setdefault(BACKFILL_RESULT_KEY, {})
+    st.session_state.setdefault(REPAIR_RESULT_KEY, {})
     st.session_state.setdefault(LATEST_FETCH_PREVIEW_KEY, {})
     st.session_state.setdefault(SEARCH_KEY, "")
     st.session_state.setdefault(SHOW_ALL_KEY, False)
@@ -170,6 +173,14 @@ def _format_edition_with_total(number, total=None):
     return edition
 
 
+def _coerce_positive_int(value, default=0):
+    try:
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        return default
+    return number if number > 0 else default
+
+
 def _placeholder_text(value, *, missing="Missing from ledger"):
     text = str(value or "").strip()
     return text if text else missing
@@ -212,17 +223,50 @@ def _developer_mode():
     return bool(st.session_state.get("developer_unlocked"))
 
 
+def _certificate_is_uploaded(row):
+    return bool(
+        str(row.get("certificate_pdf_url") or row.get("shopify_file_url") or "").strip()
+        or str(row.get("certificate_shopify_file_id") or "").strip()
+    )
+
+
+def _certificate_is_ready(row):
+    status = str(row.get("certificate_status") or "").strip().casefold()
+    if _certificate_is_uploaded(row):
+        return True
+    if "ready" in status or "generated" in status:
+        return True
+    return bool(str(row.get("certificate_pdf_path") or "").strip())
+
+
 def _certificate_label(row):
-    if row.get("certificate_pdf_url"):
-        return "Uploaded"
-    status = str(row.get("certificate_status") or "").strip()
-    if status in ALLOCATION_BLOCKER_STATUSES:
+    status = str(row.get("certificate_status") or row.get("edition") or row.get("assignment_status") or "").strip()
+    if status in ALLOCATION_BLOCKER_STATUSES and status not in {"Needs allocation", "Historical backfill required"}:
         return status
-    if status in {"Generated", "Uploaded", "Error", "Template missing", "Upload error"}:
-        return "Error" if status in {"Template missing", "Upload error"} else status
-    if row.get("certificate_pdf_path"):
-        return "Generated"
-    return "Generate"
+    if _certificate_is_uploaded(row):
+        return "Uploaded"
+    lowered = status.casefold()
+    if any(token in lowered for token in ("error", "failed", "missing template")):
+        return "Upload failed"
+    if _certificate_is_ready(row):
+        return "Ready"
+    return "Needs certificate"
+
+
+def _prodigi_label(row):
+    dispatch_status = _display_prodigi_status(row.get("prodigi_status"))
+    if str(row.get("prodigi_status") or "").strip():
+        return dispatch_status
+    if not _certificate_is_ready(row):
+        return "Needs certificate"
+    if _certificate_is_uploaded(row):
+        return "Ready to dispatch"
+    return "Certificate ready"
+
+
+def _can_start_prodigi(row):
+    status = _prodigi_label(row)
+    return status in {"Ready to dispatch", "Not started", "In progress", "Sent to Prodigi", "Complete", "Issue"}
 
 
 def _allocation_numbers(allocation):
@@ -261,7 +305,7 @@ def _allocation_numbers(allocation):
 
 def _normalise_row(row):
     updated = dict(row or {})
-    raw_edition = str(updated.get("edition") or "").strip()
+    raw_edition = str(updated.get("edition") or updated.get("assignment_status") or "").strip()
     edition_number = _normalise_edition_number(
         updated.get("edition_number")
         or updated.get("edition")
@@ -270,19 +314,34 @@ def _normalise_row(row):
     updated["order"] = str(updated.get("order") or "")
     updated["date"] = str(updated.get("date") or "")
     updated["customer"] = _placeholder_text(updated.get("customer"))
-    updated["shipping_method"] = str(updated.get("shipping_method") or "")
-    updated["shipping"] = _display_shipping_label(updated.get("shipping_method") or updated.get("shipping"))
+    updated["shipping_method"] = str(
+        updated.get("shipping_method")
+        or updated.get("shipping_title")
+        or updated.get("shipping_line")
+        or updated.get("shipping")
+        or ""
+    )
+    updated["shipping"] = _display_shipping_label(updated.get("shipping_method"))
     updated["product"] = _placeholder_text(updated.get("product"))
-    updated["variant"] = _display_variant_label(updated.get("variant"))
+    updated["variant"] = _display_variant_label(updated.get("variant") or updated.get("variant_title"))
     updated["edition_number"] = edition_number
-    updated["edition_total"] = int(updated.get("edition_total") or 100)
+    updated["edition_total"] = _coerce_positive_int(
+        updated.get("edition_total")
+        or updated.get("edition_limit")
+        or updated.get("run_edition_total")
+        or 0,
+        default=0,
+    )
     updated["edition"] = (
         _format_edition_with_total(edition_number, updated["edition_total"])
         if edition_number
         else raw_edition
+        if raw_edition in ALLOCATION_BLOCKER_STATUSES and raw_edition not in {"Needs allocation", "Historical backfill required"}
+        else "Needs edition"
     )
     updated["has_saved_allocation"] = bool(updated.get("has_saved_allocation"))
     updated["edition_offset"] = int(updated.get("edition_offset") or 0)
+    updated["allocation_index"] = _coerce_positive_int(updated.get("allocation_index") or updated.get("line_item_unit_index") or 1, default=1)
     updated["line_quantity"] = int(updated.get("line_quantity") or 1)
     updated["shopify_order_id"] = str(updated.get("shopify_order_id") or "")
     updated["legacy_resource_id"] = str(updated.get("legacy_resource_id") or "")
@@ -296,18 +355,20 @@ def _normalise_row(row):
     updated["created_at"] = str(updated.get("created_at") or "")
     updated["order_number_sort"] = int(updated.get("order_number_sort") or _parse_order_number(updated["order"]))
     updated["admin_url"] = str(updated.get("admin_url") or "")
+    updated["edition_order_id"] = str(updated.get("edition_order_id") or "")
+    updated["assignment_status"] = str(updated.get("assignment_status") or "")
     updated["prodigi_status"] = str(updated.get("prodigi_status") or "")
     updated["prodigi_row_id"] = str(updated.get("prodigi_row_id") or "")
-    updated["prodigi"] = _display_prodigi_status(updated.get("prodigi_status"))
     updated["certificate_id"] = str(updated.get("certificate_id") or "")
     updated["certificate_status"] = str(updated.get("certificate_status") or "")
-    updated["certificate"] = _certificate_label(updated)
     updated["certificate_pdf_path"] = str(updated.get("certificate_pdf_path") or "")
-    updated["certificate_pdf_url"] = str(updated.get("certificate_pdf_url") or "")
+    updated["certificate_pdf_url"] = str(updated.get("certificate_pdf_url") or updated.get("shopify_file_url") or "")
     updated["certificate_shopify_file_id"] = str(updated.get("certificate_shopify_file_id") or "")
     updated["certificate_generated_at"] = str(updated.get("certificate_generated_at") or "")
     updated["certificate_error"] = str(updated.get("certificate_error") or "")
     updated["certificate_preview_path"] = str(updated.get("certificate_preview_path") or updated.get("preview_path") or "")
+    updated["certificate"] = _certificate_label(updated)
+    updated["prodigi"] = _prodigi_label(updated)
     return updated
 
 
@@ -739,6 +800,23 @@ def _preview_latest_paid_orders(*, limit=50):
     )
 
 
+def _repair_missing_editions(*, dry_run=True, limit=100):
+    backend = _configured_supabase_backend()
+    if not backend:
+        st.session_state[NOTICE_KEY] = "Supabase is not configured. Missing-edition repair is unavailable."
+        return
+    if dry_run:
+        result = backend.preview_missing_edition_repairs(limit=limit)
+    else:
+        result = backend.repair_missing_edition_orders(limit=limit)
+        _reload_orders_from_source()
+    st.session_state[REPAIR_RESULT_KEY] = result
+    st.session_state[NOTICE_KEY] = (
+        f"{'Previewed' if dry_run else 'Applied'} missing-edition repair for "
+        f"{int(result.get('candidate_rows') or 0)} ledger row(s)."
+    )
+
+
 def _display_rows(rows):
     return [
         {column: _normalise_row(row).get(column, "") for column in VISIBLE_COLUMNS}
@@ -857,12 +935,25 @@ def _existing_uploaded_certificate(row, config):
 
 
 def _generate_certificate_for_row(row):
+    backend = _configured_supabase_backend()
     config = shopify_sync.get_config()
-    if not config.get("configured"):
-        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before generating certificates."
-        return
     row = _normalise_row(row)
     try:
+        if not row.get("edition_number"):
+            raise ValueError("This row still needs an edition number before a certificate can be generated.")
+        if not row.get("edition_order_id"):
+            raise ValueError("This row is missing its Supabase edition record. Ask a developer to repair missing editions first.")
+        if backend:
+            backend.generate_certificate_for_edition_order(row.get("edition_order_id"))
+            _reload_orders_from_source()
+            refreshed = _current_row_for(row)
+            st.session_state[NOTICE_KEY] = (
+                f"Generated certificate for {refreshed.get('order')} {refreshed.get('edition')}."
+            )
+            return
+        if not config.get("configured"):
+            st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before generating certificates."
+            return
         if not row.get("has_saved_allocation"):
             raise ValueError("Refresh Orders to allocate this row before generating a certificate.")
         existing = _existing_uploaded_certificate(row, config)
@@ -884,37 +975,43 @@ def _generate_certificate_for_row(row):
 
 
 def _upload_certificate_for_row(row):
+    backend = _configured_supabase_backend()
     config = shopify_sync.get_config()
     if not config.get("configured"):
         st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before uploading certificates."
         return
     row = _normalise_row(row)
     try:
-        if not row.get("has_saved_allocation"):
-            raise ValueError("Refresh Orders to allocate this row before uploading a certificate.")
+        if not row.get("edition_number"):
+            raise ValueError("This row still needs an edition number before a certificate can be uploaded.")
+        if not row.get("edition_order_id"):
+            raise ValueError("This row is missing its Supabase edition record. Ask a developer to repair missing editions first.")
         existing = _existing_uploaded_certificate(row, config)
         if existing:
             record = {**certificate_engine.certificate_record_from_order_row(row), **existing, "status": "Uploaded"}
             _update_row_from_certificate(row, record)
             st.session_state[NOTICE_KEY] = f"Certificate already uploaded for {row.get('order')} {row.get('edition')}."
             return
+        if backend and not str(row.get("certificate_pdf_path") or "").strip():
+            backend.generate_certificate_for_edition_order(row.get("edition_order_id"))
+            _reload_orders_from_source()
+            row = _current_row_for(row)
         record = certificate_engine.certificate_record_from_order_row(row)
         record["local_pdf_path"] = row.get("certificate_pdf_path") or record.get("local_pdf_path") or ""
         if not record.get("local_pdf_path"):
             record = certificate_engine.generate_local_certificate_for_record(record)
         uploaded = certificate_engine.upload_generated_certificate_record(record, config=config)
         saved = certificate_engine.save_certificate_record_to_order(uploaded, config=config)
-        saved_record = {**uploaded, **(saved.get("record") or {}), "status": "Uploaded"}
-        _update_row_from_certificate(row, saved_record)
+        _reload_orders_from_source()
         if saved.get("metafields_synced") is False:
             st.session_state[NOTICE_KEY] = (
                 f"Uploaded certificate for {row.get('order')} {row.get('edition')}, "
-                "but the order metafield push needs retry."
+                "but the Shopify mirror failed and needs retry."
             )
         else:
             st.session_state[NOTICE_KEY] = f"Uploaded certificate for {row.get('order')} {row.get('edition')}."
     except Exception as error:
-        _update_matching_row(row, {"certificate_status": "Error", "certificate_error": str(error), "certificate": "Error"})
+        _update_matching_row(row, {"certificate_status": "Upload failed", "certificate_error": str(error), "certificate": "Upload failed"})
         st.session_state[NOTICE_KEY] = f"Certificate upload failed: {error}"
 
 
@@ -1230,12 +1327,13 @@ def _display_rows(rows):
 def _column_config():
     return {
         "order": st.column_config.TextColumn("Order", width="medium"),
-        "date": st.column_config.TextColumn("Date", width="small"),
+        "edition": st.column_config.TextColumn("Edition", width="small"),
         "customer": st.column_config.TextColumn("Customer", width="medium"),
         "product": st.column_config.TextColumn("Product", width="large"),
         "variant": st.column_config.TextColumn("Variant", width="medium"),
-        "edition": st.column_config.TextColumn("Edition", width="small"),
         "shipping": st.column_config.TextColumn("Shipping", width="medium"),
+        "date": st.column_config.TextColumn("Date", width="small"),
+        "certificate": st.column_config.TextColumn("Certificate", width="small"),
         "prodigi": st.column_config.TextColumn("Prodigi", width="small"),
     }
 
@@ -1244,10 +1342,13 @@ def _render_top_actions(rows):
     selected_rows = _selected_rows_from_state(rows)
     selected_count = len(selected_rows)
     backend = _configured_supabase_backend()
-    admin_url = _selected_admin_url(selected_rows)
-    action_cols = st.columns([1.35, 1.1, 1.1, 2.45])
+    open_url = _first_pdf_url(selected_rows)
+    can_dispatch = selected_count == 1 and _can_start_prodigi(selected_rows[0]) if selected_rows else False
+    can_generate = selected_count > 0 and all(_normalise_row(row).get("edition_number") for row in selected_rows)
+    can_upload = can_generate
+    action_cols = st.columns([1.2, 1.15, 1.4, 1.15, 1.35, 1.35])
     if action_cols[0].button(
-        "Refresh Latest Paid Orders",
+        "Refresh Orders",
         type="primary",
         use_container_width=True,
         disabled=not backend,
@@ -1256,19 +1357,37 @@ def _render_top_actions(rows):
             _refresh_orders(latest_paid_only=True, max_orders=50)
         st.rerun()
     if action_cols[1].button(
+        "Generate Certificate",
+        use_container_width=True,
+        disabled=not can_generate,
+    ):
+        with st.spinner("Generating selected certificates..."):
+            _generate_selected_certificates(selected_rows)
+        st.rerun()
+    if action_cols[2].button(
+        "Generate + Upload Certificate",
+        use_container_width=True,
+        disabled=not can_upload,
+    ):
+        with st.spinner("Generating and uploading selected certificates..."):
+            _generate_upload_selected_certificates(selected_rows)
+        st.rerun()
+    if open_url:
+        action_cols[3].link_button("Open Certificate", open_url, use_container_width=True)
+    else:
+        action_cols[3].button("Open Certificate", use_container_width=True, disabled=True)
+    if action_cols[4].button(
         "Start Prodigi Dispatch",
         use_container_width=True,
-        disabled=selected_count != 1,
+        disabled=not can_dispatch,
     ):
         _open_prodigi_for_row(selected_rows[0])
         st.rerun()
-    if admin_url:
-        action_cols[2].link_button("Open Shopify Admin", admin_url, use_container_width=True)
-    else:
-        action_cols[2].button("Open Shopify Admin", use_container_width=True, disabled=True)
-    action_cols[3].caption(f"{selected_count} row(s) selected.")
+    action_cols[5].caption(f"{selected_count} selected")
     if not backend:
-        st.caption("Supabase ledger is not available in this runtime, so Shopify refresh is disabled.")
+        st.caption("Order refresh is unavailable in this runtime because the ledger connection is missing.")
+    elif selected_rows and not can_generate:
+        st.caption("Certificate actions stay locked until every selected row has an assigned edition number.")
 
 
 def _render_admin_result(title, result):
@@ -1289,6 +1408,9 @@ def _render_admin_result(title, result):
         ("Variant rows filled", "variant_rows_filled"),
         ("Shipping rows filled", "shipping_rows_filled"),
         ("Email rows filled", "email_rows_filled"),
+        ("Candidate rows", "candidate_rows"),
+        ("Candidate orders", "candidate_orders"),
+        ("Orders reprocessed", "orders_reprocessed"),
         ("Query", "query"),
     ):
         if key in result:
@@ -1355,7 +1477,7 @@ def _render_admin_panel(rows):
         return
     backend = _configured_supabase_backend()
     with st.expander("Admin Order Sync + Diagnostics", expanded=False):
-        admin_cols = st.columns([1.15, 1.15, 1.15, 1.2])
+        admin_cols = st.columns([1.05, 1.05, 1.05, 1.05, 1, 1])
         if admin_cols[0].button("Preview Latest Paid Fetch", use_container_width=True, disabled=not backend):
             with st.spinner("Previewing latest paid Shopify orders..."):
                 _preview_latest_paid_orders(limit=50)
@@ -1372,6 +1494,14 @@ def _render_admin_panel(rows):
             with st.spinner("Previewing missing Shopify details..."):
                 _backfill_missing_order_details(dry_run=True, limit=100)
             st.rerun()
+        if admin_cols[4].button("Preview Missing Editions", use_container_width=True, disabled=not backend):
+            with st.spinner("Previewing missing edition repairs..."):
+                _repair_missing_editions(dry_run=True, limit=100)
+            st.rerun()
+        if admin_cols[5].button("Assign Missing Editions", use_container_width=True, disabled=not backend):
+            with st.spinner("Assigning missing editions..."):
+                _repair_missing_editions(dry_run=False, limit=100)
+            st.rerun()
 
         preview = st.session_state.get(LATEST_FETCH_PREVIEW_KEY) or {}
         if preview:
@@ -1381,6 +1511,12 @@ def _render_admin_panel(rows):
                 st.dataframe(preview_rows, hide_index=True, use_container_width=True)
         _render_admin_result("Latest sync summary", st.session_state.get(SYNC_RESULT_KEY) or {})
         _render_admin_result("Latest backfill summary", st.session_state.get(BACKFILL_RESULT_KEY) or {})
+        repair = st.session_state.get(REPAIR_RESULT_KEY) or {}
+        if repair:
+            _render_admin_result("Missing-edition repair summary", repair)
+            preview_rows = repair.get("preview_rows") or []
+            if preview_rows:
+                st.dataframe(preview_rows, hide_index=True, use_container_width=True)
         st.markdown("**Supabase diagnostics**")
         _render_ledger_diagnostics()
         st.markdown("**Orders read completeness diagnostics**")
@@ -1412,22 +1548,14 @@ def render_page():
     _load_snapshot_once()
     rows = _apply_latest_product_numbers(st.session_state.get(ROWS_KEY, []))
     st.session_state[ROWS_KEY] = rows
-    meta = st.session_state.get(META_KEY) or {}
-    ledger_status = _ledger_status()
-    source_label = "Supabase ledger" if meta.get("source") == "supabase" and ledger_status.get("connected") else "Local fallback cache"
 
     st.title("Orders")
-    st.caption("Supabase ledger-backed orders for fulfilment and Prodigi dispatch.")
-    st.caption("Supabase connected" if ledger_status.get("connected") else "Supabase connection failed")
-    st.caption(f"Source: {source_label}")
-    st.caption(f"Last synced: {_format_time(meta.get('last_synced') or meta.get('last_refreshed'))}")
+    st.caption("Select an order, generate the certificate, then send to Prodigi.")
 
     notice = st.session_state.get(NOTICE_KEY)
     if notice:
         st.success(notice)
         st.session_state[NOTICE_KEY] = ""
-
-    _render_top_actions(rows)
 
     search_cols = st.columns([3.2, 1])
     search_text = search_cols[0].text_input(
@@ -1435,21 +1563,22 @@ def render_page():
         key=SEARCH_KEY,
         placeholder="Order, customer, product, variant, edition",
     )
-    show_all = search_cols[1].checkbox("Show all rows", key=SHOW_ALL_KEY)
-
-    filtered_rows = _filter_rows(rows, search_text)
-    visible_limit = len(filtered_rows) if show_all else DEFAULT_VISIBLE_ROW_LIMIT
-    visible_rows = filtered_rows[:visible_limit]
+    search_cols[1].caption("Latest 50")
 
     if not rows:
         st.info("No saved orders are available in the operational ledger yet.")
         _render_admin_panel(rows)
         return
 
+    filtered_rows = _filter_rows(rows, search_text)
+    visible_rows = filtered_rows[:DEFAULT_VISIBLE_ROW_LIMIT]
+
+    _render_top_actions(visible_rows)
+
     if len(filtered_rows) > len(visible_rows):
-        st.caption(f"Showing latest {len(visible_rows)} of {len(filtered_rows)} matching ledger rows.")
+        st.caption(f"Showing latest {len(visible_rows)} of {len(filtered_rows)} matching orders.")
     else:
-        st.caption(f"{len(visible_rows)} ledger row(s) shown.")
+        st.caption(f"{len(visible_rows)} order row(s) shown.")
 
     _render_orders_table(visible_rows)
     _render_admin_panel(rows)

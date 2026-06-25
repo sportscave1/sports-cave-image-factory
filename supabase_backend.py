@@ -42,6 +42,7 @@ DEFAULT_PSD_MASTER_FOLDER_SETTING = {
 }
 HISTORICAL_ORDER_STATUS = "Historical Order"
 REPAIRABLE_ORDER_LINE_STATUSES = ("Error", "Product Not Found", "Needs Edition Setup")
+MISSING_EDITION_REPAIRABLE_STATUSES = REPAIRABLE_ORDER_LINE_STATUSES + ("Needs Edition", "Historical Order")
 HISTORICAL_ORDER_NOTE = (
     "Paid before edition tracking started. Run Historical Order Backfill if this order should receive editions."
 )
@@ -7226,6 +7227,84 @@ def reprocess_cached_problem_orders(
         "historical_lines_marked": historical_lines_marked,
         "skipped_missing_snapshot": skipped_missing_snapshot,
         "errors": errors[:10],
+    }
+
+
+def _missing_edition_candidate_rows(limit=100, statuses=None):
+    ensure_schema()
+    selected_statuses = tuple(statuses or MISSING_EDITION_REPAIRABLE_STATUSES)
+    if not selected_statuses:
+        return []
+    placeholders = ", ".join(["%s"] * len(selected_statuses))
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    o.shopify_order_id,
+                    o.order_name,
+                    COALESCE(o.processed_at, o.created_at, o.synced_at) AS order_date,
+                    li.shopify_line_item_id,
+                    li.shopify_handle,
+                    li.shopify_product_id,
+                    li.product_title,
+                    li.variant_title,
+                    li.quantity,
+                    li.assignment_status,
+                    li.last_error
+                FROM shopify_order_lines li
+                JOIN shopify_orders o ON o.shopify_order_id = li.shopify_order_id
+                LEFT JOIN edition_orders eo ON eo.shopify_line_item_id = li.shopify_line_item_id
+                WHERE eo.id IS NULL
+                  AND COALESCE(li.assignment_status, '') IN ({placeholders})
+                ORDER BY COALESCE(o.processed_at, o.created_at, o.synced_at) DESC NULLS LAST,
+                         o.order_name DESC,
+                         li.shopify_line_item_id ASC
+                LIMIT %s
+                """,
+                (*selected_statuses, max(int(limit or 100), 1)),
+            )
+            return cur.fetchall()
+
+
+def preview_missing_edition_repairs(limit=100, statuses=None):
+    candidate_rows = _missing_edition_candidate_rows(limit=limit, statuses=statuses)
+    return {
+        "mode": "dry_run",
+        "candidate_rows": len(candidate_rows),
+        "candidate_orders": len({str(row.get("shopify_order_id") or "") for row in candidate_rows}),
+        "preview_rows": [
+            {
+                "order_name": str(row.get("order_name") or ""),
+                "date": str(row.get("order_date") or "")[:10],
+                "product_title": str(row.get("product_title") or ""),
+                "variant_title": str(row.get("variant_title") or ""),
+                "quantity": int(row.get("quantity") or 1),
+                "assignment_status": str(row.get("assignment_status") or ""),
+                "last_error": str(row.get("last_error") or ""),
+            }
+            for row in candidate_rows[:10]
+        ],
+        "errors": [],
+    }
+
+
+def repair_missing_edition_orders(limit=100, statuses=None):
+    result = reprocess_cached_problem_orders(
+        limit=limit,
+        statuses=statuses or MISSING_EDITION_REPAIRABLE_STATUSES,
+        generate_certificates=False,
+        sync_product_metafields=False,
+    )
+    return {
+        "mode": "apply",
+        "candidate_rows": len(_missing_edition_candidate_rows(limit=limit, statuses=statuses)),
+        "orders_reprocessed": int(result.get("orders_reprocessed") or 0),
+        "edition_allocations_created": int(result.get("assignments_created") or 0),
+        "existing_allocations_preserved": int(result.get("existing_assignments_skipped") or 0),
+        "historical_lines_marked": int(result.get("historical_lines_marked") or 0),
+        "skipped_missing_snapshot": int(result.get("skipped_missing_snapshot") or 0),
+        "errors": result.get("errors") or [],
     }
 
 

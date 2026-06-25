@@ -1592,15 +1592,19 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
                 rows.append(
                     {
                         **base,
+                        "edition_order_id": str(assignment.get("edition_order_id") or ""),
                         "edition_number": edition_number,
                         "edition": f"#{edition_number:03d}",
                         "edition_total": _positive_int(assignment.get("edition_total"), 100),
                         "has_saved_allocation": True,
                         "edition_offset": max(allocation_index - 1, 0),
+                        "allocation_index": allocation_index,
+                        "assignment_status": str(assignment.get("assignment_status") or "Assigned"),
                         "certificate_id": str(assignment.get("certificate_id") or ""),
                         "certificate_status": _certificate_status_from_assignment(assignment),
                         "certificate_pdf_path": certificate_path,
                         "certificate_pdf_url": certificate_url,
+                        "shopify_file_url": certificate_url,
                         "certificate_shopify_file_id": str(assignment.get("shopify_file_id") or ""),
                         "certificate_generated_at": _safe_iso(assignment.get("generated_at") or assignment.get("assigned_at")),
                         "certificate_preview_path": str(assignment.get("certificate_preview_r2_key") or ""),
@@ -1626,11 +1630,14 @@ def _snapshot_rows_from_supabase_order_rows(raw_rows):
             rows.append(
                 {
                     **base,
+                    "edition_order_id": "",
                     "edition_number": None,
                     "edition": blocker,
                     "edition_total": 100,
                     "has_saved_allocation": False,
                     "edition_offset": index,
+                    "allocation_index": index + 1,
+                    "assignment_status": status or "Needs Edition",
                     "certificate_status": blocker,
                     "certificate_error": str(row.get("last_error") or ""),
                 }

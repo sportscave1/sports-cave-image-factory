@@ -916,20 +916,9 @@ def render_page():
     originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
     rows_to_save = _rows_to_save(rows, originals)
     meta = st.session_state.get(META_KEY) or {}
-    ledger_status = _ledger_status()
 
     st.title("Edition Ops")
-    st.caption("Use this page to manage limited edition numbers from the Supabase ledger.")
-    st.caption("Supabase connected" if ledger_status.get("connected") else "Supabase connection failed")
-    st.caption("Source: Supabase ledger" if ledger_status.get("connected") else "Source: fallback cache")
-    if meta.get("mirror_status"):
-        st.caption(f"Shopify mirror {meta.get('mirror_status')}")
-    st.markdown(
-        "1. Refresh products when new products are added.\n"
-        "2. Import CSV and Replace Table when you have a new spreadsheet.\n"
-        "3. Edit Enabled, Edition Total, and Next Edition Number.\n"
-        "4. Export a CSV backup after major edits."
-    )
+    st.caption("Manage edition limits, next numbers, and active limited-edition products.")
     st.caption(f"Last refreshed: {_format_time(meta.get('last_refreshed_from_shopify'))}")
 
     notice = st.session_state.get(NOTICE_KEY)
@@ -941,7 +930,6 @@ def render_page():
     for warning in warnings:
         st.warning(warning)
     st.session_state[IMPORT_WARNINGS_KEY] = []
-    _render_ledger_diagnostics()
 
     action_cols = st.columns([1, 1, 1, 1])
     if action_cols[0].button("Refresh Products", type="primary", use_container_width=True, disabled=not config.get("configured")):

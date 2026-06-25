@@ -74,6 +74,8 @@ class EditionOpsUiTests(unittest.TestCase):
     def test_developer_keeps_edition_ops_metafield_setup(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
 
+        self.assertIn('"Edition Ops Diagnostics"', source)
+        self.assertIn("Load Edition Ops Diagnostics", source)
         self.assertIn('"Shopify Limited Edition Setup"', source)
         self.assertIn("Check Product Metafield Definitions", source)
         self.assertIn("Create Missing Product Metafield Definitions", source)
@@ -911,12 +913,13 @@ class EditionOpsUiTests(unittest.TestCase):
             orders_page.VISIBLE_COLUMNS,
             (
                 "order",
-                "date",
+                "edition",
                 "customer",
                 "product",
                 "variant",
-                "edition",
                 "shipping",
+                "date",
+                "certificate",
                 "prodigi",
             ),
         )
@@ -926,17 +929,24 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("selection_mode=\"multi-row\"", source)
         self.assertIn("DEFAULT_VISIBLE_ROW_LIMIT = 50", source)
         self.assertIn("Search orders", render_page)
-        self.assertIn("Show all rows", render_page)
-        self.assertIn("Refresh Latest Paid Orders", top_actions)
+        self.assertNotIn("Show all rows", render_page)
+        self.assertIn("Refresh Orders", top_actions)
+        self.assertIn("Generate Certificate", top_actions)
+        self.assertIn("Generate + Upload Certificate", top_actions)
+        self.assertIn("Open Certificate", top_actions)
         self.assertIn("Start Prodigi Dispatch", top_actions)
-        self.assertIn("Open Shopify Admin", top_actions)
+        self.assertNotIn("Open Shopify Admin", top_actions)
         self.assertIn("Preview Latest Paid Fetch", admin_panel)
         self.assertIn("Apply Latest Paid Sync", admin_panel)
         self.assertIn("Backfill Missing Shopify Details", admin_panel)
+        self.assertIn("Preview Missing Editions", admin_panel)
+        self.assertIn("Assign Missing Editions", admin_panel)
         self.assertNotIn("customer_email", orders_page.VISIBLE_COLUMNS)
         self.assertNotIn("edition_total", orders_page.VISIBLE_COLUMNS)
-        self.assertNotIn("Generate Selected Certificates", top_actions)
-        self.assertNotIn("Upload Selected to Shopify", top_actions)
+        self.assertIn("Select an order, generate the certificate, then send to Prodigi.", render_page)
+        self.assertNotIn("Supabase ledger-backed orders for fulfilment and Prodigi dispatch.", render_page)
+        self.assertNotIn("Source: Supabase ledger", render_page)
+        self.assertNotIn("Last synced:", render_page)
         return
 
         self.assertEqual(
@@ -1014,42 +1024,71 @@ class EditionOpsUiTests(unittest.TestCase):
         top_actions = inspect.getsource(orders_page._render_top_actions)
 
         for label in (
-            "Refresh Latest Paid Orders",
+            "Refresh Orders",
+            "Generate Certificate",
+            "Generate + Upload Certificate",
+            "Open Certificate",
             "Start Prodigi Dispatch",
-            "Open Shopify Admin",
         ):
             self.assertIn(label, top_actions)
 
         for label in (
-            "Sync New Orders",
-            "Backfill Missing Details",
-            "Generate Selected Certificates",
-            "Upload Selected to Shopify",
-            "Generate + Upload Selected",
-            "Open Selected PDF",
+            "Open Shopify Admin",
+            "Show all rows",
         ):
             self.assertNotIn(label, top_actions)
         return
 
-        for label in (
-            "Sync New Orders",
-            "Backfill Missing Details",
-            "Generate Selected Certificates",
-            "Upload Selected to Shopify",
-            "Generate + Upload Selected",
-            "Open Selected PDF",
-        ):
-            self.assertIn(label, top_actions)
+    def test_orders_normalise_row_uses_clean_va_status_labels(self):
+        row = orders_page._normalise_row(
+            {
+                "order": "#SC2848",
+                "customer": "Nathan Baker",
+                "product": "GOAT Debate Wall Art",
+                "variant": "",
+                "edition": "Historical backfill",
+                "edition_number": "",
+                "shipping": "",
+                "certificate_status": "",
+                "certificate_pdf_path": "",
+                "certificate_pdf_url": "",
+                "prodigi_status": "",
+            }
+        )
 
-        for label in (
-            "Activate Live Allocation",
-            "Re-capture Product Baselines",
-            "Allocate Missing Recent Paid Orders",
-            "Historical Backfill Selected Orders",
-            "Confirm allocation repair",
-            "Confirm historical backfill",
-        ):
-            self.assertNotIn(label, top_actions)
+        self.assertEqual(row["edition"], "Needs edition")
+        self.assertEqual(row["variant"], "Missing variant")
+        self.assertEqual(row["shipping"], "Missing shipping")
+        self.assertEqual(row["certificate"], "Needs certificate")
+        self.assertEqual(row["prodigi"], "Needs certificate")
+
+        uploaded = orders_page._normalise_row(
+            {
+                "order": "#SC2843",
+                "customer": "Ashkan Zand",
+                "product": "GOAT Debate Wall Art",
+                "variant": "Black / L",
+                "edition_number": 50,
+                "edition_total": 100,
+                "certificate_pdf_url": "https://cdn.example/cert.pdf",
+            }
+        )
+        self.assertEqual(uploaded["edition"], "#050/100")
+        self.assertEqual(uploaded["certificate"], "Uploaded")
+        self.assertEqual(uploaded["prodigi"], "Ready to dispatch")
+
+    def test_edition_ops_normal_view_hides_ledger_copy(self):
+        source = (ROOT / "edition_ops.py").read_text(encoding="utf-8")
+        render_page = source[source.index("def render_page():") :]
+
+        self.assertIn('st.title("Edition Ops")', render_page)
+        self.assertIn("Manage edition limits, next numbers, and active limited-edition products.", render_page)
+        self.assertNotIn("Supabase connected", render_page)
+        self.assertNotIn("Source: Supabase ledger", render_page)
+        self.assertNotIn("Refresh products when new products are added.", render_page)
+        self.assertNotIn("Import CSV and Replace Table when you have a new spreadsheet.", render_page)
+        self.assertNotIn("Edit Enabled, Edition Total, and Next Edition Number.", render_page)
+        self.assertNotIn("Export a CSV backup after major edits.", render_page)
 
     def test_orders_page_open_renders_snapshot_without_shopify_or_allocation_work(self):
         class FakeContainer:
@@ -1300,7 +1339,7 @@ class EditionOpsUiTests(unittest.TestCase):
             orders_page.render_page()
 
         self.assertEqual(fake_st.rendered_rows[0]["order"], "#SC2843")
-        self.assertEqual(fake_st.rendered_rows[0]["edition"], "#050/100")
+        self.assertEqual(fake_st.rendered_rows[0]["edition"], "#050")
 
     def test_orders_missing_ledger_fields_use_placeholder_and_count(self):
         row = orders_page._normalise_row(
@@ -1322,7 +1361,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(row["shipping"], "Missing shipping")
         self.assertEqual(row["product"], "Missing from ledger")
         self.assertEqual(row["variant"], "Missing variant")
-        self.assertEqual(row["prodigi"], "Not started")
+        self.assertEqual(row["prodigi"], "Needs certificate")
         self.assertEqual(counts["missing_customer"], 1)
         self.assertEqual(counts["missing_shipping"], 1)
         self.assertEqual(counts["missing_product"], 1)
@@ -1555,8 +1594,8 @@ class EditionOpsUiTests(unittest.TestCase):
 
         rows = orders_page._rows_from_order_line(order, line_item, {"edition_next_number": 91})
 
-        self.assertEqual([row["edition"] for row in rows], ["Needs allocation", "Needs allocation"])
-        self.assertEqual([row["certificate"] for row in rows], ["Needs allocation", "Needs allocation"])
+        self.assertEqual([row["edition"] for row in rows], ["Needs edition", "Needs edition"])
+        self.assertEqual([row["certificate"] for row in rows], ["Needs certificate", "Needs certificate"])
 
     def test_orders_page_marks_unallocated_sold_out_rows_for_review(self):
         order = {

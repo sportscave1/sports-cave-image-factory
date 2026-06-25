@@ -5308,6 +5308,25 @@ def render_settings_page():
         st.write(f"**Output folder path:** `{RUNS_DIR}`")
         st.write(f"**Python working directory:** `{Path.cwd()}`")
 
+    with st.expander("Edition Ops Diagnostics", expanded=False):
+        try:
+            if _developer_section_enabled("developer-load-edition-ops-diagnostics", "Load Edition Ops Diagnostics"):
+                supabase = importlib.import_module("supabase_backend")
+                status = supabase.database_status(run_schema_check=False)
+                counts = supabase.persistence_counts() if status.get("configured") else {}
+                st.write(f"**Connection:** {'Connected' if status.get('connected') else 'Not connected'}")
+                st.write("**Source:** Supabase ledger")
+                if status.get("warning"):
+                    st.caption(status.get("warning"))
+                for label, key in (
+                    ("edition_products", "edition_products"),
+                    ("edition_orders", "edition_orders"),
+                    ("audit_logs", "audit_logs"),
+                ):
+                    st.write(f"**{label}:** {int(counts.get(key) or 0)}")
+        except Exception as error:
+            _developer_section_error("Edition Ops Diagnostics", error)
+
     with st.expander("Shopify Connection", expanded=False):
         try:
             if _developer_section_enabled("developer-load-shopify-connection", "Load Shopify Connection Tools"):
