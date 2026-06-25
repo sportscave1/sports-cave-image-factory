@@ -1683,7 +1683,7 @@ def render_supabase_dashboard_page():
     focus_columns = st.columns(3)
     focus_columns[0].info("Open Orders to sync paid orders and check edition assignments.")
     focus_columns[1].info("Open Limited Editions to confirm edition totals or import a correction CSV.")
-    focus_columns[2].info("Open Files when PSD links or production assets need attention.")
+    focus_columns[2].info("Open Fulfilment when production assets or dispatch checks need attention.")
 
 
 def render_dashboard_page():
@@ -1707,7 +1707,7 @@ def render_dashboard_page():
         ("Certificate PDFs generated", metrics["certificate_pdfs_generated"]),
         ("Products missing edition setup", metrics["shopify_missing_edition_setup"]),
         ("Products missing PSD", metrics["shopify_missing_psd"]),
-        ("Products missing Prodigi", metrics["shopify_missing_prodigi"]),
+        ("Products missing Fulfilment", metrics["shopify_missing_prodigi"]),
         ("Products needing widget sync", metrics["shopify_needs_widget_sync"]),
         ("Final editions", metrics["shopify_final_editions"]),
         ("Sold out editions", metrics["shopify_sold_out"]),
@@ -1732,7 +1732,7 @@ def render_dashboard_page():
         render_focus_list("Needs asset review", focus["assets_needing_review"], "No asset packs need review.")
         render_focus_list("Live but missing files", focus["live_missing_files"], "No live products are missing core files.")
     with focus_columns[3]:
-        render_focus_list("Missing Prodigi", focus["missing_prodigi"], "Every product has Prodigi details.")
+        render_focus_list("Missing Fulfilment", focus["missing_prodigi"], "Every product has fulfilment details.")
         render_focus_list("Missing edition limit", focus["missing_edition_limit"], "Every internal product has an edition limit.")
 
 

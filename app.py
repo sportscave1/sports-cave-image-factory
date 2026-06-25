@@ -5083,6 +5083,68 @@ def _render_developer_allocation_tools():
             _developer_action_error("Historical backfill", error)
 
     st.divider()
+    st.subheader("Known Missing Edition Repair")
+    st.caption("Admin-only repair for the seven known paid order lines that were imported before editions were assigned.")
+    known_cols = st.columns(2)
+    if known_cols[0].button(
+        "Preview Known Missing Edition Repair",
+        key="developer-preview-known-missing-edition-repair",
+        use_container_width=True,
+    ):
+        try:
+            supabase = importlib.import_module("supabase_backend")
+            st.session_state.developer_known_missing_edition_repair = supabase.preview_known_missing_edition_repair()
+        except Exception as error:
+            _developer_action_error("Preview known missing edition repair", error)
+    if known_cols[1].button(
+        "Apply Known Missing Edition Repair",
+        key="developer-apply-known-missing-edition-repair",
+        use_container_width=True,
+    ):
+        try:
+            supabase = importlib.import_module("supabase_backend")
+            result = supabase.apply_known_missing_edition_repair()
+            st.session_state.developer_known_missing_edition_repair = result
+            st.success(
+                f"Applied {result.get('applied_rows') or 0} known edition repair(s); "
+                f"skipped {result.get('skipped_rows') or 0}."
+            )
+            if result.get("errors"):
+                st.warning(f"{len(result.get('errors') or [])} repair issue(s) need review.")
+            _mark_orders_snapshot_for_reload()
+        except Exception as error:
+            _developer_action_error("Apply known missing edition repair", error)
+
+    known_result = st.session_state.get("developer_known_missing_edition_repair")
+    if known_result:
+        summary = {
+            key: known_result.get(key)
+            for key in (
+                "mode",
+                "target_rows",
+                "ready_rows",
+                "already_assigned_correct",
+                "blocked_rows",
+                "applied_rows",
+                "already_exists_consistent",
+                "skipped_rows",
+            )
+            if key in known_result
+        }
+        st.json(summary)
+        rows = known_result.get("preview_rows") or known_result.get("applied") or []
+        if rows:
+            st.dataframe(rows, hide_index=True, use_container_width=True)
+        skipped = known_result.get("skipped") or []
+        if skipped:
+            with st.expander("Skipped known repair rows", expanded=False):
+                st.dataframe(skipped, hide_index=True, use_container_width=True)
+        counters = known_result.get("counter_updates") or []
+        if counters:
+            with st.expander("Counter updates", expanded=False):
+                st.dataframe(counters, hide_index=True, use_container_width=True)
+
+    st.divider()
     st.subheader("Manual Edition Override")
     st.caption(
         "Admin-only correction for one already allocated order row. Auto-allocation remains the default."

@@ -1173,6 +1173,7 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String, $sortKey: O
       updatedAt
       processedAt
       cancelledAt
+      note
       displayFinancialStatus
       displayFulfillmentStatus
       email
@@ -1234,6 +1235,10 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String, $sortKey: O
           compareDigest
         }
       }
+      customAttributes {
+        key
+        value
+      }
       lineItems(first: 100) {
         nodes {
           id
@@ -1241,6 +1246,10 @@ query SportsCaveOrders($first: Int!, $after: String, $query: String, $sortKey: O
           quantity
           variantTitle
           sku
+          customAttributes {
+            key
+            value
+          }
           variant {
             id
             title
@@ -1273,6 +1282,7 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String, $sortKe
       updatedAt
       processedAt
       cancelledAt
+      note
       displayFinancialStatus
       displayFulfillmentStatus
       email
@@ -1334,6 +1344,10 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String, $sortKe
           compareDigest
         }
       }
+      customAttributes {
+        key
+        value
+      }
       lineItems(first: 100) {
         nodes {
           id
@@ -1341,6 +1355,10 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String, $sortKe
           quantity
           variantTitle
           sku
+          customAttributes {
+            key
+            value
+          }
           variant {
             id
             title
@@ -1369,6 +1387,7 @@ query SportsCaveOrdersByIds($ids: [ID!]!) {
       updatedAt
       processedAt
       cancelledAt
+      note
       displayFinancialStatus
       displayFulfillmentStatus
       email
@@ -1430,6 +1449,10 @@ query SportsCaveOrdersByIds($ids: [ID!]!) {
           compareDigest
         }
       }
+      customAttributes {
+        key
+        value
+      }
       lineItems(first: 100) {
         nodes {
           id
@@ -1437,6 +1460,10 @@ query SportsCaveOrdersByIds($ids: [ID!]!) {
           quantity
           variantTitle
           sku
+          customAttributes {
+            key
+            value
+          }
           variant {
             id
             title
@@ -2709,6 +2736,7 @@ def normalize_order(node, store_domain):
     for item in (node.get("lineItems") or {}).get("nodes") or []:
         product = item.get("product") or {}
         variant = item.get("variant") or {}
+        custom_attributes = item.get("customAttributes") or []
         line_items.append(
             {
                 "shopify_line_item_id": item.get("id") or "",
@@ -2719,6 +2747,8 @@ def normalize_order(node, store_domain):
                 "variant_id": variant.get("id") or "",
                 "sku": item.get("sku") or variant.get("sku") or "",
                 "quantity": int(item.get("quantity") or 1),
+                "custom_attributes": custom_attributes,
+                "properties": custom_attributes,
             }
         )
     legacy_resource_id = str(node.get("legacyResourceId") or "")
@@ -2754,6 +2784,9 @@ def normalize_order(node, store_domain):
         "total_price": str(total_price.get("amount") or ""),
         "currency": total_price.get("currencyCode") or "",
         "cancelled_at": node.get("cancelledAt") or "",
+        "note": node.get("note") or "",
+        "custom_attributes": node.get("customAttributes") or [],
+        "note_attributes": node.get("customAttributes") or [],
         "metafields": metafields,
         "line_items": line_items,
     }

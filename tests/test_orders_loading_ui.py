@@ -1010,8 +1010,11 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("Last synced:", render_page)
         self.assertNotIn("li.shopify_variant_id", list_orders)
         self.assertIn("li.raw_json->>'variant_id'", list_orders)
-        self.assertIn("_column_exists(cur, \"shopify_order_lines\", \"shopify_variant_id\")", upsert_order_lines)
+        self.assertIn("column_exists(cur, \"shopify_order_lines\", \"shopify_variant_id\")", upsert_order_lines)
         self.assertIn("variant_column", upsert_order_lines)
+        set_line_status = inspect.getsource(supabase_backend._set_order_line_status)
+        self.assertIn("column_exists(cur, \"shopify_order_lines\", \"shopify_variant_id\")", set_line_status)
+        self.assertIn("variant_update_sql", set_line_status)
         self.assertNotIn("REGEXP_REPLACE", product_lookup)
         self.assertNotIn("REPLACE(REPLACE", product_lookup)
         return
@@ -1152,6 +1155,120 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(uploaded["edition"], "#050/100")
         self.assertEqual(uploaded["certificate"], "Uploaded")
         self.assertEqual(uploaded["prodigi"], "Ready to dispatch")
+
+    def test_shopify_sync_preserves_purchase_time_edition_snapshots(self):
+        query_source = "\n".join(
+            (
+                shopify_sync.ORDERS_QUERY,
+                shopify_sync.ORDERS_SAFE_QUERY,
+                shopify_sync.ORDERS_BY_IDS_QUERY,
+            )
+        )
+        normalize_graphql = inspect.getsource(shopify_sync.normalize_order)
+        normalize_rest = inspect.getsource(supabase_backend.normalize_rest_order)
+
+        self.assertIn("customAttributes", query_source)
+        self.assertIn("note", query_source)
+        self.assertIn('"custom_attributes": custom_attributes', normalize_graphql)
+        self.assertIn('"properties": custom_attributes', normalize_graphql)
+        self.assertIn('"note_attributes": node.get("customAttributes")', normalize_graphql)
+        self.assertIn('"properties": properties', normalize_rest)
+        self.assertIn('"note_attributes": payload.get("note_attributes")', normalize_rest)
+
+    def test_promised_edition_hint_reads_order_metafield_and_line_attributes(self):
+        line_id = "gid://shopify/LineItem/555"
+        order_hint = supabase_backend.promised_edition_hint_for_order_line(
+            {
+                "metafields": [
+                    {
+                        "namespace": "sports_cave",
+                        "key": "edition_allocations",
+                        "value": json.dumps(
+                            {
+                                "line_items": {
+                                    line_id: {
+                                        "edition_numbers": [42],
+                                        "edition_total": 100,
+                                    }
+                                }
+                            }
+                        ),
+                    }
+                ]
+            },
+            {"shopify_line_item_id": line_id},
+            1,
+        )
+        self.assertEqual(order_hint["edition_number"], 42)
+        self.assertEqual(order_hint["edition_total"], 100)
+        self.assertEqual(order_hint["source"], "shopify_order_metafield")
+
+        attribute_hint = supabase_backend.promised_edition_hint_for_order_line(
+            {},
+            {
+                "shopify_line_item_id": "gid://shopify/LineItem/556",
+                "custom_attributes": [{"key": "edition_number", "value": "#043/100"}],
+            },
+            1,
+        )
+        self.assertEqual(attribute_hint["edition_number"], 43)
+        self.assertEqual(attribute_hint["edition_total"], 100)
+        self.assertEqual(attribute_hint["source"], "shopify_line_or_order_attribute")
+
+    def test_allocation_uses_promised_snapshot_before_sequential_fallback(self):
+        process_source = inspect.getsource(supabase_backend.process_paid_order)
+        allocation_source = inspect.getsource(supabase_backend.allocate_edition_for_order_line)
+
+        self.assertIn("promised_edition_hint_for_order_line(order, line_item, allocation_index)", process_source)
+        self.assertIn("promised_edition_number=promised_hint.get(\"edition_number\")", process_source)
+        self.assertIn("promised_edition_total=promised_hint.get(\"edition_total\")", process_source)
+        self.assertIn("assignment_source=promised_hint.get(\"source\")", process_source)
+        self.assertIn("promised_edition_existing_mismatch", allocation_source)
+        self.assertIn("promised_edition_conflict", allocation_source)
+        self.assertIn("target_number = _int_value(promised_edition_number, 0)", allocation_source)
+        self.assertIn("target_number = next_number", allocation_source)
+        self.assertIn("incremented_next = max(next_number, target_number + 1)", allocation_source)
+        self.assertIn("edition_order_purchase_snapshot_allocation", allocation_source)
+
+    def test_known_missing_edition_repair_targets_current_paid_rows(self):
+        targets = supabase_backend.KNOWN_MISSING_EDITION_REPAIRS
+        preview_source = inspect.getsource(supabase_backend.preview_known_missing_edition_repair)
+        apply_source = inspect.getsource(supabase_backend.apply_known_missing_edition_repair)
+        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+
+        expected = {
+            ("#SC2848", "Paul Grubb", "Legends Never Die Messi vs Ronaldo Wall Art", 42),
+            ("#SC2849", "Elle Hosking", "Greg Murphy Lap of the Gods Wall Art", 17),
+            ("#SC2849", "Elle Hosking", "Peter Brock Tribute Wall Art", 67),
+            ("#SC2850", "Daniel Brearley", "Lionel Messi The Final Crown Wall Art", 30),
+            ("#SC2851", "Scott Tasler", "Legends Never Die Messi vs Ronaldo Wall Art", 43),
+            ("#SC2852", "Marco Da Cruz", "Legends Never Die Messi vs Ronaldo Wall Art", 44),
+            ("#SC2853", "Angelo Hiotis", "Legends Never Die Messi vs Ronaldo Wall Art", 45),
+        }
+        actual = {
+            (
+                target["order_name"],
+                target["customer_name"],
+                target["product_title"],
+                target["edition_number"],
+            )
+            for target in targets
+        }
+
+        self.assertEqual(actual, expected)
+        self.assertIn("target_rows", preview_source)
+        self.assertIn("blocked_conflict", inspect.getsource(supabase_backend._known_missing_edition_repair_plan))
+        self.assertIn("allocate_edition_for_order_line", apply_source)
+        self.assertIn("promised_edition_number=target.get(\"edition_number\")", apply_source)
+        self.assertIn("assignment_source=\"known_missing_truth_20260625\"", apply_source)
+        self.assertIn("Preview Known Missing Edition Repair", app_source)
+        self.assertIn("Apply Known Missing Edition Repair", app_source)
+
+    def test_dashboard_uses_fulfilment_label_for_prodigi_readiness(self):
+        dashboard_source = inspect.getsource(os_pages.render_supabase_dashboard_page)
+
+        self.assertIn("Open Fulfilment", dashboard_source)
+        self.assertNotIn("Open Prodigi", dashboard_source)
 
     def test_edition_ops_normal_view_hides_ledger_copy(self):
         source = (ROOT / "edition_ops.py").read_text(encoding="utf-8")

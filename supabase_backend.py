@@ -73,6 +73,80 @@ EDITION_RUN_STATUSES = {
     ARCHIVED_RUN_STATUS,
     INACTIVE_RUN_STATUS,
 }
+PROMISED_EDITION_NUMBER_KEYS = {
+    "edition",
+    "edition_number",
+    "edition number",
+    "edition no",
+    "edition no.",
+    "edition_number_promised",
+    "edition number promised",
+    "promised_edition_number",
+    "promised edition number",
+    "sports_cave_edition_number",
+    "sports cave edition number",
+    "customer_promised_edition_number",
+    "customer promised edition number",
+}
+PROMISED_EDITION_TOTAL_KEYS = {
+    "edition_total",
+    "edition total",
+    "edition_limit",
+    "edition limit",
+    "sports_cave_edition_total",
+    "sports cave edition total",
+}
+KNOWN_MISSING_EDITION_REPAIRS = (
+    {
+        "order_name": "#SC2848",
+        "customer_name": "Paul Grubb",
+        "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+        "edition_number": 42,
+        "edition_total": 100,
+    },
+    {
+        "order_name": "#SC2849",
+        "customer_name": "Elle Hosking",
+        "product_title": "Greg Murphy Lap of the Gods Wall Art",
+        "edition_number": 17,
+        "edition_total": 100,
+    },
+    {
+        "order_name": "#SC2849",
+        "customer_name": "Elle Hosking",
+        "product_title": "Peter Brock Tribute Wall Art",
+        "edition_number": 67,
+        "edition_total": 100,
+    },
+    {
+        "order_name": "#SC2850",
+        "customer_name": "Daniel Brearley",
+        "product_title": "Lionel Messi The Final Crown Wall Art",
+        "edition_number": 30,
+        "edition_total": 100,
+    },
+    {
+        "order_name": "#SC2851",
+        "customer_name": "Scott Tasler",
+        "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+        "edition_number": 43,
+        "edition_total": 100,
+    },
+    {
+        "order_name": "#SC2852",
+        "customer_name": "Marco Da Cruz",
+        "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+        "edition_number": 44,
+        "edition_total": 100,
+    },
+    {
+        "order_name": "#SC2853",
+        "customer_name": "Angelo Hiotis",
+        "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+        "edition_number": 45,
+        "edition_total": 100,
+    },
+)
 
 ASSET_TYPES = (
     "google_drive_folder",
@@ -4054,6 +4128,125 @@ def _parse_edition_number(value):
     return edition_number, edition_total
 
 
+def _normalized_attribute_key(value):
+    text = str(value or "").strip().casefold()
+    text = text.replace("_", " ").replace("-", " ")
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def _attribute_pairs_from_value(value):
+    if isinstance(value, dict):
+        return list(value.items())
+    if isinstance(value, list):
+        pairs = []
+        for item in value:
+            if isinstance(item, dict):
+                key = item.get("key") or item.get("name") or item.get("attribute") or item.get("property")
+                if key is not None:
+                    pairs.append((key, item.get("value")))
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                pairs.append((item[0], item[1]))
+        return pairs
+    return []
+
+
+def _edition_hint_from_attributes(attributes):
+    edition_number = None
+    edition_total = None
+    for key, value in _attribute_pairs_from_value(attributes):
+        normalized_key = _normalized_attribute_key(key)
+        if normalized_key in PROMISED_EDITION_NUMBER_KEYS:
+            number, total = _parse_edition_number(value)
+            edition_number = edition_number or number
+            edition_total = edition_total or total
+        elif normalized_key in PROMISED_EDITION_TOTAL_KEYS:
+            _, total = _parse_edition_number(value)
+            edition_total = edition_total or total or _int_value(value, 0) or None
+    if edition_number:
+        return {"edition_number": edition_number, "edition_total": edition_total, "source": "shopify_attribute"}
+    return {}
+
+
+def _edition_hint_from_allocation(order, line_item, allocation_index):
+    try:
+        import order_allocator
+    except Exception:
+        return {}
+    payload = order_allocator.allocation_payload_from_metafields(order.get("metafields") or [])
+    line_items = payload.get("line_items") or {}
+    line_id = order_allocator.line_item_gid(line_item.get("shopify_line_item_id") or line_item.get("id") or "")
+    allocation = line_items.get(line_id) or line_items.get(str(line_item.get("shopify_line_item_id") or "")) or {}
+    if not isinstance(allocation, dict):
+        return {}
+    edition_total = _int_value(allocation.get("edition_total"), 0) or None
+    unit_allocations = allocation.get("unit_allocations")
+    if isinstance(unit_allocations, list):
+        for unit in unit_allocations:
+            if not isinstance(unit, dict):
+                continue
+            unit_index = _int_value(
+                unit.get("line_item_unit_index") or unit.get("quantity_index") or unit.get("allocation_index"),
+                0,
+            )
+            if unit_index and unit_index != int(allocation_index or 1):
+                continue
+            number, total = _parse_edition_number(
+                unit.get("edition_number") or unit.get("edition") or unit.get("edition_display")
+            )
+            if number:
+                return {
+                    "edition_number": number,
+                    "edition_total": total or edition_total,
+                    "source": "shopify_order_metafield",
+                }
+    numbers = allocation.get("edition_numbers")
+    if isinstance(numbers, list) and len(numbers) >= int(allocation_index or 1):
+        number, total = _parse_edition_number(numbers[int(allocation_index or 1) - 1])
+        if number:
+            return {
+                "edition_number": number,
+                "edition_total": total or edition_total,
+                "source": "shopify_order_metafield",
+            }
+    number, total = _parse_edition_number(
+        allocation.get("edition_number") or allocation.get("edition") or allocation.get("edition_display")
+    )
+    if number and int(allocation_index or 1) == 1:
+        return {"edition_number": number, "edition_total": total or edition_total, "source": "shopify_order_metafield"}
+    return {}
+
+
+def promised_edition_hint_for_order_line(order, line_item, allocation_index=1):
+    hint = _edition_hint_from_allocation(order, line_item, allocation_index)
+    if hint:
+        return hint
+    for source in (
+        line_item.get("custom_attributes"),
+        line_item.get("properties"),
+        line_item.get("note_attributes"),
+        line_item.get("raw_json", {}).get("custom_attributes") if isinstance(line_item.get("raw_json"), dict) else None,
+        order.get("custom_attributes"),
+        order.get("note_attributes"),
+    ):
+        hint = _edition_hint_from_attributes(source)
+        if hint:
+            hint["source"] = "shopify_line_or_order_attribute"
+            return hint
+    for source in (line_item, order):
+        if not isinstance(source, dict):
+            continue
+        for key in ("edition_number", "edition", "edition_display", "promised_edition_number", "sports_cave_edition_number"):
+            number, total = _parse_edition_number(source.get(key))
+            if number:
+                return {
+                    "edition_number": number,
+                    "edition_total": total or _int_value(source.get("edition_total"), 0) or None,
+                    "source": "shopify_raw_snapshot",
+                }
+    return {}
+
+
 def _csv_value(row, *names):
     lowered = {str(key or "").strip().lower(): value for key, value in (row or {}).items()}
     for name in names:
@@ -5080,7 +5273,7 @@ def _upsert_order(cur, order):
 
 
 def _upsert_order_lines(cur, order):
-    has_line_variant_id = _column_exists(cur, "shopify_order_lines", "shopify_variant_id")
+    has_line_variant_id = column_exists(cur, "shopify_order_lines", "shopify_variant_id")
     variant_column = ", shopify_variant_id" if has_line_variant_id else ""
     variant_value = ", %s" if has_line_variant_id else ""
     variant_update = (
@@ -5175,8 +5368,23 @@ def _set_order_line_status(
     sku="",
     last_error="",
 ):
-    cur.execute(
+    has_line_variant_id = column_exists(cur, "shopify_order_lines", "shopify_variant_id")
+    variant_update_sql = (
         """
+            shopify_variant_id=CASE
+                WHEN %s <> '' THEN %s
+                ELSE shopify_variant_id
+            END,
+        """
+        if has_line_variant_id
+        else ""
+    )
+    variant_params = (
+        str(shopify_variant_id or ""),
+        str(shopify_variant_id or ""),
+    ) if has_line_variant_id else ()
+    cur.execute(
+        f"""
         UPDATE shopify_order_lines
         SET assignment_status=%s,
             last_error=%s,
@@ -5184,10 +5392,7 @@ def _set_order_line_status(
                 WHEN %s <> '' THEN %s
                 ELSE shopify_product_id
             END,
-            shopify_variant_id=CASE
-                WHEN %s <> '' THEN %s
-                ELSE shopify_variant_id
-            END,
+            {variant_update_sql}
             shopify_handle=CASE
                 WHEN %s <> '' THEN %s
                 ELSE shopify_handle
@@ -5213,8 +5418,7 @@ def _set_order_line_status(
             str(last_error or ""),
             str(shopify_product_id or ""),
             str(shopify_product_id or ""),
-            str(shopify_variant_id or ""),
-            str(shopify_variant_id or ""),
+            *variant_params,
             str(shopify_handle or ""),
             str(shopify_handle or ""),
             str(product_title or ""),
@@ -5988,6 +6192,9 @@ def allocate_edition_for_order_line(
     customer_name="",
     customer_email="",
     allocation_status="assigned",
+    promised_edition_number=None,
+    promised_edition_total=None,
+    assignment_source="supabase_sequential_allocation",
 ):
     ensure_schema()
     if not shopify_handle:
@@ -6013,6 +6220,34 @@ def allocate_edition_for_order_line(
                 )
                 existing = cur.fetchone()
                 if existing:
+                    target_existing_number = _int_value(promised_edition_number, 0)
+                    existing_number = _int_value(existing.get("edition_number"), 0)
+                    if target_existing_number and existing_number and existing_number != target_existing_number:
+                        message = (
+                            f"Existing edition #{existing_number} for {shopify_order_name or shopify_order_id} "
+                            f"does not match promised edition #{target_existing_number}."
+                        )
+                        cur.execute(
+                            """
+                            INSERT INTO app_errors(error_type, message, context)
+                            VALUES ('promised_edition_existing_mismatch', %s, %s::jsonb)
+                            """,
+                            (
+                                message,
+                                json_dumps(
+                                    {
+                                        "shopify_order_id": shopify_order_id,
+                                        "shopify_line_item_id": shopify_line_item_id,
+                                        "allocation_index": allocation_index,
+                                        "shopify_handle": shopify_handle,
+                                        "existing_edition_number": existing_number,
+                                        "promised_edition_number": target_existing_number,
+                                    }
+                                ),
+                            ),
+                        )
+                        conn.commit()
+                        return {"created": False, "assignment": None, "sold_out": False, "error": message}
                     if customer_name or customer_email:
                         cur.execute(
                             """
@@ -6228,6 +6463,87 @@ def allocate_edition_for_order_line(
                     conn.commit()
                     return {"created": False, "assignment": None, "sold_out": True, "error": message}
 
+                target_number = _int_value(promised_edition_number, 0)
+                if target_number:
+                    if target_number < 1 or target_number > edition_total:
+                        message = (
+                            f"Promised edition #{target_number}/{edition_total} is outside the edition range "
+                            f"for {shopify_handle}."
+                        )
+                        cur.execute(
+                            """
+                            INSERT INTO app_errors(error_type, message, context)
+                            VALUES ('promised_edition_out_of_range', %s, %s::jsonb)
+                            """,
+                            (
+                                message,
+                                json_dumps(
+                                    {
+                                        "shopify_order_id": shopify_order_id,
+                                        "shopify_line_item_id": shopify_line_item_id,
+                                        "allocation_index": allocation_index,
+                                        "shopify_handle": shopify_handle,
+                                        "edition_number": target_number,
+                                        "edition_total": edition_total,
+                                    }
+                                ),
+                            ),
+                        )
+                        conn.commit()
+                        return {"created": False, "assignment": None, "sold_out": False, "error": message}
+                    cur.execute(
+                        """
+                        SELECT id, shopify_order_id, shopify_order_name, shopify_line_item_id,
+                               allocation_index, product_title, shopify_handle, edition_number
+                        FROM edition_orders
+                        WHERE edition_number=%s
+                          AND COALESCE(shopify_handle, product_handle, '')=%s
+                          AND NOT (
+                              shopify_order_id=%s
+                              AND shopify_line_item_id=%s
+                              AND COALESCE(allocation_index, 1)=%s
+                          )
+                        LIMIT 1
+                        """,
+                        (
+                            target_number,
+                            shopify_handle,
+                            shopify_order_id,
+                            shopify_line_item_id,
+                            allocation_index,
+                        ),
+                    )
+                    conflict = cur.fetchone()
+                    if conflict:
+                        message = (
+                            f"Promised edition conflict for {shopify_handle} "
+                            f"#{target_number}/{edition_total}; already used by "
+                            f"{conflict.get('shopify_order_name') or conflict.get('shopify_order_id')}."
+                        )
+                        cur.execute(
+                            """
+                            INSERT INTO app_errors(error_type, message, context)
+                            VALUES ('promised_edition_conflict', %s, %s::jsonb)
+                            """,
+                            (
+                                message,
+                                json_dumps(
+                                    {
+                                        "shopify_order_id": shopify_order_id,
+                                        "shopify_line_item_id": shopify_line_item_id,
+                                        "allocation_index": allocation_index,
+                                        "shopify_handle": shopify_handle,
+                                        "edition_number": target_number,
+                                        "conflict": conflict,
+                                    }
+                                ),
+                            ),
+                        )
+                        conn.commit()
+                        return {"created": False, "assignment": None, "sold_out": False, "error": message}
+                else:
+                    target_number = next_number
+
                 cur.execute(
                     """
                     INSERT INTO edition_orders(
@@ -6235,10 +6551,10 @@ def allocate_edition_for_order_line(
                         shopify_handle, product_title, edition_run_id, edition_name, variant_title, sku,
                         customer_name, customer_email, shopify_customer_name, shopify_customer_email,
                         edition_number, edition_total, allocation_index, quantity,
-                        assigned_at, certificate_status, status, updated_at
+                        assigned_at, certificate_status, status, source, updated_at
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1,
-                            now(), 'Certificate Missing', %s, now())
+                            now(), 'Certificate Missing', %s, %s, now())
                     ON CONFLICT DO NOTHING
                     RETURNING id, shopify_order_id, shopify_line_item_id, shopify_product_id,
                               shopify_handle, product_title, edition_run_id, edition_name, variant_title, sku, customer_name,
@@ -6260,10 +6576,11 @@ def allocate_edition_for_order_line(
                         customer_email,
                         customer_name,
                         customer_email,
-                        next_number,
-                        edition_total,
+                        target_number,
+                        _int_value(promised_edition_total, 0) or edition_total,
                         allocation_index,
                         allocation_status or "assigned",
+                        assignment_source or ("shopify_purchase_snapshot" if promised_edition_number else "supabase_sequential_allocation"),
                     ),
                 )
                 inserted = cur.fetchone()
@@ -6290,7 +6607,7 @@ def allocate_edition_for_order_line(
                         }
                     message = (
                         f"Edition allocation conflict for {shopify_handle} "
-                        f"#{next_number}/{edition_total}."
+                        f"#{target_number}/{edition_total}."
                     )
                     cur.execute(
                         """
@@ -6305,7 +6622,7 @@ def allocate_edition_for_order_line(
                                     "shopify_line_item_id": shopify_line_item_id,
                                     "allocation_index": allocation_index,
                                     "shopify_handle": shopify_handle,
-                                    "edition_number": next_number,
+                                    "edition_number": target_number,
                                 }
                             ),
                         ),
@@ -6313,7 +6630,8 @@ def allocate_edition_for_order_line(
                     conn.commit()
                     return {"created": False, "assignment": None, "sold_out": False, "error": message}
 
-                incremented_next = next_number + 1
+                incremented_next = max(next_number, target_number + 1)
+                last_assigned_for_counter = max(incremented_next - 1, target_number)
                 cur.execute(
                     """
                     UPDATE edition_runs
@@ -6343,8 +6661,8 @@ def allocate_edition_for_order_line(
                     (
                         incremented_next,
                         edition_name,
-                        next_number,
-                        max(edition_total - next_number, 0),
+                        last_assigned_for_counter,
+                        max(edition_total - last_assigned_for_counter, 0),
                         incremented_next > edition_total,
                         incremented_next > edition_total,
                         shopify_handle,
@@ -6353,7 +6671,7 @@ def allocate_edition_for_order_line(
                 inserted["order_name"] = shopify_order_name
                 _insert_audit_log(
                     cur,
-                    event_type="edition_order_auto_allocation",
+                    event_type="edition_order_purchase_snapshot_allocation" if promised_edition_number else "edition_order_auto_allocation",
                     entity_type="edition_order",
                     entity_id=str(inserted.get("id") or ""),
                     shopify_order_id=shopify_order_id,
@@ -6361,14 +6679,18 @@ def allocate_edition_for_order_line(
                     shopify_handle=shopify_handle,
                     old_value={},
                     new_value={
-                        "edition_number": next_number,
+                        "edition_number": target_number,
                         "edition_total": edition_total,
                         "allocation_index": allocation_index,
                         "shopify_order_name": shopify_order_name,
                         "variant_title": variant_title or "",
                         "sku": sku or "",
                     },
-                    reason="Auto allocation during Shopify order sync.",
+                    reason=(
+                        "Purchase-time Shopify edition snapshot applied during order sync."
+                        if promised_edition_number
+                        else "Auto allocation during Shopify order sync."
+                    ),
                     actor="sports_cave_os_sync",
                     source="supabase_ledger",
                 )
@@ -6515,6 +6837,7 @@ def process_paid_order(
         line_errors = []
 
         for allocation_index in range(1, quantity + 1):
+            promised_hint = promised_edition_hint_for_order_line(order, line_item, allocation_index)
             result = allocate_edition_for_order_line(
                 shopify_order_id=order.get("shopify_order_id"),
                 shopify_order_name=order.get("order_name"),
@@ -6528,6 +6851,9 @@ def process_paid_order(
                 customer_name=order_customer_name or order_customer_email,
                 customer_email=order_customer_email,
                 allocation_status=allocation_status,
+                promised_edition_number=promised_hint.get("edition_number"),
+                promised_edition_total=promised_hint.get("edition_total"),
+                assignment_source=promised_hint.get("source") or "supabase_sequential_allocation",
             )
             if result.get("error"):
                 line_errors.append(result["error"])
@@ -7192,15 +7518,22 @@ def normalize_rest_order(payload):
     line_items = []
     for item in payload.get("line_items") or []:
         product_id = item.get("product_id")
+        variant_id = item.get("variant_id")
+        properties = item.get("properties") or []
         line_items.append(
             {
                 "shopify_line_item_id": str(item.get("id") or ""),
                 "shopify_product_id": _shopify_gid("Product", product_id) if product_id else "",
+                "shopify_variant_id": _shopify_gid("ProductVariant", variant_id) if variant_id else "",
+                "variant_id": _shopify_gid("ProductVariant", variant_id) if variant_id else "",
                 "product_title": item.get("title") or item.get("name") or "",
                 "product_handle": "",
                 "variant_title": item.get("variant_title") or item.get("variant") or "",
                 "sku": item.get("sku") or "",
                 "quantity": int(item.get("quantity") or 1),
+                "custom_attributes": properties,
+                "properties": properties,
+                "note_attributes": properties,
             }
         )
     return {
@@ -7223,6 +7556,9 @@ def normalize_rest_order(payload):
         "remote_updated_at": payload.get("updated_at") or "",
         "processed_at": payload.get("processed_at") or "",
         "cancelled_at": payload.get("cancelled_at") or "",
+        "note": payload.get("note") or "",
+        "custom_attributes": payload.get("note_attributes") or [],
+        "note_attributes": payload.get("note_attributes") or [],
         "line_items": line_items,
         "raw_payload": payload,
         "customer_raw": customer,
@@ -7457,6 +7793,307 @@ def repair_missing_edition_orders(limit=100, statuses=None):
         "historical_lines_marked": int(result.get("historical_lines_marked") or 0),
         "skipped_missing_snapshot": int(result.get("skipped_missing_snapshot") or 0),
         "errors": result.get("errors") or [],
+    }
+
+
+def _known_repair_customer_key(value):
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+
+def _known_repair_order_key(value):
+    return str(value or "").strip().casefold()
+
+
+def _known_repair_target_key(target):
+    return (
+        _known_repair_order_key(target.get("order_name")),
+        _known_repair_customer_key(target.get("customer_name")),
+        _normalize_product_title_key(target.get("product_title")),
+    )
+
+
+def _known_repair_fetch_candidate_rows(cur):
+    order_names = sorted({target["order_name"] for target in KNOWN_MISSING_EDITION_REPAIRS})
+    placeholders = ", ".join(["%s"] * len(order_names))
+    cur.execute(
+        f"""
+        SELECT
+            o.shopify_order_id,
+            o.order_name,
+            COALESCE(o.processed_at, o.created_at, o.synced_at) AS order_date,
+            COALESCE(o.customer_name, '') AS customer_name,
+            COALESCE(o.customer_email, '') AS customer_email,
+            li.shopify_line_item_id,
+            li.shopify_product_id,
+            li.shopify_handle,
+            li.product_title,
+            li.variant_title,
+            li.sku,
+            li.quantity,
+            li.assignment_status,
+            li.last_error,
+            li.raw_json,
+            eo.id AS edition_order_id,
+            eo.edition_number AS existing_edition_number,
+            eo.edition_total AS existing_edition_total
+        FROM shopify_order_lines li
+        JOIN shopify_orders o ON o.shopify_order_id = li.shopify_order_id
+        LEFT JOIN edition_orders eo
+          ON eo.shopify_line_item_id = li.shopify_line_item_id
+         AND COALESCE(eo.allocation_index, 1) = 1
+        WHERE o.order_name IN ({placeholders})
+        ORDER BY COALESCE(o.processed_at, o.created_at, o.synced_at) ASC NULLS LAST,
+                 o.order_name ASC,
+                 li.shopify_line_item_id ASC
+        """,
+        tuple(order_names),
+    )
+    return [dict(row) for row in (cur.fetchall() or [])]
+
+
+def _known_repair_conflict(cur, *, shopify_handle, edition_number, shopify_line_item_id):
+    cur.execute(
+        """
+        SELECT id, shopify_order_id, shopify_order_name, shopify_line_item_id,
+               allocation_index, shopify_handle, product_title, edition_number
+        FROM edition_orders
+        WHERE edition_number=%s
+          AND COALESCE(shopify_handle, product_handle, '')=%s
+          AND COALESCE(shopify_line_item_id, '') <> %s
+        LIMIT 1
+        """,
+        (int(edition_number), str(shopify_handle or ""), str(shopify_line_item_id or "")),
+    )
+    return cur.fetchone()
+
+
+def _known_repair_public_row(plan):
+    target = plan["target"]
+    row = plan.get("ledger_row") or {}
+    product = plan.get("product") or {}
+    conflict = plan.get("conflict") or {}
+    return {
+        "order_name": target.get("order_name"),
+        "customer_name": target.get("customer_name"),
+        "product_title": target.get("product_title"),
+        "target_edition": f"#{int(target.get('edition_number') or 0):03d}/{int(target.get('edition_total') or 100)}",
+        "current_edition": (
+            f"#{int(row.get('existing_edition_number') or 0):03d}/{int(row.get('existing_edition_total') or target.get('edition_total') or 100)}"
+            if _int_value(row.get("existing_edition_number"), 0)
+            else ""
+        ),
+        "status": plan.get("status") or "",
+        "reason": plan.get("reason") or "",
+        "shopify_order_id": row.get("shopify_order_id") or "",
+        "shopify_line_item_id": row.get("shopify_line_item_id") or "",
+        "matched_handle": product.get("handle") or row.get("shopify_handle") or "",
+        "conflict_order": conflict.get("shopify_order_name") or conflict.get("shopify_order_id") or "",
+    }
+
+
+def _known_missing_edition_repair_plan():
+    ensure_schema()
+    target_by_key = {_known_repair_target_key(target): target for target in KNOWN_MISSING_EDITION_REPAIRS}
+    with connect() as conn:
+        with conn.cursor() as cur:
+            rows = _known_repair_fetch_candidate_rows(cur)
+            rows_by_key = {}
+            for row in rows:
+                key = (
+                    _known_repair_order_key(row.get("order_name")),
+                    _known_repair_customer_key(row.get("customer_name")),
+                    _normalize_product_title_key(row.get("product_title")),
+                )
+                rows_by_key.setdefault(key, []).append(row)
+
+            plans = []
+            for key, target in target_by_key.items():
+                matches = rows_by_key.get(key) or []
+                plan = {"target": target, "status": "ready", "reason": "", "ledger_row": {}, "product": {}, "conflict": {}}
+                if not matches:
+                    plan.update(status="missing_order_line", reason="No matching Shopify mirror line was found in Supabase.")
+                    plans.append(plan)
+                    continue
+                if len(matches) > 1:
+                    plan.update(status="manual_review_ambiguous_match", reason="More than one order line matched this repair target.")
+                    plan["ledger_row"] = matches[0]
+                    plans.append(plan)
+                    continue
+
+                row = matches[0]
+                plan["ledger_row"] = row
+                existing_number = _int_value(row.get("existing_edition_number"), 0)
+                target_number = _int_value(target.get("edition_number"), 0)
+                if existing_number:
+                    if existing_number == target_number:
+                        plan.update(status="already_assigned_correct", reason="The target edition is already assigned.")
+                    else:
+                        plan.update(
+                            status="blocked_existing_edition",
+                            reason=f"Existing edition #{existing_number:03d} is already assigned and will not be overwritten.",
+                        )
+                    plans.append(plan)
+                    continue
+
+                if not row.get("shopify_line_item_id") or not row.get("shopify_order_id"):
+                    plan.update(status="missing_identifier", reason="Missing Shopify order or line item identifier.")
+                    plans.append(plan)
+                    continue
+
+                lookup_line = {
+                    **row,
+                    "product_handle": row.get("shopify_handle") or "",
+                    "variant_id": "",
+                }
+                product = _lookup_product_by_handle_or_id(cur, lookup_line) or {}
+                plan["product"] = product
+                handle = product.get("handle") or row.get("shopify_handle") or ""
+                if not handle:
+                    plan.update(status="missing_mapping", reason="Could not confidently match the line to an edition product.")
+                    plans.append(plan)
+                    continue
+
+                conflict = _known_repair_conflict(
+                    cur,
+                    shopify_handle=handle,
+                    edition_number=target_number,
+                    shopify_line_item_id=row.get("shopify_line_item_id"),
+                )
+                if conflict:
+                    plan["conflict"] = dict(conflict)
+                    plan.update(
+                        status="blocked_conflict",
+                        reason=(
+                            f"Edition #{target_number:03d} is already used by "
+                            f"{conflict.get('shopify_order_name') or conflict.get('shopify_order_id')}."
+                        ),
+                    )
+                plans.append(plan)
+
+    return plans
+
+
+def _known_repair_counter_snapshot(handles):
+    clean_handles = sorted({str(handle or "").strip() for handle in handles if str(handle or "").strip()})
+    if not clean_handles:
+        return []
+    placeholders = ", ".join(["%s"] * len(clean_handles))
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT shopify_handle, product_title, edition_total, next_edition_number,
+                       last_assigned_edition, remaining_count, sold_out, updated_at
+                FROM edition_products
+                WHERE shopify_handle IN ({placeholders})
+                ORDER BY product_title ASC
+                """,
+                tuple(clean_handles),
+            )
+            return cur.fetchall() or []
+
+
+def preview_known_missing_edition_repair():
+    plans = _known_missing_edition_repair_plan()
+    public_rows = [_known_repair_public_row(plan) for plan in plans]
+    return {
+        "mode": "dry_run",
+        "target_rows": len(KNOWN_MISSING_EDITION_REPAIRS),
+        "ready_rows": sum(1 for plan in plans if plan.get("status") == "ready"),
+        "already_assigned_correct": sum(1 for plan in plans if plan.get("status") == "already_assigned_correct"),
+        "blocked_rows": sum(
+            1
+            for plan in plans
+            if plan.get("status")
+            not in {"ready", "already_assigned_correct"}
+        ),
+        "preview_rows": public_rows,
+        "errors": [],
+    }
+
+
+def apply_known_missing_edition_repair():
+    plans = _known_missing_edition_repair_plan()
+    applied_rows = []
+    skipped_rows = []
+    errors = []
+    changed_handles = set()
+
+    for plan in plans:
+        public_row = _known_repair_public_row(plan)
+        if plan.get("status") != "ready":
+            skipped_rows.append(public_row)
+            continue
+
+        target = plan["target"]
+        row = plan["ledger_row"]
+        product = plan.get("product") or {}
+        handle = product.get("handle") or row.get("shopify_handle") or ""
+        try:
+            allocation = allocate_edition_for_order_line(
+                shopify_order_id=row.get("shopify_order_id"),
+                shopify_order_name=row.get("order_name"),
+                shopify_line_item_id=row.get("shopify_line_item_id"),
+                allocation_index=1,
+                shopify_handle=handle,
+                shopify_product_id=product.get("shopify_product_id") or row.get("shopify_product_id") or "",
+                product_title=product.get("title") or row.get("product_title") or target.get("product_title") or "",
+                variant_title=row.get("variant_title") or "",
+                sku=row.get("sku") or "",
+                customer_name=row.get("customer_name") or target.get("customer_name") or "",
+                customer_email=row.get("customer_email") or "",
+                allocation_status="assigned",
+                promised_edition_number=target.get("edition_number"),
+                promised_edition_total=target.get("edition_total"),
+                assignment_source="known_missing_truth_20260625",
+            )
+            if allocation.get("error"):
+                failed = {**public_row, "status": "error", "reason": allocation["error"]}
+                errors.append(allocation["error"])
+                skipped_rows.append(failed)
+                continue
+            assignment = allocation.get("assignment") or {}
+            assigned_number = _int_value(assignment.get("edition_number"), 0)
+            target_number = _int_value(target.get("edition_number"), 0)
+            if assigned_number != target_number:
+                message = (
+                    f"Known repair for {target.get('order_name')} expected #{target_number:03d} "
+                    f"but found #{assigned_number:03d}."
+                )
+                errors.append(message)
+                skipped_rows.append({**public_row, "status": "error", "reason": message})
+                continue
+            with connect() as conn:
+                with conn.cursor() as cur:
+                    _set_order_line_status(
+                        cur,
+                        row.get("shopify_line_item_id"),
+                        "Assigned",
+                        shopify_product_id=product.get("shopify_product_id") or row.get("shopify_product_id") or "",
+                        shopify_handle=handle,
+                        product_title=product.get("title") or row.get("product_title") or target.get("product_title") or "",
+                        variant_title=row.get("variant_title") or "",
+                        sku=row.get("sku") or "",
+                    )
+                conn.commit()
+            changed_handles.add(handle)
+            applied_rows.append({**public_row, "status": "applied" if allocation.get("created") else "already_exists_consistent", "reason": ""})
+        except Exception as error:
+            message = str(error)
+            errors.append(message)
+            skipped_rows.append({**public_row, "status": "error", "reason": message})
+
+    counter_updates = _known_repair_counter_snapshot(changed_handles)
+    return {
+        "mode": "apply",
+        "target_rows": len(KNOWN_MISSING_EDITION_REPAIRS),
+        "applied_rows": len([row for row in applied_rows if row.get("status") == "applied"]),
+        "already_exists_consistent": len([row for row in applied_rows if row.get("status") == "already_exists_consistent"]),
+        "skipped_rows": len(skipped_rows),
+        "applied": applied_rows,
+        "skipped": skipped_rows,
+        "counter_updates": counter_updates,
+        "errors": errors[:10],
     }
 
 
