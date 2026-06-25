@@ -3782,6 +3782,9 @@ def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None):
         raise RuntimeError("Supabase dispatch storage is not configured.")
     started = time.perf_counter()
     supabase_backend.upsert_prodigi_dispatch_row(saved)
+    bump_supabase_cache_version("orders", "order-summary")
+    st.session_state["orders_allocation_snapshot_loaded"] = False
+    st.session_state["orders-ledger-cache-version"] = int(st.session_state.get("orders-ledger-cache-version", 0)) + 1
     _prodigi_log_timing("dispatch save", started, f"status={status} row_id={saved.get('row_id') or ''}")
     return saved
 

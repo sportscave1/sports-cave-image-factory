@@ -4979,6 +4979,11 @@ def _load_manual_override_rows(search, allocator, limit=80):
 
 def _mark_orders_snapshot_for_reload():
     st.session_state["orders_allocation_snapshot_loaded"] = False
+    st.session_state["edition_ops_snapshot_loaded"] = False
+    st.session_state["orders-ledger-cache-version"] = int(st.session_state.get("orders-ledger-cache-version", 0)) + 1
+    st.session_state["edition-ops-ledger-cache-version"] = int(
+        st.session_state.get("edition-ops-ledger-cache-version", 0)
+    ) + 1
     with suppress(Exception):
         allocator = importlib.import_module("order_allocator")
         snapshot = allocator.load_orders_snapshot()

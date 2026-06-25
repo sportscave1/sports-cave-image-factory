@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import importlib
 import io
 import json
+import os
 from pathlib import Path
 import re
 
@@ -24,6 +25,9 @@ NOTICE_KEY = "edition_ops_notice"
 IMPORT_WARNINGS_KEY = "edition_ops_import_warnings"
 EDITOR_VERSION_KEY = "edition_ops_editor_version"
 SNAPSHOT_LOADED_KEY = "edition_ops_snapshot_loaded"
+ORDERS_CACHE_VERSION_KEY = "orders-ledger-cache-version"
+EDITION_OPS_CACHE_VERSION_KEY = "edition-ops-ledger-cache-version"
+EDITION_OPS_CACHE_TTL_SECONDS = max(int(os.getenv("SUPABASE_EDITION_OPS_CACHE_TTL_SECONDS", "180")), 30)
 
 EDITABLE_FIELDS = (
     "edition_enabled",
@@ -271,6 +275,47 @@ def _configured_supabase_backend():
     return backend
 
 
+def _cache_version(key):
+    st.session_state.setdefault(key, 0)
+    return int(st.session_state[key])
+
+
+def _bump_cache_versions(*keys):
+    for key in keys:
+        st.session_state[key] = int(st.session_state.get(key, 0)) + 1
+
+
+def _invalidate_edition_ops_cache(*, bump_orders=False):
+    _bump_cache_versions(EDITION_OPS_CACHE_VERSION_KEY, *( [ORDERS_CACHE_VERSION_KEY] if bump_orders else []))
+    st.session_state[SNAPSHOT_LOADED_KEY] = False
+
+
+@st.cache_data(ttl=EDITION_OPS_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_supabase_products_snapshot(cache_version):
+    backend = _configured_supabase_backend()
+    if not backend:
+        return None
+    products = backend.list_edition_products(search="", limit=5000)
+    rows = [_row_from_supabase_product(product) for product in products or []]
+    try:
+        sync_state = backend.get_sync_state()
+    except Exception:
+        sync_state = {}
+    last_synced = sync_state.get("last_successful_product_sync_at") or max(
+        (str(row.get("last_synced_at") or "") for row in rows),
+        default="",
+    )
+    return {
+        "version": SNAPSHOT_VERSION,
+        "rows": rows,
+        "original_rows": deepcopy(rows),
+        "last_refreshed_from_shopify": last_synced,
+        "saved_at": last_synced,
+        "source": "supabase",
+        "mirror_status": "",
+    }
+
+
 def _ledger_status():
     backend = _configured_supabase_backend()
     if not backend:
@@ -336,28 +381,7 @@ def _row_from_supabase_product(product):
 
 
 def _load_supabase_snapshot():
-    backend = _configured_supabase_backend()
-    if not backend:
-        return None
-    products = backend.list_edition_products(search="", limit=5000)
-    rows = [_row_from_supabase_product(product) for product in products or []]
-    try:
-        sync_state = backend.get_sync_state()
-    except Exception:
-        sync_state = {}
-    last_synced = sync_state.get("last_successful_product_sync_at") or max(
-        (str(row.get("last_synced_at") or "") for row in rows),
-        default="",
-    )
-    return {
-        "version": SNAPSHOT_VERSION,
-        "rows": rows,
-        "original_rows": deepcopy(rows),
-        "last_refreshed_from_shopify": last_synced,
-        "saved_at": last_synced,
-        "source": "supabase",
-        "mirror_status": "",
-    }
+    return _cached_supabase_products_snapshot(_cache_version(EDITION_OPS_CACHE_VERSION_KEY))
 
 
 def _ensure_state():
@@ -509,6 +533,7 @@ def _load_active_products_from_shopify():
     backend = _configured_supabase_backend()
     if backend:
         result = backend.sync_shopify_products_to_supabase(config=config, mode="incremental")
+        _invalidate_edition_ops_cache(bump_orders=True)
         snapshot = _load_supabase_snapshot() or {
             "rows": [],
             "original_rows": [],
@@ -544,6 +569,7 @@ def _load_active_products_from_shopify():
         deepcopy(rows),
         meta={"last_refreshed_from_shopify": refreshed_at},
     )
+    _invalidate_edition_ops_cache(bump_orders=True)
     st.session_state[NOTICE_KEY] = f"Refreshed {len(rows)} active products."
     _bump_editor_version()
 
@@ -585,6 +611,7 @@ def _mark_synced(rows, originals, results):
         new_originals,
         meta={"mirror_status": "failed" if failed else "updated"},
     )
+    _invalidate_edition_ops_cache(bump_orders=True)
     _bump_editor_version()
 
 
@@ -608,6 +635,7 @@ def _mark_supabase_saved_without_shopify(rows, originals, row_ids):
     st.session_state[ORIGINAL_ROWS_KEY] = new_originals
     st.session_state[ERRORS_KEY] = {}
     _write_snapshot(new_rows, new_originals, meta={"mirror_status": "pending"})
+    _invalidate_edition_ops_cache(bump_orders=True)
     _bump_editor_version()
 
 

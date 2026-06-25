@@ -4063,6 +4063,15 @@ def _csv_value(row, *names):
     return ""
 
 
+def _normalize_product_title_key(value):
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = text.replace("\u2019", "'").replace("\u2018", "'").replace("\u201c", '"').replace("\u201d", '"')
+    text = re.sub(r"\s+", " ", text)
+    return text.casefold()
+
+
 def _match_product_handle(cur, *, handle="", shopify_product_id="", product_title=""):
     normalized_handle = _normalize_handle(handle)
     if normalized_handle:
@@ -5068,17 +5077,31 @@ def _upsert_order_lines(cur, order):
         ).strip()
         if not line_item_id:
             continue
+        shopify_product_id = str(line_item.get("shopify_product_id") or "").strip()
+        shopify_variant_id = str(
+            line_item.get("shopify_variant_id")
+            or line_item.get("variant_id")
+            or ""
+        ).strip()
+        product_title = str(line_item.get("product_title") or "").strip()
+        matched_handle = _match_product_handle(
+            cur,
+            handle=line_item.get("product_handle") or "",
+            shopify_product_id=shopify_product_id,
+            product_title=product_title,
+        )
         cur.execute(
             """
             INSERT INTO shopify_order_lines(
-                shopify_line_item_id, shopify_order_id, shopify_product_id, shopify_handle,
+                shopify_line_item_id, shopify_order_id, shopify_product_id, shopify_variant_id, shopify_handle,
                 product_title, variant_title, sku, quantity, assignment_status, last_error,
                 raw_json, synced_at, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Needs Edition', '', %s::jsonb, now(), now())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'Needs Edition', '', %s::jsonb, now(), now())
             ON CONFLICT (shopify_line_item_id) DO UPDATE SET
                 shopify_order_id=EXCLUDED.shopify_order_id,
                 shopify_product_id=COALESCE(NULLIF(EXCLUDED.shopify_product_id, ''), shopify_order_lines.shopify_product_id),
+                shopify_variant_id=COALESCE(NULLIF(EXCLUDED.shopify_variant_id, ''), shopify_order_lines.shopify_variant_id),
                 shopify_handle=COALESCE(NULLIF(EXCLUDED.shopify_handle, ''), shopify_order_lines.shopify_handle),
                 product_title=COALESCE(NULLIF(EXCLUDED.product_title, ''), shopify_order_lines.product_title),
                 variant_title=COALESCE(NULLIF(EXCLUDED.variant_title, ''), shopify_order_lines.variant_title),
@@ -5091,9 +5114,10 @@ def _upsert_order_lines(cur, order):
             (
                 line_item_id,
                 order.get("shopify_order_id") or "",
-                line_item.get("shopify_product_id") or "",
-                line_item.get("product_handle") or "",
-                line_item.get("product_title") or "",
+                shopify_product_id,
+                shopify_variant_id,
+                matched_handle,
+                product_title,
                 line_item.get("variant_title") or "",
                 line_item.get("sku") or "",
                 max(1, int(line_item.get("quantity") or 1)),
@@ -5123,6 +5147,7 @@ def _set_order_line_status(
     assignment_status,
     *,
     shopify_product_id="",
+    shopify_variant_id="",
     shopify_handle="",
     product_title="",
     variant_title="",
@@ -5137,6 +5162,10 @@ def _set_order_line_status(
             shopify_product_id=CASE
                 WHEN %s <> '' THEN %s
                 ELSE shopify_product_id
+            END,
+            shopify_variant_id=CASE
+                WHEN %s <> '' THEN %s
+                ELSE shopify_variant_id
             END,
             shopify_handle=CASE
                 WHEN %s <> '' THEN %s
@@ -5163,6 +5192,8 @@ def _set_order_line_status(
             str(last_error or ""),
             str(shopify_product_id or ""),
             str(shopify_product_id or ""),
+            str(shopify_variant_id or ""),
+            str(shopify_variant_id or ""),
             str(shopify_handle or ""),
             str(shopify_handle or ""),
             str(product_title or ""),
@@ -5265,7 +5296,27 @@ def _backfill_edition_customer_details(cur, order):
 def _lookup_product_by_handle_or_id(cur, line_item):
     handle = line_item.get("product_handle") or ""
     product_id = line_item.get("shopify_product_id") or ""
+    variant_id = line_item.get("shopify_variant_id") or line_item.get("variant_id") or ""
     title = str(line_item.get("product_title") or "").strip()
+    normalized_title = _normalize_product_title_key(title)
+    if variant_id:
+        cur.execute(
+            """
+            SELECT
+                COALESCE(sp.shopify_product_id, sv.shopify_product_id) AS shopify_product_id,
+                COALESCE(sp.handle, ep.shopify_handle) AS handle,
+                COALESCE(sp.title, ep.product_title, sv.title) AS title
+            FROM shopify_variants sv
+            LEFT JOIN shopify_products sp ON sp.shopify_product_id = sv.shopify_product_id
+            LEFT JOIN edition_products ep ON ep.shopify_product_id = sv.shopify_product_id
+            WHERE sv.shopify_variant_id=%s
+            LIMIT 1
+            """,
+            (variant_id,),
+        )
+        row = cur.fetchone()
+        if row and row.get("handle"):
+            return row
     if product_id:
         cur.execute(
             """
@@ -5312,15 +5363,22 @@ def _lookup_product_by_handle_or_id(cur, line_item):
         row = cur.fetchone()
         if row:
             return row
-    if title:
+    if normalized_title:
         cur.execute(
             """
             SELECT sp.shopify_product_id, sp.handle, sp.title
             FROM shopify_products sp
-            WHERE LOWER(COALESCE(sp.title, '')) = LOWER(%s)
+            WHERE LOWER(
+                REGEXP_REPLACE(
+                    REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(sp.title, ''), '’', '''), '‘', '''), '“', '"'), '”', '"'),
+                    '\\s+',
+                    ' ',
+                    'g'
+                )
+            ) = %s
             LIMIT 2
             """,
-            (title,),
+            (normalized_title,),
         )
         rows = cur.fetchall()
         if len(rows) == 1:
@@ -5329,10 +5387,17 @@ def _lookup_product_by_handle_or_id(cur, line_item):
             """
             SELECT ep.shopify_product_id, ep.shopify_handle AS handle, ep.product_title AS title
             FROM edition_products ep
-            WHERE LOWER(COALESCE(ep.product_title, '')) = LOWER(%s)
+            WHERE LOWER(
+                REGEXP_REPLACE(
+                    REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(ep.product_title, ''), '’', '''), '‘', '''), '“', '"'), '”', '"'),
+                    '\\s+',
+                    ' ',
+                    'g'
+                )
+            ) = %s
             LIMIT 2
             """,
-            (title,),
+            (normalized_title,),
         )
         rows = cur.fetchall()
         if len(rows) == 1:
@@ -6025,6 +6090,16 @@ def allocate_edition_for_order_line(
                 edition_total = int(edition_run.get("edition_total") or edition_product.get("edition_total") or 100)
                 edition_name = edition_run.get("edition_name") or DEFAULT_EDITION_NAME
                 run_status = _clean_edition_run_status(edition_run.get("status"))
+                cur.execute(
+                    """
+                    SELECT COALESCE(MAX(edition_number), 0) AS max_assigned
+                    FROM edition_orders
+                    WHERE shopify_handle=%s
+                    """,
+                    (shopify_handle,),
+                )
+                max_assigned = int((cur.fetchone() or {}).get("max_assigned") or 0)
+                safe_floor = max(max_assigned + 1, 1)
                 if next_number < 1:
                     cur.execute(
                         """
@@ -6059,6 +6134,45 @@ def allocate_edition_for_order_line(
                         ),
                     )
                     next_number = 1
+                if next_number < safe_floor:
+                    previous_next_number = next_number
+                    cur.execute(
+                        """
+                        UPDATE edition_runs
+                        SET next_edition_number=%s, updated_at=now()
+                        WHERE id=%s
+                        """,
+                        (safe_floor, edition_run.get("id")),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE edition_products
+                        SET next_edition_number=%s,
+                            last_assigned_edition=%s,
+                            updated_at=now()
+                        WHERE shopify_handle=%s
+                        """,
+                        (safe_floor, max_assigned, shopify_handle),
+                    )
+                    _insert_audit_log(
+                        cur,
+                        event_type="edition_counter_auto_corrected",
+                        entity_type="edition_product",
+                        entity_id=str(edition_product.get("id") or ""),
+                        shopify_handle=shopify_handle,
+                        old_value={
+                            "next_edition_number": previous_next_number,
+                            "last_assigned_edition": edition_product.get("last_assigned_edition"),
+                        },
+                        new_value={
+                            "next_edition_number": safe_floor,
+                            "last_assigned_edition": max_assigned,
+                        },
+                        reason="Raised next edition number to the current ledger floor before auto allocation.",
+                        actor="sports_cave_os_sync",
+                        source="supabase_ledger",
+                    )
+                    next_number = safe_floor
 
                 if run_status == SOLD_OUT_RUN_STATUS or next_number > edition_total:
                     cur.execute(
@@ -6320,6 +6434,7 @@ def process_paid_order(
         )
         line_cache_keys = [
             str(line_item.get("shopify_product_id") or "").strip(),
+            str(line_item.get("shopify_variant_id") or line_item.get("variant_id") or "").strip(),
             str(line_item.get("product_handle") or "").strip().lower(),
             str(line_item.get("product_title") or "").strip().lower(),
         ]
@@ -6339,6 +6454,7 @@ def process_paid_order(
                         line_item_id,
                         "Error",
                         shopify_product_id=line_item.get("shopify_product_id") or "",
+                        shopify_variant_id=line_item.get("shopify_variant_id") or line_item.get("variant_id") or "",
                         shopify_handle=line_item.get("product_handle") or "",
                         product_title=line_item.get("product_title") or "",
                         variant_title=line_item.get("variant_title") or "",
@@ -6351,6 +6467,7 @@ def process_paid_order(
         if product:
             for cache_key in (
                 str(product.get("shopify_product_id") or "").strip(),
+                str(line_item.get("shopify_variant_id") or line_item.get("variant_id") or "").strip(),
                 str(product.get("handle") or "").strip().lower(),
                 str(product.get("title") or "").strip().lower(),
                 *line_cache_keys,
@@ -6369,6 +6486,7 @@ def process_paid_order(
                         line_item_id,
                         "Product Not Found",
                         shopify_product_id=(product or {}).get("shopify_product_id") or line_item.get("shopify_product_id") or "",
+                        shopify_variant_id=line_item.get("shopify_variant_id") or line_item.get("variant_id") or "",
                         product_title=(product or {}).get("title") or line_item.get("product_title") or "",
                         variant_title=line_item.get("variant_title") or "",
                         sku=line_item.get("sku") or "",
@@ -6429,6 +6547,7 @@ def process_paid_order(
                     line_item_id,
                     line_status,
                     shopify_product_id=product_id,
+                    shopify_variant_id=line_item.get("shopify_variant_id") or line_item.get("variant_id") or "",
                     shopify_handle=handle,
                     product_title=product_title,
                     variant_title=line_item.get("variant_title") or "",
@@ -6545,6 +6664,16 @@ def _preview_product_counter_state(cur, line_item, cache):
         "sold_out": bool(row.get("sold_out")),
         "run_status": _clean_edition_run_status(row.get("run_status")),
     }
+    cur.execute(
+        """
+        SELECT COALESCE(MAX(edition_number), 0) AS max_assigned
+        FROM edition_orders
+        WHERE shopify_handle=%s
+        """,
+        (handle,),
+    )
+    max_assigned = int((cur.fetchone() or {}).get("max_assigned") or 0)
+    state["next_edition_number"] = max(state["next_edition_number"], max_assigned + 1)
     cache[handle] = state
     return state
 
@@ -7552,6 +7681,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
                    eo.id AS edition_order_id,
                    COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AS shopify_handle,
                    COALESCE(NULLIF(eo.shopify_product_id, ''), NULLIF(li.shopify_product_id, '')) AS shopify_product_id,
+                   COALESCE(NULLIF(eo.shopify_variant_id, ''), NULLIF(li.shopify_variant_id, '')) AS shopify_variant_id,
                    COALESCE(NULLIF(li.product_title, ''), NULLIF(eo.product_title, '')) AS product_title,
                    COALESCE(NULLIF(li.variant_title, ''), NULLIF(eo.variant_title, '')) AS variant_title,
                    COALESCE(NULLIF(eo.sku, ''), NULLIF(li.sku, '')) AS sku,
@@ -7600,7 +7730,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
             order_raw_json,
             order_line_id, shopify_line_item_id, quantity,
             assignment_status, last_error,
-            shopify_handle, shopify_product_id, product_title, variant_title, sku,
+            shopify_handle, shopify_product_id, shopify_variant_id, product_title, variant_title, sku,
             prodigi_status, prodigi_row_id,
             COALESCE(image_url, '') AS image_url,
             COALESCE(psd_url, '') AS psd_url,
@@ -7646,7 +7776,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
             total_price, currency, created_at, remote_updated_at, processed_at, cancelled_at, synced_at, order_raw_json,
             order_line_id, shopify_line_item_id, quantity,
             assignment_status, last_error,
-            shopify_handle, shopify_product_id, product_title, variant_title, sku,
+            shopify_handle, shopify_product_id, shopify_variant_id, product_title, variant_title, sku,
             prodigi_status, prodigi_row_id,
             image_url, psd_url, prodigi_url
     """

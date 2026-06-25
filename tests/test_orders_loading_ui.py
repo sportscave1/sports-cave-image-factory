@@ -914,18 +914,22 @@ class EditionOpsUiTests(unittest.TestCase):
             (
                 "order",
                 "edition",
+                "certificate",
                 "customer",
                 "product",
                 "variant",
                 "shipping",
                 "date",
-                "certificate",
                 "prodigi",
             ),
         )
         self.assertIn("orders_allocation_snapshot.json", source)
         self.assertIn("_read_orders_snapshot", source)
+        self.assertIn("_cached_supabase_orders_snapshot", source)
+        self.assertIn("_invalidate_orders_snapshot_cache", source)
         self.assertIn("load_supabase_orders_snapshot", source)
+        self.assertIn("_display_table_payload", source)
+        self.assertIn("_compact_variant_label", source)
         self.assertIn("selection_mode=\"multi-row\"", source)
         self.assertIn("DEFAULT_VISIBLE_ROW_LIMIT = 50", source)
         self.assertIn("Search orders", render_page)
@@ -944,6 +948,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("customer_email", orders_page.VISIBLE_COLUMNS)
         self.assertNotIn("edition_total", orders_page.VISIBLE_COLUMNS)
         self.assertIn("Select an order, generate the certificate, then send to Prodigi.", render_page)
+        self.assertIn("Assign edition number before certificate generation.", top_actions)
         self.assertNotIn("Supabase ledger-backed orders for fulfilment and Prodigi dispatch.", render_page)
         self.assertNotIn("Source: Supabase ledger", render_page)
         self.assertNotIn("Last synced:", render_page)
@@ -1062,6 +1067,14 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(row["certificate"], "Needs certificate")
         self.assertEqual(row["prodigi"], "Needs certificate")
 
+        compact = orders_page._normalise_row(
+            {
+                "variant": "Black / XL - 62 × 87 cm (24.4 × 34.3 in)",
+            }
+        )
+        self.assertEqual(compact["variant"], "Black / XL")
+        self.assertEqual(compact["variant_full"], "Black / XL - 62 × 87 cm (24.4 × 34.3 in)")
+
         uploaded = orders_page._normalise_row(
             {
                 "order": "#SC2843",
@@ -1083,6 +1096,8 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn('st.title("Edition Ops")', render_page)
         self.assertIn("Manage edition limits, next numbers, and active limited-edition products.", render_page)
+        self.assertIn("_cached_supabase_products_snapshot", source)
+        self.assertIn("_invalidate_edition_ops_cache", source)
         self.assertNotIn("Supabase connected", render_page)
         self.assertNotIn("Source: Supabase ledger", render_page)
         self.assertNotIn("Refresh products when new products are added.", render_page)

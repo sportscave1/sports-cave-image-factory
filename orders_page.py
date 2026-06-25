@@ -1,11 +1,16 @@
 from datetime import datetime, timezone
 import importlib
 import json
+import os
 from pathlib import Path
 import re
 import time
 
 import streamlit as st
+try:
+    import pandas as pd
+except Exception:  # pragma: no cover - optional at import time
+    pd = None
 
 import certificate_engine
 import order_allocator
@@ -27,6 +32,9 @@ REPAIR_RESULT_KEY = "orders_missing_edition_repair_result"
 SEARCH_KEY = "orders_search_text"
 SHOW_ALL_KEY = "orders_show_all_rows"
 DEFAULT_VISIBLE_ROW_LIMIT = 50
+ORDERS_CACHE_VERSION_KEY = "orders-ledger-cache-version"
+EDITION_OPS_CACHE_VERSION_KEY = "edition-ops-ledger-cache-version"
+ORDERS_CACHE_TTL_SECONDS = max(int(os.getenv("SUPABASE_ORDERS_CACHE_TTL_SECONDS", "120")), 30)
 ALLOCATION_BLOCKER_STATUSES = {
     "Needs allocation",
     "Needs Review - Sold Out",
@@ -40,12 +48,12 @@ ALLOCATION_BLOCKER_STATUSES = {
 VISIBLE_COLUMNS = (
     "order",
     "edition",
+    "certificate",
     "customer",
     "product",
     "variant",
     "shipping",
     "date",
-    "certificate",
     "prodigi",
 )
 
@@ -82,6 +90,26 @@ def _ensure_state():
     st.session_state.setdefault(SHOW_ALL_KEY, False)
 
 
+def _cache_version(key):
+    st.session_state.setdefault(key, 0)
+    return int(st.session_state[key])
+
+
+def _bump_cache_versions(*keys):
+    for key in keys:
+        st.session_state[key] = int(st.session_state.get(key, 0)) + 1
+
+
+def _invalidate_orders_snapshot_cache(*, bump_edition_ops=False):
+    _bump_cache_versions(ORDERS_CACHE_VERSION_KEY, *( [EDITION_OPS_CACHE_VERSION_KEY] if bump_edition_ops else []))
+    st.session_state[SNAPSHOT_LOADED_KEY] = False
+
+
+@st.cache_data(ttl=ORDERS_CACHE_TTL_SECONDS, show_spinner=False)
+def _cached_supabase_orders_snapshot(limit, cache_version):
+    return order_allocator.load_supabase_orders_snapshot(limit=limit)
+
+
 def _configured_supabase_backend():
     try:
         backend = importlib.import_module("supabase_backend")
@@ -99,7 +127,7 @@ def _read_orders_snapshot():
     backend = _configured_supabase_backend()
     if backend:
         try:
-            payload = order_allocator.load_supabase_orders_snapshot(limit=1000)
+            payload = _cached_supabase_orders_snapshot(1000, _cache_version(ORDERS_CACHE_VERSION_KEY))
         except Exception as error:
             print(f"WARN Orders Supabase snapshot fallback: {error}", flush=True)
         else:
@@ -195,6 +223,20 @@ def _display_shipping_label(value):
         return "Express"
     if any(token in lowered for token in ("standard", "economy", "regular")):
         return "Standard"
+    return text
+
+
+def _compact_variant_label(value):
+    text = str(value or "").strip()
+    if not text:
+        return "Missing variant"
+    for separator in (" - ", " – ", " — "):
+        if separator in text:
+            compact = text.split(separator, 1)[0].strip()
+            if compact:
+                return compact
+    if len(text) > 34:
+        return f"{text[:31].rstrip()}..."
     return text
 
 
@@ -323,7 +365,8 @@ def _normalise_row(row):
     )
     updated["shipping"] = _display_shipping_label(updated.get("shipping_method"))
     updated["product"] = _placeholder_text(updated.get("product"))
-    updated["variant"] = _display_variant_label(updated.get("variant") or updated.get("variant_title"))
+    updated["variant_full"] = _display_variant_label(updated.get("variant") or updated.get("variant_title"))
+    updated["variant"] = _compact_variant_label(updated.get("variant_full"))
     updated["edition_number"] = edition_number
     updated["edition_total"] = _coerce_positive_int(
         updated.get("edition_total")
@@ -368,6 +411,12 @@ def _normalise_row(row):
     updated["certificate_error"] = str(updated.get("certificate_error") or "")
     updated["certificate_preview_path"] = str(updated.get("certificate_preview_path") or updated.get("preview_path") or "")
     updated["certificate"] = _certificate_label(updated)
+    updated["certificate_tone"] = {
+        "Uploaded": "uploaded",
+        "Upload failed": "failed",
+        "Ready": "ready",
+        "Needs certificate": "muted",
+    }.get(updated["certificate"], "default")
     updated["prodigi"] = _prodigi_label(updated)
     return updated
 
@@ -445,6 +494,8 @@ def _load_snapshot_once():
     start = time.perf_counter()
     payload = _read_orders_snapshot()
     _apply_snapshot_payload(payload)
+    if payload and payload.get("source") == "supabase":
+        _write_snapshot(payload.get("rows") or [], meta=payload)
     st.session_state[SNAPSHOT_LOADED_KEY] = True
     _perf_log("load snapshot", start, rows=len(st.session_state[ROWS_KEY]))
     print("Orders load cached rows: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
@@ -469,6 +520,9 @@ def _apply_snapshot_payload(payload):
 def _reload_orders_from_source():
     payload = _read_orders_snapshot()
     _apply_snapshot_payload(payload)
+    if payload and payload.get("source") == "supabase":
+        _write_snapshot(payload.get("rows") or [], meta=payload)
+    st.session_state[SNAPSHOT_LOADED_KEY] = True
 
 
 def _write_snapshot(rows, meta=None):
@@ -762,6 +816,9 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50):
             sync_product_metafields=False,
         )
     st.session_state[SYNC_RESULT_KEY] = result
+    _invalidate_orders_snapshot_cache(
+        bump_edition_ops=bool(int(result.get("edition_allocations_created") or 0) > 0)
+    )
     _reload_orders_from_source()
     st.session_state[NOTICE_KEY] = (
         f"New orders imported: {int(result.get('new_orders_inserted') or 0)} | "
@@ -780,6 +837,7 @@ def _backfill_missing_order_details(*, dry_run=True, limit=100):
     result = backend.backfill_missing_shopify_order_details(limit=limit, dry_run=dry_run)
     st.session_state[BACKFILL_RESULT_KEY] = result
     if not dry_run:
+        _invalidate_orders_snapshot_cache()
         _reload_orders_from_source()
     mode_label = "Dry-run" if dry_run else "Backfill applied"
     st.session_state[NOTICE_KEY] = (
@@ -809,6 +867,7 @@ def _repair_missing_editions(*, dry_run=True, limit=100):
         result = backend.preview_missing_edition_repairs(limit=limit)
     else:
         result = backend.repair_missing_edition_orders(limit=limit)
+        _invalidate_orders_snapshot_cache(bump_edition_ops=True)
         _reload_orders_from_source()
     st.session_state[REPAIR_RESULT_KEY] = result
     st.session_state[NOTICE_KEY] = (
@@ -945,6 +1004,7 @@ def _generate_certificate_for_row(row):
             raise ValueError("This row is missing its Supabase edition record. Ask a developer to repair missing editions first.")
         if backend:
             backend.generate_certificate_for_edition_order(row.get("edition_order_id"))
+            _invalidate_orders_snapshot_cache()
             _reload_orders_from_source()
             refreshed = _current_row_for(row)
             st.session_state[NOTICE_KEY] = (
@@ -994,6 +1054,7 @@ def _upload_certificate_for_row(row):
             return
         if backend and not str(row.get("certificate_pdf_path") or "").strip():
             backend.generate_certificate_for_edition_order(row.get("edition_order_id"))
+            _invalidate_orders_snapshot_cache()
             _reload_orders_from_source()
             row = _current_row_for(row)
         record = certificate_engine.certificate_record_from_order_row(row)
@@ -1002,6 +1063,7 @@ def _upload_certificate_for_row(row):
             record = certificate_engine.generate_local_certificate_for_record(record)
         uploaded = certificate_engine.upload_generated_certificate_record(record, config=config)
         saved = certificate_engine.save_certificate_record_to_order(uploaded, config=config)
+        _invalidate_orders_snapshot_cache()
         _reload_orders_from_source()
         if saved.get("metafields_synced") is False:
             st.session_state[NOTICE_KEY] = (
@@ -1058,6 +1120,7 @@ def _search_blob(row):
         normalised.get("customer"),
         normalised.get("product"),
         normalised.get("variant"),
+        normalised.get("variant_full"),
         normalised.get("edition"),
     )
     return " ".join(str(value or "").casefold() for value in fields)
@@ -1326,16 +1389,37 @@ def _display_rows(rows):
 
 def _column_config():
     return {
-        "order": st.column_config.TextColumn("Order", width="medium"),
+        "order": st.column_config.TextColumn("Order", width="small"),
         "edition": st.column_config.TextColumn("Edition", width="small"),
-        "customer": st.column_config.TextColumn("Customer", width="medium"),
-        "product": st.column_config.TextColumn("Product", width="large"),
-        "variant": st.column_config.TextColumn("Variant", width="medium"),
-        "shipping": st.column_config.TextColumn("Shipping", width="medium"),
-        "date": st.column_config.TextColumn("Date", width="small"),
         "certificate": st.column_config.TextColumn("Certificate", width="small"),
+        "customer": st.column_config.TextColumn("Customer", width="medium"),
+        "product": st.column_config.TextColumn("Product", width="medium"),
+        "variant": st.column_config.TextColumn("Variant", width="small"),
+        "shipping": st.column_config.TextColumn("Shipping", width="small"),
+        "date": st.column_config.TextColumn("Date", width="small"),
         "prodigi": st.column_config.TextColumn("Prodigi", width="small"),
     }
+
+
+def _display_table_payload(rows):
+    display_rows = _display_rows(rows)
+    if pd is None or getattr(st, "__name__", "") != "streamlit":
+        return display_rows
+    frame = pd.DataFrame(display_rows, columns=VISIBLE_COLUMNS)
+    return frame.style.map(
+        lambda value: (
+            "color: #2f9e44; font-weight: 600;"
+            if value == "Uploaded"
+            else "color: #c92a2a; font-weight: 600;"
+            if value == "Upload failed"
+            else "color: #495057;"
+            if value == "Needs certificate"
+            else "color: #1d4ed8; font-weight: 500;"
+            if value == "Ready"
+            else ""
+        ),
+        subset=["certificate"],
+    )
 
 
 def _render_top_actions(rows):
@@ -1387,7 +1471,7 @@ def _render_top_actions(rows):
     if not backend:
         st.caption("Order refresh is unavailable in this runtime because the ledger connection is missing.")
     elif selected_rows and not can_generate:
-        st.caption("Certificate actions stay locked until every selected row has an assigned edition number.")
+        st.caption("Assign edition number before certificate generation.")
 
 
 def _render_admin_result(title, result):
@@ -1528,15 +1612,15 @@ def _render_orders_table(rows):
     rows = [_normalise_row(row) for row in rows]
     with st.container(border=True):
         st.dataframe(
-            _display_rows(rows),
+            _display_table_payload(rows),
             hide_index=True,
             use_container_width=True,
-            height=min(840, max(440, 32 * (len(rows) + 1))),
+            height=min(760, max(420, 28 * (len(rows) + 1))),
             column_order=VISIBLE_COLUMNS,
             column_config=_column_config(),
             selection_mode="multi-row",
             on_select="rerun",
-            row_height=30,
+            row_height=28,
             key=GRID_KEY,
         )
     _perf_log("render table", start, rows=len(rows))
