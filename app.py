@@ -42,6 +42,7 @@ os_pages = None
 shopify_sync = None
 edition_ops_module = None
 orders_page_module = None
+ads_intelligence_module = None
 requests_module = None
 components_module = None
 pillow_modules = None
@@ -130,6 +131,15 @@ def get_orders_page():
     return orders_page_module
 
 
+def get_ads_intelligence_page():
+    global ads_intelligence_module
+    if ads_intelligence_module is None:
+        log_startup_stage("ADS INTELLIGENCE IMPORT START")
+        ads_intelligence_module = importlib.import_module("ads_intelligence_page")
+        log_startup_stage("ADS INTELLIGENCE IMPORT DONE")
+    return ads_intelligence_module
+
+
 def get_requests_module():
     global requests_module
     if requests_module is None:
@@ -173,6 +183,7 @@ ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
     "ZIP_SAVE_DRIVE_FOLDER_URL",
     "https://drive.google.com/drive/folders/1FfXmTVuVGkD7PFhRjAtvPDZOn7Gpk3q_",
 ).strip()
+# File Hub hidden until PSD/Drive asset workflow is active.
 MENU_OPTIONS = [
     "Dashboard",
     "Mockups",
@@ -180,12 +191,13 @@ MENU_OPTIONS = [
     "Edition Ops",
     "Orders",
     "Prodigi",
-    "Files",
+    "Ads Intelligence",
     "Marketing Factory",
     "VA Training",
     "Developer",
 ]
 HIDDEN_PAGE_OPTIONS = [
+    "Files",
     "Products",
     "Product Assets",
     "Webhook Events",
@@ -4475,6 +4487,12 @@ def render_sidebar():
         st.sidebar.write("2. Match Shopify size to Prodigi size: XL=A1, L=A2, M=A3, S=A4.")
         st.sidebar.write("3. Copy the exact Prodigi name or code.")
         st.sidebar.write("4. Check the frame colour before sending to production.")
+    elif st.session_state.selected_page == "Ads Intelligence":
+        st.sidebar.divider()
+        st.sidebar.subheader("Ads Intelligence")
+        st.sidebar.write("1. Review stored Meta performance from Supabase.")
+        st.sidebar.write("2. Sync Meta Ads data only when you click the manual button.")
+        st.sidebar.write("3. Tag creatives and export ChatGPT-ready analysis packs.")
     elif st.session_state.selected_page == "Dashboard":
         st.sidebar.divider()
         st.sidebar.subheader("Today's Focus")
@@ -4495,6 +4513,10 @@ def render_sidebar():
         st.sidebar.divider()
         st.sidebar.subheader("Developer")
         st.sidebar.write("Run connection tests, imports, diagnostics, and admin checks only when needed.")
+        st.sidebar.caption("File Hub hidden until PSD/Drive asset workflow is active.")
+        if st.sidebar.button("File Hub (Coming Soon)", use_container_width=True):
+            st.session_state.selected_page = "Files"
+            st.rerun()
 
     st.sidebar.divider()
     st.sidebar.subheader("MVP Mode")
@@ -4834,9 +4856,9 @@ def _developer_action_error(label, error):
     st.caption("Full traceback is logged in Render.")
 
 
-def _render_developer_password_gate():
-    st.title("Developer")
-    st.caption("Protected diagnostics and setup tools.")
+def _render_developer_password_gate(title="Developer", caption="Protected diagnostics and setup tools."):
+    st.title(title)
+    st.caption(caption)
     password = st.text_input(
         "Developer password",
         type="password",
@@ -5819,6 +5841,14 @@ def render_selected_page(current_page):
         os_route_pages().render_product_assets_page()
     elif current_page == "Prodigi":
         os_route_pages().render_prodigi_page()
+    elif current_page == "Ads Intelligence":
+        if not _developer_unlocked():
+            _render_developer_password_gate(
+                title="Admin access required.",
+                caption="Unlock Developer access to open Ads Intelligence.",
+            )
+        else:
+            get_ads_intelligence_page().render_page()
     elif current_page == "Webhook Events":
         os_route_pages().render_webhook_events_page()
     elif current_page == "Sync Runs":

@@ -10453,6 +10453,672 @@ def list_app_errors(limit=200):
             return cur.fetchall()
 
 
+ADS_LAST_SUCCESSFUL_SYNC_KEY = "ads_meta_last_successful_sync_at"
+ADS_LAST_SYNC_ERROR_KEY = "ads_meta_last_sync_error"
+ADS_LAST_SYNC_RANGE_KEY = "ads_meta_last_sync_range"
+ADS_SCHEMA_MIGRATION = BASE_DIR / "migrations" / "20260626_ads_intelligence_v1.sql"
+
+
+def ensure_ads_schema():
+    ensure_schema()
+    sql = ADS_SCHEMA_MIGRATION.read_text(encoding="utf-8")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+        conn.commit()
+
+
+def _ads_float(value, default=0.0):
+    try:
+        if value in (None, ""):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _ads_int(value, default=0):
+    try:
+        if value in (None, ""):
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def sanitize_ads_error(message):
+    cleaned = str(message or "")
+    for key in ("META_ACCESS_TOKEN", "META_APP_SECRET"):
+        value = str(os.getenv(key, "")).strip()
+        if value and len(value) >= 6:
+            cleaned = cleaned.replace(value, "[redacted]")
+    cleaned = re.sub(r"access_token=([^&\s]+)", "access_token=[redacted]", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(Bearer\s+)[A-Za-z0-9_\-.]+", r"\1[redacted]", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\bEAA[A-Za-z0-9_\-]{12,}\b", "[redacted]", cleaned)
+    return cleaned
+
+
+def _meta_action_total(row, action_names, source_key="actions"):
+    names = {str(name).lower() for name in action_names}
+    total = 0.0
+    for action in row.get(source_key) or []:
+        if str(action.get("action_type", "")).lower() in names:
+            total += _ads_float(action.get("value"))
+    return total
+
+
+def _meta_purchase_count(row):
+    return _meta_action_total(
+        row,
+        {
+            "purchase",
+            "omni_purchase",
+            "onsite_conversion.purchase",
+            "offsite_conversion.fb_pixel_purchase",
+        },
+    )
+
+
+def _meta_purchase_value(row):
+    return _meta_action_total(
+        row,
+        {
+            "purchase",
+            "omni_purchase",
+            "onsite_conversion.purchase",
+            "offsite_conversion.fb_pixel_purchase",
+        },
+        source_key="action_values",
+    )
+
+
+def _meta_add_to_cart(row):
+    return _meta_action_total(
+        row,
+        {
+            "add_to_cart",
+            "omni_add_to_cart",
+            "onsite_conversion.add_to_cart",
+            "offsite_conversion.fb_pixel_add_to_cart",
+        },
+    )
+
+
+def _meta_initiate_checkout(row):
+    return _meta_action_total(
+        row,
+        {
+            "initiate_checkout",
+            "omni_initiated_checkout",
+            "onsite_conversion.initiate_checkout",
+            "offsite_conversion.fb_pixel_initiate_checkout",
+        },
+    )
+
+
+def _ads_insert_action_log(cur, action_type, status, summary, context=None):
+    cur.execute(
+        """
+        INSERT INTO ads_action_log(action_type, status, summary, context)
+        VALUES (%s, %s, %s, %s::jsonb)
+        """,
+        (str(action_type or ""), str(status or ""), str(summary or ""), json_dumps(context or {})),
+    )
+
+
+def start_ads_sync_log(source="meta_ads_api", sync_type="manual", date_range=""):
+    ensure_ads_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ads_sync_logs(source, sync_type, date_range, started_at, status)
+                VALUES (%s, %s, %s, now(), 'started')
+                RETURNING id
+                """,
+                (str(source or "meta_ads_api"), str(sync_type or "manual"), str(date_range or "")),
+            )
+            row = cur.fetchone() or {}
+        conn.commit()
+    return row.get("id")
+
+
+def finish_ads_sync_log(
+    log_id=None,
+    *,
+    source="meta_ads_api",
+    sync_type="manual",
+    date_range="",
+    status="success",
+    rows_fetched=0,
+    rows_upserted=0,
+    error_message="",
+    context=None,
+):
+    ensure_ads_schema()
+    safe_error = sanitize_ads_error(error_message)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            if log_id:
+                cur.execute(
+                    """
+                    UPDATE ads_sync_logs
+                    SET finished_at=now(),
+                        status=%s,
+                        rows_fetched=%s,
+                        rows_upserted=%s,
+                        error_message=%s,
+                        context=%s::jsonb
+                    WHERE id=%s
+                    """,
+                    (
+                        str(status or "success"),
+                        int(rows_fetched or 0),
+                        int(rows_upserted or 0),
+                        safe_error,
+                        json_dumps(context or {}),
+                        log_id,
+                    ),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO ads_sync_logs(
+                        source, sync_type, date_range, started_at, finished_at, status,
+                        rows_fetched, rows_upserted, error_message, context
+                    )
+                    VALUES (%s, %s, %s, now(), now(), %s, %s, %s, %s, %s::jsonb)
+                    """,
+                    (
+                        str(source or "meta_ads_api"),
+                        str(sync_type or "manual"),
+                        str(date_range or ""),
+                        str(status or "success"),
+                        int(rows_fetched or 0),
+                        int(rows_upserted or 0),
+                        safe_error,
+                        json_dumps(context or {}),
+                    ),
+                )
+        conn.commit()
+
+
+def list_ads_sync_logs(limit=50):
+    if not is_configured():
+        return []
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM ads_sync_logs ORDER BY started_at DESC LIMIT %s", (int(limit or 50),))
+                return cur.fetchall()
+    except Exception:
+        return []
+
+
+def record_ads_sync_error(message, context=None):
+    if not is_configured():
+        return
+    try:
+        ensure_ads_schema()
+        safe_message = sanitize_ads_error(message or "Unknown Meta sync error")
+        set_app_setting(ADS_LAST_SYNC_ERROR_KEY, safe_message)
+        with connect() as conn:
+            with conn.cursor() as cur:
+                _ads_insert_action_log(cur, "meta_sync", "error", safe_message or "Meta sync failed", context or {})
+            conn.commit()
+        log_app_error("meta_ads_sync", safe_message or "Meta sync failed", context or {})
+    except Exception:
+        pass
+
+
+def get_ads_sync_status_read_only():
+    status = {
+        "last_successful_sync": "",
+        "last_sync_error": "",
+        "last_sync_range": "",
+    }
+    if not is_configured():
+        return status
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT key, value FROM app_settings WHERE key = ANY(%s)",
+                    ([ADS_LAST_SUCCESSFUL_SYNC_KEY, ADS_LAST_SYNC_ERROR_KEY, ADS_LAST_SYNC_RANGE_KEY],),
+                )
+                for row in cur.fetchall():
+                    value = row.get("value")
+                    if isinstance(value, dict):
+                        value = value.get("value", "")
+                    if row.get("key") == ADS_LAST_SUCCESSFUL_SYNC_KEY:
+                        status["last_successful_sync"] = value or ""
+                    elif row.get("key") == ADS_LAST_SYNC_ERROR_KEY:
+                        status["last_sync_error"] = value or ""
+                    elif row.get("key") == ADS_LAST_SYNC_RANGE_KEY:
+                        status["last_sync_range"] = value or ""
+    except Exception:
+        pass
+    return status
+
+
+def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insights=None, date_range_label="", account_id=""):
+    ensure_ads_schema()
+    account = account or {}
+    campaigns = campaigns or []
+    adsets = adsets or []
+    ads = ads or []
+    insights = insights or []
+    account_id = str(account.get("account_id") or account.get("id") or account_id or "").replace("act_", "")
+    rows_upserted = (1 if account_id else 0) + len(campaigns) + len(adsets) + len(ads) + len(insights)
+    started = time.perf_counter()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            if account_id:
+                business = account.get("business") or {}
+                cur.execute(
+                    """
+                    INSERT INTO meta_ad_accounts(
+                        account_id, name, currency, timezone_name, account_status, business_name, raw, synced_at, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, now(), now())
+                    ON CONFLICT (account_id) DO UPDATE SET
+                        name=EXCLUDED.name,
+                        currency=EXCLUDED.currency,
+                        timezone_name=EXCLUDED.timezone_name,
+                        account_status=EXCLUDED.account_status,
+                        business_name=EXCLUDED.business_name,
+                        raw=EXCLUDED.raw,
+                        synced_at=now(),
+                        updated_at=now()
+                    """,
+                    (
+                        account_id,
+                        account.get("name"),
+                        account.get("currency"),
+                        account.get("timezone_name"),
+                        str(account.get("account_status") or ""),
+                        business.get("name") if isinstance(business, dict) else "",
+                        json_dumps(account),
+                    ),
+                )
+            for campaign in campaigns:
+                cur.execute(
+                    """
+                    INSERT INTO meta_campaigns(
+                        campaign_id, account_id, campaign_name, status, effective_status, objective,
+                        meta_created_at, meta_updated_at, raw, synced_at, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now(), now())
+                    ON CONFLICT (campaign_id) DO UPDATE SET
+                        account_id=EXCLUDED.account_id,
+                        campaign_name=EXCLUDED.campaign_name,
+                        status=EXCLUDED.status,
+                        effective_status=EXCLUDED.effective_status,
+                        objective=EXCLUDED.objective,
+                        meta_created_at=EXCLUDED.meta_created_at,
+                        meta_updated_at=EXCLUDED.meta_updated_at,
+                        raw=EXCLUDED.raw,
+                        synced_at=now(),
+                        updated_at=now()
+                    """,
+                    (
+                        campaign.get("id"),
+                        account_id,
+                        campaign.get("name"),
+                        campaign.get("status"),
+                        campaign.get("effective_status"),
+                        campaign.get("objective"),
+                        campaign.get("created_time"),
+                        campaign.get("updated_time"),
+                        json_dumps(campaign),
+                    ),
+                )
+            for adset in adsets:
+                cur.execute(
+                    """
+                    INSERT INTO meta_adsets(
+                        adset_id, account_id, campaign_id, adset_name, status, effective_status,
+                        optimization_goal, billing_event, daily_budget, lifetime_budget,
+                        meta_created_at, meta_updated_at, raw, synced_at, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now(), now())
+                    ON CONFLICT (adset_id) DO UPDATE SET
+                        account_id=EXCLUDED.account_id,
+                        campaign_id=EXCLUDED.campaign_id,
+                        adset_name=EXCLUDED.adset_name,
+                        status=EXCLUDED.status,
+                        effective_status=EXCLUDED.effective_status,
+                        optimization_goal=EXCLUDED.optimization_goal,
+                        billing_event=EXCLUDED.billing_event,
+                        daily_budget=EXCLUDED.daily_budget,
+                        lifetime_budget=EXCLUDED.lifetime_budget,
+                        meta_created_at=EXCLUDED.meta_created_at,
+                        meta_updated_at=EXCLUDED.meta_updated_at,
+                        raw=EXCLUDED.raw,
+                        synced_at=now(),
+                        updated_at=now()
+                    """,
+                    (
+                        adset.get("id"),
+                        account_id,
+                        adset.get("campaign_id"),
+                        adset.get("name"),
+                        adset.get("status"),
+                        adset.get("effective_status"),
+                        adset.get("optimization_goal"),
+                        adset.get("billing_event"),
+                        _ads_float(adset.get("daily_budget")),
+                        _ads_float(adset.get("lifetime_budget")),
+                        adset.get("created_time"),
+                        adset.get("updated_time"),
+                        json_dumps(adset),
+                    ),
+                )
+            for ad in ads:
+                creative = ad.get("creative") or {}
+                creative_id = creative.get("id")
+                cur.execute(
+                    """
+                    INSERT INTO meta_ads(
+                        ad_id, account_id, campaign_id, adset_id, ad_name, status, effective_status,
+                        creative_id, meta_created_at, meta_updated_at, raw, synced_at, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, now(), now())
+                    ON CONFLICT (ad_id) DO UPDATE SET
+                        account_id=EXCLUDED.account_id,
+                        campaign_id=EXCLUDED.campaign_id,
+                        adset_id=EXCLUDED.adset_id,
+                        ad_name=EXCLUDED.ad_name,
+                        status=EXCLUDED.status,
+                        effective_status=EXCLUDED.effective_status,
+                        creative_id=EXCLUDED.creative_id,
+                        meta_created_at=EXCLUDED.meta_created_at,
+                        meta_updated_at=EXCLUDED.meta_updated_at,
+                        raw=EXCLUDED.raw,
+                        synced_at=now(),
+                        updated_at=now()
+                    """,
+                    (
+                        ad.get("id"),
+                        account_id,
+                        ad.get("campaign_id"),
+                        ad.get("adset_id"),
+                        ad.get("name"),
+                        ad.get("status"),
+                        ad.get("effective_status"),
+                        creative_id,
+                        ad.get("created_time"),
+                        ad.get("updated_time"),
+                        json_dumps(ad),
+                    ),
+                )
+                if creative_id:
+                    cur.execute(
+                        """
+                        INSERT INTO meta_creatives(
+                            creative_id, ad_id, account_id, name, thumbnail_url, object_story_id, raw, synced_at, updated_at
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, now(), now())
+                        ON CONFLICT (creative_id) DO UPDATE SET
+                            ad_id=EXCLUDED.ad_id,
+                            account_id=EXCLUDED.account_id,
+                            name=EXCLUDED.name,
+                            thumbnail_url=EXCLUDED.thumbnail_url,
+                            object_story_id=EXCLUDED.object_story_id,
+                            raw=EXCLUDED.raw,
+                            synced_at=now(),
+                            updated_at=now()
+                        """,
+                        (
+                            creative_id,
+                            ad.get("id"),
+                            account_id,
+                            creative.get("name"),
+                            creative.get("thumbnail_url"),
+                            creative.get("object_story_id"),
+                            json_dumps(creative),
+                        ),
+                    )
+            for insight in insights:
+                spend = _ads_float(insight.get("spend"))
+                purchases = _meta_purchase_count(insight)
+                purchase_value = _meta_purchase_value(insight)
+                add_to_cart = _meta_add_to_cart(insight)
+                initiate_checkout = _meta_initiate_checkout(insight)
+                cost_per_purchase = spend / purchases if purchases else 0
+                roas = purchase_value / spend if spend else 0
+                placement = " / ".join(
+                    part
+                    for part in (
+                        insight.get("publisher_platform"),
+                        insight.get("platform_position"),
+                    )
+                    if part
+                )
+                cur.execute(
+                    """
+                    INSERT INTO meta_ad_insights_daily(
+                        date, account_id, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name,
+                        spend, impressions, reach, clicks, inline_link_clicks, ctr, cpc, cpm, frequency,
+                        purchases, purchase_value, cost_per_purchase, roas, add_to_cart, initiate_checkout,
+                        country, placement, raw, synced_at, updated_at
+                    )
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s::jsonb, now(), now()
+                    )
+                    ON CONFLICT (date, ad_id, country, placement) DO UPDATE SET
+                        account_id=EXCLUDED.account_id,
+                        campaign_id=EXCLUDED.campaign_id,
+                        campaign_name=EXCLUDED.campaign_name,
+                        adset_id=EXCLUDED.adset_id,
+                        adset_name=EXCLUDED.adset_name,
+                        ad_name=EXCLUDED.ad_name,
+                        spend=EXCLUDED.spend,
+                        impressions=EXCLUDED.impressions,
+                        reach=EXCLUDED.reach,
+                        clicks=EXCLUDED.clicks,
+                        inline_link_clicks=EXCLUDED.inline_link_clicks,
+                        ctr=EXCLUDED.ctr,
+                        cpc=EXCLUDED.cpc,
+                        cpm=EXCLUDED.cpm,
+                        frequency=EXCLUDED.frequency,
+                        purchases=EXCLUDED.purchases,
+                        purchase_value=EXCLUDED.purchase_value,
+                        cost_per_purchase=EXCLUDED.cost_per_purchase,
+                        roas=EXCLUDED.roas,
+                        add_to_cart=EXCLUDED.add_to_cart,
+                        initiate_checkout=EXCLUDED.initiate_checkout,
+                        raw=EXCLUDED.raw,
+                        synced_at=now(),
+                        updated_at=now()
+                    """,
+                    (
+                        insight.get("date_start") or insight.get("date_stop"),
+                        str(insight.get("account_id") or account_id).replace("act_", ""),
+                        insight.get("campaign_id"),
+                        insight.get("campaign_name"),
+                        insight.get("adset_id"),
+                        insight.get("adset_name"),
+                        insight.get("ad_id"),
+                        insight.get("ad_name"),
+                        spend,
+                        _ads_int(insight.get("impressions")),
+                        _ads_int(insight.get("reach")),
+                        _ads_int(insight.get("clicks")),
+                        _ads_int(insight.get("inline_link_clicks")),
+                        _ads_float(insight.get("ctr")),
+                        _ads_float(insight.get("cpc")),
+                        _ads_float(insight.get("cpm")),
+                        _ads_float(insight.get("frequency")),
+                        purchases,
+                        purchase_value,
+                        cost_per_purchase,
+                        roas,
+                        add_to_cart,
+                        initiate_checkout,
+                        insight.get("country") or "",
+                        placement or "",
+                        json_dumps(insight),
+                    ),
+                )
+            _ads_insert_action_log(
+                cur,
+                "meta_sync",
+                "success",
+                f"Synced Meta Ads data for {date_range_label or 'selected range'}",
+                {
+                    "account_id": account_id,
+                    "campaigns": len(campaigns),
+                    "adsets": len(adsets),
+                    "ads": len(ads),
+                    "insights": len(insights),
+                    "rows_upserted": rows_upserted,
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
+        conn.commit()
+    success_at = _datetime_to_setting(utc_now_datetime())
+    set_app_setting(ADS_LAST_SUCCESSFUL_SYNC_KEY, success_at)
+    set_app_setting(ADS_LAST_SYNC_ERROR_KEY, "")
+    set_app_setting(ADS_LAST_SYNC_RANGE_KEY, date_range_label or "")
+    return {
+        "campaigns": len(campaigns),
+        "adsets": len(adsets),
+        "ads": len(ads),
+        "insights": len(insights),
+        "rows_upserted": rows_upserted,
+        "last_successful_sync": success_at,
+        "duration_ms": int((time.perf_counter() - started) * 1000),
+    }
+
+
+def list_meta_ad_insights(days=30, limit=5000):
+    if not is_configured():
+        return []
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT i.*, t.product_handle, t.product_title, t.sport, t.country_focus,
+                           t.mockup_type, t.ad_angle, t.funnel_stage, t.notes AS tag_notes,
+                           a.status AS ad_status, a.effective_status AS ad_effective_status
+                    FROM meta_ad_insights_daily i
+                    LEFT JOIN meta_creative_tags t ON t.ad_id = i.ad_id
+                    LEFT JOIN meta_ads a ON a.ad_id = i.ad_id
+                    WHERE i.date >= CURRENT_DATE - (%s::int - 1)
+                    ORDER BY i.date DESC, i.spend DESC
+                    LIMIT %s
+                    """,
+                    (max(int(days or 30), 1), int(limit or 5000)),
+                )
+                return cur.fetchall()
+    except Exception:
+        return []
+
+
+def list_ads_creative_tags(limit=500):
+    if not is_configured():
+        return []
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM meta_creative_tags ORDER BY updated_at DESC LIMIT %s",
+                    (int(limit or 500),),
+                )
+                return cur.fetchall()
+    except Exception:
+        return []
+
+
+def upsert_ads_creative_tag(tag):
+    ensure_ads_schema()
+    tag = tag or {}
+    ad_id = str(tag.get("ad_id") or "").strip()
+    if not ad_id:
+        raise ValueError("ad_id is required to save creative tags.")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO meta_creative_tags(
+                    ad_id, creative_id, product_handle, product_title, sport, country_focus,
+                    mockup_type, ad_angle, funnel_stage, notes, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (ad_id) DO UPDATE SET
+                    creative_id=EXCLUDED.creative_id,
+                    product_handle=EXCLUDED.product_handle,
+                    product_title=EXCLUDED.product_title,
+                    sport=EXCLUDED.sport,
+                    country_focus=EXCLUDED.country_focus,
+                    mockup_type=EXCLUDED.mockup_type,
+                    ad_angle=EXCLUDED.ad_angle,
+                    funnel_stage=EXCLUDED.funnel_stage,
+                    notes=EXCLUDED.notes,
+                    updated_at=now()
+                """,
+                (
+                    ad_id,
+                    tag.get("creative_id"),
+                    tag.get("product_handle"),
+                    tag.get("product_title"),
+                    tag.get("sport"),
+                    tag.get("country_focus"),
+                    tag.get("mockup_type"),
+                    tag.get("ad_angle"),
+                    tag.get("funnel_stage"),
+                    tag.get("notes"),
+                ),
+            )
+            cur.execute(
+                """
+                INSERT INTO ads_product_mapping(ad_id, product_handle, product_title, sport, country_focus, notes, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (ad_id) DO UPDATE SET
+                    product_handle=EXCLUDED.product_handle,
+                    product_title=EXCLUDED.product_title,
+                    sport=EXCLUDED.sport,
+                    country_focus=EXCLUDED.country_focus,
+                    notes=EXCLUDED.notes,
+                    updated_at=now()
+                """,
+                (
+                    ad_id,
+                    tag.get("product_handle"),
+                    tag.get("product_title"),
+                    tag.get("sport"),
+                    tag.get("country_focus"),
+                    tag.get("notes"),
+                ),
+            )
+            _ads_insert_action_log(
+                cur,
+                "creative_tag",
+                "saved",
+                f"Saved creative tags for ad {ad_id}",
+                {key: value for key, value in tag.items() if key != "notes"},
+            )
+        conn.commit()
+    return {"saved": True, "ad_id": ad_id}
+
+
+def list_ads_action_log(limit=100):
+    if not is_configured():
+        return []
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM ads_action_log ORDER BY created_at DESC LIMIT %s", (int(limit or 100),))
+                return cur.fetchall()
+    except Exception:
+        return []
+
+
 def run_integrity_check():
     ensure_schema()
     results = {}
