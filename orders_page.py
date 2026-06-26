@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import html
 import importlib
 import json
 from pathlib import Path
@@ -25,6 +26,7 @@ SNAPSHOT_LOADED_KEY = "orders_allocation_snapshot_loaded"
 NOTICE_KEY = "orders_allocation_notice"
 SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
 GRID_KEY = "orders-fulfilment-grid"
+ROW_SELECT_KEY_PREFIX = "orders-row-selected"
 COPY_ORDER_ICON = "\u29c9"
 SYNC_RESULT_KEY = "orders_sync_result"
 BACKFILL_RESULT_KEY = "orders_backfill_result"
@@ -422,6 +424,12 @@ def _row_key(row):
             str(normalised.get("edition_number") or ""),
         ]
     )
+
+
+def _row_select_key(row, index):
+    key_source = _row_key(row) or str(index)
+    safe_key = re.sub(r"[^A-Za-z0-9_]+", "_", key_source).strip("_")
+    return f"{ROW_SELECT_KEY_PREFIX}-{index}-{safe_key[:96]}"
 
 
 def _certificate_fields(row):
@@ -1165,6 +1173,13 @@ def _selected_indices_from_state():
 
 def _selected_rows_from_state(rows):
     normalised_rows = [_normalise_row(row) for row in rows or []]
+    manual_indices = [
+        index
+        for index, row in enumerate(normalised_rows)
+        if bool(st.session_state.get(_row_select_key(row, index)))
+    ]
+    if manual_indices:
+        return [normalised_rows[index] for index in manual_indices if 0 <= index < len(normalised_rows)]
     selected = []
     for index in _selected_indices_from_state():
         if 0 <= index < len(normalised_rows):
@@ -1449,148 +1464,169 @@ def _display_rows(rows):
     return output
 
 
-def _order_copy_overlay_html(rows):
-    orders = [
-        str(_normalise_row(row).get("order") or "").strip()
-        for row in rows or []
-        if str(_normalise_row(row).get("order") or "").strip()
-    ]
+def _order_cell_html(order_number):
+    order_number = str(order_number or "").strip()
+    escaped_order_number = html.escape(order_number)
     return f"""
+<!doctype html>
+<html>
+<head>
+<style>
+html, body {{
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: #111827;
+  font: 14px/28px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow: hidden;
+}}
+.order-cell {{
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}}
+.copy-order-button {{
+  width: 18px;
+  height: 22px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: #374151;
+  cursor: pointer;
+  font: inherit;
+  line-height: 20px;
+}}
+.copy-order-button:hover,
+.copy-order-button:focus {{
+  color: #0f766e;
+  outline: none;
+}}
+.order-number {{
+  display: inline-block;
+}}
+</style>
+</head>
+<body>
+<span class="order-cell">
+  <button class="copy-order-button" type="button" title="Copy order number" aria-label="Copy order number">{COPY_ORDER_ICON}</button>
+  <span class="order-number">{escaped_order_number}</span>
+</span>
 <script>
 (() => {{
-  const orders = {json.dumps(orders)};
-  const overlayId = "sports-cave-orders-copy-overlay";
-  const styleId = "sports-cave-orders-copy-style";
-  const icon = {json.dumps(COPY_ORDER_ICON)};
+  const button = document.querySelector(".copy-order-button");
+  const orderNumber = document.querySelector(".order-number")?.textContent || "";
 
   function copyText(value) {{
-    if (navigator.clipboard && window.isSecureContext) {{
-      return navigator.clipboard.writeText(value);
-    }}
-    const input = document.createElement("textarea");
-    input.value = value;
-    input.setAttribute("readonly", "");
-    input.style.position = "fixed";
-    input.style.left = "-9999px";
-    document.body.appendChild(input);
-    input.select();
-    document.execCommand("copy");
-    input.remove();
-    return Promise.resolve();
+    if (!navigator.clipboard) return Promise.reject(new Error("Clipboard unavailable"));
+    return navigator.clipboard.writeText(value);
   }}
 
-  function ensureStyle(doc) {{
-    if (doc.getElementById(styleId)) return;
-    const style = doc.createElement("style");
-    style.id = styleId;
-    style.textContent = `
-      #${{overlayId}} {{
-        position: absolute;
-        z-index: 9999;
-        pointer-events: none;
-        overflow: hidden;
-        color: #1f2937;
-        font: 14px/28px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }}
-      #${{overlayId}} .copy-order-row {{
-        height: 28px;
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        white-space: nowrap;
-        pointer-events: auto;
-        background: rgba(255, 255, 255, 0.96);
-      }}
-      #${{overlayId}} .copy-order-button {{
-        width: 18px;
-        height: 22px;
-        border: 0;
-        padding: 0;
-        margin: 0;
-        background: transparent;
-        color: #374151;
-        cursor: pointer;
-        font: inherit;
-        line-height: 20px;
-      }}
-      #${{overlayId}} .copy-order-button:hover,
-      #${{overlayId}} .copy-order-button:focus {{
-        color: #0f766e;
-        outline: none;
-      }}
-      #${{overlayId}} .copy-order-number {{
-        pointer-events: none;
-      }}
-    `;
-    doc.head.appendChild(style);
-  }}
-
-  function render() {{
-    const doc = window.parent && window.parent.document ? window.parent.document : document;
-    ensureStyle(doc);
-    const tables = Array.from(doc.querySelectorAll('[data-testid="stDataFrame"]'));
-    const table = tables[tables.length - 1];
-    if (!table || !orders.length) return;
-
-    let overlay = doc.getElementById(overlayId);
-    if (!overlay) {{
-      overlay = doc.createElement("div");
-      overlay.id = overlayId;
-      doc.body.appendChild(overlay);
-    }}
-
-    const rect = table.getBoundingClientRect();
-    const headerHeight = 36;
-    const checkboxColumnWidth = 36;
-    const leftPadding = 9;
-    const visibleHeight = Math.max(0, Math.min(rect.height - headerHeight, orders.length * 28));
-    overlay.style.left = `${{Math.round(rect.left + window.parent.scrollX + checkboxColumnWidth + leftPadding)}}px`;
-    overlay.style.top = `${{Math.round(rect.top + window.parent.scrollY + headerHeight)}}px`;
-    overlay.style.width = "122px";
-    overlay.style.height = `${{Math.round(visibleHeight)}}px`;
-    overlay.innerHTML = "";
-
-    orders.forEach((order) => {{
-      const row = doc.createElement("div");
-      row.className = "copy-order-row";
-      const button = doc.createElement("button");
-      button.className = "copy-order-button";
-      button.type = "button";
-      button.title = "Copy order number";
-      button.setAttribute("aria-label", "Copy order number");
-      button.dataset.order = order;
-      button.textContent = icon;
-      const number = doc.createElement("span");
-      number.className = "copy-order-number";
-      number.textContent = order;
-      button.addEventListener("click", (event) => {{
-        event.preventDefault();
-        event.stopPropagation();
-        copyText(order).then(() => {{
-          button.dataset.copied = "true";
-          window.setTimeout(() => delete button.dataset.copied, 900);
-        }});
+  if (button) {{
+    button.addEventListener("click", (event) => {{
+      event.preventDefault();
+      event.stopPropagation();
+      copyText(orderNumber).then(() => {{
+        button.dataset.copied = "true";
+        window.setTimeout(() => delete button.dataset.copied, 900);
       }});
-      row.appendChild(button);
-      row.appendChild(number);
-      overlay.appendChild(row);
     }});
   }}
-
-  render();
-  window.parent.addEventListener("resize", render, {{ passive: true }});
-  window.parent.addEventListener("scroll", render, {{ passive: true }});
-  window.setTimeout(render, 150);
-  window.setTimeout(render, 600);
 }})();
 </script>
+</body>
+</html>
 """
 
 
-def _render_order_copy_overlay(rows):
-    if getattr(st, "__name__", "") != "streamlit":
-        return
-    components.html(_order_copy_overlay_html(rows), height=0, width=0)
+def _render_order_cell(order_number):
+    components.html(_order_cell_html(order_number), height=28, width=132)
+
+
+def _render_table_text(value, *, tone=""):
+    text = html.escape(str(value or ""))
+    classes = "orders-inline-cell"
+    if tone:
+        classes = f"{classes} {tone}"
+    st.markdown(f'<div class="{classes}" title="{text}">{text}</div>', unsafe_allow_html=True)
+
+
+def _render_inline_orders_table(rows):
+    st.markdown(
+        """
+<style>
+.orders-inline-table {
+  border: 1px solid rgba(17, 24, 39, 0.12);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+}
+.orders-inline-header {
+  color: #6b7280;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(17, 24, 39, 0.10);
+}
+.orders-inline-cell,
+.orders-inline-header-cell {
+  min-height: 28px;
+  line-height: 28px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #111827;
+}
+.orders-inline-cell.uploaded,
+.orders-inline-cell.ready,
+.orders-inline-cell.complete {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.orders-inline-cell.failed {
+  color: #c92a2a;
+  font-weight: 600;
+}
+.orders-inline-cell.muted {
+  color: #6b7280;
+}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+    widths = [0.36, 1.12, 1.08, 1.2, 1.7, 2.45, 1.6, 1.25, 1.0, 1.0]
+    headers = ("", "Order", "Edition", "Certificate", "Customer", "Product", "Variant", "Shipping", "Date", "Prodigi")
+    with st.container(border=True):
+        header_cols = st.columns(widths, gap="small")
+        for column, label in zip(header_cols, headers):
+            with column:
+                st.markdown(
+                    f'<div class="orders-inline-header-cell">{html.escape(label)}</div>',
+                    unsafe_allow_html=True,
+                )
+        for index, row in enumerate(rows):
+            row_cols = st.columns(widths, gap="small")
+            with row_cols[0]:
+                st.checkbox(
+                    "Select row",
+                    key=_row_select_key(row, index),
+                    label_visibility="collapsed",
+                )
+            with row_cols[1]:
+                _render_order_cell(row.get("order") or "")
+            values = (
+                ("edition", ""),
+                ("certificate", "ready" if row.get("certificate") in {"Ready", "Uploaded"} else "failed" if row.get("certificate") == "Upload failed" else "muted" if row.get("certificate") == "Needs certificate" else ""),
+                ("customer", ""),
+                ("product", ""),
+                ("variant", ""),
+                ("shipping", ""),
+                ("date", ""),
+                ("prodigi", "complete" if row.get("prodigi") == "Complete" else "muted" if row.get("prodigi") == "Not started" else ""),
+            )
+            for column, (key, tone) in zip(row_cols[2:], values):
+                with column:
+                    _render_table_text(row.get(key) or "", tone=tone)
 
 
 def _column_config():
@@ -1850,6 +1886,11 @@ def _render_admin_panel(rows):
 def _render_orders_table(rows):
     start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
+    if getattr(st, "__name__", "") == "streamlit":
+        _render_inline_orders_table(rows)
+        _perf_log("render table", start, rows=len(rows))
+        print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
+        return
     with st.container(border=True):
         st.dataframe(
             _display_table_payload(rows),
@@ -1863,7 +1904,6 @@ def _render_orders_table(rows):
             row_height=28,
             key=GRID_KEY,
         )
-        _render_order_copy_overlay(rows)
     _perf_log("render table", start, rows=len(rows))
     print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
 

@@ -183,17 +183,39 @@ class EditionOpsUiTests(unittest.TestCase):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
         render_table = inspect.getsource(orders_page._render_orders_table)
         display_rows = orders_page._display_rows([{"order": "#SC2858"}])
-        overlay_html = orders_page._order_copy_overlay_html([{"order": "#SC2858"}])
+        order_cell_html = orders_page._order_cell_html("#SC2858")
 
         self.assertEqual(display_rows[0]["order"], f"{orders_page.COPY_ORDER_ICON} #SC2858")
+        self.assertNotIn("order_copy", orders_page.VISIBLE_COLUMNS)
+        self.assertNotIn("copy_order", orders_page.VISIBLE_COLUMNS)
+        self.assertEqual(order_cell_html.count('class="copy-order-button"'), 1)
+        self.assertEqual(order_cell_html.count('class="order-number">#SC2858</span>'), 1)
+        self.assertEqual(order_cell_html.count("#SC2858"), 1)
         self.assertNotIn("_render_order_copy_buttons", source)
+        self.assertNotIn("_render_order_copy_overlay", source)
+        self.assertNotIn("sports-cave-orders-copy-overlay", source)
+        self.assertNotIn("copy-order-row", source)
         self.assertNotIn("Copy order</span>", source)
         self.assertIn("copy-order-button", source)
         self.assertIn("components.html", source)
-        self.assertIn("_render_order_copy_overlay(rows)", render_table)
-        self.assertIn("navigator.clipboard.writeText(value)", overlay_html)
-        self.assertIn("Copy order number", overlay_html)
-        self.assertIn("#SC2858", overlay_html)
+        self.assertIn("_render_inline_orders_table(rows)", render_table)
+        self.assertIn("navigator.clipboard.writeText(value)", order_cell_html)
+        self.assertIn("Copy order number", order_cell_html)
+
+    def test_orders_inline_copy_cells_are_one_per_rendered_order_row(self):
+        rows = [
+            {"order": "#SC2860"},
+            {"order": "#SC2859"},
+            {"order": "#SC2858"},
+        ]
+        cells = [orders_page._order_cell_html(row["order"]) for row in rows]
+
+        self.assertEqual(len(cells), len(rows))
+        for row, cell in zip(rows, cells):
+            self.assertEqual(cell.count('class="copy-order-button"'), 1)
+            self.assertEqual(cell.count('class="order-number">'), 1)
+            self.assertEqual(cell.count(row["order"]), 1)
+            self.assertIn("Copy order number", cell)
 
     def test_prodigi_reference_contains_all_16_code_mappings(self):
         rows = os_pages.prodigi_reference_rows()
