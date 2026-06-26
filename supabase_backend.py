@@ -10663,6 +10663,25 @@ def list_ads_sync_logs(limit=50):
         return []
 
 
+def get_latest_ads_sync_log():
+    if not is_configured():
+        return {}
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM ads_sync_logs
+                    ORDER BY COALESCE(finished_at, started_at) DESC, id DESC
+                    LIMIT 1
+                    """
+                )
+                return cur.fetchone() or {}
+    except Exception:
+        return {}
+
+
 def ads_table_counts():
     tables = (
         "meta_ad_accounts",

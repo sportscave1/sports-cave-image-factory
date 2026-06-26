@@ -502,8 +502,28 @@ def _render_controls(config_status):
     return selected_range
 
 
-def _sync_status_label(sync_status, counts):
-    if sync_status.get("last_sync_error"):
+def _latest_sync_time(sync_status, latest_sync_log):
+    return (
+        latest_sync_log.get("finished_at")
+        or latest_sync_log.get("started_at")
+        or sync_status.get("last_successful_sync")
+        or ""
+    )
+
+
+def _latest_sync_status(latest_sync_log):
+    return str(latest_sync_log.get("status") or "").strip().lower()
+
+
+def _sync_status_label(sync_status, counts, latest_sync_log):
+    latest_status = _latest_sync_status(latest_sync_log)
+    if latest_status == "success":
+        return "Synced"
+    if latest_status == "partial_success":
+        if int(counts.get("meta_ad_insights_daily") or 0) > 0:
+            return "Synced"
+        return "Partial sync"
+    if latest_status == "error":
         return "Sync issue"
     if sync_status.get("last_successful_sync"):
         if int(counts.get("meta_ad_insights_daily") or 0) > 0:
@@ -518,6 +538,18 @@ def _empty_performance_message(counts):
     return "No Meta performance rows yet. Test connection, then sync Last 7 days."
 
 
+def _show_business_sync_warning(latest_sync_log, counts):
+    latest_status = _latest_sync_status(latest_sync_log)
+    has_insights = int(counts.get("meta_ad_insights_daily") or 0) > 0
+    if latest_status == "success":
+        return ""
+    if latest_status == "partial_success" and not has_insights:
+        return "Meta partially synced. Some data may be missing. Open Developer diagnostics for details."
+    if latest_status == "error" and not has_insights:
+        return "Meta sync issue. Open Developer diagnostics for details."
+    return ""
+
+
 def render_page():
     ui_styles.inject_global_ui_styles()
     ui_styles.page_header(
@@ -527,18 +559,20 @@ def render_page():
 
     config_status = meta_ads_client.safe_meta_config_status()
     sync_status = supabase_backend.get_ads_sync_status_read_only()
+    latest_sync_log = supabase_backend.get_latest_ads_sync_log()
     counts = supabase_backend.ads_table_counts()
-    status_label = _sync_status_label(sync_status, counts)
+    status_label = _sync_status_label(sync_status, counts, latest_sync_log)
     ui_styles.source_status_banner(
         [
             ("Source", "Meta Ads"),
-            ("Last sync", sync_status.get("last_successful_sync") or "Never"),
+            ("Last sync", _latest_sync_time(sync_status, latest_sync_log) or "Never"),
             ("Status", status_label),
             ("Data store", "Supabase"),
         ]
     )
-    if sync_status.get("last_sync_error"):
-        st.warning("Meta sync issue: some reporting data failed. Open Developer -> Ads Intelligence Diagnostics for technical details.")
+    warning_message = _show_business_sync_warning(latest_sync_log, counts)
+    if warning_message:
+        st.warning(warning_message)
 
     selected_range = _render_controls(config_status)
     days = DATE_RANGE_OPTIONS[selected_range]
@@ -608,6 +642,9 @@ def render_page():
                 else:
                     ui_styles.empty_state("No weak ads flagged yet.")
             _section("Product Opportunities")
+            st.caption(
+                "Most ads are currently untagged. Use Creative Tags to map ads to products so product opportunity reporting becomes accurate."
+            )
             product_rows = _product_opportunity_rows(ad_rows)
             if product_rows:
                 st.dataframe(product_rows, hide_index=True, use_container_width=True)

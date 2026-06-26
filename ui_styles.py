@@ -96,11 +96,16 @@ def inject_global_ui_styles():
         div[data-testid="stMetric"] {
             min-height: 62px;
             border: 1px solid #ded4c4;
-            background: var(--sc-cream);
+            background: var(--sc-cream) !important;
             border-radius: 8px;
             padding: 8px 10px;
-            color: var(--sc-dark-text);
+            color: var(--sc-dark-text) !important;
         }
+        div[data-testid="stMetric"] * {
+            color: var(--sc-dark-text) !important;
+        }
+        div[data-testid="stMetricLabel"],
+        div[data-testid="stMetricLabel"] *,
         div[data-testid="stMetric"] label,
         div[data-testid="stMetric"] label p {
             color: #665d50 !important;
@@ -109,11 +114,19 @@ def inject_global_ui_styles():
             text-transform: uppercase;
         }
         div[data-testid="stMetricValue"],
-        div[data-testid="stMetricValue"] div {
+        div[data-testid="stMetricValue"] *,
+        div[data-testid="stMetricValue"] div,
+        div[data-testid="stMetric"] [data-testid="stMarkdownContainer"] p {
             color: var(--sc-dark-text) !important;
+            opacity: 1 !important;
             font-size: 1.15rem !important;
             line-height: 1.1 !important;
             font-weight: 800 !important;
+        }
+        div[data-testid="stMetricDelta"],
+        div[data-testid="stMetricDelta"] * {
+            color: #4f4639 !important;
+            opacity: 1 !important;
         }
         .sc-pill-row {
             display: flex;
