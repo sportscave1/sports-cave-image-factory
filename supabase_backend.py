@@ -11331,11 +11331,12 @@ def save_meta_ads_breakdown_insights(kind, insights=None, account_id="", date_ra
     return {"rows": len(insights), "rows_upserted": len(insights), "duration_ms": int((time.perf_counter() - started) * 1000)}
 
 
-def _list_meta_breakdown_insights(kind, days=30, limit=5000):
+def _list_meta_breakdown_insights(kind, days=None, limit=5000, date_range="last_30_days"):
     config = ADS_BREAKDOWN_TABLES.get(kind)
     if not config or not is_configured():
         return []
     table = config["table"]
+    date_where, date_params = _ads_date_where("i.date", date_range=date_range, days=days)
     try:
         with connect() as conn:
             with conn.cursor() as cur:
@@ -11351,33 +11352,35 @@ def _list_meta_breakdown_insights(kind, days=30, limit=5000):
                     LEFT JOIN meta_creative_tags t ON t.ad_id = i.ad_id
                     LEFT JOIN meta_ads a ON a.ad_id = i.ad_id
                     LEFT JOIN meta_creatives c ON c.ad_id = i.ad_id
-                    WHERE i.date >= CURRENT_DATE - (%s::int - 1)
+                    WHERE 1=1
+                    {date_where}
                     ORDER BY i.date DESC, i.spend DESC
                     LIMIT %s
                     """,
-                    (max(int(days or 30), 1), int(limit or 5000)),
+                    (*date_params, int(limit or 5000)),
                 )
                 return cur.fetchall()
     except Exception:
         return []
 
 
-def list_meta_ad_insights_country(days=30, limit=5000):
-    return _list_meta_breakdown_insights("country", days=days, limit=limit)
+def list_meta_ad_insights_country(days=None, limit=5000, date_range="last_30_days"):
+    return _list_meta_breakdown_insights("country", days=days, limit=limit, date_range=date_range)
 
 
-def list_meta_ad_insights_age_gender(days=30, limit=5000):
-    return _list_meta_breakdown_insights("age_gender", days=days, limit=limit)
+def list_meta_ad_insights_age_gender(days=None, limit=5000, date_range="last_30_days"):
+    return _list_meta_breakdown_insights("age_gender", days=days, limit=limit, date_range=date_range)
 
 
-def list_meta_ad_insights_platform(days=30, limit=5000):
-    return _list_meta_breakdown_insights("platform", days=days, limit=limit)
+def list_meta_ad_insights_platform(days=None, limit=5000, date_range="last_30_days"):
+    return _list_meta_breakdown_insights("platform", days=days, limit=limit, date_range=date_range)
 
 
-def list_meta_ad_insights(days=30, limit=5000):
+def list_meta_ad_insights(days=None, limit=5000, date_range="last_30_days"):
     if not is_configured():
         return []
-    params = (max(int(days or 30), 1), int(limit or 5000))
+    date_where, date_params = _ads_date_where("i.date", date_range=date_range, days=days)
+    params = (*date_params, int(limit or 5000))
     new_query = """
         SELECT i.*, t.product_handle, t.product_title, t.sport, t.country_focus,
                t.mockup_type, t.room_type, t.ad_angle, t.hook_style, t.creative_format AS tag_creative_format,
@@ -11389,10 +11392,11 @@ def list_meta_ad_insights(days=30, limit=5000):
         LEFT JOIN meta_creative_tags t ON t.ad_id = i.ad_id
         LEFT JOIN meta_ads a ON a.ad_id = i.ad_id
         LEFT JOIN meta_creatives c ON c.ad_id = i.ad_id
-        WHERE i.date >= CURRENT_DATE - (%s::int - 1)
+        WHERE 1=1
+        {date_where}
         ORDER BY i.date DESC, i.spend DESC
         LIMIT %s
-    """
+    """.format(date_where=date_where)
     fallback_query = """
         SELECT i.*, t.product_handle, t.product_title, t.sport, t.country_focus,
                t.mockup_type, t.ad_angle, t.funnel_stage, t.notes AS tag_notes,
@@ -11400,10 +11404,11 @@ def list_meta_ad_insights(days=30, limit=5000):
         FROM meta_ad_insights_daily i
         LEFT JOIN meta_creative_tags t ON t.ad_id = i.ad_id
         LEFT JOIN meta_ads a ON a.ad_id = i.ad_id
-        WHERE i.date >= CURRENT_DATE - (%s::int - 1)
+        WHERE 1=1
+        {date_where}
         ORDER BY i.date DESC, i.spend DESC
         LIMIT %s
-    """
+    """.format(date_where=date_where)
     try:
         with connect() as conn:
             with conn.cursor() as cur:
@@ -11479,12 +11484,15 @@ def _ads_keyword_tokens(value):
 def list_recent_product_sales_by_handle(date_range="last_7_days", limit=500):
     if not is_configured():
         return []
-    days = _ads_days_from_range(date_range)
+    date_where, date_params = _ads_date_where(
+        "COALESCE(o.processed_at, o.created_at, li.synced_at)::date",
+        date_range=date_range,
+    )
     try:
         with connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     WITH line_rows AS (
                         SELECT
                             NULLIF(li.shopify_handle, '') AS product_handle,
@@ -11501,7 +11509,8 @@ def list_recent_product_sales_by_handle(date_range="last_7_days", limit=500):
                             ) AS total_revenue
                         FROM shopify_order_lines li
                         LEFT JOIN shopify_orders o ON o.shopify_order_id = li.shopify_order_id
-                        WHERE COALESCE(o.processed_at, o.created_at, li.synced_at) >= CURRENT_DATE - (%s::int - 1)
+                        WHERE 1=1
+                          {date_where}
                           AND (COALESCE(li.shopify_handle, '') <> '' OR COALESCE(li.product_title, '') <> '')
                         GROUP BY NULLIF(li.shopify_handle, '')
                     )
@@ -11510,7 +11519,7 @@ def list_recent_product_sales_by_handle(date_range="last_7_days", limit=500):
                     ORDER BY total_orders DESC NULLS LAST, latest_order_date DESC NULLS LAST
                     LIMIT %s
                     """,
-                    (days, int(limit or 500)),
+                    (*date_params, int(limit or 500)),
                 )
                 return cur.fetchall()
     except Exception:
@@ -11733,13 +11742,14 @@ def get_product_candidate_for_ad_name(ad_name, campaign_name=None, adset_name=No
 def list_ads_product_mapping_status(date_range="last_7_days", limit=500):
     if not is_configured():
         return []
-    days = _ads_days_from_range(date_range)
-    params = (days, int(limit or 500))
-    new_query = """
+    date_where, date_params = _ads_date_where("date", date_range=date_range)
+    params = (*date_params, int(limit or 500))
+    new_query = f"""
         WITH recent AS (
             SELECT *
             FROM meta_ad_insights_daily
-            WHERE date >= CURRENT_DATE - (%s::int - 1)
+            WHERE 1=1
+            {date_where}
         )
         SELECT
             a.ad_id,
@@ -11783,11 +11793,12 @@ def list_ads_product_mapping_status(date_range="last_7_days", limit=500):
         ORDER BY spend DESC NULLS LAST, ad_name NULLS LAST
         LIMIT %s
     """
-    fallback_query = """
+    fallback_query = f"""
         WITH recent AS (
             SELECT *
             FROM meta_ad_insights_daily
-            WHERE date >= CURRENT_DATE - (%s::int - 1)
+            WHERE 1=1
+            {date_where}
         )
         SELECT
             a.ad_id,

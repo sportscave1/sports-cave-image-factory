@@ -5471,6 +5471,29 @@ def render_settings_page():
                 )
                 st.write("**Latest sync logs**")
                 if sync_logs:
+                    latest_by_type = {}
+                    for row in sync_logs:
+                        sync_type = row.get("sync_type") or "unknown"
+                        if sync_type not in latest_by_type:
+                            latest_by_type[sync_type] = row
+                    st.write("**Latest sync by report type**")
+                    st.dataframe(
+                        [
+                            {
+                                "type": sync_type,
+                                "finished_at": row.get("finished_at"),
+                                "status": row.get("status"),
+                                "date_range": row.get("date_range"),
+                                "rows_fetched": row.get("rows_fetched"),
+                                "rows_upserted": row.get("rows_upserted"),
+                                "latest_sanitized_error": row.get("error_message") or "",
+                            }
+                            for sync_type, row in latest_by_type.items()
+                            if sync_type in {"performance", "demographics", "platform", "manual"}
+                        ],
+                        hide_index=True,
+                        use_container_width=True,
+                    )
                     st.dataframe(
                         [
                             {

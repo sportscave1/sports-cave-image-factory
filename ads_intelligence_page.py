@@ -353,14 +353,14 @@ def _aggregate_group(rows, group_keys):
     return sorted(output, key=lambda item: item["_sort"], reverse=True)
 
 
-def _compact_table(rows, height=380):
+def _compact_table(rows, height=380, empty_message="No stored rows for this view yet. Use manual sync options to fetch this data."):
     clean_rows = []
     for row in rows or []:
         clean_rows.append({key: value for key, value in row.items() if not str(key).startswith("_")})
     if clean_rows:
         st.dataframe(clean_rows[:500], hide_index=True, use_container_width=True, height=height)
     else:
-        ui_styles.empty_state("No stored rows for this view yet. Use manual sync options to fetch this data.")
+        ui_styles.empty_state(empty_message)
 
 
 def _tag_suggestion(row):
@@ -559,11 +559,11 @@ def _prompt_for(
     return "\n".join(lines)
 
 
-def _sync_meta_ads(range_label, days, sync_base=True, sync_country=True, sync_age_gender=False, sync_platform=False):
+def _sync_meta_ads(range_label, days, sync_base=True, sync_country=False, sync_age_gender=False, sync_platform=False, sync_type="performance"):
     started = time.perf_counter()
     sync_log_id = supabase_backend.start_ads_sync_log(
         source="meta_ads_api",
-        sync_type="manual",
+        sync_type=sync_type,
         date_range=range_label,
     )
     config = meta_ads_client.get_meta_config()
@@ -672,14 +672,20 @@ def _sync_meta_ads(range_label, days, sync_base=True, sync_country=True, sync_ag
         message = "; ".join(warnings) or "Meta sync returned no rows."
         supabase_backend.finish_ads_sync_log(
             sync_log_id,
-            status="error",
+            status="error" if warnings else "partial_success",
             date_range=range_label,
             rows_fetched=0,
             rows_upserted=0,
             error_message=message,
             context={"warnings": warnings},
         )
-        raise meta_ads_client.MetaAdsApiError(message)
+        if warnings:
+            raise meta_ads_client.MetaAdsApiError(message)
+        saved["warnings"] = [message]
+        saved["status"] = "partial_success"
+        saved["rows_fetched"] = 0
+        saved["total_ms"] = int((time.perf_counter() - started) * 1000)
+        return saved
 
     missing_performance_rows = sync_base and (saved.get("ads", 0) <= 0 or saved.get("insights", 0) <= 0)
     status = "partial_success" if warnings or missing_performance_rows else "success"
@@ -954,14 +960,29 @@ def _opportunity_table_rows(rows):
 
 
 def _render_controls(config_status):
-    control_cols = st.columns([1.05, 1, 1.1, 0.9])
+    control_cols = st.columns([1.15, 0.95, 1, 1, 0.9, 0.9])
     selected_range = control_cols[0].selectbox("Date range", list(DATE_RANGE_OPTIONS), index=0)
-    with st.expander("Advanced data", expanded=False):
-        st.caption("Breakdowns are separate safe Meta reads. Base and country are on by default.")
-        sync_base = st.checkbox("Base ad performance", value=True)
-        sync_country = st.checkbox("Country breakdown", value=True)
-        sync_age_gender = st.checkbox("Age/gender breakdown", value=False)
-        sync_platform = st.checkbox("Platform/placement breakdown", value=False)
+
+    def show_all_stored_message():
+        st.info("All stored data uses existing Supabase history. Sync a specific date range to fetch more Meta data.")
+
+    def show_sync_result(result, label):
+        if result.get("warnings"):
+            st.warning(
+                "Meta returned no rows for this report and date range. "
+                "Try Last 30 days or check Developer diagnostics."
+            )
+            return
+        if label == "Performance":
+            st.success(f"Performance synced: {result.get('insights', 0)} rows.")
+        elif label == "Demographics":
+            st.success(
+                f"Demographics synced: {result.get('country_insights', 0)} country rows, "
+                f"{result.get('age_gender_insights', 0)} age/gender rows."
+            )
+        elif label == "Platform":
+            st.success(f"Platform synced: {result.get('platform_insights', 0)} rows.")
+
     if control_cols[1].button("Test Meta Connection", disabled=not config_status["configured"], use_container_width=True):
         try:
             result = meta_ads_client.test_meta_connection()
@@ -969,52 +990,93 @@ def _render_controls(config_status):
         except Exception as error:
             safe_message = meta_ads_client.sanitize_meta_error(f"{type(error).__name__}: {error}")
             supabase_backend.record_ads_sync_error(safe_message, {"action": "test_meta_connection"})
-            st.error("Meta connection test failed. No Meta write actions were attempted.")
-            st.caption(safe_message)
-    if control_cols[2].button("Sync Meta Ads Data", type="primary", disabled=not config_status["configured"], use_container_width=True):
-        progress = st.progress(0, text="Starting Meta read-only sync...")
-        try:
-            progress.progress(15, text="Reading selected Meta performance data...")
-            result = _sync_meta_ads(
-                selected_range,
-                DATE_RANGE_OPTIONS[selected_range],
-                sync_base=sync_base,
-                sync_country=sync_country,
-                sync_age_gender=sync_age_gender,
-                sync_platform=sync_platform,
-            )
-            progress.progress(100, text="Meta Ads data saved to Supabase.")
-            base_ok = (not sync_base) or (result.get("ads", 0) > 0 and result.get("insights", 0) > 0)
-            if base_ok and not result.get("warnings"):
-                st.success(
-                    "Sync complete: "
-                    f"{result.get('campaigns', 0)} campaigns, {result.get('adsets', 0)} ad sets, "
-                    f"{result.get('ads', 0)} ads, {result.get('creatives', 0)} creatives, "
-                    f"{result.get('insights', 0)} daily performance rows, "
-                    f"{result.get('country_insights', 0)} country rows, "
-                    f"{result.get('age_gender_insights', 0)} age/gender rows, "
-                    f"{result.get('platform_insights', 0)} placement rows saved."
+            st.error("Meta connection test failed. Open Developer -> Ads Intelligence Diagnostics for details.")
+
+    sync_days = _date_range_days(selected_range)
+    if control_cols[2].button("Sync Performance", type="primary", disabled=not config_status["configured"], use_container_width=True):
+        if not _date_range_syncable(selected_range):
+            show_all_stored_message()
+        else:
+            progress = st.progress(0, text="Syncing ad-level performance...")
+            try:
+                result = _sync_meta_ads(
+                    selected_range,
+                    sync_days,
+                    sync_base=True,
+                    sync_country=False,
+                    sync_age_gender=False,
+                    sync_platform=False,
+                    sync_type="performance",
                 )
-            elif base_ok:
-                st.warning(
-                    "Meta partially synced. Base performance data was saved, but one selected breakdown needs retry. "
-                    "Open Developer -> Ads Intelligence Diagnostics for technical details."
+                progress.progress(100, text="Performance data saved to Supabase.")
+                show_sync_result(result, "Performance")
+            except Exception as error:
+                progress.empty()
+                safe_message = meta_ads_client.sanitize_meta_error(f"{type(error).__name__}: {error}")
+                supabase_backend.record_ads_sync_error(safe_message, {"range": selected_range, "sync_type": "performance"})
+                if "too much data" in safe_message.lower() or "reduce the amount of data" in safe_message.lower():
+                    st.error("Meta returned too much data for this range. Try a shorter range or sync only Performance first.")
+                else:
+                    st.error("Meta performance sync issue. Open Developer -> Ads Intelligence Diagnostics for technical details.")
+
+    if control_cols[3].button("Sync Demographics", disabled=not config_status["configured"], use_container_width=True):
+        if not _date_range_syncable(selected_range):
+            show_all_stored_message()
+        else:
+            progress = st.progress(0, text="Syncing country and age/gender reports...")
+            try:
+                result = _sync_meta_ads(
+                    selected_range,
+                    sync_days,
+                    sync_base=False,
+                    sync_country=True,
+                    sync_age_gender=True,
+                    sync_platform=False,
+                    sync_type="demographics",
                 )
-            else:
-                st.warning(
-                    "Synced campaign structure. Ad performance data still needs retry. "
-                    "Open Developer -> Ads Intelligence Diagnostics for technical details."
+                progress.progress(100, text="Demographics data saved to Supabase.")
+                show_sync_result(result, "Demographics")
+            except Exception as error:
+                progress.empty()
+                safe_message = meta_ads_client.sanitize_meta_error(f"{type(error).__name__}: {error}")
+                supabase_backend.record_ads_sync_error(safe_message, {"range": selected_range, "sync_type": "demographics"})
+                if "too much data" in safe_message.lower() or "reduce the amount of data" in safe_message.lower():
+                    st.error("Meta returned too much data for this range. Try a shorter range or sync Performance first.")
+                else:
+                    st.error("Meta demographics sync issue. Open Developer -> Ads Intelligence Diagnostics for technical details.")
+
+    if control_cols[4].button("Sync Platform", disabled=not config_status["configured"], use_container_width=True):
+        if not _date_range_syncable(selected_range):
+            show_all_stored_message()
+        else:
+            progress = st.progress(0, text="Syncing platform and placement report...")
+            try:
+                result = _sync_meta_ads(
+                    selected_range,
+                    sync_days,
+                    sync_base=False,
+                    sync_country=False,
+                    sync_age_gender=False,
+                    sync_platform=True,
+                    sync_type="platform",
                 )
-        except Exception as error:
-            progress.empty()
-            safe_message = meta_ads_client.sanitize_meta_error(f"{type(error).__name__}: {error}")
-            supabase_backend.record_ads_sync_error(safe_message, {"range": selected_range})
-            st.error(
-                "Meta sync issue: some reporting data failed. "
-                "Open Developer -> Ads Intelligence Diagnostics for technical details."
-            )
-    if control_cols[3].button("Refresh Stored Data", use_container_width=True):
+                progress.progress(100, text="Platform data saved to Supabase.")
+                show_sync_result(result, "Platform")
+            except Exception as error:
+                progress.empty()
+                safe_message = meta_ads_client.sanitize_meta_error(f"{type(error).__name__}: {error}")
+                supabase_backend.record_ads_sync_error(safe_message, {"range": selected_range, "sync_type": "platform"})
+                if "too much data" in safe_message.lower() or "reduce the amount of data" in safe_message.lower():
+                    st.error("Meta returned too much data for this range. Try a shorter range or sync Performance first.")
+                else:
+                    st.error("Meta platform sync issue. Open Developer -> Ads Intelligence Diagnostics for technical details.")
+
+    if control_cols[5].button("Refresh Stored Data", use_container_width=True):
         st.rerun()
+    st.caption(
+        "Performance = ad spend, purchases, ROAS, CTR, CPC. "
+        "Demographics = country plus age/gender. Platform = Facebook/Instagram placement performance."
+    )
     return selected_range
 
 
@@ -1091,15 +1153,16 @@ def render_page():
         st.warning(warning_message)
 
     selected_range = _render_controls(config_status)
-    days = DATE_RANGE_OPTIONS[selected_range]
-    insight_rows = supabase_backend.list_meta_ad_insights(days=days)
-    country_rows = supabase_backend.list_meta_ad_insights_country(days=days)
-    demographic_rows = supabase_backend.list_meta_ad_insights_age_gender(days=days)
-    platform_rows = supabase_backend.list_meta_ad_insights_platform(days=days)
+    days = _date_range_days(selected_range)
+    insight_rows = supabase_backend.list_meta_ad_insights(date_range=selected_range)
+    country_rows = supabase_backend.list_meta_ad_insights_country(date_range=selected_range)
+    demographic_rows = supabase_backend.list_meta_ad_insights_age_gender(date_range=selected_range)
+    platform_rows = supabase_backend.list_meta_ad_insights_platform(date_range=selected_range)
     mapping_rows = supabase_backend.list_ads_product_mapping_status(date_range=selected_range, limit=500)
     product_opportunities = supabase_backend.list_product_opportunities_from_ads(date_range=selected_range)
     summary = _summary(insight_rows)
     ad_rows = _aggregate_by_ad(insight_rows)
+    st.caption(f"Showing Meta-attributed data for {selected_range}.")
 
     if insight_rows:
         ui_styles.metric_strip(
@@ -1119,9 +1182,7 @@ def render_page():
     (
         war_room_tab,
         table_tab,
-        country_tab,
         demographics_tab,
-        platform_tab,
         creative_intel_tab,
         mapping_tab,
         chatgpt_tab,
@@ -1129,9 +1190,7 @@ def render_page():
         [
             "War Room",
             "Meta Ads Table",
-            "Country",
             "Demographics",
-            "Platform",
             "Creative Intelligence",
             "Product Mapping",
             "ChatGPT Pack",
@@ -1208,35 +1267,53 @@ def render_page():
             st.download_button(
                 "Download CSV",
                 data=_csv_bytes(table_rows),
-                file_name=f"sports_cave_meta_ads_{days}_days.csv",
+                file_name=f"sports_cave_meta_ads_{_date_range_slug(selected_range)}.csv",
                 mime="text/csv",
                 use_container_width=True,
             )
         else:
             ui_styles.empty_state(_empty_performance_message(counts) if not insight_rows else "No stored Meta rows match these filters.")
 
-    with country_tab:
-        _section("Country Performance", "Country is synced separately from base performance to avoid heavy Meta breakdown combinations.")
-        country_filter_cols = st.columns([1.2, 1.2, 0.8])
-        country_campaigns = ["All"] + sorted({row.get("campaign_name") for row in country_rows if row.get("campaign_name")})
-        country_campaign = country_filter_cols[0].selectbox("Campaign", country_campaigns, key="country-campaign-filter")
-        country_product = country_filter_cols[1].text_input("Product / tag", key="country-product-filter")
-        country_min_spend = country_filter_cols[2].number_input("Min spend", min_value=0.0, value=0.0, step=10.0, key="country-min-spend")
-        filtered_country = []
-        query = str(country_product or "").strip().lower()
-        for row in country_rows:
-            if country_campaign != "All" and row.get("campaign_name") != country_campaign:
+    with demographics_tab:
+        _section("Demographics")
+        report_view = st.radio(
+            "Report",
+            ["Country / Location", "Age / Gender", "Platform / Placement"],
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        active_rows = country_rows
+        group_keys = ["country"]
+        empty_message = "No stored rows for this report yet. Click Sync Demographics for this date range."
+        if report_view == "Age / Gender":
+            active_rows = demographic_rows
+            group_keys = ["age", "gender"]
+        elif report_view == "Platform / Placement":
+            active_rows = platform_rows
+            group_keys = ["publisher_platform", "platform_position"]
+            empty_message = "No stored rows for this report yet. Click Sync Platform for this date range."
+
+        demo_filter_cols = st.columns([1.2, 1.2, 0.8])
+        campaign_options = ["All"] + sorted({row.get("campaign_name") for row in active_rows if row.get("campaign_name")})
+        selected_campaign = demo_filter_cols[0].selectbox("Campaign", campaign_options, key=f"demo-campaign-{report_view}")
+        product_query = demo_filter_cols[1].text_input("Product / mapping", key=f"demo-product-{report_view}")
+        min_spend = demo_filter_cols[2].number_input("Min spend", min_value=0.0, value=0.0, step=10.0, key=f"demo-min-spend-{report_view}")
+        filtered_demo_rows = []
+        query = str(product_query or "").strip().lower()
+        for row in active_rows:
+            if selected_campaign != "All" and row.get("campaign_name") != selected_campaign:
                 continue
-            if _number(row.get("spend")) < country_min_spend:
+            if _number(row.get("spend")) < min_spend:
                 continue
             product_text = " ".join(str(row.get(key) or "") for key in ("product_handle", "product_title", "sport", "country_focus")).lower()
             if query and query not in product_text:
                 continue
-            filtered_country.append(row)
-        _compact_table(_aggregate_group(filtered_country, ["country"]), height=430)
-        if filtered_country:
+            filtered_demo_rows.append(row)
+        _compact_table(_aggregate_group(filtered_demo_rows, group_keys), height=430, empty_message=empty_message)
+
+        if report_view == "Country / Location" and filtered_demo_rows:
             _section("Country Creative Signals")
-            strong_country_ads = sorted(filtered_country, key=lambda row: (_number(row.get("roas")), _number(row.get("purchase_value"))), reverse=True)[:12]
+            strong_country_ads = sorted(filtered_demo_rows, key=lambda row: (_number(row.get("roas")), _number(row.get("purchase_value"))), reverse=True)[:12]
             _compact_table(
                 [
                     {
@@ -1251,49 +1328,8 @@ def render_page():
                     }
                     for row in strong_country_ads
                 ],
-                height=360,
+                height=320,
             )
-            _section("Winning Copy By Country")
-            copy_rows = [
-                {
-                    "Country": row.get("country") or "Unknown",
-                    "Ad": row.get("ad_name"),
-                    "Primary text": row.get("primary_text") or "",
-                    "Headline": row.get("headline") or "",
-                    "Sport": row.get("sport") or "",
-                    "Product": row.get("product_title") or row.get("product_handle") or "Untagged",
-                    "Format": row.get("tag_creative_format") or row.get("detected_creative_format") or "",
-                    "Spend": _money(row.get("spend")),
-                    "Purchases": f"{_number(row.get('purchases')):,.0f}",
-                    "ROAS": _ratio(row.get("roas")),
-                }
-                for row in sorted(filtered_country, key=lambda item: (_number(item.get("roas")), _number(item.get("purchases"))), reverse=True)
-                if row.get("primary_text") or row.get("headline")
-            ][:15]
-            _compact_table(copy_rows, height=360)
-            _section("High CTR / Low Purchase By Country")
-            low_purchase_rows = [
-                {
-                    "Country": row.get("country") or "Unknown",
-                    "Ad": row.get("ad_name"),
-                    "Campaign": row.get("campaign_name"),
-                    "Spend": _money(row.get("spend")),
-                    "CTR": _pct(row.get("ctr")),
-                    "Purchases": f"{_number(row.get('purchases')):,.0f}",
-                    "ROAS": _ratio(row.get("roas")),
-                }
-                for row in sorted(filtered_country, key=lambda item: _number(item.get("ctr")), reverse=True)
-                if _number(row.get("ctr")) >= 1.5 and _number(row.get("purchases")) <= 0 and _number(row.get("spend")) >= 20
-            ][:12]
-            _compact_table(low_purchase_rows, height=300)
-
-    with demographics_tab:
-        _section("Demographic Performance", "Age/gender is an optional manual sync so the daily page stays quick.")
-        _compact_table(_aggregate_group(demographic_rows, ["age", "gender"]), height=460)
-
-    with platform_tab:
-        _section("Platform / Placement Performance", "Platform placement is synced separately from country and demographic breakdowns.")
-        _compact_table(_aggregate_group(platform_rows, ["publisher_platform", "platform_position"]), height=460)
 
     with creative_intel_tab:
         _section("Creative Intelligence")
@@ -1510,7 +1546,7 @@ def render_page():
         st.download_button(
             "Download ChatGPT Pack",
             data=prompt_text.encode("utf-8"),
-            file_name=f"sports_cave_{template.lower().replace(' ', '_')}_{days}_days.txt",
+            file_name=f"sports_cave_{template.lower().replace(' ', '_')}_{_date_range_slug(selected_range)}.txt",
             mime="text/plain",
             use_container_width=True,
         )
