@@ -93,6 +93,28 @@ def inject_global_ui_styles():
             line-height: 1.1;
             font-weight: 800;
         }
+        div[data-testid="stMetric"] {
+            min-height: 62px;
+            border: 1px solid #ded4c4;
+            background: var(--sc-cream);
+            border-radius: 8px;
+            padding: 8px 10px;
+            color: var(--sc-dark-text);
+        }
+        div[data-testid="stMetric"] label,
+        div[data-testid="stMetric"] label p {
+            color: #665d50 !important;
+            font-size: 0.72rem !important;
+            font-weight: 750 !important;
+            text-transform: uppercase;
+        }
+        div[data-testid="stMetricValue"],
+        div[data-testid="stMetricValue"] div {
+            color: var(--sc-dark-text) !important;
+            font-size: 1.15rem !important;
+            line-height: 1.1 !important;
+            font-weight: 800 !important;
+        }
         .sc-pill-row {
             display: flex;
             flex-wrap: wrap;
@@ -212,17 +234,12 @@ def section_title(title):
 
 
 def metric_strip(metrics):
-    cards = []
-    for label, value in metrics:
-        cards.append(
-            f"""
-            <div class="sc-metric-card">
-                <div class="sc-metric-label">{html.escape(str(label))}</div>
-                <div class="sc-metric-value">{html.escape(str(value))}</div>
-            </div>
-            """
-        )
-    st.markdown(f'<div class="sc-metric-grid">{"".join(cards)}</div>', unsafe_allow_html=True)
+    metrics = list(metrics or [])
+    for start in range(0, len(metrics), 5):
+        row = metrics[start : start + 5]
+        columns = st.columns(len(row))
+        for column, (label, value) in zip(columns, row):
+            column.metric(str(label), str(value))
 
 
 def status_pills(items):

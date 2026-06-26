@@ -10532,6 +10532,14 @@ def _meta_purchase_value(row):
     )
 
 
+def _meta_purchase_roas(row):
+    for item in row.get("purchase_roas") or []:
+        value = _ads_float(item.get("value"))
+        if value:
+            return value
+    return 0.0
+
+
 def _meta_add_to_cart(row):
     return _meta_action_total(
         row,
@@ -10655,6 +10663,32 @@ def list_ads_sync_logs(limit=50):
         return []
 
 
+def ads_table_counts():
+    tables = (
+        "meta_ad_accounts",
+        "meta_campaigns",
+        "meta_adsets",
+        "meta_ads",
+        "meta_creatives",
+        "meta_ad_insights_daily",
+        "ads_sync_logs",
+    )
+    counts = {table: 0 for table in tables}
+    if not is_configured():
+        return counts
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                for table in tables:
+                    if not table_exists(cur, table):
+                        continue
+                    cur.execute(f"SELECT COUNT(*) AS count FROM {table}")
+                    counts[table] = int((cur.fetchone() or {}).get("count") or 0)
+    except Exception:
+        pass
+    return counts
+
+
 def record_ads_sync_error(message, context=None):
     if not is_configured():
         return
@@ -10709,7 +10743,7 @@ def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insi
     ads = ads or []
     insights = insights or []
     account_id = str(account.get("account_id") or account.get("id") or account_id or "").replace("act_", "")
-    rows_upserted = (1 if account_id else 0) + len(campaigns) + len(adsets) + len(ads) + len(insights)
+    creative_count = 0
     started = time.perf_counter()
     with connect() as conn:
         with conn.cursor() as cur:
@@ -10816,6 +10850,8 @@ def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insi
                 )
             for ad in ads:
                 creative = ad.get("creative") or {}
+                if not isinstance(creative, dict):
+                    creative = {"id": str(creative or "")}
                 creative_id = creative.get("id")
                 cur.execute(
                     """
@@ -10853,6 +10889,7 @@ def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insi
                     ),
                 )
                 if creative_id:
+                    creative_count += 1
                     cur.execute(
                         """
                         INSERT INTO meta_creatives(
@@ -10886,7 +10923,7 @@ def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insi
                 add_to_cart = _meta_add_to_cart(insight)
                 initiate_checkout = _meta_initiate_checkout(insight)
                 cost_per_purchase = spend / purchases if purchases else 0
-                roas = purchase_value / spend if spend else 0
+                roas = _meta_purchase_roas(insight) or (purchase_value / spend if spend else 0)
                 placement = " / ".join(
                     part
                     for part in (
@@ -10974,8 +11011,9 @@ def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insi
                     "campaigns": len(campaigns),
                     "adsets": len(adsets),
                     "ads": len(ads),
+                    "creatives": creative_count,
                     "insights": len(insights),
-                    "rows_upserted": rows_upserted,
+                    "rows_upserted": (1 if account_id else 0) + len(campaigns) + len(adsets) + len(ads) + creative_count + len(insights),
                     "duration_ms": int((time.perf_counter() - started) * 1000),
                 },
             )
@@ -10988,8 +11026,9 @@ def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insi
         "campaigns": len(campaigns),
         "adsets": len(adsets),
         "ads": len(ads),
+        "creatives": creative_count,
         "insights": len(insights),
-        "rows_upserted": rows_upserted,
+        "rows_upserted": (1 if account_id else 0) + len(campaigns) + len(adsets) + len(ads) + creative_count + len(insights),
         "last_successful_sync": success_at,
         "duration_ms": int((time.perf_counter() - started) * 1000),
     }
@@ -11107,13 +11146,19 @@ def upsert_ads_creative_tag(tag):
     return {"saved": True, "ad_id": ad_id}
 
 
-def list_ads_action_log(limit=100):
+def list_ads_action_log(limit=100, action_type=None):
     if not is_configured():
         return []
     try:
         with connect() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT * FROM ads_action_log ORDER BY created_at DESC LIMIT %s", (int(limit or 100),))
+                if action_type:
+                    cur.execute(
+                        "SELECT * FROM ads_action_log WHERE action_type=%s ORDER BY created_at DESC LIMIT %s",
+                        (str(action_type), int(limit or 100)),
+                    )
+                else:
+                    cur.execute("SELECT * FROM ads_action_log ORDER BY created_at DESC LIMIT %s", (int(limit or 100),))
                 return cur.fetchall()
     except Exception:
         return []

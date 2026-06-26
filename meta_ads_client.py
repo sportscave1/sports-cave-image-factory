@@ -130,7 +130,7 @@ def fetch_meta_campaigns(config=None):
         f"{config['ad_account_id']}/campaigns",
         params={
             "fields": "id,name,status,effective_status,objective,created_time,updated_time",
-            "limit": 500,
+            "limit": 100,
         },
         config=config,
     )
@@ -145,7 +145,7 @@ def fetch_meta_adsets(config=None):
                 "id,name,status,effective_status,campaign_id,optimization_goal,billing_event,"
                 "daily_budget,lifetime_budget,created_time,updated_time"
             ),
-            "limit": 500,
+            "limit": 100,
         },
         config=config,
     )
@@ -153,17 +153,21 @@ def fetch_meta_adsets(config=None):
 
 def fetch_meta_ads(config=None):
     config = config or get_meta_config()
-    return _paged_get(
-        f"{config['ad_account_id']}/ads",
-        params={
-            "fields": (
-                "id,name,status,effective_status,campaign_id,adset_id,created_time,updated_time,"
-                "creative{id,name,thumbnail_url,object_story_id,object_story_spec}"
-            ),
-            "limit": 500,
-        },
-        config=config,
-    )
+    params = {
+        "fields": (
+            "id,name,status,effective_status,campaign_id,adset_id,"
+            "creative{id,name,thumbnail_url},created_time,updated_time"
+        ),
+        "limit": 100,
+    }
+    try:
+        return _paged_get(f"{config['ad_account_id']}/ads", params=params, config=config)
+    except MetaAdsApiError:
+        fallback_params = {
+            "fields": "id,name,status,effective_status,campaign_id,adset_id,creative,created_time,updated_time",
+            "limit": 100,
+        }
+        return _paged_get(f"{config['ad_account_id']}/ads", params=fallback_params, config=config)
 
 
 def _date_range_for_days(days):
@@ -180,10 +184,9 @@ def fetch_meta_ad_insights(date_preset=None, since=None, until=None, days=None, 
         "fields": (
             "date_start,date_stop,account_id,campaign_id,campaign_name,adset_id,adset_name,"
             "ad_id,ad_name,spend,impressions,reach,clicks,inline_link_clicks,ctr,cpc,cpm,"
-            "frequency,actions,action_values"
+            "frequency,actions,action_values,purchase_roas"
         ),
-        "breakdowns": "country,publisher_platform,platform_position",
-        "limit": 500,
+        "limit": 100,
     }
     if date_preset:
         params["date_preset"] = date_preset

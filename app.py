@@ -5440,6 +5440,73 @@ def render_settings_page():
         except Exception as error:
             _developer_section_error("Shopify Connection", error)
 
+    with st.expander("Ads Intelligence Diagnostics", expanded=False):
+        try:
+            if _developer_section_enabled("developer-load-ads-intelligence-diagnostics", "Load Ads Intelligence Diagnostics"):
+                meta = importlib.import_module("meta_ads_client")
+                supabase = importlib.import_module("supabase_backend")
+                config_status = meta.safe_meta_config_status()
+                counts = supabase.ads_table_counts()
+                sync_logs = supabase.list_ads_sync_logs(limit=50)
+                action_logs = supabase.list_ads_action_log(limit=50, action_type="meta_sync")
+                st.write(f"**META_AD_ACCOUNT_ID present:** {'Yes' if config_status.get('ad_account_id_present') else 'No'}")
+                st.write(f"**META_ACCESS_TOKEN present:** {'Yes' if config_status.get('token_present') else 'No'}")
+                st.write(f"**META_APP_ID present:** {'Yes' if config_status.get('app_id_present') else 'No'}")
+                st.write(f"**META_APP_SECRET present:** {'Yes' if config_status.get('app_secret_present') else 'No'}")
+                st.write(f"**META_API_VERSION:** {config_status.get('api_version') or 'Missing'}")
+                st.caption("Secret values are intentionally never shown.")
+                st.write("**Ads table counts**")
+                st.dataframe(
+                    [{"Table": table, "Rows": count} for table, count in counts.items()],
+                    hide_index=True,
+                    use_container_width=True,
+                )
+                st.write("**Latest sync logs**")
+                if sync_logs:
+                    st.dataframe(
+                        [
+                            {
+                                "started_at": row.get("started_at"),
+                                "finished_at": row.get("finished_at"),
+                                "status": row.get("status"),
+                                "sync_type": row.get("sync_type"),
+                                "date_range": row.get("date_range"),
+                                "rows_fetched": row.get("rows_fetched"),
+                                "rows_upserted": row.get("rows_upserted"),
+                                "error_message": row.get("error_message") or "",
+                                "context": row.get("context") or {},
+                            }
+                            for row in sync_logs
+                        ],
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("No ads sync logs found.")
+                st.write("**Latest meta_sync action log rows**")
+                if action_logs:
+                    st.dataframe(
+                        [
+                            {
+                                "created_at": row.get("created_at"),
+                                "status": row.get("status"),
+                                "summary": row.get("summary"),
+                                "context": row.get("context") or {},
+                            }
+                            for row in action_logs
+                        ],
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("No meta_sync action rows found.")
+                last_error = next((row.get("error_message") for row in sync_logs if row.get("error_message")), "")
+                if last_error:
+                    st.write("**Last sanitized Meta error**")
+                    st.code(str(last_error), language="text")
+        except Exception as error:
+            _developer_section_error("Ads Intelligence Diagnostics", error)
+
     with st.expander("Shopify Limited Edition Setup", expanded=False):
         try:
             if _developer_section_enabled("developer-load-limited-edition-setup", "Load Limited Edition Setup"):

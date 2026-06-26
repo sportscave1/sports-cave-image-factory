@@ -351,8 +351,14 @@ def _sync_meta_ads(range_label, days):
         date_range_label=range_label,
         account_id=config.get("ad_account_id"),
     )
-    status = "partial_success" if warnings else "success"
-    warning_text = "; ".join(warnings)
+    missing_performance_rows = saved.get("ads", 0) <= 0 or saved.get("insights", 0) <= 0
+    status = "partial_success" if warnings or missing_performance_rows else "success"
+    warning_parts = list(warnings)
+    if missing_performance_rows:
+        warning_parts.append(
+            "Campaign structure synced, but ads or daily performance rows were not saved."
+        )
+    warning_text = "; ".join(warning_parts)
     supabase_backend.finish_ads_sync_log(
         sync_log_id,
         status=status,
@@ -360,12 +366,12 @@ def _sync_meta_ads(range_label, days):
         rows_fetched=rows_fetched,
         rows_upserted=saved.get("rows_upserted", 0),
         error_message=warning_text,
-        context={"warnings": warnings, "meta_pages": page_counts},
+        context={"warnings": warning_parts, "meta_pages": page_counts},
     )
     if warnings:
         supabase_backend.record_ads_sync_error(warning_text, {"range": range_label, "partial": True})
     saved["meta_pages"] = page_counts
-    saved["warnings"] = warnings
+    saved["warnings"] = warning_parts
     saved["status"] = status
     saved["rows_fetched"] = rows_fetched
     saved["total_ms"] = int((time.perf_counter() - started) * 1000)
@@ -471,54 +477,68 @@ def _render_controls(config_status):
             progress.progress(15, text="Reading Meta account, campaigns, ad sets, ads, and insights...")
             result = _sync_meta_ads(selected_range, DATE_RANGE_OPTIONS[selected_range])
             progress.progress(100, text="Meta Ads data saved to Supabase.")
-            st.success(
-                "Sync complete: "
-                f"{result.get('campaigns', 0)} campaigns, {result.get('adsets', 0)} ad sets, "
-                f"{result.get('ads', 0)} ads, {result.get('insights', 0)} daily insight rows."
-            )
-            if result.get("warnings"):
-                st.warning("Sync partially completed. Some Meta reads failed, but safe fetched rows were saved.")
+            if result.get("ads", 0) > 0 and result.get("insights", 0) > 0 and not result.get("warnings"):
+                st.success(
+                    "Sync complete: "
+                    f"{result.get('campaigns', 0)} campaigns, {result.get('adsets', 0)} ad sets, "
+                    f"{result.get('ads', 0)} ads, {result.get('creatives', 0)} creatives, "
+                    f"{result.get('insights', 0)} daily performance rows saved."
+                )
+            else:
+                st.warning(
+                    "Synced campaign structure. Ad performance data still needs retry. "
+                    "Open Developer -> Ads Intelligence Diagnostics for technical details."
+                )
         except Exception as error:
             progress.empty()
             safe_message = meta_ads_client.sanitize_meta_error(f"{type(error).__name__}: {error}")
             supabase_backend.record_ads_sync_error(safe_message, {"range": selected_range})
-            st.error("Meta sync failed. No Meta write actions were attempted.")
-            st.caption(safe_message)
+            st.error(
+                "Meta sync issue: some reporting data failed. "
+                "Open Developer -> Ads Intelligence Diagnostics for technical details."
+            )
     if control_cols[3].button("Refresh Stored Data", use_container_width=True):
         st.rerun()
     return selected_range
+
+
+def _sync_status_label(sync_status, counts):
+    if sync_status.get("last_sync_error"):
+        return "Sync issue"
+    if sync_status.get("last_successful_sync"):
+        if int(counts.get("meta_ad_insights_daily") or 0) > 0:
+            return "Synced"
+        return "Needs performance retry"
+    return "Needs sync"
+
+
+def _empty_performance_message(counts):
+    if int(counts.get("meta_campaigns") or 0) or int(counts.get("meta_adsets") or 0):
+        return "Campaign structure synced, but performance rows did not sync. Open Developer diagnostics for the Meta error."
+    return "No Meta performance rows yet. Test connection, then sync Last 7 days."
 
 
 def render_page():
     ui_styles.inject_global_ui_styles()
     ui_styles.page_header(
         "Ads Intelligence",
-        "Read-only Meta performance, creative decisions, and ChatGPT-ready analysis packs.",
+        "Read-only Meta performance for creative decisions and product opportunities.",
     )
 
     config_status = meta_ads_client.safe_meta_config_status()
     sync_status = supabase_backend.get_ads_sync_status_read_only()
-    last_error = sync_status.get("last_sync_error") or "None"
+    counts = supabase_backend.ads_table_counts()
+    status_label = _sync_status_label(sync_status, counts)
     ui_styles.source_status_banner(
         [
-            ("Source", "Meta Ads API -> Supabase"),
+            ("Source", "Meta Ads"),
             ("Last sync", sync_status.get("last_successful_sync") or "Never"),
-            ("Last status", "Error" if sync_status.get("last_sync_error") else "Ready"),
-            ("Supabase", "Configured" if supabase_backend.is_configured() else "Missing"),
+            ("Status", status_label),
+            ("Data store", "Supabase"),
         ]
     )
-    ui_styles.status_pills(
-        [
-            ("Meta configured" if config_status["configured"] else "Meta missing", "good" if config_status["configured"] else "danger"),
-            ("Ad account ID present" if config_status["ad_account_id_present"] else "Ad account ID missing", "good" if config_status["ad_account_id_present"] else "danger"),
-            ("Token present" if config_status["token_present"] else "Token missing", "good" if config_status["token_present"] else "danger"),
-            ("App ID present" if config_status["app_id_present"] else "App ID missing", "good" if config_status["app_id_present"] else "warn"),
-            ("App secret present" if config_status["app_secret_present"] else "App secret missing", "good" if config_status["app_secret_present"] else "warn"),
-            (f"API {config_status['api_version']}", "good"),
-        ]
-    )
-    if last_error != "None":
-        st.warning(f"Last sync error: {last_error}")
+    if sync_status.get("last_sync_error"):
+        st.warning("Meta sync issue: some reporting data failed. Open Developer -> Ads Intelligence Diagnostics for technical details.")
 
     selected_range = _render_controls(config_status)
     days = DATE_RANGE_OPTIONS[selected_range]
@@ -526,28 +546,29 @@ def render_page():
     summary = _summary(insight_rows)
     ad_rows = _aggregate_by_ad(insight_rows)
 
-    ui_styles.metric_strip(
-        [
-            ("Spend", _money(summary["spend"])),
-            ("Purchases", f"{summary['purchases']:,.0f}"),
-            ("Purchase value", _money(summary["revenue"])),
-            ("ROAS", _ratio(summary["roas"])),
-            ("CPA", _money(summary["cpa"])),
-            ("CTR", _pct(summary["ctr"])),
-            ("CPC", _money(summary["cpc"])),
-            ("CPM", _money(summary["cpm"])),
-            ("Frequency", f"{summary['frequency']:.2f}"),
-        ]
-    )
+    if insight_rows:
+        ui_styles.metric_strip(
+            [
+                ("Spend", _money(summary["spend"])),
+                ("Purchases", f"{summary['purchases']:,.0f}"),
+                ("Purchase value", _money(summary["revenue"])),
+                ("ROAS", _ratio(summary["roas"])),
+                ("CPA", _money(summary["cpa"])),
+                ("CTR", _pct(summary["ctr"])),
+                ("CPC", _money(summary["cpc"])),
+                ("CPM", _money(summary["cpm"])),
+                ("Frequency", f"{summary['frequency']:.2f}"),
+            ]
+        )
 
-    war_room_tab, table_tab, tags_tab, chatgpt_tab, logs_tab = st.tabs(
-        ["War Room", "Meta Ads Table", "Creative Tags", "ChatGPT Pack", "Sync Logs"]
+    war_room_tab, table_tab, tags_tab, chatgpt_tab = st.tabs(
+        ["War Room", "Meta Ads Table", "Creative Tags", "ChatGPT Pack"]
     )
 
     with war_room_tab:
         _section("Today Action List")
         if not ad_rows:
-            ui_styles.empty_state("Sync Meta data to generate decisions.")
+            ui_styles.empty_state(_empty_performance_message(counts))
         else:
             st.dataframe(_decision_summary(ad_rows), hide_index=True, use_container_width=True)
             winners, losers = _top_and_losing_rows(ad_rows)
@@ -616,7 +637,7 @@ def render_page():
                 use_container_width=True,
             )
         else:
-            ui_styles.empty_state("No stored Meta rows match these filters.")
+            ui_styles.empty_state(_empty_performance_message(counts) if not insight_rows else "No stored Meta rows match these filters.")
 
     with tags_tab:
         _section("Creative Tags")
@@ -677,46 +698,3 @@ def render_page():
             mime="text/plain",
             use_container_width=True,
         )
-
-    with logs_tab:
-        _section("Sync Logs")
-        sync_log_rows = supabase_backend.list_ads_sync_logs(limit=50)
-        if sync_log_rows:
-            st.dataframe(
-                [
-                    {
-                        "Started": row.get("started_at"),
-                        "Finished": row.get("finished_at"),
-                        "Status": row.get("status"),
-                        "Type": row.get("sync_type"),
-                        "Range": row.get("date_range"),
-                        "Fetched": row.get("rows_fetched"),
-                        "Upserted": row.get("rows_upserted"),
-                        "Error": row.get("error_message") or "",
-                    }
-                    for row in sync_log_rows
-                ],
-                hide_index=True,
-                use_container_width=True,
-                height=360,
-            )
-        else:
-            ui_styles.empty_state("No Meta sync attempts logged yet.")
-        action_rows = supabase_backend.list_ads_action_log(limit=50)
-        _section("Action Log")
-        if action_rows:
-            st.dataframe(
-                [
-                    {
-                        "Created": row.get("created_at"),
-                        "Type": row.get("action_type"),
-                        "Status": row.get("status"),
-                        "Summary": row.get("summary"),
-                    }
-                    for row in action_rows
-                ],
-                hide_index=True,
-                use_container_width=True,
-            )
-        else:
-            ui_styles.empty_state("No manual ads actions logged yet.")
