@@ -5447,8 +5447,10 @@ def render_settings_page():
                 supabase = importlib.import_module("supabase_backend")
                 config_status = meta.safe_meta_config_status()
                 counts = supabase.ads_table_counts()
+                product_mapping_diagnostics = supabase.ads_product_mapping_diagnostics()
                 sync_logs = supabase.list_ads_sync_logs(limit=50)
                 action_logs = supabase.list_ads_action_log(limit=50, action_type="meta_sync")
+                mapping_action_logs = supabase.list_ads_action_log(limit=50, action_type="product_mapping")
                 st.write(f"**META_AD_ACCOUNT_ID present:** {'Yes' if config_status.get('ad_account_id_present') else 'No'}")
                 st.write(f"**META_ACCESS_TOKEN present:** {'Yes' if config_status.get('token_present') else 'No'}")
                 st.write(f"**META_APP_ID present:** {'Yes' if config_status.get('app_id_present') else 'No'}")
@@ -5458,6 +5460,12 @@ def render_settings_page():
                 st.write("**Ads table counts**")
                 st.dataframe(
                     [{"Table": table, "Rows": count} for table, count in counts.items()],
+                    hide_index=True,
+                    use_container_width=True,
+                )
+                st.write("**Product mapping diagnostics**")
+                st.dataframe(
+                    [{"Metric": key, "Value": value} for key, value in product_mapping_diagnostics.items()],
                     hide_index=True,
                     use_container_width=True,
                 )
@@ -5500,6 +5508,23 @@ def render_settings_page():
                     )
                 else:
                     st.caption("No meta_sync action rows found.")
+                st.write("**Latest product mapping action log rows**")
+                if mapping_action_logs:
+                    st.dataframe(
+                        [
+                            {
+                                "created_at": row.get("created_at"),
+                                "status": row.get("status"),
+                                "summary": row.get("summary"),
+                                "context": row.get("context") or {},
+                            }
+                            for row in mapping_action_logs
+                        ],
+                        hide_index=True,
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("No product_mapping action rows found.")
                 last_error = next((row.get("error_message") for row in sync_logs if row.get("error_message")), "")
                 if last_error:
                     st.write("**Last sanitized Meta error**")

@@ -11419,6 +11419,616 @@ def list_meta_ad_insights(days=30, limit=5000):
             return []
 
 
+def _ads_days_from_range(date_range="last_7_days"):
+    text = str(date_range or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if text in {"all", "all_stored", "all_stored_data", "all_data"}:
+        return None
+    if "12" in text or "365" in text:
+        return 365
+    if "6_month" in text or "180" in text:
+        return 180
+    if "3_month" in text or "90" in text:
+        return 90
+    if "30" in text:
+        return 30
+    if "14" in text:
+        return 14
+    return 7
+
+
+def _ads_resolve_days(*, date_range=None, days=None):
+    if days in (None, ""):
+        return _ads_days_from_range(date_range or "last_7_days")
+    try:
+        return max(int(days), 1)
+    except (TypeError, ValueError):
+        return _ads_days_from_range(date_range or "last_7_days")
+
+
+def _ads_date_where(column_sql, *, date_range=None, days=None, prefix="AND"):
+    resolved_days = _ads_resolve_days(date_range=date_range, days=days)
+    if resolved_days is None:
+        return "", []
+    return f" {prefix} {column_sql} >= CURRENT_DATE - (%s::int - 1)", [resolved_days]
+
+
+def _ads_normalize_text(value):
+    text = str(value or "").lower().replace("'", "").replace("’", "")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    stop_words = {
+        "ad",
+        "ads",
+        "copy",
+        "creative",
+        "carousel",
+        "mockup",
+        "mockups",
+        "ia",
+        "v1",
+        "v2",
+        "test",
+        "new",
+    }
+    return " ".join(part for part in text.split() if part not in stop_words)
+
+
+def _ads_keyword_tokens(value):
+    return {part for part in _ads_normalize_text(value).split() if len(part) >= 4}
+
+
+def list_recent_product_sales_by_handle(date_range="last_7_days", limit=500):
+    if not is_configured():
+        return []
+    days = _ads_days_from_range(date_range)
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH line_rows AS (
+                        SELECT
+                            NULLIF(li.shopify_handle, '') AS product_handle,
+                            MAX(NULLIF(li.product_title, '')) AS product_title,
+                            COUNT(DISTINCT li.shopify_order_id) AS total_orders,
+                            SUM(COALESCE(li.quantity, 1)) AS total_units,
+                            MAX(COALESCE(o.processed_at, o.created_at)) AS latest_order_date,
+                            SUM(
+                                CASE
+                                    WHEN COALESCE(li.raw_json->>'price', '') ~ '^[0-9]+(\\.[0-9]+)?$'
+                                    THEN (li.raw_json->>'price')::numeric * GREATEST(COALESCE(li.quantity, 1), 1)
+                                    ELSE NULL
+                                END
+                            ) AS total_revenue
+                        FROM shopify_order_lines li
+                        LEFT JOIN shopify_orders o ON o.shopify_order_id = li.shopify_order_id
+                        WHERE COALESCE(o.processed_at, o.created_at, li.synced_at) >= CURRENT_DATE - (%s::int - 1)
+                          AND (COALESCE(li.shopify_handle, '') <> '' OR COALESCE(li.product_title, '') <> '')
+                        GROUP BY NULLIF(li.shopify_handle, '')
+                    )
+                    SELECT *
+                    FROM line_rows
+                    ORDER BY total_orders DESC NULLS LAST, latest_order_date DESC NULLS LAST
+                    LIMIT %s
+                    """,
+                    (days, int(limit or 500)),
+                )
+                return cur.fetchall()
+    except Exception:
+        return []
+
+
+def list_product_edition_summary():
+    if not is_configured():
+        return []
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        ep.shopify_handle AS product_handle,
+                        ep.product_title,
+                        ep.shopify_product_id,
+                        ep.edition_total,
+                        ep.next_edition_number,
+                        GREATEST(COALESCE(ep.edition_total, 0) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS edition_remaining,
+                        COALESCE(ep.is_active, ep.active, TRUE) AS is_active,
+                        COALESCE(ep.is_sold_out, ep.sold_out, FALSE) AS is_sold_out,
+                        ep.edition_status
+                    FROM edition_products ep
+                    WHERE COALESCE(ep.shopify_handle, '') <> '' OR COALESCE(ep.product_title, '') <> ''
+                    ORDER BY ep.product_title NULLS LAST, ep.shopify_handle NULLS LAST
+                    LIMIT 1000
+                    """
+                )
+                return cur.fetchall()
+    except Exception:
+        return []
+
+
+def list_ads_product_candidates(limit=500):
+    if not is_configured():
+        return []
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH sales AS (
+                        SELECT
+                            NULLIF(li.shopify_handle, '') AS product_handle,
+                            MAX(NULLIF(li.product_title, '')) AS sales_product_title,
+                            COUNT(DISTINCT li.shopify_order_id) AS total_orders,
+                            SUM(COALESCE(li.quantity, 1)) AS total_units,
+                            MAX(COALESCE(o.processed_at, o.created_at)) AS latest_order_date,
+                            SUM(
+                                CASE
+                                    WHEN COALESCE(li.raw_json->>'price', '') ~ '^[0-9]+(\\.[0-9]+)?$'
+                                    THEN (li.raw_json->>'price')::numeric * GREATEST(COALESCE(li.quantity, 1), 1)
+                                    ELSE NULL
+                                END
+                            ) AS total_revenue
+                        FROM shopify_order_lines li
+                        LEFT JOIN shopify_orders o ON o.shopify_order_id = li.shopify_order_id
+                        WHERE COALESCE(li.shopify_handle, '') <> '' OR COALESCE(li.product_title, '') <> ''
+                        GROUP BY NULLIF(li.shopify_handle, '')
+                    ),
+                    edition_candidates AS (
+                        SELECT
+                            ep.shopify_handle AS product_handle,
+                            ep.product_title,
+                            ep.shopify_product_id,
+                            ep.edition_total,
+                            ep.next_edition_number,
+                            GREATEST(COALESCE(ep.edition_total, 0) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS edition_remaining,
+                            COALESCE(ep.is_active, ep.active, TRUE) AS is_active,
+                            COALESCE(ep.is_sold_out, ep.sold_out, FALSE) AS is_sold_out,
+                            ep.edition_status,
+                            s.total_orders,
+                            s.total_units,
+                            s.total_revenue,
+                            s.latest_order_date
+                        FROM edition_products ep
+                        LEFT JOIN sales s ON s.product_handle = ep.shopify_handle
+                    ),
+                    order_only_candidates AS (
+                        SELECT
+                            s.product_handle,
+                            s.sales_product_title AS product_title,
+                            NULL::TEXT AS shopify_product_id,
+                            NULL::INTEGER AS edition_total,
+                            NULL::INTEGER AS next_edition_number,
+                            NULL::INTEGER AS edition_remaining,
+                            NULL::BOOLEAN AS is_active,
+                            NULL::BOOLEAN AS is_sold_out,
+                            NULL::TEXT AS edition_status,
+                            s.total_orders,
+                            s.total_units,
+                            s.total_revenue,
+                            s.latest_order_date
+                        FROM sales s
+                        LEFT JOIN edition_products ep ON ep.shopify_handle = s.product_handle
+                        WHERE ep.shopify_handle IS NULL
+                    )
+                    SELECT *
+                    FROM (
+                        SELECT * FROM edition_candidates
+                        UNION ALL
+                        SELECT * FROM order_only_candidates
+                    ) candidates
+                    WHERE COALESCE(product_handle, '') <> '' OR COALESCE(product_title, '') <> ''
+                    ORDER BY total_orders DESC NULLS LAST, product_title NULLS LAST, product_handle NULLS LAST
+                    LIMIT %s
+                    """,
+                    (int(limit or 500),),
+                )
+                return cur.fetchall()
+    except Exception:
+        return []
+
+
+def _score_product_candidate_for_ad(candidate, combined_text):
+    handle = str(candidate.get("product_handle") or "")
+    title = str(candidate.get("product_title") or "")
+    handle_norm = _ads_normalize_text(handle)
+    title_norm = _ads_normalize_text(title)
+    text_norm = _ads_normalize_text(combined_text)
+    if handle_norm and (handle_norm == text_norm or handle_norm in text_norm):
+        return 1.0, "Exact handle match"
+    if title_norm and (title_norm == text_norm or title_norm in text_norm):
+        return 0.9, "Exact product title match"
+    title_tokens = _ads_keyword_tokens(title)
+    text_tokens = _ads_keyword_tokens(text_norm)
+    overlap = title_tokens & text_tokens
+    if len(overlap) >= 2:
+        return 0.75, f"Strong keyword match: {', '.join(sorted(overlap)[:5])}"
+    if len(overlap) == 1 and len(next(iter(overlap))) >= 6:
+        return 0.6, f"Keyword match: {next(iter(overlap))}"
+    return 0.0, ""
+
+
+def _known_ads_product_pattern_terms(combined_text):
+    text = str(combined_text or "").upper()
+    patterns = []
+    if "BRUNSEN" in text or "KNICKS" in text:
+        patterns.append(("brunson knicks", "Known pattern: BRUNSEN / Knicks"))
+    if "LAP OF GOD" in text or "LAP OF THE GOD" in text:
+        patterns.append(("lap gods", "Known pattern: Lap of the Gods"))
+    if "MESSI" in text:
+        patterns.append(("messi", "Known pattern: Messi"))
+    if "RONALDO" in text:
+        patterns.append(("ronaldo", "Known pattern: Ronaldo"))
+    if "LEGENDS" in text:
+        patterns.append(("legends football soccer", "Known pattern: Legends, needs review if ambiguous"))
+    if "UFC" in text or "GAETHJE" in text:
+        patterns.append(("ufc gaethje", "Known pattern: UFC / Gaethje"))
+    if any(term in text for term in ("BROCK", "BATHURST", "LOWNDES", "WHINCUP")):
+        patterns.append(("brock bathurst lowndes whincup motorsport", "Known pattern: motorsport"))
+    if any(term in text for term in ("KOBE", "JORDAN", "GOAT")):
+        patterns.append(("kobe jordan goat basketball", "Known pattern: basketball / GOAT"))
+    return patterns
+
+
+def _suggest_product_mapping_for_text(combined_text, candidates):
+    scored = []
+    for candidate in candidates or []:
+        score, reason = _score_product_candidate_for_ad(candidate, combined_text)
+        if score:
+            scored.append((score, reason, candidate))
+    if not scored:
+        for pattern_terms, reason in _known_ads_product_pattern_terms(combined_text):
+            pattern_tokens = _ads_keyword_tokens(pattern_terms)
+            pattern_matches = []
+            for candidate in candidates or []:
+                candidate_text = f"{candidate.get('product_handle') or ''} {candidate.get('product_title') or ''}"
+                candidate_tokens = _ads_keyword_tokens(candidate_text)
+                overlap = pattern_tokens & candidate_tokens
+                if overlap:
+                    pattern_matches.append((len(overlap), candidate))
+            pattern_matches = sorted(pattern_matches, key=lambda item: item[0], reverse=True)
+            if pattern_matches:
+                top_overlap = pattern_matches[0][0]
+                top_candidates = [candidate for overlap, candidate in pattern_matches if overlap == top_overlap]
+                confidence = 0.75 if len(top_candidates) == 1 else 0.5
+                return {
+                    "product_handle": top_candidates[0].get("product_handle") or "",
+                    "product_title": top_candidates[0].get("product_title") or "",
+                    "confidence": confidence,
+                    "status": "suggested" if confidence >= 0.75 else "needs_review",
+                    "reason": reason if len(top_candidates) == 1 else f"{reason}; multiple possible products",
+                    "candidate_count": len(top_candidates),
+                }
+    if scored:
+        scored = sorted(scored, key=lambda item: item[0], reverse=True)
+        top_score = scored[0][0]
+        top = [item for item in scored if item[0] == top_score]
+        candidate = top[0][2]
+        status = "suggested" if top_score >= 0.75 and len(top) == 1 else "needs_review"
+        if top_score < 0.5:
+            status = "unmapped"
+        return {
+            "product_handle": candidate.get("product_handle") or "",
+            "product_title": candidate.get("product_title") or "",
+            "confidence": top_score,
+            "status": status,
+            "reason": top[0][1] if len(top) == 1 else f"{top[0][1]}; multiple possible products",
+            "candidate_count": len(top),
+        }
+    return {
+        "product_handle": "",
+        "product_title": "",
+        "confidence": 0.0,
+        "status": "unmapped",
+        "reason": "No strong product match found",
+        "candidate_count": 0,
+    }
+
+
+def get_product_candidate_for_ad_name(ad_name, campaign_name=None, adset_name=None):
+    candidates = list_ads_product_candidates(limit=500)
+    combined_text = f"{ad_name or ''} {campaign_name or ''} {adset_name or ''}"
+    return _suggest_product_mapping_for_text(combined_text, candidates)
+
+
+def list_ads_product_mapping_status(date_range="last_7_days", limit=500):
+    if not is_configured():
+        return []
+    days = _ads_days_from_range(date_range)
+    params = (days, int(limit or 500))
+    new_query = """
+        WITH recent AS (
+            SELECT *
+            FROM meta_ad_insights_daily
+            WHERE date >= CURRENT_DATE - (%s::int - 1)
+        )
+        SELECT
+            a.ad_id,
+            COALESCE(MAX(recent.ad_name), a.ad_name) AS ad_name,
+            COALESCE(MAX(recent.campaign_name), MAX(c.campaign_name), '') AS campaign_name,
+            COALESCE(MAX(recent.adset_name), MAX(s.adset_name), '') AS adset_name,
+            MAX(a.creative_id) AS creative_id,
+            MAX(cr.name) AS creative_name,
+            COALESCE(MAX(m.mapping_status), CASE WHEN COALESCE(MAX(m.product_handle), MAX(t.product_handle), '') <> '' THEN 'confirmed' ELSE 'unmapped' END) AS mapping_status,
+            COALESCE(MAX(m.product_handle), MAX(t.product_handle), '') AS product_handle,
+            COALESCE(MAX(m.product_title), MAX(t.product_title), '') AS product_title,
+            MAX(m.suggested_product_handle) AS suggested_product_handle,
+            MAX(m.suggested_product_title) AS suggested_product_title,
+            MAX(m.suggestion_confidence) AS suggestion_confidence,
+            MAX(m.suggestion_reason) AS suggestion_reason,
+            COALESCE(MAX(m.sport), MAX(t.sport), '') AS sport,
+            COALESCE(MAX(m.country_focus), MAX(t.country_focus), '') AS country_focus,
+            COALESCE(MAX(m.mockup_type), MAX(t.mockup_type), '') AS mockup_type,
+            COALESCE(MAX(m.room_type), MAX(t.room_type), '') AS room_type,
+            COALESCE(MAX(m.ad_angle), MAX(t.ad_angle), '') AS ad_angle,
+            COALESCE(MAX(m.hook_style), MAX(t.hook_style), '') AS hook_style,
+            COALESCE(MAX(m.creative_format), MAX(t.creative_format), MAX(cr.creative_format), '') AS creative_format,
+            COALESCE(MAX(m.funnel_stage), MAX(t.funnel_stage), '') AS funnel_stage,
+            COALESCE(MAX(m.notes), MAX(t.notes), '') AS notes,
+            SUM(COALESCE(recent.spend, 0)) AS spend,
+            SUM(COALESCE(recent.purchases, 0)) AS purchases,
+            SUM(COALESCE(recent.purchase_value, 0)) AS purchase_value,
+            SUM(COALESCE(recent.clicks, 0)) AS clicks,
+            SUM(COALESCE(recent.impressions, 0)) AS impressions,
+            CASE WHEN SUM(COALESCE(recent.spend, 0)) > 0 THEN SUM(COALESCE(recent.purchase_value, 0)) / SUM(COALESCE(recent.spend, 0)) ELSE 0 END AS roas,
+            CASE WHEN SUM(COALESCE(recent.purchases, 0)) > 0 THEN SUM(COALESCE(recent.spend, 0)) / SUM(COALESCE(recent.purchases, 0)) ELSE 0 END AS cpa,
+            CASE WHEN SUM(COALESCE(recent.impressions, 0)) > 0 THEN SUM(COALESCE(recent.clicks, 0)) / SUM(COALESCE(recent.impressions, 0)) * 100 ELSE 0 END AS ctr
+        FROM meta_ads a
+        LEFT JOIN recent ON recent.ad_id = a.ad_id
+        LEFT JOIN meta_campaigns c ON c.campaign_id = a.campaign_id
+        LEFT JOIN meta_adsets s ON s.adset_id = a.adset_id
+        LEFT JOIN meta_creatives cr ON cr.ad_id = a.ad_id
+        LEFT JOIN ads_product_mapping m ON m.ad_id = a.ad_id
+        LEFT JOIN meta_creative_tags t ON t.ad_id = a.ad_id
+        GROUP BY a.ad_id, a.ad_name
+        ORDER BY spend DESC NULLS LAST, ad_name NULLS LAST
+        LIMIT %s
+    """
+    fallback_query = """
+        WITH recent AS (
+            SELECT *
+            FROM meta_ad_insights_daily
+            WHERE date >= CURRENT_DATE - (%s::int - 1)
+        )
+        SELECT
+            a.ad_id,
+            COALESCE(MAX(recent.ad_name), a.ad_name) AS ad_name,
+            COALESCE(MAX(recent.campaign_name), MAX(c.campaign_name), '') AS campaign_name,
+            COALESCE(MAX(recent.adset_name), MAX(s.adset_name), '') AS adset_name,
+            MAX(a.creative_id) AS creative_id,
+            COALESCE(MAX(t.product_handle), '') AS product_handle,
+            COALESCE(MAX(t.product_title), '') AS product_title,
+            CASE WHEN COALESCE(MAX(t.product_handle), MAX(t.product_title), '') <> '' THEN 'confirmed' ELSE 'unmapped' END AS mapping_status,
+            '' AS suggested_product_handle,
+            '' AS suggested_product_title,
+            0 AS suggestion_confidence,
+            '' AS suggestion_reason,
+            COALESCE(MAX(t.sport), '') AS sport,
+            COALESCE(MAX(t.country_focus), '') AS country_focus,
+            COALESCE(MAX(t.mockup_type), '') AS mockup_type,
+            '' AS room_type,
+            COALESCE(MAX(t.ad_angle), '') AS ad_angle,
+            '' AS hook_style,
+            '' AS creative_format,
+            COALESCE(MAX(t.funnel_stage), '') AS funnel_stage,
+            COALESCE(MAX(t.notes), '') AS notes,
+            SUM(COALESCE(recent.spend, 0)) AS spend,
+            SUM(COALESCE(recent.purchases, 0)) AS purchases,
+            SUM(COALESCE(recent.purchase_value, 0)) AS purchase_value,
+            SUM(COALESCE(recent.clicks, 0)) AS clicks,
+            SUM(COALESCE(recent.impressions, 0)) AS impressions,
+            CASE WHEN SUM(COALESCE(recent.spend, 0)) > 0 THEN SUM(COALESCE(recent.purchase_value, 0)) / SUM(COALESCE(recent.spend, 0)) ELSE 0 END AS roas,
+            CASE WHEN SUM(COALESCE(recent.purchases, 0)) > 0 THEN SUM(COALESCE(recent.spend, 0)) / SUM(COALESCE(recent.purchases, 0)) ELSE 0 END AS cpa,
+            CASE WHEN SUM(COALESCE(recent.impressions, 0)) > 0 THEN SUM(COALESCE(recent.clicks, 0)) / SUM(COALESCE(recent.impressions, 0)) * 100 ELSE 0 END AS ctr
+        FROM meta_ads a
+        LEFT JOIN recent ON recent.ad_id = a.ad_id
+        LEFT JOIN meta_campaigns c ON c.campaign_id = a.campaign_id
+        LEFT JOIN meta_adsets s ON s.adset_id = a.adset_id
+        LEFT JOIN meta_creative_tags t ON t.ad_id = a.ad_id
+        GROUP BY a.ad_id, a.ad_name
+        ORDER BY spend DESC NULLS LAST, ad_name NULLS LAST
+        LIMIT %s
+    """
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(new_query, params)
+                return cur.fetchall()
+    except Exception:
+        try:
+            with connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(fallback_query, params)
+                    return cur.fetchall()
+        except Exception:
+            return []
+
+
+def suggest_ads_product_mappings(limit=500):
+    ensure_ads_schema()
+    rows = list_ads_product_mapping_status(date_range="last_30_days", limit=limit)
+    candidates = list_ads_product_candidates(limit=500)
+    saved = []
+    with connect() as conn:
+        with conn.cursor() as cur:
+            for row in rows:
+                if row.get("product_handle") or str(row.get("mapping_status") or "").lower() == "confirmed":
+                    continue
+                suggestion = _suggest_product_mapping_for_text(
+                    f"{row.get('ad_name') or ''} {row.get('campaign_name') or ''} {row.get('adset_name') or ''} {row.get('creative_name') or ''}",
+                    candidates,
+                )
+                status = suggestion["status"]
+                if status == "unmapped":
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO ads_product_mapping(
+                        ad_id, product_handle, product_title, mapping_status,
+                        suggested_product_handle, suggested_product_title,
+                        suggestion_confidence, suggestion_reason, updated_at
+                    )
+                    VALUES (%s, '', '', %s, %s, %s, %s, %s, now())
+                    ON CONFLICT (ad_id) DO UPDATE SET
+                        mapping_status=CASE
+                            WHEN COALESCE(ads_product_mapping.product_handle, '') <> '' THEN ads_product_mapping.mapping_status
+                            ELSE EXCLUDED.mapping_status
+                        END,
+                        suggested_product_handle=EXCLUDED.suggested_product_handle,
+                        suggested_product_title=EXCLUDED.suggested_product_title,
+                        suggestion_confidence=EXCLUDED.suggestion_confidence,
+                        suggestion_reason=EXCLUDED.suggestion_reason,
+                        updated_at=now()
+                    """,
+                    (
+                        row.get("ad_id"),
+                        status,
+                        suggestion["product_handle"],
+                        suggestion["product_title"],
+                        suggestion["confidence"],
+                        suggestion["reason"],
+                    ),
+                )
+                saved.append({"ad_id": row.get("ad_id"), **suggestion})
+            _ads_insert_action_log(
+                cur,
+                "product_mapping",
+                "suggested",
+                f"Generated {len(saved)} Ads Intelligence product mapping suggestions",
+                {"limit": int(limit or 500)},
+            )
+        conn.commit()
+    return {"suggested": len(saved), "rows": saved}
+
+
+def list_product_opportunities_from_ads(date_range="last_7_days"):
+    ad_rows = list_ads_product_mapping_status(date_range=date_range, limit=500)
+    sales_rows = list_recent_product_sales_by_handle(date_range=date_range, limit=500)
+    edition_rows = list_product_edition_summary()
+    sales_by_handle = {str(row.get("product_handle") or ""): row for row in sales_rows}
+    edition_by_handle = {str(row.get("product_handle") or ""): row for row in edition_rows}
+    products = {}
+    for row in ad_rows:
+        status = str(row.get("mapping_status") or "unmapped")
+        handle = row.get("product_handle") or row.get("suggested_product_handle") or ""
+        title = row.get("product_title") or row.get("suggested_product_title") or "Untagged"
+        key = handle or title or "Untagged"
+        item = products.setdefault(
+            key,
+            {
+                "product_handle": handle,
+                "product_title": title,
+                "mapping_status": status if status else "unmapped",
+                "mapped_ads": 0,
+                "spend": 0.0,
+                "purchases": 0.0,
+                "purchase_value": 0.0,
+                "clicks": 0.0,
+                "impressions": 0.0,
+            },
+        )
+        item["mapping_status"] = "confirmed" if status == "confirmed" else item["mapping_status"]
+        item["mapped_ads"] += 1
+        item["spend"] += _ads_float(row.get("spend"))
+        item["purchases"] += _ads_float(row.get("purchases"))
+        item["purchase_value"] += _ads_float(row.get("purchase_value"))
+        item["clicks"] += _ads_float(row.get("clicks"))
+        item["impressions"] += _ads_float(row.get("impressions"))
+    for handle, sale in sales_by_handle.items():
+        if not handle:
+            continue
+        item = products.setdefault(
+            handle,
+            {
+                "product_handle": handle,
+                "product_title": sale.get("product_title") or handle,
+                "mapping_status": "no_meta_spend",
+                "mapped_ads": 0,
+                "spend": 0.0,
+                "purchases": 0.0,
+                "purchase_value": 0.0,
+                "clicks": 0.0,
+                "impressions": 0.0,
+            },
+        )
+        item["product_title"] = item["product_title"] or sale.get("product_title") or handle
+    output = []
+    for item in products.values():
+        handle = item.get("product_handle") or ""
+        sales = sales_by_handle.get(handle) or {}
+        edition = edition_by_handle.get(handle) or {}
+        spend = item["spend"]
+        purchases = item["purchases"]
+        value = item["purchase_value"]
+        clicks = item["clicks"]
+        impressions = item["impressions"]
+        roas = value / spend if spend else 0
+        cpa = spend / purchases if purchases else 0
+        ctr = clicks / impressions * 100 if impressions else 0
+        edition_remaining = edition.get("edition_remaining")
+        status = item["mapping_status"] or "unmapped"
+        if status in {"unmapped", "suggested"} and item["spend"] > 0:
+            recommendation = "Needs tagging"
+        elif status == "needs_review":
+            recommendation = "Needs review"
+        elif edition_remaining not in (None, "") and _ads_int(edition_remaining) <= 10 and sales.get("total_orders"):
+            recommendation = "Low editions, final push opportunity"
+        elif item["mapped_ads"] <= 0 and sales.get("total_orders"):
+            recommendation = "Product selling organically, needs ads"
+        elif purchases >= 2 and roas >= 2.5:
+            recommendation = "Scale product"
+        elif spend >= 30 and clicks >= 25 and purchases <= 0:
+            recommendation = "High Meta clicks, weak purchase"
+        elif spend > 0 and purchases <= 0:
+            recommendation = "Create new creative"
+        else:
+            recommendation = "Directional only"
+        output.append(
+            {
+                "product_handle": handle,
+                "product_title": item.get("product_title") or handle or "Untagged",
+                "mapping_status": status,
+                "mapped_ads": item["mapped_ads"],
+                "meta_spend": spend,
+                "meta_purchases": purchases,
+                "meta_purchase_value": value,
+                "meta_roas": roas,
+                "meta_cpa": cpa,
+                "meta_ctr": ctr,
+                "actual_orders": sales.get("total_orders"),
+                "actual_units": sales.get("total_units"),
+                "actual_revenue": sales.get("total_revenue"),
+                "latest_order_date": sales.get("latest_order_date"),
+                "edition_remaining": edition_remaining,
+                "edition_total": edition.get("edition_total"),
+                "recommendation": recommendation,
+            }
+        )
+    return sorted(output, key=lambda row: (_ads_float(row.get("meta_purchase_value")), _ads_float(row.get("meta_spend"))), reverse=True)
+
+
+def ads_product_mapping_diagnostics():
+    rows = list_ads_product_mapping_status(date_range="last_30_days", limit=1000)
+    opportunities = list_product_opportunities_from_ads(date_range="last_30_days")
+    candidates = list_ads_product_candidates(limit=1000)
+    return {
+        "product_candidate_count": len(candidates),
+        "ads_without_mapping": sum(1 for row in rows if not (row.get("product_handle") or row.get("product_title"))),
+        "suggested_mappings_count": sum(1 for row in rows if str(row.get("mapping_status") or "") == "suggested"),
+        "confirmed_mappings_count": sum(1 for row in rows if str(row.get("mapping_status") or "") == "confirmed" or row.get("product_handle")),
+        "needs_review_count": sum(1 for row in rows if str(row.get("mapping_status") or "") == "needs_review"),
+        "products_with_meta_spend_no_confirmed_mapping": sum(
+            1
+            for row in opportunities
+            if _ads_float(row.get("meta_spend")) > 0 and str(row.get("mapping_status") or "") != "confirmed"
+        ),
+        "products_with_orders_no_meta_spend": sum(
+            1
+            for row in opportunities
+            if _ads_int(row.get("actual_orders")) > 0 and _ads_float(row.get("meta_spend")) <= 0
+        ),
+    }
+
+
 def list_ads_creative_tags(limit=500):
     if not is_configured():
         return []
@@ -11440,6 +12050,9 @@ def upsert_ads_creative_tag(tag):
     ad_id = str(tag.get("ad_id") or "").strip()
     if not ad_id:
         raise ValueError("ad_id is required to save creative tags.")
+    mapping_status = str(tag.get("mapping_status") or "").strip()
+    if not mapping_status:
+        mapping_status = "confirmed" if (tag.get("product_handle") or tag.get("product_title")) else "unmapped"
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -11484,9 +12097,16 @@ def upsert_ads_creative_tag(tag):
                 """
                 INSERT INTO ads_product_mapping(
                     ad_id, product_handle, product_title, sport, country_focus, mockup_type,
-                    room_type, ad_angle, hook_style, creative_format, funnel_stage, notes, updated_at
+                    room_type, ad_angle, hook_style, creative_format, funnel_stage, notes,
+                    mapping_status, suggested_product_handle, suggested_product_title,
+                    suggestion_confidence, suggestion_reason, confirmed_at, confirmed_by, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s,
+                    CASE WHEN %s='confirmed' THEN now() ELSE NULL END,
+                    %s, now()
+                )
                 ON CONFLICT (ad_id) DO UPDATE SET
                     product_handle=EXCLUDED.product_handle,
                     product_title=EXCLUDED.product_title,
@@ -11499,6 +12119,13 @@ def upsert_ads_creative_tag(tag):
                     creative_format=EXCLUDED.creative_format,
                     funnel_stage=EXCLUDED.funnel_stage,
                     notes=EXCLUDED.notes,
+                    mapping_status=EXCLUDED.mapping_status,
+                    suggested_product_handle=EXCLUDED.suggested_product_handle,
+                    suggested_product_title=EXCLUDED.suggested_product_title,
+                    suggestion_confidence=EXCLUDED.suggestion_confidence,
+                    suggestion_reason=EXCLUDED.suggestion_reason,
+                    confirmed_at=CASE WHEN EXCLUDED.mapping_status='confirmed' THEN COALESCE(ads_product_mapping.confirmed_at, now()) ELSE ads_product_mapping.confirmed_at END,
+                    confirmed_by=EXCLUDED.confirmed_by,
                     updated_at=now()
                 """,
                 (
@@ -11514,6 +12141,13 @@ def upsert_ads_creative_tag(tag):
                     tag.get("creative_format"),
                     tag.get("funnel_stage"),
                     tag.get("notes"),
+                    mapping_status,
+                    tag.get("suggested_product_handle"),
+                    tag.get("suggested_product_title"),
+                    _ads_float(tag.get("suggestion_confidence")),
+                    tag.get("suggestion_reason"),
+                    mapping_status,
+                    tag.get("confirmed_by") or "sports_cave_os",
                 ),
             )
             _ads_insert_action_log(

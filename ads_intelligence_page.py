@@ -13,6 +13,10 @@ import ui_styles
 DATE_RANGE_OPTIONS = {
     "Last 7 days": 7,
     "Last 30 days": 30,
+    "Last 3 months": 90,
+    "Last 6 months": 180,
+    "Last 12 months": 365,
+    "All stored data": None,
 }
 
 
@@ -34,6 +38,27 @@ PERFORMANCE_COLUMNS = [
     "Country",
     "Placement",
 ]
+
+
+MAPPING_STATUS_OPTIONS = ["All", "confirmed", "suggested", "needs_review", "unmapped"]
+
+
+def _date_range_days(label):
+    return DATE_RANGE_OPTIONS.get(label)
+
+
+def _date_range_syncable(label):
+    return _date_range_days(label) is not None
+
+
+def _date_range_slug(label):
+    return (
+        str(label or "selected_range")
+        .lower()
+        .replace("/", "_")
+        .replace(" ", "_")
+        .replace("-", "_")
+    )
 
 
 def _number(value, default=0.0):
@@ -403,7 +428,17 @@ def _group_creative_report(ad_rows, field):
     return sorted(output, key=lambda item: item["_sort"], reverse=True)
 
 
-def _prompt_for(template, range_label, summary, ad_rows, country_rows=None, demographic_rows=None, platform_rows=None):
+def _prompt_for(
+    template,
+    range_label,
+    summary,
+    ad_rows,
+    country_rows=None,
+    demographic_rows=None,
+    platform_rows=None,
+    mapping_rows=None,
+    product_opportunities=None,
+):
     winners, losers = _top_and_losing_rows(ad_rows)
     country_summary = _aggregate_group(country_rows or [], ["country"])[:8]
     demographic_summary = _aggregate_group(demographic_rows or [], ["age", "gender"])[:8]
@@ -416,6 +451,7 @@ def _prompt_for(template, range_label, summary, ad_rows, country_rows=None, demo
         "Business context:",
         "Sports Cave sells premium limited-edition framed sports artwork, usually edition of 100, through Shopify.",
         "The goal is profitable revenue growth: identify ads to scale, ads to kill, creatives to refresh, products to push, and new ad concepts to launch.",
+        "Important attribution warning: Meta revenue is platform attribution. Shopify/Supabase sales are actual product-level sales and may not be exact ad attribution unless UTM/ad ID matching exists.",
         "",
         f"Date range: {range_label}",
         "",
@@ -477,6 +513,27 @@ def _prompt_for(template, range_label, summary, ad_rows, country_rows=None, demo
         lines.extend(["", "Winning headline examples:"])
         for row in best_headlines:
             lines.append(f"- {row.get('Value')} | ROAS {row.get('ROAS')} | Purchases {row.get('Purchases')}")
+    if mapping_rows:
+        lines.extend(["", "Product mapping rows:"])
+        for row in (mapping_rows or [])[:12]:
+            lines.append(
+                f"- {row.get('ad_name')} | Campaign: {row.get('campaign_name')} | "
+                f"Product: {row.get('product_title') or row.get('product_handle') or row.get('suggested_product_title') or 'unmapped'} | "
+                f"Status: {row.get('mapping_status') or 'unmapped'} | Spend {_money(row.get('spend'))} | "
+                f"Purchases {_number(row.get('purchases')):,.0f} | ROAS {_ratio(row.get('roas'))} | "
+                f"CPA {_money(row.get('cpa'))} | CTR {_pct(row.get('ctr'))} | Notes: {row.get('notes') or 'none'}"
+            )
+    if product_opportunities:
+        lines.extend(["", "Product opportunity rows:"])
+        for row in (product_opportunities or [])[:12]:
+            lines.append(
+                f"- {row.get('product_title') or row.get('product_handle') or 'Untagged'} | "
+                f"Mapping: {row.get('mapping_status')} | Meta spend {_money(row.get('meta_spend'))} | "
+                f"Meta purchases {_number(row.get('meta_purchases')):,.0f} | Meta ROAS {_ratio(row.get('meta_roas'))} | "
+                f"Shopify/Supabase actual orders: {row.get('actual_orders') if row.get('actual_orders') not in (None, '') else 'unknown'} | "
+                f"Edition remaining: {row.get('edition_remaining') if row.get('edition_remaining') not in (None, '') else 'unknown'} | "
+                f"Recommendation: {row.get('recommendation')}"
+            )
     instructions = {
         "Daily Ads Review": "Give me today's decision list: what to scale, watch, refresh, kill, and what to test next.",
         "Creative Pattern Finder": "Find repeatable creative patterns in the winners and explain what visual or angle patterns to reuse.",
@@ -485,6 +542,9 @@ def _prompt_for(template, range_label, summary, ad_rows, country_rows=None, demo
         "Platform Placement Report": "Compare placements and recommend what creative format and copy style to use for each placement.",
         "New Ad Copy Generator": "Create 10 new primary text variations, 10 headlines, and 5 image/mockup brief ideas based on the winners. Keep style close to proven patterns, but do not copy word-for-word.",
         "New Image/Mockup Brief Generator": "Create practical image and mockup briefs based on winning products, countries, formats, and ad angles.",
+        "Product Tagging Review": "Review unmapped, suggested, and needs-review ads. Tell me which mappings look safe to confirm and which need manual investigation.",
+        "New Creative Based on Product Winners": "Use the product winners and mapped ads to create new Meta ad copy, hook ideas, and image/mockup briefs for the strongest products.",
+        "Country/Product Creative Plan": "Create a country-by-country product creative plan using mapped products, country performance, and edition scarcity where available.",
         "Loser Diagnosis": "Diagnose why the losing ads are failing and recommend whether each needs a new hook, creative, offer, audience, or product match.",
         "Product Scaling Plan": "Recommend which products deserve more spend, which countries/sports to focus on, and the next scaling sequence.",
     }
@@ -800,6 +860,99 @@ def _creative_intelligence_table(ad_rows):
     ]
 
 
+def _mapping_summary(mapping_rows):
+    rows = mapping_rows or []
+    return {
+        "total": len(rows),
+        "confirmed": sum(1 for row in rows if str(row.get("mapping_status") or "") == "confirmed" or row.get("product_handle")),
+        "suggested": sum(1 for row in rows if str(row.get("mapping_status") or "") == "suggested"),
+        "needs_review": sum(1 for row in rows if str(row.get("mapping_status") or "") == "needs_review"),
+        "unmapped": sum(1 for row in rows if not (row.get("product_handle") or row.get("product_title")) and str(row.get("mapping_status") or "unmapped") in {"", "unmapped"}),
+    }
+
+
+def _mapping_table_rows(mapping_rows):
+    table = []
+    for row in mapping_rows or []:
+        table.append(
+            {
+                "Status": row.get("mapping_status") or "unmapped",
+                "Ad": row.get("ad_name") or "",
+                "Campaign": row.get("campaign_name") or "",
+                "Ad Set": row.get("adset_name") or "",
+                "Suggested Product": row.get("suggested_product_title") or row.get("suggested_product_handle") or "",
+                "Confidence": f"{_number(row.get('suggestion_confidence')):.2f}",
+                "Suggestion Reason": row.get("suggestion_reason") or "",
+                "Confirmed Product": row.get("product_title") or row.get("product_handle") or "",
+                "Spend": _money(row.get("spend")),
+                "Purchases": f"{_number(row.get('purchases')):,.0f}",
+                "ROAS": _ratio(row.get("roas")),
+                "CPA": _money(row.get("cpa")),
+                "Action": "Review" if row.get("mapping_status") in {"suggested", "needs_review"} else ("Done" if row.get("product_handle") else "Tag"),
+                "_ad_id": row.get("ad_id"),
+            }
+        )
+    return table
+
+
+def _filter_mapping_rows(mapping_rows, status, campaign, product, min_spend, search_text):
+    query = str(search_text or "").strip().lower()
+    product_query = str(product or "").strip().lower()
+    filtered = []
+    for row in mapping_rows or []:
+        row_status = str(row.get("mapping_status") or "unmapped")
+        if status != "All" and row_status != status:
+            continue
+        if campaign != "All" and row.get("campaign_name") != campaign:
+            continue
+        if _number(row.get("spend")) < _number(min_spend):
+            continue
+        product_text = " ".join(
+            str(row.get(key) or "")
+            for key in ("product_handle", "product_title", "suggested_product_handle", "suggested_product_title")
+        ).lower()
+        if product_query and product_query not in product_text:
+            continue
+        search_blob = " ".join(
+            str(row.get(key) or "")
+            for key in ("ad_name", "campaign_name", "adset_name", "creative_name", "suggestion_reason")
+        ).lower()
+        if query and query not in search_blob:
+            continue
+        filtered.append(row)
+    return filtered
+
+
+def _product_option_label(row):
+    handle = row.get("product_handle") or ""
+    title = row.get("product_title") or handle or "Unknown product"
+    remaining = row.get("edition_remaining")
+    if remaining not in (None, ""):
+        return f"{title} | {handle} | {remaining} editions left"
+    return f"{title} | {handle}"
+
+
+def _opportunity_table_rows(rows):
+    return [
+        {
+            "Product": row.get("product_title") or row.get("product_handle") or "Untagged",
+            "Mapping": row.get("mapping_status") or "",
+            "Mapped ads": row.get("mapped_ads") or 0,
+            "Meta spend": _money(row.get("meta_spend")),
+            "Meta purchases": f"{_number(row.get('meta_purchases')):,.0f}",
+            "Meta purchase value": _money(row.get("meta_purchase_value")),
+            "Meta ROAS": _ratio(row.get("meta_roas")),
+            "Meta CPA": _money(row.get("meta_cpa")),
+            "Meta CTR": _pct(row.get("meta_ctr")),
+            "Shopify/Supabase actual orders": row.get("actual_orders") if row.get("actual_orders") not in (None, "") else "Unknown",
+            "Shopify/Supabase actual revenue": _money(row.get("actual_revenue")) if row.get("actual_revenue") not in (None, "") else "Unknown",
+            "Edition remaining": row.get("edition_remaining") if row.get("edition_remaining") not in (None, "") else "Unknown",
+            "Recommendation": row.get("recommendation") or "Directional only",
+        }
+        for row in rows or []
+    ]
+
+
 def _render_controls(config_status):
     control_cols = st.columns([1.05, 1, 1.1, 0.9])
     selected_range = control_cols[0].selectbox("Date range", list(DATE_RANGE_OPTIONS), index=0)
@@ -943,6 +1096,8 @@ def render_page():
     country_rows = supabase_backend.list_meta_ad_insights_country(days=days)
     demographic_rows = supabase_backend.list_meta_ad_insights_age_gender(days=days)
     platform_rows = supabase_backend.list_meta_ad_insights_platform(days=days)
+    mapping_rows = supabase_backend.list_ads_product_mapping_status(date_range=selected_range, limit=500)
+    product_opportunities = supabase_backend.list_product_opportunities_from_ads(date_range=selected_range)
     summary = _summary(insight_rows)
     ad_rows = _aggregate_by_ad(insight_rows)
 
@@ -968,7 +1123,7 @@ def render_page():
         demographics_tab,
         platform_tab,
         creative_intel_tab,
-        tags_tab,
+        mapping_tab,
         chatgpt_tab,
     ) = st.tabs(
         [
@@ -978,7 +1133,7 @@ def render_page():
             "Demographics",
             "Platform",
             "Creative Intelligence",
-            "Creative Tags",
+            "Product Mapping",
             "ChatGPT Pack",
         ]
     )
@@ -1027,13 +1182,13 @@ def render_page():
                     ui_styles.empty_state("No weak ads flagged yet.")
             _section("Product Opportunities")
             st.caption(
-                "Most ads are currently untagged. Use Creative Tags to map ads to products so product opportunity reporting becomes accurate."
+                "Meta revenue is platform attribution. Shopify/Supabase sales are actual product-level sales and may not be exact ad attribution until UTM/ad ID matching is added."
             )
-            product_rows = _product_opportunity_rows(ad_rows)
+            product_rows = _opportunity_table_rows(product_opportunities)
             if product_rows:
-                st.dataframe(product_rows, hide_index=True, use_container_width=True)
+                st.dataframe(product_rows[:500], hide_index=True, use_container_width=True, height=420)
             else:
-                ui_styles.empty_state("Tag ads to products to unlock product-level opportunities.")
+                ui_styles.empty_state("Map ads to products to unlock product-level opportunities.")
 
     with table_tab:
         _section("Meta Ads Performance")
@@ -1192,50 +1347,116 @@ def render_page():
                 ][:10]
                 _compact_table(weak_rows, height=260)
 
-    with tags_tab:
-        _section("Creative Tags")
-        if not ad_rows:
-            ui_styles.empty_state("Sync Meta data first, then tag ads against products, sports, mockups, and angles.")
+    with mapping_tab:
+        _section("Product Mapping")
+        st.caption("Link Meta ads to real Sports Cave products. Suggestions are not confirmed until saved.")
+        if not mapping_rows:
+            ui_styles.empty_state("No Meta ads found in Supabase yet. Sync Meta data manually first.")
         else:
-            needs_tagging = sum(1 for row in ad_rows if not (row.get("product_handle") or row.get("product_title")))
-            ui_styles.source_status_banner(
+            mapping_summary = _mapping_summary(mapping_rows)
+            ui_styles.metric_strip(
                 [
-                    ("Needs tagging", needs_tagging),
-                    ("Tagged", max(len(ad_rows) - needs_tagging, 0)),
-                    ("Source", "Meta ads + manual product mapping"),
+                    ("Total ads", mapping_summary["total"]),
+                    ("Confirmed", mapping_summary["confirmed"]),
+                    ("Suggested", mapping_summary["suggested"]),
+                    ("Needs review", mapping_summary["needs_review"]),
+                    ("Unmapped", mapping_summary["unmapped"]),
                 ]
             )
-            st.dataframe(_creative_tag_rows(ad_rows), hide_index=True, use_container_width=True, height=360)
-            with st.expander("Edit selected creative tags", expanded=False):
-                tag_order = sorted(
-                    ad_rows,
-                    key=lambda row: (bool(row.get("product_handle") or row.get("product_title")), row.get("ad") or ""),
+            action_cols = st.columns([1, 1.2, 1])
+            if action_cols[0].button("Generate suggestions", use_container_width=True):
+                result = supabase_backend.suggest_ads_product_mappings(limit=500)
+                st.success(f"Generated {result.get('suggested', 0)} product mapping suggestions. Review before confirming.")
+                st.rerun()
+            action_cols[1].caption("Suggestions use ad/campaign names plus Edition Ops and Supabase order product data.")
+
+            filter_cols = st.columns([1, 1.1, 1.1, 0.7, 1.2])
+            status_filter = filter_cols[0].selectbox("Mapping status", MAPPING_STATUS_OPTIONS)
+            campaign_options = ["All"] + sorted({row.get("campaign_name") for row in mapping_rows if row.get("campaign_name")})
+            campaign_filter = filter_cols[1].selectbox("Campaign", campaign_options, key="mapping-campaign-filter")
+            product_filter = filter_cols[2].text_input("Product", key="mapping-product-filter")
+            min_spend_filter = filter_cols[3].number_input("Min spend", min_value=0.0, value=0.0, step=10.0, key="mapping-min-spend")
+            search_filter = filter_cols[4].text_input("Search ad/campaign", key="mapping-search-filter")
+            filtered_mapping_rows = _filter_mapping_rows(
+                mapping_rows,
+                status_filter,
+                campaign_filter,
+                product_filter,
+                min_spend_filter,
+                search_filter,
+            )
+            table_rows = _mapping_table_rows(filtered_mapping_rows)
+            st.caption(f"Showing {min(len(table_rows), 500)} of {len(table_rows)} matching ads.")
+            st.dataframe(
+                [{key: value for key, value in row.items() if not key.startswith("_")} for row in table_rows[:500]],
+                hide_index=True,
+                use_container_width=True,
+                height=420,
+            )
+
+            with st.expander("Manual mapping editor", expanded=False):
+                product_candidates = supabase_backend.list_ads_product_candidates(limit=500)
+                selectable_rows = filtered_mapping_rows or mapping_rows
+                selectable_rows = sorted(
+                    selectable_rows,
+                    key=lambda row: (str(row.get("mapping_status") or "") == "confirmed", -_number(row.get("spend")), row.get("ad_name") or ""),
                 )
-                ad_options = {f"{row.get('ad')} ({row.get('ad_id')})": row for row in tag_order}
-                selected_ad_label = st.selectbox("Ad to tag", list(ad_options))
-                selected_ad = ad_options[selected_ad_label]
-                suggestion = _tag_suggestion(selected_ad)
-                st.caption(f"{suggestion['label']} - review before saving.")
-                with st.form("ads-creative-tag-form"):
+                row_options = {f"{row.get('ad_name') or 'Unnamed ad'} ({row.get('ad_id')})": row for row in selectable_rows}
+                selected_label = st.selectbox("Selected ad", list(row_options), key="product-mapping-selected-ad")
+                selected_ad = row_options[selected_label]
+                perf_cols = st.columns(5)
+                perf_cols[0].metric("Spend", _money(selected_ad.get("spend")))
+                perf_cols[1].metric("Purchases", f"{_number(selected_ad.get('purchases')):,.0f}")
+                perf_cols[2].metric("ROAS", _ratio(selected_ad.get("roas")))
+                perf_cols[3].metric("CPA", _money(selected_ad.get("cpa")))
+                perf_cols[4].metric("CTR", _pct(selected_ad.get("ctr")))
+                st.caption(
+                    f"Ad: {selected_ad.get('ad_name') or ''} | Campaign: {selected_ad.get('campaign_name') or ''} | "
+                    f"Ad set: {selected_ad.get('adset_name') or ''}"
+                )
+                candidate_options = ["Manual / keep current"]
+                candidate_lookup = {}
+                for candidate in product_candidates:
+                    label = _product_option_label(candidate)
+                    candidate_options.append(label)
+                    candidate_lookup[label] = candidate
+                suggested_handle = selected_ad.get("suggested_product_handle") or selected_ad.get("product_handle") or ""
+                default_index = 0
+                if suggested_handle:
+                    for index, label in enumerate(candidate_options):
+                        candidate = candidate_lookup.get(label) or {}
+                        if candidate.get("product_handle") == suggested_handle:
+                            default_index = index
+                            break
+                selected_product_label = st.selectbox("Product candidate", candidate_options, index=default_index)
+                selected_product = candidate_lookup.get(selected_product_label) or {}
+                with st.form("ads-product-mapping-form"):
                     col_a, col_b, col_c = st.columns(3)
-                    product_handle = col_a.text_input("Product handle", value=selected_ad.get("product_handle") or suggestion["product_handle"])
-                    product_title = col_b.text_input("Product title", value=selected_ad.get("product_title") or suggestion["product_title"])
-                    sport = col_c.text_input("Sport", value=selected_ad.get("sport") or suggestion["sport"])
-                    country_focus = col_a.text_input("Country focus", value=selected_ad.get("country_focus") or suggestion["country_focus"])
-                    mockup_type = col_b.text_input("Mockup type", value=selected_ad.get("mockup_type") or suggestion["mockup_type"])
-                    room_type = col_c.text_input("Room type", value=selected_ad.get("room_type") or suggestion["room_type"])
-                    ad_angle = col_a.text_input("Ad angle", value=selected_ad.get("ad_angle") or suggestion["ad_angle"])
-                    hook_style = col_b.text_input("Hook style", value=selected_ad.get("hook_style") or suggestion["hook_style"])
-                    creative_format = col_c.text_input("Creative format", value=selected_ad.get("creative_format") or suggestion["creative_format"])
-                    funnel_stage = col_a.text_input("Funnel stage", value=selected_ad.get("funnel_stage") or suggestion["funnel_stage"])
-                    notes = st.text_area("Notes", value=selected_ad.get("tag_notes") or suggestion["notes"], height=80)
-                    if st.form_submit_button("Save Creative Tags", use_container_width=True):
+                    default_handle = selected_product.get("product_handle") or selected_ad.get("product_handle") or selected_ad.get("suggested_product_handle") or ""
+                    default_title = selected_product.get("product_title") or selected_ad.get("product_title") or selected_ad.get("suggested_product_title") or ""
+                    product_handle = col_a.text_input("Product handle", value=default_handle)
+                    product_title = col_b.text_input("Product title", value=default_title)
+                    sport = col_c.text_input("Sport", value=selected_ad.get("sport") or "")
+                    country_focus = col_a.text_input("Country focus", value=selected_ad.get("country_focus") or "")
+                    mockup_type = col_b.text_input("Mockup type", value=selected_ad.get("mockup_type") or "")
+                    room_type = col_c.text_input("Room type", value=selected_ad.get("room_type") or "")
+                    ad_angle = col_a.text_input("Ad angle", value=selected_ad.get("ad_angle") or "")
+                    hook_style = col_b.text_input("Hook style", value=selected_ad.get("hook_style") or "")
+                    creative_format = col_c.text_input("Creative format", value=selected_ad.get("creative_format") or "")
+                    funnel_stage = col_a.text_input("Funnel stage", value=selected_ad.get("funnel_stage") or "")
+                    notes = st.text_area("Notes", value=selected_ad.get("notes") or "", height=80)
+                    action_a, action_b, action_c = st.columns(3)
+                    save_confirmed = action_a.form_submit_button("Confirm selected mapping", use_container_width=True)
+                    save_review = action_b.form_submit_button("Mark needs review", use_container_width=True)
+                    clear_mapping = action_c.form_submit_button("Clear mapping", use_container_width=True)
+                    if save_confirmed or save_review or clear_mapping:
+                        status = "confirmed" if save_confirmed else ("needs_review" if save_review else "unmapped")
                         supabase_backend.upsert_ads_creative_tag(
                             {
                                 "ad_id": selected_ad.get("ad_id"),
                                 "creative_id": selected_ad.get("creative_id"),
-                                "product_handle": product_handle,
-                                "product_title": product_title,
+                                "product_handle": "" if clear_mapping else product_handle,
+                                "product_title": "" if clear_mapping else product_title,
                                 "sport": sport,
                                 "country_focus": country_focus,
                                 "mockup_type": mockup_type,
@@ -1245,9 +1466,15 @@ def render_page():
                                 "creative_format": creative_format,
                                 "funnel_stage": funnel_stage,
                                 "notes": notes,
+                                "mapping_status": status,
+                                "suggested_product_handle": "" if clear_mapping else selected_ad.get("suggested_product_handle"),
+                                "suggested_product_title": "" if clear_mapping else selected_ad.get("suggested_product_title"),
+                                "suggestion_confidence": 0 if clear_mapping else selected_ad.get("suggestion_confidence"),
+                                "suggestion_reason": "" if clear_mapping else selected_ad.get("suggestion_reason"),
                             }
                         )
-                        st.success("Creative tags saved.")
+                        st.success("Product mapping saved.")
+                        st.rerun()
 
     with chatgpt_tab:
         _section("ChatGPT Analysis Pack")
@@ -1263,6 +1490,9 @@ def render_page():
                 "New Image/Mockup Brief Generator",
                 "Loser Diagnosis",
                 "Product Scaling Plan",
+                "Product Tagging Review",
+                "New Creative Based on Product Winners",
+                "Country/Product Creative Plan",
             ],
         )
         prompt_text = _prompt_for(
@@ -1273,6 +1503,8 @@ def render_page():
             country_rows=country_rows,
             demographic_rows=demographic_rows,
             platform_rows=platform_rows,
+            mapping_rows=mapping_rows,
+            product_opportunities=product_opportunities,
         )
         st.text_area("Copyable ChatGPT prompt/data pack", value=prompt_text, height=360)
         st.download_button(
