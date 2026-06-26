@@ -7,6 +7,7 @@ import streamlit as st
 
 import meta_ads_client
 import supabase_backend
+import ui_styles
 
 
 DATE_RANGE_OPTIONS = {
@@ -16,6 +17,7 @@ DATE_RANGE_OPTIONS = {
 
 
 PERFORMANCE_COLUMNS = [
+    "Action Label",
     "Campaign",
     "Ad Set",
     "Ad",
@@ -29,7 +31,8 @@ PERFORMANCE_COLUMNS = [
     "Revenue",
     "ROAS",
     "Frequency",
-    "Action Label",
+    "Country",
+    "Placement",
 ]
 
 
@@ -60,52 +63,8 @@ def _int_text(value):
     return f"{int(_number(value)):,.0f}"
 
 
-def _inject_ads_styles():
-    st.markdown(
-        """
-        <style>
-        .ads-hero {
-            border: 1px solid rgba(213, 170, 86, 0.28);
-            background: linear-gradient(135deg, #0d0c0a 0%, #181510 58%, #231b0d 100%);
-            border-radius: 8px;
-            padding: 22px 24px;
-            margin-bottom: 18px;
-        }
-        .ads-hero h1 {
-            color: #f7f0e4;
-            font-size: 2.05rem;
-            margin: 0 0 8px 0;
-            letter-spacing: 0;
-        }
-        .ads-hero p {
-            color: #b8aea1;
-            margin: 0;
-            font-size: 0.98rem;
-        }
-        .ads-section-title {
-            color: #f6ead8;
-            font-weight: 700;
-            font-size: 1.05rem;
-            margin: 22px 0 8px 0;
-        }
-        .ads-note {
-            color: #a99f92;
-            font-size: 0.9rem;
-        }
-        div[data-testid="stMetric"] {
-            background: #f7f2e9;
-            border: 1px solid #dfd4c5;
-            border-radius: 8px;
-            padding: 12px 14px;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
 def _section(title, caption=""):
-    st.markdown(f'<div class="ads-section-title">{title}</div>', unsafe_allow_html=True)
+    ui_styles.section_title(title)
     if caption:
         st.caption(caption)
 
@@ -169,6 +128,8 @@ def _aggregate_by_ad(rows):
                 "product_title": row.get("product_title") or "",
                 "sport": row.get("sport") or "",
                 "country_focus": row.get("country_focus") or "",
+                "countries": set(),
+                "placements": set(),
                 "mockup_type": row.get("mockup_type") or "",
                 "ad_angle": row.get("ad_angle") or "",
                 "funnel_stage": row.get("funnel_stage") or "",
@@ -186,6 +147,10 @@ def _aggregate_by_ad(rows):
         item["reach"] += int(_number(row.get("reach")))
         item["frequency_total"] += _number(row.get("frequency"))
         item["frequency_rows"] += 1
+        if row.get("country"):
+            item["countries"].add(str(row.get("country")))
+        if row.get("placement"):
+            item["placements"].add(str(row.get("placement")))
     for item in ads.values():
         spend = item["spend"]
         impressions = item["impressions"]
@@ -199,6 +164,8 @@ def _aggregate_by_ad(rows):
         item["roas"] = revenue / spend if spend else 0
         item["frequency"] = item["frequency_total"] / item["frequency_rows"] if item["frequency_rows"] else 0
         item["action_label"] = _action_label(item)
+        item["country"] = ", ".join(sorted(item["countries"])) or "All"
+        item["placement"] = ", ".join(sorted(item["placements"])) or "All"
     return sorted(ads.values(), key=lambda item: (item["roas"], item["revenue"], -item["spend"]), reverse=True)
 
 
@@ -227,6 +194,7 @@ def _performance_table(ad_rows):
     for row in ad_rows:
         table.append(
             {
+                "Action Label": row.get("action_label"),
                 "Campaign": row.get("campaign"),
                 "Ad Set": row.get("adset"),
                 "Ad": row.get("ad"),
@@ -240,7 +208,8 @@ def _performance_table(ad_rows):
                 "Revenue": _money(row.get("revenue")),
                 "ROAS": _ratio(row.get("roas")),
                 "Frequency": f"{_number(row.get('frequency')):.2f}",
-                "Action Label": row.get("action_label"),
+                "Country": row.get("country") or "All",
+                "Placement": row.get("placement") or "All",
             }
         )
     return table
@@ -403,36 +372,91 @@ def _sync_meta_ads(range_label, days):
     return saved
 
 
-def render_page():
-    _inject_ads_styles()
-    st.markdown(
-        """
-        <div class="ads-hero">
-            <h1>Ads Intelligence</h1>
-            <p>Meta Ads API read-only reporting for creative decisions, product opportunities, and ChatGPT-ready analysis packs.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+def _decision_summary(ad_rows):
+    labels = [
+        "Scale candidate",
+        "Watch",
+        "Refresh creative",
+        "Kill candidate",
+        "Needs more spend",
+        "Landing page/product issue",
+        "Data too early",
+    ]
+    return [
+        {
+            "Action Label": label,
+            "Ads": sum(1 for row in ad_rows if row.get("action_label") == label),
+            "Spend": _money(sum(row.get("spend", 0) for row in ad_rows if row.get("action_label") == label)),
+            "Revenue": _money(sum(row.get("revenue", 0) for row in ad_rows if row.get("action_label") == label)),
+            "Purchases": f"{sum(row.get('purchases', 0) for row in ad_rows if row.get('action_label') == label):.0f}",
+        }
+        for label in labels
+    ]
 
-    config_status = meta_ads_client.safe_meta_config_status()
-    sync_status = supabase_backend.get_ads_sync_status_read_only()
 
-    _section("Meta Connection Status")
-    status_cols = st.columns(6)
-    status_cols[0].metric("Meta configured", "Yes" if config_status["configured"] else "No")
-    status_cols[1].metric("Ad account ID", "Present" if config_status["ad_account_id_present"] else "Missing")
-    status_cols[2].metric("Token", "Present" if config_status["token_present"] else "Missing")
-    status_cols[3].metric("App ID", "Present" if config_status["app_id_present"] else "Missing")
-    status_cols[4].metric("App secret", "Present" if config_status["app_secret_present"] else "Missing")
-    status_cols[5].metric("API version", config_status["api_version"])
-    st.caption("Source: Meta Ads API -> Supabase")
-    st.caption(f"Last successful sync: {sync_status.get('last_successful_sync') or 'Never'}")
-    if sync_status.get("last_sync_error"):
-        st.warning(f"Last sync error: {sync_status.get('last_sync_error')}")
+def _product_opportunity_rows(ad_rows):
+    product_rows = {}
+    for row in ad_rows:
+        key = row.get("product_title") or row.get("product_handle") or "Untagged"
+        product = product_rows.setdefault(key, {"Product": key, "Spend": 0, "Revenue": 0, "Purchases": 0, "Best ROAS": 0})
+        product["Spend"] += row.get("spend", 0)
+        product["Revenue"] += row.get("revenue", 0)
+        product["Purchases"] += row.get("purchases", 0)
+        product["Best ROAS"] = max(product["Best ROAS"], row.get("roas", 0))
+    return [
+        {
+            "Product": row["Product"],
+            "Spend": _money(row["Spend"]),
+            "Revenue": _money(row["Revenue"]),
+            "Purchases": f"{row['Purchases']:.0f}",
+            "Best ROAS": _ratio(row["Best ROAS"]),
+        }
+        for row in sorted(product_rows.values(), key=lambda item: item["Revenue"], reverse=True)
+    ]
 
-    test_cols = st.columns([1, 3])
-    if test_cols[0].button("Test Meta Connection", disabled=not config_status["configured"], use_container_width=True):
+
+def _creative_tag_rows(ad_rows):
+    return [
+        {
+            "Ad ID": row.get("ad_id"),
+            "Ad": row.get("ad"),
+            "Product Handle": row.get("product_handle") or "",
+            "Product": row.get("product_title") or "",
+            "Sport": row.get("sport") or "",
+            "Country": row.get("country_focus") or "",
+            "Mockup": row.get("mockup_type") or "",
+            "Angle": row.get("ad_angle") or "",
+            "Funnel": row.get("funnel_stage") or "",
+            "Notes": row.get("tag_notes") or "",
+        }
+        for row in ad_rows
+    ]
+
+
+def _filter_ad_rows(ad_rows, action_label, campaign, min_spend, product_query):
+    filtered = []
+    query = str(product_query or "").strip().lower()
+    for row in ad_rows:
+        if action_label != "All" and row.get("action_label") != action_label:
+            continue
+        if campaign != "All" and row.get("campaign") != campaign:
+            continue
+        if _number(row.get("spend")) < _number(min_spend):
+            continue
+        product_text = " ".join(
+            str(row.get(key) or "")
+            for key in ("product_handle", "product_title", "sport", "country_focus", "ad_angle", "mockup_type")
+        ).lower()
+        if query and query not in product_text:
+            continue
+        filtered.append(row)
+    return filtered
+
+
+def _render_controls(config_status):
+    control_cols = st.columns([1.05, 1, 1.1, 0.9])
+    selected_range = control_cols[0].selectbox("Date range", list(DATE_RANGE_OPTIONS), index=0)
+    if control_cols[1].button("Test Meta Connection", disabled=not config_status["configured"], use_container_width=True):
         try:
             result = meta_ads_client.test_meta_connection()
             st.success(f"Connection OK: {result.get('name') or result.get('account_id') or 'Meta account found'}")
@@ -441,14 +465,11 @@ def render_page():
             supabase_backend.record_ads_sync_error(safe_message, {"action": "test_meta_connection"})
             st.error("Meta connection test failed. No Meta write actions were attempted.")
             st.caption(safe_message)
-
-    sync_cols = st.columns([1, 1, 2])
-    selected_sync_range = sync_cols[0].selectbox("Sync range", list(DATE_RANGE_OPTIONS), index=0)
-    if sync_cols[1].button("Sync Meta Ads Data", disabled=not config_status["configured"], use_container_width=True):
+    if control_cols[2].button("Sync Meta Ads Data", type="primary", disabled=not config_status["configured"], use_container_width=True):
         progress = st.progress(0, text="Starting Meta read-only sync...")
         try:
             progress.progress(15, text="Reading Meta account, campaigns, ad sets, ads, and insights...")
-            result = _sync_meta_ads(selected_sync_range, DATE_RANGE_OPTIONS[selected_sync_range])
+            result = _sync_meta_ads(selected_range, DATE_RANGE_OPTIONS[selected_range])
             progress.progress(100, text="Meta Ads data saved to Supabase.")
             st.success(
                 "Sync complete: "
@@ -460,183 +481,242 @@ def render_page():
         except Exception as error:
             progress.empty()
             safe_message = meta_ads_client.sanitize_meta_error(f"{type(error).__name__}: {error}")
-            supabase_backend.record_ads_sync_error(safe_message, {"range": selected_sync_range})
+            supabase_backend.record_ads_sync_error(safe_message, {"range": selected_range})
             st.error("Meta sync failed. No Meta write actions were attempted.")
             st.caption(safe_message)
+    if control_cols[3].button("Refresh Stored Data", use_container_width=True):
+        st.rerun()
+    return selected_range
 
-    range_label = st.radio("Reporting range", list(DATE_RANGE_OPTIONS), horizontal=True, label_visibility="collapsed")
-    days = DATE_RANGE_OPTIONS[range_label]
+
+def render_page():
+    ui_styles.inject_global_ui_styles()
+    ui_styles.page_header(
+        "Ads Intelligence",
+        "Read-only Meta performance, creative decisions, and ChatGPT-ready analysis packs.",
+    )
+
+    config_status = meta_ads_client.safe_meta_config_status()
+    sync_status = supabase_backend.get_ads_sync_status_read_only()
+    last_error = sync_status.get("last_sync_error") or "None"
+    ui_styles.source_status_banner(
+        [
+            ("Source", "Meta Ads API -> Supabase"),
+            ("Last sync", sync_status.get("last_successful_sync") or "Never"),
+            ("Last status", "Error" if sync_status.get("last_sync_error") else "Ready"),
+            ("Supabase", "Configured" if supabase_backend.is_configured() else "Missing"),
+        ]
+    )
+    ui_styles.status_pills(
+        [
+            ("Meta configured" if config_status["configured"] else "Meta missing", "good" if config_status["configured"] else "danger"),
+            ("Ad account ID present" if config_status["ad_account_id_present"] else "Ad account ID missing", "good" if config_status["ad_account_id_present"] else "danger"),
+            ("Token present" if config_status["token_present"] else "Token missing", "good" if config_status["token_present"] else "danger"),
+            ("App ID present" if config_status["app_id_present"] else "App ID missing", "good" if config_status["app_id_present"] else "warn"),
+            ("App secret present" if config_status["app_secret_present"] else "App secret missing", "good" if config_status["app_secret_present"] else "warn"),
+            (f"API {config_status['api_version']}", "good"),
+        ]
+    )
+    if last_error != "None":
+        st.warning(f"Last sync error: {last_error}")
+
+    selected_range = _render_controls(config_status)
+    days = DATE_RANGE_OPTIONS[selected_range]
     insight_rows = supabase_backend.list_meta_ad_insights(days=days)
     summary = _summary(insight_rows)
     ad_rows = _aggregate_by_ad(insight_rows)
-    table_rows = _performance_table(ad_rows)
 
-    _section("Daily War Room", "Decision metrics from Supabase-stored Meta insight rows.")
-    metric_cols = st.columns(4)
-    metric_cols[0].metric("Spend", _money(summary["spend"]))
-    metric_cols[1].metric("Purchases", f"{summary['purchases']:,.0f}")
-    metric_cols[2].metric("Purchase value", _money(summary["revenue"]))
-    metric_cols[3].metric("Meta ROAS", _ratio(summary["roas"]))
-    metric_cols = st.columns(5)
-    metric_cols[0].metric("CPA", _money(summary["cpa"]))
-    metric_cols[1].metric("CTR", _pct(summary["ctr"]))
-    metric_cols[2].metric("CPC", _money(summary["cpc"]))
-    metric_cols[3].metric("CPM", _money(summary["cpm"]))
-    metric_cols[4].metric("Frequency", f"{summary['frequency']:.2f}")
-
-    _section("Meta Ads Performance")
-    if table_rows:
-        st.dataframe(table_rows, hide_index=True, use_container_width=True)
-        st.download_button(
-            "Download CSV",
-            data=_csv_bytes(table_rows),
-            file_name=f"sports_cave_meta_ads_{days}_days.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-    else:
-        st.info("No stored Meta ad insight rows yet. Use Sync Meta Ads Data when ready.")
-
-    winners, losers = _top_and_losing_rows(ad_rows)
-    _section("Creative Winners")
-    if winners:
-        st.dataframe(
-            [
-                {
-                    "Ad": row.get("ad"),
-                    "Product": row.get("product_title") or row.get("product_handle") or "Untagged",
-                    "Angle": row.get("ad_angle") or "Untagged",
-                    "Spend": _money(row.get("spend")),
-                    "Purchases": f"{row.get('purchases', 0):.0f}",
-                    "ROAS": _ratio(row.get("roas")),
-                    "Action": row.get("action_label"),
-                }
-                for row in winners
-            ],
-            hide_index=True,
-            use_container_width=True,
-        )
-    else:
-        st.caption("Winner detection will appear once insight rows are stored.")
-
-    _section("Product Opportunities")
-    product_rows = {}
-    for row in ad_rows:
-        key = row.get("product_title") or row.get("product_handle") or "Untagged"
-        product = product_rows.setdefault(key, {"Product": key, "Spend": 0, "Revenue": 0, "Purchases": 0, "Best ROAS": 0})
-        product["Spend"] += row.get("spend", 0)
-        product["Revenue"] += row.get("revenue", 0)
-        product["Purchases"] += row.get("purchases", 0)
-        product["Best ROAS"] = max(product["Best ROAS"], row.get("roas", 0))
-    if product_rows:
-        st.dataframe(
-            [
-                {
-                    "Product": row["Product"],
-                    "Spend": _money(row["Spend"]),
-                    "Revenue": _money(row["Revenue"]),
-                    "Purchases": f"{row['Purchases']:.0f}",
-                    "Best ROAS": _ratio(row["Best ROAS"]),
-                }
-                for row in sorted(product_rows.values(), key=lambda item: item["Revenue"], reverse=True)
-            ],
-            hide_index=True,
-            use_container_width=True,
-        )
-    else:
-        st.caption("Tag ads to products to unlock cleaner product-level opportunity reads.")
-
-    _section("Creative Tagging")
-    if ad_rows:
-        ad_options = {f"{row.get('ad')} ({row.get('ad_id')})": row for row in ad_rows}
-        selected_ad_label = st.selectbox("Ad to tag", list(ad_options))
-        selected_ad = ad_options[selected_ad_label]
-        with st.form("ads-creative-tag-form"):
-            col_a, col_b = st.columns(2)
-            product_handle = col_a.text_input("Product handle", value=selected_ad.get("product_handle") or "")
-            product_title = col_b.text_input("Product title", value=selected_ad.get("product_title") or "")
-            sport = col_a.text_input("Sport", value=selected_ad.get("sport") or "")
-            country_focus = col_b.text_input("Country focus", value=selected_ad.get("country_focus") or "")
-            mockup_type = col_a.text_input("Mockup type", value=selected_ad.get("mockup_type") or "")
-            ad_angle = col_b.text_input("Ad angle", value=selected_ad.get("ad_angle") or "")
-            funnel_stage = col_a.text_input("Funnel stage", value=selected_ad.get("funnel_stage") or "")
-            notes = st.text_area("Notes", value=selected_ad.get("tag_notes") or "", height=90)
-            if st.form_submit_button("Save Creative Tags", use_container_width=True):
-                supabase_backend.upsert_ads_creative_tag(
-                    {
-                        "ad_id": selected_ad.get("ad_id"),
-                        "creative_id": selected_ad.get("creative_id"),
-                        "product_handle": product_handle,
-                        "product_title": product_title,
-                        "sport": sport,
-                        "country_focus": country_focus,
-                        "mockup_type": mockup_type,
-                        "ad_angle": ad_angle,
-                        "funnel_stage": funnel_stage,
-                        "notes": notes,
-                    }
-                )
-                st.success("Creative tags saved.")
-    else:
-        st.caption("Sync Meta data first, then tag ads against Sports Cave products and angles.")
-
-    _section("ChatGPT Analysis Pack")
-    template = st.selectbox(
-        "Template",
+    ui_styles.metric_strip(
         [
-            "Daily Ads Review",
-            "Creative Pattern Finder",
-            "New Ad Plan Generator",
-            "Loser Diagnosis",
-            "Product Scaling Plan",
-            "Weekly Creative Meeting Report",
-        ],
-    )
-    prompt_text = _prompt_for(template, range_label, summary, ad_rows)
-    st.text_area("Copyable ChatGPT prompt/data pack", value=prompt_text, height=360)
-    st.download_button(
-        "Download ChatGPT Pack",
-        data=prompt_text.encode("utf-8"),
-        file_name=f"sports_cave_{template.lower().replace(' ', '_')}_{days}_days.txt",
-        mime="text/plain",
-        use_container_width=True,
+            ("Spend", _money(summary["spend"])),
+            ("Purchases", f"{summary['purchases']:,.0f}"),
+            ("Purchase value", _money(summary["revenue"])),
+            ("ROAS", _ratio(summary["roas"])),
+            ("CPA", _money(summary["cpa"])),
+            ("CTR", _pct(summary["ctr"])),
+            ("CPC", _money(summary["cpc"])),
+            ("CPM", _money(summary["cpm"])),
+            ("Frequency", f"{summary['frequency']:.2f}"),
+        ]
     )
 
-    _section("Action Log")
-    sync_log_rows = supabase_backend.list_ads_sync_logs(limit=25)
-    if sync_log_rows:
-        st.caption("Meta sync attempts")
-        st.dataframe(
+    war_room_tab, table_tab, tags_tab, chatgpt_tab, logs_tab = st.tabs(
+        ["War Room", "Meta Ads Table", "Creative Tags", "ChatGPT Pack", "Sync Logs"]
+    )
+
+    with war_room_tab:
+        _section("Today Action List")
+        if not ad_rows:
+            ui_styles.empty_state("Sync Meta data to generate decisions.")
+        else:
+            st.dataframe(_decision_summary(ad_rows), hide_index=True, use_container_width=True)
+            winners, losers = _top_and_losing_rows(ad_rows)
+            left, right = st.columns(2)
+            with left:
+                _section("Scale / Winner Candidates")
+                winner_rows = [
+                    {
+                        "Ad": row.get("ad"),
+                        "Campaign": row.get("campaign"),
+                        "Spend": _money(row.get("spend")),
+                        "Revenue": _money(row.get("revenue")),
+                        "ROAS": _ratio(row.get("roas")),
+                        "Action": row.get("action_label"),
+                    }
+                    for row in winners[:8]
+                ]
+                if winner_rows:
+                    st.dataframe(winner_rows, hide_index=True, use_container_width=True)
+                else:
+                    ui_styles.empty_state("No scale candidates yet.")
+            with right:
+                _section("Refresh / Kill / Diagnose")
+                loser_rows = [
+                    {
+                        "Ad": row.get("ad"),
+                        "Campaign": row.get("campaign"),
+                        "Spend": _money(row.get("spend")),
+                        "CTR": _pct(row.get("ctr")),
+                        "ROAS": _ratio(row.get("roas")),
+                        "Action": row.get("action_label"),
+                    }
+                    for row in losers[:8]
+                ]
+                if loser_rows:
+                    st.dataframe(loser_rows, hide_index=True, use_container_width=True)
+                else:
+                    ui_styles.empty_state("No weak ads flagged yet.")
+            _section("Product Opportunities")
+            product_rows = _product_opportunity_rows(ad_rows)
+            if product_rows:
+                st.dataframe(product_rows, hide_index=True, use_container_width=True)
+            else:
+                ui_styles.empty_state("Tag ads to products to unlock product-level opportunities.")
+
+    with table_tab:
+        _section("Meta Ads Performance")
+        filter_cols = st.columns([1, 1.25, 0.8, 1.2])
+        action_options = ["All"] + sorted({row.get("action_label") for row in ad_rows if row.get("action_label")})
+        campaign_options = ["All"] + sorted({row.get("campaign") for row in ad_rows if row.get("campaign")})
+        action_filter = filter_cols[0].selectbox("Action label", action_options)
+        campaign_filter = filter_cols[1].selectbox("Campaign", campaign_options)
+        min_spend = filter_cols[2].number_input("Min spend", min_value=0.0, value=0.0, step=10.0)
+        product_query = filter_cols[3].text_input("Product / mapping")
+        filtered_rows = _filter_ad_rows(ad_rows, action_filter, campaign_filter, min_spend, product_query)
+        table_rows = _performance_table(filtered_rows)
+        if table_rows:
+            display_rows = table_rows[:500]
+            st.caption(f"Showing {len(display_rows)} of {len(table_rows)} matching ads.")
+            st.dataframe(display_rows, hide_index=True, use_container_width=True, height=520)
+            st.download_button(
+                "Download CSV",
+                data=_csv_bytes(table_rows),
+                file_name=f"sports_cave_meta_ads_{days}_days.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+        else:
+            ui_styles.empty_state("No stored Meta rows match these filters.")
+
+    with tags_tab:
+        _section("Creative Tags")
+        if not ad_rows:
+            ui_styles.empty_state("Sync Meta data first, then tag ads against products, sports, mockups, and angles.")
+        else:
+            st.dataframe(_creative_tag_rows(ad_rows), hide_index=True, use_container_width=True, height=360)
+            with st.expander("Edit selected creative tags", expanded=False):
+                ad_options = {f"{row.get('ad')} ({row.get('ad_id')})": row for row in ad_rows}
+                selected_ad_label = st.selectbox("Ad to tag", list(ad_options))
+                selected_ad = ad_options[selected_ad_label]
+                with st.form("ads-creative-tag-form"):
+                    col_a, col_b, col_c = st.columns(3)
+                    product_handle = col_a.text_input("Product handle", value=selected_ad.get("product_handle") or "")
+                    product_title = col_b.text_input("Product title", value=selected_ad.get("product_title") or "")
+                    sport = col_c.text_input("Sport", value=selected_ad.get("sport") or "")
+                    country_focus = col_a.text_input("Country focus", value=selected_ad.get("country_focus") or "")
+                    mockup_type = col_b.text_input("Mockup type", value=selected_ad.get("mockup_type") or "")
+                    ad_angle = col_c.text_input("Ad angle", value=selected_ad.get("ad_angle") or "")
+                    funnel_stage = col_a.text_input("Funnel stage", value=selected_ad.get("funnel_stage") or "")
+                    notes = st.text_area("Notes", value=selected_ad.get("tag_notes") or "", height=80)
+                    if st.form_submit_button("Save Creative Tags", use_container_width=True):
+                        supabase_backend.upsert_ads_creative_tag(
+                            {
+                                "ad_id": selected_ad.get("ad_id"),
+                                "creative_id": selected_ad.get("creative_id"),
+                                "product_handle": product_handle,
+                                "product_title": product_title,
+                                "sport": sport,
+                                "country_focus": country_focus,
+                                "mockup_type": mockup_type,
+                                "ad_angle": ad_angle,
+                                "funnel_stage": funnel_stage,
+                                "notes": notes,
+                            }
+                        )
+                        st.success("Creative tags saved.")
+
+    with chatgpt_tab:
+        _section("ChatGPT Analysis Pack")
+        template = st.selectbox(
+            "Template",
             [
-                {
-                    "Started At": row.get("started_at"),
-                    "Finished At": row.get("finished_at"),
-                    "Range": row.get("date_range"),
-                    "Status": row.get("status"),
-                    "Rows Fetched": row.get("rows_fetched"),
-                    "Rows Upserted": row.get("rows_upserted"),
-                    "Error": row.get("error_message") or "",
-                }
-                for row in sync_log_rows
+                "Daily Ads Review",
+                "Creative Pattern Finder",
+                "New Ad Plan Generator",
+                "Loser Diagnosis",
+                "Product Scaling Plan",
+                "Weekly Creative Meeting Report",
             ],
-            hide_index=True,
+        )
+        prompt_text = _prompt_for(template, selected_range, summary, ad_rows)
+        st.text_area("Copyable ChatGPT prompt/data pack", value=prompt_text, height=360)
+        st.download_button(
+            "Download ChatGPT Pack",
+            data=prompt_text.encode("utf-8"),
+            file_name=f"sports_cave_{template.lower().replace(' ', '_')}_{days}_days.txt",
+            mime="text/plain",
             use_container_width=True,
         )
-    action_rows = supabase_backend.list_ads_action_log(limit=50)
-    if action_rows:
-        st.caption("Manual actions and tags")
-        st.dataframe(
-            [
-                {
-                    "Created At": row.get("created_at"),
-                    "Type": row.get("action_type"),
-                    "Status": row.get("status"),
-                    "Summary": row.get("summary"),
-                }
-                for row in action_rows
-            ],
-            hide_index=True,
-            use_container_width=True,
-        )
-    else:
-        st.caption("No ads actions logged yet.")
+
+    with logs_tab:
+        _section("Sync Logs")
+        sync_log_rows = supabase_backend.list_ads_sync_logs(limit=50)
+        if sync_log_rows:
+            st.dataframe(
+                [
+                    {
+                        "Started": row.get("started_at"),
+                        "Finished": row.get("finished_at"),
+                        "Status": row.get("status"),
+                        "Type": row.get("sync_type"),
+                        "Range": row.get("date_range"),
+                        "Fetched": row.get("rows_fetched"),
+                        "Upserted": row.get("rows_upserted"),
+                        "Error": row.get("error_message") or "",
+                    }
+                    for row in sync_log_rows
+                ],
+                hide_index=True,
+                use_container_width=True,
+                height=360,
+            )
+        else:
+            ui_styles.empty_state("No Meta sync attempts logged yet.")
+        action_rows = supabase_backend.list_ads_action_log(limit=50)
+        _section("Action Log")
+        if action_rows:
+            st.dataframe(
+                [
+                    {
+                        "Created": row.get("created_at"),
+                        "Type": row.get("action_type"),
+                        "Status": row.get("status"),
+                        "Summary": row.get("summary"),
+                    }
+                    for row in action_rows
+                ],
+                hide_index=True,
+                use_container_width=True,
+            )
+        else:
+            ui_styles.empty_state("No manual ads actions logged yet.")
