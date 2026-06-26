@@ -1013,7 +1013,9 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Search orders", render_page)
         self.assertNotIn("Show all rows", render_page)
         self.assertNotIn("_render_admin_panel", render_page)
-        self.assertIn("Refresh Orders", top_actions)
+        self.assertIn("Check New Paid Orders", top_actions)
+        self.assertIn("Backfill Latest Paid", top_actions)
+        self.assertIn("Backfill latest paid orders", top_actions)
         self.assertIn("Preview Certificate", top_actions)
         self.assertIn("Generate + Upload Certificate", top_actions)
         self.assertIn("Reupload Certificate", top_actions)
@@ -1114,7 +1116,8 @@ class EditionOpsUiTests(unittest.TestCase):
         top_actions = inspect.getsource(orders_page._render_top_actions)
 
         for label in (
-            "Refresh Orders",
+            "Check New Paid Orders",
+            "Backfill Latest Paid",
             "Preview Certificate",
             "Generate + Upload Certificate",
             "Reupload Certificate",
@@ -2024,7 +2027,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("fetched preview for 3 latest paid shopify order(s)", fake_st.session_state[orders_page.NOTICE_KEY].lower())
         return
 
-    def test_refresh_orders_apply_uses_supabase_sync_path_and_reload(self):
+    def test_refresh_orders_apply_uses_supabase_sync_path_and_defers_reload(self):
         fake_st = SimpleNamespace(
             session_state={
                 orders_page.ROWS_KEY: [],
@@ -2058,16 +2061,64 @@ class EditionOpsUiTests(unittest.TestCase):
         ), patch.object(
             orders_page,
             "_reload_orders_from_source",
-            return_value=None,
+            side_effect=AssertionError("Cursor-first sync should not block on a full table reload by default."),
         ) as reload_rows:
             orders_page._refresh_orders(max_orders=25)
 
         self.assertEqual(
             backend.sync_calls,
-            [{"limit": 25}],
+            [{"limit": 25, "backfill_latest_paid": False}],
         )
-        reload_rows.assert_called_once()
+        reload_rows.assert_not_called()
+        self.assertIn("cursor check complete", fake_st.session_state[orders_page.NOTICE_KEY].lower())
         self.assertIn("new orders imported: 1", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        self.assertIn("table reload: deferred", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        return
+
+    def test_refresh_orders_backfill_mode_is_explicit(self):
+        fake_st = SimpleNamespace(
+            session_state={
+                orders_page.ROWS_KEY: [],
+                orders_page.META_KEY: {"last_refreshed": "", "saved_at": ""},
+                orders_page.NOTICE_KEY: "",
+                orders_page.SYNC_RESULT_KEY: {},
+                orders_page.BACKFILL_RESULT_KEY: {},
+            }
+        )
+
+        class FakeBackend:
+            def __init__(self):
+                self.sync_calls = []
+
+            def sync_latest_paid_orders_to_supabase(self, **kwargs):
+                self.sync_calls.append(kwargs)
+                return {
+                    "shopify_orders_fetched": 5,
+                    "new_orders_inserted": 1,
+                    "existing_orders_skipped": 4,
+                    "edition_allocations_created": 2,
+                    "missing_mapping_skipped": 0,
+                    "errors": [],
+                }
+
+        backend = FakeBackend()
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page,
+            "_configured_supabase_backend",
+            return_value=backend,
+        ), patch.object(
+            orders_page,
+            "_reload_orders_from_source",
+            side_effect=AssertionError("Backfill sync should still defer the full table reload by default."),
+        ):
+            orders_page._refresh_orders(max_orders=25, backfill_latest_paid=True)
+
+        self.assertEqual(
+            backend.sync_calls,
+            [{"limit": 25, "backfill_latest_paid": True}],
+        )
+        self.assertIn("backfill complete", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        self.assertIn("table reload: deferred", fake_st.session_state[orders_page.NOTICE_KEY].lower())
         return
 
     def test_latest_paid_sync_allocates_without_historical_tracking_guard(self):
@@ -2080,6 +2131,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("list_existing_shopify_order_states", latest_sync_source)
         self.assertIn("apply_known_missing_edition_repair()", latest_sync_source)
         self.assertIn("process_shopify_order_for_editions", latest_sync_source)
+        self.assertIn("fetch_missing_products=False", latest_sync_source)
         self.assertIn("assign_editions=True", latest_sync_source)
         self.assertIn("generate_certificates=False", latest_sync_source)
         self.assertIn("sync_product_metafields=False", latest_sync_source)

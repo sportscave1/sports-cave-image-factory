@@ -29,6 +29,7 @@ SYNC_RESULT_KEY = "orders_sync_result"
 BACKFILL_RESULT_KEY = "orders_backfill_result"
 LATEST_FETCH_PREVIEW_KEY = "orders_latest_fetch_preview"
 REPAIR_RESULT_KEY = "orders_missing_edition_repair_result"
+ORDER_SYNC_BACKFILL_KEY = "orders_sync_backfill_latest_paid"
 SEARCH_KEY = "orders_search_text"
 SHOW_ALL_KEY = "orders_show_all_rows"
 LOAD_ERROR_KEY = "orders_load_error"
@@ -85,6 +86,7 @@ def _ensure_state():
     st.session_state.setdefault(BACKFILL_RESULT_KEY, {})
     st.session_state.setdefault(REPAIR_RESULT_KEY, {})
     st.session_state.setdefault(LATEST_FETCH_PREVIEW_KEY, {})
+    st.session_state.setdefault(ORDER_SYNC_BACKFILL_KEY, False)
     st.session_state.setdefault(SEARCH_KEY, "")
     st.session_state.setdefault(SHOW_ALL_KEY, False)
     st.session_state.setdefault(LOAD_ERROR_KEY, "")
@@ -829,7 +831,7 @@ def _save_refreshed_rows(rows, existing_rows, refreshed_at=None):
     return sorted_rows
 
 
-def _refresh_orders(*, latest_paid_only=True, max_orders=50):
+def _refresh_orders(*, latest_paid_only=True, max_orders=50, backfill_latest_paid=False, reload_table=False):
     total_started = time.perf_counter()
     backend = _configured_supabase_backend()
     if not backend:
@@ -837,7 +839,7 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50):
         return
     sync_started = time.perf_counter()
     if latest_paid_only:
-        result = backend.sync_latest_paid_orders_to_supabase(limit=max_orders)
+        result = backend.sync_latest_paid_orders_to_supabase(limit=max_orders, backfill_latest_paid=backfill_latest_paid)
     else:
         result = backend.sync_shopify_orders_to_supabase(
             max_orders=max_orders,
@@ -854,18 +856,25 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50):
     )
     st.session_state[SYNC_RESULT_KEY] = result
     cache_started = time.perf_counter()
-    _reload_orders_from_source()
+    if reload_table:
+        _reload_orders_from_source()
+        reload_mode = "full"
+    else:
+        reload_mode = "deferred"
     print(
         "PERF Sync Orders: cache rebuild time "
-        f"elapsed_ms={int((time.perf_counter() - cache_started) * 1000)}",
+        f"elapsed_ms={int((time.perf_counter() - cache_started) * 1000)} "
+        f"mode={reload_mode}",
         flush=True,
     )
+    mode_label = "Backfill" if backfill_latest_paid else "Cursor check"
     st.session_state[NOTICE_KEY] = (
-        f"New orders imported: {int(result.get('new_orders_inserted') or 0)} | "
+        f"{mode_label} complete. New orders imported: {int(result.get('new_orders_inserted') or 0)} | "
         f"Existing orders preserved: {int(result.get('existing_orders_skipped') or 0)} | "
         f"Edition numbers assigned: {int(result.get('edition_allocations_created') or 0)} | "
         f"Missing product mapping: {int(result.get('missing_mapping_skipped') or 0)} | "
-        f"Errors: {len(result.get('errors') or [])}"
+        f"Errors: {len(result.get('errors') or [])}. "
+        f"Table reload: {reload_mode}."
     )
     print(
         "PERF Sync Orders: total sync time "
@@ -1066,7 +1075,7 @@ def _generate_certificate_for_row(row):
             st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before generating certificates."
             return
         if not row.get("has_saved_allocation"):
-            raise ValueError("Refresh Orders to allocate this row before generating a certificate.")
+            raise ValueError("Check New Paid Orders to allocate this row before generating a certificate.")
         existing = _existing_uploaded_certificate(row, config)
         if existing:
             record = {**certificate_engine.certificate_record_from_order_row(row), **existing, "status": "Uploaded"}
@@ -1490,15 +1499,26 @@ def _render_top_actions(rows):
     can_generate = selected_count > 0 and all(_normalise_row(row).get("edition_number") for row in selected_rows)
     can_upload = can_generate
     upload_label = "Reupload Certificate" if selected_rows and all(_certificate_is_uploaded(row) for row in selected_rows) else "Generate + Upload Certificate"
+    if hasattr(st, "checkbox"):
+        backfill_latest_paid = st.checkbox(
+            "Backfill latest paid orders",
+            value=bool(st.session_state.get(ORDER_SYNC_BACKFILL_KEY)),
+            key=ORDER_SYNC_BACKFILL_KEY,
+            help="Explicit backfill mode. Normal mode checks only paid orders updated after the sync cursor or a small safe window.",
+        )
+    else:
+        backfill_latest_paid = bool(st.session_state.get(ORDER_SYNC_BACKFILL_KEY))
+    sync_label = "Backfill Latest Paid" if backfill_latest_paid else "Check New Paid Orders"
     action_cols = st.columns([1.2, 1.15, 1.4, 1.15, 1.35, 1.35])
     if action_cols[0].button(
-        "Refresh Orders",
+        sync_label,
         type="primary",
         use_container_width=True,
         disabled=not backend,
     ):
-        with st.spinner("Refreshing latest paid Shopify orders..."):
-            _refresh_orders(latest_paid_only=True, max_orders=50)
+        spinner_text = "Backfilling latest paid Shopify orders..." if backfill_latest_paid else "Checking new paid Shopify orders..."
+        with st.spinner(spinner_text):
+            _refresh_orders(latest_paid_only=True, max_orders=50, backfill_latest_paid=backfill_latest_paid)
         st.rerun()
     if action_cols[1].button(
         "Preview Certificate",
@@ -1530,7 +1550,11 @@ def _render_top_actions(rows):
     action_cols[5].caption(f"{selected_count} selected")
     if not backend:
         st.caption("Order refresh is unavailable right now.")
-    elif selected_rows and not can_generate:
+    elif backfill_latest_paid:
+        st.caption("Backfill mode fetches the latest paid Shopify orders. Use only when intentionally repairing missing mirror rows.")
+    else:
+        st.caption("Normal sync is cursor-first and keeps Shopify read-only.")
+    if selected_rows and not can_generate:
         st.caption("Assign edition number before certificate generation.")
 
 

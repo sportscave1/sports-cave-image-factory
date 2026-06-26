@@ -35,6 +35,7 @@ DEFAULT_INITIAL_ORDER_ASSIGNMENT_WINDOW_DAYS = 7
 DEFAULT_INCREMENTAL_ORDER_FETCH_LIMIT = 100
 DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT = 50
 DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS = 14
+DEFAULT_CURSORLESS_ORDER_LOOKBACK_HOURS = 48
 DATETIME_MAX_UTC = datetime.max.replace(tzinfo=timezone.utc)
 DEFAULT_PSD_MASTER_FOLDER_SETTING = {
     "url": "https://drive.google.com/drive/folders/1UCs_EsyjVXZUNclAfnmO7y2x7rKutwhH",
@@ -7615,7 +7616,13 @@ def _preview_product_counter_state(cur, line_item, cache):
     return state
 
 
-def _latest_paid_orders_payload(config=None, *, limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT, lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS):
+def _latest_paid_orders_payload(
+    config=None,
+    *,
+    limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT,
+    lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
+    backfill_latest_paid=False,
+):
     config = config or shopify_sync.get_config()
     state = get_sync_state()
     last_success = _parse_datetime(
@@ -7624,20 +7631,37 @@ def _latest_paid_orders_payload(config=None, *, limit=DEFAULT_LATEST_PAID_ORDER_
     sync_from = None
     query = ""
     sort_key = "CREATED_AT"
-    if last_success:
+    query_mode = "latest_paid_backfill" if backfill_latest_paid else "cursor"
+    if backfill_latest_paid:
+        query = "financial_status:paid"
+        sort_key = "CREATED_AT"
+    elif last_success:
         sync_from = last_success - timedelta(
             minutes=state.get("sync_lookback_buffer_minutes") or DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES
         )
         query = f"financial_status:paid updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
         sort_key = "UPDATED_AT"
+    else:
+        sync_from = utc_now_datetime() - timedelta(hours=DEFAULT_CURSORLESS_ORDER_LOOKBACK_HOURS)
+        query = f"financial_status:paid updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
+        sort_key = "UPDATED_AT"
+        query_mode = "safe_window"
     fetch_started = time.perf_counter()
-    _sync_perf_log("Shopify fetch start", None, mode="latest_paid", limit=limit, cursor=bool(sync_from))
+    _sync_perf_log(
+        "cursor query build",
+        None,
+        mode=query_mode,
+        cursor=bool(sync_from),
+        lookback_hours="" if last_success or backfill_latest_paid else DEFAULT_CURSORLESS_ORDER_LOOKBACK_HOURS,
+    )
+    _sync_perf_log("Shopify fetch start", None, mode=query_mode, limit=limit, cursor=bool(sync_from))
     fetched = shopify_sync.fetch_latest_paid_orders(
         limit=limit,
         lookback_days=lookback_days,
         query=query or None,
         sort_key=sort_key,
         reverse=True,
+        lightweight=True,
         config=config,
     )
     orders = fetched.get("orders") or []
@@ -7648,7 +7672,7 @@ def _latest_paid_orders_payload(config=None, *, limit=DEFAULT_LATEST_PAID_ORDER_
         orders=len(orders),
         line_items=fetched.get("line_items_fetched") or _sync_order_line_count(orders),
         metafields=fetched.get("metafields_fetched") or _sync_order_metafield_count(orders),
-        query_mode="cursor" if sync_from else "latest_paid",
+        query_mode=query_mode,
     )
     return {
         "orders": orders,
@@ -7656,6 +7680,8 @@ def _latest_paid_orders_payload(config=None, *, limit=DEFAULT_LATEST_PAID_ORDER_
         "limit": int(fetched.get("limit") or limit or DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT),
         "lookback_days": int(fetched.get("lookback_days") or lookback_days or DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS),
         "sync_from": _datetime_to_setting(sync_from) if sync_from else "",
+        "query_mode": query_mode,
+        "backfill_latest_paid": bool(backfill_latest_paid),
         "pages_fetched": int(fetched.get("pages_fetched") or (1 if orders else 0)),
         "line_items_fetched": int(fetched.get("line_items_fetched") or _sync_order_line_count(orders)),
         "metafields_fetched": int(fetched.get("metafields_fetched") or _sync_order_metafield_count(orders)),
@@ -8003,6 +8029,7 @@ def preview_latest_paid_orders_sync(
     *,
     limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT,
     lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
+    backfill_latest_paid=False,
 ):
     total_started = time.perf_counter()
     schema_started = time.perf_counter()
@@ -8015,7 +8042,12 @@ def preview_latest_paid_orders_sync(
     tracking_start = _parse_datetime(state.get("edition_tracking_start_at"))
     if not tracking_start:
         tracking_start = ensure_edition_tracking_start()
-    payload = _latest_paid_orders_payload(config, limit=limit, lookback_days=lookback_days)
+    payload = _latest_paid_orders_payload(
+        config,
+        limit=limit,
+        lookback_days=lookback_days,
+        backfill_latest_paid=backfill_latest_paid,
+    )
     analyze_started = time.perf_counter()
     result = _analyze_fetched_orders_for_preview(
         payload.get("orders") or [],
@@ -8034,6 +8066,8 @@ def preview_latest_paid_orders_sync(
     result["query"] = payload.get("query") or ""
     result["lookback_days"] = payload.get("lookback_days") or lookback_days
     result["limit"] = payload.get("limit") or limit
+    result["query_mode"] = payload.get("query_mode") or ""
+    result["backfill_latest_paid"] = bool(payload.get("backfill_latest_paid"))
     result["pages_fetched"] = payload.get("pages_fetched") or 0
     result["line_items_fetched"] = payload.get("line_items_fetched") or 0
     result["metafields_fetched"] = payload.get("metafields_fetched") or 0
@@ -8047,6 +8081,7 @@ def sync_latest_paid_orders_to_supabase(
     *,
     limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT,
     lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
+    backfill_latest_paid=False,
 ):
     total_started = time.perf_counter()
     schema_started = time.perf_counter()
@@ -8057,7 +8092,12 @@ def sync_latest_paid_orders_to_supabase(
     run_id = start_sync_run("shopify_orders_latest_paid")
     _sync_perf_log("sync run start write", run_started, mode="latest_paid_sync")
     shopify_fetch_started = time.perf_counter()
-    payload = _latest_paid_orders_payload(config, limit=limit, lookback_days=lookback_days)
+    payload = _latest_paid_orders_payload(
+        config,
+        limit=limit,
+        lookback_days=lookback_days,
+        backfill_latest_paid=backfill_latest_paid,
+    )
     shopify_fetch_ms = int((time.perf_counter() - shopify_fetch_started) * 1000)
     fetched_orders = payload.get("orders") or []
     seen = len(fetched_orders)
@@ -8155,6 +8195,7 @@ def sync_latest_paid_orders_to_supabase(
             result = process_shopify_order_for_editions(
                 order,
                 allocation_status="assigned",
+                fetch_missing_products=False,
                 generate_certificates=False,
                 sync_product_metafields=False,
                 assign_editions=True,
@@ -8230,6 +8271,8 @@ def sync_latest_paid_orders_to_supabase(
             "certificates_deferred": assignments,
             "product_metafields_deferred": len(changed_handles),
             "query": payload.get("query") or "",
+            "query_mode": payload.get("query_mode") or "",
+            "backfill_latest_paid": bool(payload.get("backfill_latest_paid")),
             "lookback_days": payload.get("lookback_days") or lookback_days,
             "limit": payload.get("limit") or limit,
             "sync_from": payload.get("sync_from") or "",

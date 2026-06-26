@@ -1376,6 +1376,85 @@ query SportsCaveOrdersSafe($first: Int!, $after: String, $query: String, $sortKe
 }
 """
 
+ORDERS_LIGHT_QUERY = """
+query SportsCaveOrdersLight($first: Int!, $after: String, $query: String, $sortKey: OrderSortKeys!, $reverse: Boolean!) {
+  orders(first: $first, after: $after, query: $query, sortKey: $sortKey, reverse: $reverse) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      id
+      legacyResourceId
+      name
+      createdAt
+      updatedAt
+      processedAt
+      displayFinancialStatus
+      displayFulfillmentStatus
+      email
+      customer {
+        id
+        displayName
+        firstName
+        lastName
+        email
+      }
+      shippingAddress {
+        name
+        firstName
+        lastName
+        address1
+        address2
+        city
+        province
+        provinceCode
+        zip
+        country
+        countryCodeV2
+      }
+      shippingLine {
+        title
+        code
+      }
+      shippingLines(first: 1) {
+        nodes {
+          title
+          code
+        }
+      }
+      customAttributes {
+        key
+        value
+      }
+      lineItems(first: 100) {
+        nodes {
+          id
+          title
+          quantity
+          variantTitle
+          sku
+          customAttributes {
+            key
+            value
+          }
+          variant {
+            id
+            title
+            sku
+          }
+          product {
+            id
+            title
+            handle
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 ORDERS_BY_IDS_QUERY = """
 query SportsCaveOrdersByIds($ids: [ID!]!) {
   nodes(ids: $ids) {
@@ -2802,6 +2881,7 @@ def fetch_orders_page(
     default_paid_unfulfilled_filter=True,
     sort_key="UPDATED_AT",
     reverse=True,
+    lightweight=False,
 ):
     config = config or get_config()
     first = min(max(int(page_size), 1), 100)
@@ -2819,7 +2899,7 @@ def fetch_orders_page(
     }
     try:
         data, served_version = graphql_request(
-            ORDERS_QUERY,
+            ORDERS_LIGHT_QUERY if lightweight else ORDERS_QUERY,
             variables=variables,
             config=config,
             request_post=request_post,
@@ -2853,6 +2933,7 @@ def iter_order_pages(
     default_paid_unfulfilled_filter=True,
     sort_key="UPDATED_AT",
     reverse=True,
+    lightweight=False,
 ):
     config = config or get_config()
     after = None
@@ -2869,6 +2950,7 @@ def iter_order_pages(
             default_paid_unfulfilled_filter=default_paid_unfulfilled_filter,
             sort_key=sort_key,
             reverse=reverse,
+            lightweight=lightweight,
         )
         if not page["orders"]:
             break
@@ -2909,6 +2991,7 @@ def fetch_latest_paid_orders(
     query=None,
     sort_key="CREATED_AT",
     reverse=True,
+    lightweight=False,
     config=None,
     request_post=None,
 ):
@@ -2933,6 +3016,7 @@ def fetch_latest_paid_orders(
                 default_paid_unfulfilled_filter=False,
                 sort_key=sort_key,
                 reverse=reverse,
+                lightweight=lightweight,
             ):
                 pages_fetched += 1
                 fetched.extend(page.get("orders") or [])
