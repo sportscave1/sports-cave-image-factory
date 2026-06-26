@@ -10456,15 +10456,19 @@ def list_app_errors(limit=200):
 ADS_LAST_SUCCESSFUL_SYNC_KEY = "ads_meta_last_successful_sync_at"
 ADS_LAST_SYNC_ERROR_KEY = "ads_meta_last_sync_error"
 ADS_LAST_SYNC_RANGE_KEY = "ads_meta_last_sync_range"
-ADS_SCHEMA_MIGRATION = BASE_DIR / "migrations" / "20260626_ads_intelligence_v1.sql"
+ADS_SCHEMA_MIGRATIONS = (
+    BASE_DIR / "migrations" / "20260626_ads_intelligence_v1.sql",
+    BASE_DIR / "migrations" / "20260626_ads_intelligence_v2_breakdowns.sql",
+    BASE_DIR / "migrations" / "20260626_ads_product_mapping_v1.sql",
+)
 
 
 def ensure_ads_schema():
     ensure_schema()
-    sql = ADS_SCHEMA_MIGRATION.read_text(encoding="utf-8")
     with connect() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql)
+            for migration in ADS_SCHEMA_MIGRATIONS:
+                cur.execute(migration.read_text(encoding="utf-8"))
         conn.commit()
 
 
@@ -10690,9 +10694,14 @@ def ads_table_counts():
         "meta_ads",
         "meta_creatives",
         "meta_ad_insights_daily",
+        "meta_ad_insights_country_daily",
+        "meta_ad_insights_age_gender_daily",
+        "meta_ad_insights_platform_daily",
         "ads_sync_logs",
     )
     counts = {table: 0 for table in tables}
+    counts["meta_creatives_primary_text_populated"] = 0
+    counts["meta_creatives_headline_populated"] = 0
     if not is_configured():
         return counts
     try:
@@ -10703,6 +10712,11 @@ def ads_table_counts():
                         continue
                     cur.execute(f"SELECT COUNT(*) AS count FROM {table}")
                     counts[table] = int((cur.fetchone() or {}).get("count") or 0)
+                if table_exists(cur, "meta_creatives"):
+                    cur.execute("SELECT COUNT(*) AS count FROM meta_creatives WHERE COALESCE(primary_text, '') <> ''")
+                    counts["meta_creatives_primary_text_populated"] = int((cur.fetchone() or {}).get("count") or 0)
+                    cur.execute("SELECT COUNT(*) AS count FROM meta_creatives WHERE COALESCE(headline, '') <> ''")
+                    counts["meta_creatives_headline_populated"] = int((cur.fetchone() or {}).get("count") or 0)
     except Exception:
         pass
     return counts
@@ -10752,6 +10766,95 @@ def get_ads_sync_status_read_only():
     except Exception:
         pass
     return status
+
+
+def _first_ads_text(*values):
+    for value in values:
+        if isinstance(value, dict):
+            value = value.get("text") or value.get("value") or value.get("name")
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _asset_values(asset_feed_spec, key):
+    values = []
+    for item in (asset_feed_spec or {}).get(key) or []:
+        if isinstance(item, dict):
+            value = item.get("text") or item.get("value") or item.get("name")
+        else:
+            value = item
+        if value not in (None, ""):
+            values.append(str(value))
+    return values
+
+
+def _extract_creative_fields(creative):
+    creative = creative if isinstance(creative, dict) else {}
+    story_spec = creative.get("object_story_spec") if isinstance(creative.get("object_story_spec"), dict) else {}
+    asset_feed_spec = creative.get("asset_feed_spec") if isinstance(creative.get("asset_feed_spec"), dict) else {}
+    link_data = story_spec.get("link_data") if isinstance(story_spec.get("link_data"), dict) else {}
+    video_data = story_spec.get("video_data") if isinstance(story_spec.get("video_data"), dict) else {}
+    photo_data = story_spec.get("photo_data") if isinstance(story_spec.get("photo_data"), dict) else {}
+    call_to_action = link_data.get("call_to_action") if isinstance(link_data.get("call_to_action"), dict) else {}
+    cta_value = call_to_action.get("value") if isinstance(call_to_action.get("value"), dict) else {}
+    asset_texts = _asset_values(asset_feed_spec, "bodies")
+    asset_titles = _asset_values(asset_feed_spec, "titles")
+    asset_descriptions = _asset_values(asset_feed_spec, "descriptions")
+    primary_text = _first_ads_text(
+        creative.get("body"),
+        link_data.get("message"),
+        video_data.get("message"),
+        photo_data.get("message"),
+        asset_texts[0] if asset_texts else "",
+    )
+    headline = _first_ads_text(
+        creative.get("title"),
+        link_data.get("name"),
+        video_data.get("title"),
+        asset_titles[0] if asset_titles else "",
+    )
+    description = _first_ads_text(
+        creative.get("description"),
+        link_data.get("description"),
+        asset_descriptions[0] if asset_descriptions else "",
+    )
+    video_id = _first_ads_text(creative.get("video_id"), video_data.get("video_id"))
+    image_hash = _first_ads_text(creative.get("image_hash"), link_data.get("image_hash"), photo_data.get("image_hash"))
+    image_url = _first_ads_text(creative.get("image_url"), link_data.get("picture"), creative.get("thumbnail_url"))
+    link_url = _first_ads_text(creative.get("link_url"), link_data.get("link"), cta_value.get("link"))
+    if asset_feed_spec:
+        creative_format = "dynamic creative"
+    elif link_data.get("child_attachments"):
+        creative_format = "carousel"
+    elif video_id or video_data:
+        creative_format = "video"
+    elif image_hash or image_url or photo_data:
+        creative_format = "image"
+    else:
+        creative_format = "unknown"
+    return {
+        "primary_text": primary_text,
+        "headline": headline,
+        "description": description,
+        "call_to_action": _first_ads_text(creative.get("call_to_action_type"), call_to_action.get("type")),
+        "link_url": link_url,
+        "creative_format": creative_format,
+        "image_url": image_url,
+        "video_id": video_id,
+        "image_hash": image_hash,
+        "effective_object_story_id": _first_ads_text(
+            creative.get("effective_object_story_id"),
+            creative.get("object_story_id"),
+        ),
+        "object_story_spec": story_spec,
+        "asset_feed_spec": asset_feed_spec,
+        "asset_texts": asset_texts,
+        "asset_titles": asset_titles,
+        "asset_descriptions": asset_descriptions,
+        "page_id": _first_ads_text(creative.get("page_id"), story_spec.get("page_id")),
+        "instagram_actor_id": _first_ads_text(creative.get("instagram_actor_id"), story_spec.get("instagram_actor_id")),
+    }
 
 
 def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insights=None, date_range_label="", account_id=""):
@@ -10909,18 +11012,46 @@ def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insi
                 )
                 if creative_id:
                     creative_count += 1
+                    creative_fields = _extract_creative_fields(creative)
                     cur.execute(
                         """
                         INSERT INTO meta_creatives(
-                            creative_id, ad_id, account_id, name, thumbnail_url, object_story_id, raw, synced_at, updated_at
+                            creative_id, ad_id, account_id, name, thumbnail_url, object_story_id,
+                            effective_object_story_id, object_story_spec, asset_feed_spec,
+                            call_to_action, link_url, page_id, instagram_actor_id, primary_text,
+                            headline, description, creative_format, image_url, video_id, image_hash,
+                            asset_texts, asset_titles, asset_descriptions, raw, synced_at, updated_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, now(), now())
+                        VALUES (
+                            %s, %s, %s, %s, %s, %s,
+                            %s, %s::jsonb, %s::jsonb,
+                            %s, %s, %s, %s, %s,
+                            %s, %s, %s, %s, %s, %s,
+                            %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, now(), now()
+                        )
                         ON CONFLICT (creative_id) DO UPDATE SET
                             ad_id=EXCLUDED.ad_id,
                             account_id=EXCLUDED.account_id,
                             name=EXCLUDED.name,
                             thumbnail_url=EXCLUDED.thumbnail_url,
                             object_story_id=EXCLUDED.object_story_id,
+                            effective_object_story_id=EXCLUDED.effective_object_story_id,
+                            object_story_spec=EXCLUDED.object_story_spec,
+                            asset_feed_spec=EXCLUDED.asset_feed_spec,
+                            call_to_action=EXCLUDED.call_to_action,
+                            link_url=EXCLUDED.link_url,
+                            page_id=EXCLUDED.page_id,
+                            instagram_actor_id=EXCLUDED.instagram_actor_id,
+                            primary_text=EXCLUDED.primary_text,
+                            headline=EXCLUDED.headline,
+                            description=EXCLUDED.description,
+                            creative_format=EXCLUDED.creative_format,
+                            image_url=EXCLUDED.image_url,
+                            video_id=EXCLUDED.video_id,
+                            image_hash=EXCLUDED.image_hash,
+                            asset_texts=EXCLUDED.asset_texts,
+                            asset_titles=EXCLUDED.asset_titles,
+                            asset_descriptions=EXCLUDED.asset_descriptions,
                             raw=EXCLUDED.raw,
                             synced_at=now(),
                             updated_at=now()
@@ -10932,6 +11063,23 @@ def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insi
                             creative.get("name"),
                             creative.get("thumbnail_url"),
                             creative.get("object_story_id"),
+                            creative_fields["effective_object_story_id"],
+                            json_dumps(creative_fields["object_story_spec"]),
+                            json_dumps(creative_fields["asset_feed_spec"]),
+                            creative_fields["call_to_action"],
+                            creative_fields["link_url"],
+                            creative_fields["page_id"],
+                            creative_fields["instagram_actor_id"],
+                            creative_fields["primary_text"],
+                            creative_fields["headline"],
+                            creative_fields["description"],
+                            creative_fields["creative_format"],
+                            creative_fields["image_url"],
+                            creative_fields["video_id"],
+                            creative_fields["image_hash"],
+                            json_dumps(creative_fields["asset_texts"]),
+                            json_dumps(creative_fields["asset_titles"]),
+                            json_dumps(creative_fields["asset_descriptions"]),
                             json_dumps(creative),
                         ),
                     )
@@ -11053,20 +11201,156 @@ def save_meta_ads_sync(account=None, campaigns=None, adsets=None, ads=None, insi
     }
 
 
-def list_meta_ad_insights(days=30, limit=5000):
-    if not is_configured():
+ADS_BREAKDOWN_TABLES = {
+    "country": {
+        "table": "meta_ad_insights_country_daily",
+        "extra_columns": ("country",),
+        "conflict": "date, ad_id, country",
+    },
+    "age_gender": {
+        "table": "meta_ad_insights_age_gender_daily",
+        "extra_columns": ("age", "gender"),
+        "conflict": "date, ad_id, age, gender",
+    },
+    "platform": {
+        "table": "meta_ad_insights_platform_daily",
+        "extra_columns": ("publisher_platform", "platform_position"),
+        "conflict": "date, ad_id, publisher_platform, platform_position",
+    },
+}
+
+
+def save_meta_ads_breakdown_insights(kind, insights=None, account_id="", date_range_label=""):
+    ensure_ads_schema()
+    config = ADS_BREAKDOWN_TABLES.get(kind)
+    if not config:
+        raise ValueError(f"Unknown Meta Ads breakdown kind: {kind}")
+    insights = insights or []
+    account_id = str(account_id or "").replace("act_", "")
+    table = config["table"]
+    extra_columns = config["extra_columns"]
+    conflict = config["conflict"]
+    started = time.perf_counter()
+    common_columns = (
+        "date",
+        "account_id",
+        "campaign_id",
+        "campaign_name",
+        "adset_id",
+        "adset_name",
+        "ad_id",
+        "ad_name",
+    )
+    metric_columns = (
+        "spend",
+        "impressions",
+        "reach",
+        "clicks",
+        "inline_link_clicks",
+        "ctr",
+        "cpc",
+        "cpm",
+        "frequency",
+        "purchases",
+        "purchase_value",
+        "cost_per_purchase",
+        "roas",
+        "add_to_cart",
+        "initiate_checkout",
+        "raw",
+    )
+    columns = common_columns + extra_columns + metric_columns
+    placeholders = ", ".join(["%s"] * (len(columns) - 1) + ["%s::jsonb"])
+    update_columns = [column for column in columns if column not in {"date", "ad_id", *extra_columns}]
+    update_sql = ",\n                        ".join(f"{column}=EXCLUDED.{column}" for column in update_columns)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            for insight in insights:
+                spend = _ads_float(insight.get("spend"))
+                purchases = _meta_purchase_count(insight)
+                purchase_value = _meta_purchase_value(insight)
+                add_to_cart = _meta_add_to_cart(insight)
+                initiate_checkout = _meta_initiate_checkout(insight)
+                cost_per_purchase = spend / purchases if purchases else 0
+                roas = _meta_purchase_roas(insight) or (purchase_value / spend if spend else 0)
+                values = [
+                    insight.get("date_start") or insight.get("date_stop"),
+                    str(insight.get("account_id") or account_id).replace("act_", ""),
+                    insight.get("campaign_id"),
+                    insight.get("campaign_name"),
+                    insight.get("adset_id"),
+                    insight.get("adset_name"),
+                    insight.get("ad_id"),
+                    insight.get("ad_name"),
+                ]
+                values.extend(str(insight.get(column) or "") for column in extra_columns)
+                values.extend(
+                    [
+                        spend,
+                        _ads_int(insight.get("impressions")),
+                        _ads_int(insight.get("reach")),
+                        _ads_int(insight.get("clicks")),
+                        _ads_int(insight.get("inline_link_clicks")),
+                        _ads_float(insight.get("ctr")),
+                        _ads_float(insight.get("cpc")),
+                        _ads_float(insight.get("cpm")),
+                        _ads_float(insight.get("frequency")),
+                        purchases,
+                        purchase_value,
+                        cost_per_purchase,
+                        roas,
+                        add_to_cart,
+                        initiate_checkout,
+                        json_dumps(insight),
+                    ]
+                )
+                cur.execute(
+                    f"""
+                    INSERT INTO {table}({", ".join(columns)}, synced_at, updated_at)
+                    VALUES ({placeholders}, now(), now())
+                    ON CONFLICT ({conflict}) DO UPDATE SET
+                        {update_sql},
+                        synced_at=now(),
+                        updated_at=now()
+                    """,
+                    values,
+                )
+            _ads_insert_action_log(
+                cur,
+                "meta_sync",
+                "success",
+                f"Synced Meta Ads {kind.replace('_', ' ')} breakdown for {date_range_label or 'selected range'}",
+                {
+                    "breakdown": kind,
+                    "account_id": account_id,
+                    "rows": len(insights),
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
+        conn.commit()
+    return {"rows": len(insights), "rows_upserted": len(insights), "duration_ms": int((time.perf_counter() - started) * 1000)}
+
+
+def _list_meta_breakdown_insights(kind, days=30, limit=5000):
+    config = ADS_BREAKDOWN_TABLES.get(kind)
+    if not config or not is_configured():
         return []
+    table = config["table"]
     try:
         with connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
+                    f"""
                     SELECT i.*, t.product_handle, t.product_title, t.sport, t.country_focus,
-                           t.mockup_type, t.ad_angle, t.funnel_stage, t.notes AS tag_notes,
-                           a.status AS ad_status, a.effective_status AS ad_effective_status
-                    FROM meta_ad_insights_daily i
+                           t.mockup_type, t.room_type, t.ad_angle, t.hook_style, t.creative_format AS tag_creative_format,
+                           t.funnel_stage, t.notes AS tag_notes,
+                           a.status AS ad_status, a.effective_status AS ad_effective_status,
+                           c.primary_text, c.headline, c.description, c.call_to_action, c.link_url,
+                           c.creative_format AS detected_creative_format, c.image_url, c.thumbnail_url
+                    FROM {table} i
                     LEFT JOIN meta_creative_tags t ON t.ad_id = i.ad_id
                     LEFT JOIN meta_ads a ON a.ad_id = i.ad_id
+                    LEFT JOIN meta_creatives c ON c.ad_id = i.ad_id
                     WHERE i.date >= CURRENT_DATE - (%s::int - 1)
                     ORDER BY i.date DESC, i.spend DESC
                     LIMIT %s
@@ -11076,6 +11360,63 @@ def list_meta_ad_insights(days=30, limit=5000):
                 return cur.fetchall()
     except Exception:
         return []
+
+
+def list_meta_ad_insights_country(days=30, limit=5000):
+    return _list_meta_breakdown_insights("country", days=days, limit=limit)
+
+
+def list_meta_ad_insights_age_gender(days=30, limit=5000):
+    return _list_meta_breakdown_insights("age_gender", days=days, limit=limit)
+
+
+def list_meta_ad_insights_platform(days=30, limit=5000):
+    return _list_meta_breakdown_insights("platform", days=days, limit=limit)
+
+
+def list_meta_ad_insights(days=30, limit=5000):
+    if not is_configured():
+        return []
+    params = (max(int(days or 30), 1), int(limit or 5000))
+    new_query = """
+        SELECT i.*, t.product_handle, t.product_title, t.sport, t.country_focus,
+               t.mockup_type, t.room_type, t.ad_angle, t.hook_style, t.creative_format AS tag_creative_format,
+               t.funnel_stage, t.notes AS tag_notes,
+               a.status AS ad_status, a.effective_status AS ad_effective_status,
+               c.primary_text, c.headline, c.description, c.call_to_action, c.link_url,
+               c.creative_format AS detected_creative_format, c.image_url, c.thumbnail_url
+        FROM meta_ad_insights_daily i
+        LEFT JOIN meta_creative_tags t ON t.ad_id = i.ad_id
+        LEFT JOIN meta_ads a ON a.ad_id = i.ad_id
+        LEFT JOIN meta_creatives c ON c.ad_id = i.ad_id
+        WHERE i.date >= CURRENT_DATE - (%s::int - 1)
+        ORDER BY i.date DESC, i.spend DESC
+        LIMIT %s
+    """
+    fallback_query = """
+        SELECT i.*, t.product_handle, t.product_title, t.sport, t.country_focus,
+               t.mockup_type, t.ad_angle, t.funnel_stage, t.notes AS tag_notes,
+               a.status AS ad_status, a.effective_status AS ad_effective_status
+        FROM meta_ad_insights_daily i
+        LEFT JOIN meta_creative_tags t ON t.ad_id = i.ad_id
+        LEFT JOIN meta_ads a ON a.ad_id = i.ad_id
+        WHERE i.date >= CURRENT_DATE - (%s::int - 1)
+        ORDER BY i.date DESC, i.spend DESC
+        LIMIT %s
+    """
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(new_query, params)
+                return cur.fetchall()
+    except Exception:
+        try:
+            with connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(fallback_query, params)
+                    return cur.fetchall()
+        except Exception:
+            return []
 
 
 def list_ads_creative_tags(limit=500):
@@ -11105,9 +11446,9 @@ def upsert_ads_creative_tag(tag):
                 """
                 INSERT INTO meta_creative_tags(
                     ad_id, creative_id, product_handle, product_title, sport, country_focus,
-                    mockup_type, ad_angle, funnel_stage, notes, updated_at
+                    mockup_type, room_type, ad_angle, hook_style, creative_format, funnel_stage, notes, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (ad_id) DO UPDATE SET
                     creative_id=EXCLUDED.creative_id,
                     product_handle=EXCLUDED.product_handle,
@@ -11115,7 +11456,10 @@ def upsert_ads_creative_tag(tag):
                     sport=EXCLUDED.sport,
                     country_focus=EXCLUDED.country_focus,
                     mockup_type=EXCLUDED.mockup_type,
+                    room_type=EXCLUDED.room_type,
                     ad_angle=EXCLUDED.ad_angle,
+                    hook_style=EXCLUDED.hook_style,
+                    creative_format=EXCLUDED.creative_format,
                     funnel_stage=EXCLUDED.funnel_stage,
                     notes=EXCLUDED.notes,
                     updated_at=now()
@@ -11128,20 +11472,32 @@ def upsert_ads_creative_tag(tag):
                     tag.get("sport"),
                     tag.get("country_focus"),
                     tag.get("mockup_type"),
+                    tag.get("room_type"),
                     tag.get("ad_angle"),
+                    tag.get("hook_style"),
+                    tag.get("creative_format"),
                     tag.get("funnel_stage"),
                     tag.get("notes"),
                 ),
             )
             cur.execute(
                 """
-                INSERT INTO ads_product_mapping(ad_id, product_handle, product_title, sport, country_focus, notes, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, now())
+                INSERT INTO ads_product_mapping(
+                    ad_id, product_handle, product_title, sport, country_focus, mockup_type,
+                    room_type, ad_angle, hook_style, creative_format, funnel_stage, notes, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
                 ON CONFLICT (ad_id) DO UPDATE SET
                     product_handle=EXCLUDED.product_handle,
                     product_title=EXCLUDED.product_title,
                     sport=EXCLUDED.sport,
                     country_focus=EXCLUDED.country_focus,
+                    mockup_type=EXCLUDED.mockup_type,
+                    room_type=EXCLUDED.room_type,
+                    ad_angle=EXCLUDED.ad_angle,
+                    hook_style=EXCLUDED.hook_style,
+                    creative_format=EXCLUDED.creative_format,
+                    funnel_stage=EXCLUDED.funnel_stage,
                     notes=EXCLUDED.notes,
                     updated_at=now()
                 """,
@@ -11151,6 +11507,12 @@ def upsert_ads_creative_tag(tag):
                     tag.get("product_title"),
                     tag.get("sport"),
                     tag.get("country_focus"),
+                    tag.get("mockup_type"),
+                    tag.get("room_type"),
+                    tag.get("ad_angle"),
+                    tag.get("hook_style"),
+                    tag.get("creative_format"),
+                    tag.get("funnel_stage"),
                     tag.get("notes"),
                 ),
             )

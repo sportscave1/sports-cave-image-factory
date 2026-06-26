@@ -131,11 +131,44 @@ def _aggregate_by_ad(rows):
                 "countries": set(),
                 "placements": set(),
                 "mockup_type": row.get("mockup_type") or "",
+                "room_type": row.get("room_type") or "",
                 "ad_angle": row.get("ad_angle") or "",
+                "hook_style": row.get("hook_style") or "",
+                "creative_format": row.get("tag_creative_format") or row.get("detected_creative_format") or "",
                 "funnel_stage": row.get("funnel_stage") or "",
                 "tag_notes": row.get("tag_notes") or "",
+                "primary_text": row.get("primary_text") or "",
+                "headline": row.get("headline") or "",
+                "description": row.get("description") or "",
+                "call_to_action": row.get("call_to_action") or "",
+                "link_url": row.get("link_url") or "",
+                "image_url": row.get("image_url") or row.get("thumbnail_url") or "",
             },
         )
+        for key in (
+            "product_handle",
+            "product_title",
+            "sport",
+            "country_focus",
+            "mockup_type",
+            "room_type",
+            "ad_angle",
+            "hook_style",
+            "creative_format",
+            "funnel_stage",
+            "tag_notes",
+            "primary_text",
+            "headline",
+            "description",
+            "call_to_action",
+            "link_url",
+            "image_url",
+        ):
+            if not item.get(key):
+                if key == "creative_format":
+                    item[key] = row.get("tag_creative_format") or row.get("detected_creative_format") or ""
+                else:
+                    item[key] = row.get(key) or ""
         item["spend"] += _number(row.get("spend"))
         item["impressions"] += int(_number(row.get("impressions")))
         item["clicks"] += int(_number(row.get("clicks")))
@@ -236,14 +269,153 @@ def _top_and_losing_rows(ad_rows):
     return winners, losers
 
 
-def _prompt_for(template, range_label, summary, ad_rows):
+def _aggregate_group(rows, group_keys):
+    grouped = {}
+    for row in rows or []:
+        key_values = tuple(str(row.get(key) or "Unknown") for key in group_keys)
+        item = grouped.setdefault(
+            key_values,
+            {
+                **{key: value for key, value in zip(group_keys, key_values)},
+                "spend": 0.0,
+                "impressions": 0,
+                "reach": 0,
+                "clicks": 0,
+                "inline_link_clicks": 0,
+                "purchases": 0.0,
+                "purchase_value": 0.0,
+                "top_campaign": "",
+                "top_ad": "",
+                "_top_revenue": -1.0,
+            },
+        )
+        spend = _number(row.get("spend"))
+        revenue = _number(row.get("purchase_value") or row.get("revenue"))
+        item["spend"] += spend
+        item["impressions"] += int(_number(row.get("impressions")))
+        item["reach"] += int(_number(row.get("reach")))
+        item["clicks"] += int(_number(row.get("clicks")))
+        item["inline_link_clicks"] += int(_number(row.get("inline_link_clicks")))
+        item["purchases"] += _number(row.get("purchases"))
+        item["purchase_value"] += revenue
+        if revenue > item["_top_revenue"]:
+            item["_top_revenue"] = revenue
+            item["top_campaign"] = row.get("campaign_name") or row.get("campaign") or ""
+            item["top_ad"] = row.get("ad_name") or row.get("ad") or ""
+    output = []
+    for item in grouped.values():
+        spend = item["spend"]
+        impressions = item["impressions"]
+        clicks = item["clicks"]
+        purchases = item["purchases"]
+        revenue = item["purchase_value"]
+        output.append(
+            {
+                **{key: item[key] for key in group_keys},
+                "Spend": _money(spend),
+                "Purchases": f"{purchases:,.0f}",
+                "Purchase value": _money(revenue),
+                "ROAS": _ratio(revenue / spend if spend else 0),
+                "CPA": _money(spend / purchases if purchases else 0),
+                "CTR": _pct(clicks / impressions * 100 if impressions else 0),
+                "CPC": _money(spend / clicks if clicks else 0),
+                "CPM": _money(spend / impressions * 1000 if impressions else 0),
+                "Top campaign": item["top_campaign"],
+                "Top ad": item["top_ad"],
+                "_sort": revenue,
+            }
+        )
+    return sorted(output, key=lambda item: item["_sort"], reverse=True)
+
+
+def _compact_table(rows, height=380):
+    clean_rows = []
+    for row in rows or []:
+        clean_rows.append({key: value for key, value in row.items() if not str(key).startswith("_")})
+    if clean_rows:
+        st.dataframe(clean_rows[:500], hide_index=True, use_container_width=True, height=height)
+    else:
+        ui_styles.empty_state("No stored rows for this view yet. Use manual sync options to fetch this data.")
+
+
+def _tag_suggestion(row):
+    text = " ".join(str(row.get(key) or "") for key in ("ad", "campaign", "adset")).upper()
+    suggestion = {
+        "product_handle": "",
+        "product_title": "",
+        "sport": "",
+        "country_focus": "",
+        "mockup_type": row.get("mockup_type") or "",
+        "room_type": row.get("room_type") or "",
+        "ad_angle": row.get("ad_angle") or "",
+        "hook_style": row.get("hook_style") or "",
+        "creative_format": row.get("creative_format") or "",
+        "funnel_stage": row.get("funnel_stage") or "",
+        "notes": "Suggested from ad/campaign name. Review before saving.",
+        "label": "Needs review",
+    }
+    if "BRUNSEN" in text:
+        suggestion.update(product_title="Brunson / Knicks product mapping", sport="Basketball", country_focus="USA", label="Suggested: Brunson")
+    elif "LAP OF GOD" in text or "LAP OF THE GOD" in text:
+        suggestion.update(product_title="Lap of the Gods product mapping", sport="Motorsport", country_focus="Australia", label="Suggested: Lap of the Gods")
+    elif "MESSI" in text:
+        suggestion.update(product_title="Messi product mapping", sport="Football/Soccer", label="Suggested: Messi")
+    elif "UFC" in text or "GAETHJE" in text:
+        suggestion.update(product_title="UFC / Gaethje product mapping", sport="UFC/MMA", country_focus="USA", label="Suggested: UFC/Gaethje")
+    elif "LEGENDS" in text:
+        suggestion.update(product_title="Football legends product mapping", sport="Football/Soccer", label="Suggested: Legends needs review")
+    return suggestion
+
+
+def _group_creative_report(ad_rows, field):
+    grouped = {}
+    for row in ad_rows or []:
+        key = str(row.get(field) or "").strip()
+        if not key:
+            continue
+        item = grouped.setdefault(key, {"Value": key[:220], "Ads": 0, "Spend": 0.0, "Revenue": 0.0, "Purchases": 0.0, "Clicks": 0, "Impressions": 0})
+        item["Ads"] += 1
+        item["Spend"] += _number(row.get("spend"))
+        item["Revenue"] += _number(row.get("revenue"))
+        item["Purchases"] += _number(row.get("purchases"))
+        item["Clicks"] += int(_number(row.get("clicks")))
+        item["Impressions"] += int(_number(row.get("impressions")))
+    output = []
+    for item in grouped.values():
+        spend = item["Spend"]
+        revenue = item["Revenue"]
+        purchases = item["Purchases"]
+        clicks = item["Clicks"]
+        impressions = item["Impressions"]
+        output.append(
+            {
+                "Value": item["Value"],
+                "Ads": item["Ads"],
+                "Spend": _money(spend),
+                "Revenue": _money(revenue),
+                "Purchases": f"{purchases:,.0f}",
+                "ROAS": _ratio(revenue / spend if spend else 0),
+                "CPA": _money(spend / purchases if purchases else 0),
+                "CTR": _pct(clicks / impressions * 100 if impressions else 0),
+                "_sort": (revenue / spend if spend else 0, purchases, revenue),
+            }
+        )
+    return sorted(output, key=lambda item: item["_sort"], reverse=True)
+
+
+def _prompt_for(template, range_label, summary, ad_rows, country_rows=None, demographic_rows=None, platform_rows=None):
     winners, losers = _top_and_losing_rows(ad_rows)
+    country_summary = _aggregate_group(country_rows or [], ["country"])[:8]
+    demographic_summary = _aggregate_group(demographic_rows or [], ["age", "gender"])[:8]
+    platform_summary = _aggregate_group(platform_rows or [], ["publisher_platform", "platform_position"])[:8]
+    best_text = _group_creative_report(ad_rows, "primary_text")[:5]
+    best_headlines = _group_creative_report(ad_rows, "headline")[:5]
     lines = [
         "Sports Cave Meta Ads Intelligence Pack",
         "",
         "Business context:",
-        "Sports Cave sells premium sports wall art, framed prints, and limited edition products through Shopify.",
-        "The goal is profitable revenue growth: identify ads to scale, ads to kill, creatives to refresh, and new ad concepts to launch.",
+        "Sports Cave sells premium limited-edition framed sports artwork, usually edition of 100, through Shopify.",
+        "The goal is profitable revenue growth: identify ads to scale, ads to kill, creatives to refresh, products to push, and new ad concepts to launch.",
         "",
         f"Date range: {range_label}",
         "",
@@ -276,13 +448,45 @@ def _prompt_for(template, range_label, summary, ad_rows):
             f"CTR {_pct(row.get('ctr'))} | Frequency {row.get('frequency'):.2f} | Label: {row.get('action_label')} | "
             f"Notes: {row.get('tag_notes') or 'none'}"
         )
+    if country_summary:
+        lines.extend(["", "Country performance:"])
+        for row in country_summary:
+            lines.append(
+                f"- {row.get('country')} | Spend {row.get('Spend')} | Revenue {row.get('Purchase value')} | "
+                f"Purchases {row.get('Purchases')} | ROAS {row.get('ROAS')} | Top ad: {row.get('Top ad')}"
+            )
+    if demographic_summary:
+        lines.extend(["", "Demographic performance:"])
+        for row in demographic_summary:
+            lines.append(
+                f"- {row.get('age')} / {row.get('gender')} | Spend {row.get('Spend')} | Revenue {row.get('Purchase value')} | "
+                f"Purchases {row.get('Purchases')} | ROAS {row.get('ROAS')}"
+            )
+    if platform_summary:
+        lines.extend(["", "Platform placement performance:"])
+        for row in platform_summary:
+            lines.append(
+                f"- {row.get('publisher_platform')} {row.get('platform_position')} | Spend {row.get('Spend')} | "
+                f"Revenue {row.get('Purchase value')} | ROAS {row.get('ROAS')}"
+            )
+    if best_text:
+        lines.extend(["", "Winning primary text examples:"])
+        for row in best_text:
+            lines.append(f"- {row.get('Value')} | ROAS {row.get('ROAS')} | Purchases {row.get('Purchases')}")
+    if best_headlines:
+        lines.extend(["", "Winning headline examples:"])
+        for row in best_headlines:
+            lines.append(f"- {row.get('Value')} | ROAS {row.get('ROAS')} | Purchases {row.get('Purchases')}")
     instructions = {
         "Daily Ads Review": "Give me today's decision list: what to scale, watch, refresh, kill, and what to test next.",
         "Creative Pattern Finder": "Find repeatable creative patterns in the winners and explain what visual or angle patterns to reuse.",
-        "New Ad Plan Generator": "Create a new Meta ad testing plan with hooks, angles, products, and creative briefs.",
+        "Country Creative Report": "Explain what ad text, sport/product, and creative format are working by country. Create new Sports Cave ad copy and mockup prompts inspired by each country's winners.",
+        "Demographic Opportunity Report": "Find the age/gender segments worth more budget or new creative tests. Recommend tailored hooks for each strong segment.",
+        "Platform Placement Report": "Compare placements and recommend what creative format and copy style to use for each placement.",
+        "New Ad Copy Generator": "Create 10 new primary text variations, 10 headlines, and 5 image/mockup brief ideas based on the winners. Keep style close to proven patterns, but do not copy word-for-word.",
+        "New Image/Mockup Brief Generator": "Create practical image and mockup briefs based on winning products, countries, formats, and ad angles.",
         "Loser Diagnosis": "Diagnose why the losing ads are failing and recommend whether each needs a new hook, creative, offer, audience, or product match.",
         "Product Scaling Plan": "Recommend which products deserve more spend, which countries/sports to focus on, and the next scaling sequence.",
-        "Weekly Creative Meeting Report": "Turn this into a concise meeting report with decisions, owners, creative requests, and next tests.",
     }
     lines.extend(
         [
@@ -295,7 +499,7 @@ def _prompt_for(template, range_label, summary, ad_rows):
     return "\n".join(lines)
 
 
-def _sync_meta_ads(range_label, days):
+def _sync_meta_ads(range_label, days, sync_base=True, sync_country=True, sync_age_gender=False, sync_platform=False):
     started = time.perf_counter()
     sync_log_id = supabase_backend.start_ads_sync_log(
         source="meta_ads_api",
@@ -305,6 +509,17 @@ def _sync_meta_ads(range_label, days):
     config = meta_ads_client.get_meta_config()
     warnings = []
     page_counts = {}
+    saved = {
+        "campaigns": 0,
+        "adsets": 0,
+        "ads": 0,
+        "creatives": 0,
+        "insights": 0,
+        "country_insights": 0,
+        "age_gender_insights": 0,
+        "platform_insights": 0,
+        "rows_upserted": 0,
+    }
 
     def fetch_step(label, fetcher, default):
         try:
@@ -313,22 +528,86 @@ def _sync_meta_ads(range_label, days):
             warnings.append(f"{label}: {meta_ads_client.sanitize_meta_error(error)}")
             return default
 
-    account = fetch_step("account", lambda: meta_ads_client.fetch_meta_account(config=config), {})
-    campaigns = fetch_step("campaigns", lambda: meta_ads_client.fetch_meta_campaigns(config=config), {"rows": [], "page_count": 0})
-    adsets = fetch_step("adsets", lambda: meta_ads_client.fetch_meta_adsets(config=config), {"rows": [], "page_count": 0})
-    ads = fetch_step("ads", lambda: meta_ads_client.fetch_meta_ads(config=config), {"rows": [], "page_count": 0})
-    insights = fetch_step("insights", lambda: meta_ads_client.fetch_meta_ad_insights(days=days, config=config), {"rows": [], "page_count": 0})
+    rows_fetched = 0
+    if sync_base:
+        account = fetch_step("account", lambda: meta_ads_client.fetch_meta_account(config=config), {})
+        campaigns = fetch_step("campaigns", lambda: meta_ads_client.fetch_meta_campaigns(config=config), {"rows": [], "page_count": 0})
+        adsets = fetch_step("adsets", lambda: meta_ads_client.fetch_meta_adsets(config=config), {"rows": [], "page_count": 0})
+        ads = fetch_step("ads", lambda: meta_ads_client.fetch_meta_ads(config=config), {"rows": [], "page_count": 0})
+        insights = fetch_step("insights", lambda: meta_ads_client.fetch_meta_ad_insights(days=days, config=config), {"rows": [], "page_count": 0})
 
-    for label, payload in (("campaigns", campaigns), ("adsets", adsets), ("ads", ads), ("insights", insights)):
-        page_counts[label] = payload.get("page_count", 0)
+        for label, payload in (("campaigns", campaigns), ("adsets", adsets), ("ads", ads), ("insights", insights)):
+            page_counts[label] = payload.get("page_count", 0)
+        rows_fetched += (
+            (1 if account else 0)
+            + len(campaigns.get("rows") or [])
+            + len(adsets.get("rows") or [])
+            + len(ads.get("rows") or [])
+            + len(insights.get("rows") or [])
+        )
+        saved.update(
+            supabase_backend.save_meta_ads_sync(
+                account=account,
+                campaigns=campaigns.get("rows"),
+                adsets=adsets.get("rows"),
+                ads=ads.get("rows"),
+                insights=insights.get("rows"),
+                date_range_label=range_label,
+                account_id=config.get("ad_account_id"),
+            )
+        )
 
-    rows_fetched = (
-        (1 if account else 0)
-        + len(campaigns.get("rows") or [])
-        + len(adsets.get("rows") or [])
-        + len(ads.get("rows") or [])
-        + len(insights.get("rows") or [])
-    )
+    if sync_country:
+        country = fetch_step(
+            "country breakdown",
+            lambda: meta_ads_client.fetch_meta_ad_insights_country(days=days, config=config),
+            {"rows": [], "page_count": 0},
+        )
+        page_counts["country"] = country.get("page_count", 0)
+        rows_fetched += len(country.get("rows") or [])
+        country_saved = supabase_backend.save_meta_ads_breakdown_insights(
+            "country",
+            country.get("rows"),
+            account_id=config.get("ad_account_id"),
+            date_range_label=range_label,
+        )
+        saved["country_insights"] = country_saved.get("rows", 0)
+        saved["rows_upserted"] += country_saved.get("rows_upserted", 0)
+
+    if sync_age_gender:
+        age_gender = fetch_step(
+            "age/gender breakdown",
+            lambda: meta_ads_client.fetch_meta_ad_insights_age_gender(days=days, config=config),
+            {"rows": [], "page_count": 0},
+        )
+        page_counts["age_gender"] = age_gender.get("page_count", 0)
+        rows_fetched += len(age_gender.get("rows") or [])
+        age_gender_saved = supabase_backend.save_meta_ads_breakdown_insights(
+            "age_gender",
+            age_gender.get("rows"),
+            account_id=config.get("ad_account_id"),
+            date_range_label=range_label,
+        )
+        saved["age_gender_insights"] = age_gender_saved.get("rows", 0)
+        saved["rows_upserted"] += age_gender_saved.get("rows_upserted", 0)
+
+    if sync_platform:
+        platform = fetch_step(
+            "platform breakdown",
+            lambda: meta_ads_client.fetch_meta_ad_insights_platform(days=days, config=config),
+            {"rows": [], "page_count": 0},
+        )
+        page_counts["platform"] = platform.get("page_count", 0)
+        rows_fetched += len(platform.get("rows") or [])
+        platform_saved = supabase_backend.save_meta_ads_breakdown_insights(
+            "platform",
+            platform.get("rows"),
+            account_id=config.get("ad_account_id"),
+            date_range_label=range_label,
+        )
+        saved["platform_insights"] = platform_saved.get("rows", 0)
+        saved["rows_upserted"] += platform_saved.get("rows_upserted", 0)
+
     if rows_fetched <= 0:
         message = "; ".join(warnings) or "Meta sync returned no rows."
         supabase_backend.finish_ads_sync_log(
@@ -342,16 +621,7 @@ def _sync_meta_ads(range_label, days):
         )
         raise meta_ads_client.MetaAdsApiError(message)
 
-    saved = supabase_backend.save_meta_ads_sync(
-        account=account,
-        campaigns=campaigns.get("rows"),
-        adsets=adsets.get("rows"),
-        ads=ads.get("rows"),
-        insights=insights.get("rows"),
-        date_range_label=range_label,
-        account_id=config.get("ad_account_id"),
-    )
-    missing_performance_rows = saved.get("ads", 0) <= 0 or saved.get("insights", 0) <= 0
+    missing_performance_rows = sync_base and (saved.get("ads", 0) <= 0 or saved.get("insights", 0) <= 0)
     status = "partial_success" if warnings or missing_performance_rows else "success"
     warning_parts = list(warnings)
     if missing_performance_rows:
@@ -366,7 +636,16 @@ def _sync_meta_ads(range_label, days):
         rows_fetched=rows_fetched,
         rows_upserted=saved.get("rows_upserted", 0),
         error_message=warning_text,
-        context={"warnings": warning_parts, "meta_pages": page_counts},
+        context={
+            "warnings": warning_parts,
+            "meta_pages": page_counts,
+            "selected_syncs": {
+                "base": bool(sync_base),
+                "country": bool(sync_country),
+                "age_gender": bool(sync_age_gender),
+                "platform": bool(sync_platform),
+            },
+        },
     )
     if warnings:
         supabase_backend.record_ads_sync_error(warning_text, {"range": range_label, "partial": True})
@@ -422,21 +701,29 @@ def _product_opportunity_rows(ad_rows):
 
 
 def _creative_tag_rows(ad_rows):
-    return [
+    rows = []
+    for row in ad_rows:
+        suggestion = _tag_suggestion(row)
+        rows.append(
         {
             "Ad ID": row.get("ad_id"),
             "Ad": row.get("ad"),
+            "Tag Status": "Tagged" if (row.get("product_handle") or row.get("product_title")) else "Needs tagging",
+            "Suggestion": suggestion["label"],
             "Product Handle": row.get("product_handle") or "",
             "Product": row.get("product_title") or "",
             "Sport": row.get("sport") or "",
             "Country": row.get("country_focus") or "",
             "Mockup": row.get("mockup_type") or "",
+            "Room": row.get("room_type") or "",
             "Angle": row.get("ad_angle") or "",
+            "Hook": row.get("hook_style") or "",
+            "Format": row.get("creative_format") or "",
             "Funnel": row.get("funnel_stage") or "",
             "Notes": row.get("tag_notes") or "",
         }
-        for row in ad_rows
-    ]
+        )
+    return sorted(rows, key=lambda item: (item["Tag Status"] != "Needs tagging", item["Ad"] or ""))
 
 
 def _filter_ad_rows(ad_rows, action_label, campaign, min_spend, product_query):
@@ -451,7 +738,17 @@ def _filter_ad_rows(ad_rows, action_label, campaign, min_spend, product_query):
             continue
         product_text = " ".join(
             str(row.get(key) or "")
-            for key in ("product_handle", "product_title", "sport", "country_focus", "ad_angle", "mockup_type")
+            for key in (
+                "product_handle",
+                "product_title",
+                "sport",
+                "country_focus",
+                "ad_angle",
+                "mockup_type",
+                "room_type",
+                "hook_style",
+                "creative_format",
+            )
         ).lower()
         if query and query not in product_text:
             continue
@@ -459,9 +756,59 @@ def _filter_ad_rows(ad_rows, action_label, campaign, min_spend, product_query):
     return filtered
 
 
+def _filter_creative_rows(ad_rows, country, campaign, product, creative_format, action_label, min_spend):
+    filtered = []
+    for row in ad_rows:
+        if country != "All" and country not in {row.get("country"), row.get("country_focus")}:
+            continue
+        if campaign != "All" and row.get("campaign") != campaign:
+            continue
+        if product != "All" and (row.get("product_title") or row.get("product_handle") or "Untagged") != product:
+            continue
+        if creative_format != "All" and (row.get("creative_format") or "unknown") != creative_format:
+            continue
+        if action_label != "All" and row.get("action_label") != action_label:
+            continue
+        if _number(row.get("spend")) < _number(min_spend):
+            continue
+        filtered.append(row)
+    return filtered
+
+
+def _creative_intelligence_table(ad_rows):
+    return [
+        {
+            "Ad": row.get("ad"),
+            "Campaign": row.get("campaign"),
+            "Product tag": row.get("product_title") or row.get("product_handle") or "Untagged",
+            "Country focus": row.get("country_focus") or "",
+            "Creative format": row.get("creative_format") or "unknown",
+            "Mockup": row.get("mockup_type") or "",
+            "Primary text": row.get("primary_text") or "",
+            "Headline": row.get("headline") or "",
+            "Description": row.get("description") or "",
+            "CTA": row.get("call_to_action") or "",
+            "Spend": _money(row.get("spend")),
+            "Purchases": f"{_number(row.get('purchases')):,.0f}",
+            "Revenue": _money(row.get("revenue")),
+            "ROAS": _ratio(row.get("roas")),
+            "CPA": _money(row.get("cpa")),
+            "CTR": _pct(row.get("ctr")),
+            "Action": row.get("action_label"),
+        }
+        for row in ad_rows
+    ]
+
+
 def _render_controls(config_status):
     control_cols = st.columns([1.05, 1, 1.1, 0.9])
     selected_range = control_cols[0].selectbox("Date range", list(DATE_RANGE_OPTIONS), index=0)
+    with st.expander("Advanced data", expanded=False):
+        st.caption("Breakdowns are separate safe Meta reads. Base and country are on by default.")
+        sync_base = st.checkbox("Base ad performance", value=True)
+        sync_country = st.checkbox("Country breakdown", value=True)
+        sync_age_gender = st.checkbox("Age/gender breakdown", value=False)
+        sync_platform = st.checkbox("Platform/placement breakdown", value=False)
     if control_cols[1].button("Test Meta Connection", disabled=not config_status["configured"], use_container_width=True):
         try:
             result = meta_ads_client.test_meta_connection()
@@ -474,15 +821,31 @@ def _render_controls(config_status):
     if control_cols[2].button("Sync Meta Ads Data", type="primary", disabled=not config_status["configured"], use_container_width=True):
         progress = st.progress(0, text="Starting Meta read-only sync...")
         try:
-            progress.progress(15, text="Reading Meta account, campaigns, ad sets, ads, and insights...")
-            result = _sync_meta_ads(selected_range, DATE_RANGE_OPTIONS[selected_range])
+            progress.progress(15, text="Reading selected Meta performance data...")
+            result = _sync_meta_ads(
+                selected_range,
+                DATE_RANGE_OPTIONS[selected_range],
+                sync_base=sync_base,
+                sync_country=sync_country,
+                sync_age_gender=sync_age_gender,
+                sync_platform=sync_platform,
+            )
             progress.progress(100, text="Meta Ads data saved to Supabase.")
-            if result.get("ads", 0) > 0 and result.get("insights", 0) > 0 and not result.get("warnings"):
+            base_ok = (not sync_base) or (result.get("ads", 0) > 0 and result.get("insights", 0) > 0)
+            if base_ok and not result.get("warnings"):
                 st.success(
                     "Sync complete: "
                     f"{result.get('campaigns', 0)} campaigns, {result.get('adsets', 0)} ad sets, "
                     f"{result.get('ads', 0)} ads, {result.get('creatives', 0)} creatives, "
-                    f"{result.get('insights', 0)} daily performance rows saved."
+                    f"{result.get('insights', 0)} daily performance rows, "
+                    f"{result.get('country_insights', 0)} country rows, "
+                    f"{result.get('age_gender_insights', 0)} age/gender rows, "
+                    f"{result.get('platform_insights', 0)} placement rows saved."
+                )
+            elif base_ok:
+                st.warning(
+                    "Meta partially synced. Base performance data was saved, but one selected breakdown needs retry. "
+                    "Open Developer -> Ads Intelligence Diagnostics for technical details."
                 )
             else:
                 st.warning(
@@ -577,6 +940,9 @@ def render_page():
     selected_range = _render_controls(config_status)
     days = DATE_RANGE_OPTIONS[selected_range]
     insight_rows = supabase_backend.list_meta_ad_insights(days=days)
+    country_rows = supabase_backend.list_meta_ad_insights_country(days=days)
+    demographic_rows = supabase_backend.list_meta_ad_insights_age_gender(days=days)
+    platform_rows = supabase_backend.list_meta_ad_insights_platform(days=days)
     summary = _summary(insight_rows)
     ad_rows = _aggregate_by_ad(insight_rows)
 
@@ -595,8 +961,26 @@ def render_page():
             ]
         )
 
-    war_room_tab, table_tab, tags_tab, chatgpt_tab = st.tabs(
-        ["War Room", "Meta Ads Table", "Creative Tags", "ChatGPT Pack"]
+    (
+        war_room_tab,
+        table_tab,
+        country_tab,
+        demographics_tab,
+        platform_tab,
+        creative_intel_tab,
+        tags_tab,
+        chatgpt_tab,
+    ) = st.tabs(
+        [
+            "War Room",
+            "Meta Ads Table",
+            "Country",
+            "Demographics",
+            "Platform",
+            "Creative Intelligence",
+            "Creative Tags",
+            "ChatGPT Pack",
+        ]
     )
 
     with war_room_tab:
@@ -676,26 +1060,175 @@ def render_page():
         else:
             ui_styles.empty_state(_empty_performance_message(counts) if not insight_rows else "No stored Meta rows match these filters.")
 
+    with country_tab:
+        _section("Country Performance", "Country is synced separately from base performance to avoid heavy Meta breakdown combinations.")
+        country_filter_cols = st.columns([1.2, 1.2, 0.8])
+        country_campaigns = ["All"] + sorted({row.get("campaign_name") for row in country_rows if row.get("campaign_name")})
+        country_campaign = country_filter_cols[0].selectbox("Campaign", country_campaigns, key="country-campaign-filter")
+        country_product = country_filter_cols[1].text_input("Product / tag", key="country-product-filter")
+        country_min_spend = country_filter_cols[2].number_input("Min spend", min_value=0.0, value=0.0, step=10.0, key="country-min-spend")
+        filtered_country = []
+        query = str(country_product or "").strip().lower()
+        for row in country_rows:
+            if country_campaign != "All" and row.get("campaign_name") != country_campaign:
+                continue
+            if _number(row.get("spend")) < country_min_spend:
+                continue
+            product_text = " ".join(str(row.get(key) or "") for key in ("product_handle", "product_title", "sport", "country_focus")).lower()
+            if query and query not in product_text:
+                continue
+            filtered_country.append(row)
+        _compact_table(_aggregate_group(filtered_country, ["country"]), height=430)
+        if filtered_country:
+            _section("Country Creative Signals")
+            strong_country_ads = sorted(filtered_country, key=lambda row: (_number(row.get("roas")), _number(row.get("purchase_value"))), reverse=True)[:12]
+            _compact_table(
+                [
+                    {
+                        "Country": row.get("country") or "Unknown",
+                        "Ad": row.get("ad_name"),
+                        "Campaign": row.get("campaign_name"),
+                        "Spend": _money(row.get("spend")),
+                        "Purchases": f"{_number(row.get('purchases')):,.0f}",
+                        "Revenue": _money(row.get("purchase_value")),
+                        "ROAS": _ratio(row.get("roas")),
+                        "CTR": _pct(row.get("ctr")),
+                    }
+                    for row in strong_country_ads
+                ],
+                height=360,
+            )
+            _section("Winning Copy By Country")
+            copy_rows = [
+                {
+                    "Country": row.get("country") or "Unknown",
+                    "Ad": row.get("ad_name"),
+                    "Primary text": row.get("primary_text") or "",
+                    "Headline": row.get("headline") or "",
+                    "Sport": row.get("sport") or "",
+                    "Product": row.get("product_title") or row.get("product_handle") or "Untagged",
+                    "Format": row.get("tag_creative_format") or row.get("detected_creative_format") or "",
+                    "Spend": _money(row.get("spend")),
+                    "Purchases": f"{_number(row.get('purchases')):,.0f}",
+                    "ROAS": _ratio(row.get("roas")),
+                }
+                for row in sorted(filtered_country, key=lambda item: (_number(item.get("roas")), _number(item.get("purchases"))), reverse=True)
+                if row.get("primary_text") or row.get("headline")
+            ][:15]
+            _compact_table(copy_rows, height=360)
+            _section("High CTR / Low Purchase By Country")
+            low_purchase_rows = [
+                {
+                    "Country": row.get("country") or "Unknown",
+                    "Ad": row.get("ad_name"),
+                    "Campaign": row.get("campaign_name"),
+                    "Spend": _money(row.get("spend")),
+                    "CTR": _pct(row.get("ctr")),
+                    "Purchases": f"{_number(row.get('purchases')):,.0f}",
+                    "ROAS": _ratio(row.get("roas")),
+                }
+                for row in sorted(filtered_country, key=lambda item: _number(item.get("ctr")), reverse=True)
+                if _number(row.get("ctr")) >= 1.5 and _number(row.get("purchases")) <= 0 and _number(row.get("spend")) >= 20
+            ][:12]
+            _compact_table(low_purchase_rows, height=300)
+
+    with demographics_tab:
+        _section("Demographic Performance", "Age/gender is an optional manual sync so the daily page stays quick.")
+        _compact_table(_aggregate_group(demographic_rows, ["age", "gender"]), height=460)
+
+    with platform_tab:
+        _section("Platform / Placement Performance", "Platform placement is synced separately from country and demographic breakdowns.")
+        _compact_table(_aggregate_group(platform_rows, ["publisher_platform", "platform_position"]), height=460)
+
+    with creative_intel_tab:
+        _section("Creative Intelligence")
+        if not ad_rows:
+            ui_styles.empty_state("Sync base Meta performance to see creative copy, tags, and winner patterns.")
+        else:
+            filter_cols = st.columns([1, 1, 1, 1, 1, 0.7])
+            country_options = ["All"] + sorted({value for row in ad_rows for value in (row.get("country"), row.get("country_focus")) if value and value != "All"})
+            campaign_options = ["All"] + sorted({row.get("campaign") for row in ad_rows if row.get("campaign")})
+            product_options = ["All"] + sorted({row.get("product_title") or row.get("product_handle") or "Untagged" for row in ad_rows})
+            format_options = ["All"] + sorted({row.get("creative_format") or "unknown" for row in ad_rows})
+            action_options = ["All"] + sorted({row.get("action_label") for row in ad_rows if row.get("action_label")})
+            creative_country = filter_cols[0].selectbox("Country", country_options, key="creative-country-filter")
+            creative_campaign = filter_cols[1].selectbox("Campaign", campaign_options, key="creative-campaign-filter")
+            creative_product = filter_cols[2].selectbox("Product", product_options, key="creative-product-filter")
+            creative_format = filter_cols[3].selectbox("Format", format_options, key="creative-format-filter")
+            creative_action = filter_cols[4].selectbox("Action", action_options, key="creative-action-filter")
+            creative_min_spend = filter_cols[5].number_input("Min spend", min_value=0.0, value=0.0, step=10.0, key="creative-min-spend")
+            creative_rows = _filter_creative_rows(
+                ad_rows,
+                creative_country,
+                creative_campaign,
+                creative_product,
+                creative_format,
+                creative_action,
+                creative_min_spend,
+            )
+            st.dataframe(_creative_intelligence_table(creative_rows)[:500], hide_index=True, use_container_width=True, height=500)
+            report_left, report_right = st.columns(2)
+            with report_left:
+                _section("Best Primary Text")
+                _compact_table(_group_creative_report(creative_rows, "primary_text")[:10], height=300)
+                _section("Best Creative Format")
+                _compact_table(_group_creative_report(creative_rows, "creative_format")[:10], height=260)
+            with report_right:
+                _section("Best Headlines")
+                _compact_table(_group_creative_report(creative_rows, "headline")[:10], height=300)
+                _section("Weak Copy Needing Refresh")
+                weak_rows = [
+                    {
+                        "Ad": row.get("ad"),
+                        "Primary text": row.get("primary_text") or "",
+                        "Headline": row.get("headline") or "",
+                        "Spend": _money(row.get("spend")),
+                        "CTR": _pct(row.get("ctr")),
+                        "ROAS": _ratio(row.get("roas")),
+                        "Action": row.get("action_label"),
+                    }
+                    for row in creative_rows
+                    if row.get("action_label") in {"Refresh creative", "Kill candidate", "Landing page/product issue"}
+                ][:10]
+                _compact_table(weak_rows, height=260)
+
     with tags_tab:
         _section("Creative Tags")
         if not ad_rows:
             ui_styles.empty_state("Sync Meta data first, then tag ads against products, sports, mockups, and angles.")
         else:
+            needs_tagging = sum(1 for row in ad_rows if not (row.get("product_handle") or row.get("product_title")))
+            ui_styles.source_status_banner(
+                [
+                    ("Needs tagging", needs_tagging),
+                    ("Tagged", max(len(ad_rows) - needs_tagging, 0)),
+                    ("Source", "Meta ads + manual product mapping"),
+                ]
+            )
             st.dataframe(_creative_tag_rows(ad_rows), hide_index=True, use_container_width=True, height=360)
             with st.expander("Edit selected creative tags", expanded=False):
-                ad_options = {f"{row.get('ad')} ({row.get('ad_id')})": row for row in ad_rows}
+                tag_order = sorted(
+                    ad_rows,
+                    key=lambda row: (bool(row.get("product_handle") or row.get("product_title")), row.get("ad") or ""),
+                )
+                ad_options = {f"{row.get('ad')} ({row.get('ad_id')})": row for row in tag_order}
                 selected_ad_label = st.selectbox("Ad to tag", list(ad_options))
                 selected_ad = ad_options[selected_ad_label]
+                suggestion = _tag_suggestion(selected_ad)
+                st.caption(f"{suggestion['label']} - review before saving.")
                 with st.form("ads-creative-tag-form"):
                     col_a, col_b, col_c = st.columns(3)
-                    product_handle = col_a.text_input("Product handle", value=selected_ad.get("product_handle") or "")
-                    product_title = col_b.text_input("Product title", value=selected_ad.get("product_title") or "")
-                    sport = col_c.text_input("Sport", value=selected_ad.get("sport") or "")
-                    country_focus = col_a.text_input("Country focus", value=selected_ad.get("country_focus") or "")
-                    mockup_type = col_b.text_input("Mockup type", value=selected_ad.get("mockup_type") or "")
-                    ad_angle = col_c.text_input("Ad angle", value=selected_ad.get("ad_angle") or "")
-                    funnel_stage = col_a.text_input("Funnel stage", value=selected_ad.get("funnel_stage") or "")
-                    notes = st.text_area("Notes", value=selected_ad.get("tag_notes") or "", height=80)
+                    product_handle = col_a.text_input("Product handle", value=selected_ad.get("product_handle") or suggestion["product_handle"])
+                    product_title = col_b.text_input("Product title", value=selected_ad.get("product_title") or suggestion["product_title"])
+                    sport = col_c.text_input("Sport", value=selected_ad.get("sport") or suggestion["sport"])
+                    country_focus = col_a.text_input("Country focus", value=selected_ad.get("country_focus") or suggestion["country_focus"])
+                    mockup_type = col_b.text_input("Mockup type", value=selected_ad.get("mockup_type") or suggestion["mockup_type"])
+                    room_type = col_c.text_input("Room type", value=selected_ad.get("room_type") or suggestion["room_type"])
+                    ad_angle = col_a.text_input("Ad angle", value=selected_ad.get("ad_angle") or suggestion["ad_angle"])
+                    hook_style = col_b.text_input("Hook style", value=selected_ad.get("hook_style") or suggestion["hook_style"])
+                    creative_format = col_c.text_input("Creative format", value=selected_ad.get("creative_format") or suggestion["creative_format"])
+                    funnel_stage = col_a.text_input("Funnel stage", value=selected_ad.get("funnel_stage") or suggestion["funnel_stage"])
+                    notes = st.text_area("Notes", value=selected_ad.get("tag_notes") or suggestion["notes"], height=80)
                     if st.form_submit_button("Save Creative Tags", use_container_width=True):
                         supabase_backend.upsert_ads_creative_tag(
                             {
@@ -706,7 +1239,10 @@ def render_page():
                                 "sport": sport,
                                 "country_focus": country_focus,
                                 "mockup_type": mockup_type,
+                                "room_type": room_type,
                                 "ad_angle": ad_angle,
+                                "hook_style": hook_style,
+                                "creative_format": creative_format,
                                 "funnel_stage": funnel_stage,
                                 "notes": notes,
                             }
@@ -720,13 +1256,24 @@ def render_page():
             [
                 "Daily Ads Review",
                 "Creative Pattern Finder",
-                "New Ad Plan Generator",
+                "Country Creative Report",
+                "Demographic Opportunity Report",
+                "Platform Placement Report",
+                "New Ad Copy Generator",
+                "New Image/Mockup Brief Generator",
                 "Loser Diagnosis",
                 "Product Scaling Plan",
-                "Weekly Creative Meeting Report",
             ],
         )
-        prompt_text = _prompt_for(template, selected_range, summary, ad_rows)
+        prompt_text = _prompt_for(
+            template,
+            selected_range,
+            summary,
+            ad_rows,
+            country_rows=country_rows,
+            demographic_rows=demographic_rows,
+            platform_rows=platform_rows,
+        )
         st.text_area("Copyable ChatGPT prompt/data pack", value=prompt_text, height=360)
         st.download_button(
             "Download ChatGPT Pack",

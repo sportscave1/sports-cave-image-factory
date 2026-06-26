@@ -156,7 +156,9 @@ def fetch_meta_ads(config=None):
     params = {
         "fields": (
             "id,name,status,effective_status,campaign_id,adset_id,"
-            "creative{id,name,thumbnail_url},created_time,updated_time"
+            "creative{id,name,thumbnail_url,effective_object_story_id,object_story_id,"
+            "object_story_spec,asset_feed_spec,call_to_action_type,link_url,page_id,"
+            "instagram_actor_id,image_hash,video_id},created_time,updated_time"
         ),
         "limit": 100,
     }
@@ -176,22 +178,70 @@ def _date_range_for_days(days):
     return since.isoformat(), until.isoformat()
 
 
-def fetch_meta_ad_insights(date_preset=None, since=None, until=None, days=None, config=None):
-    config = config or get_meta_config()
+META_INSIGHT_FIELDS = (
+    "date_start,date_stop,account_id,campaign_id,campaign_name,adset_id,adset_name,"
+    "ad_id,ad_name,spend,impressions,reach,clicks,inline_link_clicks,ctr,cpc,cpm,"
+    "frequency,actions,action_values,purchase_roas"
+)
+
+
+def _insight_params(date_preset=None, since=None, until=None, days=None, breakdowns=None):
     params = {
         "level": "ad",
         "time_increment": 1,
-        "fields": (
-            "date_start,date_stop,account_id,campaign_id,campaign_name,adset_id,adset_name,"
-            "ad_id,ad_name,spend,impressions,reach,clicks,inline_link_clicks,ctr,cpc,cpm,"
-            "frequency,actions,action_values,purchase_roas"
-        ),
+        "fields": META_INSIGHT_FIELDS,
         "limit": 100,
     }
+    if breakdowns:
+        # Keep breakdown reads separate. Do not add action_breakdowns here; combining
+        # action_type with geo/platform breakdowns caused Meta API errors.
+        params["breakdowns"] = breakdowns
     if date_preset:
         params["date_preset"] = date_preset
     else:
         if days and not (since and until):
             since, until = _date_range_for_days(days)
         params["time_range"] = json.dumps({"since": since, "until": until})
+    return params
+
+
+def fetch_meta_ad_insights(date_preset=None, since=None, until=None, days=None, config=None):
+    config = config or get_meta_config()
+    params = _insight_params(date_preset=date_preset, since=since, until=until, days=days)
+    return _paged_get(f"{config['ad_account_id']}/insights", params=params, config=config)
+
+
+def fetch_meta_ad_insights_country(date_preset=None, since=None, until=None, days=None, config=None):
+    config = config or get_meta_config()
+    params = _insight_params(
+        date_preset=date_preset,
+        since=since,
+        until=until,
+        days=days,
+        breakdowns="country",
+    )
+    return _paged_get(f"{config['ad_account_id']}/insights", params=params, config=config)
+
+
+def fetch_meta_ad_insights_age_gender(date_preset=None, since=None, until=None, days=None, config=None):
+    config = config or get_meta_config()
+    params = _insight_params(
+        date_preset=date_preset,
+        since=since,
+        until=until,
+        days=days,
+        breakdowns="age,gender",
+    )
+    return _paged_get(f"{config['ad_account_id']}/insights", params=params, config=config)
+
+
+def fetch_meta_ad_insights_platform(date_preset=None, since=None, until=None, days=None, config=None):
+    config = config or get_meta_config()
+    params = _insight_params(
+        date_preset=date_preset,
+        since=since,
+        until=until,
+        days=days,
+        breakdowns="publisher_platform,platform_position",
+    )
     return _paged_get(f"{config['ad_account_id']}/insights", params=params, config=config)
