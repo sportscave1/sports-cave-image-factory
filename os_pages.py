@@ -3711,7 +3711,7 @@ def prodigi_find_order_rows(order_rows, search_text, stored_rows=None):
 def _prodigi_log_timing(label, started_at, extra=""):
     elapsed_ms = int((time.perf_counter() - started_at) * 1000)
     suffix = f" {extra}" if extra else ""
-    print(f"PERF Prodigi {label}: {elapsed_ms} ms{suffix}")
+    print(f"PERF Prodigi: {label} {elapsed_ms} ms{suffix}")
 
 
 def prodigi_load_dispatch_summary():
@@ -4186,6 +4186,7 @@ def _prodigi_qa_step(number, title, question, *, key, default=False, helper_text
 
 def render_prodigi_page():
     page_started = time.perf_counter()
+    _prodigi_log_timing("page start", page_started)
     st.title("Prodigi Dispatch Log")
     st.caption("Search an order, confirm the Prodigi checks, then save it to the dispatch log.")
     st.link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
@@ -4195,8 +4196,6 @@ def render_prodigi_page():
     with st.expander("Prodigi Reference", expanded=False):
         st.markdown(prodigi_reference_table_html(prodigi_reference_rows()), unsafe_allow_html=True)
         st.caption(f"Support: {PRODIGI_SUPPORT_EMAIL}")
-
-    dispatch_summary = prodigi_load_dispatch_summary()
 
     search_columns = st.columns([3.2, 1])
     search_value = search_columns[0].text_input(
@@ -4409,8 +4408,6 @@ def render_prodigi_page():
 
     st.divider()
     st.subheader("Submitted Dispatch Log")
-    st.caption(f"Dispatch rows saved: {dispatch_summary.get('rows_saved', 0)}")
-    st.caption(f"Last tracker save: {dispatch_summary.get('last_saved_at') or 'Not saved yet'}")
     log_search = st.text_input(
         "Search dispatch log",
         placeholder="Order, customer, product, edition, notes",
@@ -4426,6 +4423,17 @@ def render_prodigi_page():
     log_started = time.perf_counter()
     table_rows = prodigi_load_dispatch_rows(selected_log_view, log_search, limit=50)
     records = prodigi_dispatch_table_records(table_rows)
+    latest_save = next(
+        (
+            row.get("updated_at") or row.get("submitted_at") or row.get("date_sent_to_prodigi")
+            for row in table_rows
+            if row.get("updated_at") or row.get("submitted_at") or row.get("date_sent_to_prodigi")
+        ),
+        "",
+    )
+    dispatch_summary = {"rows_saved": len(table_rows), "last_saved_at": latest_save}
+    st.caption(f"Dispatch rows saved: {dispatch_summary.get('rows_saved', 0)}")
+    st.caption(f"Last tracker save: {dispatch_summary.get('last_saved_at') or 'Not saved yet'}")
     _prodigi_log_timing("dispatch table render", log_started, f"view={selected_log_view} rows={len(records)}")
     if records:
         st.dataframe(records, hide_index=True, use_container_width=True)

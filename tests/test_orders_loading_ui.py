@@ -179,28 +179,153 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn('PRODIGI_SUPPORT_EMAIL = "pro@prodigi.com"', source)
         self.assertNotIn("support@prodigi.com", source)
 
+    def test_prodigi_page_load_is_lazy_and_does_not_sync_or_load_all_orders(self):
+        class FakeContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeColumn:
+            def button(self, *args, **kwargs):
+                return False
+
+            def text_input(self, *args, **kwargs):
+                return ""
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def write(self, *args, **kwargs):
+                return None
+
+            def markdown(self, *args, **kwargs):
+                return None
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {}
+                self.dataframes = []
+
+            def title(self, *args, **kwargs):
+                return None
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def link_button(self, *args, **kwargs):
+                return None
+
+            def expander(self, *args, **kwargs):
+                return FakeContext()
+
+            def markdown(self, *args, **kwargs):
+                return None
+
+            def columns(self, spec):
+                return [FakeColumn() for _ in spec]
+
+            def text_input(self, *args, **kwargs):
+                return ""
+
+            def radio(self, *args, **kwargs):
+                options = args[1] if len(args) > 1 else kwargs.get("options", [])
+                return options[0] if options else ""
+
+            def divider(self):
+                return None
+
+            def subheader(self, *args, **kwargs):
+                return None
+
+            def dataframe(self, rows, **kwargs):
+                self.dataframes.append(rows)
+
+            def info(self, *args, **kwargs):
+                return None
+
+            def warning(self, *args, **kwargs):
+                return None
+
+            def success(self, *args, **kwargs):
+                return None
+
+            def error(self, *args, **kwargs):
+                return None
+
+        fake_st = FakeStreamlit()
+        with patch.object(os_pages, "st", fake_st), patch.object(
+            os_pages.supabase_backend,
+            "is_configured",
+            return_value=True,
+        ), patch.object(
+            os_pages.supabase_backend,
+            "list_prodigi_dispatch_rows",
+            return_value=[],
+        ) as list_dispatch, patch.object(
+            os_pages.supabase_backend,
+            "get_prodigi_dispatch_summary",
+            side_effect=AssertionError("Prodigi page load should not run a dispatch summary count."),
+        ), patch.object(
+            os_pages.supabase_backend,
+            "sync_latest_paid_orders_to_supabase",
+            side_effect=AssertionError("Prodigi page load must not sync orders."),
+        ), patch.object(
+            os_pages.supabase_backend,
+            "ensure_schema",
+            side_effect=AssertionError("Prodigi page load must not run schema DDL."),
+        ), patch.object(
+            os_pages.shopify_sync,
+            "iter_order_pages",
+            side_effect=AssertionError("Prodigi page load must not call Shopify orders."),
+        ), patch.object(
+            os_pages.shopify_sync,
+            "fetch_latest_paid_orders",
+            side_effect=AssertionError("Prodigi page load must not call Shopify latest-paid fetch."),
+        ), patch.object(
+            order_allocator,
+            "load_orders_snapshot",
+            side_effect=AssertionError("Prodigi page load must not load the full Orders snapshot."),
+        ), patch.object(
+            orders_page,
+            "_reload_orders_from_source",
+            side_effect=AssertionError("Prodigi page load must not reload Orders."),
+        ), patch.object(
+            os_pages,
+            "prodigi_generate_upload_certificate_for_row",
+            side_effect=AssertionError("Prodigi page load must not generate certificates."),
+        ):
+            os_pages.render_prodigi_page()
+
+        list_dispatch.assert_called_once()
+        self.assertEqual(list_dispatch.call_args.kwargs["limit"], 50)
+
     def test_orders_page_has_copy_order_number_button(self):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
         render_table = inspect.getsource(orders_page._render_orders_table)
         display_rows = orders_page._display_rows([{"order": "#SC2858"}])
-        order_cell_html = orders_page._order_cell_html("#SC2858")
+        copy_handler_html = orders_page._order_copy_click_handler_html()
 
         self.assertEqual(display_rows[0]["order"], f"{orders_page.COPY_ORDER_ICON} #SC2858")
         self.assertNotIn("order_copy", orders_page.VISIBLE_COLUMNS)
         self.assertNotIn("copy_order", orders_page.VISIBLE_COLUMNS)
-        self.assertEqual(order_cell_html.count('class="copy-order-button"'), 1)
-        self.assertEqual(order_cell_html.count('class="order-number">#SC2858</span>'), 1)
-        self.assertEqual(order_cell_html.count("#SC2858"), 1)
+        self.assertEqual(display_rows[0]["order"].count("#SC2858"), 1)
+        self.assertEqual(display_rows[0]["order"].count(orders_page.COPY_ORDER_ICON), 1)
         self.assertNotIn("_render_order_copy_buttons", source)
         self.assertNotIn("_render_order_copy_overlay", source)
+        self.assertNotIn("_render_inline_orders_table", source)
         self.assertNotIn("sports-cave-orders-copy-overlay", source)
         self.assertNotIn("copy-order-row", source)
+        self.assertNotIn("ROW_SELECT_KEY_PREFIX", source)
         self.assertNotIn("Copy order</span>", source)
-        self.assertIn("copy-order-button", source)
+        self.assertIn("st.dataframe", render_table)
+        self.assertIn("selection_mode=\"multi-row\"", render_table)
         self.assertIn("components.html", source)
-        self.assertIn("_render_inline_orders_table(rows)", render_table)
-        self.assertIn("navigator.clipboard.writeText(value)", order_cell_html)
-        self.assertIn("Copy order number", order_cell_html)
+        self.assertIn("_render_order_copy_click_handler()", render_table)
+        self.assertIn("parentWindow.navigator", copy_handler_html)
+        self.assertIn("clipboard.writeText(value)", copy_handler_html)
+        self.assertIn("Copy order number", copy_handler_html)
 
     def test_orders_inline_copy_cells_are_one_per_rendered_order_row(self):
         rows = [
@@ -208,14 +333,13 @@ class EditionOpsUiTests(unittest.TestCase):
             {"order": "#SC2859"},
             {"order": "#SC2858"},
         ]
-        cells = [orders_page._order_cell_html(row["order"]) for row in rows]
+        display_rows = orders_page._display_rows(rows)
 
-        self.assertEqual(len(cells), len(rows))
-        for row, cell in zip(rows, cells):
-            self.assertEqual(cell.count('class="copy-order-button"'), 1)
-            self.assertEqual(cell.count('class="order-number">'), 1)
-            self.assertEqual(cell.count(row["order"]), 1)
-            self.assertIn("Copy order number", cell)
+        self.assertEqual(len(display_rows), len(rows))
+        for row, display_row in zip(rows, display_rows):
+            self.assertEqual(display_row["order"].count(orders_page.COPY_ORDER_ICON), 1)
+            self.assertEqual(display_row["order"].count(row["order"]), 1)
+            self.assertEqual(set(display_row), set(orders_page.VISIBLE_COLUMNS))
 
     def test_prodigi_reference_contains_all_16_code_mappings(self):
         rows = os_pages.prodigi_reference_rows()

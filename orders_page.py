@@ -1,5 +1,4 @@
 from datetime import datetime, timezone
-import html
 import importlib
 import json
 from pathlib import Path
@@ -26,7 +25,6 @@ SNAPSHOT_LOADED_KEY = "orders_allocation_snapshot_loaded"
 NOTICE_KEY = "orders_allocation_notice"
 SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
 GRID_KEY = "orders-fulfilment-grid"
-ROW_SELECT_KEY_PREFIX = "orders-row-selected"
 COPY_ORDER_ICON = "\u29c9"
 SYNC_RESULT_KEY = "orders_sync_result"
 BACKFILL_RESULT_KEY = "orders_backfill_result"
@@ -424,12 +422,6 @@ def _row_key(row):
             str(normalised.get("edition_number") or ""),
         ]
     )
-
-
-def _row_select_key(row, index):
-    key_source = _row_key(row) or str(index)
-    safe_key = re.sub(r"[^A-Za-z0-9_]+", "_", key_source).strip("_")
-    return f"{ROW_SELECT_KEY_PREFIX}-{index}-{safe_key[:96]}"
 
 
 def _certificate_fields(row):
@@ -1173,13 +1165,6 @@ def _selected_indices_from_state():
 
 def _selected_rows_from_state(rows):
     normalised_rows = [_normalise_row(row) for row in rows or []]
-    manual_indices = [
-        index
-        for index, row in enumerate(normalised_rows)
-        if bool(st.session_state.get(_row_select_key(row, index)))
-    ]
-    if manual_indices:
-        return [normalised_rows[index] for index in manual_indices if 0 <= index < len(normalised_rows)]
     selected = []
     for index in _selected_indices_from_state():
         if 0 <= index < len(normalised_rows):
@@ -1464,169 +1449,57 @@ def _display_rows(rows):
     return output
 
 
-def _order_cell_html(order_number):
-    order_number = str(order_number or "").strip()
-    escaped_order_number = html.escape(order_number)
+def _order_copy_click_handler_html():
     return f"""
-<!doctype html>
-<html>
-<head>
-<style>
-html, body {{
-  margin: 0;
-  padding: 0;
-  background: transparent;
-  color: #111827;
-  font: 14px/28px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  overflow: hidden;
-}}
-.order-cell {{
-  height: 28px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}}
-.copy-order-button {{
-  width: 18px;
-  height: 22px;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  background: transparent;
-  color: #374151;
-  cursor: pointer;
-  font: inherit;
-  line-height: 20px;
-}}
-.copy-order-button:hover,
-.copy-order-button:focus {{
-  color: #0f766e;
-  outline: none;
-}}
-.order-number {{
-  display: inline-block;
-}}
-</style>
-</head>
-<body>
-<span class="order-cell">
-  <button class="copy-order-button" type="button" title="Copy order number" aria-label="Copy order number">{COPY_ORDER_ICON}</button>
-  <span class="order-number">{escaped_order_number}</span>
-</span>
 <script>
 (() => {{
-  const button = document.querySelector(".copy-order-button");
-  const orderNumber = document.querySelector(".order-number")?.textContent || "";
+  const icon = {json.dumps(COPY_ORDER_ICON)};
+  const marker = "sports-cave-order-copy-handler";
+  const parentWindow = window.parent || window;
+  const doc = parentWindow.document;
+  if (doc.body.dataset[marker] === "1") return;
+  doc.body.dataset[marker] = "1";
 
-  function copyText(value) {{
-    if (!navigator.clipboard) return Promise.reject(new Error("Clipboard unavailable"));
-    return navigator.clipboard.writeText(value);
+  function cleanOrder(text) {{
+    return String(text || "").replace(icon, "").trim();
   }}
 
-  if (button) {{
-    button.addEventListener("click", (event) => {{
-      event.preventDefault();
-      event.stopPropagation();
-      copyText(orderNumber).then(() => {{
-        button.dataset.copied = "true";
-        window.setTimeout(() => delete button.dataset.copied, 900);
-      }});
-    }});
+  function copyOrder(value) {{
+    const clipboard = parentWindow.navigator && parentWindow.navigator.clipboard;
+    if (!value || !clipboard) return;
+    clipboard.writeText(value);
   }}
+
+  doc.addEventListener("click", (event) => {{
+    const target = event.target;
+    const cell = target && target.closest ? target.closest('[role="gridcell"], [data-testid="stDataFrameCell"]') : null;
+    if (!cell) return;
+    const text = cell.textContent || "";
+    if (!text.includes(icon)) return;
+    const rect = cell.getBoundingClientRect();
+    if (event.clientX - rect.left > 28) return;
+    const orderNumber = cleanOrder(text);
+    if (!/^#?SC\\d+/i.test(orderNumber)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    copyOrder(orderNumber);
+  }}, true);
+
+  doc.addEventListener("mouseover", (event) => {{
+    const cell = event.target && event.target.closest ? event.target.closest('[role="gridcell"], [data-testid="stDataFrameCell"]') : null;
+    if (!cell || !(cell.textContent || "").includes(icon)) return;
+    cell.title = "Copy order number";
+    cell.style.cursor = "copy";
+  }}, true);
 }})();
 </script>
-</body>
-</html>
 """
 
 
-def _render_order_cell(order_number):
-    components.html(_order_cell_html(order_number), height=28, width=132)
-
-
-def _render_table_text(value, *, tone=""):
-    text = html.escape(str(value or ""))
-    classes = "orders-inline-cell"
-    if tone:
-        classes = f"{classes} {tone}"
-    st.markdown(f'<div class="{classes}" title="{text}">{text}</div>', unsafe_allow_html=True)
-
-
-def _render_inline_orders_table(rows):
-    st.markdown(
-        """
-<style>
-.orders-inline-table {
-  border: 1px solid rgba(17, 24, 39, 0.12);
-  border-radius: 8px;
-  overflow: hidden;
-  background: #ffffff;
-}
-.orders-inline-header {
-  color: #6b7280;
-  font-weight: 600;
-  border-bottom: 1px solid rgba(17, 24, 39, 0.10);
-}
-.orders-inline-cell,
-.orders-inline-header-cell {
-  min-height: 28px;
-  line-height: 28px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #111827;
-}
-.orders-inline-cell.uploaded,
-.orders-inline-cell.ready,
-.orders-inline-cell.complete {
-  color: #1d4ed8;
-  font-weight: 600;
-}
-.orders-inline-cell.failed {
-  color: #c92a2a;
-  font-weight: 600;
-}
-.orders-inline-cell.muted {
-  color: #6b7280;
-}
-</style>
-""",
-        unsafe_allow_html=True,
-    )
-    widths = [0.36, 1.12, 1.08, 1.2, 1.7, 2.45, 1.6, 1.25, 1.0, 1.0]
-    headers = ("", "Order", "Edition", "Certificate", "Customer", "Product", "Variant", "Shipping", "Date", "Prodigi")
-    with st.container(border=True):
-        header_cols = st.columns(widths, gap="small")
-        for column, label in zip(header_cols, headers):
-            with column:
-                st.markdown(
-                    f'<div class="orders-inline-header-cell">{html.escape(label)}</div>',
-                    unsafe_allow_html=True,
-                )
-        for index, row in enumerate(rows):
-            row_cols = st.columns(widths, gap="small")
-            with row_cols[0]:
-                st.checkbox(
-                    "Select row",
-                    key=_row_select_key(row, index),
-                    label_visibility="collapsed",
-                )
-            with row_cols[1]:
-                _render_order_cell(row.get("order") or "")
-            values = (
-                ("edition", ""),
-                ("certificate", "ready" if row.get("certificate") in {"Ready", "Uploaded"} else "failed" if row.get("certificate") == "Upload failed" else "muted" if row.get("certificate") == "Needs certificate" else ""),
-                ("customer", ""),
-                ("product", ""),
-                ("variant", ""),
-                ("shipping", ""),
-                ("date", ""),
-                ("prodigi", "complete" if row.get("prodigi") == "Complete" else "muted" if row.get("prodigi") == "Not started" else ""),
-            )
-            for column, (key, tone) in zip(row_cols[2:], values):
-                with column:
-                    _render_table_text(row.get(key) or "", tone=tone)
+def _render_order_copy_click_handler():
+    if getattr(st, "__name__", "") != "streamlit":
+        return
+    components.html(_order_copy_click_handler_html(), height=0, width=0)
 
 
 def _column_config():
@@ -1886,11 +1759,6 @@ def _render_admin_panel(rows):
 def _render_orders_table(rows):
     start = time.perf_counter()
     rows = [_normalise_row(row) for row in rows]
-    if getattr(st, "__name__", "") == "streamlit":
-        _render_inline_orders_table(rows)
-        _perf_log("render table", start, rows=len(rows))
-        print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
-        return
     with st.container(border=True):
         st.dataframe(
             _display_table_payload(rows),
@@ -1904,6 +1772,7 @@ def _render_orders_table(rows):
             row_height=28,
             key=GRID_KEY,
         )
+        _render_order_copy_click_handler()
     _perf_log("render table", start, rows=len(rows))
     print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
 

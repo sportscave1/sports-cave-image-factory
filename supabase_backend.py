@@ -4014,7 +4014,6 @@ def _prodigi_payload_from_db_row(row):
 
 
 def list_prodigi_dispatch_rows(status=None, days=None, older_than_days=None, limit=1000, search=""):
-    ensure_schema()
     limit_value = max(min(int(limit or 1000), 5000), 1)
     where_clauses = []
     params = []
@@ -4074,7 +4073,6 @@ def list_prodigi_dispatch_rows(status=None, days=None, older_than_days=None, lim
 
 
 def get_prodigi_dispatch_summary():
-    ensure_schema()
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
