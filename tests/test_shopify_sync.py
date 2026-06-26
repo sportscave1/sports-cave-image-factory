@@ -1847,6 +1847,9 @@ class ShopifySyncClientTests(unittest.TestCase):
         result = shopify_sync.fetch_latest_paid_orders(limit=50, lookback_days=14, config=self.config)
 
         self.assertEqual(result["orders"][0]["order_name"], "#SC3000")
+        self.assertEqual(result["pages_fetched"], 1)
+        self.assertEqual(result["line_items_fetched"], 0)
+        self.assertEqual(result["metafields_fetched"], 0)
         self.assertEqual(iter_order_pages.call_args.kwargs["query"], "financial_status:paid")
         self.assertNotIn("created_at", iter_order_pages.call_args.kwargs["query"])
         self.assertNotIn("fulfillment_status:unfulfilled", iter_order_pages.call_args.kwargs["query"])
@@ -1862,6 +1865,7 @@ class ShopifySyncClientTests(unittest.TestCase):
 
         self.assertEqual(result["orders"][0]["order_name"], "#SC3001")
         self.assertEqual(result["query"], "financial_status:paid")
+        self.assertEqual(result["pages_fetched"], 1)
         self.assertEqual(iter_order_pages.call_count, 1)
 
     def test_snapshot_override_search_returns_recent_allocated_order_lines(self):
@@ -2857,6 +2861,9 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         )
         self.assertEqual(fetch_latest_paid_orders.call_args.kwargs["sort_key"], "UPDATED_AT")
         self.assertEqual(payload["sync_from"], "2026-06-25T09:50:00Z")
+        self.assertEqual(payload["pages_fetched"], 0)
+        self.assertEqual(payload["line_items_fetched"], 0)
+        self.assertEqual(payload["metafields_fetched"], 0)
 
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(supabase_backend, "ensure_edition_tracking_start", return_value=datetime(2026, 6, 1, 0, 0, tzinfo=timezone.utc))
@@ -2883,6 +2890,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
         self.assertEqual(result["query"], "financial_status:paid created_at:>=2026-06-11")
         self.assertEqual(result["mode"], "latest_paid_dry_run")
+        self.assertEqual(result["pages_fetched"], 0)
         self.assertEqual(analyze_preview.call_args.kwargs["mode_label"], "latest_paid_dry_run")
 
     @patch.object(supabase_backend, "ensure_schema")

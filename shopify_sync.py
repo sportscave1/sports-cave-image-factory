@@ -2921,6 +2921,7 @@ def fetch_latest_paid_orders(
     last_error = None
     for candidate_query in queries:
         fetched = []
+        pages_fetched = 0
         try:
             for page in iter_order_pages(
                 query=candidate_query,
@@ -2933,6 +2934,7 @@ def fetch_latest_paid_orders(
                 sort_key=sort_key,
                 reverse=reverse,
             ):
+                pages_fetched += 1
                 fetched.extend(page.get("orders") or [])
         except ShopifyAPIError as error:
             last_error = error
@@ -2948,6 +2950,9 @@ def fetch_latest_paid_orders(
         "query": query_used,
         "lookback_days": lookback,
         "limit": order_limit,
+        "pages_fetched": pages_fetched if orders else 0,
+        "line_items_fetched": sum(len(order.get("line_items") or []) for order in orders),
+        "metafields_fetched": sum(len(order.get("metafields") or []) for order in orders),
     }
 
 

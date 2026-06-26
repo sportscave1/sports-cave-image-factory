@@ -2074,6 +2074,7 @@ class EditionOpsUiTests(unittest.TestCase):
         latest_sync_source = inspect.getsource(supabase_backend.sync_latest_paid_orders_to_supabase)
         preview_source = inspect.getsource(supabase_backend.preview_latest_paid_orders_sync)
         general_sync_source = inspect.getsource(supabase_backend.sync_shopify_orders_to_supabase)
+        perf_log_source = inspect.getsource(supabase_backend._sync_perf_log)
 
         self.assertIn("_latest_paid_order_needs_sync", latest_sync_source)
         self.assertIn("list_existing_shopify_order_states", latest_sync_source)
@@ -2082,8 +2083,12 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("assign_editions=True", latest_sync_source)
         self.assertIn("generate_certificates=False", latest_sync_source)
         self.assertIn("sync_product_metafields=False", latest_sync_source)
+        self.assertIn("PERF Sync Orders:", perf_log_source)
+        self.assertIn("Supabase existing-order lookup time", latest_sync_source)
+        self.assertIn("Shopify metafield mirror/update time", latest_sync_source)
         self.assertNotIn("sync_shopify_orders_to_supabase(", latest_sync_source)
         self.assertIn("respect_tracking_start=False", preview_source)
+        self.assertIn("_sync_perf_log", preview_source)
         self.assertIn("respect_tracking_start=True", general_sync_source)
 
     def test_missing_edition_repair_preview_is_chronological(self):

@@ -830,10 +830,12 @@ def _save_refreshed_rows(rows, existing_rows, refreshed_at=None):
 
 
 def _refresh_orders(*, latest_paid_only=True, max_orders=50):
+    total_started = time.perf_counter()
     backend = _configured_supabase_backend()
     if not backend:
         st.session_state[NOTICE_KEY] = "Supabase is not configured. Stage 4B sync cannot run from local fallback mode."
         return
+    sync_started = time.perf_counter()
     if latest_paid_only:
         result = backend.sync_latest_paid_orders_to_supabase(limit=max_orders)
     else:
@@ -842,14 +844,34 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50):
             generate_certificates=False,
             sync_product_metafields=False,
         )
+    print(
+        "PERF Sync Orders: backend sync returned "
+        f"elapsed_ms={int((time.perf_counter() - sync_started) * 1000)} "
+        f"mode={result.get('mode') or ('latest_paid' if latest_paid_only else 'incremental')} "
+        f"orders={int(result.get('shopify_orders_fetched') or result.get('orders_seen') or 0)} "
+        f"new_orders={int(result.get('new_orders_inserted') or 0)}",
+        flush=True,
+    )
     st.session_state[SYNC_RESULT_KEY] = result
+    cache_started = time.perf_counter()
     _reload_orders_from_source()
+    print(
+        "PERF Sync Orders: cache rebuild time "
+        f"elapsed_ms={int((time.perf_counter() - cache_started) * 1000)}",
+        flush=True,
+    )
     st.session_state[NOTICE_KEY] = (
         f"New orders imported: {int(result.get('new_orders_inserted') or 0)} | "
         f"Existing orders preserved: {int(result.get('existing_orders_skipped') or 0)} | "
         f"Edition numbers assigned: {int(result.get('edition_allocations_created') or 0)} | "
         f"Missing product mapping: {int(result.get('missing_mapping_skipped') or 0)} | "
         f"Errors: {len(result.get('errors') or [])}"
+    )
+    print(
+        "PERF Sync Orders: total sync time "
+        f"elapsed_ms={int((time.perf_counter() - total_started) * 1000)} "
+        "streamlit_rerun_trigger=after_button_handler",
+        flush=True,
     )
 
 
@@ -870,11 +892,19 @@ def _backfill_missing_order_details(*, dry_run=True, limit=100):
 
 
 def _preview_latest_paid_orders(*, limit=50):
+    total_started = time.perf_counter()
     backend = _configured_supabase_backend()
     if not backend:
         st.session_state[NOTICE_KEY] = "Supabase is not configured. Latest Shopify fetch preview is unavailable."
         return
     result = backend.preview_latest_paid_orders_sync(limit=limit)
+    print(
+        "PERF Sync Orders: preview backend returned "
+        f"elapsed_ms={int((time.perf_counter() - total_started) * 1000)} "
+        f"orders={int(result.get('shopify_orders_fetched') or 0)} "
+        f"new_orders={int(result.get('new_orders_inserted') or 0)}",
+        flush=True,
+    )
     st.session_state[LATEST_FETCH_PREVIEW_KEY] = result
     st.session_state[NOTICE_KEY] = (
         f"Fetched preview for {int(result.get('shopify_orders_fetched') or 0)} latest paid Shopify order(s)."

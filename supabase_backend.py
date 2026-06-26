@@ -4319,8 +4319,37 @@ def _record_order_fetch_metrics(
         set_app_setting(LAST_SUCCESSFUL_ORDER_FETCH_KEY, str(success_timestamp))
 
 
+def _sync_perf_log(label, started=None, **fields):
+    parts = [f"PERF Sync Orders: {label}"]
+    if started is not None:
+        parts.append(f"elapsed_ms={int((time.perf_counter() - started) * 1000)}")
+    for key, value in fields.items():
+        if value is None:
+            continue
+        parts.append(f"{key}={value}")
+    print(" ".join(parts), flush=True)
+
+
+def _sync_order_line_count(orders):
+    return sum(len(order.get("line_items") or []) for order in orders or [])
+
+
+def _sync_order_metafield_count(orders):
+    return sum(len(order.get("metafields") or []) for order in orders or [])
+
+
 def _log_order_fetch_timing(*, total_ms, shopify_ms, pages, orders, db_load_ms, assign_ms, db_write_ms):
     db_ms = int((db_load_ms or 0) + (db_write_ms or 0))
+    _sync_perf_log(
+        "total sync time",
+        None,
+        total_ms=int(total_ms),
+        shopify_ms=int(shopify_ms),
+        pages=int(pages),
+        orders=int(orders),
+        supabase_ms=db_ms,
+        edition_allocation_ms=int(assign_ms),
+    )
     print(
         "ORDER_FETCH "
         f"total={int(total_ms)}ms "
@@ -5827,12 +5856,22 @@ def _persist_order_snapshot(order):
     with connect() as conn:
         try:
             with conn.cursor() as cur:
+                customer_started = time.perf_counter()
                 customer = _customer_from_order(order)
                 _upsert_customer(cur, customer)
+                _sync_perf_log("Supabase customer upsert time", customer_started)
+                order_started = time.perf_counter()
                 _upsert_order(cur, order)
+                _sync_perf_log("Supabase order upsert time", order_started, lines=len(order.get("line_items") or []))
+                lines_started = time.perf_counter()
                 _upsert_order_lines(cur, order)
+                _sync_perf_log("Supabase line item upsert time", lines_started, lines=len(order.get("line_items") or []))
+                backfill_started = time.perf_counter()
                 _backfill_edition_customer_details(cur, order)
+                _sync_perf_log("Supabase edition customer backfill time", backfill_started)
+                commit_started = time.perf_counter()
                 conn.commit()
+                _sync_perf_log("Supabase order snapshot commit time", commit_started)
         except Exception:
             conn.rollback()
             raise
@@ -6890,6 +6929,7 @@ def allocate_edition_for_order_line(
                         """,
                         (safe_floor, max_assigned, shopify_handle),
                     )
+                    audit_started = time.perf_counter()
                     _insert_audit_log(
                         cur,
                         event_type="edition_counter_auto_corrected",
@@ -6908,6 +6948,7 @@ def allocate_edition_for_order_line(
                         actor="sports_cave_os_sync",
                         source="supabase_ledger",
                     )
+                    _sync_perf_log("audit log write time", audit_started, event="edition_counter_auto_corrected")
                     next_number = safe_floor
 
                 if run_status == SOLD_OUT_RUN_STATUS or next_number > edition_total:
@@ -7157,6 +7198,7 @@ def allocate_edition_for_order_line(
                     ),
                 )
                 inserted["order_name"] = shopify_order_name
+                audit_started = time.perf_counter()
                 _insert_audit_log(
                     cur,
                     event_type="edition_order_purchase_snapshot_allocation" if promised_edition_number else "edition_order_auto_allocation",
@@ -7182,6 +7224,7 @@ def allocate_edition_for_order_line(
                     actor="sports_cave_os_sync",
                     source="supabase_ledger",
                 )
+                _sync_perf_log("audit log write time", audit_started, event="edition_order_allocation")
                 conn.commit()
                 return {"created": True, "assignment": inserted, "sold_out": False, "error": ""}
         except Exception:
@@ -7239,6 +7282,9 @@ def process_paid_order(
     order_customer_email = str(order.get("customer_email") or order.get("email") or "").strip()
     new_assignments = []
     product_cache = {}
+    product_match_ms = 0.0
+    allocation_ms = 0.0
+    line_status_ms = 0.0
     line_items_for_allocation = sorted(
         enumerate(order.get("line_items") or [], start=1),
         key=lambda item: (
@@ -7269,14 +7315,17 @@ def process_paid_order(
                 product = cached_product
                 match_result = {"product": product, "status": "matched", "reason": "Matched from order sync product cache."}
             else:
+                product_match_started = time.perf_counter()
                 match_result = resolve_edition_product_for_order_line(
                     line_item,
                     fetch_missing_products=fetch_missing_products,
                 )
+                product_match_ms += (time.perf_counter() - product_match_started) * 1000
                 product = match_result.get("product") or {}
         except Exception as error:
             product = None
             errors.append(f"Product fetch failed for {line_item.get('product_title')}: {error}")
+            line_status_started = time.perf_counter()
             with connect() as conn:
                 with conn.cursor() as cur:
                     _set_order_line_status(
@@ -7292,6 +7341,7 @@ def process_paid_order(
                         last_error=str(error),
                     )
                 conn.commit()
+            line_status_ms += (time.perf_counter() - line_status_started) * 1000
             continue
 
         if product:
@@ -7311,6 +7361,7 @@ def process_paid_order(
             missing_mapping_skipped += quantity
             mapping_reason = (match_result or {}).get("reason") or "Could not confidently match the line to an Edition Ops product."
             errors.append(f"Missing product mapping for line item {line_item_id}: {mapping_reason}")
+            line_status_started = time.perf_counter()
             with connect() as conn:
                 with conn.cursor() as cur:
                     _set_order_line_status(
@@ -7325,11 +7376,13 @@ def process_paid_order(
                         last_error=mapping_reason,
                     )
                 conn.commit()
+            line_status_ms += (time.perf_counter() - line_status_started) * 1000
             continue
         if product and not bool(product.get("active", True)):
             missing_mapping_skipped += quantity
             setup_reason = "Matched Edition Ops product is disabled."
             errors.append(f"Edition setup disabled for line item {line_item_id}: {handle}.")
+            line_status_started = time.perf_counter()
             with connect() as conn:
                 with conn.cursor() as cur:
                     _set_order_line_status(
@@ -7345,6 +7398,7 @@ def process_paid_order(
                         last_error=setup_reason,
                     )
                 conn.commit()
+            line_status_ms += (time.perf_counter() - line_status_started) * 1000
             continue
         product_title = (product or {}).get("title") or line_item.get("product_title") or "Sports Cave Artwork"
         product_id = (product or {}).get("shopify_product_id") or line_item.get("shopify_product_id") or ""
@@ -7355,6 +7409,7 @@ def process_paid_order(
 
         for allocation_index in range(1, quantity + 1):
             promised_hint = promised_edition_hint_for_order_line(order, line_item, allocation_index)
+            allocation_started = time.perf_counter()
             result = allocate_edition_for_order_line(
                 shopify_order_id=order.get("shopify_order_id"),
                 shopify_order_name=order.get("order_name"),
@@ -7372,6 +7427,7 @@ def process_paid_order(
                 promised_edition_total=promised_hint.get("edition_total"),
                 assignment_source=promised_hint.get("source") or "supabase_sequential_allocation",
             )
+            allocation_ms += (time.perf_counter() - allocation_started) * 1000
             if result.get("error"):
                 line_errors.append(result["error"])
                 errors.append(result["error"])
@@ -7396,6 +7452,7 @@ def process_paid_order(
             line_status = "Sold Out"
         elif line_errors:
             line_status = "Error"
+        line_status_started = time.perf_counter()
         with connect() as conn:
             with conn.cursor() as cur:
                 _set_order_line_status(
@@ -7411,8 +7468,10 @@ def process_paid_order(
                     last_error=line_error,
                 )
             conn.commit()
+        line_status_ms += (time.perf_counter() - line_status_started) * 1000
 
     if generate_certificates:
+        certificate_started = time.perf_counter()
         for assignment in new_assignments:
             try:
                 generate_certificate_for_edition_order(assignment["id"])
@@ -7427,16 +7486,35 @@ def process_paid_order(
                     str(error),
                     {"edition_order_id": assignment.get("id"), "shopify_handle": assignment.get("shopify_handle")},
                 )
+        _sync_perf_log("certificate generation time", certificate_started, generated=generated_certificates)
+    else:
+        _sync_perf_log("certificate generation time", None, elapsed_ms=0, skipped=True)
 
     if sync_product_metafields:
+        metafield_started = time.perf_counter()
         for handle in sorted(changed_handles):
             try:
                 sync_product_edition_metafields(handle)
             except Exception as error:
                 errors.append(f"Shopify metafield sync failed for {handle}: {error}")
+        _sync_perf_log("Shopify metafield mirror/update time", metafield_started, handles=len(changed_handles))
+    else:
+        _sync_perf_log("Shopify metafield mirror/update time", None, elapsed_ms=0, deferred_handles=len(changed_handles))
 
+    audit_error_started = time.perf_counter()
     for message in errors:
         log_app_error("order_processing_warning", message, {"shopify_order_id": order.get("shopify_order_id")})
+    _sync_perf_log("audit log write time", audit_error_started, warnings=len(errors))
+    _sync_perf_log(
+        "order processing detail",
+        None,
+        product_match_ms=int(product_match_ms),
+        edition_allocation_ms=int(allocation_ms),
+        line_status_ms=int(line_status_ms),
+        assignments=assignments_created,
+        existing_assignments=existing_assignments_skipped,
+        missing_mapping=missing_mapping_skipped,
+    )
     return {
         "assignments_created": assignments_created,
         "existing_assignments_skipped": existing_assignments_skipped,
@@ -7552,6 +7630,8 @@ def _latest_paid_orders_payload(config=None, *, limit=DEFAULT_LATEST_PAID_ORDER_
         )
         query = f"financial_status:paid updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
         sort_key = "UPDATED_AT"
+    fetch_started = time.perf_counter()
+    _sync_perf_log("Shopify fetch start", None, mode="latest_paid", limit=limit, cursor=bool(sync_from))
     fetched = shopify_sync.fetch_latest_paid_orders(
         limit=limit,
         lookback_days=lookback_days,
@@ -7560,12 +7640,25 @@ def _latest_paid_orders_payload(config=None, *, limit=DEFAULT_LATEST_PAID_ORDER_
         reverse=True,
         config=config,
     )
+    orders = fetched.get("orders") or []
+    _sync_perf_log(
+        "Shopify fetch end",
+        fetch_started,
+        pages=fetched.get("pages_fetched") or (1 if orders else 0),
+        orders=len(orders),
+        line_items=fetched.get("line_items_fetched") or _sync_order_line_count(orders),
+        metafields=fetched.get("metafields_fetched") or _sync_order_metafield_count(orders),
+        query_mode="cursor" if sync_from else "latest_paid",
+    )
     return {
-        "orders": fetched.get("orders") or [],
+        "orders": orders,
         "query": str(fetched.get("query") or ""),
         "limit": int(fetched.get("limit") or limit or DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT),
         "lookback_days": int(fetched.get("lookback_days") or lookback_days or DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS),
         "sync_from": _datetime_to_setting(sync_from) if sync_from else "",
+        "pages_fetched": int(fetched.get("pages_fetched") or (1 if orders else 0)),
+        "line_items_fetched": int(fetched.get("line_items_fetched") or _sync_order_line_count(orders)),
+        "metafields_fetched": int(fetched.get("metafields_fetched") or _sync_order_metafield_count(orders)),
     }
 
 
@@ -7911,24 +8004,41 @@ def preview_latest_paid_orders_sync(
     limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT,
     lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
 ):
-    ensure_schema()
-    config = config or shopify_sync.get_config()
     total_started = time.perf_counter()
+    schema_started = time.perf_counter()
+    ensure_schema()
+    _sync_perf_log("schema guard", schema_started, mode="preview_latest_paid")
+    config = config or shopify_sync.get_config()
+    state_started = time.perf_counter()
     state = get_sync_state()
+    _sync_perf_log("sync state read", state_started, mode="preview_latest_paid")
     tracking_start = _parse_datetime(state.get("edition_tracking_start_at"))
     if not tracking_start:
         tracking_start = ensure_edition_tracking_start()
     payload = _latest_paid_orders_payload(config, limit=limit, lookback_days=lookback_days)
+    analyze_started = time.perf_counter()
     result = _analyze_fetched_orders_for_preview(
         payload.get("orders") or [],
         tracking_start=tracking_start,
         mode_label="latest_paid_dry_run",
         respect_tracking_start=False,
     )
+    _sync_perf_log(
+        "preview analysis",
+        analyze_started,
+        orders=result.get("shopify_orders_fetched"),
+        new_orders=result.get("new_orders_inserted"),
+        existing_orders=result.get("existing_orders_skipped"),
+        allocations=result.get("edition_allocations_created"),
+    )
     result["query"] = payload.get("query") or ""
     result["lookback_days"] = payload.get("lookback_days") or lookback_days
     result["limit"] = payload.get("limit") or limit
+    result["pages_fetched"] = payload.get("pages_fetched") or 0
+    result["line_items_fetched"] = payload.get("line_items_fetched") or 0
+    result["metafields_fetched"] = payload.get("metafields_fetched") or 0
     result["fetch_duration_ms"] = int((time.perf_counter() - total_started) * 1000)
+    _sync_perf_log("preview total sync time", total_started, orders=result.get("shopify_orders_fetched"))
     return result
 
 
@@ -7938,11 +8048,17 @@ def sync_latest_paid_orders_to_supabase(
     limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT,
     lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
 ):
-    ensure_schema()
-    config = config or shopify_sync.get_config()
-    run_id = start_sync_run("shopify_orders_latest_paid")
     total_started = time.perf_counter()
+    schema_started = time.perf_counter()
+    ensure_schema()
+    _sync_perf_log("schema guard", schema_started, mode="latest_paid_sync")
+    config = config or shopify_sync.get_config()
+    run_started = time.perf_counter()
+    run_id = start_sync_run("shopify_orders_latest_paid")
+    _sync_perf_log("sync run start write", run_started, mode="latest_paid_sync")
+    shopify_fetch_started = time.perf_counter()
     payload = _latest_paid_orders_payload(config, limit=limit, lookback_days=lookback_days)
+    shopify_fetch_ms = int((time.perf_counter() - shopify_fetch_started) * 1000)
     fetched_orders = payload.get("orders") or []
     seen = len(fetched_orders)
     processed_orders = 0
@@ -7953,12 +8069,14 @@ def sync_latest_paid_orders_to_supabase(
     changed_handles = set()
     imported_orders = 0
     imported_lines = 0
-    shopify_ms = int((time.perf_counter() - total_started) * 1000)
+    shopify_ms = shopify_fetch_ms
     db_write_started = time.perf_counter()
 
     try:
+        attempt_started = time.perf_counter()
         _set_sync_attempt(LAST_ATTEMPTED_ORDER_SYNC_KEY)
         set_app_setting(LAST_ORDER_FETCH_STATUS_KEY, "Running")
+        _sync_perf_log("sync state write", attempt_started, mode="latest_paid_sync")
         order_ids = [order.get("shopify_order_id") for order in fetched_orders]
         line_item_ids = [
             str(line_item.get("shopify_line_item_id") or "").strip()
@@ -7966,34 +8084,73 @@ def sync_latest_paid_orders_to_supabase(
             for line_item in (order.get("line_items") or [])
             if str(line_item.get("shopify_line_item_id") or "").strip()
         ]
+        existing_lookup_started = time.perf_counter()
         existing_order_ids = list_existing_shopify_order_ids(order_ids)
+        _sync_perf_log(
+            "Supabase existing-order lookup time",
+            existing_lookup_started,
+            orders_checked=len(order_ids),
+            existing_orders=len(existing_order_ids),
+        )
+        line_lookup_started = time.perf_counter()
         existing_line_item_ids = list_existing_shopify_line_item_ids(line_item_ids)
+        _sync_perf_log(
+            "Supabase existing-line lookup time",
+            line_lookup_started,
+            line_items_checked=len(line_item_ids),
+            existing_lines=len(existing_line_item_ids),
+        )
+        state_lookup_started = time.perf_counter()
         existing_order_states = list_existing_shopify_order_states(order_ids)
+        _sync_perf_log(
+            "Supabase existing-order state lookup time",
+            state_lookup_started,
+            orders_checked=len(order_ids),
+            states=len(existing_order_states),
+        )
         imported_orders = sum(
             1 for order in fetched_orders if str(order.get("shopify_order_id") or "").strip() not in existing_order_ids
         )
         imported_lines = sum(1 for line_id in line_item_ids if line_id not in existing_line_item_ids)
+        filter_started = time.perf_counter()
         candidate_orders = [
             order
             for order in fetched_orders
             if _latest_paid_order_needs_sync(order, existing_order_ids, existing_line_item_ids, existing_order_states)
         ]
+        _sync_perf_log(
+            "existing-order skip filter",
+            filter_started,
+            fetched_orders=seen,
+            candidate_orders=len(candidate_orders),
+            imported_orders=imported_orders,
+            imported_lines=imported_lines,
+        )
         known_repair_candidates = {
             str(order.get("order_name") or "").strip()
             for order in candidate_orders
             if str(order.get("order_name") or "").strip()
         }
+        known_repair_started = time.perf_counter()
         known_repair = (
             apply_known_missing_edition_repair()
             if known_repair_candidates
             and any(repair.get("order_name") in known_repair_candidates for repair in KNOWN_MISSING_EDITION_REPAIRS)
             else {"applied_rows": 0, "already_exists_consistent": 0, "errors": []}
         )
+        _sync_perf_log(
+            "known missing-edition repair time",
+            known_repair_started,
+            candidates=len(known_repair_candidates),
+            applied=known_repair.get("applied_rows") or 0,
+            already_consistent=known_repair.get("already_exists_consistent") or 0,
+        )
         known_applied = int(known_repair.get("applied_rows") or 0)
         known_consistent = int(known_repair.get("already_exists_consistent") or 0)
         if known_repair.get("errors"):
             errors.extend(known_repair.get("errors") or [])
 
+        allocation_started = time.perf_counter()
         for order in sorted(candidate_orders, key=order_allocation_sort_key):
             result = process_shopify_order_for_editions(
                 order,
@@ -8008,9 +8165,20 @@ def sync_latest_paid_orders_to_supabase(
             missing_mapping_skipped += int(result.get("missing_mapping_skipped") or 0)
             changed_handles.update(result.get("changed_handles") or [])
             errors.extend(result.get("errors") or [])
+        allocation_elapsed_ms = (time.perf_counter() - allocation_started) * 1000
+        _sync_perf_log(
+            "edition allocation time",
+            None,
+            elapsed_ms=int(allocation_elapsed_ms),
+            candidate_orders=len(candidate_orders),
+            processed_orders=processed_orders,
+            assignments=assignments,
+            existing_assignments=existing_skipped,
+        )
 
         assignments += known_applied
         existing_skipped += known_consistent
+        state_success_started = time.perf_counter()
         success_timestamp = _set_sync_success(LAST_SUCCESSFUL_ORDER_SYNC_KEY)
         status = "No New Orders" if seen == 0 and known_applied == 0 else ("Success With Warnings" if errors else "Success")
         duration_ms = int((time.perf_counter() - total_started) * 1000)
@@ -8021,14 +8189,24 @@ def sync_latest_paid_orders_to_supabase(
             assignments_created=assignments,
             success_timestamp=success_timestamp,
         )
+        _sync_perf_log("sync state success/metrics write", state_success_started, status=status)
+        run_finish_started = time.perf_counter()
         finish_sync_run(run_id, "Complete" if not errors else "Complete With Warnings", seen, processed_orders)
+        _sync_perf_log("sync run finish write", run_finish_started, status="Complete" if not errors else "Complete_With_Warnings")
+        _sync_perf_log(
+            "Shopify metafield mirror/update time",
+            None,
+            elapsed_ms=0,
+            product_metafields_deferred=len(changed_handles),
+            order_metafields_updated=0,
+        )
         _log_order_fetch_timing(
             total_ms=duration_ms,
             shopify_ms=shopify_ms,
-            pages=1 if seen else 0,
+            pages=payload.get("pages_fetched") or (1 if seen else 0),
             orders=seen,
             db_load_ms=0,
-            assign_ms=0,
+            assign_ms=allocation_elapsed_ms,
             db_write_ms=(time.perf_counter() - db_write_started) * 1000,
         )
         return {
@@ -8055,6 +8233,9 @@ def sync_latest_paid_orders_to_supabase(
             "lookback_days": payload.get("lookback_days") or lookback_days,
             "limit": payload.get("limit") or limit,
             "sync_from": payload.get("sync_from") or "",
+            "pages_fetched": payload.get("pages_fetched") or (1 if seen else 0),
+            "line_items_fetched": payload.get("line_items_fetched") or _sync_order_line_count(fetched_orders),
+            "metafields_fetched": payload.get("metafields_fetched") or _sync_order_metafield_count(fetched_orders),
             "fetch_duration_ms": duration_ms,
             "last_order_fetch_status": status,
             "errors": errors[:10],
