@@ -6,6 +6,7 @@ import re
 import time
 
 import streamlit as st
+import streamlit.components.v1 as components
 try:
     import pandas as pd
 except Exception:  # pragma: no cover - optional at import time
@@ -1448,6 +1449,150 @@ def _display_rows(rows):
     return output
 
 
+def _order_copy_overlay_html(rows):
+    orders = [
+        str(_normalise_row(row).get("order") or "").strip()
+        for row in rows or []
+        if str(_normalise_row(row).get("order") or "").strip()
+    ]
+    return f"""
+<script>
+(() => {{
+  const orders = {json.dumps(orders)};
+  const overlayId = "sports-cave-orders-copy-overlay";
+  const styleId = "sports-cave-orders-copy-style";
+  const icon = {json.dumps(COPY_ORDER_ICON)};
+
+  function copyText(value) {{
+    if (navigator.clipboard && window.isSecureContext) {{
+      return navigator.clipboard.writeText(value);
+    }}
+    const input = document.createElement("textarea");
+    input.value = value;
+    input.setAttribute("readonly", "");
+    input.style.position = "fixed";
+    input.style.left = "-9999px";
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand("copy");
+    input.remove();
+    return Promise.resolve();
+  }}
+
+  function ensureStyle(doc) {{
+    if (doc.getElementById(styleId)) return;
+    const style = doc.createElement("style");
+    style.id = styleId;
+    style.textContent = `
+      #${{overlayId}} {{
+        position: absolute;
+        z-index: 9999;
+        pointer-events: none;
+        overflow: hidden;
+        color: #1f2937;
+        font: 14px/28px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }}
+      #${{overlayId}} .copy-order-row {{
+        height: 28px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        white-space: nowrap;
+        pointer-events: auto;
+        background: rgba(255, 255, 255, 0.96);
+      }}
+      #${{overlayId}} .copy-order-button {{
+        width: 18px;
+        height: 22px;
+        border: 0;
+        padding: 0;
+        margin: 0;
+        background: transparent;
+        color: #374151;
+        cursor: pointer;
+        font: inherit;
+        line-height: 20px;
+      }}
+      #${{overlayId}} .copy-order-button:hover,
+      #${{overlayId}} .copy-order-button:focus {{
+        color: #0f766e;
+        outline: none;
+      }}
+      #${{overlayId}} .copy-order-number {{
+        pointer-events: none;
+      }}
+    `;
+    doc.head.appendChild(style);
+  }}
+
+  function render() {{
+    const doc = window.parent && window.parent.document ? window.parent.document : document;
+    ensureStyle(doc);
+    const tables = Array.from(doc.querySelectorAll('[data-testid="stDataFrame"]'));
+    const table = tables[tables.length - 1];
+    if (!table || !orders.length) return;
+
+    let overlay = doc.getElementById(overlayId);
+    if (!overlay) {{
+      overlay = doc.createElement("div");
+      overlay.id = overlayId;
+      doc.body.appendChild(overlay);
+    }}
+
+    const rect = table.getBoundingClientRect();
+    const headerHeight = 36;
+    const checkboxColumnWidth = 36;
+    const leftPadding = 9;
+    const visibleHeight = Math.max(0, Math.min(rect.height - headerHeight, orders.length * 28));
+    overlay.style.left = `${{Math.round(rect.left + window.parent.scrollX + checkboxColumnWidth + leftPadding)}}px`;
+    overlay.style.top = `${{Math.round(rect.top + window.parent.scrollY + headerHeight)}}px`;
+    overlay.style.width = "122px";
+    overlay.style.height = `${{Math.round(visibleHeight)}}px`;
+    overlay.innerHTML = "";
+
+    orders.forEach((order) => {{
+      const row = doc.createElement("div");
+      row.className = "copy-order-row";
+      const button = doc.createElement("button");
+      button.className = "copy-order-button";
+      button.type = "button";
+      button.title = "Copy order number";
+      button.setAttribute("aria-label", "Copy order number");
+      button.dataset.order = order;
+      button.textContent = icon;
+      const number = doc.createElement("span");
+      number.className = "copy-order-number";
+      number.textContent = order;
+      button.addEventListener("click", (event) => {{
+        event.preventDefault();
+        event.stopPropagation();
+        copyText(order).then(() => {{
+          button.dataset.copied = "true";
+          window.setTimeout(() => delete button.dataset.copied, 900);
+        }});
+      }});
+      row.appendChild(button);
+      row.appendChild(number);
+      overlay.appendChild(row);
+    }});
+  }}
+
+  render();
+  window.parent.addEventListener("resize", render, {{ passive: true }});
+  window.parent.addEventListener("scroll", render, {{ passive: true }});
+  window.setTimeout(render, 150);
+  window.setTimeout(render, 600);
+}})();
+</script>
+"""
+
+
+def _render_order_copy_overlay(rows):
+    if getattr(st, "__name__", "") != "streamlit":
+        return
+    components.html(_order_copy_overlay_html(rows), height=0, width=0)
+
+
 def _column_config():
     return {
         "order": st.column_config.TextColumn("Order", width="small"),
@@ -1718,6 +1863,7 @@ def _render_orders_table(rows):
             row_height=28,
             key=GRID_KEY,
         )
+        _render_order_copy_overlay(rows)
     _perf_log("render table", start, rows=len(rows))
     print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
 

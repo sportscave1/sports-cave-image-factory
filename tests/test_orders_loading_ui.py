@@ -183,12 +183,17 @@ class EditionOpsUiTests(unittest.TestCase):
         source = (ROOT / "orders_page.py").read_text(encoding="utf-8")
         render_table = inspect.getsource(orders_page._render_orders_table)
         display_rows = orders_page._display_rows([{"order": "#SC2858"}])
+        overlay_html = orders_page._order_copy_overlay_html([{"order": "#SC2858"}])
 
         self.assertEqual(display_rows[0]["order"], f"{orders_page.COPY_ORDER_ICON} #SC2858")
         self.assertNotIn("_render_order_copy_buttons", source)
         self.assertNotIn("Copy order</span>", source)
-        self.assertNotIn("copy-order-button", source)
-        self.assertNotIn("components.html", render_table)
+        self.assertIn("copy-order-button", source)
+        self.assertIn("components.html", source)
+        self.assertIn("_render_order_copy_overlay(rows)", render_table)
+        self.assertIn("navigator.clipboard.writeText(value)", overlay_html)
+        self.assertIn("Copy order number", overlay_html)
+        self.assertIn("#SC2858", overlay_html)
 
     def test_prodigi_reference_contains_all_16_code_mappings(self):
         rows = os_pages.prodigi_reference_rows()
