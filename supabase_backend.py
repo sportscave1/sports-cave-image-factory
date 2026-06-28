@@ -4302,6 +4302,12 @@ def _set_sync_success(key):
     return timestamp
 
 
+def _set_sync_success_at(key, value):
+    timestamp = _datetime_to_setting(value)
+    set_app_setting(key, timestamp)
+    return timestamp
+
+
 def _record_order_fetch_metrics(
     *,
     status,
@@ -4335,6 +4341,121 @@ def _sync_order_line_count(orders):
 
 def _sync_order_metafield_count(orders):
     return sum(len(order.get("metafields") or []) for order in orders or [])
+
+
+def _shopify_order_cursor_datetime(order):
+    return (
+        _parse_datetime(order.get("remote_updated_at"))
+        or _parse_datetime(order.get("updated_at"))
+        or _parse_datetime(order.get("processed_at"))
+        or _parse_datetime(order.get("created_at"))
+    )
+
+
+def _newest_shopify_order_cursor(orders):
+    cursors = [
+        cursor
+        for cursor in (_shopify_order_cursor_datetime(order) for order in orders or [])
+        if cursor is not None
+    ]
+    return max(cursors) if cursors else None
+
+
+def _latest_paid_sync_cursor(state, *, backfill_latest_paid=False):
+    if backfill_latest_paid:
+        return {
+            "cursor_raw": "",
+            "cursor_source": "backfill",
+            "cursor_datetime": None,
+            "cursor_used": "",
+            "cursor_timezone": "UTC",
+            "cursor_warning": "",
+            "cursor_ignored": False,
+            "query_mode": "latest_paid_backfill",
+        }
+
+    raw_cursor = ""
+    source = ""
+    for key in ("last_successful_order_fetch_at", "last_successful_order_sync_at"):
+        candidate = state.get(key)
+        parsed = _parse_datetime(candidate)
+        if parsed:
+            raw_cursor = str(candidate or "")
+            source = key
+            break
+
+    now = utc_now_datetime()
+    if raw_cursor and parsed > now:
+        sync_from = now - timedelta(hours=DEFAULT_CURSORLESS_ORDER_LOOKBACK_HOURS)
+        return {
+            "cursor_raw": raw_cursor,
+            "cursor_source": source,
+            "cursor_datetime": parsed,
+            "cursor_used": _datetime_to_setting(sync_from),
+            "cursor_timezone": "UTC",
+            "cursor_warning": (
+                f"Stored order sync cursor {raw_cursor} is in the future. "
+                "Ignored it and used the safe recent-orders window instead."
+            ),
+            "cursor_ignored": True,
+            "query_mode": "safe_window_future_cursor_ignored",
+        }
+
+    if raw_cursor:
+        sync_from = parsed - timedelta(
+            minutes=state.get("sync_lookback_buffer_minutes") or DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES
+        )
+        return {
+            "cursor_raw": raw_cursor,
+            "cursor_source": source,
+            "cursor_datetime": parsed,
+            "cursor_used": _datetime_to_setting(sync_from),
+            "cursor_timezone": "UTC",
+            "cursor_warning": "",
+            "cursor_ignored": False,
+            "query_mode": "cursor",
+        }
+
+    sync_from = now - timedelta(hours=DEFAULT_CURSORLESS_ORDER_LOOKBACK_HOURS)
+    return {
+        "cursor_raw": "",
+        "cursor_source": "none",
+        "cursor_datetime": None,
+        "cursor_used": _datetime_to_setting(sync_from),
+        "cursor_timezone": "UTC",
+        "cursor_warning": "",
+        "cursor_ignored": False,
+        "query_mode": "safe_window",
+    }
+
+
+def _latest_paid_empty_fetch_reason(payload):
+    if payload.get("backfill_latest_paid"):
+        return "Shopify API returned empty for latest paid orders in backfill mode."
+    if payload.get("cursor_warning"):
+        return (
+            f"{payload.get('cursor_warning')} Shopify API returned empty for paid orders "
+            f"after {payload.get('sync_from') or 'the safe window'}."
+        )
+    if payload.get("sync_from"):
+        return (
+            f"No paid orders after cursor {payload.get('sync_from')}. "
+            "Backfill not enabled. Shopify API returned empty."
+        )
+    return "Shopify API returned empty for paid orders. Backfill not enabled."
+
+
+def _paid_order_skip_counts(orders):
+    skipped_orders = 0
+    skipped_lines = 0
+    for order in orders or []:
+        financial_status = str(order.get("financial_status") or "").upper()
+        cancelled = bool(str(order.get("cancelled_at") or "").strip())
+        unpaid_or_refunded = financial_status and financial_status not in {"PAID", "PARTIALLY_PAID"}
+        if cancelled or unpaid_or_refunded:
+            skipped_orders += 1
+            skipped_lines += len(order.get("line_items") or [])
+    return skipped_orders, skipped_lines
 
 
 def _log_order_fetch_timing(*, total_ms, shopify_ms, pages, orders, db_load_ms, assign_ms, db_write_ms):
@@ -7623,34 +7744,53 @@ def _latest_paid_orders_payload(
 ):
     config = config or shopify_sync.get_config()
     state = get_sync_state()
-    last_success = _parse_datetime(
-        state.get("last_successful_order_fetch_at") or state.get("last_successful_order_sync_at")
-    )
     sync_from = None
     query = ""
     sort_key = "CREATED_AT"
+    reverse = True
     query_mode = "latest_paid_backfill" if backfill_latest_paid else "cursor"
+    cursor = _latest_paid_sync_cursor(state, backfill_latest_paid=backfill_latest_paid)
     if backfill_latest_paid:
         query = "financial_status:paid"
         sort_key = "CREATED_AT"
-    elif last_success:
-        sync_from = last_success - timedelta(
-            minutes=state.get("sync_lookback_buffer_minutes") or DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES
-        )
-        query = f"financial_status:paid updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
-        sort_key = "UPDATED_AT"
     else:
-        sync_from = utc_now_datetime() - timedelta(hours=DEFAULT_CURSORLESS_ORDER_LOOKBACK_HOURS)
+        sync_from = _parse_datetime(cursor.get("cursor_used"))
         query = f"financial_status:paid updated_at:>='{_datetime_to_shopify_query(sync_from)}'"
         sort_key = "UPDATED_AT"
-        query_mode = "safe_window"
+        reverse = False
+        query_mode = cursor.get("query_mode") or "cursor"
+    query_parameters = {
+        "status": "any",
+        "financial_status": "paid",
+        "fulfillment_status": "",
+        "updated_at_min": _datetime_to_shopify_query(sync_from) if sync_from else "",
+        "created_at_min": "",
+        "limit": int(limit or DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT),
+        "sort": sort_key,
+        "order": "desc" if reverse else "asc",
+    }
     fetch_started = time.perf_counter()
     _sync_perf_log(
         "cursor query build",
         None,
         mode=query_mode,
         cursor=bool(sync_from),
-        lookback_hours="" if last_success or backfill_latest_paid else DEFAULT_CURSORLESS_ORDER_LOOKBACK_HOURS,
+        cursor_source=cursor.get("cursor_source"),
+        cursor_used=_datetime_to_setting(sync_from) if sync_from else "",
+        cursor_ignored=cursor.get("cursor_ignored"),
+        lookback_hours="" if cursor.get("cursor_raw") or backfill_latest_paid else DEFAULT_CURSORLESS_ORDER_LOOKBACK_HOURS,
+    )
+    _sync_perf_log(
+        "Shopify query parameters",
+        None,
+        status=query_parameters["status"],
+        financial_status=query_parameters["financial_status"],
+        fulfillment_status=query_parameters["fulfillment_status"] or "none",
+        updated_at_min=query_parameters["updated_at_min"] or "none",
+        created_at_min=query_parameters["created_at_min"] or "none",
+        limit=query_parameters["limit"],
+        sort=query_parameters["sort"],
+        order=query_parameters["order"],
     )
     _sync_perf_log("Shopify fetch start", None, mode=query_mode, limit=limit, cursor=bool(sync_from))
     fetched = shopify_sync.fetch_latest_paid_orders(
@@ -7658,7 +7798,7 @@ def _latest_paid_orders_payload(
         lookback_days=lookback_days,
         query=query or None,
         sort_key=sort_key,
-        reverse=True,
+        reverse=reverse,
         lightweight=True,
         config=config,
     )
@@ -7675,14 +7815,29 @@ def _latest_paid_orders_payload(
     return {
         "orders": orders,
         "query": str(fetched.get("query") or ""),
+        "query_parameters": query_parameters,
         "limit": int(fetched.get("limit") or limit or DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT),
         "lookback_days": int(fetched.get("lookback_days") or lookback_days or DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS),
         "sync_from": _datetime_to_setting(sync_from) if sync_from else "",
         "query_mode": query_mode,
+        "cursor_raw": cursor.get("cursor_raw") or "",
+        "cursor_source": cursor.get("cursor_source") or "",
+        "cursor_timezone": cursor.get("cursor_timezone") or "UTC",
+        "cursor_warning": cursor.get("cursor_warning") or "",
+        "cursor_ignored": bool(cursor.get("cursor_ignored")),
         "backfill_latest_paid": bool(backfill_latest_paid),
         "pages_fetched": int(fetched.get("pages_fetched") or (1 if orders else 0)),
         "line_items_fetched": int(fetched.get("line_items_fetched") or _sync_order_line_count(orders)),
         "metafields_fetched": int(fetched.get("metafields_fetched") or _sync_order_metafield_count(orders)),
+        "empty_fetch_reason": _latest_paid_empty_fetch_reason(
+            {
+                "backfill_latest_paid": bool(backfill_latest_paid),
+                "cursor_warning": cursor.get("cursor_warning") or "",
+                "sync_from": _datetime_to_setting(sync_from) if sync_from else "",
+            }
+        )
+        if not orders
+        else "",
     }
 
 
@@ -7735,6 +7890,10 @@ def _latest_paid_order_needs_sync(order, existing_order_ids, existing_line_item_
         or existing.get("created_at")
         or existing.get("synced_at")
     )
+    if incoming_updated and not stored_updated:
+        return True
+    if not incoming_updated:
+        return False
     return incoming_updated > stored_updated
 
 
@@ -8109,6 +8268,12 @@ def sync_latest_paid_orders_to_supabase(
     imported_lines = 0
     shopify_ms = shopify_fetch_ms
     db_write_started = time.perf_counter()
+    line_items_fetched = int(payload.get("line_items_fetched") or _sync_order_line_count(fetched_orders))
+    skipped_status_orders, skipped_status_lines = _paid_order_skip_counts(fetched_orders)
+    newest_processed_cursor = _newest_shopify_order_cursor(fetched_orders)
+    newest_processed_cursor_text = _datetime_to_setting(newest_processed_cursor) if newest_processed_cursor else ""
+    cursor_updated = False
+    cursor_update_reason = ""
 
     try:
         attempt_started = time.perf_counter()
@@ -8150,6 +8315,10 @@ def sync_latest_paid_orders_to_supabase(
             1 for order in fetched_orders if str(order.get("shopify_order_id") or "").strip() not in existing_order_ids
         )
         imported_lines = sum(1 for line_id in line_item_ids if line_id not in existing_line_item_ids)
+        existing_orders_preserved = sum(
+            1 for order in fetched_orders if str(order.get("shopify_order_id") or "").strip() in existing_order_ids
+        )
+        existing_lines_preserved = max(len(line_item_ids) - imported_lines, 0)
         filter_started = time.perf_counter()
         candidate_orders = [
             order
@@ -8163,6 +8332,8 @@ def sync_latest_paid_orders_to_supabase(
             candidate_orders=len(candidate_orders),
             imported_orders=imported_orders,
             imported_lines=imported_lines,
+            existing_orders=existing_orders_preserved,
+            existing_lines=existing_lines_preserved,
         )
         known_repair_candidates = {
             str(order.get("order_name") or "").strip()
@@ -8218,7 +8389,21 @@ def sync_latest_paid_orders_to_supabase(
         assignments += known_applied
         existing_skipped += known_consistent
         state_success_started = time.perf_counter()
-        success_timestamp = _set_sync_success(LAST_SUCCESSFUL_ORDER_SYNC_KEY)
+        if backfill_latest_paid:
+            success_timestamp = ""
+            cursor_update_reason = "Backfill mode does not advance the normal sync cursor."
+        elif newest_processed_cursor:
+            success_timestamp = _set_sync_success_at(LAST_SUCCESSFUL_ORDER_SYNC_KEY, newest_processed_cursor)
+            cursor_updated = True
+            cursor_update_reason = (
+                "Cursor advanced to newest successfully fetched Shopify order updated_at."
+            )
+        else:
+            success_timestamp = ""
+            cursor_update_reason = (
+                payload.get("empty_fetch_reason")
+                or "No Shopify orders were fetched, so the cursor was left unchanged."
+            )
         status = "No New Orders" if seen == 0 and known_applied == 0 else ("Success With Warnings" if errors else "Success")
         duration_ms = int((time.perf_counter() - total_started) * 1000)
         _record_order_fetch_metrics(
@@ -8255,9 +8440,12 @@ def sync_latest_paid_orders_to_supabase(
             "orders_processed": processed_orders,
             "orders_inserted_or_updated": processed_orders,
             "orders_imported": imported_orders,
-            "existing_orders_skipped": max(seen - processed_orders, 0),
+            "existing_orders_skipped": existing_orders_preserved,
             "new_orders_inserted": imported_orders,
             "new_lines_inserted": imported_lines,
+            "existing_lines_skipped": existing_lines_preserved,
+            "lines_already_existing": existing_lines_preserved,
+            "supabase_rows_inserted": imported_orders + imported_lines,
             "assignments_created": assignments,
             "edition_allocations_created": assignments,
             "existing_assignments_skipped": existing_skipped,
@@ -8269,14 +8457,26 @@ def sync_latest_paid_orders_to_supabase(
             "certificates_deferred": assignments,
             "product_metafields_deferred": len(changed_handles),
             "query": payload.get("query") or "",
+            "query_parameters": payload.get("query_parameters") or {},
             "query_mode": payload.get("query_mode") or "",
             "backfill_latest_paid": bool(payload.get("backfill_latest_paid")),
             "lookback_days": payload.get("lookback_days") or lookback_days,
             "limit": payload.get("limit") or limit,
             "sync_from": payload.get("sync_from") or "",
+            "cursor_source": payload.get("cursor_source") or "",
+            "cursor_raw": payload.get("cursor_raw") or "",
+            "cursor_timezone": payload.get("cursor_timezone") or "UTC",
+            "cursor_warning": payload.get("cursor_warning") or "",
+            "cursor_ignored": bool(payload.get("cursor_ignored")),
+            "cursor_updated": cursor_updated,
+            "cursor_update_reason": cursor_update_reason,
+            "newest_shopify_updated_at_processed": newest_processed_cursor_text,
+            "empty_fetch_reason": payload.get("empty_fetch_reason") or "",
             "pages_fetched": payload.get("pages_fetched") or (1 if seen else 0),
-            "line_items_fetched": payload.get("line_items_fetched") or _sync_order_line_count(fetched_orders),
+            "line_items_fetched": line_items_fetched,
             "metafields_fetched": payload.get("metafields_fetched") or _sync_order_metafield_count(fetched_orders),
+            "skipped_unpaid_cancelled_refunded_orders": skipped_status_orders,
+            "skipped_unpaid_cancelled_refunded_lines": skipped_status_lines,
             "fetch_duration_ms": duration_ms,
             "last_order_fetch_status": status,
             "errors": errors[:10],

@@ -1,9 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import importlib
 import json
 from pathlib import Path
 import re
 import time
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -18,6 +19,10 @@ import shopify_sync
 
 
 BASE_DIR = Path(__file__).resolve().parent
+try:
+    SYDNEY_TZ = ZoneInfo("Australia/Sydney")
+except Exception:  # pragma: no cover - fallback for minimal local Python installs
+    SYDNEY_TZ = timezone(timedelta(hours=10), "AEST")
 
 ROWS_KEY = "orders_allocation_rows"
 META_KEY = "orders_allocation_meta"
@@ -65,7 +70,7 @@ def _format_time(value):
     parsed = order_allocator.normalize_datetime_utc(value)
     if parsed == order_allocator.DATETIME_MIN_UTC:
         return str(value)
-    return parsed.astimezone().strftime("%d %b %Y %I:%M %p")
+    return parsed.astimezone(SYDNEY_TZ).strftime("%d %b %Y %I:%M %p %Z (Sydney)")
 
 
 def _now_iso():
@@ -869,12 +874,20 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50, backfill_latest_pai
         flush=True,
     )
     mode_label = "Backfill" if backfill_latest_paid else "Cursor check"
+    notice_parts = [
+        f"{mode_label} complete. Shopify fetched: {int(result.get('shopify_orders_fetched') or 0)} orders",
+        f"New orders imported: {int(result.get('new_orders_inserted') or 0)}",
+        f"Existing orders preserved/skipped: {int(result.get('existing_orders_skipped') or 0)}",
+        f"Edition numbers assigned: {int(result.get('edition_allocations_created') or 0)}",
+        f"Missing product mapping: {int(result.get('missing_mapping_skipped') or 0)}",
+        f"Errors: {len(result.get('errors') or [])}",
+    ]
+    if not int(result.get("shopify_orders_fetched") or 0) and result.get("empty_fetch_reason"):
+        notice_parts.append(f"Reason: {result.get('empty_fetch_reason')}")
+    if result.get("cursor_warning"):
+        notice_parts.append(f"Warning: {result.get('cursor_warning')}")
     st.session_state[NOTICE_KEY] = (
-        f"{mode_label} complete. New orders imported: {int(result.get('new_orders_inserted') or 0)} | "
-        f"Existing orders preserved: {int(result.get('existing_orders_skipped') or 0)} | "
-        f"Edition numbers assigned: {int(result.get('edition_allocations_created') or 0)} | "
-        f"Missing product mapping: {int(result.get('missing_mapping_skipped') or 0)} | "
-        f"Errors: {len(result.get('errors') or [])}. "
+        " | ".join(notice_parts) + ". "
         f"Table reload: {reload_mode}."
     )
     print(
@@ -1612,6 +1625,54 @@ def _render_top_actions(rows):
         st.caption("Assign edition number before certificate generation.")
 
 
+def _render_sync_diagnostics(result):
+    if not result:
+        return
+
+    query_parameters = result.get("query_parameters") or {}
+    mode = "backfill" if result.get("backfill_latest_paid") else "cursor"
+    cursor_used = result.get("sync_from") or ""
+    newest_processed = result.get("newest_shopify_updated_at_processed") or ""
+    with st.expander("Sync diagnostics", expanded=False):
+        if result.get("cursor_warning"):
+            st.caption(f"warning: {result.get('cursor_warning')}")
+        st.caption(f"mode: {mode}")
+        st.caption(f"cursor used: {_format_time(cursor_used) if cursor_used else 'None'}")
+        st.caption(f"cursor source: {result.get('cursor_source') or 'none'}")
+        st.caption(f"cursor timezone: {result.get('cursor_timezone') or 'UTC'}")
+        st.caption("displayed timezone: Australia/Sydney")
+        st.caption(f"Shopify query: {result.get('query') or 'None'}")
+        st.caption(
+            "Shopify query params: "
+            f"status={query_parameters.get('status') or 'any'}; "
+            f"financial_status={query_parameters.get('financial_status') or 'paid'}; "
+            f"fulfillment_status={query_parameters.get('fulfillment_status') or 'none'}; "
+            f"updated_at_min={query_parameters.get('updated_at_min') or 'none'}; "
+            f"created_at_min={query_parameters.get('created_at_min') or 'none'}; "
+            f"limit={query_parameters.get('limit') or result.get('limit') or 50}; "
+            f"sort={query_parameters.get('sort') or 'UPDATED_AT'}; "
+            f"order={query_parameters.get('order') or 'asc'}"
+        )
+        st.caption(f"Shopify orders fetched: {int(result.get('shopify_orders_fetched') or 0)}")
+        st.caption(f"Shopify lines fetched: {int(result.get('line_items_fetched') or 0)}")
+        st.caption(f"Supabase rows inserted: {int(result.get('supabase_rows_inserted') or 0)}")
+        st.caption(f"existing rows skipped: {int(result.get('existing_lines_skipped') or result.get('lines_already_existing') or 0)}")
+        st.caption(f"missing mappings: {int(result.get('missing_mapping_skipped') or 0)}")
+        st.caption(
+            "skipped unpaid/cancelled/refunded: "
+            f"{int(result.get('skipped_unpaid_cancelled_refunded_lines') or 0)} lines"
+        )
+        st.caption(
+            f"newest Shopify updated_at processed: "
+            f"{_format_time(newest_processed) if newest_processed else 'None'}"
+        )
+        st.caption(f"cursor updated: {'yes' if result.get('cursor_updated') else 'no'}")
+        if result.get("cursor_update_reason"):
+            st.caption(f"cursor update reason: {result.get('cursor_update_reason')}")
+        if not int(result.get("shopify_orders_fetched") or 0) and result.get("empty_fetch_reason"):
+            st.caption(f"empty fetch reason: {result.get('empty_fetch_reason')}")
+
+
 def _render_admin_result(title, result):
     if not result:
         return
@@ -1798,6 +1859,7 @@ def render_page():
     if notice:
         st.success(notice)
         st.session_state[NOTICE_KEY] = ""
+    _render_sync_diagnostics(st.session_state.get(SYNC_RESULT_KEY) or {})
 
     search_cols = st.columns([3.2, 1])
     search_text = search_cols[0].text_input(
