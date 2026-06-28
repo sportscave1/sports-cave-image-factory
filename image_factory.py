@@ -5,6 +5,8 @@ import os
 import zipfile
 import re
 import shutil
+import tempfile
+import warnings
 from datetime import datetime
 from textwrap import dedent
 
@@ -20,6 +22,9 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 RENDER_LIGHTWEIGHT_MODE = True
 MAX_UPLOAD_MB = 20
 MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+MAX_LIFESTYLE_UPLOAD_MB = 15
+MAX_LIFESTYLE_UPLOAD_SIZE_BYTES = MAX_LIFESTYLE_UPLOAD_MB * 1024 * 1024
+MAX_LIFESTYLE_SOURCE_EDGE = 3000
 MAX_SOURCE_PIXELS = 25_000_000
 MAX_WORKING_EDGE = 2000
 MAX_PREVIEW_EDGE = 900
@@ -38,6 +43,12 @@ MEMORY_LIMIT_MESSAGE = (
 PREPARE_ARTWORK_MEMORY_LIMIT_MESSAGE = (
     "Memory limit reached while preparing the uploaded artwork. "
     "Try exporting the artwork as JPG/WebP under 20MB, or upgrade Render to a higher-memory instance."
+)
+LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE = (
+    "This uploaded image is too large. Please upload a JPG, PNG or WebP under 15 MB."
+)
+LIFESTYLE_UPLOAD_INVALID_MESSAGE = (
+    "Cannot read the uploaded lifestyle image. Please upload a valid JPG, PNG, or WEBP file."
 )
 
 
@@ -84,6 +95,54 @@ def close_image(image):
 def collect_garbage(stage, error_message=MEMORY_LIMIT_MESSAGE):
     gc.collect()
     ensure_memory_available(stage, error_message=error_message)
+
+
+def validate_lifestyle_upload_size(image_file):
+    file_size = getattr(image_file, "size", None)
+    if file_size is not None and file_size > MAX_LIFESTYLE_UPLOAD_SIZE_BYTES:
+        raise ValueError(LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE)
+
+    if file_size is not None and file_size <= 0:
+        raise ValueError(LIFESTYLE_UPLOAD_INVALID_MESSAGE)
+
+
+def get_uploaded_image_suffix(image_file):
+    suffix = Path(getattr(image_file, "name", "")).suffix.lower()
+    if suffix in {".jpg", ".jpeg", ".png", ".webp"}:
+        return suffix
+
+    return ".jpg"
+
+
+def copy_uploaded_image_to_temp(image_file, temp_dir):
+    validate_lifestyle_upload_size(image_file)
+    temp_path = Path(temp_dir) / f"uploaded-lifestyle{get_uploaded_image_suffix(image_file)}"
+
+    if hasattr(image_file, "seek"):
+        image_file.seek(0)
+
+    with temp_path.open("wb") as destination:
+        shutil.copyfileobj(image_file, destination, length=1024 * 1024)
+
+    if temp_path.stat().st_size > MAX_LIFESTYLE_UPLOAD_SIZE_BYTES:
+        raise ValueError(LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE)
+
+    if hasattr(image_file, "seek"):
+        image_file.seek(0)
+
+    return temp_path
+
+
+def resize_lifestyle_source_if_needed(image):
+    longest_side = max(image.size)
+    if longest_side <= MAX_LIFESTYLE_SOURCE_EDGE:
+        return False
+
+    image.thumbnail(
+        (MAX_LIFESTYLE_SOURCE_EDGE, MAX_LIFESTYLE_SOURCE_EDGE),
+        Image.LANCZOS,
+    )
+    return True
 
 
 def log_image_details(stage, image_format, width, height, file_size_bytes):
@@ -1614,33 +1673,54 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
     jpg_output_path = jpg_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}.jpg"
     preview_output_path = preview_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}-preview.webp"
 
-    if hasattr(image_file, "seek"):
-        image_file.seek(0)
-
-    ensure_memory_available(f"Before source image open: {prompt_filename}")
     image_export = None
     working_image = None
+    rgb_image = None
     try:
-        with Image.open(image_file) as image:
-            image.load()
-            working_image = ImageOps.exif_transpose(image).convert("RGB")
-            export_edge = max(1, min(MAX_EXPORT_EDGE, working_image.width, working_image.height))
-            image_export = ImageOps.fit(
-                working_image,
-                (export_edge, export_edge),
-                method=Image.LANCZOS,
-            )
-            close_image(working_image)
-            del working_image
-    except UnidentifiedImageError as error:
-        raise RuntimeError(
-            "Cannot read the uploaded lifestyle image. Please upload a valid JPG, PNG, or WEBP file."
-        ) from error
+        with tempfile.TemporaryDirectory(prefix="sports-cave-lifestyle-") as temp_dir:
+            temp_source_path = copy_uploaded_image_to_temp(image_file, temp_dir)
+
+            ensure_memory_available(f"Before source image open: {prompt_filename}")
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", Image.DecompressionBombWarning)
+                    with Image.open(temp_source_path) as source_image:
+                        working_image = ImageOps.exif_transpose(source_image)
+                        if resize_lifestyle_source_if_needed(working_image):
+                            collect_garbage(f"After lifestyle source resize: {prompt_filename}")
+
+                        if working_image.mode != "RGB":
+                            rgb_image = working_image.convert("RGB")
+                            close_image(working_image)
+                            working_image = None
+                        else:
+                            rgb_image = working_image
+                            working_image = None
+
+                        export_edge = max(1, min(MAX_EXPORT_EDGE, rgb_image.width, rgb_image.height))
+                        image_export = ImageOps.fit(
+                            rgb_image,
+                            (export_edge, export_edge),
+                            method=Image.LANCZOS,
+                        )
+            finally:
+                close_image(rgb_image)
+                close_image(working_image)
+                del rgb_image, working_image
+                collect_garbage(f"After source image open: {prompt_filename}")
+    except ValueError:
+        raise
+    except (
+        UnidentifiedImageError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+    ) as error:
+        raise RuntimeError(LIFESTYLE_UPLOAD_INVALID_MESSAGE) from error
+    except (MemoryError, MemoryLimitExceededError) as error:
+        raise RuntimeError(LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE) from error
     finally:
         if hasattr(image_file, "seek"):
             image_file.seek(0)
-
-    ensure_memory_available(f"After source image open: {prompt_filename}")
 
     try:
         image_export.save(
@@ -1649,6 +1729,7 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
             quality=EXPORT_WEBP_QUALITY,
             method=EXPORT_WEBP_METHOD,
         )
+        collect_garbage(f"After lifestyle WEBP save: {prompt_filename}")
 
         image_export.save(
             jpg_output_path,
@@ -1656,6 +1737,7 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
             quality=EXPORT_JPG_QUALITY,
             optimize=True,
         )
+        collect_garbage(f"After lifestyle JPG save: {prompt_filename}")
 
         preview_image = image_export.copy()
         try:

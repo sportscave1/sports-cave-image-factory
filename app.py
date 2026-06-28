@@ -4300,8 +4300,29 @@ def render_prompt_cards(result, prompt_paths, heading):
                         st.session_state.last_generation_result = updated_result
                         st.rerun()
                     except Exception as error:
-                        st.error("Could not save the lifestyle image for this prompt.")
-                        st.exception(error)
+                        error_message = str(error)
+                        clean_lifestyle_errors = {
+                            getattr(image_factory, "LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE", ""),
+                            getattr(image_factory, "LIFESTYLE_UPLOAD_INVALID_MESSAGE", ""),
+                        }
+                        is_clean_lifestyle_error = (
+                            isinstance(
+                                error,
+                                (
+                                    ValueError,
+                                    MemoryError,
+                                    getattr(image_factory, "MemoryLimitExceededError", RuntimeError),
+                                ),
+                            )
+                            or error_message in clean_lifestyle_errors
+                            or "Memory limit reached" in error_message
+                        )
+                        if is_clean_lifestyle_error:
+                            st.error(error_message)
+                            gc.collect()
+                        else:
+                            st.error("Could not save the lifestyle image for this prompt.")
+                            st.exception(error)
 
 
 def render_optional_package_controls(result):
