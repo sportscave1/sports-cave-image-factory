@@ -261,6 +261,37 @@ def _line_item_sort_identity(line_item):
     )
 
 
+def canonical_shopify_id(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    match = re.match(r"^gid://shopify/[^/]+/([^/?#]+)", raw, flags=re.IGNORECASE)
+    if match:
+        return match.group(1).strip()
+    return raw
+
+
+def _shopify_id_candidates(resource_type, value):
+    raw = str(value or "").strip()
+    canonical = canonical_shopify_id(raw)
+    candidates = {candidate for candidate in (raw, canonical) if candidate}
+    if canonical:
+        candidates.add(f"gid://shopify/{resource_type}/{canonical}")
+    return sorted(candidates)
+
+
+def allocation_identity_key(shopify_order_id, shopify_line_item_id, unit_index):
+    order_id = canonical_shopify_id(shopify_order_id)
+    line_id = canonical_shopify_id(shopify_line_item_id)
+    try:
+        unit = max(int(unit_index or 1), 1)
+    except (TypeError, ValueError):
+        unit = 1
+    if not order_id or not line_id:
+        return ""
+    return f"{order_id}:{line_id}:{unit}"
+
+
 def order_allocation_sort_key(order):
     """Stable oldest-first key for edition allocation, independent of API/display order."""
     line_items = order.get("line_items") or [{}]
@@ -1071,6 +1102,7 @@ def _ensure_schema_uncached():
                     ("edition_number", "INTEGER"),
                     ("edition_total", "INTEGER"),
                     ("edition_display", "TEXT"),
+                    ("allocation_key", "TEXT"),
                     ("allocation_index", "INTEGER DEFAULT 1"),
                     ("quantity", "INTEGER DEFAULT 1"),
                     ("status", "TEXT DEFAULT 'assigned'"),
@@ -1465,6 +1497,31 @@ def _ensure_schema_uncached():
             cur.execute("DROP INDEX IF EXISTS idx_edition_orders_handle_number_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_handle_number ON edition_orders(shopify_handle, edition_number)")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_line_allocation_unique ON edition_orders(shopify_line_item_id, allocation_index)", "idx_edition_orders_line_allocation_unique")
+            if table_exists(cur, "edition_orders") and column_exists(cur, "edition_orders", "allocation_key"):
+                cur.execute(
+                    """
+                    UPDATE edition_orders
+                    SET allocation_key =
+                        COALESCE(NULLIF(regexp_replace(shopify_order_id, '^gid://shopify/[^/]+/', '', 'i'), ''), shopify_order_id)
+                        || ':' ||
+                        COALESCE(NULLIF(regexp_replace(shopify_line_item_id, '^gid://shopify/[^/]+/', '', 'i'), ''), shopify_line_item_id)
+                        || ':' ||
+                        GREATEST(COALESCE(allocation_index, 1), 1)::text
+                    WHERE COALESCE(allocation_key, '') = ''
+                      AND COALESCE(shopify_order_id, '') <> ''
+                      AND COALESCE(shopify_line_item_id, '') <> ''
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_allocation_key ON edition_orders(allocation_key)")
+                _safe_create_index(
+                    cur,
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_allocation_key_unique
+                    ON edition_orders(allocation_key)
+                    WHERE COALESCE(allocation_key, '') <> ''
+                    """,
+                    "idx_edition_orders_allocation_key_unique",
+                )
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_run_id ON edition_orders(edition_run_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_line_item_id ON edition_orders(shopify_line_item_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_product_id ON edition_orders(shopify_product_id)")
@@ -3624,6 +3681,189 @@ def _fetch_public_edition_metafields(owner_gid, config=None, request_post=None):
         return {"metafields": [], "api_version": "", "error": str(error)}
 
 
+def _public_edition_metafield_values(metafields):
+    values = {}
+    for metafield in _public_edition_metafields(metafields):
+        key = str(metafield.get("key") or "").strip()
+        if key:
+            values[key] = metafield.get("value")
+    return values
+
+
+def _shopify_bool_text(value):
+    return "true" if bool(value) else "false"
+
+
+def _shopify_product_mirror_values_from_payload(payload):
+    edition_total = max(_int_value(payload.get("edition_total"), 100), 1)
+    next_number = max(_int_value(payload.get("next_edition_number"), 1), 1)
+    sold_count = min(max(_int_value(payload.get("sold_count"), max(next_number - 1, 0)), 0), edition_total)
+    remaining_count = min(max(_int_value(payload.get("remaining_count"), max(edition_total - sold_count, 0)), 0), edition_total)
+    is_sold_out = bool(payload.get("is_sold_out")) or remaining_count <= 0 or next_number > edition_total
+    edition_status = str(payload.get("edition_status") or "").strip() or ("sold_out" if is_sold_out else "limited_release")
+    edition_label = str(payload.get("edition_name") or payload.get("run_edition_name") or DEFAULT_EDITION_NAME).strip() or DEFAULT_EDITION_NAME
+    edition_display_text = str(payload.get("edition_display_text") or "").strip()
+    if not edition_display_text:
+        edition_display_text = "Sold Out Archive" if is_sold_out else f"Next Available Edition {format_edition_display_number(next_number, edition_total)}"
+    return {
+        "edition_enabled": _shopify_bool_text(not bool(payload.get("is_archived"))),
+        "edition_total": str(edition_total),
+        "edition_next_number": str(next_number),
+        "edition_sold_count": str(sold_count),
+        "edition_remaining": str(remaining_count),
+        "edition_status": edition_status,
+        "edition_label": edition_label,
+        "next_edition_number": str(next_number),
+        "last_assigned_edition": str(max(_int_value(payload.get("last_assigned_edition"), 0), 0)),
+        "sold_count": str(sold_count),
+        "remaining_count": str(remaining_count),
+        "is_sold_out": _shopify_bool_text(is_sold_out),
+        "edition_display_text": edition_display_text,
+    }
+
+
+def _product_mirror_source_values(payload):
+    mirror_values = _shopify_product_mirror_values_from_payload(payload)
+    return {key: mirror_values.get(key) for key in CANONICAL_STOREFRONT_EDITION_METAFIELDS}
+
+
+def _record_product_metafield_mirror_audit(
+    shopify_handle,
+    *,
+    status,
+    payload=None,
+    before=None,
+    after=None,
+    error_message="",
+):
+    if not is_configured():
+        return
+    payload = payload or {}
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                _insert_audit_log(
+                    cur,
+                    event_type="shopify_product_metafield_mirror",
+                    entity_type="edition_product",
+                    entity_id=payload.get("id") or payload.get("edition_product_id") or "",
+                    shopify_handle=shopify_handle,
+                    old_value={
+                        "shopify_metafields_before": _public_edition_metafield_values(before or []),
+                        "last_mirror_synced_at": str(payload.get("metafields_synced_at") or ""),
+                        "last_mirror_status": str(payload.get("metafields_sync_status") or ""),
+                    },
+                    new_value={
+                        "status": status,
+                        "supabase_source": _product_mirror_source_values(payload) if payload else {},
+                        "shopify_metafields_after": _public_edition_metafield_values(after or []),
+                        "error": str(error_message or "")[:1000],
+                    },
+                    reason="Edition Ops Shopify metafield mirror",
+                    actor="edition_ops",
+                    source="edition_ops",
+                )
+            conn.commit()
+    except Exception:
+        pass
+
+
+def preview_shopify_edition_metafield_mirror_for_handles(
+    handles,
+    config=None,
+    request_post=None,
+    *,
+    ensure_schema_first=True,
+):
+    if ensure_schema_first:
+        ensure_schema()
+    previews = []
+    errors = []
+    unique_handles = []
+    seen = set()
+    for handle in handles or []:
+        clean_handle = str(handle or "").strip()
+        if clean_handle and clean_handle not in seen:
+            unique_handles.append(clean_handle)
+            seen.add(clean_handle)
+    for handle in unique_handles:
+        try:
+            payload = get_product_edition_metafield_payload(
+                handle,
+                ensure_schema_first=False,
+            )
+            owner_gid = payload.get("shopify_product_gid") or payload.get("shopify_product_id") or ""
+            before_snapshot = _fetch_public_edition_metafields(owner_gid, config=config, request_post=request_post)
+            before_values = _public_edition_metafield_values(before_snapshot.get("metafields") or [])
+            new_values = _shopify_product_mirror_values_from_payload(payload)
+            keys = list(CANONICAL_STOREFRONT_EDITION_METAFIELDS) + [
+                key for key in LEGACY_STOREFRONT_EDITION_METAFIELDS if key in new_values
+            ]
+            changes = [
+                {
+                    "key": key,
+                    "shopify_before": before_values.get(key, ""),
+                    "supabase_after": new_values.get(key, ""),
+                    "will_update": str(before_values.get(key, "")) != str(new_values.get(key, "")),
+                }
+                for key in keys
+            ]
+            previews.append(
+                {
+                    "handle": handle,
+                    "shopify_product_id": owner_gid,
+                    "product_title": payload.get("product_title") or payload.get("title") or handle,
+                    "last_mirror_synced_at": payload.get("metafields_synced_at") or "",
+                    "last_mirror_status": payload.get("metafields_sync_status") or "",
+                    "source_values": _product_mirror_source_values(payload),
+                    "changes": changes,
+                    "metafields_before_error": before_snapshot.get("error") or "",
+                }
+            )
+        except Exception as error:
+            errors.append(f"{handle}: {error}")
+            previews.append(
+                {
+                    "handle": handle,
+                    "status": "failed",
+                    "error": str(error),
+                    "changes": [],
+                    "source_values": {},
+                }
+            )
+    return {
+        "attempted": len(unique_handles),
+        "previews": previews,
+        "errors": errors,
+        "canonical_namespace": "sports_cave",
+        "canonical_keys": list(CANONICAL_STOREFRONT_EDITION_METAFIELDS),
+        "legacy_keys": list(LEGACY_STOREFRONT_EDITION_METAFIELDS),
+    }
+
+
+def preview_shopify_edition_metafield_mirror_for_active_products(
+    config=None,
+    request_post=None,
+    *,
+    search="",
+    limit=1000,
+    ensure_schema_first=True,
+):
+    if ensure_schema_first:
+        ensure_schema()
+    handles = _active_mapped_edition_product_handles(
+        search=search,
+        limit=limit,
+        ensure_schema_first=False,
+    )
+    return preview_shopify_edition_metafield_mirror_for_handles(
+        handles,
+        config=config,
+        request_post=request_post,
+        ensure_schema_first=False,
+    )
+
+
 def _product_metafield_sync_diagnostic(result, status="updated", error_message=""):
     payload = result.get("payload") or {}
     before = result.get("metafields_before") or []
@@ -3637,6 +3877,8 @@ def _product_metafield_sync_diagnostic(result, status="updated", error_message="
         "supabase_remaining": payload.get("remaining_count"),
         "edition_total": payload.get("edition_total"),
         "shopify_product_id": payload.get("shopify_product_id") or payload.get("shopify_product_gid") or "",
+        "source_values": _product_mirror_source_values(payload) if payload else {},
+        "last_mirror_synced_at": payload.get("metafields_synced_at") or "",
         "metafields_before": before,
         "metafields_after": after,
         "shopify_metafields_set_response": result.get("shopify_metafields_set_response") or {},
@@ -3703,6 +3945,13 @@ def sync_product_edition_metafields(
         _mark_product_metafields_sync(shopify_handle, payload, "Synced", "")
         after_snapshot = _fetch_public_edition_metafields(owner_gid, config=config, request_post=request_post)
         after_metafields = after_snapshot.get("metafields") or []
+        _record_product_metafield_mirror_audit(
+            shopify_handle,
+            status="updated",
+            payload=payload,
+            before=before_metafields,
+            after=after_metafields,
+        )
         return {
             "shopify_handle": shopify_handle,
             "payload": payload,
@@ -3715,6 +3964,7 @@ def sync_product_edition_metafields(
             "shopify_metafields_set_response": result,
             "shopify_user_errors": [],
             "mirror_status": "updated",
+            "source_values": _product_mirror_source_values(payload),
             "canonical_namespace": "sports_cave",
             "canonical_keys": list(CANONICAL_STOREFRONT_EDITION_METAFIELDS),
             "storefront_main_tracker_reads": STOREFRONT_WIDGET_METAFIELD_READS["main_tracker"],
@@ -3723,6 +3973,14 @@ def sync_product_edition_metafields(
         }
     except Exception as error:
         _mark_product_metafields_sync(shopify_handle, payload, "Failed", str(error))
+        _record_product_metafield_mirror_audit(
+            shopify_handle,
+            status="failed",
+            payload=payload,
+            before=before_metafields,
+            after=[],
+            error_message=str(error),
+        )
         if ensure_schema_first:
             log_app_error(
                 "product_metafield_sync_failed",
@@ -3766,6 +4024,14 @@ def sync_product_edition_metafields_for_handles(
             except Exception as error:
                 skipped += 1
                 errors.append(f"{handle}: {error}")
+                _record_product_metafield_mirror_audit(
+                    handle,
+                    status="failed",
+                    payload={},
+                    before=[],
+                    after=[],
+                    error_message=str(error),
+                )
                 results.append(
                     {
                         "handle": handle,
@@ -4253,7 +4519,14 @@ def count_shopify_orders():
 def list_existing_shopify_order_ids(order_ids, *, ensure_schema_first=True):
     if ensure_schema_first:
         ensure_schema()
-    values = [str(order_id or "").strip() for order_id in (order_ids or []) if str(order_id or "").strip()]
+    values = sorted(
+        {
+            candidate
+            for order_id in (order_ids or [])
+            for candidate in _shopify_id_candidates("Order", order_id)
+            if candidate
+        }
+    )
     if not values:
         return set()
     try:
@@ -4263,7 +4536,13 @@ def list_existing_shopify_order_ids(order_ids, *, ensure_schema_first=True):
                     "SELECT shopify_order_id FROM shopify_orders WHERE shopify_order_id = ANY(%s)",
                     (values,),
                 )
-                return {str(row.get("shopify_order_id") or "").strip() for row in cur.fetchall() if row.get("shopify_order_id")}
+                existing = {str(row.get("shopify_order_id") or "").strip() for row in cur.fetchall() if row.get("shopify_order_id")}
+                return {
+                    candidate
+                    for existing_id in existing
+                    for candidate in _shopify_id_candidates("Order", existing_id)
+                    if candidate
+                }
     except Exception as error:
         schema_message = orders_sync_schema_error_message(error)
         if schema_message:
@@ -4274,7 +4553,14 @@ def list_existing_shopify_order_ids(order_ids, *, ensure_schema_first=True):
 def list_existing_shopify_line_item_ids(line_item_ids, *, ensure_schema_first=True):
     if ensure_schema_first:
         ensure_schema()
-    values = [str(line_item_id or "").strip() for line_item_id in (line_item_ids or []) if str(line_item_id or "").strip()]
+    values = sorted(
+        {
+            candidate
+            for line_item_id in (line_item_ids or [])
+            for candidate in _shopify_id_candidates("LineItem", line_item_id)
+            if candidate
+        }
+    )
     if not values:
         return set()
     try:
@@ -4284,10 +4570,16 @@ def list_existing_shopify_line_item_ids(line_item_ids, *, ensure_schema_first=Tr
                     "SELECT shopify_line_item_id FROM shopify_order_lines WHERE shopify_line_item_id = ANY(%s)",
                     (values,),
                 )
-                return {
+                existing = {
                     str(row.get("shopify_line_item_id") or "").strip()
                     for row in cur.fetchall()
                     if row.get("shopify_line_item_id")
+                }
+                return {
+                    candidate
+                    for existing_id in existing
+                    for candidate in _shopify_id_candidates("LineItem", existing_id)
+                    if candidate
                 }
     except Exception as error:
         schema_message = orders_sync_schema_error_message(error)
@@ -5959,20 +6251,22 @@ def import_limited_edition_rows(
                         )
                         synthetic_order_id = f"csv-import:{matched_handle}:{order_name or 'order'}:{edition_number}"
                         synthetic_line_id = f"{synthetic_order_id}:line:1"
+                        synthetic_allocation_key = allocation_identity_key(synthetic_order_id, synthetic_line_id, 1)
                         if overwrite_existing_orders:
                             cur.execute(
                                 """
                                 INSERT INTO edition_orders(
                                     shopify_order_id, shopify_line_item_id, shopify_product_id,
                                     shopify_handle, product_title, variant_title, customer_name,
-                                    edition_number, edition_total, allocation_index, assigned_at, certificate_status
+                                    edition_number, edition_total, allocation_index, allocation_key, assigned_at, certificate_status
                                 )
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, now(), 'Certificate Missing')
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, now(), 'Certificate Missing')
                                 ON CONFLICT (shopify_line_item_id, allocation_index) DO UPDATE SET
                                     product_title=EXCLUDED.product_title,
                                     variant_title=EXCLUDED.variant_title,
                                     customer_name=EXCLUDED.customer_name,
-                                    edition_total=EXCLUDED.edition_total
+                                    edition_total=EXCLUDED.edition_total,
+                                    allocation_key=COALESCE(NULLIF(edition_orders.allocation_key, ''), EXCLUDED.allocation_key)
                                 """,
                                 (
                                     synthetic_order_id,
@@ -5984,6 +6278,7 @@ def import_limited_edition_rows(
                                     customer_name,
                                     int(edition_number),
                                     int(edition_total),
+                                    synthetic_allocation_key,
                                 ),
                             )
                         else:
@@ -5992,9 +6287,9 @@ def import_limited_edition_rows(
                                 INSERT INTO edition_orders(
                                     shopify_order_id, shopify_line_item_id, shopify_product_id,
                                     shopify_handle, product_title, variant_title, customer_name,
-                                    edition_number, edition_total, allocation_index, assigned_at, certificate_status
+                                    edition_number, edition_total, allocation_index, allocation_key, assigned_at, certificate_status
                                 )
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, now(), 'Certificate Missing')
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 1, %s, now(), 'Certificate Missing')
                                 ON CONFLICT DO NOTHING
                                 """,
                                 (
@@ -6007,6 +6302,7 @@ def import_limited_edition_rows(
                                     customer_name,
                                     int(edition_number),
                                     int(edition_total),
+                                    synthetic_allocation_key,
                                 ),
                             )
 
@@ -7432,22 +7728,47 @@ def allocate_edition_for_order_line(
     if not shopify_line_item_id:
         raise ValueError("Shopify line item ID is required for edition allocation.")
 
+    allocation_index = max(_int_value(allocation_index, 1), 1)
+    allocation_key = allocation_identity_key(shopify_order_id, shopify_line_item_id, allocation_index)
+    order_id_candidates = _shopify_id_candidates("Order", shopify_order_id)
+    line_item_id_candidates = _shopify_id_candidates("LineItem", shopify_line_item_id)
+
     with connect() as conn:
         try:
             with conn.cursor() as cur:
+                has_allocation_key = column_exists(cur, "edition_orders", "allocation_key")
+                allocation_key_filter = "COALESCE(eo.allocation_key, '') = %s OR" if has_allocation_key else ""
+                allocation_key_params = (allocation_key,) if has_allocation_key else ()
                 cur.execute(
-                    """
+                    f"""
                     SELECT eo.*, o.order_name
                     FROM edition_orders eo
                     LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                    WHERE eo.shopify_order_id=%s
-                      AND eo.shopify_line_item_id=%s
-                      AND eo.allocation_index=%s
+                    WHERE (
+                        {allocation_key_filter}
+                        (
+                            eo.shopify_order_id = ANY(%s)
+                            AND eo.shopify_line_item_id = ANY(%s)
+                            AND COALESCE(eo.allocation_index, 1)=%s
+                        )
+                    )
+                    ORDER BY eo.assigned_at ASC NULLS LAST, eo.created_at ASC NULLS LAST
+                    LIMIT 1
                     """,
-                    (shopify_order_id, shopify_line_item_id, allocation_index),
+                    (*allocation_key_params, order_id_candidates, line_item_id_candidates, allocation_index),
                 )
                 existing = cur.fetchone()
                 if existing:
+                    if has_allocation_key and allocation_key and not existing.get("allocation_key"):
+                        cur.execute(
+                            """
+                            UPDATE edition_orders
+                            SET allocation_key=%s, updated_at=now()
+                            WHERE id::text=%s
+                              AND COALESCE(allocation_key, '') = ''
+                            """,
+                            (allocation_key, str(existing.get("id"))),
+                        )
                     target_existing_number = _int_value(promised_edition_number, 0)
                     existing_number = _int_value(existing.get("edition_number"), 0)
                     if target_existing_number and existing_number and existing_number != target_existing_number:
@@ -7518,8 +7839,8 @@ def allocate_edition_for_order_line(
                                 str(customer_email or "").strip(),
                                 str(customer_email or "").strip(),
                                 str(customer_email or "").strip(),
-                                shopify_order_id,
-                                shopify_line_item_id,
+                                existing.get("shopify_order_id") or shopify_order_id,
+                                existing.get("shopify_line_item_id") or shopify_line_item_id,
                                 allocation_index,
                             ),
                         )
@@ -7729,8 +8050,8 @@ def allocate_edition_for_order_line(
                         WHERE edition_number=%s
                           AND COALESCE(shopify_handle, product_handle, '')=%s
                           AND NOT (
-                              shopify_order_id=%s
-                              AND shopify_line_item_id=%s
+                              shopify_order_id = ANY(%s)
+                              AND shopify_line_item_id = ANY(%s)
                               AND COALESCE(allocation_index, 1)=%s
                           )
                         LIMIT 1
@@ -7738,8 +8059,8 @@ def allocate_edition_for_order_line(
                         (
                             target_number,
                             shopify_handle,
-                            shopify_order_id,
-                            shopify_line_item_id,
+                            order_id_candidates,
+                            line_item_id_candidates,
                             allocation_index,
                         ),
                     )
@@ -7774,22 +8095,26 @@ def allocate_edition_for_order_line(
                 else:
                     target_number = next_number
 
+                allocation_key_insert_column = ", allocation_key" if has_allocation_key else ""
+                allocation_key_insert_value = ", %s" if has_allocation_key else ""
+                allocation_key_returning = ", allocation_key" if has_allocation_key else ""
+                allocation_key_insert_params = (allocation_key,) if has_allocation_key else ()
                 cur.execute(
-                    """
+                    f"""
                     INSERT INTO edition_orders(
                         shopify_order_id, shopify_order_name, shopify_line_item_id, shopify_product_id,
                         shopify_handle, product_title, edition_run_id, edition_name, variant_title, sku,
                         customer_name, customer_email, shopify_customer_name, shopify_customer_email,
                         edition_number, edition_total, allocation_index, quantity,
-                        assigned_at, certificate_status, status, source, updated_at
+                        assigned_at, certificate_status, status, source, updated_at{allocation_key_insert_column}
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1,
-                            now(), 'Certificate Missing', %s, %s, now())
+                            now(), 'Certificate Missing', %s, %s, now(){allocation_key_insert_value})
                     ON CONFLICT DO NOTHING
                     RETURNING id, shopify_order_id, shopify_line_item_id, shopify_product_id,
                               shopify_handle, product_title, edition_run_id, edition_name, variant_title, sku, customer_name,
                               customer_email, edition_number, edition_total, allocation_index,
-                              assigned_at, certificate_status
+                              assigned_at, certificate_status{allocation_key_returning}
                     """,
                     (
                         shopify_order_id,
@@ -7811,20 +8136,28 @@ def allocate_edition_for_order_line(
                         allocation_index,
                         allocation_status or "assigned",
                         assignment_source or ("shopify_purchase_snapshot" if promised_edition_number else "supabase_sequential_allocation"),
+                        *allocation_key_insert_params,
                     ),
                 )
                 inserted = cur.fetchone()
                 if not inserted:
                     cur.execute(
-                        """
+                        f"""
                         SELECT eo.*, o.order_name
                         FROM edition_orders eo
                         LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                        WHERE eo.shopify_order_id=%s
-                          AND eo.shopify_line_item_id=%s
-                          AND eo.allocation_index=%s
+                        WHERE (
+                            {allocation_key_filter}
+                            (
+                                eo.shopify_order_id = ANY(%s)
+                                AND eo.shopify_line_item_id = ANY(%s)
+                                AND COALESCE(eo.allocation_index, 1)=%s
+                            )
+                        )
+                        ORDER BY eo.assigned_at ASC NULLS LAST, eo.created_at ASC NULLS LAST
+                        LIMIT 1
                         """,
-                        (shopify_order_id, shopify_line_item_id, allocation_index),
+                        (*allocation_key_params, order_id_candidates, line_item_id_candidates, allocation_index),
                     )
                     existing_after_conflict = cur.fetchone()
                     if existing_after_conflict:
@@ -8937,6 +9270,107 @@ def preview_latest_paid_orders_sync(
     return result
 
 
+def edition_allocation_duplicate_diagnostics(limit=50):
+    if not is_configured():
+        return {"edition_orders_total": 0, "duplicate_group_count": 0, "duplicate_row_count": 0, "groups": []}
+    allocation_key_expr = """
+        COALESCE(
+            NULLIF(allocation_key, ''),
+            COALESCE(NULLIF(regexp_replace(shopify_order_id, '^gid://shopify/[^/]+/', '', 'i'), ''), shopify_order_id)
+            || ':' ||
+            COALESCE(NULLIF(regexp_replace(shopify_line_item_id, '^gid://shopify/[^/]+/', '', 'i'), ''), shopify_line_item_id)
+            || ':' ||
+            GREATEST(COALESCE(allocation_index, 1), 1)::text
+        )
+    """
+    with connect() as conn:
+        with conn.cursor() as cur:
+            has_allocation_key = column_exists(cur, "edition_orders", "allocation_key")
+            if not has_allocation_key:
+                allocation_key_expr = """
+                    COALESCE(NULLIF(regexp_replace(shopify_order_id, '^gid://shopify/[^/]+/', '', 'i'), ''), shopify_order_id)
+                    || ':' ||
+                    COALESCE(NULLIF(regexp_replace(shopify_line_item_id, '^gid://shopify/[^/]+/', '', 'i'), ''), shopify_line_item_id)
+                    || ':' ||
+                    GREATEST(COALESCE(allocation_index, 1), 1)::text
+                """
+            cur.execute("SELECT COUNT(*) AS count FROM edition_orders")
+            total = int((cur.fetchone() or {}).get("count") or 0)
+            cur.execute(
+                f"""
+                WITH keyed AS (
+                    SELECT eo.*, {allocation_key_expr} AS computed_allocation_key
+                    FROM edition_orders eo
+                    WHERE COALESCE(shopify_order_id, '') <> ''
+                      AND COALESCE(shopify_line_item_id, '') <> ''
+                ),
+                duplicate_groups AS (
+                    SELECT computed_allocation_key,
+                           COUNT(*) AS actual_allocation_count,
+                           MIN(COALESCE(quantity, 1)) AS expected_quantity,
+                           MIN(created_at) AS first_created_at,
+                           MAX(created_at) AS last_created_at
+                    FROM keyed
+                    WHERE COALESCE(computed_allocation_key, '') <> ''
+                    GROUP BY computed_allocation_key
+                    HAVING COUNT(*) > 1
+                )
+                SELECT
+                    dg.computed_allocation_key AS allocation_key,
+                    dg.actual_allocation_count,
+                    dg.expected_quantity,
+                    dg.first_created_at,
+                    dg.last_created_at,
+                    k.shopify_order_name,
+                    k.shopify_order_id,
+                    k.shopify_line_item_id,
+                    k.shopify_product_id,
+                    k.shopify_variant_id,
+                    k.shopify_handle,
+                    k.product_title,
+                    k.variant_title,
+                    ARRAY_AGG(k.edition_number ORDER BY k.created_at ASC NULLS LAST, k.assigned_at ASC NULLS LAST) AS edition_numbers,
+                    ARRAY_AGG(k.id::text ORDER BY k.created_at ASC NULLS LAST, k.assigned_at ASC NULLS LAST) AS edition_order_ids
+                FROM duplicate_groups dg
+                JOIN keyed k ON k.computed_allocation_key = dg.computed_allocation_key
+                GROUP BY dg.computed_allocation_key, dg.actual_allocation_count, dg.expected_quantity,
+                         dg.first_created_at, dg.last_created_at, k.shopify_order_name, k.shopify_order_id,
+                         k.shopify_line_item_id, k.shopify_product_id, k.shopify_variant_id,
+                         k.shopify_handle, k.product_title, k.variant_title
+                ORDER BY dg.last_created_at DESC NULLS LAST
+                LIMIT %s
+                """,
+                (max(min(int(limit or 50), 500), 1),),
+            )
+            groups = [dict(row) for row in cur.fetchall()]
+            cur.execute(
+                f"""
+                WITH keyed AS (
+                    SELECT {allocation_key_expr} AS computed_allocation_key
+                    FROM edition_orders
+                    WHERE COALESCE(shopify_order_id, '') <> ''
+                      AND COALESCE(shopify_line_item_id, '') <> ''
+                ),
+                duplicate_groups AS (
+                    SELECT computed_allocation_key, COUNT(*) AS row_count
+                    FROM keyed
+                    WHERE COALESCE(computed_allocation_key, '') <> ''
+                    GROUP BY computed_allocation_key
+                    HAVING COUNT(*) > 1
+                )
+                SELECT COUNT(*) AS group_count, COALESCE(SUM(row_count), 0) AS row_count
+                FROM duplicate_groups
+                """
+            )
+            summary = cur.fetchone() or {}
+    return {
+        "edition_orders_total": total,
+        "duplicate_group_count": int(summary.get("group_count") or 0),
+        "duplicate_row_count": int(summary.get("row_count") or 0),
+        "groups": groups,
+    }
+
+
 def sync_latest_paid_orders_to_supabase(
     config=None,
     *,
@@ -8961,6 +9395,46 @@ def sync_latest_paid_orders_to_supabase(
         run_started = time.perf_counter()
         run_id = start_sync_run("shopify_orders_latest_paid", ensure_schema_first=ensure_schema_first)
         _sync_perf_log("sync run start write", run_started, mode="latest_paid_sync")
+        duplicate_diagnostics = edition_allocation_duplicate_diagnostics(limit=10)
+        duplicate_group_count = int(duplicate_diagnostics.get("duplicate_group_count") or 0)
+        duplicate_row_count = int(duplicate_diagnostics.get("duplicate_row_count") or 0)
+        if duplicate_group_count and not backfill_latest_paid:
+            message = (
+                "Check New Paid Orders is blocked because duplicate allocation-risk rows already exist. "
+                "Review the read-only duplicate diagnostics before running more allocation syncs."
+            )
+            finish_sync_run(run_id, "Blocked", 0, 0, message)
+            _orders_sync_log(
+                "duplicate_allocation_preflight_blocked",
+                "blocked",
+                duplicate_groups=duplicate_group_count,
+                duplicate_rows=duplicate_row_count,
+            )
+            return {
+                "mode": "latest_paid_sync",
+                "sync_blocked": True,
+                "block_reason": message,
+                "orders_seen": 0,
+                "shopify_orders_fetched": 0,
+                "orders_processed": 0,
+                "orders_inserted_or_updated": 0,
+                "orders_imported": 0,
+                "existing_orders_skipped": 0,
+                "new_orders_inserted": 0,
+                "new_lines_inserted": 0,
+                "existing_lines_skipped": 0,
+                "lines_already_existing": 0,
+                "supabase_rows_inserted": 0,
+                "assignments_created": 0,
+                "edition_allocations_created": 0,
+                "existing_assignments_skipped": 0,
+                "existing_allocations_preserved": 0,
+                "existing_allocation_units_skipped": 0,
+                "duplicate_risk_units_blocked": duplicate_row_count,
+                "edition_counters_incremented": 0,
+                "duplicate_diagnostics": duplicate_diagnostics,
+                "errors": [message],
+            }
         shopify_fetch_started = time.perf_counter()
         _orders_sync_log("shopify_orders_fetch_started", mode="latest_paid_sync")
         payload = _latest_paid_orders_payload(
@@ -9383,8 +9857,12 @@ def sync_latest_paid_orders_to_supabase(
             "supabase_rows_inserted": imported_orders + imported_lines,
             "assignments_created": assignments,
             "edition_allocations_created": assignments,
+            "new_allocation_units_inserted": assignments,
             "existing_assignments_skipped": existing_skipped,
             "existing_allocations_preserved": existing_skipped,
+            "existing_allocation_units_skipped": existing_skipped,
+            "duplicate_risk_units_blocked": 0,
+            "edition_counters_incremented": assignments,
             "known_missing_repairs_applied": known_applied,
             "known_missing_repairs_already_consistent": known_consistent,
             "missing_mapping_skipped": missing_mapping_skipped,
@@ -10910,9 +11388,17 @@ def list_hybrid_order_rows(limit=250):
                 for row in base_rows
                 if str(row.get("shopify_line_item_id") or "").strip()
             ]
+            line_id_lookup_values = sorted(
+                {
+                    candidate
+                    for line_id in line_ids
+                    for candidate in _shopify_id_candidates("LineItem", line_id)
+                    if candidate
+                }
+            )
             overlay_started = time.perf_counter()
             edition_rows = []
-            if line_ids:
+            if line_id_lookup_values:
                 cur.execute(
                     """
                     SELECT
@@ -10961,7 +11447,7 @@ def list_hybrid_order_rows(limit=250):
                              eo.allocation_index ASC NULLS LAST,
                              eo.edition_number ASC NULLS LAST
                     """,
-                    (line_ids,),
+                    (line_id_lookup_values,),
                 )
                 edition_rows = cur.fetchall()
             print(
@@ -10972,7 +11458,7 @@ def list_hybrid_order_rows(limit=250):
     merge_started = time.perf_counter()
     assignments_by_line = {}
     for edition_row in edition_rows:
-        line_id = str(edition_row.get("shopify_line_item_id") or "").strip()
+        line_id = canonical_shopify_id(edition_row.get("shopify_line_item_id"))
         if not line_id:
             continue
         assignments_by_line.setdefault(line_id, []).append(
@@ -11007,7 +11493,7 @@ def list_hybrid_order_rows(limit=250):
         )
     merged_rows = []
     for row in base_rows:
-        line_id = str(row.get("shopify_line_item_id") or "").strip()
+        line_id = canonical_shopify_id(row.get("shopify_line_item_id"))
         merged = dict(row)
         merged["assignments"] = assignments_by_line.get(line_id, [])
         merged_rows.append(merged)

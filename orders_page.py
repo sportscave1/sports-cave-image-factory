@@ -452,9 +452,22 @@ def _normalise_row(row):
     updated["edition_offset"] = int(updated.get("edition_offset") or 0)
     updated["allocation_index"] = _coerce_positive_int(updated.get("allocation_index") or updated.get("line_item_unit_index") or 1, default=1)
     updated["line_quantity"] = int(updated.get("line_quantity") or 1)
+    assignments = updated.get("assignments") if isinstance(updated.get("assignments"), list) else []
+    updated["assignments_count"] = int(
+        updated.get("assignments_count")
+        or len(assignments)
+        or (1 if updated.get("edition_order_id") else 0)
+    )
     updated["shopify_order_id"] = str(updated.get("shopify_order_id") or "")
     updated["legacy_resource_id"] = str(updated.get("legacy_resource_id") or "")
     updated["shopify_line_item_id"] = str(updated.get("shopify_line_item_id") or "")
+    updated["duplicate_allocation_warning"] = bool(
+        updated.get("duplicate_allocation_warning")
+        or (
+            updated.get("shopify_line_item_id")
+            and updated["assignments_count"] > max(updated["line_quantity"], 1)
+        )
+    )
     updated["shopify_product_id"] = str(updated.get("shopify_product_id") or "")
     updated["variant_id"] = str(updated.get("variant_id") or "")
     updated["product_handle"] = str(updated.get("product_handle") or updated.get("handle") or "")
@@ -1080,6 +1093,10 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50, backfill_latest_pai
         flush=True,
     )
     st.session_state[SYNC_RESULT_KEY] = result
+    if result.get("sync_blocked"):
+        st.session_state[NOTICE_KEY] = result.get("block_reason") or "Orders sync blocked before allocation."
+        print("ORDERS SYNC: snapshot_cache_invalidated no", flush=True)
+        return
     cache_started = time.perf_counter()
     refresh_needed = reload_table or _sync_result_visible_refresh_needed(result)
     affected_rows_merged_count = 0
@@ -1110,7 +1127,9 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50, backfill_latest_pai
         f"{mode_label} complete. Shopify fetched: {int(result.get('shopify_orders_fetched') or 0)} orders",
         f"New orders imported: {int(result.get('new_orders_inserted') or 0)}",
         f"Existing orders preserved/skipped: {int(result.get('existing_orders_skipped') or 0)}",
+        f"Existing allocation units skipped: {int(result.get('existing_allocation_units_skipped') or result.get('existing_assignments_skipped') or 0)}",
         f"Edition numbers assigned: {int(result.get('edition_allocations_created') or 0)}",
+        f"Duplicate-risk units blocked: {int(result.get('duplicate_risk_units_blocked') or 0)}",
         f"Missing product mapping: {int(result.get('missing_mapping_skipped') or 0)}",
         f"Errors: {len(result.get('errors') or [])}",
     ]
@@ -1766,6 +1785,25 @@ def _render_ledger_diagnostics():
             ("audit_logs", "audit_logs"),
         ):
             st.caption(f"{label}: {int(counts.get(key) or 0)}")
+        backend = _configured_supabase_backend()
+        if backend and hasattr(backend, "edition_allocation_duplicate_diagnostics"):
+            try:
+                duplicates = backend.edition_allocation_duplicate_diagnostics(limit=10)
+                duplicate_groups = int(duplicates.get("duplicate_group_count") or 0)
+                duplicate_rows = int(duplicates.get("duplicate_row_count") or 0)
+                st.caption(f"duplicate allocation groups: {duplicate_groups}")
+                st.caption(f"duplicate-risk edition rows: {duplicate_rows}")
+                if duplicate_groups:
+                    st.warning("Duplicate allocation warning: review duplicate diagnostics before running more allocation syncs.")
+                    for group in (duplicates.get("groups") or [])[:5]:
+                        st.caption(
+                            f"{group.get('shopify_order_name') or group.get('shopify_order_id')}: "
+                            f"{group.get('product_title') or group.get('shopify_handle')} / "
+                            f"{group.get('variant_title') or 'variant not shown'} - "
+                            f"{int(group.get('actual_allocation_count') or 0)} allocation rows"
+                        )
+            except Exception as error:
+                st.caption(f"Duplicate allocation diagnostics unavailable: {error}")
 
 
 def _display_rows(rows):
@@ -1774,6 +1812,13 @@ def _display_rows(rows):
         display_row = {column: row.get(column, "") for column in VISIBLE_COLUMNS}
         if display_row.get("order"):
             display_row["order"] = f"{COPY_ORDER_ICON} {display_row['order']}"
+        if row.get("line_quantity", 1) > 1:
+            display_row["variant"] = (
+                f"{display_row.get('variant') or ''} "
+                f"(unit {int(row.get('allocation_index') or 1)}/{int(row.get('line_quantity') or 1)})"
+            ).strip()
+        if row.get("duplicate_allocation_warning"):
+            display_row["edition"] = f"{display_row.get('edition') or 'Needs review'} - Duplicate allocation warning"
         output.append(display_row)
     return output
 
@@ -1968,6 +2013,15 @@ def _render_sync_diagnostics(result):
     cursor_used = result.get("sync_from") or ""
     newest_processed = result.get("newest_shopify_updated_at_processed") or ""
     with st.expander("Sync diagnostics", expanded=False):
+        if result.get("sync_blocked"):
+            st.caption(f"blocked: {result.get('block_reason') or 'Duplicate allocation risk detected.'}")
+        duplicate_diagnostics = result.get("duplicate_diagnostics") or {}
+        if duplicate_diagnostics:
+            st.caption(
+                "duplicate allocation warning: "
+                f"{int(duplicate_diagnostics.get('duplicate_group_count') or 0)} group(s); "
+                f"{int(duplicate_diagnostics.get('duplicate_row_count') or 0)} row(s)"
+            )
         if result.get("cursor_warning"):
             st.caption(f"warning: {result.get('cursor_warning')}")
         st.caption(f"mode: {mode}")
@@ -1988,6 +2042,11 @@ def _render_sync_diagnostics(result):
             f"order={query_parameters.get('order') or 'asc'}"
         )
         st.caption(f"Shopify orders fetched: {int(result.get('shopify_orders_fetched') or 0)}")
+        st.caption(f"existing order lines skipped: {int(result.get('existing_lines_skipped') or result.get('lines_already_existing') or 0)}")
+        st.caption(f"existing allocation units skipped: {int(result.get('existing_allocation_units_skipped') or result.get('existing_assignments_skipped') or 0)}")
+        st.caption(f"new allocation units inserted: {int(result.get('new_allocation_units_inserted') or result.get('edition_allocations_created') or 0)}")
+        st.caption(f"duplicate-risk units blocked: {int(result.get('duplicate_risk_units_blocked') or 0)}")
+        st.caption(f"edition counters incremented: {int(result.get('edition_counters_incremented') or 0)}")
         if result.get("fetch_strategy"):
             st.caption(f"fetch strategy: {result.get('fetch_strategy')}")
         if result.get("cursor_orders_fetched") is not None or result.get("latest_created_orders_fetched") is not None:

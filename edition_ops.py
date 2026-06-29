@@ -23,6 +23,8 @@ META_KEY = "edition_ops_snapshot_meta"
 ERRORS_KEY = "edition_ops_sync_errors"
 NOTICE_KEY = "edition_ops_notice"
 IMPORT_WARNINGS_KEY = "edition_ops_import_warnings"
+SHOPIFY_MIRROR_PREVIEW_KEY = "edition_ops_shopify_mirror_preview"
+SHOPIFY_MIRROR_RESULT_KEY = "edition_ops_shopify_mirror_result"
 EDITOR_VERSION_KEY = "edition_ops_editor_version"
 SNAPSHOT_LOADED_KEY = "edition_ops_snapshot_loaded"
 ORDERS_CACHE_VERSION_KEY = "orders-ledger-cache-version"
@@ -67,6 +69,16 @@ CSV_COLUMNS = (
     "last_synced_at",
     "sync_status",
     "sync_error",
+)
+
+SHOPIFY_MIRROR_METAFIELD_KEYS = (
+    "edition_enabled",
+    "edition_total",
+    "edition_remaining",
+    "edition_next_number",
+    "edition_sold_count",
+    "edition_status",
+    "edition_label",
 )
 
 
@@ -494,6 +506,8 @@ def _ensure_state():
     st.session_state.setdefault(ERRORS_KEY, {})
     st.session_state.setdefault(IMPORT_WARNINGS_KEY, [])
     st.session_state.setdefault(NOTICE_KEY, "")
+    st.session_state.setdefault(SHOPIFY_MIRROR_PREVIEW_KEY, None)
+    st.session_state.setdefault(SHOPIFY_MIRROR_RESULT_KEY, None)
     st.session_state.setdefault(EDITOR_VERSION_KEY, 0)
 
 
@@ -642,6 +656,241 @@ def _save_validation_error(row):
     if next_number > total + 1:
         return f"{label}: next_edition_number cannot be more than one past edition_total."
     return ""
+
+
+def _mirror_options(rows):
+    options = []
+    seen = set()
+    for row in rows:
+        normalised = _normalise_row(row)
+        handle = str(normalised.get("handle") or "").strip()
+        if not handle or handle in seen:
+            continue
+        label = f"{normalised.get('product_title') or handle} ({handle})"
+        options.append((label, handle))
+        seen.add(handle)
+    return options
+
+
+def _mirror_preview_table(preview):
+    rows = []
+    for product in (preview or {}).get("previews") or []:
+        handle = product.get("handle") or ""
+        title = product.get("product_title") or handle
+        last_synced = _format_time(product.get("last_mirror_synced_at"))
+        if product.get("error"):
+            rows.append(
+                {
+                    "Product": title,
+                    "Handle": handle,
+                    "Metafield": "error",
+                    "Shopify before": "",
+                    "Supabase source": product.get("error"),
+                    "Will update": "No",
+                    "Last mirror synced": last_synced,
+                }
+            )
+            continue
+        for change in product.get("changes") or []:
+            if change.get("key") not in SHOPIFY_MIRROR_METAFIELD_KEYS:
+                continue
+            rows.append(
+                {
+                    "Product": title,
+                    "Handle": handle,
+                    "Metafield": change.get("key") or "",
+                    "Shopify before": change.get("shopify_before", ""),
+                    "Supabase source": change.get("supabase_after", ""),
+                    "Will update": "Yes" if change.get("will_update") else "No",
+                    "Last mirror synced": last_synced,
+                }
+            )
+    return rows
+
+
+def _mirror_result_table(result):
+    rows = []
+    for item in (result or {}).get("results") or []:
+        source = item.get("source_values") or {}
+        before = {
+            row.get("key"): row.get("value")
+            for row in item.get("metafields_before") or []
+            if row.get("key")
+        }
+        after = {
+            row.get("key"): row.get("value")
+            for row in item.get("metafields_after") or []
+            if row.get("key")
+        }
+        for key in SHOPIFY_MIRROR_METAFIELD_KEYS:
+            rows.append(
+                {
+                    "Handle": item.get("handle") or "",
+                    "Status": "Shopify mirror updated" if item.get("status") == "updated" else "Shopify mirror failed",
+                    "Metafield": key,
+                    "Supabase source": source.get(key, ""),
+                    "Shopify before": before.get(key, ""),
+                    "Shopify after": after.get(key, ""),
+                    "Error": item.get("error") or "",
+                    "Last mirror synced": _format_time(item.get("last_mirror_synced_at")),
+                }
+            )
+    return rows
+
+
+def _selected_mirror_handles(selected_labels, options):
+    by_label = {label: handle for label, handle in options}
+    return [by_label[label] for label in selected_labels or [] if by_label.get(label)]
+
+
+def _preview_shopify_mirror(backend, handles, *, sync_all_active=False):
+    config = shopify_sync.get_config()
+    if not config.get("configured"):
+        raise ValueError("Shopify is not configured.")
+    if sync_all_active:
+        return backend.preview_shopify_edition_metafield_mirror_for_active_products(
+            config=config,
+            limit=5000,
+        )
+    return backend.preview_shopify_edition_metafield_mirror_for_handles(
+        handles,
+        config=config,
+    )
+
+
+def _push_shopify_mirror(backend, handles, *, sync_all_active=False):
+    config = shopify_sync.get_config()
+    if not config.get("configured"):
+        raise ValueError("Shopify is not configured.")
+    if sync_all_active:
+        return backend.reconcile_shopify_edition_metafields(
+            config=config,
+            limit=5000,
+        )
+    return backend.sync_product_edition_metafields_for_handles(
+        handles,
+        config=config,
+    )
+
+
+def _apply_shopify_mirror_result(rows, originals, result):
+    now = _now_iso()
+    by_handle = {
+        str(item.get("handle") or "").strip(): item
+        for item in (result or {}).get("results") or []
+        if str(item.get("handle") or "").strip()
+    }
+    original_by_key = {
+        _stable_row_key(row): _normalise_row(row)
+        for row in originals
+        if _stable_row_key(row)
+    }
+    updated_rows = []
+    updated_originals = []
+    errors = {}
+    for row in rows:
+        updated = _normalise_row(row)
+        handle = str(updated.get("handle") or "").strip()
+        key = _stable_row_key(updated)
+        mirror = by_handle.get(handle)
+        if mirror:
+            if mirror.get("status") == "updated":
+                updated["sync_status"] = "Shopify mirror updated"
+                updated["sync_error"] = ""
+            else:
+                updated["sync_status"] = "Shopify mirror failed"
+                updated["sync_error"] = mirror.get("error") or "Shopify mirror failed"
+                errors[key or handle] = updated["sync_error"]
+            updated["last_synced_at"] = now
+            updated_originals.append(deepcopy(updated))
+        else:
+            updated_originals.append(deepcopy(original_by_key.get(key, updated)))
+        updated_rows.append(updated)
+    st.session_state[ROWS_KEY] = updated_rows
+    st.session_state[ORIGINAL_ROWS_KEY] = updated_originals
+    st.session_state[ERRORS_KEY] = errors
+    _write_snapshot(updated_rows, updated_originals, meta={"mirror_status": "failed" if errors else "updated"})
+    _invalidate_edition_ops_cache(bump_orders=False)
+    _bump_editor_version()
+
+
+def _render_shopify_mirror_controls(backend, rows, rows_to_save):
+    with st.popover("Push Shopify Metafields", use_container_width=True):
+        st.caption("Shopify is mirror-only. Values are read from Supabase immediately before preview or push.")
+        options = _mirror_options(rows)
+        labels = [label for label, _handle in options]
+        changed_handles = {str(_normalise_row(row).get("handle") or "").strip() for row in rows_to_save}
+        default_labels = [label for label, handle in options if handle in changed_handles]
+        selected_labels = st.multiselect(
+            "Products to mirror",
+            labels,
+            default=default_labels[:25],
+            key="edition-ops-shopify-mirror-products",
+        )
+        sync_all_active = st.checkbox(
+            "Sync all active edition products from Supabase",
+            key="edition-ops-shopify-mirror-all-active",
+        )
+        confirm_all = st.checkbox(
+            "I confirm this should update every active edition product mirror",
+            key="edition-ops-shopify-mirror-confirm-all",
+            disabled=not sync_all_active,
+        )
+        selected_handles = _selected_mirror_handles(selected_labels, options)
+        can_run = bool(backend) and (
+            (sync_all_active and confirm_all)
+            or (not sync_all_active and bool(selected_handles))
+        )
+        col_preview, col_push = st.columns(2)
+        if col_preview.button("Preview Mirror", use_container_width=True, disabled=not can_run):
+            try:
+                st.session_state[SHOPIFY_MIRROR_PREVIEW_KEY] = _preview_shopify_mirror(
+                    backend,
+                    selected_handles,
+                    sync_all_active=sync_all_active,
+                )
+                st.session_state[SHOPIFY_MIRROR_RESULT_KEY] = None
+            except Exception as error:
+                st.session_state[SHOPIFY_MIRROR_PREVIEW_KEY] = {"errors": [str(error)], "previews": []}
+        if col_push.button("Push Shopify Metafields", type="primary", use_container_width=True, disabled=not can_run):
+            try:
+                result = _push_shopify_mirror(
+                    backend,
+                    selected_handles,
+                    sync_all_active=sync_all_active,
+                )
+                st.session_state[SHOPIFY_MIRROR_RESULT_KEY] = result
+                st.session_state[SHOPIFY_MIRROR_PREVIEW_KEY] = None
+                _apply_shopify_mirror_result(
+                    [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])],
+                    [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])],
+                    result,
+                )
+                st.session_state[NOTICE_KEY] = (
+                    f"Shopify mirror updated: {result.get('synced') or 0}. "
+                    f"Failed: {result.get('skipped') or result.get('failed') or 0}. "
+                    "Supabase remained the source of truth."
+                )
+                st.rerun()
+            except Exception as error:
+                st.session_state[SHOPIFY_MIRROR_RESULT_KEY] = {"errors": [str(error)], "results": []}
+                st.error(f"Shopify mirror failed: {error}")
+        preview = st.session_state.get(SHOPIFY_MIRROR_PREVIEW_KEY)
+        if preview:
+            for error in preview.get("errors") or []:
+                st.warning(error)
+            preview_rows = _mirror_preview_table(preview)
+            if preview_rows:
+                st.dataframe(preview_rows, hide_index=True, use_container_width=True)
+            else:
+                st.caption("No preview rows yet.")
+        result = st.session_state.get(SHOPIFY_MIRROR_RESULT_KEY)
+        if result:
+            for error in result.get("errors") or []:
+                st.warning(error)
+            result_rows = _mirror_result_table(result)
+            if result_rows:
+                st.dataframe(result_rows, hide_index=True, use_container_width=True)
 
 
 def _apply_save_errors(rows, originals, rows_to_save, errors):
@@ -1181,7 +1430,7 @@ def render_page():
         st.warning(warning)
     st.session_state[IMPORT_WARNINGS_KEY] = []
 
-    action_cols = st.columns([1, 1, 1, 1])
+    action_cols = st.columns([1, 1, 1, 1, 1])
     if action_cols[0].button("Refresh Products", type="primary", use_container_width=True, disabled=not backend):
         with st.spinner("Reloading products from Supabase..."):
             _reload_products_from_supabase()
@@ -1194,7 +1443,9 @@ def render_page():
         with st.spinner("Saving changed rows..."):
             _save_changed_rows()
         st.rerun()
-    action_cols[2].download_button(
+    with action_cols[2]:
+        _render_shopify_mirror_controls(backend, rows, rows_to_save)
+    action_cols[3].download_button(
         "Export CSV Backup",
         data=_export_csv(rows),
         file_name=f"edition-ops-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
@@ -1202,7 +1453,7 @@ def render_page():
         use_container_width=True,
         disabled=not bool(rows),
     )
-    with action_cols[3].popover("Import CSV and Replace Table", use_container_width=True):
+    with action_cols[4].popover("Import CSV and Replace Table", use_container_width=True):
         st.caption("CSV values replace the edition fields and mark rows Needs Sync. They are not saved until you click Save Changed Rows.")
         uploaded_csv = st.file_uploader(
             "Choose CSV backup",

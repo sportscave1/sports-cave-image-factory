@@ -2582,6 +2582,134 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         upsert_products.assert_called_once()
         metafield_sync.assert_called_once()
 
+    def test_shopify_metafield_mirror_preview_reads_without_writing(self):
+        payload = {
+            "id": "101",
+            "shopify_handle": "legends-never-die",
+            "shopify_product_gid": "gid://shopify/Product/777",
+            "product_title": "Legends Never Die",
+            "edition_total": 100,
+            "next_edition_number": 43,
+            "sold_count": 42,
+            "remaining_count": 58,
+            "edition_status": "limited_release",
+            "edition_name": "Numbered Edition",
+            "metafields_synced_at": "2026-06-30T00:00:00Z",
+        }
+
+        with patch.object(supabase_backend, "ensure_schema") as ensure_schema, patch.object(
+            supabase_backend,
+            "get_product_edition_metafield_payload",
+            return_value=payload,
+        ) as get_payload, patch.object(
+            supabase_backend,
+            "_fetch_public_edition_metafields",
+            return_value={
+                "metafields": [
+                    {
+                        "namespace": "sports_cave",
+                        "key": "edition_next_number",
+                        "type": "number_integer",
+                        "value": "42",
+                    }
+                ],
+                "error": "",
+            },
+        ), patch.object(
+            supabase_backend.shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+        ) as sync_limited:
+            result = supabase_backend.preview_shopify_edition_metafield_mirror_for_handles(
+                ["legends-never-die"],
+                config=self.config,
+            )
+
+        ensure_schema.assert_called_once()
+        get_payload.assert_called_once_with("legends-never-die", ensure_schema_first=False)
+        sync_limited.assert_not_called()
+        self.assertEqual(result["attempted"], 1)
+        preview = result["previews"][0]
+        self.assertEqual(preview["source_values"]["edition_next_number"], "43")
+        next_change = [row for row in preview["changes"] if row["key"] == "edition_next_number"][0]
+        self.assertEqual(next_change["shopify_before"], "42")
+        self.assertEqual(next_change["supabase_after"], "43")
+        self.assertTrue(next_change["will_update"])
+
+    def test_shopify_metafield_mirror_attempt_records_audit(self):
+        payload = {
+            "id": "101",
+            "shopify_handle": "legends-never-die",
+            "shopify_product_id": "gid://shopify/Product/777",
+            "shopify_product_gid": "gid://shopify/Product/777",
+            "product_title": "Legends Never Die",
+            "edition_total": 100,
+            "next_edition_number": 43,
+            "sold_count": 42,
+            "remaining_count": 58,
+            "edition_status": "limited_release",
+            "edition_name": "Numbered Edition",
+        }
+
+        snapshots = [
+            {
+                "metafields": [
+                    {
+                        "namespace": "sports_cave",
+                        "key": "edition_next_number",
+                        "type": "number_integer",
+                        "value": "42",
+                    }
+                ],
+                "error": "",
+            },
+            {
+                "metafields": [
+                    {
+                        "namespace": "sports_cave",
+                        "key": "edition_next_number",
+                        "type": "number_integer",
+                        "value": "43",
+                    }
+                ],
+                "error": "",
+            },
+        ]
+
+        with patch.object(
+            supabase_backend,
+            "get_product_edition_metafield_payload",
+            return_value=payload,
+        ), patch.object(
+            supabase_backend,
+            "_fetch_public_edition_metafields",
+            side_effect=snapshots,
+        ), patch.object(
+            supabase_backend.shopify_sync,
+            "sync_limited_edition_metafields_for_products",
+            return_value={"synced": 1, "failed": 0, "results": []},
+        ) as sync_limited, patch.object(
+            supabase_backend.shopify_sync,
+            "sync_product_edition_metafields",
+            return_value={"count": 8},
+        ), patch.object(
+            supabase_backend,
+            "_mark_product_metafields_sync",
+        ), patch.object(
+            supabase_backend,
+            "_record_product_metafield_mirror_audit",
+        ) as audit_log:
+            result = supabase_backend.sync_product_edition_metafields(
+                "legends-never-die",
+                config=self.config,
+                ensure_schema_first=False,
+            )
+
+        sync_limited.assert_called_once()
+        audit_log.assert_called_once()
+        self.assertEqual(audit_log.call_args.args[0], "legends-never-die")
+        self.assertEqual(audit_log.call_args.kwargs["status"], "updated")
+        self.assertEqual(result["source_values"]["edition_next_number"], "43")
+
 
 class SupabaseOrderSyncLogicTests(unittest.TestCase):
     def setUp(self):
@@ -3028,8 +3156,9 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             "audit_logs",
         ):
             self.assertIn(f"CREATE TABLE IF NOT EXISTS {table_name}", sql)
-        for unsafe in ("DROP ", "DELETE ", "TRUNCATE ", "UPDATE "):
+        for unsafe in ("DROP ", "DELETE ", "TRUNCATE "):
             self.assertNotIn(unsafe, sql.upper())
+        self.assertIn("SET allocation_key =", sql)
         self.assertIn("idx_edition_orders_line_allocation_unique", sql)
         self.assertIn("idx_edition_orders_run_number_active_unique", sql)
         self.assertIn("idx_edition_orders_handle_number_unrun_unique", sql)
@@ -3040,12 +3169,189 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
         self.assertIn("UNIQUE (shopify_line_item_id, allocation_index)", migration_sql)
         self.assertIn("idx_edition_orders_line_allocation_unique", migration_sql)
-        self.assertIn("WHERE eo.shopify_order_id=%s", allocation_source)
-        self.assertIn("AND eo.shopify_line_item_id=%s", allocation_source)
-        self.assertIn("AND eo.allocation_index=%s", allocation_source)
+        self.assertIn("allocation_key", migration_sql)
+        self.assertIn("idx_edition_orders_allocation_key_unique", migration_sql)
+        self.assertIn("eo.shopify_order_id = ANY(%s)", allocation_source)
+        self.assertIn("eo.shopify_line_item_id = ANY(%s)", allocation_source)
+        self.assertIn("COALESCE(eo.allocation_index, 1)=%s", allocation_source)
+        self.assertIn("allocation_identity_key", allocation_source)
         self.assertIn("return {\"created\": False", allocation_source)
         self.assertIn("ON CONFLICT DO NOTHING", allocation_source)
         self.assertIn("edition_order_auto_allocation", allocation_source)
+
+    def test_canonical_shopify_id_normalizes_numeric_and_gid(self):
+        self.assertEqual(supabase_backend.canonical_shopify_id("123"), "123")
+        self.assertEqual(supabase_backend.canonical_shopify_id("gid://shopify/Order/123"), "123")
+        self.assertEqual(supabase_backend.canonical_shopify_id("gid://shopify/LineItem/456"), "456")
+        self.assertEqual(
+            supabase_backend.allocation_identity_key("gid://shopify/Order/123", "456", 2),
+            "123:456:2",
+        )
+
+    def test_existing_numeric_line_lookup_matches_gid_candidate(self):
+        class FakeCursor:
+            def execute(self, sql, params=()):
+                self.params = params
+                self.next_rows = [{"shopify_line_item_id": "3001"}]
+
+            def fetchall(self):
+                return self.next_rows
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeConnection:
+            def cursor(self):
+                return FakeCursor()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with patch.object(supabase_backend, "connect", return_value=FakeConnection()):
+            result = supabase_backend.list_existing_shopify_line_item_ids(
+                ["gid://shopify/LineItem/3001"],
+                ensure_schema_first=False,
+            )
+
+        self.assertIn("3001", result)
+        self.assertIn("gid://shopify/LineItem/3001", result)
+
+    def test_latest_paid_filter_treats_numeric_and_gid_ids_as_existing(self):
+        order = {
+            "shopify_order_id": "gid://shopify/Order/3001",
+            "financial_status": "PAID",
+            "line_items": [{"shopify_line_item_id": "gid://shopify/LineItem/4001"}],
+        }
+        existing_orders = set(supabase_backend._shopify_id_candidates("Order", "3001"))
+        existing_lines = set(supabase_backend._shopify_id_candidates("LineItem", "4001"))
+
+        self.assertFalse(
+            supabase_backend._latest_paid_order_needs_sync(
+                order,
+                existing_orders,
+                existing_lines,
+                {},
+            )
+        )
+
+    def test_existing_allocation_key_skip_does_not_increment_counter(self):
+        statements = []
+
+        class FakeCursor:
+            def execute(self, sql, params=()):
+                statements.append(str(sql))
+                if "information_schema.columns" in str(sql):
+                    self.next_row = {"exists": True}
+                elif "SELECT eo.*, o.order_name" in str(sql):
+                    self.next_row = {
+                        "id": "existing-1",
+                        "allocation_key": "3001:4001:1",
+                        "shopify_order_id": "3001",
+                        "shopify_line_item_id": "4001",
+                        "allocation_index": 1,
+                        "edition_number": 12,
+                    }
+                else:
+                    self.next_row = None
+
+            def fetchone(self):
+                return self.next_row
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeConnection:
+            def cursor(self):
+                return FakeCursor()
+
+            def commit(self):
+                return None
+
+            def rollback(self):
+                return None
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        with patch.object(supabase_backend, "connect", return_value=FakeConnection()):
+            result = supabase_backend.allocate_edition_for_order_line(
+                shopify_order_id="gid://shopify/Order/3001",
+                shopify_order_name="#SC3001",
+                shopify_line_item_id="gid://shopify/LineItem/4001",
+                allocation_index=1,
+                shopify_handle="legends-never-die",
+                product_title="Legends Never Die",
+                ensure_schema_first=False,
+            )
+
+        self.assertFalse(result["created"])
+        self.assertEqual(result["assignment"]["edition_number"], 12)
+        self.assertFalse(any("UPDATE edition_runs" in statement for statement in statements))
+        self.assertFalse(any("INSERT INTO edition_orders" in statement for statement in statements))
+
+    def test_quantity_two_allocates_two_units_and_rerun_skips_existing_units(self):
+        order = self.paid_order(
+            processed_at="2026-06-19T00:05:00Z",
+            remote_updated_at="2026-06-19T02:05:00Z",
+        )
+        order["line_items"][0]["quantity"] = 2
+        created_results = [
+            {"created": True, "assignment": {"id": "a1", "shopify_handle": "legends-never-die"}, "sold_out": False, "error": ""},
+            {"created": True, "assignment": {"id": "a2", "shopify_handle": "legends-never-die"}, "sold_out": False, "error": ""},
+        ]
+        existing_results = [
+            {"created": False, "assignment": {"id": "a1", "shopify_handle": "legends-never-die"}, "sold_out": False, "error": ""},
+            {"created": False, "assignment": {"id": "a2", "shopify_handle": "legends-never-die"}, "sold_out": False, "error": ""},
+        ]
+
+        with patch.object(supabase_backend, "_persist_order_snapshot"), patch.object(
+            supabase_backend, "resolve_edition_product_for_order_line", return_value={"product": {"handle": "legends-never-die", "title": "Legends Never Die"}}
+        ), patch.object(
+            supabase_backend, "allocate_edition_for_order_line", side_effect=created_results
+        ), patch.object(
+            supabase_backend, "connect"
+        ), patch.object(
+            supabase_backend, "_set_order_line_status"
+        ):
+            first = supabase_backend.process_paid_order(
+                order,
+                generate_certificates=False,
+                sync_product_metafields=False,
+                ensure_schema_first=False,
+            )
+
+        with patch.object(supabase_backend, "_persist_order_snapshot"), patch.object(
+            supabase_backend, "resolve_edition_product_for_order_line", return_value={"product": {"handle": "legends-never-die", "title": "Legends Never Die"}}
+        ), patch.object(
+            supabase_backend, "allocate_edition_for_order_line", side_effect=existing_results
+        ), patch.object(
+            supabase_backend, "connect"
+        ), patch.object(
+            supabase_backend, "_set_order_line_status"
+        ):
+            second = supabase_backend.process_paid_order(
+                order,
+                generate_certificates=False,
+                sync_product_metafields=False,
+                ensure_schema_first=False,
+            )
+
+        self.assertEqual(first["assignments_created"], 2)
+        self.assertEqual(first["existing_assignments_skipped"], 0)
+        self.assertEqual(second["assignments_created"], 0)
+        self.assertEqual(second["existing_assignments_skipped"], 2)
 
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(

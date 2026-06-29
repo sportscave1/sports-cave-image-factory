@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS edition_orders (
     edition_number INTEGER,
     edition_total INTEGER,
     edition_display TEXT,
+    allocation_key TEXT,
     allocation_index INTEGER DEFAULT 1,
     quantity INTEGER DEFAULT 1,
     assigned_at TIMESTAMPTZ DEFAULT now(),
@@ -207,6 +208,7 @@ ALTER TABLE IF EXISTS edition_products ADD COLUMN IF NOT EXISTS allow_counter_hi
 
 ALTER TABLE IF EXISTS edition_orders ADD COLUMN IF NOT EXISTS edition_run_id UUID;
 ALTER TABLE IF EXISTS edition_orders ADD COLUMN IF NOT EXISTS edition_name TEXT;
+ALTER TABLE IF EXISTS edition_orders ADD COLUMN IF NOT EXISTS allocation_key TEXT;
 ALTER TABLE IF EXISTS edition_orders ADD COLUMN IF NOT EXISTS quantity INTEGER DEFAULT 1;
 ALTER TABLE IF EXISTS edition_orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'assigned';
 ALTER TABLE IF EXISTS edition_orders ADD COLUMN IF NOT EXISTS manual_override BOOLEAN DEFAULT FALSE;
@@ -230,6 +232,41 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_order_lines_line_id_unique
 CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_orders_line_allocation_unique
     ON edition_orders(shopify_line_item_id, allocation_index)
     WHERE shopify_line_item_id IS NOT NULL AND allocation_index IS NOT NULL;
+
+UPDATE edition_orders
+SET allocation_key =
+    COALESCE(NULLIF(regexp_replace(shopify_order_id, '^gid://shopify/[^/]+/', '', 'i'), ''), shopify_order_id)
+    || ':' ||
+    COALESCE(NULLIF(regexp_replace(shopify_line_item_id, '^gid://shopify/[^/]+/', '', 'i'), ''), shopify_line_item_id)
+    || ':' ||
+    GREATEST(COALESCE(allocation_index, 1), 1)::text
+WHERE COALESCE(allocation_key, '') = ''
+  AND COALESCE(shopify_order_id, '') <> ''
+  AND COALESCE(shopify_line_item_id, '') <> '';
+
+CREATE INDEX IF NOT EXISTS idx_edition_orders_allocation_key
+    ON edition_orders(allocation_key)
+    WHERE COALESCE(allocation_key, '') <> '';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = 'idx_edition_orders_allocation_key_unique'
+    ) AND NOT EXISTS (
+        SELECT 1
+        FROM edition_orders
+        WHERE COALESCE(allocation_key, '') <> ''
+        GROUP BY allocation_key
+        HAVING COUNT(*) > 1
+    ) THEN
+        CREATE UNIQUE INDEX idx_edition_orders_allocation_key_unique
+            ON edition_orders(allocation_key)
+            WHERE COALESCE(allocation_key, '') <> '';
+    END IF;
+END $$;
 
 DO $$
 BEGIN
