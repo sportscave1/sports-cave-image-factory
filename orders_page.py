@@ -922,14 +922,26 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50, backfill_latest_pai
         st.session_state[NOTICE_KEY] = "Supabase is not configured. Stage 4B sync cannot run from local fallback mode."
         return
     sync_started = time.perf_counter()
-    if latest_paid_only:
-        result = backend.sync_latest_paid_orders_to_supabase(limit=max_orders, backfill_latest_paid=backfill_latest_paid)
-    else:
-        result = backend.sync_shopify_orders_to_supabase(
-            max_orders=max_orders,
-            generate_certificates=False,
-            sync_product_metafields=False,
-        )
+    try:
+        if latest_paid_only:
+            result = backend.sync_latest_paid_orders_to_supabase(
+                limit=max_orders,
+                backfill_latest_paid=backfill_latest_paid,
+                ensure_schema_first=False,
+            )
+        else:
+            result = backend.sync_shopify_orders_to_supabase(
+                max_orders=max_orders,
+                generate_certificates=False,
+                sync_product_metafields=False,
+            )
+    except Exception as error:
+        message = str(error) or "Orders sync failed."
+        if "missing required database schema" not in message:
+            message = f"Orders sync failed: {message}"
+        st.session_state[NOTICE_KEY] = message
+        print(f"ORDERS SYNC: orders_sync_failed status=failed error={message}", flush=True)
+        return
     print(
         "PERF Sync Orders: backend sync returned "
         f"elapsed_ms={int((time.perf_counter() - sync_started) * 1000)} "

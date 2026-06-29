@@ -2218,7 +2218,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(
             backend.sync_calls,
-            [{"limit": 25, "backfill_latest_paid": False}],
+            [{"limit": 25, "backfill_latest_paid": False, "ensure_schema_first": False}],
         )
         reload_rows.assert_not_called()
         self.assertIn("cursor check complete", fake_st.session_state[orders_page.NOTICE_KEY].lower())
@@ -2266,7 +2266,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(
             backend.sync_calls,
-            [{"limit": 25, "backfill_latest_paid": True}],
+            [{"limit": 25, "backfill_latest_paid": True, "ensure_schema_first": False}],
         )
         self.assertIn("backfill complete", fake_st.session_state[orders_page.NOTICE_KEY].lower())
         self.assertIn("table reload: deferred", fake_st.session_state[orders_page.NOTICE_KEY].lower())
@@ -2280,7 +2280,10 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn("_latest_paid_order_needs_sync", latest_sync_source)
         self.assertIn("list_existing_shopify_order_states", latest_sync_source)
-        self.assertIn("apply_known_missing_edition_repair()", latest_sync_source)
+        self.assertIn(
+            "apply_known_missing_edition_repair(ensure_schema_first=ensure_schema_first)",
+            latest_sync_source,
+        )
         self.assertIn("process_shopify_order_for_editions", latest_sync_source)
         self.assertIn("fetch_missing_products=False", latest_sync_source)
         self.assertIn("assign_editions=True", latest_sync_source)

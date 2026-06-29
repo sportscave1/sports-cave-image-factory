@@ -354,6 +354,12 @@ def certificate_schema_missing_error_message(error):
     return f"missing required database column/table {name}. Run migrations separately."
 
 
+def orders_sync_schema_error_message(error):
+    if certificate_schema_missing_error_message(error):
+        return "Orders sync failed: missing required database schema. Run migrations separately."
+    return ""
+
+
 def _database_url_with_ssl():
     url = get_database_url()
     if not url:
@@ -1987,20 +1993,27 @@ def _insert_audit_log(
     )
 
 
-def start_sync_run(sync_type):
-    ensure_schema()
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO sync_runs(sync_type, status)
-                VALUES (%s, 'Running')
-                RETURNING id
-                """,
-                (sync_type,),
-            )
-            run_id = cur.fetchone()["id"]
-        conn.commit()
+def start_sync_run(sync_type, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO sync_runs(sync_type, status)
+                    VALUES (%s, 'Running')
+                    RETURNING id
+                    """,
+                    (sync_type,),
+                )
+                run_id = cur.fetchone()["id"]
+            conn.commit()
+    except Exception as error:
+        schema_message = orders_sync_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        raise
     return run_id
 
 
@@ -4167,36 +4180,50 @@ def count_shopify_orders():
             return int((cur.fetchone() or {}).get("count") or 0)
 
 
-def list_existing_shopify_order_ids(order_ids):
-    ensure_schema()
+def list_existing_shopify_order_ids(order_ids, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
     values = [str(order_id or "").strip() for order_id in (order_ids or []) if str(order_id or "").strip()]
     if not values:
         return set()
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT shopify_order_id FROM shopify_orders WHERE shopify_order_id = ANY(%s)",
-                (values,),
-            )
-            return {str(row.get("shopify_order_id") or "").strip() for row in cur.fetchall() if row.get("shopify_order_id")}
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT shopify_order_id FROM shopify_orders WHERE shopify_order_id = ANY(%s)",
+                    (values,),
+                )
+                return {str(row.get("shopify_order_id") or "").strip() for row in cur.fetchall() if row.get("shopify_order_id")}
+    except Exception as error:
+        schema_message = orders_sync_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        raise
 
 
-def list_existing_shopify_line_item_ids(line_item_ids):
-    ensure_schema()
+def list_existing_shopify_line_item_ids(line_item_ids, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
     values = [str(line_item_id or "").strip() for line_item_id in (line_item_ids or []) if str(line_item_id or "").strip()]
     if not values:
         return set()
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT shopify_line_item_id FROM shopify_order_lines WHERE shopify_line_item_id = ANY(%s)",
-                (values,),
-            )
-            return {
-                str(row.get("shopify_line_item_id") or "").strip()
-                for row in cur.fetchall()
-                if row.get("shopify_line_item_id")
-            }
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT shopify_line_item_id FROM shopify_order_lines WHERE shopify_line_item_id = ANY(%s)",
+                    (values,),
+                )
+                return {
+                    str(row.get("shopify_line_item_id") or "").strip()
+                    for row in cur.fetchall()
+                    if row.get("shopify_line_item_id")
+                }
+    except Exception as error:
+        schema_message = orders_sync_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        raise
 
 
 def get_order_line_assignment_snapshot(line_item_ids):
@@ -4523,36 +4550,50 @@ def upsert_prodigi_dispatch_rows(rows, *, ensure_schema_first=True):
     return {"upserted": count}
 
 
-def get_app_setting(key, default=None):
-    ensure_schema()
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT value FROM app_settings WHERE key=%s", (key,))
-            row = cur.fetchone()
+def get_app_setting(key, default=None, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT value FROM app_settings WHERE key=%s", (key,))
+                row = cur.fetchone()
+    except Exception as error:
+        schema_message = orders_sync_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        raise
     if not row:
         return default
     return row.get("value") or default
 
 
-def set_app_setting(key, value):
-    ensure_schema()
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO app_settings(key, value, updated_at)
-                VALUES (%s, %s::jsonb, now())
-                ON CONFLICT (key) DO UPDATE SET
-                    value=EXCLUDED.value,
-                    updated_at=now()
-                """,
-                (key, json_dumps(value)),
-            )
-        conn.commit()
+def set_app_setting(key, value, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO app_settings(key, value, updated_at)
+                    VALUES (%s, %s::jsonb, now())
+                    ON CONFLICT (key) DO UPDATE SET
+                        value=EXCLUDED.value,
+                        updated_at=now()
+                    """,
+                    (key, json_dumps(value)),
+                )
+            conn.commit()
+    except Exception as error:
+        schema_message = orders_sync_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        raise
 
 
-def get_sync_setting(key, default=""):
-    value = get_app_setting(key, default)
+def get_sync_setting(key, default="", *, ensure_schema_first=True):
+    value = get_app_setting(key, default, ensure_schema_first=ensure_schema_first)
     if isinstance(value, dict):
         return value.get("value", default)
     if value is None:
@@ -4560,12 +4601,16 @@ def get_sync_setting(key, default=""):
     return value
 
 
-def get_sync_setting_int(key, default=0):
-    return _int_value(get_sync_setting(key, default), default)
+def get_sync_setting_int(key, default=0, *, ensure_schema_first=True):
+    return _int_value(get_sync_setting(key, default, ensure_schema_first=ensure_schema_first), default)
 
 
-def _sync_lookback_minutes():
-    raw = get_sync_setting(SYNC_LOOKBACK_BUFFER_KEY, DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES)
+def _sync_lookback_minutes(*, ensure_schema_first=True):
+    raw = get_sync_setting(
+        SYNC_LOOKBACK_BUFFER_KEY,
+        DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES,
+        ensure_schema_first=ensure_schema_first,
+    )
     try:
         minutes = int(raw)
     except (TypeError, ValueError):
@@ -4575,9 +4620,13 @@ def _sync_lookback_minutes():
     return min(minutes, 120)
 
 
-def ensure_sync_defaults():
-    if get_app_setting(SYNC_LOOKBACK_BUFFER_KEY) is None:
-        set_app_setting(SYNC_LOOKBACK_BUFFER_KEY, DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES)
+def ensure_sync_defaults(*, ensure_schema_first=True):
+    if get_app_setting(SYNC_LOOKBACK_BUFFER_KEY, ensure_schema_first=ensure_schema_first) is None:
+        set_app_setting(
+            SYNC_LOOKBACK_BUFFER_KEY,
+            DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES,
+            ensure_schema_first=ensure_schema_first,
+        )
 
 
 def ensure_edition_tracking_start():
@@ -4591,20 +4640,20 @@ def ensure_edition_tracking_start():
     return started_at
 
 
-def get_sync_state():
-    ensure_sync_defaults()
+def get_sync_state(*, ensure_schema_first=True):
+    ensure_sync_defaults(ensure_schema_first=ensure_schema_first)
     return {
-        "last_successful_order_sync_at": get_sync_setting(LAST_SUCCESSFUL_ORDER_SYNC_KEY, ""),
-        "last_attempted_order_sync_at": get_sync_setting(LAST_ATTEMPTED_ORDER_SYNC_KEY, ""),
-        "last_successful_order_fetch_at": get_sync_setting(LAST_SUCCESSFUL_ORDER_FETCH_KEY, ""),
-        "last_order_fetch_status": get_sync_setting(LAST_ORDER_FETCH_STATUS_KEY, ""),
-        "last_order_fetch_duration_ms": get_sync_setting_int(LAST_ORDER_FETCH_DURATION_KEY, 0),
-        "last_orders_imported_count": get_sync_setting_int(LAST_ORDERS_IMPORTED_COUNT_KEY, 0),
-        "last_assignments_created_count": get_sync_setting_int(LAST_ASSIGNMENTS_CREATED_COUNT_KEY, 0),
-        "edition_tracking_start_at": get_sync_setting(EDITION_TRACKING_START_KEY, ""),
-        "last_successful_product_sync_at": get_sync_setting(LAST_SUCCESSFUL_PRODUCT_SYNC_KEY, ""),
-        "last_attempted_product_sync_at": get_sync_setting(LAST_ATTEMPTED_PRODUCT_SYNC_KEY, ""),
-        "sync_lookback_buffer_minutes": _sync_lookback_minutes(),
+        "last_successful_order_sync_at": get_sync_setting(LAST_SUCCESSFUL_ORDER_SYNC_KEY, "", ensure_schema_first=ensure_schema_first),
+        "last_attempted_order_sync_at": get_sync_setting(LAST_ATTEMPTED_ORDER_SYNC_KEY, "", ensure_schema_first=ensure_schema_first),
+        "last_successful_order_fetch_at": get_sync_setting(LAST_SUCCESSFUL_ORDER_FETCH_KEY, "", ensure_schema_first=ensure_schema_first),
+        "last_order_fetch_status": get_sync_setting(LAST_ORDER_FETCH_STATUS_KEY, "", ensure_schema_first=ensure_schema_first),
+        "last_order_fetch_duration_ms": get_sync_setting_int(LAST_ORDER_FETCH_DURATION_KEY, 0, ensure_schema_first=ensure_schema_first),
+        "last_orders_imported_count": get_sync_setting_int(LAST_ORDERS_IMPORTED_COUNT_KEY, 0, ensure_schema_first=ensure_schema_first),
+        "last_assignments_created_count": get_sync_setting_int(LAST_ASSIGNMENTS_CREATED_COUNT_KEY, 0, ensure_schema_first=ensure_schema_first),
+        "edition_tracking_start_at": get_sync_setting(EDITION_TRACKING_START_KEY, "", ensure_schema_first=ensure_schema_first),
+        "last_successful_product_sync_at": get_sync_setting(LAST_SUCCESSFUL_PRODUCT_SYNC_KEY, "", ensure_schema_first=ensure_schema_first),
+        "last_attempted_product_sync_at": get_sync_setting(LAST_ATTEMPTED_PRODUCT_SYNC_KEY, "", ensure_schema_first=ensure_schema_first),
+        "sync_lookback_buffer_minutes": _sync_lookback_minutes(ensure_schema_first=ensure_schema_first),
     }
 
 
@@ -4646,21 +4695,21 @@ def get_sync_state_read_only():
     }
 
 
-def _set_sync_attempt(key):
+def _set_sync_attempt(key, *, ensure_schema_first=True):
     timestamp = _datetime_to_setting(utc_now_datetime())
-    set_app_setting(key, timestamp)
+    set_app_setting(key, timestamp, ensure_schema_first=ensure_schema_first)
     return timestamp
 
 
-def _set_sync_success(key):
+def _set_sync_success(key, *, ensure_schema_first=True):
     timestamp = _datetime_to_setting(utc_now_datetime())
-    set_app_setting(key, timestamp)
+    set_app_setting(key, timestamp, ensure_schema_first=ensure_schema_first)
     return timestamp
 
 
-def _set_sync_success_at(key, value):
+def _set_sync_success_at(key, value, *, ensure_schema_first=True):
     timestamp = _datetime_to_setting(value)
-    set_app_setting(key, timestamp)
+    set_app_setting(key, timestamp, ensure_schema_first=ensure_schema_first)
     return timestamp
 
 
@@ -4671,13 +4720,14 @@ def _record_order_fetch_metrics(
     imported_count=0,
     assignments_created=0,
     success_timestamp="",
+    ensure_schema_first=True,
 ):
-    set_app_setting(LAST_ORDER_FETCH_STATUS_KEY, str(status or "Unknown"))
-    set_app_setting(LAST_ORDER_FETCH_DURATION_KEY, int(duration_ms or 0))
-    set_app_setting(LAST_ORDERS_IMPORTED_COUNT_KEY, int(imported_count or 0))
-    set_app_setting(LAST_ASSIGNMENTS_CREATED_COUNT_KEY, int(assignments_created or 0))
+    set_app_setting(LAST_ORDER_FETCH_STATUS_KEY, str(status or "Unknown"), ensure_schema_first=ensure_schema_first)
+    set_app_setting(LAST_ORDER_FETCH_DURATION_KEY, int(duration_ms or 0), ensure_schema_first=ensure_schema_first)
+    set_app_setting(LAST_ORDERS_IMPORTED_COUNT_KEY, int(imported_count or 0), ensure_schema_first=ensure_schema_first)
+    set_app_setting(LAST_ASSIGNMENTS_CREATED_COUNT_KEY, int(assignments_created or 0), ensure_schema_first=ensure_schema_first)
     if success_timestamp:
-        set_app_setting(LAST_SUCCESSFUL_ORDER_FETCH_KEY, str(success_timestamp))
+        set_app_setting(LAST_SUCCESSFUL_ORDER_FETCH_KEY, str(success_timestamp), ensure_schema_first=ensure_schema_first)
 
 
 def _sync_perf_log(label, started=None, **fields):
@@ -4686,6 +4736,15 @@ def _sync_perf_log(label, started=None, **fields):
         parts.append(f"elapsed_ms={int((time.perf_counter() - started) * 1000)}")
     for key, value in fields.items():
         if value is None:
+            continue
+        parts.append(f"{key}={value}")
+    print(" ".join(parts), flush=True)
+
+
+def _orders_sync_log(event, status="started", **fields):
+    parts = [f"ORDERS SYNC: {event}", f"status={status}"]
+    for key, value in fields.items():
+        if value in (None, ""):
             continue
         parts.append(f"{key}={value}")
     print(" ".join(parts), flush=True)
@@ -5237,8 +5296,9 @@ def _resolve_edition_product_for_order_line_with_cursor(cur, line_item, *, lock=
     }
 
 
-def resolve_edition_product_for_order_line(line_item, *, fetch_missing_products=True):
-    ensure_schema()
+def resolve_edition_product_for_order_line(line_item, *, fetch_missing_products=True, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
     with connect() as conn:
         with conn.cursor() as cur:
             result = _resolve_edition_product_for_order_line_with_cursor(cur, line_item)
@@ -7212,8 +7272,10 @@ def allocate_edition_for_order_line(
     promised_edition_number=None,
     promised_edition_total=None,
     assignment_source="supabase_sequential_allocation",
+    ensure_schema_first=True,
 ):
-    ensure_schema()
+    if ensure_schema_first:
+        ensure_schema()
     if not shopify_handle:
         raise ValueError("Shopify handle is required for edition allocation.")
     if not shopify_order_id:
@@ -7731,8 +7793,10 @@ def process_paid_order(
     sync_product_metafields=True,
     assign_editions=True,
     allocation_skip_reason="",
+    ensure_schema_first=True,
 ):
-    ensure_schema()
+    if ensure_schema_first:
+        ensure_schema()
     if not order.get("shopify_order_id"):
         raise ValueError("Shopify order ID is missing.")
     assignments_created = 0
@@ -7809,6 +7873,7 @@ def process_paid_order(
                 match_result = resolve_edition_product_for_order_line(
                     line_item,
                     fetch_missing_products=fetch_missing_products,
+                    ensure_schema_first=ensure_schema_first,
                 )
                 product_match_ms += (time.perf_counter() - product_match_started) * 1000
                 product = match_result.get("product") or {}
@@ -7916,6 +7981,7 @@ def process_paid_order(
                 promised_edition_number=promised_hint.get("edition_number"),
                 promised_edition_total=promised_hint.get("edition_total"),
                 assignment_source=promised_hint.get("source") or "supabase_sequential_allocation",
+                ensure_schema_first=ensure_schema_first,
             )
             allocation_ms += (time.perf_counter() - allocation_started) * 1000
             if result.get("error"):
@@ -7992,8 +8058,9 @@ def process_paid_order(
         _sync_perf_log("Shopify metafield mirror/update time", None, elapsed_ms=0, deferred_handles=len(changed_handles))
 
     audit_error_started = time.perf_counter()
-    for message in errors:
-        log_app_error("order_processing_warning", message, {"shopify_order_id": order.get("shopify_order_id")})
+    if ensure_schema_first:
+        for message in errors:
+            log_app_error("order_processing_warning", message, {"shopify_order_id": order.get("shopify_order_id")})
     _sync_perf_log("audit log write time", audit_error_started, warnings=len(errors))
     _sync_perf_log(
         "order processing detail",
@@ -8025,6 +8092,7 @@ def process_shopify_order_for_editions(
     sync_product_metafields=True,
     assign_editions=True,
     allocation_skip_reason="",
+    ensure_schema_first=True,
 ):
     """Persist one Shopify order, assign editions, and sync product widget metafields."""
     order = dict(order_payload or {})
@@ -8038,6 +8106,7 @@ def process_shopify_order_for_editions(
         sync_product_metafields=sync_product_metafields,
         assign_editions=assign_editions,
         allocation_skip_reason=allocation_skip_reason,
+        ensure_schema_first=ensure_schema_first,
     )
 
 
@@ -8111,9 +8180,10 @@ def _latest_paid_orders_payload(
     limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT,
     lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
     backfill_latest_paid=False,
+    ensure_schema_first=True,
 ):
     config = config or shopify_sync.get_config()
-    state = get_sync_state()
+    state = get_sync_state(ensure_schema_first=ensure_schema_first)
     sync_from = None
     query = ""
     sort_key = "CREATED_AT"
@@ -8211,22 +8281,29 @@ def _latest_paid_orders_payload(
     }
 
 
-def list_existing_shopify_order_states(order_ids):
-    ensure_schema()
+def list_existing_shopify_order_states(order_ids, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
     values = [str(order_id or "").strip() for order_id in (order_ids or []) if str(order_id or "").strip()]
     if not values:
         return {}
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT shopify_order_id, remote_updated_at, created_at, synced_at
-                FROM shopify_orders
-                WHERE shopify_order_id = ANY(%s)
-                """,
-                (values,),
-            )
-            rows = cur.fetchall()
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT shopify_order_id, remote_updated_at, created_at, synced_at
+                    FROM shopify_orders
+                    WHERE shopify_order_id = ANY(%s)
+                    """,
+                    (values,),
+                )
+                rows = cur.fetchall()
+    except Exception as error:
+        schema_message = orders_sync_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        raise
     return {
         str(row.get("shopify_order_id") or "").strip(): {
             "remote_updated_at": row.get("remote_updated_at"),
@@ -8632,22 +8709,37 @@ def sync_latest_paid_orders_to_supabase(
     limit=DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT,
     lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
     backfill_latest_paid=False,
+    ensure_schema_first=True,
 ):
     total_started = time.perf_counter()
     schema_started = time.perf_counter()
-    ensure_schema()
-    _sync_perf_log("schema guard", schema_started, mode="latest_paid_sync")
+    _orders_sync_log("orders_sync_started", mode="latest_paid_sync", backfill=bool(backfill_latest_paid))
+    if ensure_schema_first:
+        ensure_schema()
+        _sync_perf_log("schema guard", schema_started, mode="latest_paid_sync")
+    else:
+        _orders_sync_log("orders_sync_schema_check_skipped", "completed", mode="latest_paid_sync")
+        _sync_perf_log("schema guard skipped", schema_started, mode="latest_paid_sync")
     config = config or shopify_sync.get_config()
-    run_started = time.perf_counter()
-    run_id = start_sync_run("shopify_orders_latest_paid")
-    _sync_perf_log("sync run start write", run_started, mode="latest_paid_sync")
-    shopify_fetch_started = time.perf_counter()
-    payload = _latest_paid_orders_payload(
-        config,
-        limit=limit,
-        lookback_days=lookback_days,
-        backfill_latest_paid=backfill_latest_paid,
-    )
+    run_id = None
+    try:
+        run_started = time.perf_counter()
+        run_id = start_sync_run("shopify_orders_latest_paid", ensure_schema_first=ensure_schema_first)
+        _sync_perf_log("sync run start write", run_started, mode="latest_paid_sync")
+        shopify_fetch_started = time.perf_counter()
+        _orders_sync_log("shopify_orders_fetch_started", mode="latest_paid_sync")
+        payload = _latest_paid_orders_payload(
+            config,
+            limit=limit,
+            lookback_days=lookback_days,
+            backfill_latest_paid=backfill_latest_paid,
+            ensure_schema_first=ensure_schema_first,
+        )
+        _orders_sync_log("shopify_orders_fetch_completed", "completed", orders=len(payload.get("orders") or []))
+    except Exception as error:
+        failure_message = orders_sync_schema_error_message(error) or str(error)
+        _orders_sync_log("orders_sync_failed", "failed", error=failure_message)
+        raise RuntimeError(failure_message) from error
     shopify_fetch_ms = int((time.perf_counter() - shopify_fetch_started) * 1000)
     fetched_orders = payload.get("orders") or []
     seen = len(fetched_orders)
@@ -8670,8 +8762,10 @@ def sync_latest_paid_orders_to_supabase(
 
     try:
         attempt_started = time.perf_counter()
-        _set_sync_attempt(LAST_ATTEMPTED_ORDER_SYNC_KEY)
-        set_app_setting(LAST_ORDER_FETCH_STATUS_KEY, "Running")
+        _orders_sync_log("app_sync_state_update_started", mode="attempt")
+        _set_sync_attempt(LAST_ATTEMPTED_ORDER_SYNC_KEY, ensure_schema_first=ensure_schema_first)
+        set_app_setting(LAST_ORDER_FETCH_STATUS_KEY, "Running", ensure_schema_first=ensure_schema_first)
+        _orders_sync_log("app_sync_state_update_completed", "completed", mode="attempt")
         _sync_perf_log("sync state write", attempt_started, mode="latest_paid_sync")
         order_ids = [order.get("shopify_order_id") for order in fetched_orders]
         line_item_ids = [
@@ -8681,7 +8775,8 @@ def sync_latest_paid_orders_to_supabase(
             if str(line_item.get("shopify_line_item_id") or "").strip()
         ]
         existing_lookup_started = time.perf_counter()
-        existing_order_ids = list_existing_shopify_order_ids(order_ids)
+        _orders_sync_log("supabase_order_read_started", mode="existing_orders", orders=len(order_ids))
+        existing_order_ids = list_existing_shopify_order_ids(order_ids, ensure_schema_first=ensure_schema_first)
         _sync_perf_log(
             "Supabase existing-order lookup time",
             existing_lookup_started,
@@ -8689,7 +8784,7 @@ def sync_latest_paid_orders_to_supabase(
             existing_orders=len(existing_order_ids),
         )
         line_lookup_started = time.perf_counter()
-        existing_line_item_ids = list_existing_shopify_line_item_ids(line_item_ids)
+        existing_line_item_ids = list_existing_shopify_line_item_ids(line_item_ids, ensure_schema_first=ensure_schema_first)
         _sync_perf_log(
             "Supabase existing-line lookup time",
             line_lookup_started,
@@ -8697,7 +8792,14 @@ def sync_latest_paid_orders_to_supabase(
             existing_lines=len(existing_line_item_ids),
         )
         state_lookup_started = time.perf_counter()
-        existing_order_states = list_existing_shopify_order_states(order_ids)
+        existing_order_states = list_existing_shopify_order_states(order_ids, ensure_schema_first=ensure_schema_first)
+        _orders_sync_log(
+            "supabase_order_read_completed",
+            "completed",
+            existing_orders=len(existing_order_ids),
+            existing_lines=len(existing_line_item_ids),
+            states=len(existing_order_states),
+        )
         _sync_perf_log(
             "Supabase existing-order state lookup time",
             state_lookup_started,
@@ -8735,7 +8837,7 @@ def sync_latest_paid_orders_to_supabase(
         }
         known_repair_started = time.perf_counter()
         known_repair = (
-            apply_known_missing_edition_repair()
+            apply_known_missing_edition_repair(ensure_schema_first=ensure_schema_first)
             if known_repair_candidates
             and any(repair.get("order_name") in known_repair_candidates for repair in KNOWN_MISSING_EDITION_REPAIRS)
             else {"applied_rows": 0, "already_exists_consistent": 0, "errors": []}
@@ -8758,13 +8860,15 @@ def sync_latest_paid_orders_to_supabase(
             except Exception as handle_error:
                 message = f"Shopify product mirror handle lookup failed / retry: {handle_error}"
                 errors.append(message)
-                log_app_error(
-                    "latest_paid_product_metafield_handle_lookup_failed",
-                    str(handle_error),
-                    {"orders": [order.get("order_name") or order.get("shopify_order_id") for order in fetched_orders[:10]]},
-                )
+                if ensure_schema_first:
+                    log_app_error(
+                        "latest_paid_product_metafield_handle_lookup_failed",
+                        str(handle_error),
+                        {"orders": [order.get("order_name") or order.get("shopify_order_id") for order in fetched_orders[:10]]},
+                    )
 
         allocation_started = time.perf_counter()
+        _orders_sync_log("edition_allocation_started", orders=len(candidate_orders))
         for order in sorted(candidate_orders, key=order_allocation_sort_key):
             result = process_shopify_order_for_editions(
                 order,
@@ -8773,6 +8877,7 @@ def sync_latest_paid_orders_to_supabase(
                 generate_certificates=False,
                 sync_product_metafields=False,
                 assign_editions=True,
+                ensure_schema_first=ensure_schema_first,
             )
             processed_orders += 1
             assignments += int(result.get("assignments_created") or 0)
@@ -8786,6 +8891,13 @@ def sync_latest_paid_orders_to_supabase(
             None,
             elapsed_ms=int(allocation_elapsed_ms),
             candidate_orders=len(candidate_orders),
+            processed_orders=processed_orders,
+            assignments=assignments,
+            existing_assignments=existing_skipped,
+        )
+        _orders_sync_log(
+            "edition_allocation_completed",
+            "completed",
             processed_orders=processed_orders,
             assignments=assignments,
             existing_assignments=existing_skipped,
@@ -8809,10 +8921,12 @@ def sync_latest_paid_orders_to_supabase(
         mirror_started = time.perf_counter()
         mirror_failed_with_exception = False
         if mirror_handles:
+            _orders_sync_log("shopify_metafield_mirror_started", handles=len(mirror_handles))
             try:
                 product_metafield_mirror = sync_product_edition_metafields_for_handles(
                     mirror_handles,
                     config=config,
+                    ensure_schema_first=ensure_schema_first,
                 )
             except Exception as mirror_error:
                 mirror_failed_with_exception = True
@@ -8832,11 +8946,12 @@ def sync_latest_paid_orders_to_supabase(
                         for handle in mirror_handles
                     ],
                 }
-                log_app_error(
-                    "latest_paid_product_metafield_mirror_failed",
-                    str(mirror_error),
-                    {"handles": mirror_handles},
-                )
+                if ensure_schema_first:
+                    log_app_error(
+                        "latest_paid_product_metafield_mirror_failed",
+                        str(mirror_error),
+                        {"handles": mirror_handles},
+                    )
             mirror_errors = product_metafield_mirror.get("errors") or []
             if mirror_errors and not mirror_failed_with_exception:
                 errors.extend(
@@ -8850,6 +8965,13 @@ def sync_latest_paid_orders_to_supabase(
                 product_metafields_synced=product_metafield_mirror.get("synced") or 0,
                 product_metafields_failed=product_metafield_mirror.get("skipped") or 0,
             )
+            _orders_sync_log(
+                "shopify_metafield_mirror_completed",
+                "completed",
+                attempted=product_metafield_mirror.get("attempted") or 0,
+                synced=product_metafield_mirror.get("synced") or 0,
+                failed=product_metafield_mirror.get("skipped") or 0,
+            )
         else:
             _sync_perf_log(
                 "Shopify metafield mirror/update time",
@@ -8859,12 +8981,19 @@ def sync_latest_paid_orders_to_supabase(
                 product_metafields_synced=0,
                 product_metafields_failed=0,
             )
+            _orders_sync_log("shopify_metafield_mirror_completed", "completed", attempted=0, synced=0, failed=0)
         state_success_started = time.perf_counter()
         if backfill_latest_paid:
             success_timestamp = ""
             cursor_update_reason = "Backfill mode does not advance the normal sync cursor."
         elif newest_processed_cursor:
-            success_timestamp = _set_sync_success_at(LAST_SUCCESSFUL_ORDER_SYNC_KEY, newest_processed_cursor)
+            _orders_sync_log("app_sync_state_update_started", mode="success_cursor")
+            success_timestamp = _set_sync_success_at(
+                LAST_SUCCESSFUL_ORDER_SYNC_KEY,
+                newest_processed_cursor,
+                ensure_schema_first=ensure_schema_first,
+            )
+            _orders_sync_log("app_sync_state_update_completed", "completed", mode="success_cursor")
             cursor_updated = True
             cursor_update_reason = (
                 "Cursor advanced to newest successfully fetched Shopify order updated_at."
@@ -8883,7 +9012,9 @@ def sync_latest_paid_orders_to_supabase(
             imported_count=imported_orders,
             assignments_created=assignments,
             success_timestamp=success_timestamp,
+            ensure_schema_first=ensure_schema_first,
         )
+        _orders_sync_log("app_sync_state_update_completed", "completed", mode="metrics", sync_status=status)
         _sync_perf_log("sync state success/metrics write", state_success_started, status=status)
         run_finish_started = time.perf_counter()
         finish_sync_run(run_id, "Complete" if not errors else "Complete With Warnings", seen, processed_orders)
@@ -8897,6 +9028,7 @@ def sync_latest_paid_orders_to_supabase(
             assign_ms=allocation_elapsed_ms,
             db_write_ms=(time.perf_counter() - db_write_started) * 1000,
         )
+        _orders_sync_log("orders_sync_finished", "completed", orders=seen, assignments=assignments, errors=len(errors))
         return {
             "mode": "latest_paid_sync",
             "orders_seen": seen,
@@ -8952,16 +9084,27 @@ def sync_latest_paid_orders_to_supabase(
         }
     except Exception as error:
         duration_ms = int((time.perf_counter() - total_started) * 1000)
-        _record_order_fetch_metrics(
-            status="Failed",
-            duration_ms=duration_ms,
-            imported_count=imported_orders,
-            assignments_created=assignments,
-            success_timestamp="",
-        )
-        finish_sync_run(run_id, "Failed", seen, processed_orders, "Latest paid Shopify order sync failed.")
-        log_app_error("latest_paid_order_sync_failed", str(error), {"records_seen": seen})
-        raise
+        schema_message = orders_sync_schema_error_message(error)
+        failure_message = schema_message or str(error)
+        try:
+            _record_order_fetch_metrics(
+                status="Failed",
+                duration_ms=duration_ms,
+                imported_count=imported_orders,
+                assignments_created=assignments,
+                success_timestamp="",
+                ensure_schema_first=ensure_schema_first,
+            )
+        except Exception:
+            pass
+        try:
+            finish_sync_run(run_id, "Failed", seen, processed_orders, "Latest paid Shopify order sync failed.")
+        except Exception:
+            pass
+        if ensure_schema_first:
+            log_app_error("latest_paid_order_sync_failed", failure_message, {"records_seen": seen})
+        _orders_sync_log("orders_sync_failed", "failed", error=failure_message, orders=seen, assignments=assignments)
+        raise RuntimeError(failure_message) from error
 
 
 def backfill_missing_shopify_order_details(config=None, *, limit=100, dry_run=True):
@@ -9514,8 +9657,9 @@ def _known_repair_public_row(plan):
     }
 
 
-def _known_missing_edition_repair_plan():
-    ensure_schema()
+def _known_missing_edition_repair_plan(*, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
     target_by_key = {_known_repair_target_key(target): target for target in KNOWN_MISSING_EDITION_REPAIRS}
     with connect() as conn:
         with conn.cursor() as cur:
@@ -9639,8 +9783,8 @@ def preview_known_missing_edition_repair():
     }
 
 
-def apply_known_missing_edition_repair():
-    plans = _known_missing_edition_repair_plan()
+def apply_known_missing_edition_repair(*, ensure_schema_first=True):
+    plans = _known_missing_edition_repair_plan(ensure_schema_first=ensure_schema_first)
     applied_rows = []
     skipped_rows = []
     errors = []
@@ -9673,6 +9817,7 @@ def apply_known_missing_edition_repair():
                 promised_edition_number=target.get("edition_number"),
                 promised_edition_total=target.get("edition_total"),
                 assignment_source="known_missing_truth_20260625",
+                ensure_schema_first=ensure_schema_first,
             )
             if allocation.get("error"):
                 failed = {**public_row, "status": "error", "reason": allocation["error"]}

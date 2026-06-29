@@ -2835,7 +2835,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         ), patch.object(
             supabase_backend,
             "apply_known_missing_edition_repair",
-            side_effect=lambda: events.append("known_repair")
+            side_effect=lambda **_kwargs: events.append("known_repair")
             or {"applied_rows": 1, "already_exists_consistent": 0, "errors": []},
         ), patch.object(
             supabase_backend,
@@ -2937,6 +2937,115 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["existing_orders_skipped"], 1)
         self.assertEqual(result["new_orders_inserted"], 0)
         self.assertEqual(result["sync_from"], "2026-06-25T09:50:00Z")
+
+    def test_sync_latest_paid_orders_no_schema_mode_skips_ensure_and_mirrors_affected_handles(self):
+        payload = {
+            "orders": [
+                {
+                    "shopify_order_id": "gid://shopify/Order/3001",
+                    "order_name": "#SC3001",
+                    "financial_status": "PAID",
+                    "remote_updated_at": "2026-06-25T10:00:00Z",
+                    "line_items": [
+                        {
+                            "shopify_line_item_id": "gid://shopify/LineItem/3001",
+                            "quantity": 1,
+                            "shopify_product_id": "gid://shopify/Product/1",
+                            "product_handle": "legends-never-die",
+                            "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                        }
+                    ],
+                }
+            ],
+            "query": "financial_status:paid updated_at:>='2026-06-25T09:50:00Z'",
+            "limit": 50,
+            "lookback_days": 14,
+            "sync_from": "2026-06-25T09:50:00Z",
+        }
+        with patch.object(
+            supabase_backend,
+            "ensure_schema",
+            side_effect=AssertionError("Orders sync should not run schema migrations."),
+        ) as ensure_schema, patch.object(
+            supabase_backend, "start_sync_run", return_value="run-1"
+        ) as start_sync_run, patch.object(
+            supabase_backend, "_set_sync_attempt"
+        ), patch.object(
+            supabase_backend, "set_app_setting"
+        ), patch.object(
+            supabase_backend, "_latest_paid_orders_payload", return_value=payload
+        ), patch.object(
+            supabase_backend, "list_existing_shopify_order_ids", return_value=set()
+        ), patch.object(
+            supabase_backend, "list_existing_shopify_line_item_ids", return_value=set()
+        ), patch.object(
+            supabase_backend, "list_existing_shopify_order_states", return_value={}
+        ), patch.object(
+            supabase_backend, "apply_known_missing_edition_repair"
+        ) as known_repair, patch.object(
+            supabase_backend,
+            "process_shopify_order_for_editions",
+            return_value={
+                "assignments_created": 1,
+                "existing_assignments_skipped": 0,
+                "missing_mapping_skipped": 0,
+                "changed_handles": ["legends-never-die"],
+                "errors": [],
+            },
+        ) as process_order, patch.object(
+            supabase_backend,
+            "sync_product_edition_metafields_for_handles",
+            return_value={"attempted": 1, "synced": 1, "skipped": 0, "errors": [], "results": []},
+        ) as mirror_handles, patch.object(
+            supabase_backend, "_set_sync_success_at", return_value="2026-06-25T10:00:00Z"
+        ), patch.object(
+            supabase_backend, "_record_order_fetch_metrics"
+        ), patch.object(
+            supabase_backend, "finish_sync_run"
+        ), patch.object(
+            supabase_backend, "_log_order_fetch_timing"
+        ):
+            result = supabase_backend.sync_latest_paid_orders_to_supabase(
+                config=self.config,
+                limit=50,
+                lookback_days=14,
+                ensure_schema_first=False,
+            )
+
+        ensure_schema.assert_not_called()
+        start_sync_run.assert_called_once_with("shopify_orders_latest_paid", ensure_schema_first=False)
+        known_repair.assert_not_called()
+        self.assertFalse(process_order.call_args.kwargs["ensure_schema_first"])
+        mirror_handles.assert_called_once_with(
+            ["legends-never-die"],
+            config=self.config,
+            ensure_schema_first=False,
+        )
+        self.assertEqual(result["edition_allocations_created"], 1)
+        self.assertEqual(result["product_metafields_synced"], 1)
+
+    def test_sync_latest_paid_orders_no_schema_mode_reports_missing_schema_cleanly(self):
+        class MissingSchemaError(Exception):
+            sqlstate = "42P01"
+
+        with patch.object(
+            supabase_backend,
+            "ensure_schema",
+            side_effect=AssertionError("Orders sync should not run schema migrations."),
+        ) as ensure_schema, patch.object(
+            supabase_backend,
+            "start_sync_run",
+            side_effect=MissingSchemaError("relation sync_runs does not exist"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Orders sync failed: missing required database schema"):
+                supabase_backend.sync_latest_paid_orders_to_supabase(
+                    config=self.config,
+                    limit=50,
+                    lookback_days=14,
+                    ensure_schema_first=False,
+                )
+
+        ensure_schema.assert_not_called()
 
     @patch.object(supabase_backend, "get_sync_state")
     @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders")
