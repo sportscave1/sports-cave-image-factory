@@ -19,6 +19,9 @@ R2_BUCKET_ENV_KEYS = {
 DEFAULT_PRESIGNED_EXPIRY_SECONDS = 3600
 TEST_BACKUP_KEY = "test/sports-cave-os-r2-test.txt"
 TEST_BACKUP_BODY = b"Sports Cave OS R2 test upload"
+DEFAULT_R2_CONNECT_TIMEOUT_SECONDS = 8
+DEFAULT_R2_READ_TIMEOUT_SECONDS = 30
+DEFAULT_R2_MAX_ATTEMPTS = 2
 
 
 class R2ConfigurationError(RuntimeError):
@@ -81,6 +84,19 @@ def _normalize_endpoint(endpoint):
     return endpoint.rstrip("/")
 
 
+def _env_int(name, default):
+    try:
+        return int(_clean_env(name) or default)
+    except ValueError:
+        return default
+
+
+def _r2_log(event, **details):
+    safe_details = " ".join(f"{key}={value}" for key, value in details.items() if value not in (None, ""))
+    suffix = f" {safe_details}" if safe_details else ""
+    print(f"CERTIFICATE ACTION: R2 {event}{suffix}", flush=True)
+
+
 def get_r2_client():
     if not safe_r2_enabled():
         raise R2ConfigurationError(
@@ -98,7 +114,15 @@ def get_r2_client():
         aws_access_key_id=_clean_env("R2_ACCESS_KEY_ID"),
         aws_secret_access_key=_clean_env("R2_SECRET_ACCESS_KEY"),
         region_name="auto",
-        config=Config(signature_version="s3v4"),
+        config=Config(
+            signature_version="s3v4",
+            connect_timeout=max(_env_int("R2_CONNECT_TIMEOUT_SECONDS", DEFAULT_R2_CONNECT_TIMEOUT_SECONDS), 1),
+            read_timeout=max(_env_int("R2_READ_TIMEOUT_SECONDS", DEFAULT_R2_READ_TIMEOUT_SECONDS), 1),
+            retries={
+                "max_attempts": max(_env_int("R2_MAX_ATTEMPTS", DEFAULT_R2_MAX_ATTEMPTS), 1),
+                "mode": "standard",
+            },
+        ),
     )
 
 
@@ -122,7 +146,9 @@ def upload_bytes(bucket, key, data, content_type=None):
         kwargs = {"Bucket": bucket, "Key": key, "Body": bytes(body)}
         if content_type:
             kwargs["ContentType"] = str(content_type)
+        _r2_log("upload started", bucket=bucket, key=key, size_bytes=len(body))
         get_r2_client().put_object(**kwargs)
+        _r2_log("upload completed", bucket=bucket, key=key, size_bytes=len(body))
         return {
             "ok": True,
             "bucket": bucket,
@@ -131,6 +157,7 @@ def upload_bytes(bucket, key, data, content_type=None):
             "content_type": content_type or "",
         }
     except Exception as error:
+        _r2_log("upload failed", bucket=bucket if "bucket" in locals() else "", key=key if "key" in locals() else "", error=error)
         return _safe_error(error)
 
 

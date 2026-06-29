@@ -1593,6 +1593,12 @@ def _metafields_user_error_text(errors):
     return "; ".join(messages)
 
 
+def _certificate_upload_log(event, **details):
+    safe_details = " ".join(f"{key}={value}" for key, value in details.items() if value not in (None, ""))
+    suffix = f" {safe_details}" if safe_details else ""
+    print(f"CERTIFICATE ACTION: Shopify {event}{suffix}", flush=True)
+
+
 def metafields_set(metafields, config=None, request_post=None):
     inputs = [item for item in (metafields or []) if item.get("ownerId") and item.get("key")]
     if not inputs:
@@ -1734,16 +1740,26 @@ def upload_file_to_shopify_files(
 ):
     file_path = Path(file_path)
     filename = filename or file_path.name
-    staged = create_staged_upload(filename, mime_type, config=config, request_post=request_post)
-    upload_to_staged_target(staged["target"], file_path, mime_type, upload_post=upload_post)
-    created = create_shopify_file(
-        staged["target"].get("resourceUrl") or "",
-        filename,
-        alt=alt or filename,
-        content_type=content_type,
-        config=config,
-        request_post=request_post,
-    )
+    try:
+        _certificate_upload_log("staged upload create started", filename=filename, mime_type=mime_type)
+        staged = create_staged_upload(filename, mime_type, config=config, request_post=request_post)
+        _certificate_upload_log("staged upload create completed", filename=filename)
+        _certificate_upload_log("staged upload started", filename=filename)
+        upload_to_staged_target(staged["target"], file_path, mime_type, upload_post=upload_post)
+        _certificate_upload_log("staged upload completed", filename=filename)
+        _certificate_upload_log("fileCreate started", filename=filename, content_type=content_type)
+        created = create_shopify_file(
+            staged["target"].get("resourceUrl") or "",
+            filename,
+            alt=alt or filename,
+            content_type=content_type,
+            config=config,
+            request_post=request_post,
+        )
+        _certificate_upload_log("fileCreate completed", filename=filename)
+    except Exception as error:
+        _certificate_upload_log("upload failed", filename=filename, error=error)
+        raise
     file_node = created.get("file") or {}
     file_id = file_node.get("id") or ""
     for _ in range(max(int(poll_attempts or 0), 0)):

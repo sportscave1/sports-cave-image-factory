@@ -23,6 +23,12 @@ LOCAL_ONLY_CERTIFICATE_KEYS = {
 logger = logging.getLogger(__name__)
 
 
+def _certificate_action_log(event, **details):
+    safe_details = " ".join(f"{key}={value}" for key, value in details.items() if value not in (None, ""))
+    suffix = f" {safe_details}" if safe_details else ""
+    print(f"CERTIFICATE ACTION: {event}{suffix}", flush=True)
+
+
 def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -496,6 +502,11 @@ def _upload_certificate_image_assets(updated, *, config=None, request_post=None,
 def generate_local_certificate_for_record(record, output_dir=None):
     output_dir = Path(output_dir or CERTIFICATE_OUTPUT_DIR)
     updated = dict(record or {})
+    _certificate_action_log(
+        "certificate PDF generation started",
+        order=updated.get("order_name") or updated.get("shopify_order_name"),
+        edition=updated.get("edition_number"),
+    )
     filename = certificate_service.certificate_pdf_filename(
         updated.get("order_name"),
         updated.get("handle"),
@@ -538,23 +549,36 @@ def generate_local_certificate_for_record(record, output_dir=None):
         updated["updated_at"] = updated["generated_at"]
         updated["status"] = "Generated"
         updated["sync_error"] = ""
+        _certificate_action_log(
+            "certificate PDF generated",
+            order=updated.get("order_name") or updated.get("shopify_order_name"),
+            edition=updated.get("edition_number"),
+            pdf_path=pdf_path,
+        )
     except FileNotFoundError as error:
         updated["status"] = "Template missing"
         updated["sync_error"] = str(error)
         updated["generated_at"] = now_iso()
         updated["created_at"] = updated.get("created_at") or updated["generated_at"]
         updated["updated_at"] = updated["generated_at"]
+        _certificate_action_log("certificate PDF generation failed", error=error)
     except Exception as error:
         updated["status"] = "Error"
         updated["sync_error"] = str(error)
         updated["generated_at"] = now_iso()
         updated["created_at"] = updated.get("created_at") or updated["generated_at"]
         updated["updated_at"] = updated["generated_at"]
+        _certificate_action_log("certificate PDF generation failed", error=error)
     return updated
 
 
 def upload_generated_certificate_record(record, *, config=None, request_post=None, upload_post=None):
     updated = dict(record or {})
+    _certificate_action_log(
+        "certificate Shopify upload started",
+        order=updated.get("order_name") or updated.get("shopify_order_name"),
+        edition=updated.get("edition_number"),
+    )
     local_raw = str(updated.get("local_pdf_path") or "").strip()
     if not local_raw:
         raise FileNotFoundError("Generated certificate PDF is missing.")
@@ -601,6 +625,12 @@ def upload_generated_certificate_record(record, *, config=None, request_post=Non
     updated["generated_at"] = updated.get("generated_at") or now_iso()
     updated["created_at"] = updated.get("created_at") or updated["generated_at"]
     updated["updated_at"] = now_iso()
+    _certificate_action_log(
+        "certificate Shopify upload completed",
+        order=updated.get("order_name") or updated.get("shopify_order_name"),
+        edition=updated.get("edition_number"),
+        file_id=updated.get("pdf_shopify_file_id"),
+    )
     return updated
 
 
@@ -608,6 +638,11 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
     order_gid = order_allocator.order_gid(record.get("order_gid") or record.get("shopify_order_id"))
     if not order_gid:
         raise shopify_sync.ShopifyAPIError("Order ID is missing for certificate save.")
+    _certificate_action_log(
+        "Supabase/order certificate update started",
+        order=record.get("order_name") or record.get("shopify_order_name"),
+        edition=record.get("edition_number"),
+    )
     record_to_save = certificate_metafield_record(record)
     persist_certificate_record_to_supabase(record_to_save)
     state = read_order_certificate_state(order_gid, config=config, request_post=request_post)
@@ -626,6 +661,13 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
             config=config,
             request_post=request_post,
         )
+        _certificate_action_log(
+            "Supabase/order certificate update completed",
+            order=record.get("order_name") or record.get("shopify_order_name"),
+            edition=record.get("edition_number"),
+            metafields_synced=bool(sync_result.get("ok")),
+            existing=True,
+        )
         return {
             "record": existing,
             "saved": False,
@@ -641,13 +683,20 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
         config=config,
         request_post=request_post,
     )
-    return {
+    result = {
         "record": record_to_save,
         "saved": True,
         "skipped_existing": False,
         "metafields_synced": bool(sync_result.get("ok")),
         "metafield_error": sync_result.get("error") or "",
     }
+    _certificate_action_log(
+        "Supabase/order certificate update completed",
+        order=record.get("order_name") or record.get("shopify_order_name"),
+        edition=record.get("edition_number"),
+        metafields_synced=result.get("metafields_synced"),
+    )
+    return result
 
 
 def retry_certificate_metafield_push_for_rows(rows, *, config=None, request_post=None):

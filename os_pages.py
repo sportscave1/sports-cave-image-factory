@@ -3790,11 +3790,20 @@ def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None):
 
 
 def prodigi_generate_upload_certificate_for_row(row, *, config=None):
+    started = time.perf_counter()
+    print(
+        "CERTIFICATE ACTION: certificate action started "
+        f"source=Prodigi order={row.get('shopify_order_name') or row.get('shopify_order_number') or ''} "
+        f"selected_row_found={bool(row)}",
+        flush=True,
+    )
     if not _prodigi_is_limited_edition(row):
+        print("CERTIFICATE ACTION: certificate action finished source=Prodigi skipped=not_limited", flush=True)
         return {"skipped": True, "record": {}, "metafields_synced": True}
     if not _prodigi_int(row.get("edition_number"), 0):
         raise ValueError("Assign edition number before certificate generation.")
     if _prodigi_certificate_uploaded(row):
+        print("CERTIFICATE ACTION: certificate action finished source=Prodigi skipped=already_uploaded", flush=True)
         return {
             "skipped_existing": True,
             "metafields_synced": True,
@@ -3813,7 +3822,15 @@ def prodigi_generate_upload_certificate_for_row(row, *, config=None):
     edition_order_id = str(row.get("edition_order_id") or "").strip()
     if edition_order_id:
         try:
+            print(
+                f"CERTIFICATE ACTION: backend call started source=Prodigi edition_order_id={edition_order_id}",
+                flush=True,
+            )
             supabase_backend.generate_certificate_for_edition_order(edition_order_id)
+            print(
+                f"CERTIFICATE ACTION: backend call completed source=Prodigi edition_order_id={edition_order_id}",
+                flush=True,
+            )
         except Exception as error:
             supabase_backend.log_app_error(
                 "prodigi_certificate_supabase_generation_failed",
@@ -3862,6 +3879,12 @@ def prodigi_generate_upload_certificate_for_row(row, *, config=None):
     bump_supabase_cache_version("orders", "order-summary")
     st.session_state["orders_allocation_snapshot_loaded"] = False
     st.session_state["orders-ledger-cache-version"] = int(st.session_state.get("orders-ledger-cache-version", 0)) + 1
+    print(
+        "CERTIFICATE ACTION: certificate action finished "
+        f"source=Prodigi order={row.get('shopify_order_name') or row.get('shopify_order_number') or ''} "
+        f"elapsed_ms={int((time.perf_counter() - started) * 1000)}",
+        flush=True,
+    )
     return saved
 
 
@@ -4379,6 +4402,7 @@ def render_prodigi_page():
             disabled=bool(completion_blockers) or bool(already_submitted),
             key="prodigi-dispatch-complete",
         ):
+            st.session_state["prodigi_certificate_action_loading"] = True
             try:
                 completion_row = dict(selected_row)
                 if _prodigi_is_limited_edition(completion_row):
@@ -4405,7 +4429,14 @@ def render_prodigi_page():
                 st.rerun()
             except Exception as error:
                 supabase_backend.log_app_error("prodigi_dispatch_complete_save_failed", str(error), {"source": "prodigi_page"})
-                st.error(f"Dispatch save failed: {error}")
+                print(
+                    f"CERTIFICATE ACTION: certificate action failed source=Prodigi order={selected_row.get('shopify_order_name') or selected_row.get('shopify_order_number') or ''} error={error}",
+                    flush=True,
+                )
+                st.error(f"Certificate upload failed: {error}. You can retry this order.")
+            finally:
+                st.session_state["prodigi_certificate_action_loading"] = False
+                print("CERTIFICATE ACTION: loading state cleared source=Prodigi", flush=True)
 
     st.divider()
     st.subheader("Submitted Dispatch Log")

@@ -28,6 +28,7 @@ ROWS_KEY = "orders_allocation_rows"
 META_KEY = "orders_allocation_meta"
 SNAPSHOT_LOADED_KEY = "orders_allocation_snapshot_loaded"
 NOTICE_KEY = "orders_allocation_notice"
+CERTIFICATE_ACTION_LOADING_KEY = "orders_certificate_action_loading"
 SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
 GRID_KEY = "orders-fulfilment-grid"
 COPY_ORDER_ICON = "\u29c9"
@@ -84,10 +85,23 @@ def _perf_log(label, start_time, **extra):
     print(f"PERF Orders {label} {elapsed:.3f}s{suffix}", flush=True)
 
 
+def _certificate_action_log(event, *, row=None, source="Orders", **extra):
+    normalised = _normalise_row(row or {}) if row else {}
+    details = {
+        "source": source,
+        "order": normalised.get("order") or normalised.get("order_name") or "",
+        "selected_row_found": bool(row),
+        **extra,
+    }
+    safe_details = " ".join(f"{key}={value}" for key, value in details.items() if value not in (None, ""))
+    print(f"CERTIFICATE ACTION: {event} {safe_details}", flush=True)
+
+
 def _ensure_state():
     st.session_state.setdefault(ROWS_KEY, [])
     st.session_state.setdefault(META_KEY, {"last_refreshed": "", "saved_at": ""})
     st.session_state.setdefault(NOTICE_KEY, "")
+    st.session_state.setdefault(CERTIFICATE_ACTION_LOADING_KEY, False)
     st.session_state.setdefault(SYNC_RESULT_KEY, {})
     st.session_state.setdefault(BACKFILL_RESULT_KEY, {})
     st.session_state.setdefault(REPAIR_RESULT_KEY, {})
@@ -1068,7 +1082,7 @@ def _existing_uploaded_certificate(row, config):
     return {}
 
 
-def _generate_certificate_for_row(row):
+def _generate_certificate_for_row(row, *, raise_errors=False):
     backend = _configured_supabase_backend()
     config = shopify_sync.get_config()
     row = _normalise_row(row)
@@ -1095,10 +1109,13 @@ def _generate_certificate_for_row(row):
             st.session_state[NOTICE_KEY] = (
                 f"Generated certificate for {refreshed.get('order')} {refreshed.get('edition')}."
             )
-            return
+            return True
         if not config.get("configured"):
-            st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before generating certificates."
-            return
+            message = "Store connection is not configured yet. Ask a developer before generating certificates."
+            st.session_state[NOTICE_KEY] = message
+            if raise_errors:
+                raise RuntimeError(message)
+            return False
         if not row.get("has_saved_allocation"):
             raise ValueError("Check New Paid Orders to allocate this row before generating a certificate.")
         existing = _existing_uploaded_certificate(row, config)
@@ -1106,25 +1123,36 @@ def _generate_certificate_for_row(row):
             record = {**certificate_engine.certificate_record_from_order_row(row), **existing, "status": "Uploaded"}
             _update_row_from_certificate(row, record)
             st.session_state[NOTICE_KEY] = f"Certificate already uploaded for {row.get('order')} {row.get('edition')}."
-            return
+            return True
         record = certificate_engine.certificate_record_from_order_row(row)
         generated = certificate_engine.generate_local_certificate_for_record(record)
         _update_row_from_certificate(row, generated)
         if generated.get("status") == "Generated":
             st.session_state[NOTICE_KEY] = f"Generated certificate for {row.get('order')} {row.get('edition')}."
+            return True
         else:
-            st.session_state[NOTICE_KEY] = generated.get("sync_error") or "Certificate generation needs review."
+            message = generated.get("sync_error") or "Certificate generation needs review."
+            st.session_state[NOTICE_KEY] = message
+            if raise_errors:
+                raise RuntimeError(message)
+            return False
     except Exception as error:
         _update_matching_row(row, {"certificate_status": "Error", "certificate_error": str(error), "certificate": "Error"})
         st.session_state[NOTICE_KEY] = f"Certificate generation failed: {error}"
+        if raise_errors:
+            raise
+        return False
 
 
-def _upload_certificate_for_row(row):
+def _upload_certificate_for_row(row, *, raise_errors=False):
     backend = _configured_supabase_backend()
     config = shopify_sync.get_config()
     if not config.get("configured"):
-        st.session_state[NOTICE_KEY] = "Store connection is not configured yet. Ask a developer before uploading certificates."
-        return
+        message = "Store connection is not configured yet. Ask a developer before uploading certificates."
+        st.session_state[NOTICE_KEY] = message
+        if raise_errors:
+            raise RuntimeError(message)
+        return False
     row = _normalise_row(row)
     try:
         if not row.get("edition_number"):
@@ -1136,7 +1164,7 @@ def _upload_certificate_for_row(row):
             record = {**certificate_engine.certificate_record_from_order_row(row), **existing, "status": "Uploaded"}
             _update_row_from_certificate(row, record)
             st.session_state[NOTICE_KEY] = f"Certificate already uploaded for {row.get('order')} {row.get('edition')}."
-            return
+            return True
         if backend and not str(row.get("certificate_pdf_path") or "").strip():
             generated_path = backend.generate_certificate_for_edition_order(row.get("edition_order_id"))
             generated_path = str(generated_path or "").strip()
@@ -1166,9 +1194,13 @@ def _upload_certificate_for_row(row):
             )
         else:
             st.session_state[NOTICE_KEY] = f"Uploaded certificate for {row.get('order')} {row.get('edition')}."
+        return True
     except Exception as error:
         _update_matching_row(row, {"certificate_status": "Upload failed", "certificate_error": str(error), "certificate": "Upload failed"})
         st.session_state[NOTICE_KEY] = f"Certificate upload failed: {error}"
+        if raise_errors:
+            raise
+        return False
 
 
 def _file_link(path):
@@ -1292,12 +1324,27 @@ def _generate_upload_selected_certificates(rows):
         st.session_state[NOTICE_KEY] = "Select one or more order rows first."
         return
     start = time.perf_counter()
-    for row in rows:
-        _generate_certificate_for_row(row)
-        _upload_certificate_for_row(_current_row_for(row))
-    _perf_log("generate selected certificates", start, rows=len(rows), mode="generate_upload")
-    _perf_log("upload selected certificates", start, rows=len(rows), mode="generate_upload")
-    st.session_state[NOTICE_KEY] = f"Generated and uploaded {len(rows)} selected certificate(s)."
+    st.session_state[CERTIFICATE_ACTION_LOADING_KEY] = True
+    completed = 0
+    try:
+        for row in rows:
+            _certificate_action_log("certificate action started", row=row, source="Orders")
+            _generate_certificate_for_row(row, raise_errors=True)
+            _certificate_action_log("certificate PDF generated yes", row=row, source="Orders")
+            _upload_certificate_for_row(_current_row_for(row), raise_errors=True)
+            _certificate_action_log("certificate action finished", row=row, source="Orders")
+            completed += 1
+        _perf_log("generate selected certificates", start, rows=len(rows), mode="generate_upload")
+        _perf_log("upload selected certificates", start, rows=len(rows), mode="generate_upload")
+        st.session_state[NOTICE_KEY] = f"Generated and uploaded {len(rows)} selected certificate(s)."
+    except Exception as error:
+        _certificate_action_log("certificate action failed", row=rows[completed] if completed < len(rows) else None, source="Orders", error=error)
+        message = f"Certificate upload failed: {error}. You can retry this order."
+        st.session_state[NOTICE_KEY] = message
+        st.error(message)
+    finally:
+        st.session_state[CERTIFICATE_ACTION_LOADING_KEY] = False
+        _certificate_action_log("loading state cleared", source="Orders", rows=len(rows))
 
 
 def _render_top_actions(rows):

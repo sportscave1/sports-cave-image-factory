@@ -10416,37 +10416,62 @@ def list_edition_orders(search="", limit=250):
 
 
 def generate_certificate_for_edition_order(edition_order_id, *, force=False):
+    started = time.perf_counter()
+    path = ""
+    print(f"CERTIFICATE ACTION: backend generation started edition_order_id={edition_order_id}", flush=True)
     ensure_schema()
     assignment = None
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT eo.*, o.order_name
-                FROM edition_orders eo
-                LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                WHERE eo.id::text=%s
-                """,
-                (str(edition_order_id),),
-            )
-            assignment = cur.fetchone()
-            if not assignment:
-                raise ValueError("Edition order was not found.")
-            path = _generate_certificate_for_assignment(cur, assignment, force=force)
-        conn.commit()
     try:
-        if assignment and assignment.get("shopify_order_id"):
-            sync_order_certificate_metafields(assignment["shopify_order_id"])
-    except Exception as error:
-        log_app_error(
-            "order_certificate_metafield_sync_failed",
-            str(error),
-            {
-                "edition_order_id": edition_order_id,
-                "shopify_order_id": assignment.get("shopify_order_id") if assignment else "",
-            },
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT eo.*, o.order_name
+                    FROM edition_orders eo
+                    LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+                    WHERE eo.id::text=%s
+                    """,
+                    (str(edition_order_id),),
+                )
+                assignment = cur.fetchone()
+                if not assignment:
+                    raise ValueError("Edition order was not found.")
+                path = _generate_certificate_for_assignment(cur, assignment, force=force)
+            conn.commit()
+        print(
+            f"CERTIFICATE ACTION: backend PDF generated edition_order_id={edition_order_id} pdf_generated={bool(path)}",
+            flush=True,
         )
-    return path
+        try:
+            if assignment and assignment.get("shopify_order_id"):
+                print(
+                    f"CERTIFICATE ACTION: order metafield sync started edition_order_id={edition_order_id}",
+                    flush=True,
+                )
+                sync_order_certificate_metafields(assignment["shopify_order_id"])
+                print(
+                    f"CERTIFICATE ACTION: order metafield sync completed edition_order_id={edition_order_id}",
+                    flush=True,
+                )
+        except Exception as error:
+            print(
+                f"CERTIFICATE ACTION: order metafield sync failed edition_order_id={edition_order_id} error={error}",
+                flush=True,
+            )
+            log_app_error(
+                "order_certificate_metafield_sync_failed",
+                str(error),
+                {
+                    "edition_order_id": edition_order_id,
+                    "shopify_order_id": assignment.get("shopify_order_id") if assignment else "",
+                },
+            )
+        return path
+    finally:
+        print(
+            f"CERTIFICATE ACTION: backend generation finished edition_order_id={edition_order_id} elapsed_ms={int((time.perf_counter() - started) * 1000)}",
+            flush=True,
+        )
 
 
 def mark_certificates_checked(edition_order_ids):
