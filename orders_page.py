@@ -1078,8 +1078,19 @@ def _generate_certificate_for_row(row):
         if not row.get("edition_order_id"):
             raise ValueError("This row is missing its Supabase edition record. Ask a developer to repair missing editions first.")
         if backend:
-            backend.generate_certificate_for_edition_order(row.get("edition_order_id"))
-            _reload_orders_from_source()
+            generated_path = backend.generate_certificate_for_edition_order(row.get("edition_order_id"))
+            generated_path = str(generated_path or "").strip()
+            updates = {
+                "certificate_status": "Generated",
+                "certificate_pdf_path": row.get("certificate_pdf_path") or "",
+                "certificate_error": "",
+            }
+            if generated_path.startswith(("http://", "https://")):
+                updates["certificate_pdf_url"] = generated_path
+            elif generated_path and Path(generated_path).exists():
+                updates["certificate_pdf_path"] = generated_path
+            updates["certificate"] = _certificate_label({**row, **updates})
+            _update_matching_row(row, updates)
             refreshed = _current_row_for(row)
             st.session_state[NOTICE_KEY] = (
                 f"Generated certificate for {refreshed.get('order')} {refreshed.get('edition')}."
@@ -1127,8 +1138,19 @@ def _upload_certificate_for_row(row):
             st.session_state[NOTICE_KEY] = f"Certificate already uploaded for {row.get('order')} {row.get('edition')}."
             return
         if backend and not str(row.get("certificate_pdf_path") or "").strip():
-            backend.generate_certificate_for_edition_order(row.get("edition_order_id"))
-            _reload_orders_from_source()
+            generated_path = backend.generate_certificate_for_edition_order(row.get("edition_order_id"))
+            generated_path = str(generated_path or "").strip()
+            updates = {
+                "certificate_status": "Generated",
+                "certificate_pdf_path": row.get("certificate_pdf_path") or "",
+                "certificate_error": "",
+            }
+            if generated_path.startswith(("http://", "https://")):
+                updates["certificate_pdf_url"] = generated_path
+            elif generated_path and Path(generated_path).exists():
+                updates["certificate_pdf_path"] = generated_path
+            updates["certificate"] = _certificate_label({**row, **updates})
+            _update_matching_row(row, updates)
             row = _current_row_for(row)
         record = certificate_engine.certificate_record_from_order_row(row)
         record["local_pdf_path"] = row.get("certificate_pdf_path") or record.get("local_pdf_path") or ""
@@ -1136,7 +1158,7 @@ def _upload_certificate_for_row(row):
             record = certificate_engine.generate_local_certificate_for_record(record)
         uploaded = certificate_engine.upload_generated_certificate_record(record, config=config)
         saved = certificate_engine.save_certificate_record_to_order(uploaded, config=config)
-        _reload_orders_from_source()
+        _update_row_from_certificate(row, saved.get("record") or uploaded)
         if saved.get("metafields_synced") is False:
             st.session_state[NOTICE_KEY] = (
                 f"Uploaded certificate for {row.get('order')} {row.get('edition')}, "

@@ -4194,11 +4194,55 @@ def list_prodigi_dispatch_rows(status=None, days=None, older_than_days=None, lim
         where_clauses.append("prodigi_status = %s")
         params.append(clean_status)
     if days:
-        where_clauses.append(f"{_prodigi_dispatch_time_sql()} >= now() - (%s * interval '1 day')")
-        params.append(int(days))
+        where_clauses.append(
+            """
+            (
+                (submitted_at IS NOT NULL AND submitted_at >= now() - (%s * interval '1 day'))
+                OR (
+                    submitted_at IS NULL
+                    AND NULLIF(date_sent_to_prodigi, '') IS NOT NULL
+                    AND NULLIF(date_sent_to_prodigi, '') >= (CURRENT_DATE - %s::integer)::text
+                )
+                OR (
+                    submitted_at IS NULL
+                    AND NULLIF(date_sent_to_prodigi, '') IS NULL
+                    AND updated_at >= now() - (%s * interval '1 day')
+                )
+                OR (
+                    submitted_at IS NULL
+                    AND NULLIF(date_sent_to_prodigi, '') IS NULL
+                    AND updated_at IS NULL
+                    AND created_at >= now() - (%s * interval '1 day')
+                )
+            )
+            """
+        )
+        params.extend([int(days), int(days), int(days), int(days)])
     if older_than_days:
-        where_clauses.append(f"{_prodigi_dispatch_time_sql()} < now() - (%s * interval '1 day')")
-        params.append(int(older_than_days))
+        where_clauses.append(
+            """
+            (
+                (submitted_at IS NOT NULL AND submitted_at < now() - (%s * interval '1 day'))
+                OR (
+                    submitted_at IS NULL
+                    AND NULLIF(date_sent_to_prodigi, '') IS NOT NULL
+                    AND NULLIF(date_sent_to_prodigi, '') < (CURRENT_DATE - %s::integer)::text
+                )
+                OR (
+                    submitted_at IS NULL
+                    AND NULLIF(date_sent_to_prodigi, '') IS NULL
+                    AND updated_at < now() - (%s * interval '1 day')
+                )
+                OR (
+                    submitted_at IS NULL
+                    AND NULLIF(date_sent_to_prodigi, '') IS NULL
+                    AND updated_at IS NULL
+                    AND created_at < now() - (%s * interval '1 day')
+                )
+            )
+            """
+        )
+        params.extend([int(older_than_days), int(older_than_days), int(older_than_days), int(older_than_days)])
     search_value = str(search or "").strip().lower()
     if search_value:
         where_clauses.append(
@@ -4231,7 +4275,11 @@ def list_prodigi_dispatch_rows(status=None, days=None, older_than_days=None, lim
                     notes, source, row_json, created_at, updated_at
                 FROM prodigi_dispatch_rows
                 {where_sql}
-                ORDER BY {_prodigi_dispatch_time_sql()} DESC NULLS LAST, shopify_order_name DESC NULLS LAST
+                ORDER BY submitted_at DESC NULLS LAST,
+                         date_sent_to_prodigi DESC NULLS LAST,
+                         updated_at DESC NULLS LAST,
+                         created_at DESC NULLS LAST,
+                         shopify_order_name DESC NULLS LAST
                 LIMIT %s
                 """,
                 (*params, limit_value),

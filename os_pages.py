@@ -3820,6 +3820,7 @@ def prodigi_generate_upload_certificate_for_row(row, *, config=None):
                 str(error),
                 {"edition_order_id": edition_order_id, "row_id": row.get("row_id") or ""},
             )
+            raise RuntimeError(f"Certificate backend generation failed: {error}") from error
 
     order_row = {
         "order": row.get("shopify_order_name") or row.get("shopify_order_number") or "",
@@ -4404,7 +4405,7 @@ def render_prodigi_page():
                 st.rerun()
             except Exception as error:
                 supabase_backend.log_app_error("prodigi_dispatch_complete_save_failed", str(error), {"source": "prodigi_page"})
-                st.error("Dispatch save failed. Check Supabase connection and Render logs.")
+                st.error(f"Dispatch save failed: {error}")
 
     st.divider()
     st.subheader("Submitted Dispatch Log")

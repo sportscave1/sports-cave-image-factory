@@ -1665,6 +1665,7 @@ def upload_to_staged_target(target, file_path, mime_type="application/pdf", uplo
             target.get("url"),
             data=parameters,
             files={"file": (file_path.name, file_handle, mime_type)},
+            timeout=30,
         )
     if getattr(response, "status_code", 200) >= 400:
         raise ShopifyAPIError(f"Shopify staged upload failed with HTTP {response.status_code}.")
