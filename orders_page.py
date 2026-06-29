@@ -1629,6 +1629,23 @@ def _render_sync_diagnostics(result):
     if not result:
         return
 
+    def compact_metafields(rows):
+        by_key = {
+            str(row.get("key") or ""): str(row.get("value") or "")
+            for row in rows or []
+        }
+        parts = [
+            f"{key}={by_key[key]}"
+            for key in (
+                "edition_next_number",
+                "edition_remaining",
+                "edition_total",
+                "edition_sold_count",
+            )
+            if key in by_key
+        ]
+        return "; ".join(parts)
+
     query_parameters = result.get("query_parameters") or {}
     mode = "backfill" if result.get("backfill_latest_paid") else "cursor"
     cursor_used = result.get("sync_from") or ""
@@ -1671,6 +1688,59 @@ def _render_sync_diagnostics(result):
             st.caption(f"cursor update reason: {result.get('cursor_update_reason')}")
         if not int(result.get("shopify_orders_fetched") or 0) and result.get("empty_fetch_reason"):
             st.caption(f"empty fetch reason: {result.get('empty_fetch_reason')}")
+        mirror = result.get("product_metafield_mirror") or {}
+        affected_handles = mirror.get("affected_product_handles") or result.get("affected_product_handles") or []
+        if mirror or affected_handles:
+            st.caption(
+                "Shopify product mirror: "
+                f"updated={int(mirror.get('synced') or 0)}; "
+                f"skipped/failed={int(mirror.get('skipped') or 0)}; "
+                f"attempted={int(mirror.get('attempted') or 0)}"
+            )
+            st.caption(
+                "affected product handles: "
+                f"{', '.join(str(handle) for handle in affected_handles) if affected_handles else 'None'}"
+            )
+            st.caption(
+                "Storefront main tracker reads: "
+                f"{', '.join(mirror.get('storefront_main_tracker_reads') or []) or 'sports_cave.edition_next_number'}"
+            )
+            st.caption(
+                "Storefront badge reads: "
+                f"{', '.join(mirror.get('storefront_badge_reads') or []) or 'sports_cave.edition_remaining'}"
+            )
+            for item in (mirror.get("results") or [])[:5]:
+                st.caption(
+                    f"mirror {item.get('handle') or 'product'}: {item.get('status') or 'unknown'}; "
+                    f"Supabase next={item.get('supabase_next_edition') or 'n/a'}; "
+                    f"highest={item.get('supabase_highest_assigned') or 'n/a'}; "
+                    f"remaining={item.get('supabase_remaining') or 'n/a'}; "
+                    f"Shopify product ID={item.get('shopify_product_id') or 'n/a'}"
+                )
+                before_values = compact_metafields(item.get("metafields_before") or [])
+                after_values = compact_metafields(item.get("metafields_after") or [])
+                if before_values:
+                    st.caption(f"metafields before update: {before_values}")
+                if after_values:
+                    st.caption(f"metafields after update: {after_values}")
+                stale_46 = [
+                    f"{row.get('namespace')}.{row.get('key')}={row.get('value')}"
+                    for row in (item.get("metafields_containing_46_before") or [])
+                ]
+                if stale_46:
+                    st.caption(f"metafields containing 46 before update: {', '.join(stale_46[:8])}")
+                stale_keys = [
+                    f"{row.get('namespace')}.{row.get('key')}={row.get('value')}"
+                    for row in (item.get("stale_metafields_found") or [])
+                ]
+                if stale_keys:
+                    st.caption(f"stale edition metafields found: {', '.join(stale_keys[:8])}")
+                if item.get("metafields_before_error"):
+                    st.caption(f"metafields before-read warning: {item.get('metafields_before_error')}")
+                if item.get("metafields_after_error"):
+                    st.caption(f"metafields after-read warning: {item.get('metafields_after_error')}")
+                if item.get("error"):
+                    st.caption(f"mirror warning: {item.get('error')}")
 
 
 def _render_admin_result(title, result):

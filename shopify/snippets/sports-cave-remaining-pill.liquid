@@ -40,19 +40,19 @@
 
   if sc_is_enabled and edition_total > 0
     if qty == 1
-      assign label = 'Final 1 of ' | append: edition_total | append: ' remaining'
+      assign label = 'LAST ONE AVAILABLE'
       assign state = 'final'
     elsif qty >= 2 and qty <= 5
-      assign label = 'Final ' | append: qty | append: ' of ' | append: edition_total | append: ' remaining'
+      assign label = 'FINAL ' | append: qty | append: ' LEFT'
       assign state = 'final'
-    elsif qty == 6
-      assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
+    elsif qty >= 6 and qty <= 10
+      assign label = 'FINAL ' | append: qty | append: ' EDITIONS'
       assign state = 'low'
-    elsif qty >= 7 and qty <= 12
-      assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
+    elsif qty >= 11 and qty <= 25
+      assign label = 'ONLY ' | append: qty | append: ' LEFT'
       assign state = 'count'
-    elsif qty >= 13
-      assign label = qty | append: ' of ' | append: edition_total | append: ' remaining'
+    elsif qty >= 26
+      assign label = 'ONLY ' | append: edition_total | append: ' MADE'
       assign state = 'standard'
     endif
   endif

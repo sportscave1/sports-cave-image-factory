@@ -3407,8 +3407,139 @@ def _mark_product_metafields_sync(shopify_handle, payload, status, error_message
         conn.commit()
 
 
+CANONICAL_STOREFRONT_EDITION_METAFIELDS = (
+    "edition_enabled",
+    "edition_total",
+    "edition_next_number",
+    "edition_sold_count",
+    "edition_remaining",
+    "edition_status",
+    "edition_label",
+)
+
+LEGACY_STOREFRONT_EDITION_METAFIELDS = (
+    "next_edition_number",
+    "last_assigned_edition",
+    "sold_count",
+    "remaining_count",
+    "is_sold_out",
+    "edition_display_text",
+    "edition_limit",
+    "next_available_edition",
+    "editions_sold",
+    "editions_remaining",
+)
+
+STOREFRONT_WIDGET_METAFIELD_READS = {
+    "main_tracker": (
+        "sports_cave.edition_enabled",
+        "sports_cave.edition_total",
+        "sports_cave.edition_next_number",
+    ),
+    "badge": (
+        "sports_cave.edition_enabled",
+        "sports_cave.edition_total",
+        "sports_cave.edition_remaining",
+        "sports_cave.edition_next_number",
+    ),
+}
+
+
+def _public_edition_metafields(metafields):
+    edition_keys = set(CANONICAL_STOREFRONT_EDITION_METAFIELDS) | set(LEGACY_STOREFRONT_EDITION_METAFIELDS)
+    public_rows = []
+    for metafield in metafields or []:
+        namespace = str(metafield.get("namespace") or "").strip()
+        key = str(metafield.get("key") or "").strip()
+        if namespace != "sports_cave":
+            continue
+        if key not in edition_keys and "edition" not in key:
+            continue
+        value = str(metafield.get("value") if metafield.get("value") is not None else "")
+        if len(value) > 200:
+            value = f"{value[:197]}..."
+        public_rows.append(
+            {
+                "namespace": namespace,
+                "key": key,
+                "type": str(metafield.get("type") or ""),
+                "value": value,
+            }
+        )
+    return sorted(public_rows, key=lambda row: (row["namespace"], row["key"]))
+
+
+def _stale_edition_metafields(metafields):
+    legacy_keys = set(LEGACY_STOREFRONT_EDITION_METAFIELDS)
+    return [
+        row
+        for row in _public_edition_metafields(metafields)
+        if row.get("key") in legacy_keys
+    ]
+
+
+def _edition_metafields_containing_value(metafields, needle):
+    text = str(needle or "").strip()
+    if not text:
+        return []
+    return [
+        row
+        for row in _public_edition_metafields(metafields)
+        if row.get("value") == text or text in str(row.get("value") or "")
+    ]
+
+
+def _fetch_public_edition_metafields(owner_gid, config=None, request_post=None):
+    if not owner_gid:
+        return {"metafields": [], "error": "Shopify product ID is missing."}
+    try:
+        response = shopify_sync.fetch_metafields(
+            owner_gid,
+            namespace="sports_cave",
+            config=config,
+            request_post=request_post,
+        )
+        return {
+            "metafields": response.get("metafields") or [],
+            "api_version": response.get("api_version") or "",
+            "error": "",
+        }
+    except Exception as error:
+        return {"metafields": [], "api_version": "", "error": str(error)}
+
+
+def _product_metafield_sync_diagnostic(result, status="updated", error_message=""):
+    payload = result.get("payload") or {}
+    before = result.get("metafields_before") or []
+    after = result.get("metafields_after") or []
+    return {
+        "handle": result.get("shopify_handle") or payload.get("shopify_handle") or "",
+        "status": status,
+        "error": error_message or result.get("error") or "",
+        "supabase_next_edition": payload.get("next_edition_number"),
+        "supabase_highest_assigned": payload.get("last_assigned_edition"),
+        "supabase_remaining": payload.get("remaining_count"),
+        "edition_total": payload.get("edition_total"),
+        "shopify_product_id": payload.get("shopify_product_id") or payload.get("shopify_product_gid") or "",
+        "metafields_before": before,
+        "metafields_after": after,
+        "metafields_before_error": result.get("metafields_before_error") or "",
+        "metafields_after_error": result.get("metafields_after_error") or "",
+        "stale_metafields_found": result.get("stale_metafields_found") or [],
+        "metafields_containing_46_before": result.get("metafields_containing_46_before") or [],
+        "mirror_status": result.get("mirror_status") or status,
+        "storefront_main_tracker_reads": list(STOREFRONT_WIDGET_METAFIELD_READS["main_tracker"]),
+        "storefront_badge_reads": list(STOREFRONT_WIDGET_METAFIELD_READS["badge"]),
+        "canonical_namespace": "sports_cave",
+        "canonical_keys": list(CANONICAL_STOREFRONT_EDITION_METAFIELDS),
+    }
+
+
 def sync_product_edition_metafields(shopify_handle, config=None, request_post=None):
     payload = get_product_edition_metafield_payload(shopify_handle)
+    owner_gid = payload.get("shopify_product_gid") or payload.get("shopify_product_id") or ""
+    before_snapshot = _fetch_public_edition_metafields(owner_gid, config=config, request_post=request_post)
+    before_metafields = before_snapshot.get("metafields") or []
     try:
         result = shopify_sync.sync_limited_edition_metafields_for_products(
             [
@@ -3422,6 +3553,7 @@ def sync_product_edition_metafields(shopify_handle, config=None, request_post=No
                     "edition_sold_count": payload.get("sold_count"),
                     "edition_remaining": payload.get("remaining_count"),
                     "edition_status": payload.get("edition_status"),
+                    "edition_label": payload.get("edition_name") or payload.get("run_edition_name") or DEFAULT_EDITION_NAME,
                 }
             ],
             config=config,
@@ -3441,7 +3573,24 @@ def sync_product_edition_metafields(shopify_handle, config=None, request_post=No
                 {"shopify_handle": shopify_handle},
             )
         _mark_product_metafields_sync(shopify_handle, payload, "Synced", "")
-        return {"shopify_handle": shopify_handle, "payload": payload, **result}
+        after_snapshot = _fetch_public_edition_metafields(owner_gid, config=config, request_post=request_post)
+        after_metafields = after_snapshot.get("metafields") or []
+        return {
+            "shopify_handle": shopify_handle,
+            "payload": payload,
+            "metafields_before": _public_edition_metafields(before_metafields),
+            "metafields_after": _public_edition_metafields(after_metafields),
+            "metafields_before_error": before_snapshot.get("error") or "",
+            "metafields_after_error": after_snapshot.get("error") or "",
+            "stale_metafields_found": _stale_edition_metafields(before_metafields),
+            "metafields_containing_46_before": _edition_metafields_containing_value(before_metafields, "46"),
+            "mirror_status": "updated",
+            "canonical_namespace": "sports_cave",
+            "canonical_keys": list(CANONICAL_STOREFRONT_EDITION_METAFIELDS),
+            "storefront_main_tracker_reads": STOREFRONT_WIDGET_METAFIELD_READS["main_tracker"],
+            "storefront_badge_reads": STOREFRONT_WIDGET_METAFIELD_READS["badge"],
+            **result,
+        }
     except Exception as error:
         _mark_product_metafields_sync(shopify_handle, payload, "Failed", str(error))
         log_app_error(
@@ -3465,14 +3614,27 @@ def sync_product_edition_metafields_for_handles(handles, config=None, progress_c
     synced = 0
     skipped = 0
     errors = []
+    results = []
     try:
         for index, handle in enumerate(unique_handles, start=1):
             try:
-                sync_product_edition_metafields(handle, config=config)
+                result = sync_product_edition_metafields(handle, config=config)
+                results.append(_product_metafield_sync_diagnostic(result, status="updated"))
                 synced += 1
             except Exception as error:
                 skipped += 1
                 errors.append(f"{handle}: {error}")
+                results.append(
+                    {
+                        "handle": handle,
+                        "status": "failed",
+                        "error": str(error),
+                        "canonical_namespace": "sports_cave",
+                        "canonical_keys": list(CANONICAL_STOREFRONT_EDITION_METAFIELDS),
+                        "storefront_main_tracker_reads": list(STOREFRONT_WIDGET_METAFIELD_READS["main_tracker"]),
+                        "storefront_badge_reads": list(STOREFRONT_WIDGET_METAFIELD_READS["badge"]),
+                    }
+                )
             if progress_callback:
                 progress_callback(index, len(unique_handles), handle)
         finish_sync_run(
@@ -3487,6 +3649,12 @@ def sync_product_edition_metafields_for_handles(handles, config=None, progress_c
             "synced": synced,
             "skipped": skipped,
             "errors": errors[:10],
+            "results": results,
+            "affected_product_handles": unique_handles,
+            "canonical_namespace": "sports_cave",
+            "canonical_keys": list(CANONICAL_STOREFRONT_EDITION_METAFIELDS),
+            "storefront_main_tracker_reads": STOREFRONT_WIDGET_METAFIELD_READS["main_tracker"],
+            "storefront_badge_reads": STOREFRONT_WIDGET_METAFIELD_READS["badge"],
         }
     except Exception as error:
         finish_sync_run(run_id, "Failed", len(unique_handles), synced, str(error))
@@ -8356,6 +8524,7 @@ def sync_latest_paid_orders_to_supabase(
         )
         known_applied = int(known_repair.get("applied_rows") or 0)
         known_consistent = int(known_repair.get("already_exists_consistent") or 0)
+        changed_handles.update(known_repair.get("changed_handles") or [])
         if known_repair.get("errors"):
             errors.extend(known_repair.get("errors") or [])
 
@@ -8388,6 +8557,72 @@ def sync_latest_paid_orders_to_supabase(
 
         assignments += known_applied
         existing_skipped += known_consistent
+        mirror_handles = sorted(handle for handle in changed_handles if handle)
+        product_metafield_mirror = {
+            "attempted": 0,
+            "synced": 0,
+            "skipped": 0,
+            "errors": [],
+            "results": [],
+            "affected_product_handles": mirror_handles,
+            "canonical_namespace": "sports_cave",
+            "canonical_keys": list(CANONICAL_STOREFRONT_EDITION_METAFIELDS),
+            "storefront_main_tracker_reads": STOREFRONT_WIDGET_METAFIELD_READS["main_tracker"],
+            "storefront_badge_reads": STOREFRONT_WIDGET_METAFIELD_READS["badge"],
+        }
+        mirror_started = time.perf_counter()
+        mirror_failed_with_exception = False
+        if mirror_handles:
+            try:
+                product_metafield_mirror = sync_product_edition_metafields_for_handles(
+                    mirror_handles,
+                    config=config,
+                )
+            except Exception as mirror_error:
+                mirror_failed_with_exception = True
+                message = f"Shopify product mirror failed / retry: {mirror_error}"
+                errors.append(message)
+                product_metafield_mirror = {
+                    **product_metafield_mirror,
+                    "attempted": len(mirror_handles),
+                    "skipped": len(mirror_handles),
+                    "errors": [str(mirror_error)],
+                    "results": [
+                        {
+                            "handle": handle,
+                            "status": "failed",
+                            "error": str(mirror_error),
+                        }
+                        for handle in mirror_handles
+                    ],
+                }
+                log_app_error(
+                    "latest_paid_product_metafield_mirror_failed",
+                    str(mirror_error),
+                    {"handles": mirror_handles},
+                )
+            mirror_errors = product_metafield_mirror.get("errors") or []
+            if mirror_errors and not mirror_failed_with_exception:
+                errors.extend(
+                    f"Shopify product mirror failed / retry: {error}"
+                    for error in mirror_errors
+                )
+            _sync_perf_log(
+                "Shopify metafield mirror/update time",
+                mirror_started,
+                product_metafields_attempted=product_metafield_mirror.get("attempted") or 0,
+                product_metafields_synced=product_metafield_mirror.get("synced") or 0,
+                product_metafields_failed=product_metafield_mirror.get("skipped") or 0,
+            )
+        else:
+            _sync_perf_log(
+                "Shopify metafield mirror/update time",
+                None,
+                elapsed_ms=0,
+                product_metafields_attempted=0,
+                product_metafields_synced=0,
+                product_metafields_failed=0,
+            )
         state_success_started = time.perf_counter()
         if backfill_latest_paid:
             success_timestamp = ""
@@ -8417,13 +8652,6 @@ def sync_latest_paid_orders_to_supabase(
         run_finish_started = time.perf_counter()
         finish_sync_run(run_id, "Complete" if not errors else "Complete With Warnings", seen, processed_orders)
         _sync_perf_log("sync run finish write", run_finish_started, status="Complete" if not errors else "Complete_With_Warnings")
-        _sync_perf_log(
-            "Shopify metafield mirror/update time",
-            None,
-            elapsed_ms=0,
-            product_metafields_deferred=len(changed_handles),
-            order_metafields_updated=0,
-        )
         _log_order_fetch_timing(
             total_ms=duration_ms,
             shopify_ms=shopify_ms,
@@ -8455,7 +8683,12 @@ def sync_latest_paid_orders_to_supabase(
             "missing_mapping_skipped": missing_mapping_skipped,
             "generated_certificates": 0,
             "certificates_deferred": assignments,
-            "product_metafields_deferred": len(changed_handles),
+            "product_metafields_deferred": int(product_metafield_mirror.get("skipped") or 0),
+            "product_metafields_attempted": int(product_metafield_mirror.get("attempted") or 0),
+            "product_metafields_synced": int(product_metafield_mirror.get("synced") or 0),
+            "product_metafields_failed": int(product_metafield_mirror.get("skipped") or 0),
+            "product_metafield_mirror": product_metafield_mirror,
+            "affected_product_handles": mirror_handles,
             "query": payload.get("query") or "",
             "query_parameters": payload.get("query_parameters") or {},
             "query_mode": payload.get("query_mode") or "",
@@ -9251,6 +9484,7 @@ def apply_known_missing_edition_repair():
         "applied": applied_rows,
         "skipped": skipped_rows,
         "counter_updates": counter_updates,
+        "changed_handles": sorted(handle for handle in changed_handles if handle),
         "errors": errors[:10],
     }
 
