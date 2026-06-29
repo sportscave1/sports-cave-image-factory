@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import edition_ops
 import order_allocator
@@ -1050,19 +1050,18 @@ class EditionOpsUiTests(unittest.TestCase):
     def test_render_uses_single_streamlit_process_for_free_instance(self):
         source = (ROOT / "render.yaml").read_text(encoding="utf-8")
 
-        self.assertIn("startCommand: streamlit run app.py", source)
-        self.assertIn("--server.fileWatcherType none", source)
-        self.assertIn("--server.runOnSave false", source)
-        self.assertIn("--browser.gatherUsageStats false", source)
-        self.assertIn("healthCheckPath: /_stcore/health", source)
-        self.assertNotIn("startCommand: python server.py", source)
+        self.assertIn("startCommand: python server.py", source)
+        self.assertIn("healthCheckPath: /healthz", source)
+        self.assertNotIn("startCommand: streamlit run app.py", source)
 
     def test_lightweight_webhook_server_route_remains_available(self):
         source = (ROOT / "server.py").read_text(encoding="utf-8")
 
         self.assertIn('/webhooks/shopify/orders-paid', source)
-        self.assertIn("process_shopify_order_for_editions", source)
-        self.assertIn("require_cutover=True", source)
+        self.assertIn("process_order_paid_webhook", source)
+        self.assertIn("verify_shopify_webhook_hmac", source)
+        self.assertNotIn("generate_missing_certificates_for_order", source)
+        self.assertNotIn("require_cutover=True", source)
 
     def test_prompt_editing_is_password_gated_and_backend_persisted(self):
         app_source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -2315,6 +2314,44 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn("sync timed out at backend_sync", fake_st.session_state[orders_page.NOTICE_KEY])
         self.assertIn("retry", fake_st.session_state[orders_page.NOTICE_KEY].casefold())
+
+    def test_orders_live_refresh_checks_supabase_only_and_reloads_on_marker_change(self):
+        fake_st = SimpleNamespace(
+            session_state={
+                orders_page.ORDERS_SUPABASE_LIVE_MARKER_KEY: "1|2026-06-29T01:00:00Z",
+                orders_page.CERTIFICATE_ACTION_LOADING_KEY: False,
+                orders_page.CERTIFICATE_ACTION_STATE_KEY: {},
+            },
+            rerun=Mock(),
+        )
+
+        class FakeBackend:
+            def orders_visibility_marker(self, **kwargs):
+                self.kwargs = kwargs
+                return {"marker": "2|2026-06-29T02:00:00Z"}
+
+        backend = FakeBackend()
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page,
+            "_configured_supabase_backend",
+            return_value=backend,
+        ), patch.object(
+            orders_page,
+            "_reload_orders_from_source",
+        ) as reload_rows, patch.object(
+            shopify_sync,
+            "fetch_latest_paid_orders",
+            side_effect=AssertionError("Orders live refresh must not call Shopify."),
+        ):
+            orders_page._check_orders_supabase_live_refresh()
+
+        self.assertEqual(backend.kwargs, {"ensure_schema_first": False})
+        reload_rows.assert_called_once()
+        fake_st.rerun.assert_called_once()
+        self.assertEqual(
+            fake_st.session_state[orders_page.ORDERS_SUPABASE_LIVE_MARKER_KEY],
+            "2|2026-06-29T02:00:00Z",
+        )
 
     def test_refresh_orders_backfill_mode_is_explicit(self):
         fake_st = SimpleNamespace(

@@ -43,6 +43,8 @@ LATEST_FETCH_PREVIEW_KEY = "orders_latest_fetch_preview"
 REPAIR_RESULT_KEY = "orders_missing_edition_repair_result"
 ORDER_SYNC_BACKFILL_KEY = "orders_sync_backfill_latest_paid"
 ORDERS_SYNC_TIMEOUT_SECONDS = 90
+ORDERS_SUPABASE_LIVE_MARKER_KEY = "orders_supabase_live_visibility_marker"
+ORDERS_SUPABASE_LIVE_CHECK_SECONDS = 25
 SEARCH_KEY = "orders_search_text"
 SHOW_ALL_KEY = "orders_show_all_rows"
 LOAD_ERROR_KEY = "orders_load_error"
@@ -637,6 +639,59 @@ def _reload_orders_from_source():
     payload = _read_orders_snapshot()
     _apply_snapshot_payload(payload)
     st.session_state[SNAPSHOT_LOADED_KEY] = True
+
+
+def _certificate_action_in_progress():
+    _clear_stale_certificate_action_state(source="Orders")
+    state = st.session_state.get(CERTIFICATE_ACTION_STATE_KEY) or {}
+    return bool(st.session_state.get(CERTIFICATE_ACTION_LOADING_KEY) or state.get("order_key"))
+
+
+def _orders_supabase_visibility_marker():
+    backend = _configured_supabase_backend()
+    if not backend or not hasattr(backend, "orders_visibility_marker"):
+        return ""
+    marker = backend.orders_visibility_marker(ensure_schema_first=False)
+    return str((marker or {}).get("marker") or "").strip()
+
+
+def _check_orders_supabase_live_refresh():
+    if _certificate_action_in_progress():
+        return
+    try:
+        marker = _orders_supabase_visibility_marker()
+    except Exception as error:
+        print(f"ORDERS SYNC: orders_page_live_refresh_check_failed status=failed error={error}", flush=True)
+        return
+    if not marker:
+        return
+    previous = str(st.session_state.get(ORDERS_SUPABASE_LIVE_MARKER_KEY) or "").strip()
+    if not previous:
+        st.session_state[ORDERS_SUPABASE_LIVE_MARKER_KEY] = marker
+        return
+    if marker == previous:
+        return
+    print(
+        "ORDERS SYNC: orders_page_live_refresh_detected_change "
+        f"status=completed old_marker={previous} new_marker={marker}",
+        flush=True,
+    )
+    st.session_state[ORDERS_SUPABASE_LIVE_MARKER_KEY] = marker
+    _reload_orders_from_source()
+    print("ORDERS SYNC: orders_snapshot_invalidated source=supabase_live_refresh", flush=True)
+    st.rerun()
+
+
+def _render_orders_supabase_live_refresh():
+    fragment = getattr(st, "fragment", None)
+    if callable(fragment):
+        @fragment(run_every=f"{ORDERS_SUPABASE_LIVE_CHECK_SECONDS}s")
+        def _orders_live_refresh_fragment():
+            _check_orders_supabase_live_refresh()
+
+        _orders_live_refresh_fragment()
+    else:
+        _check_orders_supabase_live_refresh()
 
 
 def _order_match_tokens(row):
@@ -2192,6 +2247,7 @@ def _render_orders_table(rows):
 def render_page():
     _ensure_state()
     _load_snapshot_once()
+    _render_orders_supabase_live_refresh()
     prep_started = time.perf_counter()
     rows = _apply_latest_product_numbers(st.session_state.get(ROWS_KEY, []))
     st.session_state[ROWS_KEY] = rows

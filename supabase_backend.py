@@ -1,5 +1,6 @@
 import csv
 import gc
+import hashlib
 import io
 import json
 import os
@@ -26,6 +27,13 @@ LAST_ORDER_FETCH_STATUS_KEY = "last_order_fetch_status"
 LAST_ORDER_FETCH_DURATION_KEY = "last_order_fetch_duration_ms"
 LAST_ORDERS_IMPORTED_COUNT_KEY = "last_orders_imported_count"
 LAST_ASSIGNMENTS_CREATED_COUNT_KEY = "last_assignments_created_count"
+LAST_ORDERS_PAID_WEBHOOK_RECEIVED_KEY = "last_orders_paid_webhook_received_at"
+LAST_ORDERS_PAID_WEBHOOK_PROCESSED_KEY = "last_orders_paid_webhook_processed_at"
+LAST_ORDERS_PAID_WEBHOOK_ORDER_KEY = "last_orders_paid_webhook_order"
+LAST_ORDERS_PAID_WEBHOOK_RESULT_KEY = "last_orders_paid_webhook_result"
+LAST_ORDERS_PAID_WEBHOOK_ERROR_KEY = "last_orders_paid_webhook_error"
+LAST_ORDERS_PAID_WEBHOOK_HANDLE_KEY = "last_orders_paid_webhook_handle"
+LAST_ORDERS_PAID_WEBHOOK_MIRROR_KEY = "last_orders_paid_webhook_mirror_result"
 EDITION_TRACKING_START_KEY = "edition_tracking_start_at"
 LAST_SUCCESSFUL_PRODUCT_SYNC_KEY = "last_successful_product_sync_at"
 LAST_ATTEMPTED_PRODUCT_SYNC_KEY = "last_attempted_product_sync_at"
@@ -358,6 +366,12 @@ def certificate_schema_missing_error_message(error):
 def orders_sync_schema_error_message(error):
     if certificate_schema_missing_error_message(error):
         return "Orders sync failed: missing required database schema. Run migrations separately."
+    return ""
+
+
+def webhook_schema_error_message(error):
+    if certificate_schema_missing_error_message(error):
+        return "Webhook order paid failed: missing required database schema. Run migrations separately."
     return ""
 
 
@@ -9590,46 +9604,439 @@ def normalize_rest_order(payload):
     }
 
 
-def process_order_paid_webhook(payload, webhook_id, topic="orders/paid"):
-    ensure_schema()
-    if not webhook_id:
-        webhook_id = f"missing-id-{utc_now()}"
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO webhook_events(webhook_id, topic, status, payload, received_at)
-                VALUES (%s, %s, 'Received', %s::jsonb, now())
-                ON CONFLICT (webhook_id) DO NOTHING
-                RETURNING webhook_id
-                """,
-                (webhook_id, topic, json_dumps(payload)),
-            )
-            inserted = cur.fetchone()
-        conn.commit()
-    if not inserted:
-        return {"duplicate": True, "assignments_created": 0}
+def _webhook_log(event, status="started", **fields):
+    payload = {"event": event, "status": status}
+    payload.update({key: value for key, value in fields.items() if value not in (None, "")})
+    print(json.dumps(payload, ensure_ascii=True, default=str), flush=True)
+
+
+def _safe_webhook_order_payload(payload):
+    if not isinstance(payload, dict):
+        return {}
+    line_items = payload.get("line_items") if isinstance(payload.get("line_items"), list) else []
+    return {
+        "id": payload.get("id") or payload.get("shopify_order_id") or "",
+        "admin_graphql_api_id": payload.get("admin_graphql_api_id") or payload.get("shopify_order_id") or "",
+        "name": payload.get("name") or payload.get("order_name") or "",
+        "order_number": payload.get("order_number") or payload.get("order_number") or "",
+        "financial_status": payload.get("financial_status") or "",
+        "created_at": payload.get("created_at") or "",
+        "updated_at": payload.get("updated_at") or payload.get("remote_updated_at") or "",
+        "line_item_count": len(line_items),
+    }
+
+
+def _fallback_webhook_id(payload, topic):
+    safe_payload = json_dumps(_safe_webhook_order_payload(payload))
+    digest = hashlib.sha256(f"{topic}|{safe_payload}".encode("utf-8")).hexdigest()[:24]
+    return f"missing-id-{digest}"
+
+
+def _set_webhook_app_setting(key, value):
     try:
-        result = process_shopify_order_for_editions(normalize_rest_order(payload))
-        status = "Processed" if not result.get("errors") else "Processed With Warnings"
+        set_app_setting(key, value, ensure_schema_first=False)
+    except Exception as error:
+        schema_message = webhook_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        _webhook_log("webhook_status_setting_failed", "failed", key=key, error=str(error))
+
+
+def _claim_webhook_event(webhook_id, topic, payload):
+    safe_payload = _safe_webhook_order_payload(payload)
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO webhook_events(webhook_id, topic, status, payload, received_at)
+                    VALUES (%s, %s, 'Received', %s::jsonb, now())
+                    ON CONFLICT (webhook_id) DO NOTHING
+                    RETURNING webhook_id
+                    """,
+                    (webhook_id, topic, json_dumps(safe_payload)),
+                )
+                inserted = cur.fetchone()
+                if inserted:
+                    conn.commit()
+                    return True
+                cur.execute("SELECT status FROM webhook_events WHERE webhook_id=%s", (webhook_id,))
+                existing = cur.fetchone() or {}
+                existing_status = str(existing.get("status") or "").strip().casefold()
+                if existing_status in {"failed", "retry"}:
+                    cur.execute(
+                        """
+                        UPDATE webhook_events
+                        SET status='Retrying', topic=%s, payload=%s::jsonb, received_at=now(), error_message=''
+                        WHERE webhook_id=%s
+                        """,
+                        (topic, json_dumps(safe_payload), webhook_id),
+                    )
+                    conn.commit()
+                    return True
+            conn.commit()
+    except Exception as error:
+        schema_message = webhook_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        raise
+    return False
+
+
+def _update_webhook_event_status(webhook_id, status, *, error_message=""):
+    if not webhook_id:
+        return
+    try:
         with connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE webhook_events SET status=%s, error_message=%s WHERE webhook_id=%s",
-                    (status, "\n".join(result.get("errors") or []), webhook_id),
+                    (status, str(error_message or "")[:2000], webhook_id),
                 )
             conn.commit()
+    except Exception as error:
+        schema_message = webhook_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        _webhook_log("webhook_event_status_update_failed", "failed", webhook_id=webhook_id, error=str(error))
+
+
+def _single_order_gid_from_payload(payload):
+    if not isinstance(payload, dict):
+        return ""
+    return (
+        str(payload.get("shopify_order_id") or "").strip()
+        or str(payload.get("admin_graphql_api_id") or "").strip()
+        or _shopify_gid("Order", payload.get("id"))
+    )
+
+
+def _single_order_payload_needs_fetch(order):
+    if not isinstance(order, dict) or not str(order.get("shopify_order_id") or "").strip():
+        return True
+    line_items = order.get("line_items") or []
+    if not line_items:
+        return True
+    for line_item in line_items:
+        if not str((line_item or {}).get("shopify_line_item_id") or "").strip():
+            return True
+    return False
+
+
+def _load_single_paid_shopify_order(order_id_or_payload, *, config=None):
+    config = config or shopify_sync.get_config()
+    source_payload = order_id_or_payload
+    order = {}
+    if isinstance(order_id_or_payload, str):
+        order_gid = _shopify_gid("Order", order_id_or_payload)
+    elif isinstance(order_id_or_payload, dict):
+        if order_id_or_payload.get("shopify_order_id") and isinstance(order_id_or_payload.get("line_items"), list):
+            order = dict(order_id_or_payload)
+        elif order_id_or_payload.get("id") and isinstance(order_id_or_payload.get("line_items"), list):
+            order = normalize_rest_order(order_id_or_payload)
+        order_gid = _single_order_gid_from_payload(order_id_or_payload) or _single_order_gid_from_payload(order)
+    else:
+        order_gid = ""
+
+    if _single_order_payload_needs_fetch(order) and order_gid:
+        _webhook_log("shopify_single_order_fetch_started", order_id=order_gid)
+        fetched = shopify_sync.fetch_orders_by_ids([order_gid], config=config)
+        order = dict((fetched or [{}])[0] or {})
+        _webhook_log(
+            "shopify_single_order_fetch_completed",
+            "completed",
+            order_name=order.get("order_name") or "",
+            line_items=len(order.get("line_items") or []),
+        )
+    if not order and isinstance(source_payload, dict):
+        order = normalize_rest_order(source_payload)
+    return order
+
+
+def process_single_paid_shopify_order_for_editions(
+    order_id_or_payload,
+    *,
+    source="webhook",
+    config=None,
+    ensure_schema_first=False,
+):
+    started = time.perf_counter()
+    config = config or shopify_sync.get_config()
+    order = _load_single_paid_shopify_order(order_id_or_payload, config=config)
+    order_name = _shopify_order_name(order)
+    order_id = _shopify_order_id(order)
+    _webhook_log("webhook_order_processing_started", source=source, order_name=order_name, shopify_order_id=order_id)
+    if not _latest_paid_order_is_processable(order):
+        _webhook_log("order_not_paid_skipped", "completed", source=source, order_name=order_name, shopify_order_id=order_id)
+        return {
+            "source": source,
+            "processed": False,
+            "reason": "Order is not paid, is cancelled, or is invalid.",
+            "order_name": order_name,
+            "shopify_order_id": order_id,
+            "imported_lines": 0,
+            "skipped_existing_lines": 0,
+            "editions_assigned": 0,
+            "assigned_editions": [],
+            "affected_handles": [],
+            "metafields_updated": 0,
+            "order_visible_refresh_hint": False,
+            "errors": [],
+        }
+    _webhook_log("order_paid_validated", "completed", source=source, order_name=order_name, shopify_order_id=order_id)
+
+    line_item_ids = [
+        str(line_item.get("shopify_line_item_id") or "").strip()
+        for line_item in (order.get("line_items") or [])
+        if str(line_item.get("shopify_line_item_id") or "").strip()
+    ]
+    existing_line_ids = list_existing_shopify_line_item_ids(
+        line_item_ids,
+        ensure_schema_first=ensure_schema_first,
+    )
+    new_line_ids = [line_id for line_id in line_item_ids if line_id not in existing_line_ids]
+    _webhook_log(
+        "existing_line_lookup_completed",
+        "completed",
+        source=source,
+        order_name=order_name,
+        existing_lines=len(existing_line_ids),
+        new_lines=len(new_line_ids),
+    )
+    if line_item_ids and not new_line_ids:
+        result = {
+            "source": source,
+            "processed": True,
+            "reason": "All Shopify line items already exist.",
+            "order_name": order_name,
+            "shopify_order_id": order_id,
+            "imported_lines": 0,
+            "skipped_existing_lines": len(existing_line_ids),
+            "editions_assigned": 0,
+            "assigned_editions": [],
+            "affected_handles": [],
+            "metafields_updated": 0,
+            "order_visible_refresh_hint": False,
+            "errors": [],
+        }
+        _webhook_log("webhook_order_processing_finished", "completed", source=source, order_name=order_name, elapsed_ms=int((time.perf_counter() - started) * 1000))
+        return result
+
+    _webhook_log("edition_allocation_started", source=source, order_name=order_name, new_lines=len(new_line_ids))
+    allocation_result = process_shopify_order_for_editions(
+        order,
+        fetch_missing_products=False,
+        allocation_status="assigned",
+        generate_certificates=False,
+        sync_product_metafields=False,
+        assign_editions=True,
+        ensure_schema_first=ensure_schema_first,
+    )
+    _webhook_log(
+        "edition_allocation_completed",
+        "completed",
+        source=source,
+        order_name=order_name,
+        assignments=allocation_result.get("assignments_created") or 0,
+        existing_assignments=allocation_result.get("existing_assignments_skipped") or 0,
+    )
+    affected_handles = sorted(handle for handle in (allocation_result.get("changed_handles") or []) if handle)
+    _webhook_log("affected_handles_count", "completed", source=source, order_name=order_name, count=len(affected_handles))
+    mirror_result = {"attempted": 0, "synced": 0, "errors": [], "results": []}
+    if affected_handles:
+        _webhook_log("metafield_mirror_started", source=source, order_name=order_name, handles=len(affected_handles))
+        try:
+            mirror_result = sync_product_edition_metafields_for_handles(
+                affected_handles,
+                config=config,
+                ensure_schema_first=ensure_schema_first,
+            )
+        except Exception as error:
+            mirror_result = {"attempted": len(affected_handles), "synced": 0, "errors": [str(error)], "results": []}
+        _webhook_log(
+            "metafield_mirror_completed",
+            "completed" if not mirror_result.get("errors") else "failed",
+            source=source,
+            order_name=order_name,
+            attempted=mirror_result.get("attempted") or 0,
+            synced=mirror_result.get("synced") or 0,
+            errors=len(mirror_result.get("errors") or []),
+        )
+
+    errors = list(allocation_result.get("errors") or []) + list(mirror_result.get("errors") or [])
+    result = {
+        "source": source,
+        "processed": True,
+        "order_name": order_name,
+        "shopify_order_id": order_id,
+        "imported_lines": len(new_line_ids),
+        "skipped_existing_lines": len(existing_line_ids),
+        "editions_assigned": int(allocation_result.get("assignments_created") or 0),
+        "assigned_editions": allocation_result.get("new_assignment_ids") or [],
+        "affected_handles": affected_handles,
+        "metafields_updated": int(mirror_result.get("synced") or 0),
+        "product_metafield_mirror": mirror_result,
+        "order_visible_refresh_hint": bool(new_line_ids or allocation_result.get("assignments_created")),
+        "errors": errors,
+    }
+    _webhook_log("orders_snapshot_invalidated", "completed", source=source, order_name=order_name)
+    _webhook_log("webhook_order_processing_finished", "completed", source=source, order_name=order_name, elapsed_ms=int((time.perf_counter() - started) * 1000))
+    return result
+
+
+def process_order_paid_webhook(payload, webhook_id, topic="orders/paid"):
+    topic = str(topic or "orders/paid").strip()
+    webhook_id = str(webhook_id or "").strip() or _fallback_webhook_id(payload, topic)
+    if not shopify_sync.is_orders_paid_webhook_topic(topic):
+        return {
+            "source": "webhook",
+            "duplicate": False,
+            "processed": False,
+            "reason": "Unsupported Shopify webhook topic.",
+            "order_name": "",
+            "shopify_order_id": "",
+            "imported_lines": 0,
+            "skipped_existing_lines": 0,
+            "editions_assigned": 0,
+            "assigned_editions": [],
+            "affected_handles": [],
+            "metafields_updated": 0,
+            "order_visible_refresh_hint": False,
+            "errors": [],
+        }
+    if not _claim_webhook_event(webhook_id, topic, payload):
+        _webhook_log("webhook_duplicate_skipped", "completed", webhook_id=webhook_id, topic=topic)
+        return {
+            "source": "webhook",
+            "duplicate": True,
+            "processed": True,
+            "order_name": "",
+            "shopify_order_id": "",
+            "imported_lines": 0,
+            "skipped_existing_lines": 0,
+            "editions_assigned": 0,
+            "assigned_editions": [],
+            "affected_handles": [],
+            "metafields_updated": 0,
+            "order_visible_refresh_hint": False,
+            "errors": [],
+        }
+    _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_RECEIVED_KEY, utc_now())
+    try:
+        result = process_single_paid_shopify_order_for_editions(
+            payload,
+            source="webhook",
+            ensure_schema_first=False,
+        )
+        status = "Processed" if not result.get("errors") else "Processed With Warnings"
+        if not result.get("processed"):
+            status = "Skipped"
+        _update_webhook_event_status(webhook_id, status, error_message="\n".join(result.get("errors") or []))
+        _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_PROCESSED_KEY, utc_now())
+        _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_ORDER_KEY, result.get("order_name") or result.get("shopify_order_id") or "")
+        _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_RESULT_KEY, json_dumps({
+            "status": status,
+            "editions_assigned": result.get("editions_assigned") or 0,
+            "imported_lines": result.get("imported_lines") or 0,
+            "metafields_updated": result.get("metafields_updated") or 0,
+        }))
+        _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_ERROR_KEY, "\n".join(result.get("errors") or []))
+        _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_HANDLE_KEY, ", ".join(result.get("affected_handles") or []))
+        _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_MIRROR_KEY, json_dumps(result.get("product_metafield_mirror") or {}))
         return {"duplicate": False, **result}
     except Exception as error:
+        schema_message = webhook_schema_error_message(error)
+        message = schema_message or str(error)
+        _update_webhook_event_status(webhook_id, "Failed", error_message=message)
+        _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_ERROR_KEY, message)
+        _webhook_log("webhook_order_processing_failed", "failed", webhook_id=webhook_id, topic=topic, error=message)
+        raise RuntimeError(message) from error
+
+
+def orders_visibility_marker(*, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
+    try:
         with connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE webhook_events SET status='Failed', error_message=%s WHERE webhook_id=%s",
-                    (str(error), webhook_id),
+                    """
+                    SELECT
+                        COUNT(*) AS order_count,
+                        COALESCE(MAX(updated_at), MAX(synced_at), MAX(created_at)) AS latest_order_update
+                    FROM shopify_orders
+                    """
                 )
-            conn.commit()
-        log_app_error("webhook_order_processing_failed", str(error), {"webhook_id": webhook_id})
+                row = cur.fetchone() or {}
+    except Exception as error:
+        schema_message = webhook_schema_error_message(error) or orders_sync_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
         raise
+    latest = row.get("latest_order_update") or ""
+    return {
+        "order_count": int(row.get("order_count") or 0),
+        "latest_order_update": _datetime_to_setting(latest) if latest else "",
+        "marker": f"{int(row.get('order_count') or 0)}|{_datetime_to_setting(latest) if latest else ''}",
+    }
+
+
+def get_orders_paid_webhook_status(*, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
+    status = {
+        "last_received_at": "",
+        "last_processed_at": "",
+        "last_order": "",
+        "last_result": "",
+        "last_error": "",
+        "last_affected_product_handle": "",
+        "last_metafield_mirror_result": "",
+        "last_webhook_event": {},
+    }
+    keys = (
+        LAST_ORDERS_PAID_WEBHOOK_RECEIVED_KEY,
+        LAST_ORDERS_PAID_WEBHOOK_PROCESSED_KEY,
+        LAST_ORDERS_PAID_WEBHOOK_ORDER_KEY,
+        LAST_ORDERS_PAID_WEBHOOK_RESULT_KEY,
+        LAST_ORDERS_PAID_WEBHOOK_ERROR_KEY,
+        LAST_ORDERS_PAID_WEBHOOK_HANDLE_KEY,
+        LAST_ORDERS_PAID_WEBHOOK_MIRROR_KEY,
+    )
+    try:
+        values = {}
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT key, value FROM app_sync_state WHERE key = ANY(%s)", (list(keys),))
+                values = {row.get("key"): row.get("value") for row in cur.fetchall()}
+                cur.execute(
+                    """
+                    SELECT webhook_id, topic, status, received_at, error_message
+                    FROM webhook_events
+                    WHERE topic ILIKE %s OR topic ILIKE %s
+                    ORDER BY received_at DESC
+                    LIMIT 1
+                    """,
+                    ("orders/paid", "ORDERS_PAID"),
+                )
+                status["last_webhook_event"] = cur.fetchone() or {}
+    except Exception as error:
+        schema_message = webhook_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        raise
+    status.update(
+        {
+            "last_received_at": values.get(LAST_ORDERS_PAID_WEBHOOK_RECEIVED_KEY, ""),
+            "last_processed_at": values.get(LAST_ORDERS_PAID_WEBHOOK_PROCESSED_KEY, ""),
+            "last_order": values.get(LAST_ORDERS_PAID_WEBHOOK_ORDER_KEY, ""),
+            "last_result": values.get(LAST_ORDERS_PAID_WEBHOOK_RESULT_KEY, ""),
+            "last_error": values.get(LAST_ORDERS_PAID_WEBHOOK_ERROR_KEY, ""),
+            "last_affected_product_handle": values.get(LAST_ORDERS_PAID_WEBHOOK_HANDLE_KEY, ""),
+            "last_metafield_mirror_result": values.get(LAST_ORDERS_PAID_WEBHOOK_MIRROR_KEY, ""),
+        }
+    )
+    return status
 
 
 def _normalize_cached_order_snapshot(raw_value):

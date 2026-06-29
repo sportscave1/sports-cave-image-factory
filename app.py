@@ -5628,7 +5628,10 @@ def render_settings_page():
 
     with st.expander("Shopify Webhook Setup", expanded=False):
         st.write("**Paid orders webhook endpoint:** `/webhooks/shopify/orders-paid`")
-        st.write(f"**Webhook secret configured:** {'Yes' if bool(os.getenv('SHOPIFY_WEBHOOK_SECRET', '').strip()) else 'No'}")
+        st.write(
+            "**Webhook app secret configured:** "
+            f"{'Yes' if bool(os.getenv('SHOPIFY_WEBHOOK_SECRET', '').strip() or os.getenv('SHOPIFY_CLIENT_SECRET', '').strip()) else 'No'}"
+        )
         try:
             sync = get_shopify_sync()
             config = sync.get_config()
@@ -5646,11 +5649,29 @@ def render_settings_page():
                 st.success(
                     f"orders/paid webhook {status}: {subscription.get('id') or result.get('callback_url')}"
                 )
+            try:
+                supabase = importlib.import_module("supabase_backend")
+                if supabase.is_configured():
+                    webhook_status = supabase.get_orders_paid_webhook_status(ensure_schema_first=False)
+                    st.write(f"**Last ORDERS_PAID webhook received:** {webhook_status.get('last_received_at') or 'Not received'}")
+                    st.write(f"**Last webhook order processed:** {webhook_status.get('last_order') or 'Not processed'}")
+                    st.write(f"**Last webhook result:** `{webhook_status.get('last_result') or 'None'}`")
+                    if webhook_status.get("last_error"):
+                        st.write(f"**Last webhook error:** `{webhook_status.get('last_error')}`")
+                    st.write(
+                        "**Last affected product handle:** "
+                        f"{webhook_status.get('last_affected_product_handle') or 'None'}"
+                    )
+                    st.write(
+                        "**Last metafield mirror result:** "
+                        f"`{webhook_status.get('last_metafield_mirror_result') or 'None'}`"
+                    )
+            except Exception as status_error:
+                st.caption(f"Webhook status unavailable: {status_error}")
         except Exception as error:
             _developer_section_error("Shopify Webhook Setup", error)
         st.caption(
-            "The lightweight webhook wrapper is available in server.py. "
-            "Render free uses direct Streamlit startup to stay under the 512MB memory limit."
+            "The lightweight webhook wrapper runs in server.py and proxies the Streamlit UI."
         )
 
     with st.expander("Allocation Repair Tools", expanded=False):

@@ -2,6 +2,9 @@ import json
 import os
 import threading
 import time
+import base64
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -20,6 +23,7 @@ TOKEN_REFRESH_BUFFER_SECONDS = 300
 DEFAULT_FILE_POLL_ATTEMPTS = 12
 MAX_FILE_POLL_ATTEMPTS = 30
 MAX_FILE_POLL_SLEEP_SECONDS = 2.0
+ORDERS_PAID_WEBHOOK_TOPICS = {"orders/paid", "orders_paid"}
 
 
 _TOKEN_CACHE = {}
@@ -362,6 +366,30 @@ def graphql_request(query, variables=None, timeout=10, config=None, request_post
         )
 
     return payload["data"], response.headers.get("X-Shopify-API-Version")
+
+
+def get_shopify_webhook_secret(config=None):
+    config = config or get_config()
+    return (
+        str(config.get("client_secret") or "").strip()
+        or os.getenv("SHOPIFY_WEBHOOK_SECRET", "").strip()
+    )
+
+
+def verify_shopify_webhook_hmac(raw_body: bytes, hmac_header: str, secret: str) -> bool:
+    if not raw_body or not hmac_header or not secret:
+        return False
+    try:
+        digest = hmac.new(str(secret).encode("utf-8"), raw_body, hashlib.sha256).digest()
+        calculated = base64.b64encode(digest).decode("utf-8")
+    except Exception:
+        return False
+    return hmac.compare_digest(calculated, str(hmac_header or "").strip())
+
+
+def is_orders_paid_webhook_topic(topic):
+    normalised = str(topic or "").strip().replace("/", "_").casefold()
+    return normalised in ORDERS_PAID_WEBHOOK_TOPICS
 
 
 SHOP_QUERY = """
@@ -2176,6 +2204,7 @@ def sync_limited_edition_metafields_for_products(
 
 def public_app_base_url():
     for key in (
+        "SPORTS_CAVE_OS_BASE_URL",
         "SPORTS_CAVE_APP_URL",
         "PUBLIC_APP_URL",
         "APP_BASE_URL",
@@ -2199,6 +2228,8 @@ def orders_paid_webhook_callback_url(base_url=None):
         return ""
     if "://" not in base:
         base = f"https://{base}"
+    if base.rstrip("/").endswith("/webhooks/shopify/orders-paid"):
+        return base.rstrip("/")
     return f"{base}/webhooks/shopify/orders-paid"
 
 
@@ -2227,7 +2258,7 @@ def ensure_orders_paid_webhook_subscription(callback_url=None, config=None, requ
     target_url = orders_paid_webhook_callback_url(callback_url)
     if not target_url:
         raise ShopifyConfigurationError(
-            "Public app URL is missing. Set SPORTS_CAVE_APP_URL, PUBLIC_APP_URL, APP_BASE_URL, "
+            "Public app URL is missing. Set SPORTS_CAVE_OS_BASE_URL, PUBLIC_APP_URL, "
             "or RENDER_EXTERNAL_URL before registering the Shopify orders/paid webhook."
         )
     existing = list_orders_paid_webhook_subscriptions(config=config, request_post=request_post)

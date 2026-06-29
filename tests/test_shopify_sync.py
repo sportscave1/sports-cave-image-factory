@@ -1,6 +1,9 @@
 import os
 import inspect
 import json
+import base64
+import hashlib
+import hmac
 from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
@@ -49,6 +52,128 @@ class ShopifySyncClientTests(unittest.TestCase):
             shopify_sync.normalize_store_domain("https://SPORTS-CAVE.myshopify.com/admin"),
             "sports-cave.myshopify.com",
         )
+
+    def test_shopify_webhook_hmac_verifies_valid_signature(self):
+        raw_body = b'{"id":123,"name":"#SC2879"}'
+        secret = "app-secret"
+        signature = base64.b64encode(
+            hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
+        ).decode("utf-8")
+
+        self.assertTrue(shopify_sync.verify_shopify_webhook_hmac(raw_body, signature, secret))
+
+    def test_shopify_webhook_hmac_rejects_invalid_or_missing_signature(self):
+        raw_body = b'{"id":123}'
+
+        self.assertFalse(shopify_sync.verify_shopify_webhook_hmac(raw_body, "bad", "app-secret"))
+        self.assertFalse(shopify_sync.verify_shopify_webhook_hmac(raw_body, "", "app-secret"))
+        self.assertFalse(shopify_sync.verify_shopify_webhook_hmac(raw_body, "bad", ""))
+
+    def test_orders_paid_webhook_topic_accepts_rest_and_graphql_names(self):
+        self.assertTrue(shopify_sync.is_orders_paid_webhook_topic("orders/paid"))
+        self.assertTrue(shopify_sync.is_orders_paid_webhook_topic("ORDERS_PAID"))
+        self.assertFalse(shopify_sync.is_orders_paid_webhook_topic("orders/create"))
+
+    def test_orders_paid_webhook_callback_accepts_base_or_full_url(self):
+        self.assertEqual(
+            shopify_sync.orders_paid_webhook_callback_url("https://sports-cave-image-factory.onrender.com"),
+            "https://sports-cave-image-factory.onrender.com/webhooks/shopify/orders-paid",
+        )
+        self.assertEqual(
+            shopify_sync.orders_paid_webhook_callback_url(
+                "https://sports-cave-image-factory.onrender.com/webhooks/shopify/orders-paid"
+            ),
+            "https://sports-cave-image-factory.onrender.com/webhooks/shopify/orders-paid",
+        )
+
+    def test_orders_paid_fastapi_route_accepts_valid_hmac(self):
+        from fastapi.testclient import TestClient
+        import server
+
+        raw_body = b'{"id":2879,"name":"#SC2879","financial_status":"paid","line_items":[]}'
+        secret = "client-secret"
+        signature = base64.b64encode(
+            hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
+        ).decode("utf-8")
+        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": secret}), patch.object(
+            supabase_backend,
+            "is_configured",
+            return_value=True,
+        ), patch.object(
+            supabase_backend,
+            "process_order_paid_webhook",
+            return_value={
+                "source": "webhook",
+                "processed": True,
+                "order_name": "#SC2879",
+                "shopify_order_id": "gid://shopify/Order/2879",
+                "imported_lines": 1,
+                "skipped_existing_lines": 0,
+                "editions_assigned": 1,
+                "affected_handles": ["joel-embiid-76ers-art"],
+                "metafields_updated": 1,
+                "errors": [],
+            },
+        ) as process_webhook:
+            response = TestClient(server.app).post(
+                "/webhooks/shopify/orders-paid",
+                content=raw_body,
+                headers={
+                    "X-Shopify-Hmac-Sha256": signature,
+                    "X-Shopify-Topic": "orders/paid",
+                    "X-Shopify-Webhook-Id": "webhook-2879",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "processed")
+        process_webhook.assert_called_once()
+
+    def test_orders_paid_fastapi_route_rejects_invalid_hmac(self):
+        from fastapi.testclient import TestClient
+        import server
+
+        raw_body = b'{"id":2879}'
+        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": "client-secret"}), patch.object(
+            supabase_backend,
+            "process_order_paid_webhook",
+        ) as process_webhook:
+            response = TestClient(server.app).post(
+                "/webhooks/shopify/orders-paid",
+                content=raw_body,
+                headers={
+                    "X-Shopify-Hmac-Sha256": "bad",
+                    "X-Shopify-Topic": "orders/paid",
+                },
+            )
+
+        self.assertEqual(response.status_code, 401)
+        process_webhook.assert_not_called()
+
+    def test_orders_paid_fastapi_route_rejects_wrong_topic_after_hmac(self):
+        from fastapi.testclient import TestClient
+        import server
+
+        raw_body = b'{"id":2879}'
+        secret = "client-secret"
+        signature = base64.b64encode(
+            hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
+        ).decode("utf-8")
+        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": secret}), patch.object(
+            supabase_backend,
+            "process_order_paid_webhook",
+        ) as process_webhook:
+            response = TestClient(server.app).post(
+                "/webhooks/shopify/orders-paid",
+                content=raw_body,
+                headers={
+                    "X-Shopify-Hmac-Sha256": signature,
+                    "X-Shopify-Topic": "orders/create",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        process_webhook.assert_not_called()
 
     def test_order_certificate_metafields_include_vault_ready_json(self):
         inputs = shopify_sync.order_certificate_metafield_inputs(
@@ -3200,6 +3325,168 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["affected_order_names"], ["#SC3002"])
         self.assertEqual(result["affected_shopify_order_ids"], ["gid://shopify/Order/3002"])
         self.assertTrue(result["cursor_updated"])
+
+    @patch.object(supabase_backend, "ensure_schema", side_effect=AssertionError("webhook must not run schema DDL"))
+    @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders", side_effect=AssertionError("webhook must not fetch latest paid orders"))
+    @patch.object(supabase_backend, "list_existing_shopify_line_item_ids", return_value=set())
+    @patch.object(supabase_backend, "process_shopify_order_for_editions")
+    @patch.object(supabase_backend, "sync_product_edition_metafields_for_handles")
+    def test_webhook_single_order_processes_one_order_without_latest_fetch_or_schema(
+        self,
+        sync_product_edition_metafields_for_handles,
+        process_shopify_order_for_editions,
+        list_existing_shopify_line_item_ids,
+        _fetch_latest_paid_orders,
+        _ensure_schema,
+    ):
+        order = self.paid_order(
+            order_id="gid://shopify/Order/2879",
+            order_name="#SC2879",
+            line_item_id="gid://shopify/LineItem/28791",
+            processed_at="2026-06-29T06:30:00Z",
+            remote_updated_at="2026-06-29T06:30:10Z",
+        )
+        process_shopify_order_for_editions.return_value = {
+            "assignments_created": 1,
+            "existing_assignments_skipped": 0,
+            "missing_mapping_skipped": 0,
+            "changed_handles": ["messi-the-final-crown-wall-art"],
+            "new_assignment_ids": ["edition-2879"],
+            "errors": [],
+        }
+        sync_product_edition_metafields_for_handles.return_value = {
+            "attempted": 1,
+            "synced": 1,
+            "errors": [],
+            "results": [],
+        }
+
+        result = supabase_backend.process_single_paid_shopify_order_for_editions(
+            order,
+            source="webhook",
+            config=self.config,
+            ensure_schema_first=False,
+        )
+
+        self.assertEqual(result["source"], "webhook")
+        self.assertEqual(result["order_name"], "#SC2879")
+        self.assertEqual(result["imported_lines"], 1)
+        self.assertEqual(result["skipped_existing_lines"], 0)
+        self.assertEqual(result["editions_assigned"], 1)
+        self.assertEqual(result["assigned_editions"], ["edition-2879"])
+        self.assertEqual(result["affected_handles"], ["messi-the-final-crown-wall-art"])
+        self.assertEqual(result["metafields_updated"], 1)
+        list_existing_shopify_line_item_ids.assert_called_once_with(
+            ["gid://shopify/LineItem/28791"],
+            ensure_schema_first=False,
+        )
+        process_shopify_order_for_editions.assert_called_once()
+        _, process_kwargs = process_shopify_order_for_editions.call_args
+        self.assertFalse(process_kwargs["generate_certificates"])
+        self.assertFalse(process_kwargs["sync_product_metafields"])
+        self.assertFalse(process_kwargs["ensure_schema_first"])
+        sync_product_edition_metafields_for_handles.assert_called_once_with(
+            ["messi-the-final-crown-wall-art"],
+            config=self.config,
+            ensure_schema_first=False,
+        )
+
+    @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders", side_effect=AssertionError("webhook must not fetch latest paid orders"))
+    @patch.object(supabase_backend.shopify_sync, "fetch_orders_by_ids")
+    @patch.object(supabase_backend, "list_existing_shopify_line_item_ids", return_value=set())
+    @patch.object(
+        supabase_backend,
+        "process_shopify_order_for_editions",
+        return_value={
+            "assignments_created": 1,
+            "existing_assignments_skipped": 0,
+            "missing_mapping_skipped": 0,
+            "changed_handles": [],
+            "new_assignment_ids": ["edition-2879"],
+            "errors": [],
+        },
+    )
+    def test_webhook_thin_payload_fetches_single_order_by_id(
+        self,
+        process_shopify_order_for_editions,
+        _existing_line_ids,
+        fetch_orders_by_ids,
+        _fetch_latest_paid_orders,
+    ):
+        fetched_order = self.paid_order(
+            order_id="gid://shopify/Order/2879",
+            order_name="#SC2879",
+            line_item_id="gid://shopify/LineItem/28791",
+            processed_at="2026-06-29T06:30:00Z",
+            remote_updated_at="2026-06-29T06:30:10Z",
+        )
+        fetch_orders_by_ids.return_value = [fetched_order]
+
+        result = supabase_backend.process_single_paid_shopify_order_for_editions(
+            {"id": 2879, "admin_graphql_api_id": "gid://shopify/Order/2879", "financial_status": "paid"},
+            source="webhook",
+            config=self.config,
+            ensure_schema_first=False,
+        )
+
+        fetch_orders_by_ids.assert_called_once_with(["gid://shopify/Order/2879"], config=self.config)
+        self.assertEqual(result["order_name"], "#SC2879")
+        self.assertEqual(result["editions_assigned"], 1)
+        process_shopify_order_for_editions.assert_called_once()
+
+    @patch.object(supabase_backend, "ensure_schema", side_effect=AssertionError("webhook must not run schema DDL"))
+    @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders", side_effect=AssertionError("webhook must not fetch latest paid orders"))
+    @patch.object(
+        supabase_backend,
+        "list_existing_shopify_line_item_ids",
+        return_value={"gid://shopify/LineItem/28791"},
+    )
+    @patch.object(supabase_backend, "process_shopify_order_for_editions")
+    @patch.object(supabase_backend, "sync_product_edition_metafields_for_handles")
+    def test_webhook_existing_line_skips_allocation_and_mirror(
+        self,
+        sync_product_edition_metafields_for_handles,
+        process_shopify_order_for_editions,
+        _existing_line_ids,
+        _fetch_latest_paid_orders,
+        _ensure_schema,
+    ):
+        order = self.paid_order(
+            order_id="gid://shopify/Order/2879",
+            order_name="#SC2879",
+            line_item_id="gid://shopify/LineItem/28791",
+            processed_at="2026-06-29T06:30:00Z",
+            remote_updated_at="2026-06-29T06:30:10Z",
+        )
+
+        result = supabase_backend.process_single_paid_shopify_order_for_editions(
+            order,
+            source="webhook",
+            config=self.config,
+            ensure_schema_first=False,
+        )
+
+        self.assertEqual(result["imported_lines"], 0)
+        self.assertEqual(result["skipped_existing_lines"], 1)
+        self.assertEqual(result["editions_assigned"], 0)
+        process_shopify_order_for_editions.assert_not_called()
+        sync_product_edition_metafields_for_handles.assert_not_called()
+
+    @patch.object(supabase_backend, "process_single_paid_shopify_order_for_editions")
+    @patch.object(supabase_backend, "_claim_webhook_event", return_value=False)
+    def test_duplicate_webhook_id_skips_processing(self, _claim_webhook_event, process_single_paid_shopify_order_for_editions):
+        result = supabase_backend.process_order_paid_webhook({"id": 2879, "line_items": []}, "webhook-1", "orders/paid")
+
+        self.assertTrue(result["duplicate"])
+        self.assertEqual(result["editions_assigned"], 0)
+        process_single_paid_shopify_order_for_editions.assert_not_called()
+
+    def test_webhook_backend_path_does_not_call_ensure_schema(self):
+        process_source = inspect.getsource(supabase_backend.process_order_paid_webhook)
+        single_order_source = inspect.getsource(supabase_backend.process_single_paid_shopify_order_for_editions)
+
+        self.assertNotIn("ensure_schema()", process_source)
+        self.assertNotIn("ensure_schema()", single_order_source)
 
     def test_latest_paid_order_needs_sync_rejects_unpaid_and_cancelled_orders(self):
         self.assertFalse(
