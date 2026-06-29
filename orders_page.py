@@ -14,8 +14,10 @@ except Exception:  # pragma: no cover - optional at import time
     pd = None
 
 import certificate_engine
+import certificate_job
 import order_allocator
 import shopify_sync
+from certificate_logging import certificate_stage_log
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -153,6 +155,7 @@ def _set_certificate_action_state(row, source="Orders"):
 def _clear_certificate_action_state(source="Orders"):
     st.session_state[CERTIFICATE_ACTION_STATE_KEY] = {}
     st.session_state[CERTIFICATE_ACTION_LOADING_KEY] = False
+    certificate_stage_log("loading_state_cleared", "completed", source_page=source)
     _certificate_action_log("loading state cleared", source=source)
 
 
@@ -1397,12 +1400,29 @@ def _generate_upload_selected_certificates(rows):
         for row in rows:
             _set_certificate_action_state(row, source="Orders")
             _certificate_action_log("certificate action started", row=row, source="Orders")
-            _generate_certificate_for_row(row, raise_errors=True)
-            _certificate_action_log("certificate PDF generated yes", row=row, source="Orders")
+            result = certificate_job.run_certificate_job_with_timeout(row, source_page="Orders", upload=True)
+            if not result.get("ok"):
+                raise RuntimeError(result.get("error") or "Certificate upload failed.")
+            record = result.get("record") or {}
+            if record:
+                _update_row_from_certificate(row, record)
             _certificate_action_log("row refresh started", row=row, source="Orders")
+            certificate_stage_log(
+                "selected_row_refresh",
+                "started",
+                source_page="Orders",
+                order_name=_normalise_row(row).get("order") or "",
+                edition_order_id=_normalise_row(row).get("edition_order_id") or "",
+            )
             refreshed_row = _current_row_for(row)
+            certificate_stage_log(
+                "selected_row_refresh",
+                "completed",
+                source_page="Orders",
+                order_name=refreshed_row.get("order") or "",
+                edition_order_id=refreshed_row.get("edition_order_id") or "",
+            )
             _certificate_action_log("row refresh finished", row=refreshed_row, source="Orders")
-            _upload_certificate_for_row(refreshed_row, raise_errors=True)
             _certificate_action_log("certificate action finished", row=row, source="Orders")
             completed += 1
         _perf_log("generate selected certificates", start, rows=len(rows), mode="generate_upload")

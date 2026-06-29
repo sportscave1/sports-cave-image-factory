@@ -14,10 +14,12 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
+import certificate_job
 import db
 import prompt_store
 import shopify_sync
 import supabase_backend
+from certificate_logging import certificate_stage_log
 from services import r2_storage
 
 
@@ -483,6 +485,7 @@ def _prodigi_set_certificate_action_state(row):
 def _prodigi_clear_certificate_action_state():
     st.session_state[PRODIGI_CERTIFICATE_ACTION_STATE_KEY] = {}
     st.session_state[PRODIGI_CERTIFICATE_ACTION_LOADING_KEY] = False
+    certificate_stage_log("loading_state_cleared", "completed", source_page="Prodigi")
     print("CERTIFICATE ACTION: loading state cleared source=Prodigi", flush=True)
 
 
@@ -3876,64 +3879,15 @@ def prodigi_generate_upload_certificate_for_row(row, *, config=None):
     if not config.get("configured"):
         raise RuntimeError("Store connection is not configured for certificate upload.")
 
-    certificate_engine = importlib.import_module("certificate_engine")
-    edition_order_id = str(row.get("edition_order_id") or "").strip()
-    if edition_order_id:
-        try:
-            print(
-                f"CERTIFICATE ACTION: backend call started source=Prodigi edition_order_id={edition_order_id}",
-                flush=True,
-            )
-            supabase_backend.generate_certificate_for_edition_order(edition_order_id)
-            print(
-                f"CERTIFICATE ACTION: backend call completed source=Prodigi edition_order_id={edition_order_id}",
-                flush=True,
-            )
-        except Exception as error:
-            supabase_backend.log_app_error(
-                "prodigi_certificate_supabase_generation_failed",
-                str(error),
-                {"edition_order_id": edition_order_id, "row_id": row.get("row_id") or ""},
-            )
-            raise RuntimeError(f"Certificate backend generation failed: {error}") from error
-
-    order_row = {
-        "order": row.get("shopify_order_name") or row.get("shopify_order_number") or "",
-        "order_name": row.get("shopify_order_name") or row.get("shopify_order_number") or "",
-        "customer": row.get("customer_name") or "",
-        "customer_name": row.get("customer_name") or "",
-        "customer_email": row.get("customer_email") or "",
-        "shopify_customer_id": row.get("shopify_customer_id") or "",
-        "product": row.get("product_title") or "",
-        "product_title": row.get("product_title") or "",
-        "product_handle": row.get("product_handle") or row.get("shopify_handle") or "",
-        "variant": row.get("shopify_variant_title") or row.get("variant_title") or "",
-        "variant_title": row.get("shopify_variant_title") or row.get("variant_title") or "",
-        "edition_number": row.get("edition_number"),
-        "edition_total": row.get("edition_total") or 100,
-        "edition_order_id": edition_order_id,
-        "shopify_order_id": row.get("shopify_order_id") or "",
-        "shopify_line_item_id": row.get("shopify_line_item_id") or "",
-        "shopify_product_id": row.get("shopify_product_id") or "",
-        "variant_id": row.get("shopify_variant_id") or "",
-        "shopify_variant_id": row.get("shopify_variant_id") or "",
-        "edition_offset": max(_prodigi_int(row.get("line_item_unit_index"), 1) - 1, 0),
-        "processed_at": row.get("date") or "",
-        "date": row.get("date") or "",
-        "certificate_pdf_path": row.get("certificate_pdf_path") or "",
-        "certificate_pdf_url": row.get("certificate_pdf_url") or row.get("shopify_file_url") or "",
-        "certificate_shopify_file_id": row.get("certificate_shopify_file_id") or "",
-        "certificate_generated_at": row.get("certificate_generated_at") or "",
+    result = certificate_job.run_certificate_job_with_timeout(row, source_page="Prodigi", upload=True)
+    if not result.get("ok"):
+        raise RuntimeError(result.get("error") or "Certificate upload failed.")
+    saved = {
+        "record": result.get("record") or {},
+        "metafields_synced": result.get("metafields_synced", True),
+        "saved": result.get("saved", False),
+        "skipped_existing": result.get("skipped_existing", False),
     }
-    record = certificate_engine.certificate_record_from_order_row(order_row)
-    if not str(record.get("local_pdf_path") or "").strip():
-        record = certificate_engine.generate_local_certificate_for_record(record)
-    if not str(record.get("local_pdf_path") or "").strip():
-        raise RuntimeError(record.get("sync_error") or "Certificate PDF was not generated.")
-    uploaded = certificate_engine.upload_generated_certificate_record(record, config=config)
-    saved = certificate_engine.save_certificate_record_to_order(uploaded, config=config)
-    if saved.get("metafields_synced") is False:
-        raise RuntimeError(saved.get("metafield_error") or "Certificate uploaded, but Shopify certificate mirror failed. Retry.")
     bump_supabase_cache_version("orders", "order-summary")
     st.session_state["orders_allocation_snapshot_loaded"] = False
     st.session_state["orders-ledger-cache-version"] = int(st.session_state.get("orders-ledger-cache-version", 0)) + 1
@@ -4482,11 +4436,25 @@ def render_prodigi_page():
                     f"source=Prodigi order={completion_row.get('shopify_order_name') or completion_row.get('shopify_order_number') or ''}",
                     flush=True,
                 )
+                certificate_stage_log(
+                    "selected_row_refresh",
+                    "started",
+                    source_page="Prodigi",
+                    order_name=completion_row.get("shopify_order_name") or completion_row.get("shopify_order_number") or "",
+                    edition_order_id=completion_row.get("edition_order_id") or "",
+                )
                 prodigi_save_dispatch_row(
                     completion_row,
                     status="Complete",
                     notes=notes,
                     qa_answers=qa_answers,
+                )
+                certificate_stage_log(
+                    "selected_row_refresh",
+                    "completed",
+                    source_page="Prodigi",
+                    order_name=completion_row.get("shopify_order_name") or completion_row.get("shopify_order_number") or "",
+                    edition_order_id=completion_row.get("edition_order_id") or "",
                 )
                 print(
                     "CERTIFICATE ACTION: row refresh finished "

@@ -1,8 +1,11 @@
 import mimetypes
 import os
 import re
+import time
 from datetime import date
 from pathlib import Path
+
+from certificate_logging import certificate_stage_log
 
 
 R2_ENV_KEYS = (
@@ -147,8 +150,11 @@ def upload_bytes(bucket, key, data, content_type=None):
         if content_type:
             kwargs["ContentType"] = str(content_type)
         _r2_log("upload started", bucket=bucket, key=key, size_bytes=len(body))
+        started_at = time.perf_counter()
+        certificate_stage_log("R2_upload", "started")
         get_r2_client().put_object(**kwargs)
         _r2_log("upload completed", bucket=bucket, key=key, size_bytes=len(body))
+        certificate_stage_log("R2_upload", "completed", started_at=started_at)
         return {
             "ok": True,
             "bucket": bucket,
@@ -158,6 +164,12 @@ def upload_bytes(bucket, key, data, content_type=None):
         }
     except Exception as error:
         _r2_log("upload failed", bucket=bucket if "bucket" in locals() else "", key=key if "key" in locals() else "", error=error)
+        certificate_stage_log(
+            "R2_upload",
+            "failed",
+            started_at=started_at if "started_at" in locals() else None,
+            error=error,
+        )
         return _safe_error(error)
 
 

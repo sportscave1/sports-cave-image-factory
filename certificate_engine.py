@@ -7,6 +7,7 @@ from pathlib import Path
 import certificate_service
 import order_allocator
 import shopify_sync
+from certificate_logging import certificate_stage, certificate_stage_log
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -519,26 +520,30 @@ def generate_local_certificate_for_record(record, output_dir=None):
         updated["generated_at"] = now_iso()
         return updated
     try:
-        pdf_path = certificate_service.generate_certificate_pdf(
-            output_dir,
-            product_title=updated.get("product_title"),
-            edition_number=updated.get("edition_number"),
-            edition_total=updated.get("edition_total"),
-            order_name=updated.get("order_name"),
-            customer_name=updated.get("customer_name"),
-            assigned_at=updated.get("purchase_date"),
-            shopify_handle=updated.get("handle"),
-            filename=filename,
-        )
-        try:
-            preview_path = certificate_service.generate_certificate_preview_png(
+        certificate_stage_log("template/font/assets_loaded", "started")
+        certificate_stage_log("template/font/assets_loaded", "completed")
+        with certificate_stage("PDF_generation"):
+            pdf_path = certificate_service.generate_certificate_pdf(
                 output_dir,
                 product_title=updated.get("product_title"),
                 edition_number=updated.get("edition_number"),
                 edition_total=updated.get("edition_total"),
                 order_name=updated.get("order_name"),
+                customer_name=updated.get("customer_name"),
+                assigned_at=updated.get("purchase_date"),
                 shopify_handle=updated.get("handle"),
+                filename=filename,
             )
+        try:
+            with certificate_stage("preview_generation"):
+                preview_path = certificate_service.generate_certificate_preview_png(
+                    output_dir,
+                    product_title=updated.get("product_title"),
+                    edition_number=updated.get("edition_number"),
+                    edition_total=updated.get("edition_total"),
+                    order_name=updated.get("order_name"),
+                    shopify_handle=updated.get("handle"),
+                )
         except Exception:
             preview_path = ""
         updated = _generate_certificate_image_assets(updated, output_dir)
@@ -643,17 +648,47 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
         order=record.get("order_name") or record.get("shopify_order_name"),
         edition=record.get("edition_number"),
     )
-    record_to_save = certificate_metafield_record(record)
-    persist_certificate_record_to_supabase(record_to_save)
-    state = read_order_certificate_state(order_gid, config=config, request_post=request_post)
-    certificates = state.get("certificates") or []
-    existing = _existing_ready_certificate(
-        {_certificate_key(item): item for item in certificates},
-        record_to_save.get("line_item_id"),
-        record_to_save.get("edition_number"),
-        record_to_save.get("line_item_unit_index"),
-    )
-    if existing:
+    with certificate_stage("Supabase_update"):
+        record_to_save = certificate_metafield_record(record)
+        persist_result = persist_certificate_record_to_supabase(record_to_save)
+        if persist_result.get("ok") is False and persist_result.get("error"):
+            _certificate_action_log(
+                "Supabase update failed",
+                order=record.get("order_name") or record.get("shopify_order_name"),
+                edition=record.get("edition_number"),
+                error=persist_result.get("error"),
+            )
+        state = read_order_certificate_state(order_gid, config=config, request_post=request_post)
+        certificates = state.get("certificates") or []
+        existing = _existing_ready_certificate(
+            {_certificate_key(item): item for item in certificates},
+            record_to_save.get("line_item_id"),
+            record_to_save.get("edition_number"),
+            record_to_save.get("line_item_unit_index"),
+        )
+        if existing:
+            sync_result = _sync_order_certificate_records(
+                order_gid,
+                certificates,
+                compare_digest=state.get("compare_digest"),
+                config=config,
+                request_post=request_post,
+            )
+            _certificate_action_log(
+                "Supabase/order certificate update completed",
+                order=record.get("order_name") or record.get("shopify_order_name"),
+                edition=record.get("edition_number"),
+                metafields_synced=bool(sync_result.get("ok")),
+                existing=True,
+            )
+            return {
+                "record": existing,
+                "saved": False,
+                "skipped_existing": True,
+                "metafields_synced": bool(sync_result.get("ok")),
+                "metafield_error": sync_result.get("error") or "",
+            }
+        certificates = _replace_certificate(certificates, record_to_save)
         sync_result = _sync_order_certificate_records(
             order_gid,
             certificates,
@@ -661,42 +696,20 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
             config=config,
             request_post=request_post,
         )
+        result = {
+            "record": record_to_save,
+            "saved": True,
+            "skipped_existing": False,
+            "metafields_synced": bool(sync_result.get("ok")),
+            "metafield_error": sync_result.get("error") or "",
+        }
         _certificate_action_log(
             "Supabase/order certificate update completed",
             order=record.get("order_name") or record.get("shopify_order_name"),
             edition=record.get("edition_number"),
-            metafields_synced=bool(sync_result.get("ok")),
-            existing=True,
+            metafields_synced=result.get("metafields_synced"),
         )
-        return {
-            "record": existing,
-            "saved": False,
-            "skipped_existing": True,
-            "metafields_synced": bool(sync_result.get("ok")),
-            "metafield_error": sync_result.get("error") or "",
-        }
-    certificates = _replace_certificate(certificates, record_to_save)
-    sync_result = _sync_order_certificate_records(
-        order_gid,
-        certificates,
-        compare_digest=state.get("compare_digest"),
-        config=config,
-        request_post=request_post,
-    )
-    result = {
-        "record": record_to_save,
-        "saved": True,
-        "skipped_existing": False,
-        "metafields_synced": bool(sync_result.get("ok")),
-        "metafield_error": sync_result.get("error") or "",
-    }
-    _certificate_action_log(
-        "Supabase/order certificate update completed",
-        order=record.get("order_name") or record.get("shopify_order_name"),
-        edition=record.get("edition_number"),
-        metafields_synced=result.get("metafields_synced"),
-    )
-    return result
+        return result
 
 
 def retry_certificate_metafield_push_for_rows(rows, *, config=None, request_post=None):

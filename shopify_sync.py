@@ -8,6 +8,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from certificate_logging import certificate_stage_log
+
 
 DEFAULT_API_VERSION = "2026-04"
 DEFAULT_PAGE_SIZE = 50
@@ -1747,20 +1749,30 @@ def upload_file_to_shopify_files(
     poll_sleep = min(max(float(poll_sleep_seconds or 0), 0), MAX_FILE_POLL_SLEEP_SECONDS)
     try:
         _certificate_upload_log("staged upload create started", filename=filename, mime_type=mime_type)
+        stage_started = time.perf_counter()
+        certificate_stage_log("Shopify_stagedUploadsCreate", "started")
         try:
             staged = create_staged_upload(filename, mime_type, config=config, request_post=request_post)
         except Exception as error:
             _certificate_upload_log("staged upload create failed", filename=filename, error=error)
+            certificate_stage_log("Shopify_stagedUploadsCreate", "failed", started_at=stage_started, error=error)
             raise
         _certificate_upload_log("staged upload create completed", filename=filename)
+        certificate_stage_log("Shopify_stagedUploadsCreate", "completed", started_at=stage_started)
         _certificate_upload_log("staged upload started", filename=filename)
+        stage_started = time.perf_counter()
+        certificate_stage_log("HTTP_staged_upload", "started")
         try:
             upload_to_staged_target(staged["target"], file_path, mime_type, upload_post=upload_post)
         except Exception as error:
             _certificate_upload_log("staged upload failed", filename=filename, error=error)
+            certificate_stage_log("HTTP_staged_upload", "failed", started_at=stage_started, error=error)
             raise
         _certificate_upload_log("staged upload completed", filename=filename)
+        certificate_stage_log("HTTP_staged_upload", "completed", started_at=stage_started)
         _certificate_upload_log("fileCreate started", filename=filename, content_type=content_type)
+        stage_started = time.perf_counter()
+        certificate_stage_log("Shopify_fileCreate", "started")
         try:
             created = create_shopify_file(
                 staged["target"].get("resourceUrl") or "",
@@ -1772,8 +1784,10 @@ def upload_file_to_shopify_files(
             )
         except Exception as error:
             _certificate_upload_log("fileCreate failed", filename=filename, error=error)
+            certificate_stage_log("Shopify_fileCreate", "failed", started_at=stage_started, error=error)
             raise
         _certificate_upload_log("fileCreate completed", filename=filename)
+        certificate_stage_log("Shopify_fileCreate", "completed", started_at=stage_started)
     except Exception as error:
         _certificate_upload_log("upload failed", filename=filename, error=error)
         raise
@@ -1781,14 +1795,24 @@ def upload_file_to_shopify_files(
     file_id = file_node.get("id") or ""
     if not file_id:
         _certificate_upload_log("file polling failed", filename=filename, error="missing_file_id")
+        certificate_stage_log("Shopify_file_polling", "failed", error="missing_file_id")
         raise ShopifyAPIError("Shopify fileCreate did not return a file ID.")
     _certificate_upload_log("file polling started", filename=filename, attempts=poll_limit)
+    poll_started = time.perf_counter()
+    certificate_stage_log("Shopify_file_polling", "started", attempts=poll_limit)
     if _shopify_file_url(file_node) and str(file_node.get("fileStatus") or "").upper() in {"READY", "UPLOADED"}:
         _certificate_upload_log(
             "file polling completed",
             filename=filename,
             attempt=0,
             status=file_node.get("fileStatus") or "",
+        )
+        certificate_stage_log(
+            "Shopify_file_READY",
+            "completed",
+            started_at=poll_started,
+            shopify_file_status=file_node.get("fileStatus") or "",
+            attempt=0,
         )
     else:
         for attempt in range(1, poll_limit + 1):
@@ -1801,12 +1825,26 @@ def upload_file_to_shopify_files(
                     attempt=attempt,
                     status=file_node.get("fileStatus") or "",
                 )
+                certificate_stage_log(
+                    "Shopify_file_READY",
+                    "completed",
+                    started_at=poll_started,
+                    shopify_file_status=file_node.get("fileStatus") or "",
+                    attempt=attempt,
+                )
                 break
         else:
             _certificate_upload_log(
                 "file polling failed",
                 filename=filename,
                 status=file_node.get("fileStatus") or "",
+                attempts=poll_limit,
+            )
+            certificate_stage_log(
+                "Shopify_file_polling_timeout",
+                "failed",
+                started_at=poll_started,
+                shopify_file_status=file_node.get("fileStatus") or "",
                 attempts=poll_limit,
             )
             raise ShopifyAPIError(
@@ -1819,6 +1857,13 @@ def upload_file_to_shopify_files(
             filename=filename,
             status=file_node.get("fileStatus") or "",
             error="missing_ready_url",
+        )
+        certificate_stage_log(
+            "Shopify_file_polling",
+            "failed",
+            started_at=poll_started,
+            error="missing_ready_url",
+            shopify_file_status=file_node.get("fileStatus") or "",
         )
         raise ShopifyAPIError(
             "Shopify file upload finished without a permanent file URL. "
