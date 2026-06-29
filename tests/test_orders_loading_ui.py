@@ -1063,6 +1063,37 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("generate_missing_certificates_for_order", source)
         self.assertNotIn("require_cutover=True", source)
 
+    def test_streamlit_wrapper_preserves_required_proxy_paths_and_flags(self):
+        source = (ROOT / "server.py").read_text(encoding="utf-8")
+
+        self.assertIn('@app.get("/healthz")', source)
+        self.assertIn('@app.api_route("/{path:path}"', source)
+        self.assertIn('@app.websocket("/{path:path}")', source)
+        self.assertIn("websockets.connect", source)
+        self.assertIn('"--server.fileWatcherType"', source)
+        self.assertIn('"none"', source)
+        self.assertIn('"--server.runOnSave"', source)
+        self.assertIn('"false"', source)
+        self.assertIn('"--browser.gatherUsageStats"', source)
+        self.assertIn('"false"', source)
+
+    def test_streamlit_proxy_strips_decoded_content_encoding_header(self):
+        import server
+
+        filtered = server._filtered_proxy_headers(
+            {
+                "content-encoding": "gzip",
+                "content-length": "99",
+                "content-type": "application/javascript",
+                "set-cookie": "a=b",
+            }
+        )
+
+        self.assertNotIn("content-encoding", {key.lower(): value for key, value in filtered.items()})
+        self.assertNotIn("content-length", {key.lower(): value for key, value in filtered.items()})
+        self.assertEqual(filtered["content-type"], "application/javascript")
+        self.assertEqual(filtered["set-cookie"], "a=b")
+
     def test_prompt_editing_is_password_gated_and_backend_persisted(self):
         app_source = (ROOT / "app.py").read_text(encoding="utf-8")
         os_pages_source = (ROOT / "os_pages.py").read_text(encoding="utf-8")

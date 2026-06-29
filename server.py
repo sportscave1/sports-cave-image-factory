@@ -129,6 +129,7 @@ async def shopify_orders_paid_webhook(request: Request):
 def _filtered_proxy_headers(headers):
     blocked = {
         "connection",
+        "content-encoding",
         "content-length",
         "host",
         "keep-alive",
