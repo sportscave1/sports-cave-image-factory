@@ -3837,12 +3837,12 @@ def prodigi_find_order_rows_from_cache(search_text):
     return matches, []
 
 
-def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None):
+def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None, ensure_schema_first=True):
     _, saved = prodigi_upsert_dispatch_row([], base_row, status=status, notes=notes, qa_answers=qa_answers)
     if not supabase_backend.is_configured():
         raise RuntimeError("Supabase dispatch storage is not configured.")
     started = time.perf_counter()
-    supabase_backend.upsert_prodigi_dispatch_row(saved)
+    supabase_backend.upsert_prodigi_dispatch_row(saved, ensure_schema_first=ensure_schema_first)
     bump_supabase_cache_version("orders", "order-summary")
     st.session_state["orders_allocation_snapshot_loaded"] = False
     st.session_state["orders-ledger-cache-version"] = int(st.session_state.get("orders-ledger-cache-version", 0)) + 1
@@ -4448,6 +4448,7 @@ def render_prodigi_page():
                     status="Complete",
                     notes=notes,
                     qa_answers=qa_answers,
+                    ensure_schema_first=False,
                 )
                 certificate_stage_log(
                     "selected_row_refresh",
@@ -4467,7 +4468,7 @@ def render_prodigi_page():
                 st.success("Certificate uploaded and dispatch completed.")
                 st.rerun()
             except Exception as error:
-                supabase_backend.log_app_error("prodigi_dispatch_complete_save_failed", str(error), {"source": "prodigi_page"})
+                # Keep certificate-action failures out of schema guards; log_app_error can run ensure_schema().
                 print(
                     f"CERTIFICATE ACTION: certificate action failed source=Prodigi order={selected_row.get('shopify_order_name') or selected_row.get('shopify_order_number') or ''} error={error}",
                     flush=True,

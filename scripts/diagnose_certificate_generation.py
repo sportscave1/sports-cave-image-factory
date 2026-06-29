@@ -110,6 +110,16 @@ def _worker_main(args):
         order_name=row.get("order") or row.get("order_name") or row.get("shopify_order_name") or args.order_name,
         edition_order_id=row.get("edition_order_id") or args.edition_order_id,
     )
+    certificate_stage_log(
+        "certificate_schema_check_skipped",
+        "completed",
+        schema_mode="diagnostic_certificate_worker",
+    )
+    certificate_stage_log(
+        "certificate_no_ddl_confirmed",
+        "completed",
+        schema_mode="diagnostic_certificate_worker",
+    )
     try:
         result = certificate_job.run_certificate_job(
             row,

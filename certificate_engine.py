@@ -353,8 +353,10 @@ def certificates_json_payload(certificates):
     return shopify_sync.order_certificates_json_payload(certificates)
 
 
-def _log_certificate_metafield_failure(order_gid, error, certificates=None):
+def _log_certificate_metafield_failure(order_gid, error, certificates=None, *, log_to_supabase=True):
     logger.warning("Certificate metafield push failed for %s: %s", order_gid, error)
+    if not log_to_supabase:
+        return
     try:
         supabase = importlib.import_module("supabase_backend")
         supabase.log_app_error(
@@ -369,7 +371,7 @@ def _log_certificate_metafield_failure(order_gid, error, certificates=None):
         pass
 
 
-def persist_certificate_record_to_supabase(record):
+def persist_certificate_record_to_supabase(record, *, ensure_schema_first=True):
     try:
         supabase = importlib.import_module("supabase_backend")
     except Exception as error:
@@ -378,21 +380,35 @@ def persist_certificate_record_to_supabase(record):
     if not getattr(supabase, "is_configured", lambda: False)():
         return {"ok": False, "skipped": True, "reason": "Supabase DATABASE_URL is not configured."}
     try:
-        return supabase.upsert_certificate_metadata(certificate_metafield_record(record))
+        return supabase.upsert_certificate_metadata(
+            certificate_metafield_record(record),
+            ensure_schema_first=ensure_schema_first,
+        )
     except Exception as error:
-        logger.warning("Supabase certificate metadata write failed: %s", error)
-        try:
-            supabase.log_app_error(
-                "certificate_metadata_supabase_write_failed",
-                str(error),
-                {"certificate_id": (record or {}).get("certificate_id")},
-            )
-        except Exception:
-            pass
-        return {"ok": False, "error": str(error)}
+        schema_message = getattr(supabase, "certificate_schema_missing_error_message", lambda exc: "")(error)
+        message = schema_message or str(error)
+        logger.warning("Supabase certificate metadata write failed: %s", message)
+        if ensure_schema_first:
+            try:
+                supabase.log_app_error(
+                    "certificate_metadata_supabase_write_failed",
+                    message,
+                    {"certificate_id": (record or {}).get("certificate_id")},
+                )
+            except Exception:
+                pass
+        return {"ok": False, "error": message}
 
 
-def _sync_order_certificate_records(order_gid, records, *, compare_digest=None, config=None, request_post=None):
+def _sync_order_certificate_records(
+    order_gid,
+    records,
+    *,
+    compare_digest=None,
+    config=None,
+    request_post=None,
+    log_to_supabase=True,
+):
     try:
         shopify_sync.sync_order_certificate_metafields(
             order_gid,
@@ -403,7 +419,7 @@ def _sync_order_certificate_records(order_gid, records, *, compare_digest=None, 
         )
         return {"ok": True, "error": ""}
     except Exception as error:
-        _log_certificate_metafield_failure(order_gid, error, records)
+        _log_certificate_metafield_failure(order_gid, error, records, log_to_supabase=log_to_supabase)
         return {"ok": False, "error": str(error)}
 
 
@@ -639,7 +655,7 @@ def upload_generated_certificate_record(record, *, config=None, request_post=Non
     return updated
 
 
-def save_certificate_record_to_order(record, *, config=None, request_post=None):
+def save_certificate_record_to_order(record, *, config=None, request_post=None, ensure_schema_first=True):
     order_gid = order_allocator.order_gid(record.get("order_gid") or record.get("shopify_order_id"))
     if not order_gid:
         raise shopify_sync.ShopifyAPIError("Order ID is missing for certificate save.")
@@ -650,7 +666,11 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
     )
     with certificate_stage("Supabase_update"):
         record_to_save = certificate_metafield_record(record)
-        persist_result = persist_certificate_record_to_supabase(record_to_save)
+        with certificate_stage("certificate_db_update"):
+            persist_result = persist_certificate_record_to_supabase(
+                record_to_save,
+                ensure_schema_first=ensure_schema_first,
+            )
         if persist_result.get("ok") is False and persist_result.get("error"):
             _certificate_action_log(
                 "Supabase update failed",
@@ -658,6 +678,7 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
                 edition=record.get("edition_number"),
                 error=persist_result.get("error"),
             )
+            raise RuntimeError(persist_result.get("error"))
         state = read_order_certificate_state(order_gid, config=config, request_post=request_post)
         certificates = state.get("certificates") or []
         existing = _existing_ready_certificate(
@@ -673,6 +694,7 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
                 compare_digest=state.get("compare_digest"),
                 config=config,
                 request_post=request_post,
+                log_to_supabase=ensure_schema_first,
             )
             _certificate_action_log(
                 "Supabase/order certificate update completed",
@@ -695,6 +717,7 @@ def save_certificate_record_to_order(record, *, config=None, request_post=None):
             compare_digest=state.get("compare_digest"),
             config=config,
             request_post=request_post,
+            log_to_supabase=ensure_schema_first,
         )
         result = {
             "record": record_to_save,

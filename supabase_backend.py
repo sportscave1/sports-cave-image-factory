@@ -333,6 +333,27 @@ def _safe_error_type(error):
     return error.__class__.__name__ if error else ""
 
 
+def certificate_schema_missing_error_message(error):
+    sqlstate = str(
+        getattr(error, "sqlstate", "")
+        or getattr(error, "pgcode", "")
+        or ""
+    )
+    text = str(error or "")
+    lowered = text.casefold()
+    missing_schema = sqlstate in {"42P01", "42703"} or "does not exist" in lowered
+    if not missing_schema:
+        return ""
+    diag = getattr(error, "diag", None)
+    name = (
+        getattr(diag, "column_name", "")
+        or getattr(diag, "table_name", "")
+        or getattr(diag, "schema_name", "")
+        or "referenced by query"
+    )
+    return f"missing required database column/table {name}. Run migrations separately."
+
+
 def _database_url_with_ssl():
     url = get_database_url()
     if not url:
@@ -3781,8 +3802,12 @@ def sync_all_product_edition_metafields(config=None, search="", limit=1000, prog
     )
 
 
-def _certificate_rows_for_order(shopify_order_id):
-    ensure_schema()
+def _certificate_rows_for_order(shopify_order_id, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
+    else:
+        certificate_stage_log("certificate_schema_check_skipped", "completed", db_stage="certificate_rows_for_order")
+        certificate_stage_log("certificate_no_ddl_confirmed", "completed", db_stage="certificate_rows_for_order")
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -3813,11 +3838,11 @@ def _certificate_rows_for_order(shopify_order_id):
             return cur.fetchall()
 
 
-def sync_order_certificate_metafields(shopify_order_id, config=None, request_post=None):
+def sync_order_certificate_metafields(shopify_order_id, config=None, request_post=None, *, ensure_schema_first=True):
     order_id = str(shopify_order_id or "").strip()
     if not order_id:
         return {"count": 0, "skipped": True, "reason": "Missing Shopify order ID."}
-    rows = _certificate_rows_for_order(order_id)
+    rows = _certificate_rows_for_order(order_id, ensure_schema_first=ensure_schema_first)
     if not rows:
         return {"count": 0, "skipped": True, "reason": "No certificates for this order."}
     certificates = []
@@ -3899,11 +3924,12 @@ def sync_order_certificate_metafields(shopify_order_id, config=None, request_pos
                     (str(error)[:1000], str(error)[:1000], order_id),
                 )
             conn.commit()
-        log_app_error(
-            "order_certificate_metafield_sync_failed",
-            str(error),
-            {"shopify_order_id": order_id},
-        )
+        if ensure_schema_first:
+            log_app_error(
+                "order_certificate_metafield_sync_failed",
+                str(error),
+                {"shopify_order_id": order_id},
+            )
         return {
             "count": 0,
             "failed": True,
@@ -4414,12 +4440,16 @@ def get_prodigi_dispatch_summary():
     }
 
 
-def upsert_prodigi_dispatch_row(row):
-    return upsert_prodigi_dispatch_rows([row])
+def upsert_prodigi_dispatch_row(row, *, ensure_schema_first=True):
+    return upsert_prodigi_dispatch_rows([row], ensure_schema_first=ensure_schema_first)
 
 
-def upsert_prodigi_dispatch_rows(rows):
-    ensure_schema()
+def upsert_prodigi_dispatch_rows(rows, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
+    else:
+        certificate_stage_log("certificate_schema_check_skipped", "completed", db_stage="prodigi_dispatch_save")
+        certificate_stage_log("certificate_no_ddl_confirmed", "completed", db_stage="prodigi_dispatch_save")
     count = 0
     with connect() as conn:
         with conn.cursor() as cur:
@@ -6632,7 +6662,7 @@ def _int_or_none(value):
     return number if number > 0 else None
 
 
-def upsert_certificate_metadata(metadata):
+def upsert_certificate_metadata(metadata, *, ensure_schema_first=True):
     if not is_configured():
         return {"ok": False, "skipped": True, "reason": "Supabase DATABASE_URL is not configured."}
     metadata = dict(metadata or {})
@@ -6700,82 +6730,92 @@ def upsert_certificate_metadata(metadata):
     assignments = ", ".join(f"{column}=%s" for column in columns)
     insert_columns = ", ".join(columns)
     placeholders = ", ".join(["%s"] * len(columns))
-    ensure_schema()
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id
-                FROM certificates
-                WHERE (%s <> '' AND certificate_id=%s)
-                   OR (
-                        shopify_order_id=%s
-                    AND shopify_line_item_id=%s
-                    AND line_item_unit_index=%s
-                    AND edition_number=%s
-                   )
-                ORDER BY updated_at DESC NULLS LAST, id DESC
-                LIMIT 1
-                """,
-                (
-                    row["certificate_id"] or "",
-                    row["certificate_id"] or "",
-                    row["shopify_order_id"],
-                    row["shopify_line_item_id"],
-                    row["line_item_unit_index"],
-                    row["edition_number"],
-                ),
-            )
-            existing = cur.fetchone() or {}
-            if existing.get("id"):
+    if ensure_schema_first:
+        ensure_schema()
+    else:
+        certificate_stage_log("certificate_schema_check_skipped", "completed", db_stage="certificate_metadata_upsert")
+        certificate_stage_log("certificate_no_ddl_confirmed", "completed", db_stage="certificate_metadata_upsert")
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
                 cur.execute(
-                    f"UPDATE certificates SET {assignments} WHERE id=%s",
-                    tuple(row[column] for column in columns) + (existing["id"],),
+                    """
+                    SELECT id
+                    FROM certificates
+                    WHERE (%s <> '' AND certificate_id=%s)
+                       OR (
+                            shopify_order_id=%s
+                        AND shopify_line_item_id=%s
+                        AND line_item_unit_index=%s
+                        AND edition_number=%s
+                       )
+                    ORDER BY updated_at DESC NULLS LAST, id DESC
+                    LIMIT 1
+                    """,
+                    (
+                        row["certificate_id"] or "",
+                        row["certificate_id"] or "",
+                        row["shopify_order_id"],
+                        row["shopify_line_item_id"],
+                        row["line_item_unit_index"],
+                        row["edition_number"],
+                    ),
                 )
-                certificate_row_id = existing["id"]
-                action = "updated"
-            else:
+                existing = cur.fetchone() or {}
+                if existing.get("id"):
+                    cur.execute(
+                        f"UPDATE certificates SET {assignments} WHERE id=%s",
+                        tuple(row[column] for column in columns) + (existing["id"],),
+                    )
+                    certificate_row_id = existing["id"]
+                    action = "updated"
+                else:
+                    cur.execute(
+                        f"INSERT INTO certificates ({insert_columns}) VALUES ({placeholders}) RETURNING id",
+                        tuple(row[column] for column in columns),
+                    )
+                    certificate_row_id = (cur.fetchone() or {}).get("id")
+                    action = "inserted"
                 cur.execute(
-                    f"INSERT INTO certificates ({insert_columns}) VALUES ({placeholders}) RETURNING id",
-                    tuple(row[column] for column in columns),
+                    """
+                    UPDATE edition_orders
+                    SET shopify_customer_id=%s,
+                        shopify_order_name=%s,
+                        shopify_variant_id=%s,
+                        product_handle=%s,
+                        edition_display=%s,
+                        certificate_status=%s,
+                        certificate_id=%s,
+                        shopify_file_id=%s,
+                        shopify_file_status=%s,
+                        certificate_file_url=%s,
+                        purchase_date=%s,
+                        updated_at=now()
+                    WHERE shopify_line_item_id=%s
+                      AND allocation_index=%s
+                    """,
+                    (
+                        row["shopify_customer_id"],
+                        row["shopify_order_name"],
+                        row["shopify_variant_id"],
+                        row["product_handle"],
+                        row["edition_display"],
+                        row["certificate_status"],
+                        row["certificate_id"],
+                        row["shopify_file_id"],
+                        row["shopify_file_status"],
+                        row["certificate_file_url"],
+                        row["purchase_date"],
+                        row["shopify_line_item_id"],
+                        row["line_item_unit_index"],
+                    ),
                 )
-                certificate_row_id = (cur.fetchone() or {}).get("id")
-                action = "inserted"
-            cur.execute(
-                """
-                UPDATE edition_orders
-                SET shopify_customer_id=%s,
-                    shopify_order_name=%s,
-                    shopify_variant_id=%s,
-                    product_handle=%s,
-                    edition_display=%s,
-                    certificate_status=%s,
-                    certificate_id=%s,
-                    shopify_file_id=%s,
-                    shopify_file_status=%s,
-                    certificate_file_url=%s,
-                    purchase_date=%s,
-                    updated_at=now()
-                WHERE shopify_line_item_id=%s
-                  AND allocation_index=%s
-                """,
-                (
-                    row["shopify_customer_id"],
-                    row["shopify_order_name"],
-                    row["shopify_variant_id"],
-                    row["product_handle"],
-                    row["edition_display"],
-                    row["certificate_status"],
-                    row["certificate_id"],
-                    row["shopify_file_id"],
-                    row["shopify_file_status"],
-                    row["certificate_file_url"],
-                    row["purchase_date"],
-                    row["shopify_line_item_id"],
-                    row["line_item_unit_index"],
-                ),
-            )
-        conn.commit()
+            conn.commit()
+    except Exception as error:
+        schema_message = certificate_schema_missing_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        raise
     return {"ok": True, "action": action, "id": certificate_row_id, "certificate_id": row["certificate_id"]}
 
 
@@ -10470,7 +10510,7 @@ def list_edition_orders(search="", limit=250):
             return cur.fetchall()
 
 
-def generate_certificate_for_edition_order(edition_order_id, *, force=False, source_page="Backend"):
+def generate_certificate_for_edition_order(edition_order_id, *, force=False, source_page="Backend", ensure_schema_first=True):
     started = time.perf_counter()
     path = ""
     set_certificate_log_context(source_page=source_page, edition_order_id=edition_order_id)
@@ -10478,27 +10518,32 @@ def generate_certificate_for_edition_order(edition_order_id, *, force=False, sou
     print(f"CERTIFICATE ACTION: backend generation started edition_order_id={edition_order_id}", flush=True)
     assignment = None
     try:
-        ensure_schema()
+        if ensure_schema_first:
+            ensure_schema()
+        else:
+            certificate_stage_log("certificate_schema_check_skipped", "completed", db_stage="certificate_backend")
+            certificate_stage_log("certificate_no_ddl_confirmed", "completed", db_stage="certificate_backend")
         with connect() as conn:
             with conn.cursor() as cur:
-                with certificate_stage("certificate_data_loaded"):
-                    cur.execute(
-                        """
-                        SELECT eo.*, o.order_name
-                        FROM edition_orders eo
-                        LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
-                        WHERE eo.id::text=%s
-                        """,
-                        (str(edition_order_id),),
-                    )
-                    assignment = cur.fetchone()
-                    if not assignment:
-                        raise ValueError("Edition order was not found.")
-                    set_certificate_log_context(
-                        source_page=source_page,
-                        order_name=assignment.get("order_name") or assignment.get("shopify_order_name") or "",
-                        edition_order_id=edition_order_id,
-                    )
+                with certificate_stage("certificate_db_read"):
+                    with certificate_stage("certificate_data_loaded"):
+                        cur.execute(
+                            """
+                            SELECT eo.*, o.order_name
+                            FROM edition_orders eo
+                            LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+                            WHERE eo.id::text=%s
+                            """,
+                            (str(edition_order_id),),
+                        )
+                        assignment = cur.fetchone()
+                        if not assignment:
+                            raise ValueError("Edition order was not found.")
+                        set_certificate_log_context(
+                            source_page=source_page,
+                            order_name=assignment.get("order_name") or assignment.get("shopify_order_name") or "",
+                            edition_order_id=edition_order_id,
+                        )
                 path = _generate_certificate_for_assignment(cur, assignment, force=force)
             conn.commit()
         certificate_stage_log("certificate_backend_entered", "completed", started_at=started)
@@ -10507,7 +10552,7 @@ def generate_certificate_for_edition_order(edition_order_id, *, force=False, sou
             flush=True,
         )
         try:
-            if assignment and assignment.get("shopify_order_id"):
+            if ensure_schema_first and assignment and assignment.get("shopify_order_id"):
                 print(
                     f"CERTIFICATE ACTION: order metafield sync started edition_order_id={edition_order_id}",
                     flush=True,
@@ -10517,21 +10562,37 @@ def generate_certificate_for_edition_order(edition_order_id, *, force=False, sou
                     f"CERTIFICATE ACTION: order metafield sync completed edition_order_id={edition_order_id}",
                     flush=True,
                 )
+            elif assignment and assignment.get("shopify_order_id"):
+                certificate_stage_log(
+                    "certificate_schema_check_skipped",
+                    "completed",
+                    db_stage="post_generation_order_metafield_sync",
+                )
+                certificate_stage_log(
+                    "certificate_no_ddl_confirmed",
+                    "completed",
+                    db_stage="post_generation_order_metafield_sync",
+                )
         except Exception as error:
             print(
                 f"CERTIFICATE ACTION: order metafield sync failed edition_order_id={edition_order_id} error={error}",
                 flush=True,
             )
-            log_app_error(
-                "order_certificate_metafield_sync_failed",
-                str(error),
-                {
-                    "edition_order_id": edition_order_id,
-                    "shopify_order_id": assignment.get("shopify_order_id") if assignment else "",
-                },
-            )
+            if ensure_schema_first:
+                log_app_error(
+                    "order_certificate_metafield_sync_failed",
+                    str(error),
+                    {
+                        "edition_order_id": edition_order_id,
+                        "shopify_order_id": assignment.get("shopify_order_id") if assignment else "",
+                    },
+                )
         return path
     except Exception as error:
+        schema_message = certificate_schema_missing_error_message(error)
+        if schema_message:
+            certificate_stage_log("certificate_backend_entered", "failed", started_at=started, error=schema_message)
+            raise RuntimeError(schema_message) from error
         certificate_stage_log("certificate_backend_entered", "failed", started_at=started, error=error)
         raise
     finally:

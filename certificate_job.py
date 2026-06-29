@@ -294,6 +294,16 @@ def run_certificate_job(row, *, source_page="Diagnostic", upload=False, force=Fa
         config = shopify_sync.get_config()
         if upload and not config.get("configured"):
             raise RuntimeError("Store connection is not configured for certificate upload.")
+        certificate_stage_log(
+            "certificate_schema_check_skipped",
+            "completed",
+            schema_mode="certificate_job_no_schema",
+        )
+        certificate_stage_log(
+            "certificate_no_ddl_confirmed",
+            "completed",
+            schema_mode="certificate_job_no_schema",
+        )
 
         generated_path = ""
         if normalised.get("edition_order_id"):
@@ -301,6 +311,7 @@ def run_certificate_job(row, *, source_page="Diagnostic", upload=False, force=Fa
                 normalised.get("edition_order_id"),
                 force=force,
                 source_page=source_page,
+                ensure_schema_first=False,
             )
             generated_path = str(generated_path or "").strip()
             if generated_path and Path(generated_path).exists():
@@ -333,7 +344,11 @@ def run_certificate_job(row, *, source_page="Diagnostic", upload=False, force=Fa
         if not str(record.get("local_pdf_path") or "").strip():
             raise RuntimeError(record.get("sync_error") or "Certificate PDF was not generated.")
         uploaded = certificate_engine.upload_generated_certificate_record(record, config=config)
-        saved = certificate_engine.save_certificate_record_to_order(uploaded, config=config)
+        saved = certificate_engine.save_certificate_record_to_order(
+            uploaded,
+            config=config,
+            ensure_schema_first=False,
+        )
         if saved.get("metafields_synced") is False:
             raise RuntimeError(saved.get("metafield_error") or "Certificate uploaded, but Shopify certificate mirror failed. Retry.")
         return {

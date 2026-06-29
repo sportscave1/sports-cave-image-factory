@@ -35,7 +35,7 @@ def certificate_stage_log(stage, status, *, started_at=None, error="", **details
         payload["duration_seconds"] = round(max(time.perf_counter() - float(started_at), 0.0), 3)
     if error:
         payload["error"] = str(error)[:1000]
-    for key in ("shopify_file_status", "attempt", "attempts", "timeout_seconds"):
+    for key in ("shopify_file_status", "attempt", "attempts", "timeout_seconds", "db_stage", "schema_mode"):
         if context.get(key) not in (None, ""):
             payload[key] = context.get(key)
     print(json.dumps(payload, ensure_ascii=True, default=str), flush=True)
