@@ -346,6 +346,13 @@ def _database_url_with_ssl():
     return urlunparse(parsed._replace(query=urlencode(query)))
 
 
+def _db_statement_timeout_ms(default=8000):
+    try:
+        return max(int(os.getenv("SUPABASE_STATEMENT_TIMEOUT_MS", str(default))), 1)
+    except (TypeError, ValueError):
+        return default
+
+
 def connect():
     try:
         import psycopg
@@ -360,7 +367,10 @@ def connect():
         row_factory=dict_row,
         connect_timeout=8,
         prepare_threshold=None,
-        options="-c statement_timeout=8000 -c idle_in_transaction_session_timeout=8000",
+        options=(
+            f"-c statement_timeout={_db_statement_timeout_ms()} "
+            f"-c idle_in_transaction_session_timeout={_db_statement_timeout_ms()}"
+        ),
     )
 
 
@@ -3305,14 +3315,16 @@ def calculate_product_edition_metafield_values(row):
     }
 
 
-def get_product_edition_metafield_payload(shopify_handle):
-    ensure_schema()
+def get_product_edition_metafield_payload(shopify_handle, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
     handle = str(shopify_handle or "").strip()
     if not handle:
         raise ValueError("Shopify handle is required.")
     with connect() as conn:
         with conn.cursor() as cur:
-            _get_active_edition_run_for_handle(cur, handle, create_missing=True)
+            if ensure_schema_first:
+                _get_active_edition_run_for_handle(cur, handle, create_missing=True)
             active_run_join = _active_run_lateral_sql()
             cur.execute(
                 f"""
@@ -3562,8 +3574,17 @@ def _product_metafield_sync_diagnostic(result, status="updated", error_message="
     }
 
 
-def sync_product_edition_metafields(shopify_handle, config=None, request_post=None):
-    payload = get_product_edition_metafield_payload(shopify_handle)
+def sync_product_edition_metafields(
+    shopify_handle,
+    config=None,
+    request_post=None,
+    *,
+    ensure_schema_first=True,
+):
+    payload = get_product_edition_metafield_payload(
+        shopify_handle,
+        ensure_schema_first=ensure_schema_first,
+    )
     owner_gid = payload.get("shopify_product_gid") or payload.get("shopify_product_id") or ""
     before_snapshot = _fetch_public_edition_metafields(owner_gid, config=config, request_post=request_post)
     before_metafields = before_snapshot.get("metafields") or []
@@ -3594,11 +3615,12 @@ def sync_product_edition_metafields(shopify_handle, config=None, request_post=No
                 request_post=request_post,
             )
         except Exception as legacy_error:
-            log_app_error(
-                "legacy_product_metafield_sync_failed",
-                str(legacy_error),
-                {"shopify_handle": shopify_handle},
-            )
+            if ensure_schema_first:
+                log_app_error(
+                    "legacy_product_metafield_sync_failed",
+                    str(legacy_error),
+                    {"shopify_handle": shopify_handle},
+                )
         _mark_product_metafields_sync(shopify_handle, payload, "Synced", "")
         after_snapshot = _fetch_public_edition_metafields(owner_gid, config=config, request_post=request_post)
         after_metafields = after_snapshot.get("metafields") or []
@@ -3622,16 +3644,24 @@ def sync_product_edition_metafields(shopify_handle, config=None, request_post=No
         }
     except Exception as error:
         _mark_product_metafields_sync(shopify_handle, payload, "Failed", str(error))
-        log_app_error(
-            "product_metafield_sync_failed",
-            str(error),
-            {"shopify_handle": shopify_handle},
-        )
+        if ensure_schema_first:
+            log_app_error(
+                "product_metafield_sync_failed",
+                str(error),
+                {"shopify_handle": shopify_handle},
+            )
         raise
 
 
-def sync_product_edition_metafields_for_handles(handles, config=None, progress_callback=None):
-    ensure_schema()
+def sync_product_edition_metafields_for_handles(
+    handles,
+    config=None,
+    progress_callback=None,
+    *,
+    ensure_schema_first=True,
+):
+    if ensure_schema_first:
+        ensure_schema()
     unique_handles = []
     seen_handles = set()
     for handle in handles or []:
@@ -3639,7 +3669,7 @@ def sync_product_edition_metafields_for_handles(handles, config=None, progress_c
         if clean_handle and clean_handle not in seen_handles:
             unique_handles.append(clean_handle)
             seen_handles.add(clean_handle)
-    run_id = start_sync_run("shopify_product_metafields")
+    run_id = start_sync_run("shopify_product_metafields") if ensure_schema_first else None
     synced = 0
     skipped = 0
     errors = []
@@ -3647,7 +3677,11 @@ def sync_product_edition_metafields_for_handles(handles, config=None, progress_c
     try:
         for index, handle in enumerate(unique_handles, start=1):
             try:
-                result = sync_product_edition_metafields(handle, config=config)
+                result = sync_product_edition_metafields(
+                    handle,
+                    config=config,
+                    ensure_schema_first=ensure_schema_first,
+                )
                 results.append(_product_metafield_sync_diagnostic(result, status="updated"))
                 synced += 1
             except Exception as error:
@@ -3688,12 +3722,16 @@ def sync_product_edition_metafields_for_handles(handles, config=None, progress_c
         }
     except Exception as error:
         finish_sync_run(run_id, "Failed", len(unique_handles), synced, str(error))
-        log_app_error("product_metafield_bulk_sync_failed", str(error), {})
+        if ensure_schema_first:
+            log_app_error("product_metafield_bulk_sync_failed", str(error), {})
         raise
 
 
-def _active_mapped_edition_product_handles(search="", limit=1000):
-    products = list_edition_products(search=search, limit=limit)
+def _active_mapped_edition_product_handles(search="", limit=1000, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        products = list_edition_products(search=search, limit=limit)
+    else:
+        products = list_edition_products_read_only(search=search, limit=limit)
     handles = []
     seen = set()
     for product in products:
@@ -3713,11 +3751,23 @@ def _active_mapped_edition_product_handles(search="", limit=1000):
     return handles
 
 
-def reconcile_shopify_edition_metafields(config=None, search="", limit=1000, progress_callback=None):
+def reconcile_shopify_edition_metafields(
+    config=None,
+    search="",
+    limit=1000,
+    progress_callback=None,
+    *,
+    ensure_schema_first=True,
+):
     return sync_product_edition_metafields_for_handles(
-        _active_mapped_edition_product_handles(search=search, limit=limit),
+        _active_mapped_edition_product_handles(
+            search=search,
+            limit=limit,
+            ensure_schema_first=ensure_schema_first,
+        ),
         config=config,
         progress_callback=progress_callback,
+        ensure_schema_first=ensure_schema_first,
     )
 
 
