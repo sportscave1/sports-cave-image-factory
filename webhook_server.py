@@ -1,4 +1,7 @@
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import os
 
@@ -25,6 +28,28 @@ def _header(headers, *names):
     return ""
 
 
+def _shopify_webhook_secret():
+    webhook_secret = os.getenv("SHOPIFY_WEBHOOK_SECRET", "").strip()
+    if webhook_secret:
+        return webhook_secret, "SHOPIFY_WEBHOOK_SECRET"
+    client_secret = os.getenv("SHOPIFY_CLIENT_SECRET", "").strip()
+    if client_secret:
+        return client_secret, "SHOPIFY_CLIENT_SECRET"
+    return "", ""
+
+
+def _calculate_shopify_hmac(raw_body: bytes, secret: str):
+    digest = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+def _verify_shopify_hmac(raw_body: bytes, hmac_header: str, secret: str):
+    if not raw_body or not hmac_header or not secret:
+        return False, ""
+    calculated = _calculate_shopify_hmac(raw_body, secret)
+    return hmac.compare_digest(calculated, str(hmac_header or "").strip()), calculated
+
+
 @app.get("/healthz")
 async def healthz():
     return {"ok": True, "service": "sports-cave-os-webhooks"}
@@ -41,12 +66,19 @@ async def shopify_orders_paid_webhook(request: Request):
     )
     shop_domain = _header(request.headers, "X-Shopify-Shop-Domain")
     triggered_at = _header(request.headers, "X-Shopify-Triggered-At")
+    hmac_header = _header(request.headers, "X-Shopify-Hmac-Sha256", "X-Shopify-Hmac-SHA256")
+    secret, secret_env_used = _shopify_webhook_secret()
     _webhook_log(
         "shopify_orders_paid_webhook_received",
         webhook_id=webhook_id,
         topic=topic,
         shop_domain=shop_domain,
         triggered_at=triggered_at,
+        raw_body_bytes=len(raw_body),
+        has_hmac_header=bool(hmac_header),
+        secret_env_used=secret_env_used or "missing",
+        secret_length=len(secret),
+        received_hmac_length=len(str(hmac_header or "").strip()),
     )
     try:
         import shopify_sync
@@ -54,12 +86,33 @@ async def shopify_orders_paid_webhook(request: Request):
         _webhook_log("webhook_order_processing_failed", webhook_id=webhook_id, error=str(error))
         return Response("Webhook processor is unavailable.", status_code=500)
 
-    secret = shopify_sync.get_shopify_webhook_secret()
-    hmac_header = _header(request.headers, "X-Shopify-Hmac-Sha256", "X-Shopify-Hmac-SHA256")
-    if not shopify_sync.verify_shopify_webhook_hmac(raw_body, hmac_header, secret):
-        _webhook_log("webhook_hmac_failed", webhook_id=webhook_id, topic=topic)
+    hmac_ok, calculated_hmac = _verify_shopify_hmac(raw_body, hmac_header, secret)
+    if not hmac_ok:
+        _webhook_log(
+            "webhook_hmac_failed",
+            webhook_id=webhook_id,
+            topic=topic,
+            shop_domain=shop_domain,
+            raw_body_bytes=len(raw_body),
+            has_hmac_header=bool(hmac_header),
+            secret_env_used=secret_env_used or "missing",
+            secret_length=len(secret),
+            received_hmac_length=len(str(hmac_header or "").strip()),
+            calculated_hmac_length=len(calculated_hmac),
+        )
         return Response("Invalid Shopify webhook signature.", status_code=401)
-    _webhook_log("webhook_hmac_verified", webhook_id=webhook_id, topic=topic)
+    _webhook_log(
+        "webhook_hmac_verified",
+        webhook_id=webhook_id,
+        topic=topic,
+        shop_domain=shop_domain,
+        raw_body_bytes=len(raw_body),
+        has_hmac_header=True,
+        secret_env_used=secret_env_used,
+        secret_length=len(secret),
+        received_hmac_length=len(str(hmac_header or "").strip()),
+        calculated_hmac_length=len(calculated_hmac),
+    )
 
     if not shopify_sync.is_orders_paid_webhook_topic(topic):
         _webhook_log("webhook_order_processing_failed", webhook_id=webhook_id, topic=topic, error="Unsupported topic")

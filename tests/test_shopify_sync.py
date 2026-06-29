@@ -69,6 +69,16 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertFalse(shopify_sync.verify_shopify_webhook_hmac(raw_body, "", "app-secret"))
         self.assertFalse(shopify_sync.verify_shopify_webhook_hmac(raw_body, "bad", ""))
 
+    def test_shopify_webhook_secret_prefers_dedicated_webhook_secret(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SHOPIFY_WEBHOOK_SECRET": "webhook-secret ",
+                "SHOPIFY_CLIENT_SECRET": "client-secret",
+            },
+        ):
+            self.assertEqual(shopify_sync.get_shopify_webhook_secret(config={"client_secret": "config-secret"}), "webhook-secret")
+
     def test_orders_paid_webhook_topic_accepts_rest_and_graphql_names(self):
         self.assertTrue(shopify_sync.is_orders_paid_webhook_topic("orders/paid"))
         self.assertTrue(shopify_sync.is_orders_paid_webhook_topic("ORDERS_PAID"))
@@ -108,7 +118,7 @@ class ShopifySyncClientTests(unittest.TestCase):
         signature = base64.b64encode(
             hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
         ).decode("utf-8")
-        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": secret}), patch.object(
+        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": secret, "SHOPIFY_WEBHOOK_SECRET": ""}), patch.object(
             supabase_backend,
             "is_configured",
             return_value=True,
@@ -156,7 +166,7 @@ class ShopifySyncClientTests(unittest.TestCase):
         import webhook_server
 
         raw_body = b'{"id":2879}'
-        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": "client-secret"}), patch.object(
+        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": "client-secret", "SHOPIFY_WEBHOOK_SECRET": ""}), patch.object(
             supabase_backend,
             "process_order_paid_webhook",
         ) as process_webhook:
@@ -181,7 +191,7 @@ class ShopifySyncClientTests(unittest.TestCase):
         signature = base64.b64encode(
             hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
         ).decode("utf-8")
-        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": secret}), patch.object(
+        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": secret, "SHOPIFY_WEBHOOK_SECRET": ""}), patch.object(
             supabase_backend,
             "process_order_paid_webhook",
         ) as process_webhook:
@@ -195,6 +205,74 @@ class ShopifySyncClientTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 400)
+        process_webhook.assert_not_called()
+
+    def test_orders_paid_fastapi_route_rejects_reencoded_json_signature(self):
+        from fastapi.testclient import TestClient
+        import webhook_server
+
+        sent_body = b'{ "id" : 2879, "name" : "#SC2879", "financial_status" : "paid" }'
+        differently_encoded_body = b'{"id":2879,"name":"#SC2879","financial_status":"paid"}'
+        secret = "client-secret"
+        signature = base64.b64encode(
+            hmac.new(secret.encode("utf-8"), differently_encoded_body, hashlib.sha256).digest()
+        ).decode("utf-8")
+        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": secret, "SHOPIFY_WEBHOOK_SECRET": ""}), patch.object(
+            supabase_backend,
+            "process_order_paid_webhook",
+        ) as process_webhook:
+            response = TestClient(webhook_server.app).post(
+                "/webhooks/shopify/orders-paid",
+                content=sent_body,
+                headers={
+                    "X-Shopify-Hmac-Sha256": signature,
+                    "X-Shopify-Topic": "orders/paid",
+                },
+            )
+
+        self.assertEqual(response.status_code, 401)
+        process_webhook.assert_not_called()
+
+    def test_orders_paid_fastapi_route_rejects_wrong_secret(self):
+        from fastapi.testclient import TestClient
+        import webhook_server
+
+        raw_body = b'{"id":2879,"financial_status":"paid"}'
+        signature = base64.b64encode(
+            hmac.new(b"wrong-secret", raw_body, hashlib.sha256).digest()
+        ).decode("utf-8")
+        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": "client-secret", "SHOPIFY_WEBHOOK_SECRET": ""}), patch.object(
+            supabase_backend,
+            "process_order_paid_webhook",
+        ) as process_webhook:
+            response = TestClient(webhook_server.app).post(
+                "/webhooks/shopify/orders-paid",
+                content=raw_body,
+                headers={
+                    "X-Shopify-Hmac-Sha256": signature,
+                    "X-Shopify-Topic": "orders/paid",
+                },
+            )
+
+        self.assertEqual(response.status_code, 401)
+        process_webhook.assert_not_called()
+
+    def test_orders_paid_fastapi_route_rejects_missing_hmac_header(self):
+        from fastapi.testclient import TestClient
+        import webhook_server
+
+        raw_body = b'{"id":2879,"financial_status":"paid"}'
+        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": "client-secret", "SHOPIFY_WEBHOOK_SECRET": ""}), patch.object(
+            supabase_backend,
+            "process_order_paid_webhook",
+        ) as process_webhook:
+            response = TestClient(webhook_server.app).post(
+                "/webhooks/shopify/orders-paid",
+                content=raw_body,
+                headers={"X-Shopify-Topic": "orders/paid"},
+            )
+
+        self.assertEqual(response.status_code, 401)
         process_webhook.assert_not_called()
 
     def test_order_certificate_metafields_include_vault_ready_json(self):
