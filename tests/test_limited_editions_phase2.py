@@ -58,7 +58,7 @@ class LimitedEditionPhase2Tests(unittest.TestCase):
         self.assertTrue(normalized["active"])
         self.assertFalse(normalized["sold_out"])
 
-    def test_manual_lowered_counter_stays_authoritative(self):
+    def test_metafield_payload_uses_highest_assignment_when_counter_is_stale(self):
         row = {
             "shopify_handle": "jalen-brunson",
             "product_title": "Jalen Brunson Built for Big Moments",
@@ -77,8 +77,10 @@ class LimitedEditionPhase2Tests(unittest.TestCase):
         self.assertEqual(normalized["latest_sent"], 9)
         self.assertEqual(normalized["last_assigned_edition"], 9)
         self.assertEqual(normalized["historical_max_assigned_edition"], 70)
-        self.assertEqual(payload["sold_count"], 9)
-        self.assertIn("#010/100", payload["edition_display_text"])
+        self.assertEqual(payload["next_edition_number"], 71)
+        self.assertEqual(payload["sold_count"], 70)
+        self.assertEqual(payload["remaining_count"], 30)
+        self.assertIn("#071/100", payload["edition_display_text"])
 
 
 if __name__ == "__main__":

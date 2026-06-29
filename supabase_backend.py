@@ -3267,10 +3267,19 @@ def format_edition_display_number(edition_number, edition_total):
 
 def calculate_product_edition_metafield_values(row):
     edition_total = max(_safe_int(row.get("edition_total"), 100), 1)
-    next_number = max(_safe_int(row.get("next_edition_number"), 1), 1)
-    last_assigned = max(next_number - 1, 0)
-    sold_count = last_assigned
-    remaining_count = max(edition_total - last_assigned, 0)
+    stored_next_number = max(_safe_int(row.get("next_edition_number"), 1), 1)
+    highest_assigned = max(
+        _safe_int(row.get("highest_assigned_edition"), 0),
+        _safe_int(row.get("max_assigned_edition"), 0),
+        _safe_int(row.get("historical_max_assigned_edition"), 0),
+        _safe_int(row.get("active_run_max_assigned"), 0),
+        _safe_int(row.get("last_assigned_edition"), 0),
+        0,
+    )
+    next_number = max(stored_next_number, highest_assigned + 1)
+    last_assigned = highest_assigned
+    sold_count = highest_assigned
+    remaining_count = max(edition_total - highest_assigned, 0)
     is_sold_out = bool(row.get("sold_out")) or next_number > edition_total or remaining_count <= 0
     if is_sold_out:
         edition_status = "sold_out"
@@ -3377,7 +3386,8 @@ def _mark_product_metafields_sync(shopify_handle, payload, status, error_message
             cur.execute(
                 """
                 UPDATE edition_products
-                SET last_assigned_edition=%s,
+                SET next_edition_number=GREATEST(COALESCE(next_edition_number, 1), %s),
+                    last_assigned_edition=%s,
                     sold_count=%s,
                     remaining_count=%s,
                     edition_status=%s,
@@ -3391,6 +3401,7 @@ def _mark_product_metafields_sync(shopify_handle, payload, status, error_message
                 WHERE shopify_handle=%s
                 """,
                 (
+                    payload.get("next_edition_number") or 1,
                     payload.get("last_assigned_edition") or 0,
                     payload.get("sold_count") or 0,
                     payload.get("remaining_count") or 0,
@@ -3401,6 +3412,20 @@ def _mark_product_metafields_sync(shopify_handle, payload, status, error_message
                     str(error_message or "")[:1000],
                     bool(payload.get("is_sold_out")),
                     bool(payload.get("is_sold_out")),
+                    shopify_handle,
+                ),
+            )
+            cur.execute(
+                """
+                UPDATE edition_runs er
+                SET next_edition_number=GREATEST(COALESCE(er.next_edition_number, 1), %s),
+                    updated_at=now()
+                FROM edition_products ep
+                WHERE ep.shopify_handle=%s
+                  AND ep.active_edition_run_id=er.id
+                """,
+                (
+                    payload.get("next_edition_number") or 1,
                     shopify_handle,
                 ),
             )
@@ -3523,6 +3548,8 @@ def _product_metafield_sync_diagnostic(result, status="updated", error_message="
         "shopify_product_id": payload.get("shopify_product_id") or payload.get("shopify_product_gid") or "",
         "metafields_before": before,
         "metafields_after": after,
+        "shopify_metafields_set_response": result.get("shopify_metafields_set_response") or {},
+        "shopify_user_errors": result.get("shopify_user_errors") or [],
         "metafields_before_error": result.get("metafields_before_error") or "",
         "metafields_after_error": result.get("metafields_after_error") or "",
         "stale_metafields_found": result.get("stale_metafields_found") or [],
@@ -3584,6 +3611,8 @@ def sync_product_edition_metafields(shopify_handle, config=None, request_post=No
             "metafields_after_error": after_snapshot.get("error") or "",
             "stale_metafields_found": _stale_edition_metafields(before_metafields),
             "metafields_containing_46_before": _edition_metafields_containing_value(before_metafields, "46"),
+            "shopify_metafields_set_response": result,
+            "shopify_user_errors": [],
             "mirror_status": "updated",
             "canonical_namespace": "sports_cave",
             "canonical_keys": list(CANONICAL_STOREFRONT_EDITION_METAFIELDS),
@@ -3629,6 +3658,7 @@ def sync_product_edition_metafields_for_handles(handles, config=None, progress_c
                         "handle": handle,
                         "status": "failed",
                         "error": str(error),
+                        "shopify_user_errors": [str(error)],
                         "canonical_namespace": "sports_cave",
                         "canonical_keys": list(CANONICAL_STOREFRONT_EDITION_METAFIELDS),
                         "storefront_main_tracker_reads": list(STOREFRONT_WIDGET_METAFIELD_READS["main_tracker"]),
@@ -3662,11 +3692,40 @@ def sync_product_edition_metafields_for_handles(handles, config=None, progress_c
         raise
 
 
-def sync_all_product_edition_metafields(config=None, search="", limit=1000, progress_callback=None):
+def _active_mapped_edition_product_handles(search="", limit=1000):
     products = list_edition_products(search=search, limit=limit)
+    handles = []
+    seen = set()
+    for product in products:
+        handle = str(product.get("shopify_handle") or product.get("handle") or "").strip()
+        product_id = str(
+            product.get("shopify_product_gid")
+            or product.get("shopify_product_id")
+            or product.get("synced_shopify_product_gid")
+            or product.get("synced_shopify_product_id")
+            or ""
+        ).strip()
+        is_active = bool(product.get("active") if product.get("active") is not None else product.get("is_active", True))
+        if not handle or not product_id or not is_active or handle in seen:
+            continue
+        handles.append(handle)
+        seen.add(handle)
+    return handles
+
+
+def reconcile_shopify_edition_metafields(config=None, search="", limit=1000, progress_callback=None):
     return sync_product_edition_metafields_for_handles(
-        [product.get("shopify_handle") for product in products],
+        _active_mapped_edition_product_handles(search=search, limit=limit),
         config=config,
+        progress_callback=progress_callback,
+    )
+
+
+def sync_all_product_edition_metafields(config=None, search="", limit=1000, progress_callback=None):
+    return reconcile_shopify_edition_metafields(
+        config=config,
+        search=search,
+        limit=limit,
         progress_callback=progress_callback,
     )
 
@@ -8113,6 +8172,29 @@ def _latest_paid_order_needs_sync(order, existing_order_ids, existing_line_item_
     return incoming_updated > stored_updated
 
 
+def _edition_product_handles_for_orders(orders):
+    handles = set()
+    if not orders:
+        return []
+    with connect() as conn:
+        with conn.cursor() as cur:
+            for order in orders or []:
+                for line_item in order.get("line_items") or []:
+                    if not isinstance(line_item, dict):
+                        continue
+                    result = _resolve_edition_product_for_order_line_with_cursor(cur, line_item)
+                    product = result.get("product") or {}
+                    if not product:
+                        continue
+                    is_active = bool(product.get("active") if product.get("active") is not None else product.get("is_active", True))
+                    if not is_active:
+                        continue
+                    handle = str(product.get("shopify_handle") or product.get("handle") or "").strip()
+                    if handle:
+                        handles.add(handle)
+    return sorted(handles)
+
+
 def _analyze_fetched_orders_for_preview(
     fetched_orders,
     *,
@@ -8575,6 +8657,17 @@ def sync_latest_paid_orders_to_supabase(
         changed_handles.update(known_repair.get("changed_handles") or [])
         if known_repair.get("errors"):
             errors.extend(known_repair.get("errors") or [])
+        if fetched_orders:
+            try:
+                changed_handles.update(_edition_product_handles_for_orders(fetched_orders))
+            except Exception as handle_error:
+                message = f"Shopify product mirror handle lookup failed / retry: {handle_error}"
+                errors.append(message)
+                log_app_error(
+                    "latest_paid_product_metafield_handle_lookup_failed",
+                    str(handle_error),
+                    {"orders": [order.get("order_name") or order.get("shopify_order_id") for order in fetched_orders[:10]]},
+                )
 
         allocation_started = time.perf_counter()
         for order in sorted(candidate_orders, key=order_allocation_sort_key):
