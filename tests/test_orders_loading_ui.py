@@ -2272,6 +2272,111 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("table reload: deferred", fake_st.session_state[orders_page.NOTICE_KEY].lower())
         return
 
+    def test_sync_diagnostics_hidden_on_normal_orders_page(self):
+        class FakeColumn:
+            def text_input(self, *args, **kwargs):
+                return ""
+
+            def caption(self, *args, **kwargs):
+                return None
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {
+                    orders_page.ROWS_KEY: [{"order": "#SC3002", "edition_number": 62}],
+                    orders_page.META_KEY: {"last_refreshed": "2026-06-29T06:00:00Z"},
+                    orders_page.SYNC_RESULT_KEY: {"shopify_orders_fetched": 2},
+                    orders_page.NOTICE_KEY: "",
+                }
+
+            def title(self, *args, **kwargs):
+                return None
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def columns(self, spec):
+                return [FakeColumn() for _ in spec]
+
+            def info(self, *args, **kwargs):
+                return None
+
+            def error(self, *args, **kwargs):
+                return None
+
+            def success(self, *args, **kwargs):
+                return None
+
+        fake_st = FakeStreamlit()
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page, "_load_snapshot_once"
+        ), patch.object(
+            orders_page, "_configured_supabase_backend", return_value=object()
+        ), patch.object(
+            orders_page, "_render_top_actions"
+        ), patch.object(
+            orders_page, "_render_orders_table"
+        ), patch.object(
+            orders_page,
+            "_render_sync_diagnostics",
+            side_effect=AssertionError("Normal Orders page must not show detailed sync diagnostics."),
+        ) as diagnostics:
+            orders_page.render_page()
+
+        diagnostics.assert_not_called()
+
+    def test_sync_diagnostics_available_when_developer_unlocked(self):
+        class FakeColumn:
+            def text_input(self, *args, **kwargs):
+                return ""
+
+            def caption(self, *args, **kwargs):
+                return None
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.session_state = {
+                    orders_page.ROWS_KEY: [{"order": "#SC3002", "edition_number": 62}],
+                    orders_page.META_KEY: {"last_refreshed": "2026-06-29T06:00:00Z"},
+                    orders_page.SYNC_RESULT_KEY: {"shopify_orders_fetched": 2},
+                    orders_page.NOTICE_KEY: "",
+                    "developer_unlocked": True,
+                }
+
+            def title(self, *args, **kwargs):
+                return None
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def columns(self, spec):
+                return [FakeColumn() for _ in spec]
+
+            def info(self, *args, **kwargs):
+                return None
+
+            def error(self, *args, **kwargs):
+                return None
+
+            def success(self, *args, **kwargs):
+                return None
+
+        fake_st = FakeStreamlit()
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page, "_load_snapshot_once"
+        ), patch.object(
+            orders_page, "_configured_supabase_backend", return_value=object()
+        ), patch.object(
+            orders_page, "_render_top_actions"
+        ), patch.object(
+            orders_page, "_render_orders_table"
+        ), patch.object(
+            orders_page, "_render_sync_diagnostics"
+        ) as diagnostics:
+            orders_page.render_page()
+
+        diagnostics.assert_called_once_with({"shopify_orders_fetched": 2})
+
     def test_latest_paid_sync_allocates_without_historical_tracking_guard(self):
         latest_sync_source = inspect.getsource(supabase_backend.sync_latest_paid_orders_to_supabase)
         preview_source = inspect.getsource(supabase_backend.preview_latest_paid_orders_sync)

@@ -3049,28 +3049,209 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
     @patch.object(supabase_backend, "get_sync_state")
     @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders")
+    def test_sync_latest_paid_orders_imports_latest_created_catchup_when_cursor_only_existing(
+        self,
+        fetch_latest_paid_orders,
+        get_sync_state,
+    ):
+        get_sync_state.return_value = {
+            "last_successful_order_fetch_at": "2026-06-29T06:22:12Z",
+            "sync_lookback_buffer_minutes": 10,
+        }
+        existing_order = {
+            "shopify_order_id": "gid://shopify/Order/3001",
+            "order_name": "#SC3001",
+            "financial_status": "PAID",
+            "remote_updated_at": "2026-06-29T06:25:00Z",
+            "line_items": [
+                {
+                    "shopify_line_item_id": "gid://shopify/LineItem/3001",
+                    "quantity": 1,
+                    "shopify_product_id": "gid://shopify/Product/1",
+                    "product_handle": "legends-never-die",
+                    "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                }
+            ],
+        }
+        new_order = {
+            "shopify_order_id": "gid://shopify/Order/3002",
+            "order_name": "#SC3002",
+            "financial_status": "PAID",
+            "remote_updated_at": "2026-06-29T06:20:00Z",
+            "created_at": "2026-06-29T06:18:00Z",
+            "line_items": [
+                {
+                    "shopify_line_item_id": "gid://shopify/LineItem/3002",
+                    "quantity": 1,
+                    "shopify_product_id": "gid://shopify/Product/1",
+                    "product_handle": "legends-never-die",
+                    "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                }
+            ],
+        }
+        fetch_latest_paid_orders.side_effect = [
+            {
+                "orders": [existing_order],
+                "query": "financial_status:paid updated_at:>='2026-06-29T06:12:12Z'",
+                "limit": 50,
+                "lookback_days": 14,
+                "pages_fetched": 1,
+            },
+            {
+                "orders": [existing_order, new_order],
+                "query": "financial_status:paid",
+                "limit": 50,
+                "lookback_days": 14,
+                "pages_fetched": 1,
+            },
+        ]
+
+        with patch.object(
+            supabase_backend,
+            "ensure_schema",
+            side_effect=AssertionError("Orders sync should not run schema migrations."),
+        ) as ensure_schema, patch.object(
+            supabase_backend, "start_sync_run", return_value="run-1"
+        ), patch.object(
+            supabase_backend, "_set_sync_attempt"
+        ), patch.object(
+            supabase_backend, "set_app_setting"
+        ), patch.object(
+            supabase_backend,
+            "list_existing_shopify_order_ids",
+            return_value={"gid://shopify/Order/3001"},
+        ), patch.object(
+            supabase_backend,
+            "list_existing_shopify_line_item_ids",
+            return_value={"gid://shopify/LineItem/3001"},
+        ), patch.object(
+            supabase_backend,
+            "list_existing_shopify_order_states",
+            return_value={
+                "gid://shopify/Order/3001": {
+                    "remote_updated_at": "2026-06-29T06:25:00Z",
+                    "created_at": "2026-06-29T06:00:00Z",
+                    "synced_at": "2026-06-29T06:25:00Z",
+                }
+            },
+        ), patch.object(
+            supabase_backend, "_edition_product_handles_for_orders", return_value=[]
+        ), patch.object(
+            supabase_backend, "apply_known_missing_edition_repair"
+        ) as known_repair, patch.object(
+            supabase_backend,
+            "process_shopify_order_for_editions",
+            return_value={
+                "assignments_created": 1,
+                "existing_assignments_skipped": 0,
+                "missing_mapping_skipped": 0,
+                "changed_handles": ["legends-never-die"],
+                "errors": [],
+            },
+        ) as process_order, patch.object(
+            supabase_backend,
+            "sync_product_edition_metafields_for_handles",
+            return_value={"attempted": 1, "synced": 1, "skipped": 0, "errors": [], "results": []},
+        ) as mirror_handles, patch.object(
+            supabase_backend, "_set_sync_success_at", return_value="2026-06-29T06:25:00Z"
+        ), patch.object(
+            supabase_backend, "_record_order_fetch_metrics"
+        ), patch.object(
+            supabase_backend, "finish_sync_run"
+        ), patch.object(
+            supabase_backend, "_log_order_fetch_timing"
+        ):
+            result = supabase_backend.sync_latest_paid_orders_to_supabase(
+                config=self.config,
+                limit=50,
+                lookback_days=14,
+                ensure_schema_first=False,
+            )
+
+        ensure_schema.assert_not_called()
+        known_repair.assert_not_called()
+        process_order.assert_called_once()
+        self.assertEqual(process_order.call_args.args[0]["order_name"], "#SC3002")
+        mirror_handles.assert_called_once_with(
+            ["legends-never-die"],
+            config=self.config,
+            ensure_schema_first=False,
+        )
+        self.assertEqual(result["fetch_strategy"], "cursor_plus_latest_created")
+        self.assertEqual(result["cursor_orders_fetched"], 1)
+        self.assertEqual(result["latest_created_orders_fetched"], 2)
+        self.assertEqual(result["duplicate_orders_removed"], 1)
+        self.assertEqual(result["shopify_orders_fetched"], 2)
+        self.assertEqual(result["existing_orders_skipped"], 1)
+        self.assertEqual(result["new_orders_inserted"], 1)
+        self.assertEqual(result["new_lines_inserted"], 1)
+        self.assertEqual(result["edition_allocations_created"], 1)
+        self.assertTrue(result["cursor_updated"])
+
+    def test_latest_paid_order_needs_sync_rejects_unpaid_and_cancelled_orders(self):
+        self.assertFalse(
+            supabase_backend._latest_paid_order_needs_sync(
+                {
+                    "shopify_order_id": "gid://shopify/Order/4001",
+                    "financial_status": "REFUNDED",
+                    "line_items": [{"shopify_line_item_id": "gid://shopify/LineItem/4001"}],
+                },
+                set(),
+                set(),
+                {},
+            )
+        )
+        self.assertFalse(
+            supabase_backend._latest_paid_order_needs_sync(
+                {
+                    "shopify_order_id": "gid://shopify/Order/4002",
+                    "financial_status": "PAID",
+                    "cancelled_at": "2026-06-29T07:00:00Z",
+                    "line_items": [{"shopify_line_item_id": "gid://shopify/LineItem/4002"}],
+                },
+                set(),
+                set(),
+                {},
+            )
+        )
+
+    @patch.object(supabase_backend, "get_sync_state")
+    @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders")
     def test_latest_paid_orders_payload_uses_last_sync_timestamp(self, fetch_latest_paid_orders, get_sync_state):
         get_sync_state.return_value = {
             "last_successful_order_fetch_at": "2026-06-25T10:00:00Z",
             "sync_lookback_buffer_minutes": 10,
         }
-        fetch_latest_paid_orders.return_value = {
-            "orders": [],
-            "query": "financial_status:paid updated_at:>='2026-06-25T09:50:00Z'",
-            "limit": 50,
-            "lookback_days": 14,
-        }
+        fetch_latest_paid_orders.side_effect = [
+            {
+                "orders": [],
+                "query": "financial_status:paid updated_at:>='2026-06-25T09:50:00Z'",
+                "limit": 50,
+                "lookback_days": 14,
+            },
+            {
+                "orders": [],
+                "query": "financial_status:paid",
+                "limit": 50,
+                "lookback_days": 14,
+            },
+        ]
 
         payload = supabase_backend._latest_paid_orders_payload(config=self.config, limit=50, lookback_days=14)
 
         self.assertEqual(
-            fetch_latest_paid_orders.call_args.kwargs["query"],
+            fetch_latest_paid_orders.call_args_list[0].kwargs["query"],
             "financial_status:paid updated_at:>='2026-06-25T09:50:00Z'",
         )
-        self.assertEqual(fetch_latest_paid_orders.call_args.kwargs["sort_key"], "UPDATED_AT")
-        self.assertTrue(fetch_latest_paid_orders.call_args.kwargs["lightweight"])
+        self.assertEqual(fetch_latest_paid_orders.call_args_list[0].kwargs["sort_key"], "UPDATED_AT")
+        self.assertTrue(fetch_latest_paid_orders.call_args_list[0].kwargs["lightweight"])
+        self.assertEqual(fetch_latest_paid_orders.call_args_list[1].kwargs["query"], "financial_status:paid")
+        self.assertEqual(fetch_latest_paid_orders.call_args_list[1].kwargs["sort_key"], "CREATED_AT")
+        self.assertTrue(fetch_latest_paid_orders.call_args_list[1].kwargs["reverse"])
+        self.assertEqual(fetch_latest_paid_orders.call_count, 2)
         self.assertEqual(payload["sync_from"], "2026-06-25T09:50:00Z")
         self.assertEqual(payload["query_mode"], "cursor")
+        self.assertEqual(payload["fetch_strategy"], "cursor_plus_latest_created")
         self.assertFalse(payload["backfill_latest_paid"])
         self.assertEqual(payload["pages_fetched"], 0)
         self.assertEqual(payload["line_items_fetched"], 0)
@@ -3086,24 +3267,86 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         _utc_now,
     ):
         get_sync_state.return_value = {"sync_lookback_buffer_minutes": 10}
-        fetch_latest_paid_orders.return_value = {
-            "orders": [],
-            "query": "financial_status:paid updated_at:>='2026-06-24T12:00:00Z'",
-            "limit": 50,
-            "lookback_days": 14,
-        }
+        fetch_latest_paid_orders.side_effect = [
+            {
+                "orders": [],
+                "query": "financial_status:paid updated_at:>='2026-06-24T12:00:00Z'",
+                "limit": 50,
+                "lookback_days": 14,
+            },
+            {
+                "orders": [],
+                "query": "financial_status:paid",
+                "limit": 50,
+                "lookback_days": 14,
+            },
+        ]
 
         payload = supabase_backend._latest_paid_orders_payload(config=self.config, limit=50, lookback_days=14)
 
         self.assertEqual(
-            fetch_latest_paid_orders.call_args.kwargs["query"],
+            fetch_latest_paid_orders.call_args_list[0].kwargs["query"],
             "financial_status:paid updated_at:>='2026-06-24T12:00:00Z'",
         )
-        self.assertEqual(fetch_latest_paid_orders.call_args.kwargs["sort_key"], "UPDATED_AT")
-        self.assertTrue(fetch_latest_paid_orders.call_args.kwargs["lightweight"])
+        self.assertEqual(fetch_latest_paid_orders.call_args_list[0].kwargs["sort_key"], "UPDATED_AT")
+        self.assertTrue(fetch_latest_paid_orders.call_args_list[0].kwargs["lightweight"])
+        self.assertEqual(fetch_latest_paid_orders.call_args_list[1].kwargs["query"], "financial_status:paid")
+        self.assertEqual(fetch_latest_paid_orders.call_args_list[1].kwargs["sort_key"], "CREATED_AT")
         self.assertEqual(payload["sync_from"], "2026-06-24T12:00:00Z")
         self.assertEqual(payload["query_mode"], "safe_window")
+        self.assertEqual(payload["fetch_strategy"], "cursor_plus_latest_created")
         self.assertFalse(payload["backfill_latest_paid"])
+
+    @patch.object(supabase_backend, "get_sync_state")
+    @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders")
+    def test_latest_paid_orders_payload_merges_cursor_and_latest_created_candidates(
+        self,
+        fetch_latest_paid_orders,
+        get_sync_state,
+    ):
+        get_sync_state.return_value = {
+            "last_successful_order_fetch_at": "2026-06-29T06:22:12Z",
+            "sync_lookback_buffer_minutes": 10,
+        }
+        cursor_order = {
+            "shopify_order_id": "gid://shopify/Order/3001",
+            "order_name": "#SC3001",
+            "remote_updated_at": "2026-06-29T06:25:00Z",
+            "line_items": [{"shopify_line_item_id": "gid://shopify/LineItem/3001"}],
+        }
+        new_order = {
+            "shopify_order_id": "gid://shopify/Order/3002",
+            "order_name": "#SC3002",
+            "remote_updated_at": "2026-06-29T06:20:00Z",
+            "created_at": "2026-06-29T06:18:00Z",
+            "line_items": [{"shopify_line_item_id": "gid://shopify/LineItem/3002"}],
+        }
+        fetch_latest_paid_orders.side_effect = [
+            {
+                "orders": [dict(cursor_order)],
+                "query": "financial_status:paid updated_at:>='2026-06-29T06:12:12Z'",
+                "limit": 50,
+                "lookback_days": 14,
+                "pages_fetched": 1,
+            },
+            {
+                "orders": [dict(cursor_order), new_order],
+                "query": "financial_status:paid",
+                "limit": 50,
+                "lookback_days": 14,
+                "pages_fetched": 1,
+            },
+        ]
+
+        payload = supabase_backend._latest_paid_orders_payload(config=self.config, limit=50, lookback_days=14)
+
+        self.assertEqual(fetch_latest_paid_orders.call_count, 2)
+        self.assertEqual(payload["fetch_strategy"], "cursor_plus_latest_created")
+        self.assertEqual(payload["cursor_orders_fetched"], 1)
+        self.assertEqual(payload["latest_created_orders_fetched"], 2)
+        self.assertEqual(payload["duplicate_orders_removed"], 1)
+        self.assertEqual([order["order_name"] for order in payload["orders"]], ["#SC3001", "#SC3002"])
+        self.assertEqual(payload["line_items_fetched"], 2)
 
     @patch.object(supabase_backend, "get_sync_state")
     @patch.object(supabase_backend.shopify_sync, "fetch_latest_paid_orders")

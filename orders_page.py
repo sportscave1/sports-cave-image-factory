@@ -1845,6 +1845,25 @@ def _render_sync_diagnostics(result):
             f"order={query_parameters.get('order') or 'asc'}"
         )
         st.caption(f"Shopify orders fetched: {int(result.get('shopify_orders_fetched') or 0)}")
+        if result.get("fetch_strategy"):
+            st.caption(f"fetch strategy: {result.get('fetch_strategy')}")
+        if result.get("cursor_orders_fetched") is not None or result.get("latest_created_orders_fetched") is not None:
+            st.caption(
+                "fetch breakdown: "
+                f"cursor={int(result.get('cursor_orders_fetched') or 0)}; "
+                f"latest_created={int(result.get('latest_created_orders_fetched') or 0)}; "
+                f"deduped={int(result.get('duplicate_orders_removed') or 0)}"
+            )
+        latest_params = result.get("latest_created_query_parameters") or {}
+        if latest_params:
+            st.caption(
+                "Latest-created catch-up params: "
+                f"status={latest_params.get('status') or 'any'}; "
+                f"financial_status={latest_params.get('financial_status') or 'paid'}; "
+                f"limit={latest_params.get('limit') or result.get('limit') or 50}; "
+                f"sort={latest_params.get('sort') or 'CREATED_AT'}; "
+                f"order={latest_params.get('order') or 'desc'}"
+            )
         st.caption(f"Shopify lines fetched: {int(result.get('line_items_fetched') or 0)}")
         st.caption(f"Supabase rows inserted: {int(result.get('supabase_rows_inserted') or 0)}")
         st.caption(f"existing rows skipped: {int(result.get('existing_lines_skipped') or result.get('lines_already_existing') or 0)}")
@@ -2103,7 +2122,8 @@ def render_page():
     if notice:
         st.success(notice)
         st.session_state[NOTICE_KEY] = ""
-    _render_sync_diagnostics(st.session_state.get(SYNC_RESULT_KEY) or {})
+    if _developer_mode():
+        _render_sync_diagnostics(st.session_state.get(SYNC_RESULT_KEY) or {})
 
     search_cols = st.columns([3.2, 1])
     search_text = search_cols[0].text_input(
