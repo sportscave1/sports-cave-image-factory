@@ -15,6 +15,9 @@ DEFAULT_MAX_PRODUCTS = 500
 DEFAULT_MAX_ORDERS = 250
 DEFAULT_EDITION_OPS_MAX_PRODUCTS = 500
 TOKEN_REFRESH_BUFFER_SECONDS = 300
+DEFAULT_FILE_POLL_ATTEMPTS = 12
+MAX_FILE_POLL_ATTEMPTS = 30
+MAX_FILE_POLL_SLEEP_SECONDS = 2.0
 
 
 _TOKEN_CACHE = {}
@@ -1735,40 +1738,92 @@ def upload_file_to_shopify_files(
     config=None,
     request_post=None,
     upload_post=None,
-    poll_attempts=5,
+    poll_attempts=DEFAULT_FILE_POLL_ATTEMPTS,
     poll_sleep_seconds=0.5,
 ):
     file_path = Path(file_path)
     filename = filename or file_path.name
+    poll_limit = min(max(int(poll_attempts or 0), 0), MAX_FILE_POLL_ATTEMPTS)
+    poll_sleep = min(max(float(poll_sleep_seconds or 0), 0), MAX_FILE_POLL_SLEEP_SECONDS)
     try:
         _certificate_upload_log("staged upload create started", filename=filename, mime_type=mime_type)
-        staged = create_staged_upload(filename, mime_type, config=config, request_post=request_post)
+        try:
+            staged = create_staged_upload(filename, mime_type, config=config, request_post=request_post)
+        except Exception as error:
+            _certificate_upload_log("staged upload create failed", filename=filename, error=error)
+            raise
         _certificate_upload_log("staged upload create completed", filename=filename)
         _certificate_upload_log("staged upload started", filename=filename)
-        upload_to_staged_target(staged["target"], file_path, mime_type, upload_post=upload_post)
+        try:
+            upload_to_staged_target(staged["target"], file_path, mime_type, upload_post=upload_post)
+        except Exception as error:
+            _certificate_upload_log("staged upload failed", filename=filename, error=error)
+            raise
         _certificate_upload_log("staged upload completed", filename=filename)
         _certificate_upload_log("fileCreate started", filename=filename, content_type=content_type)
-        created = create_shopify_file(
-            staged["target"].get("resourceUrl") or "",
-            filename,
-            alt=alt or filename,
-            content_type=content_type,
-            config=config,
-            request_post=request_post,
-        )
+        try:
+            created = create_shopify_file(
+                staged["target"].get("resourceUrl") or "",
+                filename,
+                alt=alt or filename,
+                content_type=content_type,
+                config=config,
+                request_post=request_post,
+            )
+        except Exception as error:
+            _certificate_upload_log("fileCreate failed", filename=filename, error=error)
+            raise
         _certificate_upload_log("fileCreate completed", filename=filename)
     except Exception as error:
         _certificate_upload_log("upload failed", filename=filename, error=error)
         raise
     file_node = created.get("file") or {}
     file_id = file_node.get("id") or ""
-    for _ in range(max(int(poll_attempts or 0), 0)):
-        if _shopify_file_url(file_node) and str(file_node.get("fileStatus") or "").upper() in {"READY", "UPLOADED"}:
-            break
-        if not file_id:
-            break
-        time.sleep(max(float(poll_sleep_seconds or 0), 0))
-        file_node = fetch_shopify_file(file_id, config=config, request_post=request_post).get("file") or file_node
+    if not file_id:
+        _certificate_upload_log("file polling failed", filename=filename, error="missing_file_id")
+        raise ShopifyAPIError("Shopify fileCreate did not return a file ID.")
+    _certificate_upload_log("file polling started", filename=filename, attempts=poll_limit)
+    if _shopify_file_url(file_node) and str(file_node.get("fileStatus") or "").upper() in {"READY", "UPLOADED"}:
+        _certificate_upload_log(
+            "file polling completed",
+            filename=filename,
+            attempt=0,
+            status=file_node.get("fileStatus") or "",
+        )
+    else:
+        for attempt in range(1, poll_limit + 1):
+            time.sleep(poll_sleep)
+            file_node = fetch_shopify_file(file_id, config=config, request_post=request_post).get("file") or file_node
+            if _shopify_file_url(file_node) and str(file_node.get("fileStatus") or "").upper() in {"READY", "UPLOADED"}:
+                _certificate_upload_log(
+                    "file polling completed",
+                    filename=filename,
+                    attempt=attempt,
+                    status=file_node.get("fileStatus") or "",
+                )
+                break
+        else:
+            _certificate_upload_log(
+                "file polling failed",
+                filename=filename,
+                status=file_node.get("fileStatus") or "",
+                attempts=poll_limit,
+            )
+            raise ShopifyAPIError(
+                "Shopify file upload timed out waiting for a ready file URL. "
+                f"Last status: {file_node.get('fileStatus') or 'unknown'}."
+            )
+    if not _shopify_file_url(file_node):
+        _certificate_upload_log(
+            "file polling failed",
+            filename=filename,
+            status=file_node.get("fileStatus") or "",
+            error="missing_ready_url",
+        )
+        raise ShopifyAPIError(
+            "Shopify file upload finished without a permanent file URL. "
+            f"Last status: {file_node.get('fileStatus') or 'unknown'}."
+        )
     return {
         "file_id": file_id,
         "url": _shopify_file_url(file_node),
@@ -1786,7 +1841,7 @@ def upload_pdf_to_shopify_files(
     config=None,
     request_post=None,
     upload_post=None,
-    poll_attempts=5,
+    poll_attempts=DEFAULT_FILE_POLL_ATTEMPTS,
     poll_sleep_seconds=0.5,
 ):
     return upload_file_to_shopify_files(
@@ -1812,7 +1867,7 @@ def upload_image_to_shopify_files(
     config=None,
     request_post=None,
     upload_post=None,
-    poll_attempts=5,
+    poll_attempts=DEFAULT_FILE_POLL_ATTEMPTS,
     poll_sleep_seconds=0.5,
 ):
     image_path = Path(image_path)

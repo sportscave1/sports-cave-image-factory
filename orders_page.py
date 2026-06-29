@@ -29,6 +29,8 @@ META_KEY = "orders_allocation_meta"
 SNAPSHOT_LOADED_KEY = "orders_allocation_snapshot_loaded"
 NOTICE_KEY = "orders_allocation_notice"
 CERTIFICATE_ACTION_LOADING_KEY = "orders_certificate_action_loading"
+CERTIFICATE_ACTION_STATE_KEY = "orders_certificate_action_state"
+CERTIFICATE_ACTION_STALE_SECONDS = 300
 SNAPSHOT_FILE_NAME = "orders_allocation_snapshot.json"
 GRID_KEY = "orders-fulfilment-grid"
 COPY_ORDER_ICON = "\u29c9"
@@ -97,11 +99,70 @@ def _certificate_action_log(event, *, row=None, source="Orders", **extra):
     print(f"CERTIFICATE ACTION: {event} {safe_details}", flush=True)
 
 
+def _certificate_action_key(row):
+    normalised = _normalise_row(row or {})
+    parts = (
+        normalised.get("edition_order_id"),
+        normalised.get("shopify_order_id"),
+        normalised.get("shopify_line_item_id"),
+        normalised.get("edition_number"),
+        normalised.get("order"),
+    )
+    return "|".join(str(part or "").strip() for part in parts if str(part or "").strip())
+
+
+def _certificate_action_started_at(state):
+    try:
+        return float((state or {}).get("started_at") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _clear_stale_certificate_action_state(source="Orders"):
+    state = st.session_state.get(CERTIFICATE_ACTION_STATE_KEY) or {}
+    started_at = _certificate_action_started_at(state)
+    if started_at and time.time() - started_at > CERTIFICATE_ACTION_STALE_SECONDS:
+        _certificate_action_log(
+            "stale loading state cleared",
+            source=source,
+            action_key=state.get("action_key") or "",
+            order=state.get("order") or "",
+        )
+        st.session_state[CERTIFICATE_ACTION_STATE_KEY] = {}
+        st.session_state[CERTIFICATE_ACTION_LOADING_KEY] = False
+
+
+def _set_certificate_action_state(row, source="Orders"):
+    _clear_stale_certificate_action_state(source=source)
+    action_key = _certificate_action_key(row)
+    state = st.session_state.get(CERTIFICATE_ACTION_STATE_KEY) or {}
+    active_key = str(state.get("action_key") or "")
+    if active_key and active_key == action_key:
+        raise RuntimeError("Certificate upload is already in progress for this order. You can retry in a moment.")
+    normalised = _normalise_row(row or {})
+    st.session_state[CERTIFICATE_ACTION_STATE_KEY] = {
+        "action_key": action_key,
+        "order": normalised.get("order") or normalised.get("order_name") or "",
+        "edition_order_id": normalised.get("edition_order_id") or "",
+        "source": source,
+        "started_at": time.time(),
+    }
+    st.session_state[CERTIFICATE_ACTION_LOADING_KEY] = True
+
+
+def _clear_certificate_action_state(source="Orders"):
+    st.session_state[CERTIFICATE_ACTION_STATE_KEY] = {}
+    st.session_state[CERTIFICATE_ACTION_LOADING_KEY] = False
+    _certificate_action_log("loading state cleared", source=source)
+
+
 def _ensure_state():
     st.session_state.setdefault(ROWS_KEY, [])
     st.session_state.setdefault(META_KEY, {"last_refreshed": "", "saved_at": ""})
     st.session_state.setdefault(NOTICE_KEY, "")
     st.session_state.setdefault(CERTIFICATE_ACTION_LOADING_KEY, False)
+    st.session_state.setdefault(CERTIFICATE_ACTION_STATE_KEY, {})
+    _clear_stale_certificate_action_state(source="Orders")
     st.session_state.setdefault(SYNC_RESULT_KEY, {})
     st.session_state.setdefault(BACKFILL_RESULT_KEY, {})
     st.session_state.setdefault(REPAIR_RESULT_KEY, {})
@@ -1322,29 +1383,40 @@ def _upload_selected_certificates(rows):
 def _generate_upload_selected_certificates(rows):
     if not rows:
         st.session_state[NOTICE_KEY] = "Select one or more order rows first."
-        return
+        return False
+    for row in rows:
+        normalised = _normalise_row(row)
+        if not (normalised.get("order") or normalised.get("shopify_order_id")):
+            message = "Selected order row is missing its order identity. You can retry after refreshing the row."
+            st.session_state[NOTICE_KEY] = message
+            st.error(message)
+            return False
     start = time.perf_counter()
-    st.session_state[CERTIFICATE_ACTION_LOADING_KEY] = True
     completed = 0
     try:
         for row in rows:
+            _set_certificate_action_state(row, source="Orders")
             _certificate_action_log("certificate action started", row=row, source="Orders")
             _generate_certificate_for_row(row, raise_errors=True)
             _certificate_action_log("certificate PDF generated yes", row=row, source="Orders")
-            _upload_certificate_for_row(_current_row_for(row), raise_errors=True)
+            _certificate_action_log("row refresh started", row=row, source="Orders")
+            refreshed_row = _current_row_for(row)
+            _certificate_action_log("row refresh finished", row=refreshed_row, source="Orders")
+            _upload_certificate_for_row(refreshed_row, raise_errors=True)
             _certificate_action_log("certificate action finished", row=row, source="Orders")
             completed += 1
         _perf_log("generate selected certificates", start, rows=len(rows), mode="generate_upload")
         _perf_log("upload selected certificates", start, rows=len(rows), mode="generate_upload")
         st.session_state[NOTICE_KEY] = f"Generated and uploaded {len(rows)} selected certificate(s)."
+        return True
     except Exception as error:
         _certificate_action_log("certificate action failed", row=rows[completed] if completed < len(rows) else None, source="Orders", error=error)
         message = f"Certificate upload failed: {error}. You can retry this order."
         st.session_state[NOTICE_KEY] = message
         st.error(message)
+        return False
     finally:
-        st.session_state[CERTIFICATE_ACTION_LOADING_KEY] = False
-        _certificate_action_log("loading state cleared", source="Orders", rows=len(rows))
+        _clear_certificate_action_state(source="Orders")
 
 
 def _render_top_actions(rows):
@@ -1670,8 +1742,9 @@ def _render_top_actions(rows):
         disabled=not can_upload,
     ):
         with st.spinner("Generating and uploading selected certificates..."):
-            _generate_upload_selected_certificates(selected_rows)
-        st.rerun()
+            certificate_action_ok = _generate_upload_selected_certificates(selected_rows)
+        if certificate_action_ok:
+            st.rerun()
     if open_url:
         action_cols[3].link_button("Open Certificate", open_url, use_container_width=True)
     else:

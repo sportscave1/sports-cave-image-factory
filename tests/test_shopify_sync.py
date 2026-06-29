@@ -464,6 +464,88 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(requests_seen[0]["variables"]["input"][0]["resource"], "FILE")
         self.assertEqual(requests_seen[1]["variables"]["files"][0]["contentType"], "FILE")
 
+    def test_pdf_upload_times_out_when_file_never_becomes_ready(self):
+        responses = [
+            FakeResponse(
+                {
+                    "data": {
+                        "stagedUploadsCreate": {
+                            "stagedTargets": [
+                                {
+                                    "url": "https://upload.example",
+                                    "resourceUrl": "https://resource.example/certificate.pdf",
+                                    "parameters": [{"name": "key", "value": "certificate-key"}],
+                                }
+                            ],
+                            "userErrors": [],
+                        }
+                    }
+                }
+            ),
+            FakeResponse(
+                {
+                    "data": {
+                        "fileCreate": {
+                            "files": [
+                                {
+                                    "id": "gid://shopify/GenericFile/1",
+                                    "fileStatus": "PROCESSING",
+                                    "url": "",
+                                }
+                            ],
+                            "userErrors": [],
+                        }
+                    }
+                }
+            ),
+            FakeResponse(
+                {
+                    "data": {
+                        "node": {
+                            "id": "gid://shopify/GenericFile/1",
+                            "fileStatus": "PROCESSING",
+                            "url": "",
+                        }
+                    }
+                }
+            ),
+            FakeResponse(
+                {
+                    "data": {
+                        "node": {
+                            "id": "gid://shopify/GenericFile/1",
+                            "fileStatus": "PROCESSING",
+                            "url": "",
+                        }
+                    }
+                }
+            ),
+        ]
+
+        def fake_post(*args, **kwargs):
+            return responses.pop(0)
+
+        class UploadResponse:
+            status_code = 201
+
+            def raise_for_status(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pdf_path = Path(tmpdir) / "certificate.pdf"
+            pdf_path.write_bytes(b"%PDF-1.4\n%%EOF\n")
+            with self.assertRaises(shopify_sync.ShopifyAPIError) as context:
+                shopify_sync.upload_pdf_to_shopify_files(
+                    pdf_path,
+                    config=self.config,
+                    request_post=fake_post,
+                    upload_post=lambda *args, **kwargs: UploadResponse(),
+                    poll_attempts=2,
+                    poll_sleep_seconds=0,
+                )
+
+        self.assertIn("timed out waiting for a ready file URL", str(context.exception))
+
     def test_paid_order_allocator_assigns_current_next_number_and_advances_product(self):
         order_payload = {
             "id": 1234,

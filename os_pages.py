@@ -27,6 +27,9 @@ PRODUCT_CACHE_DISPLAY_LIMIT = 5000
 ORDER_SCREEN_CACHE_LIMIT = int(os.getenv("SUPABASE_ORDER_SCREEN_CACHE_LIMIT", "1500"))
 DEFAULT_PAGE_SIZE = 50
 DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
+PRODIGI_CERTIFICATE_ACTION_LOADING_KEY = "prodigi_certificate_action_loading"
+PRODIGI_CERTIFICATE_ACTION_STATE_KEY = "prodigi_certificate_action_state"
+PRODIGI_CERTIFICATE_ACTION_STALE_SECONDS = 300
 
 QUICK_LINKS = (
     ("shopify_admin_url", "Open Shopify Admin"),
@@ -426,6 +429,61 @@ def _prodigi_int(value, default=0):
         return int(value)
     digits = re.findall(r"\d+", str(value or ""))
     return int(digits[0]) if digits else default
+
+
+def _prodigi_certificate_action_key(row):
+    row = row or {}
+    parts = (
+        row.get("edition_order_id"),
+        row.get("shopify_order_id"),
+        row.get("shopify_line_item_id"),
+        row.get("edition_number"),
+        row.get("shopify_order_name") or row.get("shopify_order_number"),
+    )
+    return "|".join(str(part or "").strip() for part in parts if str(part or "").strip())
+
+
+def _prodigi_certificate_action_started_at(state):
+    try:
+        return float((state or {}).get("started_at") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _prodigi_clear_stale_certificate_action_state():
+    state = st.session_state.get(PRODIGI_CERTIFICATE_ACTION_STATE_KEY) or {}
+    started_at = _prodigi_certificate_action_started_at(state)
+    if started_at and time.time() - started_at > PRODIGI_CERTIFICATE_ACTION_STALE_SECONDS:
+        print(
+            "CERTIFICATE ACTION: stale loading state cleared "
+            f"source=Prodigi action_key={state.get('action_key') or ''} "
+            f"order={state.get('order') or ''}",
+            flush=True,
+        )
+        st.session_state[PRODIGI_CERTIFICATE_ACTION_STATE_KEY] = {}
+        st.session_state[PRODIGI_CERTIFICATE_ACTION_LOADING_KEY] = False
+
+
+def _prodigi_set_certificate_action_state(row):
+    _prodigi_clear_stale_certificate_action_state()
+    action_key = _prodigi_certificate_action_key(row)
+    state = st.session_state.get(PRODIGI_CERTIFICATE_ACTION_STATE_KEY) or {}
+    if str(state.get("action_key") or "") == action_key and action_key:
+        raise RuntimeError("Certificate upload is already in progress for this order. You can retry in a moment.")
+    st.session_state[PRODIGI_CERTIFICATE_ACTION_STATE_KEY] = {
+        "action_key": action_key,
+        "order": (row or {}).get("shopify_order_name") or (row or {}).get("shopify_order_number") or "",
+        "edition_order_id": (row or {}).get("edition_order_id") or "",
+        "source": "Prodigi",
+        "started_at": time.time(),
+    }
+    st.session_state[PRODIGI_CERTIFICATE_ACTION_LOADING_KEY] = True
+
+
+def _prodigi_clear_certificate_action_state():
+    st.session_state[PRODIGI_CERTIFICATE_ACTION_STATE_KEY] = {}
+    st.session_state[PRODIGI_CERTIFICATE_ACTION_LOADING_KEY] = False
+    print("CERTIFICATE ACTION: loading state cleared source=Prodigi", flush=True)
 
 
 def _prodigi_bool(value):
@@ -4380,6 +4438,9 @@ def render_prodigi_page():
             for blocker in completion_blockers:
                 st.warning(blocker)
 
+        st.session_state.setdefault(PRODIGI_CERTIFICATE_ACTION_LOADING_KEY, False)
+        st.session_state.setdefault(PRODIGI_CERTIFICATE_ACTION_STATE_KEY, {})
+        _prodigi_clear_stale_certificate_action_state()
         action_columns = st.columns([1, 1, 3])
         if action_columns[0].button("Save Issue", use_container_width=True, key="prodigi-dispatch-save-issue"):
             try:
@@ -4402,9 +4463,9 @@ def render_prodigi_page():
             disabled=bool(completion_blockers) or bool(already_submitted),
             key="prodigi-dispatch-complete",
         ):
-            st.session_state["prodigi_certificate_action_loading"] = True
+            completion_row = dict(selected_row)
             try:
-                completion_row = dict(selected_row)
+                _prodigi_set_certificate_action_state(completion_row)
                 if _prodigi_is_limited_edition(completion_row):
                     certificate_result = prodigi_generate_upload_certificate_for_row(completion_row)
                     record = certificate_result.get("record") or {}
@@ -4416,11 +4477,21 @@ def render_prodigi_page():
                         }
                     )
                     qa_answers["certificate"] = "Yes"
+                print(
+                    "CERTIFICATE ACTION: row refresh started "
+                    f"source=Prodigi order={completion_row.get('shopify_order_name') or completion_row.get('shopify_order_number') or ''}",
+                    flush=True,
+                )
                 prodigi_save_dispatch_row(
                     completion_row,
                     status="Complete",
                     notes=notes,
                     qa_answers=qa_answers,
+                )
+                print(
+                    "CERTIFICATE ACTION: row refresh finished "
+                    f"source=Prodigi order={completion_row.get('shopify_order_name') or completion_row.get('shopify_order_number') or ''}",
+                    flush=True,
                 )
                 st.session_state["prodigi_dispatch_existing_rows"] = prodigi_load_dispatch_rows("Search", search_text=last_query, limit=100)
                 st.session_state["prodigi_dispatch_selected_row_id"] = completion_row.get("row_id") or ""
@@ -4435,8 +4506,7 @@ def render_prodigi_page():
                 )
                 st.error(f"Certificate upload failed: {error}. You can retry this order.")
             finally:
-                st.session_state["prodigi_certificate_action_loading"] = False
-                print("CERTIFICATE ACTION: loading state cleared source=Prodigi", flush=True)
+                _prodigi_clear_certificate_action_state()
 
     st.divider()
     st.subheader("Submitted Dispatch Log")
