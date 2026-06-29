@@ -628,6 +628,55 @@ def _shopify_values_from_row(row):
     }
 
 
+def _save_validation_error(row):
+    normalised = _normalise_row(row, preserve_derived=False)
+    label = normalised.get("product_title") or normalised.get("handle") or "Edition row"
+    if not normalised.get("handle"):
+        return f"{label}: Shopify handle is required."
+    total = _coerce_int(normalised.get("edition_total"), 0)
+    next_number = _coerce_int(normalised.get("edition_next_number"), 0)
+    if total < 1:
+        return f"{label}: edition_total must be 1 or higher."
+    if next_number < 1:
+        return f"{label}: next_edition_number must be 1 or higher."
+    if next_number > total + 1:
+        return f"{label}: next_edition_number cannot be more than one past edition_total."
+    return ""
+
+
+def _apply_save_errors(rows, originals, rows_to_save, errors):
+    now = _now_iso()
+    attempted_keys = {_stable_row_key(row) for row in rows_to_save if _stable_row_key(row)}
+    original_by_key = {
+        _stable_row_key(row): _normalise_row(row)
+        for row in originals
+        if _stable_row_key(row)
+    }
+    updated_rows = []
+    updated_originals = []
+    for row in rows:
+        normalised = _normalise_row(row)
+        key = _stable_row_key(normalised)
+        if key in errors:
+            normalised["sync_status"] = "Error"
+            normalised["sync_error"] = errors[key]
+            updated_originals.append(deepcopy(original_by_key.get(key, normalised)))
+        elif key in attempted_keys:
+            normalised["sync_status"] = "Saved in Supabase"
+            normalised["sync_error"] = ""
+            normalised["last_synced_at"] = now
+            updated_originals.append(deepcopy(normalised))
+        else:
+            updated_originals.append(deepcopy(original_by_key.get(key, normalised)))
+        updated_rows.append(normalised)
+    st.session_state[ROWS_KEY] = updated_rows
+    st.session_state[ORIGINAL_ROWS_KEY] = updated_originals
+    st.session_state[ERRORS_KEY] = errors
+    _write_snapshot(updated_rows, updated_originals, meta={"mirror_status": "failed" if errors else "pending"})
+    _invalidate_edition_ops_cache(bump_orders=True)
+    _bump_editor_version()
+
+
 def _load_active_products_from_shopify():
     config = shopify_sync.get_config()
     if not config.get("configured"):
@@ -755,7 +804,7 @@ def _mark_supabase_saved_without_shopify(rows, originals, row_ids):
         updated = _normalise_row(row)
         row_key = _stable_row_key(updated)
         if row_key in saved_ids:
-            updated["sync_status"] = "Shopify mirror pending"
+            updated["sync_status"] = "Saved in Supabase"
             updated["sync_error"] = ""
             updated["last_synced_at"] = now
             new_originals.append(deepcopy(updated))
@@ -765,7 +814,7 @@ def _mark_supabase_saved_without_shopify(rows, originals, row_ids):
     st.session_state[ROWS_KEY] = new_rows
     st.session_state[ORIGINAL_ROWS_KEY] = new_originals
     st.session_state[ERRORS_KEY] = {}
-    _write_snapshot(new_rows, new_originals, meta={"mirror_status": "pending"})
+    _write_snapshot(new_rows, new_originals, meta={"mirror_status": "not_mirrored"})
     _invalidate_edition_ops_cache(bump_orders=True)
     _bump_editor_version()
 
@@ -783,16 +832,27 @@ def _save_changed_rows():
             "Supabase is not configured. Edition Ops saves stay locked until the ledger is available."
         )
         return
-    config = shopify_sync.get_config()
     supabase_errors = {}
     changed_count = len(rows_to_save)
     unchanged_count = max(len(rows) - changed_count, 0)
+    for row in rows_to_save:
+        message = _save_validation_error(row)
+        if message:
+            supabase_errors[_stable_row_key(row)] = message
+    if supabase_errors:
+        _apply_save_errors(rows, originals, rows_to_save, supabase_errors)
+        st.session_state[NOTICE_KEY] = (
+            f"Changed rows saved: 0. Unchanged rows skipped: {unchanged_count}. "
+            f"Errors: {len(supabase_errors)}."
+        )
+        return
     if hasattr(backend, "update_edition_products_batch"):
         batch_rows = []
         for row in rows_to_save:
             normalised = _normalise_row(row, preserve_derived=False)
             batch_rows.append(
                 {
+                    "row_key": _stable_row_key(normalised),
                     "edition_product_id": normalised.get("edition_product_id"),
                     "handle": normalised.get("handle"),
                     "edition_name": normalised.get("edition_label"),
@@ -802,7 +862,18 @@ def _save_changed_rows():
                     "sold_out": normalised.get("edition_remaining") <= 0,
                 }
             )
-        results = backend.update_edition_products_batch(batch_rows, reason="Edition Ops save")
+        try:
+            results = backend.update_edition_products_batch(batch_rows, reason="Edition Ops save")
+        except Exception as error:
+            results = [
+                {
+                    "ok": False,
+                    "handle": row.get("handle"),
+                    "key": row.get("row_key"),
+                    "message": str(error),
+                }
+                for row in batch_rows
+            ]
         for result in results or []:
             if not result.get("ok"):
                 supabase_errors[result.get("key") or result.get("handle") or ""] = result.get("message") or "Save failed"
@@ -822,42 +893,21 @@ def _save_changed_rows():
             except Exception as error:
                 supabase_errors[_stable_row_key(normalised) or normalised.get("handle")] = str(error)
     if supabase_errors:
-        updated_rows = []
-        for row in rows:
-            normalised = _normalise_row(row)
-            key = _stable_row_key(normalised)
-            if key in supabase_errors:
-                normalised["sync_status"] = "Error"
-                normalised["sync_error"] = supabase_errors[key]
-            updated_rows.append(normalised)
-        st.session_state[ROWS_KEY] = updated_rows
-        st.session_state[ERRORS_KEY] = supabase_errors
-        _write_snapshot(updated_rows, originals)
+        _apply_save_errors(rows, originals, rows_to_save, supabase_errors)
         st.session_state[NOTICE_KEY] = (
             f"Changed rows saved: {changed_count - len(supabase_errors)}. "
             f"Unchanged rows skipped: {unchanged_count}. "
             f"Errors: {len(supabase_errors)}."
         )
         return
-    if not config.get("configured"):
-        _mark_supabase_saved_without_shopify(
-            rows,
-            originals,
-            [_stable_row_key(row) for row in rows_to_save],
-        )
-        st.session_state[NOTICE_KEY] = (
-            f"Changed rows saved: {changed_count}. Unchanged rows skipped: {unchanged_count}. Errors: 0."
-        )
-        return
-    result = shopify_sync.sync_limited_edition_metafields_for_products(
-        [_shopify_values_from_row(row) for row in rows_to_save],
-        config=config,
+    _mark_supabase_saved_without_shopify(
+        rows,
+        originals,
+        [_stable_row_key(row) for row in rows_to_save],
     )
-    _mark_synced(rows, originals, result.get("results") or [])
     st.session_state[NOTICE_KEY] = (
-        f"Changed rows saved: {changed_count}. "
-        f"Unchanged rows skipped: {unchanged_count}. "
-        f"Errors: {int(result.get('failed', 0) or 0)}."
+        f"Changed rows saved: {changed_count}. Unchanged rows skipped: {unchanged_count}. Errors: 0. "
+        "Shopify was not called."
     )
 
 

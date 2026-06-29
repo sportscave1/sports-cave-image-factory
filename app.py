@@ -5423,7 +5423,10 @@ def render_settings_page():
             if _developer_section_enabled("developer-load-edition-ops-diagnostics", "Load Edition Ops Diagnostics"):
                 supabase = importlib.import_module("supabase_backend")
                 status = supabase.database_status(run_schema_check=False)
-                counts = supabase.persistence_counts() if status.get("configured") else {}
+                if hasattr(supabase, "persistence_counts_read_only"):
+                    counts = supabase.persistence_counts_read_only() if status.get("configured") else {}
+                else:
+                    counts = {}
                 st.write(f"**Connection:** {'Connected' if status.get('connected') else 'Not connected'}")
                 st.write("**Source:** Supabase ledger")
                 if status.get("warning"):
@@ -5890,6 +5893,16 @@ def render_settings_page():
                 st.caption(f"Server time: {result.get('server_time')}")
             except Exception as error:
                 _developer_action_error("Database connection test", error)
+        if st.button("Run Supabase Schema Check", key="developer-run-supabase-schema-check", use_container_width=True):
+            try:
+                supabase_backend = importlib.import_module("supabase_backend")
+                started = time.perf_counter()
+                supabase_backend.ensure_schema()
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                st.success("Supabase schema check completed.")
+                st.caption(f"Duration: {duration_ms} ms")
+            except Exception as error:
+                _developer_action_error("Supabase schema check", error)
         if st.button("Run DB Health / Repair", key="developer-db-health-repair", use_container_width=True):
             try:
                 supabase_backend = importlib.import_module("supabase_backend")

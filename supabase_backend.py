@@ -2546,6 +2546,24 @@ def _insert_edition_adjustment_with_cursor(
             str(source or "manual_app"),
         ),
     )
+    _insert_audit_log(
+        cur,
+        event_type="edition_product_manual_update",
+        entity_type="edition_product",
+        entity_id=(product or {}).get("id"),
+        shopify_handle=(run or {}).get("shopify_handle") or (product or {}).get("shopify_handle"),
+        old_value={
+            "next_edition_number": _int_value(old_next, 1),
+            "edition_total": _int_value(old_total, 100),
+        },
+        new_value={
+            "next_edition_number": _int_value(new_next, 1),
+            "edition_total": _int_value(new_total, 100),
+        },
+        reason=str(reason or "Manual edition adjustment"),
+        actor="edition_ops",
+        source=str(source or "manual_app"),
+    )
 
 
 def list_edition_products(search="", limit=500, offset=0):
@@ -2984,12 +3002,24 @@ def _update_edition_product_with_cursor(
     )
     max_assigned = _int_value((cur.fetchone() or {}).get("max_assigned"), 0)
     if not allow_history_override:
-        proposed_next = max(proposed_next, max_assigned + 1 if max_assigned > 0 else 1)
+        minimum_next = max_assigned + 1 if max_assigned > 0 else 1
+        if proposed_next < minimum_next:
+            raise ValueError(
+                f"Next edition number cannot be below {minimum_next}; "
+                f"{max_assigned} edition(s) are already assigned."
+            )
 
     if proposed_next < 1:
         raise ValueError("Next edition number must be at least 1.")
     if new_total < 1:
         raise ValueError("Edition total must be at least 1.")
+    if max_assigned > 0 and new_total < max_assigned:
+        raise ValueError(
+            f"Edition total cannot be below {max_assigned}; "
+            "editions have already been assigned."
+        )
+    if proposed_next > new_total + 1:
+        raise ValueError("Next edition number cannot be more than one past the edition total.")
 
     requested_status = _clean_edition_run_status(
         status,
@@ -3077,13 +3107,12 @@ def _update_edition_product_with_cursor(
 
 
 def update_edition_products_batch(rows, reason="Manual edition edit"):
-    ensure_schema()
     results = []
     with connect() as conn:
         with conn.cursor() as cur:
             for row in rows or []:
                 handle = str((row or {}).get("handle") or (row or {}).get("shopify_handle") or "").strip()
-                key = str((row or {}).get("edition_product_id") or handle or "")
+                key = str((row or {}).get("row_key") or (row or {}).get("edition_product_id") or handle or "")
                 cur.execute("SAVEPOINT edition_ops_batch_row")
                 try:
                     _update_edition_product_with_cursor(
@@ -4174,6 +4203,32 @@ def persistence_counts():
     with connect() as conn:
         with conn.cursor() as cur:
             for table_name in tables:
+                cur.execute(f"SELECT COUNT(*) AS count FROM {table_name}")
+                counts[table_name] = int((cur.fetchone() or {}).get("count") or 0)
+    return counts
+
+
+def persistence_counts_read_only():
+    tables = (
+        "edition_products",
+        "edition_orders",
+        "shopify_order_lines",
+        "product_assets",
+        "certificates",
+        "shopify_products",
+        "shopify_orders",
+        "audit_logs",
+    )
+    counts = {}
+    if not is_configured():
+        return counts
+    with connect() as conn:
+        with conn.cursor() as cur:
+            for table_name in tables:
+                cur.execute("SELECT to_regclass(%s) AS table_name", (f"public.{table_name}",))
+                if not (cur.fetchone() or {}).get("table_name"):
+                    counts[table_name] = 0
+                    continue
                 cur.execute(f"SELECT COUNT(*) AS count FROM {table_name}")
                 counts[table_name] = int((cur.fetchone() or {}).get("count") or 0)
     return counts

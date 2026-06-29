@@ -4091,6 +4091,69 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertTrue(result["sold_out"])
         self.assertEqual(cursor.product_update_params[0], 100)
 
+    def test_update_edition_products_batch_does_not_run_schema_check_on_save(self):
+        class FakeCursor:
+            def __init__(self):
+                self.statements = []
+
+            def execute(self, sql, params=()):
+                self.statements.append(str(sql).strip())
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeConnection:
+            def __init__(self):
+                self.cursor_obj = FakeCursor()
+                self.committed = False
+
+            def cursor(self):
+                return self.cursor_obj
+
+            def commit(self):
+                self.committed = True
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        fake_connection = FakeConnection()
+        with patch.object(
+            supabase_backend,
+            "ensure_schema",
+            side_effect=AssertionError("Normal Edition Ops saves must not run schema checks."),
+        ), patch.object(
+            supabase_backend,
+            "connect",
+            return_value=fake_connection,
+        ), patch.object(
+            supabase_backend,
+            "_update_edition_product_with_cursor",
+            return_value={"handle": "legends-never-die", "next_edition_number": 43, "edition_total": 100},
+        ) as update_row:
+            results = supabase_backend.update_edition_products_batch(
+                [
+                    {
+                        "row_key": "edition_product:101",
+                        "edition_product_id": "101",
+                        "handle": "legends-never-die",
+                        "edition_total": 100,
+                        "next_edition_number": 43,
+                        "active": True,
+                    }
+                ],
+                reason="Edition Ops save",
+            )
+
+        self.assertEqual(results, [{"ok": True, "handle": "legends-never-die", "key": "edition_product:101"}])
+        self.assertTrue(fake_connection.committed)
+        update_row.assert_called_once()
+
     @patch.object(supabase_backend, "process_paid_order")
     @patch.object(
         supabase_backend,
