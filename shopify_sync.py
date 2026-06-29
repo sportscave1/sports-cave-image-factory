@@ -371,8 +371,8 @@ def graphql_request(query, variables=None, timeout=10, config=None, request_post
 def get_shopify_webhook_secret(config=None):
     config = config or get_config()
     return (
-        str(config.get("client_secret") or "").strip()
-        or os.getenv("SHOPIFY_WEBHOOK_SECRET", "").strip()
+        os.getenv("SHOPIFY_WEBHOOK_SECRET", "").strip()
+        or str(config.get("client_secret") or "").strip()
     )
 
 
@@ -1051,6 +1051,9 @@ query SportsCaveOrdersPaidWebhookSubscriptions($first: Int!, $topics: [WebhookSu
     nodes {
       id
       topic
+      format
+      createdAt
+      updatedAt
       endpoint {
         __typename
         ... on WebhookHttpEndpoint {

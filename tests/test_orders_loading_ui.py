@@ -1067,7 +1067,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn('@app.get("/healthz")', source)
         self.assertIn('/webhooks/shopify/orders-paid', source)
         self.assertIn("process_order_paid_webhook", source)
-        self.assertIn("_verify_shopify_hmac", source)
+        self.assertIn("verify_shopify_webhook_hmac", source)
         self.assertIn("hmac.compare_digest", source)
         self.assertNotIn("streamlit run", source)
         self.assertNotIn("start_streamlit", source)
@@ -1080,6 +1080,15 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("certificate_job", source)
         self.assertNotIn("generate_missing_certificates_for_order", source)
         self.assertNotIn("require_cutover=True", source)
+
+    def test_orders_paid_webhook_diagnostic_script_is_read_only(self):
+        source = (ROOT / "scripts" / "diagnose_shopify_orders_paid_webhooks.py").read_text(encoding="utf-8")
+
+        self.assertIn("list_orders_paid_webhook_subscriptions", source)
+        self.assertIn("duplicate_orders_paid_webhook_subscription", source)
+        self.assertNotIn("ensure_orders_paid_webhook_subscription", source)
+        self.assertNotIn("webhookSubscriptionDelete", source)
+        self.assertNotIn("delete", source.lower())
 
     def test_server_py_is_not_a_streamlit_proxy(self):
         source = (ROOT / "server.py").read_text(encoding="utf-8")
