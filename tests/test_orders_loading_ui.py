@@ -2178,7 +2178,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("fetched preview for 3 latest paid shopify order(s)", fake_st.session_state[orders_page.NOTICE_KEY].lower())
         return
 
-    def test_refresh_orders_apply_uses_supabase_sync_path_and_defers_reload(self):
+    def test_refresh_orders_apply_uses_supabase_sync_path_and_refreshes_changed_rows(self):
         fake_st = SimpleNamespace(
             session_state={
                 orders_page.ROWS_KEY: [],
@@ -2198,8 +2198,69 @@ class EditionOpsUiTests(unittest.TestCase):
                 return {
                     "shopify_orders_fetched": 5,
                     "new_orders_inserted": 1,
+                    "new_lines_inserted": 1,
                     "existing_orders_skipped": 4,
                     "edition_allocations_created": 2,
+                    "missing_mapping_skipped": 0,
+                    "affected_order_names": ["#SC2879"],
+                    "affected_shopify_order_ids": ["gid://shopify/Order/2879"],
+                    "errors": [],
+                }
+
+        def fake_reload():
+            fake_st.session_state[orders_page.ROWS_KEY] = [
+                {
+                    "order": "#SC2879",
+                    "shopify_order_id": "gid://shopify/Order/2879",
+                    "edition_number": 35,
+                    "edition_total": 100,
+                }
+            ]
+
+        backend = FakeBackend()
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page,
+            "_configured_supabase_backend",
+            return_value=backend,
+        ), patch.object(
+            orders_page,
+            "_reload_orders_from_source",
+            side_effect=fake_reload,
+        ) as reload_rows:
+            orders_page._refresh_orders(max_orders=25)
+
+        self.assertEqual(
+            backend.sync_calls,
+            [{"limit": 25, "backfill_latest_paid": False, "ensure_schema_first": False}],
+        )
+        reload_rows.assert_called_once()
+        self.assertIn("cursor check complete", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        self.assertIn("new orders imported: 1", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        self.assertIn("table refresh: refreshed", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        self.assertEqual(fake_st.session_state[orders_page.SYNC_RESULT_KEY]["affected_rows_merged_count"], 1)
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY][0]["order"], "#SC2879")
+        return
+
+    def test_refresh_orders_no_changes_defers_table_reload(self):
+        fake_st = SimpleNamespace(
+            session_state={
+                orders_page.ROWS_KEY: [],
+                orders_page.META_KEY: {"last_refreshed": "", "saved_at": ""},
+                orders_page.NOTICE_KEY: "",
+                orders_page.SYNC_RESULT_KEY: {},
+                orders_page.BACKFILL_RESULT_KEY: {},
+            }
+        )
+
+        class FakeBackend:
+            def sync_latest_paid_orders_to_supabase(self, **kwargs):
+                self.kwargs = kwargs
+                return {
+                    "shopify_orders_fetched": 1,
+                    "new_orders_inserted": 0,
+                    "new_lines_inserted": 0,
+                    "existing_orders_skipped": 1,
+                    "edition_allocations_created": 0,
                     "missing_mapping_skipped": 0,
                     "errors": [],
                 }
@@ -2212,19 +2273,48 @@ class EditionOpsUiTests(unittest.TestCase):
         ), patch.object(
             orders_page,
             "_reload_orders_from_source",
-            side_effect=AssertionError("Cursor-first sync should not block on a full table reload by default."),
-        ) as reload_rows:
+            side_effect=AssertionError("Unchanged sync should not reload the table."),
+        ):
             orders_page._refresh_orders(max_orders=25)
 
         self.assertEqual(
-            backend.sync_calls,
-            [{"limit": 25, "backfill_latest_paid": False, "ensure_schema_first": False}],
+            backend.kwargs,
+            {"limit": 25, "backfill_latest_paid": False, "ensure_schema_first": False},
         )
-        reload_rows.assert_not_called()
-        self.assertIn("cursor check complete", fake_st.session_state[orders_page.NOTICE_KEY].lower())
-        self.assertIn("new orders imported: 1", fake_st.session_state[orders_page.NOTICE_KEY].lower())
-        self.assertIn("table reload: deferred", fake_st.session_state[orders_page.NOTICE_KEY].lower())
-        return
+        self.assertIn("table refresh: deferred", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+
+    def test_refresh_orders_timeout_returns_retry_message_and_clears_state(self):
+        fake_st = SimpleNamespace(
+            session_state={
+                orders_page.ROWS_KEY: [],
+                orders_page.META_KEY: {"last_refreshed": "", "saved_at": ""},
+                orders_page.NOTICE_KEY: "",
+                orders_page.SYNC_RESULT_KEY: {},
+                orders_page.BACKFILL_RESULT_KEY: {},
+            }
+        )
+
+        class FakeBackend:
+            def sync_latest_paid_orders_to_supabase(self, **kwargs):
+                return {}
+
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page,
+            "_configured_supabase_backend",
+            return_value=FakeBackend(),
+        ), patch.object(
+            orders_page,
+            "_run_sync_with_timeout",
+            side_effect=TimeoutError("Orders sync failed: sync timed out at backend_sync. You can retry."),
+        ), patch.object(
+            orders_page,
+            "_reload_orders_from_source",
+            side_effect=AssertionError("Timed out sync must not reload rows."),
+        ):
+            orders_page._refresh_orders(max_orders=25)
+
+        self.assertIn("sync timed out at backend_sync", fake_st.session_state[orders_page.NOTICE_KEY])
+        self.assertIn("retry", fake_st.session_state[orders_page.NOTICE_KEY].casefold())
 
     def test_refresh_orders_backfill_mode_is_explicit(self):
         fake_st = SimpleNamespace(
@@ -2245,9 +2335,10 @@ class EditionOpsUiTests(unittest.TestCase):
                 self.sync_calls.append(kwargs)
                 return {
                     "shopify_orders_fetched": 5,
-                    "new_orders_inserted": 1,
-                    "existing_orders_skipped": 4,
-                    "edition_allocations_created": 2,
+                    "new_orders_inserted": 0,
+                    "new_lines_inserted": 0,
+                    "existing_orders_skipped": 5,
+                    "edition_allocations_created": 0,
                     "missing_mapping_skipped": 0,
                     "errors": [],
                 }
@@ -2269,7 +2360,7 @@ class EditionOpsUiTests(unittest.TestCase):
             [{"limit": 25, "backfill_latest_paid": True, "ensure_schema_first": False}],
         )
         self.assertIn("backfill complete", fake_st.session_state[orders_page.NOTICE_KEY].lower())
-        self.assertIn("table reload: deferred", fake_st.session_state[orders_page.NOTICE_KEY].lower())
+        self.assertIn("table refresh: deferred", fake_st.session_state[orders_page.NOTICE_KEY].lower())
         return
 
     def test_sync_diagnostics_hidden_on_normal_orders_page(self):

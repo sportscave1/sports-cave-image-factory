@@ -35,6 +35,7 @@ DEFAULT_INITIAL_ORDER_BOOTSTRAP_DAYS = 30
 DEFAULT_INITIAL_ORDER_ASSIGNMENT_WINDOW_DAYS = 7
 DEFAULT_INCREMENTAL_ORDER_FETCH_LIMIT = 100
 DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT = 50
+DEFAULT_LATEST_CREATED_CATCHUP_LIMIT = 10
 DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS = 14
 DEFAULT_CURSORLESS_ORDER_LOOKBACK_HOURS = 48
 DATETIME_MAX_UTC = datetime.max.replace(tzinfo=timezone.utc)
@@ -4871,6 +4872,18 @@ def _shopify_order_dedupe_key(order):
     return f"name:{order_name}" if order_name else ""
 
 
+def _shopify_order_name(order):
+    return str((order or {}).get("order_name") or (order or {}).get("name") or "").strip()
+
+
+def _shopify_order_id(order):
+    return str((order or {}).get("shopify_order_id") or (order or {}).get("id") or "").strip()
+
+
+def _sorted_nonempty(values):
+    return sorted({str(value or "").strip() for value in values or [] if str(value or "").strip()})
+
+
 def _merge_shopify_order_candidate(existing, incoming):
     if not isinstance(existing, dict) or not isinstance(incoming, dict):
         return existing
@@ -8146,6 +8159,7 @@ def process_paid_order(
         "generated_certificates": generated_certificates,
         "historical_lines_marked": 0,
         "changed_handles": sorted(changed_handles),
+        "new_assignment_ids": _sorted_nonempty(assignment.get("id") for assignment in new_assignments),
         "errors": errors,
     }
 
@@ -8248,6 +8262,7 @@ def _latest_paid_orders_payload(
     lookback_days=DEFAULT_LATEST_PAID_ORDER_LOOKBACK_DAYS,
     backfill_latest_paid=False,
     ensure_schema_first=True,
+    latest_created_catchup_limit=DEFAULT_LATEST_CREATED_CATCHUP_LIMIT,
 ):
     config = config or shopify_sync.get_config()
     state = get_sync_state(ensure_schema_first=ensure_schema_first)
@@ -8267,6 +8282,10 @@ def _latest_paid_orders_payload(
         reverse = False
         query_mode = cursor.get("query_mode") or "cursor"
     order_limit = int(limit or DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT)
+    latest_created_limit = order_limit if backfill_latest_paid else min(
+        max(int(latest_created_catchup_limit or DEFAULT_LATEST_CREATED_CATCHUP_LIMIT), 1),
+        15,
+    )
     query_parameters = {
         "status": "any",
         "financial_status": "paid",
@@ -8301,6 +8320,7 @@ def _latest_paid_orders_payload(
         order=query_parameters["order"],
     )
     if backfill_latest_paid:
+        latest_stage_started = time.perf_counter()
         _orders_sync_log("latest_created_fetch_started", mode="backfill", limit=order_limit)
         _sync_perf_log("Shopify fetch start", None, mode=query_mode, limit=order_limit, cursor=False)
         fetched = shopify_sync.fetch_latest_paid_orders(
@@ -8318,8 +8338,14 @@ def _latest_paid_orders_payload(
         latest_created_orders = orders
         cursor_fetched = {}
         latest_created_fetched = fetched
-        _orders_sync_log("latest_created_fetch_completed", "completed", orders=len(orders))
+        _orders_sync_log(
+            "latest_created_fetch_completed",
+            "completed",
+            orders=len(orders),
+            duration_ms=int((time.perf_counter() - latest_stage_started) * 1000),
+        )
     else:
+        cursor_stage_started = time.perf_counter()
         _orders_sync_log("cursor_fetch_started", mode=query_mode, limit=order_limit, cursor=bool(sync_from))
         _sync_perf_log("Shopify fetch start", None, mode=query_mode, limit=order_limit, cursor=bool(sync_from))
         cursor_fetched = shopify_sync.fetch_latest_paid_orders(
@@ -8332,11 +8358,17 @@ def _latest_paid_orders_payload(
             config=config,
         )
         cursor_orders = cursor_fetched.get("orders") or []
-        _orders_sync_log("cursor_fetch_completed", "completed", orders=len(cursor_orders))
+        _orders_sync_log(
+            "cursor_fetch_completed",
+            "completed",
+            orders=len(cursor_orders),
+            duration_ms=int((time.perf_counter() - cursor_stage_started) * 1000),
+        )
         latest_created_query = "financial_status:paid"
-        _orders_sync_log("latest_created_fetch_started", mode="catchup", limit=order_limit)
+        latest_stage_started = time.perf_counter()
+        _orders_sync_log("latest_created_fetch_started", mode="catchup", limit=latest_created_limit)
         latest_created_fetched = shopify_sync.fetch_latest_paid_orders(
-            limit=order_limit,
+            limit=latest_created_limit,
             lookback_days=lookback_days,
             query=latest_created_query,
             sort_key="CREATED_AT",
@@ -8345,7 +8377,12 @@ def _latest_paid_orders_payload(
             config=config,
         )
         latest_created_orders = latest_created_fetched.get("orders") or []
-        _orders_sync_log("latest_created_fetch_completed", "completed", orders=len(latest_created_orders))
+        _orders_sync_log(
+            "latest_created_fetch_completed",
+            "completed",
+            orders=len(latest_created_orders),
+            duration_ms=int((time.perf_counter() - latest_stage_started) * 1000),
+        )
         _orders_sync_log(
             "candidate_dedupe_started",
             cursor_orders=len(cursor_orders),
@@ -8387,7 +8424,7 @@ def _latest_paid_orders_payload(
             "fulfillment_status": "",
             "updated_at_min": "",
             "created_at_min": "",
-            "limit": order_limit,
+            "limit": latest_created_limit,
             "sort": "CREATED_AT",
             "order": "desc",
         }
@@ -8468,23 +8505,8 @@ def _latest_paid_order_needs_sync(order, existing_order_ids, existing_line_item_
         line_item_id = str(line_item.get("shopify_line_item_id") or "").strip()
         if line_item_id and line_item_id not in existing_line_item_ids:
             return True
-    existing = existing_order_states.get(order_id) or {}
-    incoming_updated = _parse_datetime(
-        order.get("remote_updated_at")
-        or order.get("updated_at")
-        or order.get("processed_at")
-        or order.get("created_at")
-    )
-    stored_updated = _parse_datetime(
-        existing.get("remote_updated_at")
-        or existing.get("created_at")
-        or existing.get("synced_at")
-    )
-    if incoming_updated and not stored_updated:
-        return True
-    if not incoming_updated:
-        return False
-    return incoming_updated > stored_updated
+    _ = existing_order_states
+    return False
 
 
 def _edition_product_handles_for_orders(orders):
@@ -8904,13 +8926,25 @@ def sync_latest_paid_orders_to_supabase(
     cursor_updated = False
     cursor_update_reason = ""
     candidate_processing_errors = 0
+    fetched_order_names = _sorted_nonempty(_shopify_order_name(order) for order in fetched_orders)
+    fetched_shopify_order_ids = _sorted_nonempty(_shopify_order_id(order) for order in fetched_orders)
+    imported_order_names = set()
+    preserved_order_names = set()
+    assigned_order_names = set()
+    affected_shopify_order_ids = set()
+    affected_edition_order_ids = set()
 
     try:
         attempt_started = time.perf_counter()
         _orders_sync_log("app_sync_state_update_started", mode="attempt")
         _set_sync_attempt(LAST_ATTEMPTED_ORDER_SYNC_KEY, ensure_schema_first=ensure_schema_first)
         set_app_setting(LAST_ORDER_FETCH_STATUS_KEY, "Running", ensure_schema_first=ensure_schema_first)
-        _orders_sync_log("app_sync_state_update_completed", "completed", mode="attempt")
+        _orders_sync_log(
+            "app_sync_state_update_completed",
+            "completed",
+            mode="attempt",
+            duration_ms=int((time.perf_counter() - attempt_started) * 1000),
+        )
         _sync_perf_log("sync state write", attempt_started, mode="latest_paid_sync")
         processable_orders = [order for order in fetched_orders if _latest_paid_order_is_processable(order)]
         order_ids = [order.get("shopify_order_id") for order in processable_orders]
@@ -8930,7 +8964,14 @@ def sync_latest_paid_orders_to_supabase(
             existing_orders=len(existing_order_ids),
         )
         line_lookup_started = time.perf_counter()
+        _orders_sync_log("existing_line_lookup_started", line_items=len(line_item_ids))
         existing_line_item_ids = list_existing_shopify_line_item_ids(line_item_ids, ensure_schema_first=ensure_schema_first)
+        _orders_sync_log(
+            "existing_line_lookup_completed",
+            "completed",
+            existing_lines=len(existing_line_item_ids),
+            duration_ms=int((time.perf_counter() - line_lookup_started) * 1000),
+        )
         _sync_perf_log(
             "Supabase existing-line lookup time",
             line_lookup_started,
@@ -8959,6 +9000,20 @@ def sync_latest_paid_orders_to_supabase(
         existing_orders_preserved = sum(
             1 for order in processable_orders if str(order.get("shopify_order_id") or "").strip() in existing_order_ids
         )
+        for order in processable_orders:
+            order_id = _shopify_order_id(order)
+            order_name = _shopify_order_name(order)
+            line_ids_for_order = [
+                str(line_item.get("shopify_line_item_id") or "").strip()
+                for line_item in (order.get("line_items") or [])
+                if str(line_item.get("shopify_line_item_id") or "").strip()
+            ]
+            has_new_line = any(line_id not in existing_line_item_ids for line_id in line_ids_for_order)
+            if order_id in existing_order_ids and not has_new_line:
+                preserved_order_names.add(order_name)
+            if order_id not in existing_order_ids or has_new_line:
+                imported_order_names.add(order_name)
+                affected_shopify_order_ids.add(order_id)
         existing_lines_preserved = max(len(line_item_ids) - imported_lines, 0)
         if existing_orders_preserved or existing_lines_preserved:
             _orders_sync_log(
@@ -8967,6 +9022,7 @@ def sync_latest_paid_orders_to_supabase(
                 orders=existing_orders_preserved,
                 lines=existing_lines_preserved,
             )
+        _orders_sync_log("existing_lines_skipped_count", "completed", count=existing_lines_preserved)
         if imported_orders or imported_lines:
             _orders_sync_log(
                 "new_order_imported",
@@ -8974,6 +9030,7 @@ def sync_latest_paid_orders_to_supabase(
                 orders=imported_orders,
                 lines=imported_lines,
             )
+        _orders_sync_log("new_lines_detected_count", "completed", count=imported_lines)
         filter_started = time.perf_counter()
         candidate_orders = [
             order
@@ -9021,20 +9078,9 @@ def sync_latest_paid_orders_to_supabase(
         if known_repair.get("errors"):
             errors.extend(known_repair.get("errors") or [])
             candidate_processing_errors += len(known_repair.get("errors") or [])
-        if processable_orders:
-            try:
-                changed_handles.update(_edition_product_handles_for_orders(processable_orders))
-            except Exception as handle_error:
-                message = f"Shopify product mirror handle lookup failed / retry: {handle_error}"
-                errors.append(message)
-                if ensure_schema_first:
-                    log_app_error(
-                        "latest_paid_product_metafield_handle_lookup_failed",
-                        str(handle_error),
-                        {"orders": [order.get("order_name") or order.get("shopify_order_id") for order in processable_orders[:10]]},
-                    )
 
         allocation_started = time.perf_counter()
+        _orders_sync_log("allocation_started", orders=len(candidate_orders))
         _orders_sync_log("edition_allocation_started", orders=len(candidate_orders))
         for order in sorted(candidate_orders, key=order_allocation_sort_key):
             result = process_shopify_order_for_editions(
@@ -9047,10 +9093,15 @@ def sync_latest_paid_orders_to_supabase(
                 ensure_schema_first=ensure_schema_first,
             )
             processed_orders += 1
-            assignments += int(result.get("assignments_created") or 0)
+            order_assignments = int(result.get("assignments_created") or 0)
+            assignments += order_assignments
             existing_skipped += int(result.get("existing_assignments_skipped") or 0)
             missing_mapping_skipped += int(result.get("missing_mapping_skipped") or 0)
             changed_handles.update(result.get("changed_handles") or [])
+            if order_assignments:
+                assigned_order_names.add(_shopify_order_name(order))
+                affected_shopify_order_ids.add(_shopify_order_id(order))
+                affected_edition_order_ids.update(result.get("new_assignment_ids") or [])
             result_errors = result.get("errors") or []
             errors.extend(result_errors)
             candidate_processing_errors += len(result_errors)
@@ -9067,14 +9118,26 @@ def sync_latest_paid_orders_to_supabase(
         _orders_sync_log(
             "edition_allocation_completed",
             "completed",
+            duration_ms=int(allocation_elapsed_ms),
             processed_orders=processed_orders,
             assignments=assignments,
             existing_assignments=existing_skipped,
         )
+        _orders_sync_log(
+            "allocation_completed",
+            "completed",
+            duration_ms=int(allocation_elapsed_ms),
+            processed_orders=processed_orders,
+            assignments=assignments,
+        )
 
         assignments += known_applied
         existing_skipped += known_consistent
+        if known_applied:
+            for order_name in known_repair_candidates:
+                assigned_order_names.add(order_name)
         mirror_handles = sorted(handle for handle in changed_handles if handle)
+        _orders_sync_log("affected_handles_count", "completed", count=len(mirror_handles))
         product_metafield_mirror = {
             "attempted": 0,
             "synced": 0,
@@ -9090,6 +9153,7 @@ def sync_latest_paid_orders_to_supabase(
         mirror_started = time.perf_counter()
         mirror_failed_with_exception = False
         if mirror_handles:
+            _orders_sync_log("metafield_mirror_started", handles=len(mirror_handles))
             _orders_sync_log("shopify_metafield_mirror_started", handles=len(mirror_handles))
             try:
                 product_metafield_mirror = sync_product_edition_metafields_for_handles(
@@ -9137,6 +9201,15 @@ def sync_latest_paid_orders_to_supabase(
             _orders_sync_log(
                 "shopify_metafield_mirror_completed",
                 "completed",
+                duration_ms=int((time.perf_counter() - mirror_started) * 1000),
+                attempted=product_metafield_mirror.get("attempted") or 0,
+                synced=product_metafield_mirror.get("synced") or 0,
+                failed=product_metafield_mirror.get("skipped") or 0,
+            )
+            _orders_sync_log(
+                "metafield_mirror_completed",
+                "completed",
+                duration_ms=int((time.perf_counter() - mirror_started) * 1000),
                 attempted=product_metafield_mirror.get("attempted") or 0,
                 synced=product_metafield_mirror.get("synced") or 0,
                 failed=product_metafield_mirror.get("skipped") or 0,
@@ -9151,6 +9224,7 @@ def sync_latest_paid_orders_to_supabase(
                 product_metafields_failed=0,
             )
             _orders_sync_log("shopify_metafield_mirror_completed", "completed", attempted=0, synced=0, failed=0)
+            _orders_sync_log("metafield_mirror_completed", "completed", duration_ms=0, attempted=0, synced=0, failed=0)
         state_success_started = time.perf_counter()
         if backfill_latest_paid:
             success_timestamp = ""
@@ -9170,12 +9244,18 @@ def sync_latest_paid_orders_to_supabase(
         elif newest_processed_cursor:
             _orders_sync_log("cursor_update_started", mode="success_cursor")
             _orders_sync_log("app_sync_state_update_started", mode="success_cursor")
+            cursor_state_started = time.perf_counter()
             success_timestamp = _set_sync_success_at(
                 LAST_SUCCESSFUL_ORDER_SYNC_KEY,
                 newest_processed_cursor,
                 ensure_schema_first=ensure_schema_first,
             )
-            _orders_sync_log("app_sync_state_update_completed", "completed", mode="success_cursor")
+            _orders_sync_log(
+                "app_sync_state_update_completed",
+                "completed",
+                mode="success_cursor",
+                duration_ms=int((time.perf_counter() - cursor_state_started) * 1000),
+            )
             _orders_sync_log("cursor_update_completed", "completed", mode="success_cursor")
             cursor_updated = True
             cursor_update_reason = (
@@ -9198,7 +9278,13 @@ def sync_latest_paid_orders_to_supabase(
             success_timestamp=success_timestamp,
             ensure_schema_first=ensure_schema_first,
         )
-        _orders_sync_log("app_sync_state_update_completed", "completed", mode="metrics", sync_status=status)
+        _orders_sync_log(
+            "app_sync_state_update_completed",
+            "completed",
+            mode="metrics",
+            sync_status=status,
+            duration_ms=int((time.perf_counter() - state_success_started) * 1000),
+        )
         _sync_perf_log("sync state success/metrics write", state_success_started, status=status)
         run_finish_started = time.perf_counter()
         finish_sync_run(run_id, "Complete" if not errors else "Complete With Warnings", seen, processed_orders)
@@ -9241,6 +9327,14 @@ def sync_latest_paid_orders_to_supabase(
             "product_metafields_failed": int(product_metafield_mirror.get("skipped") or 0),
             "product_metafield_mirror": product_metafield_mirror,
             "affected_product_handles": mirror_handles,
+            "fetched_order_names": fetched_order_names,
+            "fetched_shopify_order_ids": fetched_shopify_order_ids,
+            "imported_order_names": _sorted_nonempty(imported_order_names),
+            "preserved_order_names": _sorted_nonempty(preserved_order_names),
+            "assigned_order_names": _sorted_nonempty(assigned_order_names),
+            "affected_order_names": _sorted_nonempty(set(imported_order_names) | set(assigned_order_names)),
+            "affected_shopify_order_ids": _sorted_nonempty(affected_shopify_order_ids),
+            "affected_edition_order_ids": _sorted_nonempty(affected_edition_order_ids),
             "query": payload.get("query") or "",
             "query_parameters": payload.get("query_parameters") or {},
             "latest_created_query_parameters": payload.get("latest_created_query_parameters") or {},

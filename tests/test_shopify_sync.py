@@ -2921,6 +2921,10 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         ) as known_repair, patch.object(
             supabase_backend, "process_shopify_order_for_editions"
         ) as process_order, patch.object(
+            supabase_backend, "_edition_product_handles_for_orders"
+        ) as handles_lookup, patch.object(
+            supabase_backend, "sync_product_edition_metafields_for_handles"
+        ) as mirror_handles, patch.object(
             supabase_backend, "_set_sync_success", return_value="2026-06-25T10:01:00Z"
         ), patch.object(
             supabase_backend, "_record_order_fetch_metrics"
@@ -2933,6 +2937,8 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
         process_order.assert_not_called()
         known_repair.assert_not_called()
+        handles_lookup.assert_not_called()
+        mirror_handles.assert_not_called()
         self.assertEqual(result["orders_processed"], 0)
         self.assertEqual(result["existing_orders_skipped"], 1)
         self.assertEqual(result["new_orders_inserted"], 0)
@@ -3136,7 +3142,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             },
         ), patch.object(
             supabase_backend, "_edition_product_handles_for_orders", return_value=[]
-        ), patch.object(
+        ) as handles_lookup, patch.object(
             supabase_backend, "apply_known_missing_edition_repair"
         ) as known_repair, patch.object(
             supabase_backend,
@@ -3170,6 +3176,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
         ensure_schema.assert_not_called()
         known_repair.assert_not_called()
+        handles_lookup.assert_not_called()
         process_order.assert_called_once()
         self.assertEqual(process_order.call_args.args[0]["order_name"], "#SC3002")
         mirror_handles.assert_called_once_with(
@@ -3186,6 +3193,12 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["new_orders_inserted"], 1)
         self.assertEqual(result["new_lines_inserted"], 1)
         self.assertEqual(result["edition_allocations_created"], 1)
+        self.assertEqual(result["fetched_order_names"], ["#SC3001", "#SC3002"])
+        self.assertEqual(result["imported_order_names"], ["#SC3002"])
+        self.assertEqual(result["preserved_order_names"], ["#SC3001"])
+        self.assertEqual(result["assigned_order_names"], ["#SC3002"])
+        self.assertEqual(result["affected_order_names"], ["#SC3002"])
+        self.assertEqual(result["affected_shopify_order_ids"], ["gid://shopify/Order/3002"])
         self.assertTrue(result["cursor_updated"])
 
     def test_latest_paid_order_needs_sync_rejects_unpaid_and_cancelled_orders(self):
@@ -3248,6 +3261,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(fetch_latest_paid_orders.call_args_list[1].kwargs["query"], "financial_status:paid")
         self.assertEqual(fetch_latest_paid_orders.call_args_list[1].kwargs["sort_key"], "CREATED_AT")
         self.assertTrue(fetch_latest_paid_orders.call_args_list[1].kwargs["reverse"])
+        self.assertEqual(fetch_latest_paid_orders.call_args_list[1].kwargs["limit"], 10)
         self.assertEqual(fetch_latest_paid_orders.call_count, 2)
         self.assertEqual(payload["sync_from"], "2026-06-25T09:50:00Z")
         self.assertEqual(payload["query_mode"], "cursor")
@@ -3292,6 +3306,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertTrue(fetch_latest_paid_orders.call_args_list[0].kwargs["lightweight"])
         self.assertEqual(fetch_latest_paid_orders.call_args_list[1].kwargs["query"], "financial_status:paid")
         self.assertEqual(fetch_latest_paid_orders.call_args_list[1].kwargs["sort_key"], "CREATED_AT")
+        self.assertEqual(fetch_latest_paid_orders.call_args_list[1].kwargs["limit"], 10)
         self.assertEqual(payload["sync_from"], "2026-06-24T12:00:00Z")
         self.assertEqual(payload["query_mode"], "safe_window")
         self.assertEqual(payload["fetch_strategy"], "cursor_plus_latest_created")
@@ -3341,6 +3356,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         payload = supabase_backend._latest_paid_orders_payload(config=self.config, limit=50, lookback_days=14)
 
         self.assertEqual(fetch_latest_paid_orders.call_count, 2)
+        self.assertEqual(fetch_latest_paid_orders.call_args_list[1].kwargs["limit"], 10)
         self.assertEqual(payload["fetch_strategy"], "cursor_plus_latest_created")
         self.assertEqual(payload["cursor_orders_fetched"], 1)
         self.assertEqual(payload["latest_created_orders_fetched"], 2)
@@ -3371,6 +3387,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
         self.assertEqual(fetch_latest_paid_orders.call_args.kwargs["query"], "financial_status:paid")
         self.assertEqual(fetch_latest_paid_orders.call_args.kwargs["sort_key"], "CREATED_AT")
+        self.assertEqual(fetch_latest_paid_orders.call_args.kwargs["limit"], 50)
         self.assertTrue(fetch_latest_paid_orders.call_args.kwargs["lightweight"])
         self.assertEqual(payload["sync_from"], "")
         self.assertEqual(payload["query_mode"], "latest_paid_backfill")

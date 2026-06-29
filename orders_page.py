@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timedelta, timezone
 import importlib
 import json
@@ -41,6 +42,7 @@ BACKFILL_RESULT_KEY = "orders_backfill_result"
 LATEST_FETCH_PREVIEW_KEY = "orders_latest_fetch_preview"
 REPAIR_RESULT_KEY = "orders_missing_edition_repair_result"
 ORDER_SYNC_BACKFILL_KEY = "orders_sync_backfill_latest_paid"
+ORDERS_SYNC_TIMEOUT_SECONDS = 90
 SEARCH_KEY = "orders_search_text"
 SHOW_ALL_KEY = "orders_show_all_rows"
 LOAD_ERROR_KEY = "orders_load_error"
@@ -637,6 +639,75 @@ def _reload_orders_from_source():
     st.session_state[SNAPSHOT_LOADED_KEY] = True
 
 
+def _order_match_tokens(row):
+    normalised = _normalise_row(row)
+    return {
+        str(normalised.get("order") or "").strip(),
+        str(normalised.get("shopify_order_id") or "").strip(),
+    }
+
+
+def _sync_result_visible_refresh_needed(result):
+    if not result:
+        return False
+    return bool(
+        int(result.get("new_orders_inserted") or 0)
+        or int(result.get("new_lines_inserted") or 0)
+        or int(result.get("edition_allocations_created") or 0)
+        or result.get("affected_order_names")
+        or result.get("affected_shopify_order_ids")
+    )
+
+
+def _affected_rows_count(result):
+    names = {str(value or "").strip() for value in (result or {}).get("affected_order_names") or [] if str(value or "").strip()}
+    ids = {str(value or "").strip() for value in (result or {}).get("affected_shopify_order_ids") or [] if str(value or "").strip()}
+    if not names and not ids:
+        return 0
+    count = 0
+    for row in st.session_state.get(ROWS_KEY, []) or []:
+        tokens = _order_match_tokens(row)
+        if tokens & names or tokens & ids:
+            count += 1
+    return count
+
+
+def _refresh_visible_rows_after_sync(result):
+    start = time.perf_counter()
+    print("ORDERS SYNC: orders_visible_rows_refresh_started status=started", flush=True)
+    print("ORDERS SYNC: snapshot_cache_invalidated yes", flush=True)
+    st.session_state[SNAPSHOT_LOADED_KEY] = False
+    _reload_orders_from_source()
+    merged_count = _affected_rows_count(result)
+    print(
+        "ORDERS SYNC: orders_visible_rows_refresh_completed "
+        f"status=completed duration_ms={int((time.perf_counter() - start) * 1000)} "
+        f"affected_rows_merged_count={merged_count}",
+        flush=True,
+    )
+    print(f"ORDERS SYNC: affected_rows_merged_count {merged_count}", flush=True)
+    return merged_count
+
+
+def _run_sync_with_timeout(callable_):
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(callable_)
+    try:
+        result = future.result(timeout=ORDERS_SYNC_TIMEOUT_SECONDS)
+        executor.shutdown(wait=True)
+        return result
+    except FutureTimeoutError as error:
+        future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+        message = "Orders sync failed: sync timed out at backend_sync. You can retry."
+        print(
+            "ORDERS SYNC: orders_sync_failed status=failed "
+            f"last_stage_on_timeout=backend_sync timeout_seconds={ORDERS_SYNC_TIMEOUT_SECONDS}",
+            flush=True,
+        )
+        raise TimeoutError(message) from error
+
+
 def _write_snapshot(rows, meta=None):
     sorted_rows = _sort_rows(rows)
     payload = order_allocator.save_orders_snapshot(
@@ -923,24 +994,27 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50, backfill_latest_pai
         return
     sync_started = time.perf_counter()
     try:
-        if latest_paid_only:
-            result = backend.sync_latest_paid_orders_to_supabase(
-                limit=max_orders,
-                backfill_latest_paid=backfill_latest_paid,
-                ensure_schema_first=False,
-            )
-        else:
-            result = backend.sync_shopify_orders_to_supabase(
+        def run_backend_sync():
+            if latest_paid_only:
+                return backend.sync_latest_paid_orders_to_supabase(
+                    limit=max_orders,
+                    backfill_latest_paid=backfill_latest_paid,
+                    ensure_schema_first=False,
+                )
+            return backend.sync_shopify_orders_to_supabase(
                 max_orders=max_orders,
                 generate_certificates=False,
                 sync_product_metafields=False,
             )
+
+        result = _run_sync_with_timeout(run_backend_sync)
     except Exception as error:
         message = str(error) or "Orders sync failed."
-        if "missing required database schema" not in message:
+        if not message.startswith("Orders sync failed:") and "missing required database schema" not in message:
             message = f"Orders sync failed: {message}"
         st.session_state[NOTICE_KEY] = message
         print(f"ORDERS SYNC: orders_sync_failed status=failed error={message}", flush=True)
+        print("ORDERS SYNC: loading_state_cleared status=completed", flush=True)
         return
     print(
         "PERF Sync Orders: backend sync returned "
@@ -952,10 +1026,23 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50, backfill_latest_pai
     )
     st.session_state[SYNC_RESULT_KEY] = result
     cache_started = time.perf_counter()
-    if reload_table:
-        _reload_orders_from_source()
-        reload_mode = "full"
+    refresh_needed = reload_table or _sync_result_visible_refresh_needed(result)
+    affected_rows_merged_count = 0
+    if refresh_needed:
+        try:
+            affected_rows_merged_count = _refresh_visible_rows_after_sync(result)
+            result["affected_rows_merged_count"] = affected_rows_merged_count
+            reload_mode = "full" if reload_table else "refreshed"
+        except Exception as refresh_error:
+            reload_mode = "refresh failed"
+            result["visible_refresh_error"] = str(refresh_error)
+            print(
+                "ORDERS SYNC: orders_visible_rows_refresh_failed "
+                f"status=failed error={refresh_error}",
+                flush=True,
+            )
     else:
+        print("ORDERS SYNC: snapshot_cache_invalidated no", flush=True)
         reload_mode = "deferred"
     print(
         "PERF Sync Orders: cache rebuild time "
@@ -978,7 +1065,7 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50, backfill_latest_pai
         notice_parts.append(f"Warning: {result.get('cursor_warning')}")
     st.session_state[NOTICE_KEY] = (
         " | ".join(notice_parts) + ". "
-        f"Table reload: {reload_mode}."
+        f"Table refresh: {reload_mode}."
     )
     print(
         "PERF Sync Orders: total sync time "
@@ -986,6 +1073,7 @@ def _refresh_orders(*, latest_paid_only=True, max_orders=50, backfill_latest_pai
         "streamlit_rerun_trigger=after_button_handler",
         flush=True,
     )
+    print("ORDERS SYNC: loading_state_cleared status=completed", flush=True)
 
 
 def _backfill_missing_order_details(*, dry_run=True, limit=100):
