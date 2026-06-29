@@ -2218,12 +2218,31 @@ def public_app_base_url():
             value = f"https://{value}"
         if "://" not in value:
             value = f"https://{value}"
+            return value.rstrip("/")
+    return ""
+
+
+def public_webhook_base_url():
+    for key in (
+        "SPORTS_CAVE_WEBHOOK_BASE_URL",
+        "SPORTS_CAVE_OS_BASE_URL",
+        "PUBLIC_APP_URL",
+        "RENDER_EXTERNAL_URL",
+        "RENDER_EXTERNAL_HOSTNAME",
+    ):
+        value = str(os.getenv(key, "") or "").strip()
+        if not value:
+            continue
+        if key == "RENDER_EXTERNAL_HOSTNAME" and "://" not in value:
+            value = f"https://{value}"
+        if "://" not in value:
+            value = f"https://{value}"
         return value.rstrip("/")
     return ""
 
 
 def orders_paid_webhook_callback_url(base_url=None):
-    base = str(base_url or public_app_base_url() or "").strip().rstrip("/")
+    base = str(base_url or public_webhook_base_url() or "").strip().rstrip("/")
     if not base:
         return ""
     if "://" not in base:
@@ -2258,8 +2277,8 @@ def ensure_orders_paid_webhook_subscription(callback_url=None, config=None, requ
     target_url = orders_paid_webhook_callback_url(callback_url)
     if not target_url:
         raise ShopifyConfigurationError(
-            "Public app URL is missing. Set SPORTS_CAVE_OS_BASE_URL, PUBLIC_APP_URL, "
-            "or RENDER_EXTERNAL_URL before registering the Shopify orders/paid webhook."
+            "Webhook URL is missing. Set SPORTS_CAVE_WEBHOOK_BASE_URL, SPORTS_CAVE_OS_BASE_URL, "
+            "PUBLIC_APP_URL, or RENDER_EXTERNAL_URL before registering the Shopify orders/paid webhook."
         )
     existing = list_orders_paid_webhook_subscriptions(config=config, request_post=request_post)
     for subscription in existing.get("subscriptions") or []:

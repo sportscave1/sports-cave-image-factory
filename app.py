@@ -5671,7 +5671,7 @@ def render_settings_page():
         except Exception as error:
             _developer_section_error("Shopify Webhook Setup", error)
         st.caption(
-            "The lightweight webhook wrapper runs in server.py and proxies the Streamlit UI."
+            "The paid-orders webhook runs as a separate lightweight service; the main app runs direct Streamlit."
         )
 
     with st.expander("Allocation Repair Tools", expanded=False):

@@ -86,9 +86,22 @@ class ShopifySyncClientTests(unittest.TestCase):
             "https://sports-cave-image-factory.onrender.com/webhooks/shopify/orders-paid",
         )
 
+    def test_orders_paid_webhook_callback_prefers_webhook_base_url(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SPORTS_CAVE_WEBHOOK_BASE_URL": "https://sports-cave-os-webhooks.onrender.com",
+                "SPORTS_CAVE_OS_BASE_URL": "https://sports-cave-image-factory.onrender.com",
+            },
+        ):
+            self.assertEqual(
+                shopify_sync.orders_paid_webhook_callback_url(),
+                "https://sports-cave-os-webhooks.onrender.com/webhooks/shopify/orders-paid",
+            )
+
     def test_orders_paid_fastapi_route_accepts_valid_hmac(self):
         from fastapi.testclient import TestClient
-        import server
+        import webhook_server
 
         raw_body = b'{"id":2879,"name":"#SC2879","financial_status":"paid","line_items":[]}'
         secret = "client-secret"
@@ -115,7 +128,7 @@ class ShopifySyncClientTests(unittest.TestCase):
                 "errors": [],
             },
         ) as process_webhook:
-            response = TestClient(server.app).post(
+            response = TestClient(webhook_server.app).post(
                 "/webhooks/shopify/orders-paid",
                 content=raw_body,
                 headers={
@@ -129,16 +142,25 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "processed")
         process_webhook.assert_called_once()
 
+    def test_orders_paid_fastapi_healthz(self):
+        from fastapi.testclient import TestClient
+        import webhook_server
+
+        response = TestClient(webhook_server.app).get("/healthz")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["service"], "sports-cave-os-webhooks")
+
     def test_orders_paid_fastapi_route_rejects_invalid_hmac(self):
         from fastapi.testclient import TestClient
-        import server
+        import webhook_server
 
         raw_body = b'{"id":2879}'
         with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": "client-secret"}), patch.object(
             supabase_backend,
             "process_order_paid_webhook",
         ) as process_webhook:
-            response = TestClient(server.app).post(
+            response = TestClient(webhook_server.app).post(
                 "/webhooks/shopify/orders-paid",
                 content=raw_body,
                 headers={
@@ -152,7 +174,7 @@ class ShopifySyncClientTests(unittest.TestCase):
 
     def test_orders_paid_fastapi_route_rejects_wrong_topic_after_hmac(self):
         from fastapi.testclient import TestClient
-        import server
+        import webhook_server
 
         raw_body = b'{"id":2879}'
         secret = "client-secret"
@@ -163,7 +185,7 @@ class ShopifySyncClientTests(unittest.TestCase):
             supabase_backend,
             "process_order_paid_webhook",
         ) as process_webhook:
-            response = TestClient(server.app).post(
+            response = TestClient(webhook_server.app).post(
                 "/webhooks/shopify/orders-paid",
                 content=raw_body,
                 headers={

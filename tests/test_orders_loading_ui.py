@@ -1047,52 +1047,49 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(saved["source"], "supabase")
         self.assertEqual(loaded["rows"][0]["notes"], "Submitted safely")
 
-    def test_render_uses_single_streamlit_process_for_free_instance(self):
+    def test_render_main_service_uses_direct_streamlit_and_webhook_service_is_separate(self):
         source = (ROOT / "render.yaml").read_text(encoding="utf-8")
 
-        self.assertIn("startCommand: python server.py", source)
+        self.assertIn("name: sports-cave-image-factory", source)
+        self.assertIn("startCommand: streamlit run app.py", source)
+        self.assertIn("--server.fileWatcherType none", source)
+        self.assertIn("--server.runOnSave false", source)
+        self.assertIn("--browser.gatherUsageStats false", source)
+        self.assertIn("healthCheckPath: /_stcore/health", source)
+        self.assertIn("name: sports-cave-os-webhooks", source)
+        self.assertIn("startCommand: python webhook_server.py", source)
         self.assertIn("healthCheckPath: /healthz", source)
-        self.assertNotIn("startCommand: streamlit run app.py", source)
+        self.assertNotIn("startCommand: python server.py", source)
 
-    def test_lightweight_webhook_server_route_remains_available(self):
-        source = (ROOT / "server.py").read_text(encoding="utf-8")
+    def test_lightweight_webhook_service_route_remains_available_without_streamlit_proxy(self):
+        source = (ROOT / "webhook_server.py").read_text(encoding="utf-8")
 
+        self.assertIn('@app.get("/healthz")', source)
         self.assertIn('/webhooks/shopify/orders-paid', source)
         self.assertIn("process_order_paid_webhook", source)
         self.assertIn("verify_shopify_webhook_hmac", source)
+        self.assertNotIn("streamlit run", source)
+        self.assertNotIn("start_streamlit", source)
+        self.assertNotIn("websockets.connect", source)
+        self.assertNotIn("ensure_schema", source)
+        self.assertNotIn("ALTER TABLE", source)
+        self.assertNotIn("CREATE TABLE", source)
+        self.assertNotIn("prodigi", source.lower())
+        self.assertNotIn("certificate_engine", source)
+        self.assertNotIn("certificate_job", source)
         self.assertNotIn("generate_missing_certificates_for_order", source)
         self.assertNotIn("require_cutover=True", source)
 
-    def test_streamlit_wrapper_preserves_required_proxy_paths_and_flags(self):
+    def test_server_py_is_not_a_streamlit_proxy(self):
         source = (ROOT / "server.py").read_text(encoding="utf-8")
 
-        self.assertIn('@app.get("/healthz")', source)
-        self.assertIn('@app.api_route("/{path:path}"', source)
-        self.assertIn('@app.websocket("/{path:path}")', source)
-        self.assertIn("websockets.connect", source)
-        self.assertIn('"--server.fileWatcherType"', source)
-        self.assertIn('"none"', source)
-        self.assertIn('"--server.runOnSave"', source)
-        self.assertIn('"false"', source)
-        self.assertIn('"--browser.gatherUsageStats"', source)
-        self.assertIn('"false"', source)
-
-    def test_streamlit_proxy_strips_decoded_content_encoding_header(self):
-        import server
-
-        filtered = server._filtered_proxy_headers(
-            {
-                "content-encoding": "gzip",
-                "content-length": "99",
-                "content-type": "application/javascript",
-                "set-cookie": "a=b",
-            }
-        )
-
-        self.assertNotIn("content-encoding", {key.lower(): value for key, value in filtered.items()})
-        self.assertNotIn("content-length", {key.lower(): value for key, value in filtered.items()})
-        self.assertEqual(filtered["content-type"], "application/javascript")
-        self.assertEqual(filtered["set-cookie"], "a=b")
+        self.assertIn("from webhook_server import app", source)
+        self.assertNotIn("streamlit run", source.lower())
+        self.assertNotIn("start_streamlit", source)
+        self.assertNotIn("subprocess", source)
+        self.assertNotIn("websockets.connect", source)
+        self.assertNotIn('@app.api_route("/{path:path}"', source)
+        self.assertNotIn('@app.websocket("/{path:path}")', source)
 
     def test_prompt_editing_is_password_gated_and_backend_persisted(self):
         app_source = (ROOT / "app.py").read_text(encoding="utf-8")
