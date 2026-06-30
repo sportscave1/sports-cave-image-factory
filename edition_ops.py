@@ -87,7 +87,9 @@ def _render_import_popover_styles():
         """
         <style>
         div[data-testid="stPopover"] div[role="dialog"],
-        div[data-testid="stPopover"] [data-testid="stPopoverBody"] {
+        div[data-testid="stPopover"] [data-testid="stPopoverBody"],
+        div[data-baseweb="popover"],
+        div[data-baseweb="popover"] > div {
             background: #FFFFFF !important;
             color: #111111 !important;
         }
@@ -95,17 +97,23 @@ def _render_import_popover_styles():
         div[data-testid="stPopover"] div[role="dialog"] *,
         div[data-testid="stPopover"] [data-testid="stPopoverBody"] *,
         div[data-testid="stPopover"] [data-testid="stFileUploader"] *,
-        div[data-testid="stPopover"] section[data-testid="stFileUploaderDropzone"] * {
+        div[data-testid="stPopover"] section[data-testid="stFileUploaderDropzone"] *,
+        div[data-baseweb="popover"] *,
+        div[data-baseweb="popover"] label,
+        div[data-baseweb="popover"] p,
+        div[data-baseweb="popover"] span {
             color: #111111 !important;
             -webkit-text-fill-color: #111111 !important;
-            fill: #111111 !important;
-            stroke: #111111 !important;
         }
 
         div[data-testid="stPopover"] [data-testid="stFileUploader"],
         div[data-testid="stPopover"] section[data-testid="stFileUploaderDropzone"],
         div[data-testid="stPopover"] [data-testid="stFileUploaderFile"],
-        div[data-testid="stPopover"] [data-baseweb="tag"] {
+        div[data-testid="stPopover"] [data-baseweb="tag"],
+        div[data-baseweb="popover"] input,
+        div[data-baseweb="popover"] textarea,
+        div[data-baseweb="popover"] [role="listbox"],
+        div[data-baseweb="popover"] [data-baseweb="select"] > div {
             background: #FFFFFF !important;
             color: #111111 !important;
             border-color: #D5D5D5 !important;
@@ -814,83 +822,46 @@ def _apply_shopify_mirror_result(rows, originals, result):
     _bump_editor_version()
 
 
+def _pending_shopify_mirror_handles(rows):
+    handles = []
+    seen = set()
+    pending_statuses = {"saved in supabase", "shopify mirror failed"}
+    for row in rows:
+        normalised = _normalise_row(row)
+        status = str(normalised.get("sync_status") or "").strip().casefold()
+        handle = str(normalised.get("handle") or "").strip()
+        if status in pending_statuses and handle and handle not in seen:
+            handles.append(handle)
+            seen.add(handle)
+    return handles
+
+
 def _render_shopify_mirror_controls(backend, rows, rows_to_save):
-    with st.popover("Push Shopify Metafields", use_container_width=True):
-        st.caption("Shopify is mirror-only. Values are read from Supabase immediately before preview or push.")
-        options = _mirror_options(rows)
-        labels = [label for label, _handle in options]
-        changed_handles = {str(_normalise_row(row).get("handle") or "").strip() for row in rows_to_save}
-        default_labels = [label for label, handle in options if handle in changed_handles]
-        selected_labels = st.multiselect(
-            "Products to mirror",
-            labels,
-            default=default_labels[:25],
-            key="edition-ops-shopify-mirror-products",
-        )
-        sync_all_active = st.checkbox(
-            "Sync all active edition products from Supabase",
-            key="edition-ops-shopify-mirror-all-active",
-        )
-        confirm_all = st.checkbox(
-            "I confirm this should update every active edition product mirror",
-            key="edition-ops-shopify-mirror-confirm-all",
-            disabled=not sync_all_active,
-        )
-        selected_handles = _selected_mirror_handles(selected_labels, options)
-        can_run = bool(backend) and (
-            (sync_all_active and confirm_all)
-            or (not sync_all_active and bool(selected_handles))
-        )
-        col_preview, col_push = st.columns(2)
-        if col_preview.button("Preview Mirror", use_container_width=True, disabled=not can_run):
-            try:
-                st.session_state[SHOPIFY_MIRROR_PREVIEW_KEY] = _preview_shopify_mirror(
-                    backend,
-                    selected_handles,
-                    sync_all_active=sync_all_active,
-                )
-                st.session_state[SHOPIFY_MIRROR_RESULT_KEY] = None
-            except Exception as error:
-                st.session_state[SHOPIFY_MIRROR_PREVIEW_KEY] = {"errors": [str(error)], "previews": []}
-        if col_push.button("Push Shopify Metafields", type="primary", use_container_width=True, disabled=not can_run):
-            try:
-                result = _push_shopify_mirror(
-                    backend,
-                    selected_handles,
-                    sync_all_active=sync_all_active,
-                )
-                st.session_state[SHOPIFY_MIRROR_RESULT_KEY] = result
-                st.session_state[SHOPIFY_MIRROR_PREVIEW_KEY] = None
-                _apply_shopify_mirror_result(
-                    [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])],
-                    [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])],
-                    result,
-                )
-                st.session_state[NOTICE_KEY] = (
-                    f"Shopify mirror updated: {result.get('synced') or 0}. "
-                    f"Failed: {result.get('skipped') or result.get('failed') or 0}. "
-                    "Supabase remained the source of truth."
-                )
-                st.rerun()
-            except Exception as error:
-                st.session_state[SHOPIFY_MIRROR_RESULT_KEY] = {"errors": [str(error)], "results": []}
-                st.error(f"Shopify mirror failed: {error}")
-        preview = st.session_state.get(SHOPIFY_MIRROR_PREVIEW_KEY)
-        if preview:
-            for error in preview.get("errors") or []:
-                st.warning(error)
-            preview_rows = _mirror_preview_table(preview)
-            if preview_rows:
-                st.dataframe(preview_rows, hide_index=True, use_container_width=True)
-            else:
-                st.caption("No preview rows yet.")
-        result = st.session_state.get(SHOPIFY_MIRROR_RESULT_KEY)
-        if result:
-            for error in result.get("errors") or []:
-                st.warning(error)
-            result_rows = _mirror_result_table(result)
-            if result_rows:
-                st.dataframe(result_rows, hide_index=True, use_container_width=True)
+    pending_handles = _pending_shopify_mirror_handles(rows)
+    disabled = not backend or bool(rows_to_save) or not pending_handles
+    if st.button("Push Metafield", use_container_width=True, disabled=disabled):
+        try:
+            result = _push_shopify_mirror(
+                backend,
+                pending_handles,
+                sync_all_active=False,
+            )
+            st.session_state[SHOPIFY_MIRROR_RESULT_KEY] = result
+            st.session_state[SHOPIFY_MIRROR_PREVIEW_KEY] = None
+            _apply_shopify_mirror_result(
+                [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])],
+                [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])],
+                result,
+            )
+            st.session_state[NOTICE_KEY] = (
+                f"Shopify metafield pushed for {result.get('synced') or 0} saved product(s). "
+                f"Failed: {result.get('skipped') or result.get('failed') or 0}. "
+                "Supabase remained the source of truth."
+            )
+            st.rerun()
+        except Exception as error:
+            st.session_state[SHOPIFY_MIRROR_RESULT_KEY] = {"errors": [str(error)], "results": []}
+            st.error(f"Shopify metafield push failed: {error}")
 
 
 def _apply_save_errors(rows, originals, rows_to_save, errors):

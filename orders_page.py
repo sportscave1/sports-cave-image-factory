@@ -1613,7 +1613,37 @@ def _generate_upload_selected_certificates(rows):
         _clear_certificate_action_state(source="Orders")
 
 
-def _render_top_actions(rows):
+def _duplicate_diagnostics_snapshot(limit=10):
+    backend = _configured_supabase_backend()
+    if not backend or not hasattr(backend, "edition_allocation_duplicate_diagnostics"):
+        return {}
+    try:
+        return backend.edition_allocation_duplicate_diagnostics(limit=limit)
+    except Exception as error:
+        return {"error": str(error), "duplicate_group_count": 0, "duplicate_row_count": 0, "groups": []}
+
+
+def _render_duplicate_warning_panel(duplicates):
+    duplicate_groups = int((duplicates or {}).get("duplicate_group_count") or 0)
+    if duplicate_groups <= 0:
+        return
+    duplicate_rows = int((duplicates or {}).get("duplicate_row_count") or 0)
+    st.error("Duplicate edition allocations detected. Repair required before syncing.")
+    st.caption(
+        f"Check New Paid Orders is blocked. Duplicate groups: {duplicate_groups}. "
+        f"Duplicate-risk rows: {duplicate_rows}."
+    )
+    for group in (duplicates.get("groups") or [])[:5]:
+        st.caption(
+            f"{group.get('shopify_order_name') or group.get('shopify_order_id')}: "
+            f"{group.get('product_title') or group.get('shopify_handle')} / "
+            f"{group.get('variant_title') or 'variant not shown'} - "
+            f"{int(group.get('actual_allocation_count') or 0)} rows "
+            f"({group.get('duplicate_type') or 'duplicate'})"
+        )
+
+
+def _render_top_actions(rows, duplicate_diagnostics=None):
     selected_rows = _selected_rows_from_state(rows)
     selected_count = len(selected_rows)
     open_url = _first_pdf_url(selected_rows)
@@ -1937,12 +1967,13 @@ def _render_top_actions(rows):
     else:
         backfill_latest_paid = bool(st.session_state.get(ORDER_SYNC_BACKFILL_KEY))
     sync_label = "Backfill Latest Paid" if backfill_latest_paid else "Check New Paid Orders"
+    duplicate_sync_blocked = int((duplicate_diagnostics or {}).get("duplicate_group_count") or 0) > 0
     action_cols = st.columns([1.2, 1.15, 1.4, 1.15, 1.35, 1.35])
     if action_cols[0].button(
         sync_label,
         type="primary",
         use_container_width=True,
-        disabled=not backend,
+        disabled=not backend or duplicate_sync_blocked,
     ):
         spinner_text = "Backfilling latest paid Shopify orders..." if backfill_latest_paid else "Checking new paid Shopify orders..."
         with st.spinner(spinner_text):
@@ -1979,6 +2010,8 @@ def _render_top_actions(rows):
     action_cols[5].caption(f"{selected_count} selected")
     if not backend:
         st.caption("Order refresh is unavailable right now.")
+    elif duplicate_sync_blocked:
+        st.caption("Duplicate edition allocations detected. Repair required before syncing.")
     elif backfill_latest_paid:
         st.caption("Backfill mode fetches the latest paid Shopify orders. Use only when intentionally repairing missing mirror rows.")
     else:
@@ -2320,6 +2353,8 @@ def render_page():
     st.caption(f"Shopify mirror last synced: {_format_time(meta.get('last_synced') or meta.get('last_refreshed'))}")
     if meta.get("error"):
         st.caption(f"Orders load warning: {meta.get('error')}")
+    duplicate_diagnostics = _duplicate_diagnostics_snapshot(limit=10)
+    _render_duplicate_warning_panel(duplicate_diagnostics)
 
     notice = st.session_state.get(NOTICE_KEY)
     if notice:
@@ -2347,7 +2382,7 @@ def render_page():
     filtered_rows = _filter_rows(rows, search_text)
     visible_rows = filtered_rows[:DEFAULT_VISIBLE_ROW_LIMIT]
 
-    _render_top_actions(visible_rows)
+    _render_top_actions(visible_rows, duplicate_diagnostics)
 
     if len(filtered_rows) > len(visible_rows):
         st.caption(f"Showing latest {len(visible_rows)} of {len(filtered_rows)} matching orders.")

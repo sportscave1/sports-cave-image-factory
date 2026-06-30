@@ -5212,11 +5212,11 @@ def _latest_paid_empty_fetch_reason(payload):
     if payload.get("cursor_warning"):
         return (
             f"{payload.get('cursor_warning')} Shopify API returned empty for paid orders "
-            f"after {payload.get('sync_from') or 'the safe window'} and in the latest-created catch-up batch."
+            f"after {payload.get('sync_from') or 'the safe window'}."
         )
     if payload.get("sync_from"):
         return (
-            f"No paid orders after cursor {payload.get('sync_from')} or in the latest-created catch-up batch. "
+            f"No paid orders after cursor {payload.get('sync_from')}. "
             "Backfill not enabled. Shopify API returned empty."
         )
     return "Shopify API returned empty for paid orders. Backfill not enabled."
@@ -7711,6 +7711,7 @@ def allocate_edition_for_order_line(
     variant_title="",
     sku="",
     shopify_product_id="",
+    shopify_variant_id="",
     customer_name="",
     customer_email="",
     allocation_status="assigned",
@@ -7732,6 +7733,7 @@ def allocate_edition_for_order_line(
     allocation_key = allocation_identity_key(shopify_order_id, shopify_line_item_id, allocation_index)
     order_id_candidates = _shopify_id_candidates("Order", shopify_order_id)
     line_item_id_candidates = _shopify_id_candidates("LineItem", shopify_line_item_id)
+    variant_identity = canonical_shopify_id(shopify_variant_id) or str(variant_title or "").strip().casefold()
 
     with connect() as conn:
         try:
@@ -8095,6 +8097,72 @@ def allocate_edition_for_order_line(
                 else:
                     target_number = next_number
 
+                cur.execute(
+                    """
+                    SELECT eo.*, o.order_name
+                    FROM edition_orders eo
+                    LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+                    WHERE eo.edition_number=%s
+                      AND COALESCE(eo.edition_total, %s)=%s
+                      AND (
+                          eo.shopify_order_id = ANY(%s)
+                          OR LOWER(COALESCE(eo.shopify_order_name, o.order_name, '')) = LOWER(%s)
+                      )
+                      AND (
+                          eo.shopify_line_item_id = ANY(%s)
+                          OR COALESCE(eo.shopify_line_item_id, '') = ''
+                      )
+                      AND LOWER(COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(eo.product_handle, ''), NULLIF(eo.product_title, ''))) =
+                          LOWER(COALESCE(NULLIF(%s, ''), NULLIF(%s, '')))
+                      AND (
+                          %s = ''
+                          OR LOWER(COALESCE(
+                              NULLIF(regexp_replace(eo.shopify_variant_id, '^gid://shopify/[^/]+/', '', 'i'), ''),
+                              NULLIF(eo.variant_title, ''),
+                              ''
+                          )) = LOWER(%s)
+                      )
+                      AND (
+                          COALESCE(NULLIF(%s, ''), NULLIF(%s, '')) IS NULL
+                          OR LOWER(COALESCE(NULLIF(eo.customer_email, ''), NULLIF(eo.customer_name, ''), '')) =
+                             LOWER(COALESCE(NULLIF(%s, ''), NULLIF(%s, '')))
+                          OR LOWER(COALESCE(NULLIF(eo.customer_email, ''), NULLIF(eo.customer_name, ''), '')) = ''
+                      )
+                    ORDER BY eo.assigned_at ASC NULLS LAST, eo.created_at ASC NULLS LAST, eo.id::text ASC
+                    LIMIT 1
+                    """,
+                    (
+                        target_number,
+                        edition_total,
+                        edition_total,
+                        order_id_candidates,
+                        shopify_order_name or "",
+                        line_item_id_candidates,
+                        shopify_handle,
+                        product_title,
+                        variant_identity,
+                        variant_identity,
+                        customer_email or "",
+                        customer_name or "",
+                        customer_email or "",
+                        customer_name or "",
+                    ),
+                )
+                exact_existing = cur.fetchone()
+                if exact_existing:
+                    if has_allocation_key and allocation_key and not exact_existing.get("allocation_key"):
+                        cur.execute(
+                            """
+                            UPDATE edition_orders
+                            SET allocation_key=%s, updated_at=now()
+                            WHERE id::text=%s
+                              AND COALESCE(allocation_key, '') = ''
+                            """,
+                            (allocation_key, str(exact_existing.get("id"))),
+                        )
+                    conn.commit()
+                    return {"created": False, "assignment": exact_existing, "sold_out": False, "error": ""}
+
                 allocation_key_insert_column = ", allocation_key" if has_allocation_key else ""
                 allocation_key_insert_value = ", %s" if has_allocation_key else ""
                 allocation_key_returning = ", allocation_key" if has_allocation_key else ""
@@ -8102,17 +8170,17 @@ def allocate_edition_for_order_line(
                 cur.execute(
                     f"""
                     INSERT INTO edition_orders(
-                        shopify_order_id, shopify_order_name, shopify_line_item_id, shopify_product_id,
+                        shopify_order_id, shopify_order_name, shopify_line_item_id, shopify_product_id, shopify_variant_id,
                         shopify_handle, product_title, edition_run_id, edition_name, variant_title, sku,
                         customer_name, customer_email, shopify_customer_name, shopify_customer_email,
                         edition_number, edition_total, allocation_index, quantity,
                         assigned_at, certificate_status, status, source, updated_at{allocation_key_insert_column}
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1,
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1,
                             now(), 'Certificate Missing', %s, %s, now(){allocation_key_insert_value})
                     ON CONFLICT DO NOTHING
                     RETURNING id, shopify_order_id, shopify_line_item_id, shopify_product_id,
-                              shopify_handle, product_title, edition_run_id, edition_name, variant_title, sku, customer_name,
+                              shopify_variant_id, shopify_handle, product_title, edition_run_id, edition_name, variant_title, sku, customer_name,
                               customer_email, edition_number, edition_total, allocation_index,
                               assigned_at, certificate_status{allocation_key_returning}
                     """,
@@ -8121,6 +8189,7 @@ def allocate_edition_for_order_line(
                         shopify_order_name,
                         shopify_line_item_id,
                         shopify_product_id,
+                        shopify_variant_id,
                         shopify_handle,
                         product_title,
                         edition_run.get("id"),
@@ -8454,6 +8523,7 @@ def process_paid_order(
                 allocation_index=allocation_index,
                 shopify_handle=handle,
                 shopify_product_id=product_id,
+                shopify_variant_id=line_item.get("shopify_variant_id") or line_item.get("variant_id") or "",
                 product_title=product_title,
                 variant_title=line_item.get("variant_title") or "",
                 sku=line_item.get("sku") or "",
@@ -8684,10 +8754,7 @@ def _latest_paid_orders_payload(
         reverse = False
         query_mode = cursor.get("query_mode") or "cursor"
     order_limit = int(limit or DEFAULT_LATEST_PAID_ORDER_FETCH_LIMIT)
-    latest_created_limit = order_limit if backfill_latest_paid else min(
-        max(int(latest_created_catchup_limit or DEFAULT_LATEST_CREATED_CATCHUP_LIMIT), 1),
-        15,
-    )
+    latest_created_limit = order_limit if backfill_latest_paid else 0
     query_parameters = {
         "status": "any",
         "financial_status": "paid",
@@ -8766,44 +8833,17 @@ def _latest_paid_orders_payload(
             orders=len(cursor_orders),
             duration_ms=int((time.perf_counter() - cursor_stage_started) * 1000),
         )
-        latest_created_query = "financial_status:paid"
-        latest_stage_started = time.perf_counter()
-        _orders_sync_log("latest_created_fetch_started", mode="catchup", limit=latest_created_limit)
-        latest_created_fetched = shopify_sync.fetch_latest_paid_orders(
-            limit=latest_created_limit,
-            lookback_days=lookback_days,
-            query=latest_created_query,
-            sort_key="CREATED_AT",
-            reverse=True,
-            lightweight=True,
-            config=config,
-        )
-        latest_created_orders = latest_created_fetched.get("orders") or []
-        _orders_sync_log(
-            "latest_created_fetch_completed",
-            "completed",
-            orders=len(latest_created_orders),
-            duration_ms=int((time.perf_counter() - latest_stage_started) * 1000),
-        )
-        _orders_sync_log(
-            "candidate_dedupe_started",
-            cursor_orders=len(cursor_orders),
-            latest_created_orders=len(latest_created_orders),
-        )
-        orders, duplicate_orders_removed = _dedupe_shopify_order_candidates(cursor_orders, latest_created_orders)
-        _orders_sync_log(
-            "candidate_dedupe_completed",
-            "completed",
-            candidates=len(orders),
-            duplicates=duplicate_orders_removed,
-        )
+        latest_created_query = ""
+        latest_created_fetched = {}
+        latest_created_orders = []
+        orders = cursor_orders
+        duplicate_orders_removed = 0
         _orders_sync_log("candidate_orders_count", "completed", candidate_orders=len(orders))
         fetched = {
-            "query": f"{cursor_fetched.get('query') or query} + latest_created:{latest_created_fetched.get('query') or latest_created_query}",
+            "query": cursor_fetched.get("query") or query,
             "limit": order_limit,
             "lookback_days": lookback_days,
-            "pages_fetched": int(cursor_fetched.get("pages_fetched") or 0)
-            + int(latest_created_fetched.get("pages_fetched") or 0),
+            "pages_fetched": int(cursor_fetched.get("pages_fetched") or 0),
             "line_items_fetched": _sync_order_line_count(orders),
             "metafields_fetched": _sync_order_metafield_count(orders),
         }
@@ -8820,19 +8860,8 @@ def _latest_paid_orders_payload(
         "orders": orders,
         "query": str(fetched.get("query") or ""),
         "query_parameters": query_parameters,
-        "latest_created_query_parameters": {
-            "status": "any",
-            "financial_status": "paid",
-            "fulfillment_status": "",
-            "updated_at_min": "",
-            "created_at_min": "",
-            "limit": latest_created_limit,
-            "sort": "CREATED_AT",
-            "order": "desc",
-        }
-        if not backfill_latest_paid
-        else {},
-        "fetch_strategy": "latest_paid_backfill" if backfill_latest_paid else "cursor_plus_latest_created",
+        "latest_created_query_parameters": {},
+        "fetch_strategy": "latest_paid_backfill" if backfill_latest_paid else "cursor_only",
         "cursor_orders_fetched": len(cursor_orders),
         "latest_created_orders_fetched": len(latest_created_orders),
         "duplicate_orders_removed": duplicate_orders_removed,
@@ -9299,24 +9328,85 @@ def edition_allocation_duplicate_diagnostics(limit=50):
             cur.execute(
                 f"""
                 WITH keyed AS (
-                    SELECT eo.*, {allocation_key_expr} AS computed_allocation_key
+                    SELECT eo.*,
+                           {allocation_key_expr} AS computed_allocation_key,
+                           LOWER(TRIM(COALESCE(
+                               NULLIF(regexp_replace(eo.shopify_order_id, '^gid://shopify/[^/]+/', '', 'i'), ''),
+                               NULLIF(eo.shopify_order_name, ''),
+                               eo.shopify_order_id,
+                               ''
+                           ))) AS canonical_order_identity,
+                           LOWER(TRIM(COALESCE(
+                               NULLIF(regexp_replace(eo.shopify_line_item_id, '^gid://shopify/[^/]+/', '', 'i'), ''),
+                               ''
+                           ))) AS canonical_line_identity,
+                           LOWER(TRIM(COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(eo.product_handle, ''), NULLIF(eo.product_title, ''), ''))) AS product_identity,
+                           LOWER(TRIM(COALESCE(
+                               NULLIF(regexp_replace(eo.shopify_variant_id, '^gid://shopify/[^/]+/', '', 'i'), ''),
+                               NULLIF(eo.variant_title, ''),
+                               ''
+                           ))) AS variant_identity,
+                           LOWER(TRIM(COALESCE(NULLIF(eo.customer_email, ''), NULLIF(eo.customer_name, ''), ''))) AS customer_identity
                     FROM edition_orders eo
-                    WHERE COALESCE(shopify_order_id, '') <> ''
-                      AND COALESCE(shopify_line_item_id, '') <> ''
                 ),
-                duplicate_groups AS (
-                    SELECT computed_allocation_key,
+                allocation_duplicate_groups AS (
+                    SELECT 'allocation_key' AS duplicate_type,
+                           'allocation:' || computed_allocation_key AS group_key,
+                           computed_allocation_key AS allocation_key,
                            COUNT(*) AS actual_allocation_count,
                            MIN(COALESCE(quantity, 1)) AS expected_quantity,
                            MIN(created_at) AS first_created_at,
                            MAX(created_at) AS last_created_at
                     FROM keyed
                     WHERE COALESCE(computed_allocation_key, '') <> ''
+                      AND COALESCE(shopify_order_id, '') <> ''
+                      AND COALESCE(shopify_line_item_id, '') <> ''
                     GROUP BY computed_allocation_key
                     HAVING COUNT(*) > 1
+                ),
+                exact_clone_groups AS (
+                    SELECT 'exact_clone' AS duplicate_type,
+                           'clone:' ||
+                           canonical_order_identity || ':' ||
+                           canonical_line_identity || ':' ||
+                           product_identity || ':' ||
+                           variant_identity || ':' ||
+                           customer_identity || ':' ||
+                           COALESCE(edition_number::text, '') || ':' ||
+                           COALESCE(edition_total::text, '') AS group_key,
+                           MIN(computed_allocation_key) AS allocation_key,
+                           COUNT(*) AS actual_allocation_count,
+                           MIN(COALESCE(quantity, 1)) AS expected_quantity,
+                           MIN(created_at) AS first_created_at,
+                           MAX(created_at) AS last_created_at
+                    FROM keyed
+                    WHERE COALESCE(canonical_order_identity, '') <> ''
+                      AND COALESCE(product_identity, '') <> ''
+                      AND edition_number IS NOT NULL
+                      AND edition_total IS NOT NULL
+                    GROUP BY canonical_order_identity, canonical_line_identity, product_identity,
+                             variant_identity, customer_identity, edition_number, edition_total
+                    HAVING COUNT(*) > 1
+                ),
+                duplicate_groups AS (
+                    SELECT * FROM allocation_duplicate_groups
+                    UNION ALL
+                    SELECT ec.*
+                    FROM exact_clone_groups ec
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM allocation_duplicate_groups ag
+                        WHERE ag.group_key = ec.group_key
+                           OR (
+                               COALESCE(ag.allocation_key, '') <> ''
+                               AND ag.allocation_key = ec.allocation_key
+                           )
+                    )
                 )
                 SELECT
-                    dg.computed_allocation_key AS allocation_key,
+                    dg.duplicate_type,
+                    dg.group_key,
+                    dg.allocation_key,
                     dg.actual_allocation_count,
                     dg.expected_quantity,
                     dg.first_created_at,
@@ -9332,8 +9422,21 @@ def edition_allocation_duplicate_diagnostics(limit=50):
                     ARRAY_AGG(k.edition_number ORDER BY k.created_at ASC NULLS LAST, k.assigned_at ASC NULLS LAST) AS edition_numbers,
                     ARRAY_AGG(k.id::text ORDER BY k.created_at ASC NULLS LAST, k.assigned_at ASC NULLS LAST) AS edition_order_ids
                 FROM duplicate_groups dg
-                JOIN keyed k ON k.computed_allocation_key = dg.computed_allocation_key
-                GROUP BY dg.computed_allocation_key, dg.actual_allocation_count, dg.expected_quantity,
+                JOIN keyed k ON (
+                    (dg.duplicate_type = 'allocation_key' AND k.computed_allocation_key = dg.allocation_key)
+                    OR
+                    (dg.duplicate_type = 'exact_clone' AND (
+                        'clone:' ||
+                        k.canonical_order_identity || ':' ||
+                        k.canonical_line_identity || ':' ||
+                        k.product_identity || ':' ||
+                        k.variant_identity || ':' ||
+                        k.customer_identity || ':' ||
+                        COALESCE(k.edition_number::text, '') || ':' ||
+                        COALESCE(k.edition_total::text, '')
+                    ) = dg.group_key)
+                )
+                GROUP BY dg.duplicate_type, dg.group_key, dg.allocation_key, dg.actual_allocation_count, dg.expected_quantity,
                          dg.first_created_at, dg.last_created_at, k.shopify_order_name, k.shopify_order_id,
                          k.shopify_line_item_id, k.shopify_product_id, k.shopify_variant_id,
                          k.shopify_handle, k.product_title, k.variant_title
@@ -9346,17 +9449,59 @@ def edition_allocation_duplicate_diagnostics(limit=50):
             cur.execute(
                 f"""
                 WITH keyed AS (
-                    SELECT {allocation_key_expr} AS computed_allocation_key
-                    FROM edition_orders
-                    WHERE COALESCE(shopify_order_id, '') <> ''
-                      AND COALESCE(shopify_line_item_id, '') <> ''
+                    SELECT eo.*,
+                           {allocation_key_expr} AS computed_allocation_key,
+                           LOWER(TRIM(COALESCE(
+                               NULLIF(regexp_replace(eo.shopify_order_id, '^gid://shopify/[^/]+/', '', 'i'), ''),
+                               NULLIF(eo.shopify_order_name, ''),
+                               eo.shopify_order_id,
+                               ''
+                           ))) AS canonical_order_identity,
+                           LOWER(TRIM(COALESCE(
+                               NULLIF(regexp_replace(eo.shopify_line_item_id, '^gid://shopify/[^/]+/', '', 'i'), ''),
+                               ''
+                           ))) AS canonical_line_identity,
+                           LOWER(TRIM(COALESCE(NULLIF(eo.shopify_handle, ''), NULLIF(eo.product_handle, ''), NULLIF(eo.product_title, ''), ''))) AS product_identity,
+                           LOWER(TRIM(COALESCE(
+                               NULLIF(regexp_replace(eo.shopify_variant_id, '^gid://shopify/[^/]+/', '', 'i'), ''),
+                               NULLIF(eo.variant_title, ''),
+                               ''
+                           ))) AS variant_identity,
+                           LOWER(TRIM(COALESCE(NULLIF(eo.customer_email, ''), NULLIF(eo.customer_name, ''), ''))) AS customer_identity
+                    FROM edition_orders eo
                 ),
-                duplicate_groups AS (
-                    SELECT computed_allocation_key, COUNT(*) AS row_count
+                allocation_duplicate_groups AS (
+                    SELECT 'allocation:' || computed_allocation_key AS group_key, COUNT(*) AS row_count
                     FROM keyed
                     WHERE COALESCE(computed_allocation_key, '') <> ''
+                      AND COALESCE(shopify_order_id, '') <> ''
+                      AND COALESCE(shopify_line_item_id, '') <> ''
                     GROUP BY computed_allocation_key
                     HAVING COUNT(*) > 1
+                ),
+                exact_clone_groups AS (
+                    SELECT 'clone:' ||
+                           canonical_order_identity || ':' ||
+                           canonical_line_identity || ':' ||
+                           product_identity || ':' ||
+                           variant_identity || ':' ||
+                           customer_identity || ':' ||
+                           COALESCE(edition_number::text, '') || ':' ||
+                           COALESCE(edition_total::text, '') AS group_key,
+                           COUNT(*) AS row_count
+                    FROM keyed
+                    WHERE COALESCE(canonical_order_identity, '') <> ''
+                      AND COALESCE(product_identity, '') <> ''
+                      AND edition_number IS NOT NULL
+                      AND edition_total IS NOT NULL
+                    GROUP BY canonical_order_identity, canonical_line_identity, product_identity,
+                             variant_identity, customer_identity, edition_number, edition_total
+                    HAVING COUNT(*) > 1
+                ),
+                duplicate_groups AS (
+                    SELECT * FROM allocation_duplicate_groups
+                    UNION
+                    SELECT * FROM exact_clone_groups
                 )
                 SELECT COUNT(*) AS group_count, COALESCE(SUM(row_count), 0) AS row_count
                 FROM duplicate_groups
@@ -9398,10 +9543,9 @@ def sync_latest_paid_orders_to_supabase(
         duplicate_diagnostics = edition_allocation_duplicate_diagnostics(limit=10)
         duplicate_group_count = int(duplicate_diagnostics.get("duplicate_group_count") or 0)
         duplicate_row_count = int(duplicate_diagnostics.get("duplicate_row_count") or 0)
-        if duplicate_group_count and not backfill_latest_paid:
+        if duplicate_group_count:
             message = (
-                "Check New Paid Orders is blocked because duplicate allocation-risk rows already exist. "
-                "Review the read-only duplicate diagnostics before running more allocation syncs."
+                "Duplicate edition allocations detected. Repair required before syncing."
             )
             finish_sync_run(run_id, "Blocked", 0, 0, message)
             _orders_sync_log(
@@ -11031,6 +11175,7 @@ def apply_known_missing_edition_repair(*, ensure_schema_first=True):
                 allocation_index=1,
                 shopify_handle=handle,
                 shopify_product_id=product.get("shopify_product_id") or row.get("shopify_product_id") or "",
+                shopify_variant_id=row.get("shopify_variant_id") or "",
                 product_title=product.get("title") or row.get("product_title") or target.get("product_title") or "",
                 variant_title=row.get("variant_title") or "",
                 sku=row.get("sku") or "",
