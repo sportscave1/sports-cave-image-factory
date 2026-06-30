@@ -23,6 +23,7 @@ KNOWN_KEEP_EDITIONS = {
 SC2884_ORDER_NAME = "#SC2884"
 SC2884_RENUMBER_FROM = 65
 SC2884_RENUMBER_TO = 64
+ORDERS_CACHE_PATH = ROOT / "output" / "_cache" / "orders_allocation_snapshot.json"
 SHOPIFY_MIRROR_KEYS = [
     "sports_cave.edition_enabled",
     "sports_cave.edition_total",
@@ -141,9 +142,17 @@ def _has_completed_work(row):
         _clean(row.get(key)).lower()
         for key in ("certificate_status", "status", "certificate_asset_status", "prodigi_status")
     )
-    if any(marker in status_text for marker in ("ready", "uploaded", "complete", "completed", "sent", "fulfilled")):
+    if any(
+        marker in status_text
+        for marker in ("ready", "generated", "uploaded", "complete", "completed", "sent", "fulfilled", "locked")
+    ):
         return True
-    return bool(row.get("certificate_id") or row.get("shopify_file_url") or row.get("prodigi_row_id"))
+    return bool(
+        row.get("certificate_id")
+        or row.get("shopify_file_url")
+        or row.get("certificate_url")
+        or row.get("prodigi_row_id")
+    )
 
 
 def _keep_sort_key(row):
@@ -172,6 +181,7 @@ def _public_row(row):
         "edition_number": row.get("edition_number"),
         "edition_total": row.get("edition_total"),
         "certificate_status": _clean(row.get("certificate_status")),
+        "certificate_url": _clean(row.get("shopify_file_url") or row.get("certificate_url")),
         "certificate_id": _clean(row.get("certificate_id")),
         "prodigi_status": _clean(row.get("prodigi_status")),
         "created_at": row.get("created_at"),
@@ -244,7 +254,13 @@ def _row_truth(row, truth_by_key):
     return None
 
 
-def build_repair_plan(edition_rows, shopify_lines=None):
+def build_repair_plan(
+    edition_rows,
+    shopify_lines=None,
+    *,
+    include_sc2884_renumber=True,
+    known_orders_only=False,
+):
     truth_by_key, _truth_by_line = _build_truth_index(shopify_lines or [])
     delete_by_id = OrderedDict()
     matching_row_by_id = OrderedDict()
@@ -314,156 +330,158 @@ def build_repair_plan(edition_rows, shopify_lines=None):
     def remaining(rows):
         return [row for row in rows if row_id(row) not in delete_by_id]
 
-    allocation_groups = {}
-    for row in remaining(edition_rows or []):
-        key = _allocation_key(row)
-        if key:
-            allocation_groups.setdefault(key, []).append(row)
-    for key, rows in allocation_groups.items():
-        if len(rows) <= 1:
-            continue
-        note_matching(*rows)
-        sorted_rows = sorted(rows, key=_keep_sort_key)
-        keep = sorted_rows[0]
-        keep_ids.add(row_id(keep))
-        delete_rows = sorted_rows[1:]
-        for row in delete_rows:
-            mark_delete(
-                row,
-                reason="Same allocation_key/order-line-unit was allocated more than once.",
-                keep=keep,
-                duplicate_type="allocation_key",
-            )
-        groups.append(
-            {
-                "duplicate_type": "allocation_key",
-                "group_key": key,
-                "row_count": len(rows),
-                "keep": _public_row(keep),
-                "delete": [delete_by_id[row_id(row)] for row in delete_rows if row_id(row) in delete_by_id],
-            }
-        )
-
-    exact_groups = {}
-    for row in remaining(edition_rows or []):
-        key = _exact_clone_key(row)
-        if key:
-            exact_groups.setdefault(key, []).append(row)
-    for key, rows in exact_groups.items():
-        if len(rows) <= 1:
-            continue
-        note_matching(*rows)
-        sorted_rows = sorted(rows, key=_keep_sort_key)
-        keep = sorted_rows[0]
-        keep_ids.add(row_id(keep))
-        delete_rows = sorted_rows[1:]
-        for row in delete_rows:
-            mark_delete(
-                row,
-                reason="Exact clone edition_order row repeated.",
-                keep=keep,
-                duplicate_type="exact_clone",
-            )
-        groups.append(
-            {
-                "duplicate_type": "exact_clone",
-                "group_key": "|".join(key),
-                "row_count": len(rows),
-                "keep": _public_row(keep),
-                "delete": [delete_by_id[row_id(row)] for row in delete_rows if row_id(row) in delete_by_id],
-            }
-        )
-
-    order_groups = {}
-    for row in remaining(edition_rows or []):
-        truth = _row_truth(row, truth_by_key)
-        if truth:
-            order_groups.setdefault(truth["order_key"], {"truth": truth, "rows": []})["rows"].append(row)
-    for order_key, detail in order_groups.items():
-        rows = remaining(detail["rows"])
-        expected_units = int(detail["truth"].get("expected_units") or 0)
-        if expected_units <= 0 or len(rows) <= expected_units:
-            continue
-        note_matching(*rows)
-        sorted_rows = sorted(rows, key=_keep_sort_key)
-        keep_rows = sorted_rows[:expected_units]
-        for keep in keep_rows:
+    if not known_orders_only:
+        allocation_groups = {}
+        for row in remaining(edition_rows or []):
+            key = _allocation_key(row)
+            if key:
+                allocation_groups.setdefault(key, []).append(row)
+        for key, rows in allocation_groups.items():
+            if len(rows) <= 1:
+                continue
+            note_matching(*rows)
+            sorted_rows = sorted(rows, key=_keep_sort_key)
+            keep = sorted_rows[0]
             keep_ids.add(row_id(keep))
-        delete_rows = sorted_rows[expected_units:]
-        for row in delete_rows:
-            mark_delete(
-                row,
-                reason="Actual edition_orders count exceeds Shopify mirror expected eligible units.",
-                keep=keep_rows[0] if keep_rows else None,
-                duplicate_type="shopify_expected_units_overflow",
+            delete_rows = sorted_rows[1:]
+            for row in delete_rows:
+                mark_delete(
+                    row,
+                    reason="Same allocation_key/order-line-unit was allocated more than once.",
+                    keep=keep,
+                    duplicate_type="allocation_key",
+                )
+            groups.append(
+                {
+                    "duplicate_type": "allocation_key",
+                    "group_key": key,
+                    "row_count": len(rows),
+                    "keep": _public_row(keep),
+                    "delete": [delete_by_id[row_id(row)] for row in delete_rows if row_id(row) in delete_by_id],
+                }
             )
-        groups.append(
-            {
-                "duplicate_type": "shopify_expected_units_overflow",
-                "group_key": order_key,
-                "expected_units": expected_units,
-                "actual_rows": len(rows),
-                "eligible_lines": detail["truth"].get("eligible_lines") or [],
-                "keep": [_public_row(row) for row in keep_rows],
-                "delete": [delete_by_id[row_id(row)] for row in delete_rows if row_id(row) in delete_by_id],
-            }
-        )
-        order_name = detail["truth"].get("shopify_order_name") or order_key
-        order_before_after[order_name] = {
-            "before": len(rows),
-            "after": expected_units,
-            "expected_units": expected_units,
-            "source": "shopify_mirror_expected_units",
-        }
 
-    valid_after_delete = [row for row in edition_rows or [] if row_id(row) not in delete_by_id]
-    sc2884_rows = [
-        row
-        for row in valid_after_delete
-        if _order_name_key(row.get("shopify_order_name") or row.get("order_name")) == SC2884_ORDER_NAME
-    ]
-    sc2884_65_rows = [
-        row for row in sc2884_rows if _int_value(row.get("edition_number")) == SC2884_RENUMBER_FROM
-    ]
-    if sc2884_65_rows:
-        candidate = sorted(sc2884_65_rows, key=_keep_sort_key)[0]
-        handle = _clean(candidate.get("shopify_handle") or candidate.get("product_handle"))
-        edition_64_owner = next(
-            (
-                row
-                for row in valid_after_delete
-                if _clean(row.get("shopify_handle") or row.get("product_handle")) == handle
-                and _int_value(row.get("edition_number")) == SC2884_RENUMBER_TO
-                and row_id(row) != row_id(candidate)
-            ),
-            None,
-        )
-        if _has_completed_work(candidate):
-            manual_review.append(
+        exact_groups = {}
+        for row in remaining(edition_rows or []):
+            key = _exact_clone_key(row)
+            if key:
+                exact_groups.setdefault(key, []).append(row)
+        for key, rows in exact_groups.items():
+            if len(rows) <= 1:
+                continue
+            note_matching(*rows)
+            sorted_rows = sorted(rows, key=_keep_sort_key)
+            keep = sorted_rows[0]
+            keep_ids.add(row_id(keep))
+            delete_rows = sorted_rows[1:]
+            for row in delete_rows:
+                mark_delete(
+                    row,
+                    reason="Exact clone edition_order row repeated.",
+                    keep=keep,
+                    duplicate_type="exact_clone",
+                )
+            groups.append(
                 {
-                    "order_name": SC2884_ORDER_NAME,
-                    "reason": "#SC2884 already has certificate/Prodigi-visible work; do not renumber automatically.",
-                    "row": _public_row(candidate),
+                    "duplicate_type": "exact_clone",
+                    "group_key": "|".join(key),
+                    "row_count": len(rows),
+                    "keep": _public_row(keep),
+                    "delete": [delete_by_id[row_id(row)] for row in delete_rows if row_id(row) in delete_by_id],
                 }
             )
-        elif edition_64_owner:
-            manual_review.append(
+
+        order_groups = {}
+        for row in remaining(edition_rows or []):
+            truth = _row_truth(row, truth_by_key)
+            if truth:
+                order_groups.setdefault(truth["order_key"], {"truth": truth, "rows": []})["rows"].append(row)
+        for order_key, detail in order_groups.items():
+            rows = remaining(detail["rows"])
+            expected_units = int(detail["truth"].get("expected_units") or 0)
+            if expected_units <= 0 or len(rows) <= expected_units:
+                continue
+            note_matching(*rows)
+            sorted_rows = sorted(rows, key=_keep_sort_key)
+            keep_rows = sorted_rows[:expected_units]
+            for keep in keep_rows:
+                keep_ids.add(row_id(keep))
+            delete_rows = sorted_rows[expected_units:]
+            for row in delete_rows:
+                mark_delete(
+                    row,
+                    reason="Actual edition_orders count exceeds Shopify mirror expected eligible units.",
+                    keep=keep_rows[0] if keep_rows else None,
+                    duplicate_type="shopify_expected_units_overflow",
+                )
+            groups.append(
                 {
-                    "order_name": SC2884_ORDER_NAME,
-                    "reason": "#064/100 is already owned by another valid order after duplicate deletions.",
-                    "row": _public_row(candidate),
-                    "blocking_owner": _public_row(edition_64_owner),
+                    "duplicate_type": "shopify_expected_units_overflow",
+                    "group_key": order_key,
+                    "expected_units": expected_units,
+                    "actual_rows": len(rows),
+                    "eligible_lines": detail["truth"].get("eligible_lines") or [],
+                    "keep": [_public_row(row) for row in keep_rows],
+                    "delete": [delete_by_id[row_id(row)] for row in delete_rows if row_id(row) in delete_by_id],
                 }
             )
-        else:
-            report = _public_row(candidate)
-            report["old_edition_number"] = SC2884_RENUMBER_FROM
-            report["new_edition_number"] = SC2884_RENUMBER_TO
-            report["reason"] = "#SC2884 was allocated after fake #064 duplicate rows; #064 is free after repair."
-            renumber_reports.append(report)
-            if handle:
-                affected_products[handle] = True
-            note_matching(candidate)
+            order_name = detail["truth"].get("shopify_order_name") or order_key
+            order_before_after[order_name] = {
+                "before": len(rows),
+                "after": expected_units,
+                "expected_units": expected_units,
+                "source": "shopify_mirror_expected_units",
+            }
+
+    if include_sc2884_renumber:
+        valid_after_delete = [row for row in edition_rows or [] if row_id(row) not in delete_by_id]
+        sc2884_rows = [
+            row
+            for row in valid_after_delete
+            if _order_name_key(row.get("shopify_order_name") or row.get("order_name")) == SC2884_ORDER_NAME
+        ]
+        sc2884_65_rows = [
+            row for row in sc2884_rows if _int_value(row.get("edition_number")) == SC2884_RENUMBER_FROM
+        ]
+        if sc2884_65_rows:
+            candidate = sorted(sc2884_65_rows, key=_keep_sort_key)[0]
+            handle = _clean(candidate.get("shopify_handle") or candidate.get("product_handle"))
+            edition_64_owner = next(
+                (
+                    row
+                    for row in valid_after_delete
+                    if _clean(row.get("shopify_handle") or row.get("product_handle")) == handle
+                    and _int_value(row.get("edition_number")) == SC2884_RENUMBER_TO
+                    and row_id(row) != row_id(candidate)
+                ),
+                None,
+            )
+            if _has_completed_work(candidate):
+                manual_review.append(
+                    {
+                        "order_name": SC2884_ORDER_NAME,
+                        "reason": "#SC2884 already has certificate/Prodigi-visible work; do not renumber automatically.",
+                        "row": _public_row(candidate),
+                    }
+                )
+            elif edition_64_owner:
+                manual_review.append(
+                    {
+                        "order_name": SC2884_ORDER_NAME,
+                        "reason": "#064/100 is already owned by another valid order after duplicate deletions.",
+                        "row": _public_row(candidate),
+                        "blocking_owner": _public_row(edition_64_owner),
+                    }
+                )
+            else:
+                report = _public_row(candidate)
+                report["old_edition_number"] = SC2884_RENUMBER_FROM
+                report["new_edition_number"] = SC2884_RENUMBER_TO
+                report["reason"] = "#SC2884 was allocated after fake #064 duplicate rows; #064 is free after repair."
+                renumber_reports.append(report)
+                if handle:
+                    affected_products[handle] = True
+                note_matching(candidate)
 
     delete_rows = list(delete_by_id.values())
     sc2884_result = "unchanged"
@@ -682,6 +700,10 @@ def _counter_plan(cur, affected_products, delete_ids, renumber_rows=None):
 
 
 def _audit_delete(cur, row):
+    audit_reason = (
+        row.get("audit_reason")
+        or "duplicate allocation from bad resync/webhook retry, Shopify order has 1 item"
+    )
     cur.execute(
         """
         INSERT INTO audit_logs(
@@ -720,11 +742,12 @@ def _audit_delete(cur, row):
                     "product": row.get("product_title") or row.get("shopify_handle"),
                     "variant": row.get("variant_title"),
                     "duplicate_type": row.get("duplicate_type"),
+                    "reason": audit_reason,
                     "timestamp": datetime.utcnow().isoformat() + "Z",
                 },
                 default=_json_default,
             ),
-            row.get("delete_reason") or "Duplicate edition allocation repair.",
+            audit_reason,
         ),
     )
 
@@ -859,23 +882,34 @@ def _apply_repair(cur, plan, counter_changes):
           AND COALESCE(shopify_line_item_id, '') <> ''
         """
     )
+    edition_product_columns = _table_columns(cur, "edition_products")
     for change in counter_changes:
-        cur.execute(
-            """
-            UPDATE edition_products
-            SET next_edition_number=%s,
-                remaining_count=%s,
-                last_assigned_edition=%s,
-                updated_at=now()
-            WHERE shopify_handle=%s
-            """,
-            (
-                change["proposed_next_edition_number"],
-                change["proposed_remaining_count"],
-                change["max_assigned_after"],
-                change["shopify_handle"],
-            ),
-        )
+        assignments = []
+        params = []
+        if "next_edition_number" in edition_product_columns:
+            assignments.append("next_edition_number=%s")
+            params.append(change["proposed_next_edition_number"])
+        if "remaining_count" in edition_product_columns:
+            assignments.append("remaining_count=%s")
+            params.append(change["proposed_remaining_count"])
+        if "sold_count" in edition_product_columns:
+            assignments.append("sold_count=%s")
+            params.append(change["assigned_count_after"])
+        if "last_assigned_edition" in edition_product_columns:
+            assignments.append("last_assigned_edition=%s")
+            params.append(change["max_assigned_after"])
+        if "updated_at" in edition_product_columns:
+            assignments.append("updated_at=now()")
+        if assignments:
+            params.append(change["shopify_handle"])
+            cur.execute(
+                f"""
+                UPDATE edition_products
+                SET {", ".join(assignments)}
+                WHERE shopify_handle=%s
+                """,
+                tuple(params),
+            )
         cur.execute(
             """
             UPDATE edition_runs er
@@ -897,7 +931,71 @@ def _apply_repair(cur, plan, counter_changes):
     _backfill_order_sync_locks(cur)
 
 
-def run_repair(*, apply=False):
+def _delete_blockers(rows):
+    return [row for row in rows or [] if _has_completed_work(row)]
+
+
+def _target_order_counts(cur):
+    order_names = list(KNOWN_KEEP_EDITIONS.keys())
+    cur.execute(
+        """
+        SELECT COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, '')) AS order_name,
+               eo.id::text AS id,
+               eo.customer_name,
+               eo.product_title,
+               eo.variant_title,
+               eo.edition_number,
+               eo.edition_total,
+               eo.created_at,
+               eo.certificate_status,
+               eo.allocation_key
+        FROM edition_orders eo
+        LEFT JOIN shopify_orders o ON o.shopify_order_id = eo.shopify_order_id
+        WHERE UPPER(TRIM(COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, '')))) = ANY(%s)
+        ORDER BY order_name ASC, eo.created_at ASC NULLS LAST, eo.id::text ASC
+        """,
+        ([name.upper() for name in order_names],),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    counts = OrderedDict()
+    for name in order_names:
+        matching = [
+            _public_row(row)
+            for row in rows
+            if _order_name_key(row.get("order_name") or row.get("shopify_order_name")) == name
+        ]
+        counts[name] = {
+            "count": len(matching),
+            "editions": [row.get("edition_number") for row in matching],
+            "rows": matching,
+        }
+    return counts
+
+
+def _clear_orders_cache_file():
+    try:
+        if not ORDERS_CACHE_PATH.exists():
+            return {"cleared": False, "path": str(ORDERS_CACHE_PATH), "reason": "cache file not present"}
+        ORDERS_CACHE_PATH.unlink()
+        return {"cleared": True, "path": str(ORDERS_CACHE_PATH)}
+    except Exception as error:
+        return {"cleared": False, "path": str(ORDERS_CACHE_PATH), "error": str(error)}
+
+
+def _table_columns(cur, table_name):
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema='public'
+          AND table_name=%s
+        """,
+        (table_name,),
+    )
+    return {str((row or {}).get("column_name") or "") for row in cur.fetchall()}
+
+
+def run_repair(*, apply=False, include_sc2884_renumber=False, known_orders_only=True):
     if not supabase_backend.is_configured():
         return {
             "mode": "apply" if apply else "dry_run",
@@ -911,15 +1009,26 @@ def run_repair(*, apply=False):
             with conn.cursor() as cur:
                 edition_rows = _fetch_edition_rows(cur)
                 shopify_lines = _fetch_shopify_lines(cur)
-                plan = build_repair_plan(edition_rows, shopify_lines)
+                target_counts_before = _target_order_counts(cur)
+                plan = build_repair_plan(
+                    edition_rows,
+                    shopify_lines,
+                    include_sc2884_renumber=include_sc2884_renumber,
+                    known_orders_only=known_orders_only,
+                )
                 counter_changes = _counter_plan(cur, plan["affected_products"], plan["delete_ids"], plan["renumber_rows"])
+                delete_blockers = _delete_blockers(plan["rows_to_delete"])
                 report.update(
                     {
                         "total_edition_orders_before": len(edition_rows),
                         "shopify_line_rows_checked": len(shopify_lines),
+                        "known_orders_only": known_orders_only,
+                        "sc2884_renumber_enabled": include_sc2884_renumber,
                         "duplicate_groups_found": len(plan["duplicate_groups"]),
                         "rows_to_delete_count": len(plan["delete_ids"]),
                         "rows_to_delete": plan["rows_to_delete"],
+                        "delete_blocked_by_certificate_or_prodigi": bool(delete_blockers),
+                        "delete_blockers": delete_blockers,
                         "renumber_rows": plan["renumber_rows"],
                         "manual_review": plan["manual_review"],
                         "rows_to_keep": plan["rows_to_keep"],
@@ -931,14 +1040,23 @@ def run_repair(*, apply=False):
                         "order_before_after": plan["order_before_after"],
                         "matching_rows_before": plan["matching_rows_before"],
                         "proposed_counter_changes": counter_changes,
+                        "target_order_counts_before": target_counts_before,
                         "total_edition_orders_after": len(edition_rows) - len(plan["delete_ids"]),
+                        "target_order_counts_after_actual": None,
+                        "orders_cache_cleared": {"cleared": False, "reason": "dry run"},
                         "db_protection_added": False,
                         "order_sync_locks_backfilled": False,
                     }
                 )
                 if apply:
+                    if delete_blockers:
+                        report["error"] = "Apply blocked because one or more rows to delete has certificate or Prodigi completion state."
+                        conn.rollback()
+                        return report
                     _apply_repair(cur, plan, counter_changes)
+                    report["target_order_counts_after_actual"] = _target_order_counts(cur)
                     conn.commit()
+                    report["orders_cache_cleared"] = _clear_orders_cache_file()
                     report["changes_made"] = True
                     report["db_protection_added"] = True
                     report["order_sync_locks_backfilled"] = True
@@ -956,11 +1074,25 @@ def main():
     parser = argparse.ArgumentParser(description="Repair duplicate edition orders using Shopify mirror quantities as truth.")
     parser.add_argument("--apply", action="store_true", help="Apply deletes and counter updates.")
     parser.add_argument(CONFIRM_FLAG, dest="confirmed", action="store_true", help="Required with --apply.")
+    parser.add_argument(
+        "--include-general-duplicates",
+        action="store_true",
+        help="Also plan general duplicate groups beyond the known SC2880-SC2883 emergency repair.",
+    )
+    parser.add_argument(
+        "--include-sc2884-renumber",
+        action="store_true",
+        help="Allow the optional SC2884 resequence check. Off by default for this emergency delete-only pass.",
+    )
     args = parser.parse_args()
     if args.apply and not args.confirmed:
         raise SystemExit(f"Apply mode requires {CONFIRM_FLAG}.")
     _load_dotenv()
-    report = run_repair(apply=args.apply)
+    report = run_repair(
+        apply=args.apply,
+        include_sc2884_renumber=args.include_sc2884_renumber,
+        known_orders_only=not args.include_general_duplicates,
+    )
     print(json.dumps(report, indent=2, default=_json_default))
     return 1 if report.get("error") else 0
 
