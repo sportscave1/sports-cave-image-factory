@@ -1355,7 +1355,7 @@ def _generate_certificate_for_row(row, *, raise_errors=False):
                 raise RuntimeError(message)
             return False
         if not row.get("has_saved_allocation"):
-            raise ValueError("Check New Paid Orders to allocate this row before generating a certificate.")
+            raise ValueError("This order needs an edition allocation before generating a certificate.")
         existing = _existing_uploaded_certificate(row, config)
         if existing:
             record = {**certificate_engine.certificate_record_from_order_row(row), **existing, "status": "Uploaded"}
@@ -1952,24 +1952,12 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
     can_generate = selected_count > 0 and all(_normalise_row(row).get("edition_number") for row in selected_rows)
     can_upload = can_generate
     upload_label = "Reupload Certificate" if selected_rows and all(_certificate_is_uploaded(row) for row in selected_rows) else "Generate + Upload Certificate"
-    backfill_latest_paid = False
     st.session_state[ORDER_SYNC_BACKFILL_KEY] = False
-    sync_label = "Check New Paid Orders"
     diagnostics = duplicate_diagnostics or {}
     duplicate_sync_blocked = int(diagnostics.get("duplicate_group_count") or 0) > 0
     diagnostics_blocked = diagnostics.get("sync_allowed") is False
-    sync_blocked = duplicate_sync_blocked or diagnostics_blocked
-    action_cols = st.columns([1.2, 1.15, 1.4, 1.15, 1.35, 1.35])
-    if action_cols[0].button(
-        sync_label,
-        type="primary",
-        use_container_width=True,
-        disabled=not backend or sync_blocked,
-    ):
-        spinner_text = "Backfilling latest paid Shopify orders..." if backfill_latest_paid else "Checking new paid Shopify orders..."
-        with st.spinner(spinner_text):
-            _refresh_orders(latest_paid_only=True, max_orders=50, backfill_latest_paid=backfill_latest_paid)
-        st.rerun()
+    action_cols = st.columns([1.35, 1.15, 1.4, 1.15, 1.35, 1.2])
+    action_cols[0].caption("Orders sync automatically after payment.")
     if action_cols[1].button(
         "Preview Certificate",
         use_container_width=True,
@@ -2000,13 +1988,11 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
         st.rerun()
     action_cols[5].caption(f"{selected_count} selected")
     if not backend:
-        st.caption("Order refresh is unavailable right now.")
+        st.caption("Orders are temporarily unavailable.")
     elif duplicate_sync_blocked:
         st.caption("Orders need repair before new sync. Please contact Nathan/admin.")
     elif diagnostics_blocked:
-        st.caption("Order refresh is unavailable right now. Please contact Nathan/admin.")
-    else:
-        st.caption("Normal sync is cursor-first and keeps Shopify read-only.")
+        st.caption("Orders are temporarily unavailable. Please contact Nathan/admin.")
     if selected_rows and not can_generate:
         st.caption("Assign edition number before certificate generation.")
 

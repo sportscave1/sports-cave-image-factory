@@ -20,6 +20,24 @@ KNOWN_KEEP_EDITIONS = {
     "#SC2882": 27,
     "#SC2883": 63,
 }
+SC2884_ORDER_NAME = "#SC2884"
+SC2884_RENUMBER_FROM = 65
+SC2884_RENUMBER_TO = 64
+SHOPIFY_MIRROR_KEYS = [
+    "sports_cave.edition_enabled",
+    "sports_cave.edition_total",
+    "sports_cave.edition_next_number",
+    "sports_cave.edition_sold_count",
+    "sports_cave.edition_remaining",
+    "sports_cave.edition_status",
+    "sports_cave.edition_label",
+    "sports_cave.next_edition_number",
+    "sports_cave.last_assigned_edition",
+    "sports_cave.sold_count",
+    "sports_cave.remaining_count",
+    "sports_cave.is_sold_out",
+    "sports_cave.edition_display_text",
+]
 
 
 def _load_dotenv():
@@ -233,6 +251,8 @@ def build_repair_plan(edition_rows, shopify_lines=None):
     keep_ids = set()
     groups = []
     known_reports = {}
+    renumber_reports = []
+    manual_review = []
     affected_products = OrderedDict()
     order_before_after = OrderedDict()
 
@@ -396,15 +416,79 @@ def build_repair_plan(edition_rows, shopify_lines=None):
             "source": "shopify_mirror_expected_units",
         }
 
+    valid_after_delete = [row for row in edition_rows or [] if row_id(row) not in delete_by_id]
+    sc2884_rows = [
+        row
+        for row in valid_after_delete
+        if _order_name_key(row.get("shopify_order_name") or row.get("order_name")) == SC2884_ORDER_NAME
+    ]
+    sc2884_65_rows = [
+        row for row in sc2884_rows if _int_value(row.get("edition_number")) == SC2884_RENUMBER_FROM
+    ]
+    if sc2884_65_rows:
+        candidate = sorted(sc2884_65_rows, key=_keep_sort_key)[0]
+        handle = _clean(candidate.get("shopify_handle") or candidate.get("product_handle"))
+        edition_64_owner = next(
+            (
+                row
+                for row in valid_after_delete
+                if _clean(row.get("shopify_handle") or row.get("product_handle")) == handle
+                and _int_value(row.get("edition_number")) == SC2884_RENUMBER_TO
+                and row_id(row) != row_id(candidate)
+            ),
+            None,
+        )
+        if _has_completed_work(candidate):
+            manual_review.append(
+                {
+                    "order_name": SC2884_ORDER_NAME,
+                    "reason": "#SC2884 already has certificate/Prodigi-visible work; do not renumber automatically.",
+                    "row": _public_row(candidate),
+                }
+            )
+        elif edition_64_owner:
+            manual_review.append(
+                {
+                    "order_name": SC2884_ORDER_NAME,
+                    "reason": "#064/100 is already owned by another valid order after duplicate deletions.",
+                    "row": _public_row(candidate),
+                    "blocking_owner": _public_row(edition_64_owner),
+                }
+            )
+        else:
+            report = _public_row(candidate)
+            report["old_edition_number"] = SC2884_RENUMBER_FROM
+            report["new_edition_number"] = SC2884_RENUMBER_TO
+            report["reason"] = "#SC2884 was allocated after fake #064 duplicate rows; #064 is free after repair."
+            renumber_reports.append(report)
+            if handle:
+                affected_products[handle] = True
+            note_matching(candidate)
+
     delete_rows = list(delete_by_id.values())
+    sc2884_result = "unchanged"
+    if renumber_reports:
+        sc2884_result = f"renumber #{SC2884_RENUMBER_FROM:03d}/100 -> #{SC2884_RENUMBER_TO:03d}/100"
+    elif any(item.get("order_name") == SC2884_ORDER_NAME for item in manual_review):
+        sc2884_result = "manual review required"
     return {
         "known_repairs": known_reports,
         "duplicate_groups": groups,
+        "renumber_rows": renumber_reports,
+        "manual_review": manual_review,
         "matching_rows_before": list(matching_row_by_id.values()),
         "delete_ids": list(delete_by_id.keys()),
         "rows_to_delete": delete_rows,
         "rows_to_keep": [group.get("keep") for group in groups if group.get("keep")],
         "affected_products": list(affected_products.keys()),
+        "shopify_metafield_mirror_keys": SHOPIFY_MIRROR_KEYS,
+        "expected_orders_page_result": {
+            "#SC2880": "one row #025/100",
+            "#SC2881": "one row #026/100",
+            "#SC2882": "one row #027/100",
+            "#SC2883": "one row #063/100",
+            "#SC2884": sc2884_result,
+        },
         "expected_before_after": {
             name: {"before": detail["before_count"], "after": detail["after_count"]}
             for name, detail in known_reports.items()
@@ -532,8 +616,14 @@ def _fetch_edition_rows(cur):
     return [dict(row) for row in cur.fetchall()]
 
 
-def _counter_plan(cur, affected_products, delete_ids):
+def _counter_plan(cur, affected_products, delete_ids, renumber_rows=None):
     changes = []
+    delete_id_set = {str(value) for value in delete_ids or []}
+    renumber_by_id = {
+        str(row.get("id")): _int_value(row.get("new_edition_number"))
+        for row in renumber_rows or []
+        if str(row.get("id") or "").strip()
+    }
     for handle in affected_products:
         cur.execute(
             """
@@ -558,18 +648,20 @@ def _counter_plan(cur, affected_products, delete_ids):
         before_stats = cur.fetchone() or {}
         cur.execute(
             """
-            SELECT COUNT(*) AS assigned_count,
-                   COALESCE(MAX(edition_number), 0) AS max_assigned
+            SELECT id::text AS id, edition_number
             FROM edition_orders
             WHERE COALESCE(shopify_handle, product_handle, '')=%s
-              AND NOT (id::text = ANY(%s))
             """,
-            (handle, delete_ids),
+            (handle,),
         )
-        stats = cur.fetchone() or {}
+        after_numbers = [
+            renumber_by_id.get(str(row.get("id")), _int_value(row.get("edition_number"), 0))
+            for row in cur.fetchall()
+            if str(row.get("id") or "") not in delete_id_set
+        ]
         edition_total = max(_int_value(product.get("edition_total"), 100), 1)
-        assigned_count = _int_value(stats.get("assigned_count"), 0)
-        max_assigned = _int_value(stats.get("max_assigned"), 0)
+        assigned_count = len([number for number in after_numbers if number])
+        max_assigned = max(after_numbers or [0])
         proposed_next = max(max_assigned + 1, 1)
         changes.append(
             {
@@ -633,6 +725,42 @@ def _audit_delete(cur, row):
                 default=_json_default,
             ),
             row.get("delete_reason") or "Duplicate edition allocation repair.",
+        ),
+    )
+
+
+def _audit_renumber(cur, row):
+    old_number = _int_value(row.get("old_edition_number"))
+    new_number = _int_value(row.get("new_edition_number"))
+    cur.execute(
+        """
+        INSERT INTO audit_logs(
+            event_type, entity_type, entity_id,
+            shopify_order_id, shopify_line_item_id, shopify_handle,
+            old_value, new_value, reason, actor, source
+        )
+        VALUES (
+            'repair_resequence_after_duplicate_allocation',
+            'edition_order',
+            %s,
+            %s,
+            %s,
+            %s,
+            %s::jsonb,
+            %s::jsonb,
+            %s,
+            'developer_repair_script',
+            'repair_duplicate_order_allocations_from_shopify_truth'
+        )
+        """,
+        (
+            row.get("id"),
+            row.get("shopify_order_id"),
+            row.get("shopify_line_item_id"),
+            row.get("shopify_handle"),
+            json.dumps({"edition_number": old_number, "row": row}, default=_json_default),
+            json.dumps({"edition_number": new_number, "row": row}, default=_json_default),
+            row.get("reason") or "Resequence valid order after duplicate allocation repair.",
         ),
     )
 
@@ -702,6 +830,20 @@ def _apply_repair(cur, plan, counter_changes):
         _audit_delete(cur, row)
     if plan["delete_ids"]:
         cur.execute("DELETE FROM edition_orders WHERE id::text = ANY(%s)", (plan["delete_ids"],))
+    for row in plan.get("renumber_rows") or []:
+        _audit_renumber(cur, row)
+        new_number = _int_value(row.get("new_edition_number"))
+        total = _int_value(row.get("edition_total"), 100)
+        cur.execute(
+            """
+            UPDATE edition_orders
+            SET edition_number=%s,
+                edition_display=%s,
+                updated_at=now()
+            WHERE id::text=%s
+            """,
+            (new_number, f"#{new_number:03d}/{total}", str(row.get("id"))),
+        )
     cur.execute(
         """
         UPDATE edition_orders
@@ -770,7 +912,7 @@ def run_repair(*, apply=False):
                 edition_rows = _fetch_edition_rows(cur)
                 shopify_lines = _fetch_shopify_lines(cur)
                 plan = build_repair_plan(edition_rows, shopify_lines)
-                counter_changes = _counter_plan(cur, plan["affected_products"], plan["delete_ids"])
+                counter_changes = _counter_plan(cur, plan["affected_products"], plan["delete_ids"], plan["renumber_rows"])
                 report.update(
                     {
                         "total_edition_orders_before": len(edition_rows),
@@ -778,10 +920,14 @@ def run_repair(*, apply=False):
                         "duplicate_groups_found": len(plan["duplicate_groups"]),
                         "rows_to_delete_count": len(plan["delete_ids"]),
                         "rows_to_delete": plan["rows_to_delete"],
+                        "renumber_rows": plan["renumber_rows"],
+                        "manual_review": plan["manual_review"],
                         "rows_to_keep": plan["rows_to_keep"],
                         "affected_products": plan["affected_products"],
+                        "shopify_metafield_mirror_keys": plan["shopify_metafield_mirror_keys"],
                         "known_repairs": plan["known_repairs"],
                         "expected_before_after": plan["expected_before_after"],
+                        "expected_orders_page_result": plan["expected_orders_page_result"],
                         "order_before_after": plan["order_before_after"],
                         "matching_rows_before": plan["matching_rows_before"],
                         "proposed_counter_changes": counter_changes,

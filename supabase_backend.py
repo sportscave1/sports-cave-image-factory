@@ -973,7 +973,16 @@ def _ensure_schema_uncached():
                     webhook_id TEXT PRIMARY KEY,
                     topic TEXT,
                     status TEXT,
+                    shop_domain TEXT,
+                    shopify_order_id TEXT,
+                    shopify_order_name TEXT,
+                    source TEXT DEFAULT 'webhook',
+                    inserted_count INTEGER DEFAULT 0,
+                    skipped_count INTEGER DEFAULT 0,
+                    affected_handles_count INTEGER DEFAULT 0,
                     received_at TIMESTAMPTZ DEFAULT now(),
+                    processed_at TIMESTAMPTZ,
+                    processing_elapsed_ms INTEGER DEFAULT 0,
                     payload JSONB DEFAULT '{}'::jsonb,
                     error_message TEXT
                 )
@@ -1337,7 +1346,16 @@ def _ensure_schema_uncached():
                 "webhook_events": (
                     ("topic", "TEXT"),
                     ("status", "TEXT"),
+                    ("shop_domain", "TEXT"),
+                    ("shopify_order_id", "TEXT"),
+                    ("shopify_order_name", "TEXT"),
+                    ("source", "TEXT DEFAULT 'webhook'"),
+                    ("inserted_count", "INTEGER DEFAULT 0"),
+                    ("skipped_count", "INTEGER DEFAULT 0"),
+                    ("affected_handles_count", "INTEGER DEFAULT 0"),
                     ("received_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ("processed_at", "TIMESTAMPTZ"),
+                    ("processing_elapsed_ms", "INTEGER DEFAULT 0"),
                     ("payload", "JSONB DEFAULT '{}'::jsonb"),
                     ("error_message", "TEXT"),
                 ),
@@ -10759,6 +10777,48 @@ def _fallback_webhook_id(payload, topic):
     return f"missing-id-{digest}"
 
 
+def _ensure_webhook_event_table_with_cursor(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS webhook_events (
+            webhook_id TEXT PRIMARY KEY,
+            topic TEXT,
+            status TEXT,
+            shop_domain TEXT,
+            shopify_order_id TEXT,
+            shopify_order_name TEXT,
+            source TEXT DEFAULT 'webhook',
+            inserted_count INTEGER DEFAULT 0,
+            skipped_count INTEGER DEFAULT 0,
+            affected_handles_count INTEGER DEFAULT 0,
+            received_at TIMESTAMPTZ DEFAULT now(),
+            processed_at TIMESTAMPTZ,
+            processing_elapsed_ms INTEGER DEFAULT 0,
+            payload JSONB DEFAULT '{}'::jsonb,
+            error_message TEXT
+        )
+        """
+    )
+    for column_name, column_type in (
+        ("topic", "TEXT"),
+        ("status", "TEXT"),
+        ("shop_domain", "TEXT"),
+        ("shopify_order_id", "TEXT"),
+        ("shopify_order_name", "TEXT"),
+        ("source", "TEXT DEFAULT 'webhook'"),
+        ("inserted_count", "INTEGER DEFAULT 0"),
+        ("skipped_count", "INTEGER DEFAULT 0"),
+        ("affected_handles_count", "INTEGER DEFAULT 0"),
+        ("received_at", "TIMESTAMPTZ DEFAULT now()"),
+        ("processed_at", "TIMESTAMPTZ"),
+        ("processing_elapsed_ms", "INTEGER DEFAULT 0"),
+        ("payload", "JSONB DEFAULT '{}'::jsonb"),
+        ("error_message", "TEXT"),
+    ):
+        cur.execute(f"ALTER TABLE webhook_events ADD COLUMN IF NOT EXISTS {column_name} {column_type}")
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_id_unique ON webhook_events(webhook_id)")
+
+
 def _set_webhook_app_setting(key, value):
     try:
         set_app_setting(key, value, ensure_schema_first=False)
@@ -10769,19 +10829,25 @@ def _set_webhook_app_setting(key, value):
         _webhook_log("webhook_status_setting_failed", "failed", key=key, error=str(error))
 
 
-def _claim_webhook_event(webhook_id, topic, payload):
+def _claim_webhook_event(webhook_id, topic, payload, *, shop_domain=""):
     safe_payload = _safe_webhook_order_payload(payload)
+    shopify_order_id = str(safe_payload.get("admin_graphql_api_id") or safe_payload.get("id") or "").strip()
+    shopify_order_name = str(safe_payload.get("name") or "").strip()
     try:
         with connect() as conn:
             with conn.cursor() as cur:
+                _ensure_webhook_event_table_with_cursor(cur)
                 cur.execute(
                     """
-                    INSERT INTO webhook_events(webhook_id, topic, status, payload, received_at)
-                    VALUES (%s, %s, 'Received', %s::jsonb, now())
+                    INSERT INTO webhook_events(
+                        webhook_id, topic, status, shop_domain, shopify_order_id, shopify_order_name,
+                        source, payload, received_at
+                    )
+                    VALUES (%s, %s, 'received', %s, %s, %s, 'webhook', %s::jsonb, now())
                     ON CONFLICT (webhook_id) DO NOTHING
                     RETURNING webhook_id
                     """,
-                    (webhook_id, topic, json_dumps(safe_payload)),
+                    (webhook_id, topic, shop_domain, shopify_order_id, shopify_order_name, json_dumps(safe_payload)),
                 )
                 inserted = cur.fetchone()
                 if inserted:
@@ -10794,13 +10860,36 @@ def _claim_webhook_event(webhook_id, topic, payload):
                     cur.execute(
                         """
                         UPDATE webhook_events
-                        SET status='Retrying', topic=%s, payload=%s::jsonb, received_at=now(), error_message=''
+                        SET status='received',
+                            topic=%s,
+                            shop_domain=%s,
+                            shopify_order_id=%s,
+                            shopify_order_name=%s,
+                            source='webhook',
+                            payload=%s::jsonb,
+                            received_at=now(),
+                            processed_at=NULL,
+                            processing_elapsed_ms=0,
+                            inserted_count=0,
+                            skipped_count=0,
+                            affected_handles_count=0,
+                            error_message=''
                         WHERE webhook_id=%s
                         """,
-                        (topic, json_dumps(safe_payload), webhook_id),
+                        (topic, shop_domain, shopify_order_id, shopify_order_name, json_dumps(safe_payload), webhook_id),
                     )
                     conn.commit()
                     return True
+                cur.execute(
+                    """
+                    UPDATE webhook_events
+                    SET status='skipped_duplicate',
+                        error_message='Duplicate webhook delivery skipped.',
+                        processed_at=COALESCE(processed_at, now())
+                    WHERE webhook_id=%s
+                    """,
+                    (webhook_id,),
+                )
             conn.commit()
     except Exception as error:
         schema_message = webhook_schema_error_message(error)
@@ -10810,15 +10899,68 @@ def _claim_webhook_event(webhook_id, topic, payload):
     return False
 
 
-def _update_webhook_event_status(webhook_id, status, *, error_message=""):
+def claim_order_paid_webhook_receipt(payload, webhook_id, topic="orders/paid", *, shop_domain=""):
+    topic = str(topic or "orders/paid").strip()
+    webhook_id = str(webhook_id or "").strip() or _fallback_webhook_id(payload, topic)
+    safe_payload = _safe_webhook_order_payload(payload)
+    if not _claim_webhook_event(webhook_id, topic, payload, shop_domain=shop_domain):
+        return {
+            "webhook_id": webhook_id,
+            "duplicate": True,
+            "order_name": safe_payload.get("name") or "",
+            "shopify_order_id": safe_payload.get("admin_graphql_api_id") or safe_payload.get("id") or "",
+        }
+    return {
+        "webhook_id": webhook_id,
+        "duplicate": False,
+        "order_name": safe_payload.get("name") or "",
+        "shopify_order_id": safe_payload.get("admin_graphql_api_id") or safe_payload.get("id") or "",
+    }
+
+
+def _update_webhook_event_status(
+    webhook_id,
+    status,
+    *,
+    error_message="",
+    inserted_count=0,
+    skipped_count=0,
+    affected_handles_count=0,
+    processing_elapsed_ms=0,
+    shopify_order_id="",
+    shopify_order_name="",
+):
     if not webhook_id:
         return
     try:
         with connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE webhook_events SET status=%s, error_message=%s WHERE webhook_id=%s",
-                    (status, str(error_message or "")[:2000], webhook_id),
+                    """
+                    UPDATE webhook_events
+                    SET status=%s,
+                        error_message=%s,
+                        inserted_count=%s,
+                        skipped_count=%s,
+                        affected_handles_count=%s,
+                        processing_elapsed_ms=%s,
+                        processed_at=CASE WHEN %s IN ('processed', 'processed_with_warnings', 'skipped', 'skipped_duplicate', 'failed') THEN now() ELSE processed_at END,
+                        shopify_order_id=COALESCE(NULLIF(%s, ''), shopify_order_id),
+                        shopify_order_name=COALESCE(NULLIF(%s, ''), shopify_order_name)
+                    WHERE webhook_id=%s
+                    """,
+                    (
+                        status,
+                        str(error_message or "")[:2000],
+                        int(inserted_count or 0),
+                        int(skipped_count or 0),
+                        int(affected_handles_count or 0),
+                        int(processing_elapsed_ms or 0),
+                        status,
+                        str(shopify_order_id or "").strip(),
+                        str(shopify_order_name or "").strip(),
+                        webhook_id,
+                    ),
                 )
             conn.commit()
     except Exception as error:
@@ -11011,7 +11153,8 @@ def process_single_paid_shopify_order_for_editions(
     return result
 
 
-def process_order_paid_webhook(payload, webhook_id, topic="orders/paid"):
+def process_order_paid_webhook(payload, webhook_id, topic="orders/paid", *, claim_event=True):
+    started = time.perf_counter()
     topic = str(topic or "orders/paid").strip()
     webhook_id = str(webhook_id or "").strip() or _fallback_webhook_id(payload, topic)
     if not shopify_sync.is_orders_paid_webhook_topic(topic):
@@ -11031,23 +11174,26 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid"):
             "order_visible_refresh_hint": False,
             "errors": [],
         }
-    if not _claim_webhook_event(webhook_id, topic, payload):
-        _webhook_log("webhook_duplicate_skipped", "completed", webhook_id=webhook_id, topic=topic)
-        return {
-            "source": "webhook",
-            "duplicate": True,
-            "processed": True,
-            "order_name": "",
-            "shopify_order_id": "",
-            "imported_lines": 0,
-            "skipped_existing_lines": 0,
-            "editions_assigned": 0,
-            "assigned_editions": [],
-            "affected_handles": [],
-            "metafields_updated": 0,
-            "order_visible_refresh_hint": False,
-            "errors": [],
-        }
+    if claim_event:
+        claim = claim_order_paid_webhook_receipt(payload, webhook_id, topic)
+        if claim.get("duplicate"):
+            _webhook_log("webhook_duplicate_skipped", "completed", webhook_id=webhook_id, topic=topic)
+            return {
+                "source": "webhook",
+                "duplicate": True,
+                "processed": True,
+                "order_name": "",
+                "shopify_order_id": "",
+                "imported_lines": 0,
+                "skipped_existing_lines": 0,
+                "editions_assigned": 0,
+                "assigned_editions": [],
+                "affected_handles": [],
+                "metafields_updated": 0,
+                "order_visible_refresh_hint": False,
+                "errors": [],
+            }
+    _update_webhook_event_status(webhook_id, "processing")
     _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_RECEIVED_KEY, utc_now())
     try:
         result = process_single_paid_shopify_order_for_editions(
@@ -11055,10 +11201,20 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid"):
             source="webhook",
             ensure_schema_first=False,
         )
-        status = "Processed" if not result.get("errors") else "Processed With Warnings"
+        status = "processed" if not result.get("errors") else "processed_with_warnings"
         if not result.get("processed"):
-            status = "Skipped"
-        _update_webhook_event_status(webhook_id, status, error_message="\n".join(result.get("errors") or []))
+            status = "skipped"
+        _update_webhook_event_status(
+            webhook_id,
+            status,
+            error_message="\n".join(result.get("errors") or []),
+            inserted_count=result.get("editions_assigned") or 0,
+            skipped_count=result.get("skipped_existing_lines") or 0,
+            affected_handles_count=len(result.get("affected_handles") or []),
+            processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
+            shopify_order_id=result.get("shopify_order_id") or "",
+            shopify_order_name=result.get("order_name") or "",
+        )
         _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_PROCESSED_KEY, utc_now())
         _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_ORDER_KEY, result.get("order_name") or result.get("shopify_order_id") or "")
         _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_RESULT_KEY, json_dumps({
@@ -11074,7 +11230,12 @@ def process_order_paid_webhook(payload, webhook_id, topic="orders/paid"):
     except Exception as error:
         schema_message = webhook_schema_error_message(error)
         message = schema_message or str(error)
-        _update_webhook_event_status(webhook_id, "Failed", error_message=message)
+        _update_webhook_event_status(
+            webhook_id,
+            "failed",
+            error_message=message,
+            processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
+        )
         _set_webhook_app_setting(LAST_ORDERS_PAID_WEBHOOK_ERROR_KEY, message)
         _webhook_log("webhook_order_processing_failed", "failed", webhook_id=webhook_id, topic=topic, error=message)
         raise RuntimeError(message) from error

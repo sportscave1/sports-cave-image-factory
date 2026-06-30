@@ -5136,28 +5136,45 @@ def _render_developer_allocation_tools():
         except Exception as error:
             _developer_action_error("Baseline capture", error)
 
+    st.subheader("Manual Sync / Backfill Danger Zone")
+    st.caption("Webhook is the normal order path. Use manual sync only after duplicate diagnostics are clean.")
+    manual_confirmation = st.text_input(
+        "Manual sync confirmation",
+        value="",
+        placeholder="RUN MANUAL ORDER SYNC",
+        key="developer-manual-order-sync-confirmation",
+    )
+    manual_sync_blocked = bool(duplicate_diagnostics and duplicate_diagnostics.get("sync_allowed") is False)
     repair_cols = st.columns(2)
     if repair_cols[0].button(
-        "Allocate Missing Recent Paid Orders",
-        key="developer-allocate-missing-paid-orders",
-        disabled=not config.get("configured"),
+        "Run Manual Order Sync",
+        key="developer-run-manual-order-sync",
+        disabled=not config.get("configured") or manual_confirmation.strip() != "RUN MANUAL ORDER SYNC" or manual_sync_blocked,
         use_container_width=True,
     ):
         try:
-            orders = _fetch_recent_paid_shopify_orders(sync, config)
-            result = allocator.process_shopify_orders_for_editions(
-                orders,
+            supabase = importlib.import_module("supabase_backend")
+            result = supabase.sync_latest_paid_orders_to_supabase(
                 config=config,
-                require_cutover=True,
+                limit=50,
+                lookback_days=14,
+                ensure_schema_first=False,
             )
+            st.session_state.developer_manual_order_sync_result = result
             st.success(
-                f"Allocated {result.get('assignments_created') or 0} edition number(s) "
-                f"across {result.get('processed_orders') or 0} recent paid order(s)."
+                f"Manual sync processed {result.get('orders_processed') or 0} order(s); "
+                f"created {result.get('edition_allocations_created') or 0} allocation(s)."
             )
             if result.get("errors"):
-                st.warning(f"{len(result.get('errors') or [])} order(s) need review.")
+                st.warning(f"{len(result.get('errors') or [])} sync warning(s) need review.")
+            _mark_orders_snapshot_for_reload()
         except Exception as error:
-            _developer_action_error("Recent paid order allocation", error)
+            _developer_action_error("Manual order sync", error)
+    if manual_sync_blocked:
+        st.warning("Manual order sync is blocked until duplicate diagnostics are clean.")
+    if st.session_state.get("developer_manual_order_sync_result"):
+        with st.expander("Manual order sync result", expanded=False):
+            st.json(st.session_state.developer_manual_order_sync_result)
 
     try:
         snapshot = allocator.load_orders_snapshot()
@@ -5279,9 +5296,19 @@ def _render_developer_allocation_tools():
     ):
         try:
             repair = importlib.import_module("scripts.repair_duplicate_order_allocations_from_shopify_truth")
-            st.session_state.developer_shopify_truth_repair_result = repair.run_repair(apply=True)
+            supabase = importlib.import_module("supabase_backend")
+            result = repair.run_repair(apply=True)
+            affected_handles = result.get("affected_products") or []
+            if affected_handles:
+                result["shopify_metafield_mirror_after_repair"] = supabase.sync_product_edition_metafields_for_handles(
+                    affected_handles,
+                    config=config,
+                    ensure_schema_first=False,
+                )
+            st.session_state.developer_shopify_truth_repair_result = result
             st.success("Applied Shopify-truth duplicate order allocation repair.")
-            st.warning("Affected products need Shopify metafield mirror sync from Supabase.")
+            if affected_handles and result.get("shopify_metafield_mirror_after_repair", {}).get("errors"):
+                st.warning("Database repair applied, but one or more Shopify metafield mirror updates failed.")
             _clear_orders_session_cache()
             _mark_orders_snapshot_for_reload()
         except Exception as error:
@@ -5298,8 +5325,13 @@ def _render_developer_allocation_tools():
                 "duplicate_groups_found": truth_result.get("duplicate_groups_found"),
                 "rows_to_delete_count": truth_result.get("rows_to_delete_count"),
                 "expected_before_after": truth_result.get("expected_before_after"),
+                "expected_orders_page_result": truth_result.get("expected_orders_page_result"),
                 "order_before_after": truth_result.get("order_before_after"),
                 "affected_products": truth_result.get("affected_products"),
+                "renumber_rows": truth_result.get("renumber_rows"),
+                "manual_review": truth_result.get("manual_review"),
+                "shopify_metafield_mirror_keys": truth_result.get("shopify_metafield_mirror_keys"),
+                "shopify_metafield_mirror_after_repair": truth_result.get("shopify_metafield_mirror_after_repair"),
                 "db_protection_added": truth_result.get("db_protection_added"),
                 "order_sync_locks_backfilled": truth_result.get("order_sync_locks_backfilled"),
                 "error": truth_result.get("error"),
@@ -5311,6 +5343,12 @@ def _render_developer_allocation_tools():
         if truth_result.get("rows_to_delete"):
             st.write("Rows to delete")
             st.dataframe(truth_result["rows_to_delete"], hide_index=True, use_container_width=True)
+        if truth_result.get("renumber_rows"):
+            st.write("Rows to renumber")
+            st.dataframe(truth_result["renumber_rows"], hide_index=True, use_container_width=True)
+        if truth_result.get("manual_review"):
+            st.write("Manual review required")
+            st.dataframe(truth_result["manual_review"], hide_index=True, use_container_width=True)
         if truth_result.get("proposed_counter_changes"):
             st.write("Affected product counter changes")
             st.dataframe(truth_result["proposed_counter_changes"], hide_index=True, use_container_width=True)
@@ -5642,6 +5680,9 @@ def render_settings_page():
 
     with st.expander("Basic App Info", expanded=True):
         st.write(f"**App version:** {APP_VERSION}")
+        st.write(f"**Git SHA:** {os.getenv('RENDER_GIT_COMMIT') or os.getenv('GIT_COMMIT') or 'local'}")
+        st.write(f"**Deployment timestamp:** {os.getenv('RENDER_DEPLOY_CREATED_AT') or os.getenv('DEPLOYMENT_TIMESTAMP') or 'local'}")
+        st.write(f"**Service role:** {os.getenv('SPORTS_CAVE_SERVICE_ROLE') or 'app'}")
         st.write(f"**App password protection:** {get_password_protection_status()}")
         st.write(f"**Developer password env override:** {'Set' if os.getenv('DEVELOPER_PAGE_PASSWORD') else 'Using MVP default'}")
         st.write(f"**Output folder path:** `{RUNS_DIR}`")

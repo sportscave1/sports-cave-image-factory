@@ -124,6 +124,15 @@ class ShopifySyncClientTests(unittest.TestCase):
             return_value=True,
         ), patch.object(
             supabase_backend,
+            "claim_order_paid_webhook_receipt",
+            return_value={
+                "webhook_id": "webhook-2879",
+                "duplicate": False,
+                "order_name": "#SC2879",
+                "shopify_order_id": "gid://shopify/Order/2879",
+            },
+        ), patch.object(
+            supabase_backend,
             "process_order_paid_webhook",
             return_value={
                 "source": "webhook",
@@ -149,8 +158,9 @@ class ShopifySyncClientTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["status"], "processed")
+        self.assertEqual(response.json()["status"], "accepted")
         process_webhook.assert_called_once()
+        self.assertFalse(process_webhook.call_args.kwargs["claim_event"])
 
     def test_orders_paid_fastapi_route_accepts_valid_webhook_secret(self):
         from fastapi.testclient import TestClient
@@ -168,6 +178,15 @@ class ShopifySyncClientTests(unittest.TestCase):
             supabase_backend,
             "is_configured",
             return_value=True,
+        ), patch.object(
+            supabase_backend,
+            "claim_order_paid_webhook_receipt",
+            return_value={
+                "webhook_id": "missing-id-test",
+                "duplicate": False,
+                "order_name": "#SC2879",
+                "shopify_order_id": "gid://shopify/Order/2879",
+            },
         ), patch.object(
             supabase_backend,
             "process_order_paid_webhook",
@@ -214,6 +233,15 @@ class ShopifySyncClientTests(unittest.TestCase):
             return_value=True,
         ), patch.object(
             supabase_backend,
+            "claim_order_paid_webhook_receipt",
+            return_value={
+                "webhook_id": "missing-id-test",
+                "duplicate": False,
+                "order_name": "#SC2879",
+                "shopify_order_id": "gid://shopify/Order/2879",
+            },
+        ), patch.object(
+            supabase_backend,
             "process_order_paid_webhook",
             return_value={
                 "source": "webhook",
@@ -239,6 +267,100 @@ class ShopifySyncClientTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         process_webhook.assert_called_once()
+
+    def test_orders_paid_fastapi_route_duplicate_receipt_skips_background_processing(self):
+        from fastapi.testclient import TestClient
+        import webhook_server
+
+        raw_body = b'{"id":2879,"name":"#SC2879","financial_status":"paid","line_items":[]}'
+        secret = "client-secret"
+        signature = base64.b64encode(
+            hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
+        ).decode("utf-8")
+        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": secret, "SHOPIFY_WEBHOOK_SECRET": ""}), patch.object(
+            supabase_backend,
+            "is_configured",
+            return_value=True,
+        ), patch.object(
+            supabase_backend,
+            "claim_order_paid_webhook_receipt",
+            return_value={
+                "webhook_id": "webhook-2879",
+                "duplicate": True,
+                "order_name": "#SC2879",
+                "shopify_order_id": "gid://shopify/Order/2879",
+            },
+        ), patch.object(
+            supabase_backend,
+            "process_order_paid_webhook",
+        ) as process_webhook:
+            response = TestClient(webhook_server.app).post(
+                "/webhooks/shopify/orders-paid",
+                content=raw_body,
+                headers={
+                    "X-Shopify-Hmac-Sha256": signature,
+                    "X-Shopify-Topic": "orders/paid",
+                    "X-Shopify-Webhook-Id": "webhook-2879",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "skipped_duplicate")
+        process_webhook.assert_not_called()
+
+    def test_orders_paid_fastapi_logs_do_not_expose_hmac_or_secret_lengths(self):
+        from fastapi.testclient import TestClient
+        import webhook_server
+
+        raw_body = b'{"id":2879,"name":"#SC2879","financial_status":"paid","line_items":[]}'
+        secret = "client-secret"
+        signature = base64.b64encode(
+            hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
+        ).decode("utf-8")
+        with patch.dict(
+            os.environ,
+            {
+                "SHOPIFY_CLIENT_SECRET": secret,
+                "SHOPIFY_WEBHOOK_SECRET": "",
+                "DEBUG_WEBHOOK_SECURITY": "",
+                "RENDER": "true",
+            },
+        ), patch.object(
+            supabase_backend,
+            "is_configured",
+            return_value=True,
+        ), patch.object(
+            supabase_backend,
+            "claim_order_paid_webhook_receipt",
+            return_value={
+                "webhook_id": "webhook-2879",
+                "duplicate": False,
+                "order_name": "#SC2879",
+                "shopify_order_id": "gid://shopify/Order/2879",
+            },
+        ), patch.object(
+            supabase_backend,
+            "process_order_paid_webhook",
+            return_value={"source": "webhook", "processed": True, "errors": []},
+        ), patch.object(webhook_server, "_webhook_log") as webhook_log:
+            response = TestClient(webhook_server.app).post(
+                "/webhooks/shopify/orders-paid",
+                content=raw_body,
+                headers={
+                    "X-Shopify-Hmac-Sha256": signature,
+                    "X-Shopify-Topic": "orders/paid",
+                    "X-Shopify-Webhook-Id": "webhook-2879",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        logged_text = " ".join(str(call) for call in webhook_log.call_args_list)
+        self.assertNotIn("received_hmac_prefix", logged_text)
+        self.assertNotIn("received_hmac_suffix", logged_text)
+        self.assertNotIn("calculated_hmac_prefix", logged_text)
+        self.assertNotIn("calculated_hmac_suffix", logged_text)
+        self.assertNotIn("secret_length", logged_text)
+        self.assertNotIn("raw_body", logged_text)
 
     def test_orders_paid_fastapi_healthz(self):
         from fastapi.testclient import TestClient
@@ -3529,8 +3651,8 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
 
         self.assertIn("duplicate_diagnostics", signature.parameters)
         self.assertEqual(signature.parameters["duplicate_diagnostics"].default, None)
-        self.assertIn("sync_allowed", actions_source)
-        self.assertIn("Check New Paid Orders", actions_source)
+        self.assertIn("Orders sync automatically after payment.", actions_source)
+        self.assertNotIn("Check New Paid Orders", actions_source)
 
     def test_orders_duplicate_warning_disappears_when_raw_diagnostics_are_clean(self):
         import orders_page
@@ -3871,6 +3993,97 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(plan["delete_ids"], ["2"])
         self.assertEqual(plan["rows_to_delete"][0]["duplicate_type"], "allocation_key")
 
+    def test_shopify_truth_repair_plan_renumbers_sc2884_65_to_64_when_safe(self):
+        from scripts import repair_duplicate_order_allocations_from_shopify_truth as repair
+
+        rows = [
+            {
+                "id": "1",
+                "shopify_order_name": "#SC2883",
+                "shopify_order_id": "gid://shopify/Order/2883",
+                "shopify_line_item_id": "gid://shopify/LineItem/9001",
+                "allocation_index": 1,
+                "allocation_key": "2883:9001:1",
+                "shopify_handle": "legends-never-die",
+                "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant_title": "Black / L",
+                "customer_name": "ANDREW KEELING",
+                "edition_number": 63,
+                "edition_total": 100,
+                "certificate_status": "Needs certificate",
+                "created_at": "2026-06-29T01:00:00Z",
+            },
+            {
+                "id": "2",
+                "shopify_order_name": "#SC2883",
+                "shopify_order_id": "gid://shopify/Order/2883",
+                "shopify_line_item_id": "gid://shopify/LineItem/9001",
+                "allocation_index": 1,
+                "allocation_key": "2883:9001:1",
+                "shopify_handle": "legends-never-die",
+                "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant_title": "Black / L",
+                "customer_name": "ANDREW KEELING",
+                "edition_number": 64,
+                "edition_total": 100,
+                "certificate_status": "Needs certificate",
+                "created_at": "2026-06-29T01:01:00Z",
+            },
+            {
+                "id": "3",
+                "shopify_order_name": "#SC2884",
+                "shopify_order_id": "gid://shopify/Order/2884",
+                "shopify_line_item_id": "gid://shopify/LineItem/9002",
+                "allocation_index": 1,
+                "allocation_key": "2884:9002:1",
+                "shopify_handle": "legends-never-die",
+                "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant_title": "Oak / M",
+                "customer_name": "Michael Winn",
+                "edition_number": 65,
+                "edition_total": 100,
+                "certificate_status": "Needs certificate",
+                "created_at": "2026-06-30T01:00:00Z",
+            },
+        ]
+
+        plan = repair.build_repair_plan(rows, [])
+
+        self.assertEqual(plan["delete_ids"], ["2"])
+        self.assertEqual(len(plan["renumber_rows"]), 1)
+        self.assertEqual(plan["renumber_rows"][0]["id"], "3")
+        self.assertEqual(plan["renumber_rows"][0]["old_edition_number"], 65)
+        self.assertEqual(plan["renumber_rows"][0]["new_edition_number"], 64)
+        self.assertEqual(plan["manual_review"], [])
+
+    def test_shopify_truth_repair_plan_blocks_sc2884_renumber_when_certificate_ready(self):
+        from scripts import repair_duplicate_order_allocations_from_shopify_truth as repair
+
+        rows = [
+            {
+                "id": "1",
+                "shopify_order_name": "#SC2884",
+                "shopify_order_id": "gid://shopify/Order/2884",
+                "shopify_line_item_id": "gid://shopify/LineItem/9002",
+                "allocation_index": 1,
+                "allocation_key": "2884:9002:1",
+                "shopify_handle": "legends-never-die",
+                "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant_title": "Oak / M",
+                "customer_name": "Michael Winn",
+                "edition_number": 65,
+                "edition_total": 100,
+                "certificate_status": "Ready",
+                "created_at": "2026-06-30T01:00:00Z",
+            },
+        ]
+
+        plan = repair.build_repair_plan(rows, [])
+
+        self.assertEqual(plan["renumber_rows"], [])
+        self.assertEqual(plan["manual_review"][0]["order_name"], "#SC2884")
+        self.assertIn("certificate", plan["manual_review"][0]["reason"])
+
     def test_orders_page_keeps_one_visible_row_per_allocation_unit(self):
         import orders_page
 
@@ -3967,6 +4180,8 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertIn("Orders need repair before new sync. Please contact Nathan/admin.", warning_source)
         self.assertNotIn("allocation_key", warning_source)
         self.assertNotIn("Backfill latest paid orders", actions_source)
+        self.assertNotIn("Check New Paid Orders", actions_source)
+        self.assertIn("Orders sync automatically after payment.", actions_source)
 
     def test_developer_page_has_orders_cache_recheck_diagnostics_only(self):
         import app
@@ -3978,6 +4193,8 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertIn("check_new_paid_orders_allowed", developer_source)
         self.assertIn("Shopify truth duplicate repair", developer_source)
         self.assertIn("repair_duplicate_order_allocations_from_shopify_truth", developer_source)
+        self.assertIn("RUN MANUAL ORDER SYNC", developer_source)
+        self.assertIn("sync_latest_paid_orders_to_supabase", developer_source)
 
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(
