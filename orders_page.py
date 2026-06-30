@@ -1639,10 +1639,7 @@ def _duplicate_diagnostics_snapshot(limit=10):
 
 
 def _render_duplicate_warning_panel(duplicates):
-    duplicate_groups = int((duplicates or {}).get("duplicate_group_count") or 0)
-    if duplicate_groups <= 0:
-        return
-    st.error("Orders need repair before new sync. Please contact Nathan/admin.")
+    return
 
 
 def _render_top_actions(rows, duplicate_diagnostics=None):
@@ -1953,11 +1950,7 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
     can_upload = can_generate
     upload_label = "Reupload Certificate" if selected_rows and all(_certificate_is_uploaded(row) for row in selected_rows) else "Generate + Upload Certificate"
     st.session_state[ORDER_SYNC_BACKFILL_KEY] = False
-    diagnostics = duplicate_diagnostics or {}
-    duplicate_sync_blocked = int(diagnostics.get("duplicate_group_count") or 0) > 0
-    diagnostics_blocked = diagnostics.get("sync_allowed") is False
     action_cols = st.columns([1.35, 1.15, 1.4, 1.15, 1.35, 1.2])
-    action_cols[0].caption("Orders sync automatically after payment.")
     if action_cols[1].button(
         "Preview Certificate",
         use_container_width=True,
@@ -1989,10 +1982,6 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
     action_cols[5].caption(f"{selected_count} selected")
     if not backend:
         st.caption("Orders are temporarily unavailable.")
-    elif duplicate_sync_blocked:
-        st.caption("Orders need repair before new sync. Please contact Nathan/admin.")
-    elif diagnostics_blocked:
-        st.caption("Orders are temporarily unavailable. Please contact Nathan/admin.")
     if selected_rows and not can_generate:
         st.caption("Assign edition number before certificate generation.")
 
@@ -2323,11 +2312,8 @@ def render_page():
     _perf_log("table render prep", prep_started, rows=len(rows))
 
     st.title("Orders")
-    st.caption("Select an order, complete QA, then generate and upload the certificate.")
+    st.caption("Orders sync automatically after payment.")
     meta = st.session_state.get(META_KEY) or {}
-    st.caption("Source: Shopify mirror + Supabase edition ledger")
-    st.caption("Edition source: Supabase")
-    st.caption(f"Shopify mirror last synced: {_format_time(meta.get('last_synced') or meta.get('last_refreshed'))}")
     if meta.get("error"):
         st.caption(f"Orders load warning: {meta.get('error')}")
     duplicate_diagnostics = _duplicate_diagnostics_snapshot(limit=10)
