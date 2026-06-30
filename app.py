@@ -5250,6 +5250,72 @@ def _render_developer_allocation_tools():
                 st.dataframe(counters, hide_index=True, use_container_width=True)
 
     st.divider()
+    st.subheader("Shopify truth duplicate repair")
+    st.caption(
+        "Developer-only repair that compares edition_orders to Shopify mirror line quantities. Dry-run first; apply requires typed confirmation."
+    )
+    truth_repair_cols = st.columns(2)
+    if truth_repair_cols[0].button(
+        "Dry-run Shopify truth repair",
+        key="developer-dry-run-shopify-truth-repair",
+        use_container_width=True,
+    ):
+        try:
+            repair = importlib.import_module("scripts.repair_duplicate_order_allocations_from_shopify_truth")
+            st.session_state.developer_shopify_truth_repair_result = repair.run_repair(apply=False)
+        except Exception as error:
+            _developer_action_error("Dry-run Shopify truth repair", error)
+    truth_confirmation = st.text_input(
+        "Shopify truth repair confirmation",
+        value="",
+        placeholder="DELETE DUPLICATE EDITION ROWS",
+        key="developer-shopify-truth-repair-confirmation",
+    )
+    if truth_repair_cols[1].button(
+        "Apply Shopify truth repair",
+        key="developer-apply-shopify-truth-repair",
+        disabled=truth_confirmation.strip() != "DELETE DUPLICATE EDITION ROWS",
+        use_container_width=True,
+    ):
+        try:
+            repair = importlib.import_module("scripts.repair_duplicate_order_allocations_from_shopify_truth")
+            st.session_state.developer_shopify_truth_repair_result = repair.run_repair(apply=True)
+            st.success("Applied Shopify-truth duplicate order allocation repair.")
+            st.warning("Affected products need Shopify metafield mirror sync from Supabase.")
+            _clear_orders_session_cache()
+            _mark_orders_snapshot_for_reload()
+        except Exception as error:
+            _developer_action_error("Apply Shopify truth repair", error)
+    truth_result = st.session_state.get("developer_shopify_truth_repair_result")
+    if truth_result:
+        st.json(
+            {
+                "mode": truth_result.get("mode"),
+                "changes_made": truth_result.get("changes_made"),
+                "total_edition_orders_before": truth_result.get("total_edition_orders_before"),
+                "total_edition_orders_after": truth_result.get("total_edition_orders_after"),
+                "shopify_line_rows_checked": truth_result.get("shopify_line_rows_checked"),
+                "duplicate_groups_found": truth_result.get("duplicate_groups_found"),
+                "rows_to_delete_count": truth_result.get("rows_to_delete_count"),
+                "expected_before_after": truth_result.get("expected_before_after"),
+                "order_before_after": truth_result.get("order_before_after"),
+                "affected_products": truth_result.get("affected_products"),
+                "db_protection_added": truth_result.get("db_protection_added"),
+                "order_sync_locks_backfilled": truth_result.get("order_sync_locks_backfilled"),
+                "error": truth_result.get("error"),
+            }
+        )
+        if truth_result.get("matching_rows_before"):
+            with st.expander("Matching rows before repair", expanded=False):
+                st.dataframe(truth_result["matching_rows_before"], hide_index=True, use_container_width=True)
+        if truth_result.get("rows_to_delete"):
+            st.write("Rows to delete")
+            st.dataframe(truth_result["rows_to_delete"], hide_index=True, use_container_width=True)
+        if truth_result.get("proposed_counter_changes"):
+            st.write("Affected product counter changes")
+            st.dataframe(truth_result["proposed_counter_changes"], hide_index=True, use_container_width=True)
+
+    st.divider()
     st.subheader("Repair duplicate order allocations")
     st.caption("Developer-only SC2880-SC2883 repair. Dry-run first; apply requires typed confirmation.")
     repair_duplicate_cols = st.columns(2)

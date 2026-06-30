@@ -3301,6 +3301,60 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertFalse(any("UPDATE edition_runs" in statement for statement in statements))
         self.assertFalse(any("INSERT INTO edition_orders" in statement for statement in statements))
 
+    def test_one_item_order_allocates_one_unit_and_marks_processed_lock(self):
+        order = self.paid_order(
+            processed_at="2026-06-19T00:05:00Z",
+            remote_updated_at="2026-06-19T02:05:00Z",
+        )
+        allocations = []
+
+        def fake_allocate(**kwargs):
+            allocations.append(kwargs)
+            return {
+                "created": True,
+                "assignment": {
+                    "id": "eo-1",
+                    "shopify_handle": kwargs["shopify_handle"],
+                    "edition_number": 25,
+                    "edition_total": 100,
+                    "allocation_index": kwargs["allocation_index"],
+                },
+                "sold_out": False,
+                "error": "",
+            }
+
+        with patch.object(supabase_backend, "_persist_order_snapshot"), patch.object(
+            supabase_backend, "list_existing_edition_order_identities", return_value={"order_ids": set(), "order_names": set()}
+        ), patch.object(
+            supabase_backend, "list_existing_order_sync_locks", return_value=set()
+        ), patch.object(
+            supabase_backend,
+            "resolve_edition_product_for_order_line",
+            return_value={
+                "product": {
+                    "handle": "messi-the-final-crown-wall-art",
+                    "title": "Messi The Final Crown Wall Art",
+                    "shopify_product_id": "gid://shopify/Product/999",
+                    "active": True,
+                }
+            },
+        ), patch.object(
+            supabase_backend, "allocate_edition_for_order_line", side_effect=fake_allocate
+        ), patch.object(supabase_backend, "connect") as connect, patch.object(
+            supabase_backend, "_set_order_line_status"
+        ):
+            result = supabase_backend.process_paid_order(
+                order,
+                generate_certificates=False,
+                sync_product_metafields=False,
+                ensure_schema_first=False,
+            )
+
+        self.assertEqual(result["assignments_created"], 1)
+        self.assertEqual(result["existing_assignments_skipped"], 0)
+        self.assertEqual([call["allocation_index"] for call in allocations], [1])
+        self.assertTrue(connect.called)
+
     def test_quantity_two_order_allocates_two_units_and_marks_processed_lock(self):
         order = self.paid_order(
             processed_at="2026-06-19T00:05:00Z",
@@ -3655,6 +3709,168 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(sorted(plan["delete_ids"]), ["2", "3", "4", "5", "7"])
         self.assertEqual(len(plan["rows_to_delete"]), 5)
 
+    def test_shopify_truth_repair_plan_keeps_sc2880_sc2883_and_deletes_12_extras(self):
+        from scripts import repair_duplicate_order_allocations_from_shopify_truth as repair
+
+        keep_map = {"#SC2880": 25, "#SC2881": 26, "#SC2882": 27, "#SC2883": 63}
+        edition_sequences = {
+            "#SC2880": [28, 25, 28, 25],
+            "#SC2881": [29, 26, 29, 26],
+            "#SC2882": [30, 27, 30, 27],
+            "#SC2883": [63, 64, 63, 64],
+        }
+        rows = []
+        shopify_lines = []
+        next_id = 1
+        for offset, (order_name, editions) in enumerate(edition_sequences.items(), start=2880):
+            line_id = f"gid://shopify/LineItem/{offset}001"
+            order_id = f"gid://shopify/Order/{offset}"
+            handle = "legends-never-die" if order_name == "#SC2883" else "seventh-nolan-ryan"
+            shopify_lines.append(
+                {
+                    "shopify_order_id": order_id,
+                    "order_name": order_name,
+                    "shopify_line_item_id": line_id,
+                    "quantity": 1,
+                    "shopify_handle": handle,
+                    "product_title": "Legends Never Die Messi vs Ronaldo Wall Art"
+                    if order_name == "#SC2883"
+                    else "The Seventh Nolan Ryan Wall Art",
+                    "variant_title": "Black / L" if order_name == "#SC2883" else "Black / S",
+                    "eligible": True,
+                }
+            )
+            for index, edition_number in enumerate(editions, start=1):
+                rows.append(
+                    {
+                        "id": str(next_id),
+                        "shopify_order_name": order_name,
+                        "shopify_order_id": order_id if index % 2 else str(offset),
+                        "shopify_line_item_id": line_id if index % 2 else str(offset) + "001",
+                        "allocation_index": 1,
+                        "allocation_key": f"{offset}:{offset}001:1" if index in (1, 3) else "",
+                        "shopify_handle": handle,
+                        "product_title": shopify_lines[-1]["product_title"],
+                        "variant_title": shopify_lines[-1]["variant_title"],
+                        "customer_name": "ANDREW KEELING" if order_name == "#SC2883" else "Nathan Baker",
+                        "edition_number": edition_number,
+                        "edition_total": 100,
+                        "created_at": f"2026-06-29T0{index}:00:00Z",
+                    }
+                )
+                next_id += 1
+
+        plan = repair.build_repair_plan(rows, shopify_lines)
+
+        self.assertEqual(len(plan["delete_ids"]), 12)
+        self.assertEqual(plan["expected_before_after"], {
+            "#SC2880": {"before": 4, "after": 1},
+            "#SC2881": {"before": 4, "after": 1},
+            "#SC2882": {"before": 4, "after": 1},
+            "#SC2883": {"before": 4, "after": 1},
+        })
+        for order_name, keep_edition in keep_map.items():
+            kept = plan["known_repairs"][order_name]["keep"]
+            deleted_editions = [row["edition_number"] for row in plan["known_repairs"][order_name]["delete"]]
+            self.assertEqual(kept["edition_number"], keep_edition)
+            self.assertEqual(len(deleted_editions), 3)
+            self.assertNotIn(kept["id"], plan["delete_ids"])
+        self.assertEqual(len(plan["matching_rows_before"]), 16)
+
+    def test_shopify_truth_repair_plan_preserves_valid_quantity_two_units(self):
+        from scripts import repair_duplicate_order_allocations_from_shopify_truth as repair
+
+        rows = [
+            {
+                "id": "1",
+                "shopify_order_name": "#SC3000",
+                "shopify_order_id": "gid://shopify/Order/3000",
+                "shopify_line_item_id": "gid://shopify/LineItem/7000",
+                "allocation_index": 1,
+                "allocation_key": "3000:7000:1",
+                "shopify_handle": "legends-never-die",
+                "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant_title": "Black / L",
+                "customer_name": "Collector",
+                "edition_number": 10,
+                "edition_total": 100,
+                "created_at": "2026-06-29T01:00:00Z",
+            },
+            {
+                "id": "2",
+                "shopify_order_name": "#SC3000",
+                "shopify_order_id": "gid://shopify/Order/3000",
+                "shopify_line_item_id": "gid://shopify/LineItem/7000",
+                "allocation_index": 2,
+                "allocation_key": "3000:7000:2",
+                "shopify_handle": "legends-never-die",
+                "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant_title": "Black / L",
+                "customer_name": "Collector",
+                "edition_number": 11,
+                "edition_total": 100,
+                "created_at": "2026-06-29T01:01:00Z",
+            },
+        ]
+        shopify_lines = [
+            {
+                "shopify_order_id": "gid://shopify/Order/3000",
+                "order_name": "#SC3000",
+                "shopify_line_item_id": "gid://shopify/LineItem/7000",
+                "quantity": 2,
+                "shopify_handle": "legends-never-die",
+                "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant_title": "Black / L",
+                "eligible": True,
+            }
+        ]
+
+        plan = repair.build_repair_plan(rows, shopify_lines)
+
+        self.assertEqual(plan["delete_ids"], [])
+        self.assertEqual(plan["rows_to_delete"], [])
+
+    def test_shopify_truth_repair_plan_removes_duplicate_allocation_key_unit(self):
+        from scripts import repair_duplicate_order_allocations_from_shopify_truth as repair
+
+        rows = [
+            {
+                "id": "1",
+                "shopify_order_name": "#SC3000",
+                "shopify_order_id": "gid://shopify/Order/3000",
+                "shopify_line_item_id": "gid://shopify/LineItem/7000",
+                "allocation_index": 1,
+                "allocation_key": "3000:7000:1",
+                "shopify_handle": "legends-never-die",
+                "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant_title": "Black / L",
+                "customer_name": "Collector",
+                "edition_number": 10,
+                "edition_total": 100,
+                "created_at": "2026-06-29T01:00:00Z",
+            },
+            {
+                "id": "2",
+                "shopify_order_name": "#SC3000",
+                "shopify_order_id": "3000",
+                "shopify_line_item_id": "7000",
+                "allocation_index": 1,
+                "allocation_key": "3000:7000:1",
+                "shopify_handle": "legends-never-die",
+                "product_title": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant_title": "Black / L",
+                "customer_name": "Collector",
+                "edition_number": 10,
+                "edition_total": 100,
+                "created_at": "2026-06-29T01:01:00Z",
+            },
+        ]
+
+        plan = repair.build_repair_plan(rows, [])
+
+        self.assertEqual(plan["delete_ids"], ["2"])
+        self.assertEqual(plan["rows_to_delete"][0]["duplicate_type"], "allocation_key")
+
     def test_orders_page_keeps_one_visible_row_per_allocation_unit(self):
         import orders_page
 
@@ -3760,6 +3976,8 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertIn("Clear Orders Cache / Recheck Diagnostics", developer_source)
         self.assertIn("edition_allocation_duplicate_diagnostics", developer_source)
         self.assertIn("check_new_paid_orders_allowed", developer_source)
+        self.assertIn("Shopify truth duplicate repair", developer_source)
+        self.assertIn("repair_duplicate_order_allocations_from_shopify_truth", developer_source)
 
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(
