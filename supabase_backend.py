@@ -292,6 +292,16 @@ def allocation_identity_key(shopify_order_id, shopify_line_item_id, unit_index):
     return f"{order_id}:{line_id}:{unit}"
 
 
+def canonical_order_sync_key(shopify_order_id="", shopify_order_name=""):
+    order_id = canonical_shopify_id(shopify_order_id)
+    if order_id:
+        return f"id:{order_id}"
+    order_name = str(shopify_order_name or "").strip().upper()
+    if order_name:
+        return f"name:{order_name}"
+    return ""
+
+
 def order_allocation_sort_key(order):
     """Stable oldest-first key for edition allocation, independent of API/display order."""
     line_items = order.get("line_items") or [{}]
@@ -714,6 +724,20 @@ def _ensure_schema_uncached():
                     created_at TIMESTAMPTZ DEFAULT now(),
                     updated_at TIMESTAMPTZ DEFAULT now(),
                     UNIQUE (shopify_line_item_id, allocation_index)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS edition_order_sync_locks (
+                    id BIGSERIAL PRIMARY KEY,
+                    canonical_order_key TEXT UNIQUE NOT NULL,
+                    shopify_order_id TEXT,
+                    shopify_order_name TEXT,
+                    status TEXT DEFAULT 'allocated',
+                    reason TEXT DEFAULT '',
+                    created_at TIMESTAMPTZ DEFAULT now(),
+                    updated_at TIMESTAMPTZ DEFAULT now()
                 )
                 """
             )
@@ -1522,6 +1546,49 @@ def _ensure_schema_uncached():
                     """,
                     "idx_edition_orders_allocation_key_unique",
                 )
+            if table_exists(cur, "edition_order_sync_locks"):
+                cur.execute(
+                    """
+                    INSERT INTO edition_order_sync_locks(
+                        canonical_order_key,
+                        shopify_order_id,
+                        shopify_order_name,
+                        status,
+                        reason,
+                        updated_at
+                    )
+                    SELECT DISTINCT ON (canonical_order_key)
+                           canonical_order_key,
+                           shopify_order_id,
+                           shopify_order_name,
+                           'allocated',
+                           'Backfilled from existing edition_orders',
+                           now()
+                    FROM (
+                        SELECT CASE
+                                   WHEN COALESCE(eo.shopify_order_id, '') <> ''
+                                   THEN 'id:' || regexp_replace(eo.shopify_order_id, '^gid://shopify/[^/]+/', '', 'i')
+                                   WHEN COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, '')) <> ''
+                                   THEN 'name:' || UPPER(TRIM(COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, ''))))
+                                   ELSE ''
+                               END AS canonical_order_key,
+                               eo.shopify_order_id,
+                               COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, '')) AS shopify_order_name,
+                               eo.created_at,
+                               eo.id::text AS row_id
+                        FROM edition_orders eo
+                        LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+                    ) existing_orders
+                    WHERE canonical_order_key <> ''
+                    ORDER BY canonical_order_key, created_at ASC NULLS LAST, row_id ASC
+                    ON CONFLICT (canonical_order_key) DO UPDATE SET
+                        shopify_order_id=COALESCE(NULLIF(edition_order_sync_locks.shopify_order_id, ''), EXCLUDED.shopify_order_id),
+                        shopify_order_name=COALESCE(NULLIF(edition_order_sync_locks.shopify_order_name, ''), EXCLUDED.shopify_order_name),
+                        updated_at=now()
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_order_sync_locks_order_id ON edition_order_sync_locks(shopify_order_id)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_order_sync_locks_order_name ON edition_order_sync_locks(shopify_order_name)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_run_id ON edition_orders(edition_run_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_line_item_id ON edition_orders(shopify_line_item_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_orders_product_id ON edition_orders(shopify_product_id)")
@@ -4586,6 +4653,211 @@ def list_existing_shopify_line_item_ids(line_item_ids, *, ensure_schema_first=Tr
         if schema_message:
             raise RuntimeError(schema_message) from error
         raise
+
+
+def list_existing_edition_order_identities(orders, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
+    order_id_values = sorted(
+        {
+            candidate
+            for order in (orders or [])
+            for candidate in _shopify_id_candidates("Order", (order or {}).get("shopify_order_id"))
+            if candidate
+        }
+    )
+    order_names = sorted(
+        {
+            str((order or {}).get("order_name") or (order or {}).get("name") or "").strip()
+            for order in (orders or [])
+            if str((order or {}).get("order_name") or (order or {}).get("name") or "").strip()
+        }
+    )
+    if not order_id_values and not order_names:
+        return {"order_ids": set(), "order_names": set()}
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT shopify_order_id, shopify_order_name
+                    FROM edition_orders
+                    WHERE (
+                        COALESCE(shopify_order_id, '') <> ''
+                        AND shopify_order_id = ANY(%s)
+                    )
+                    OR (
+                        COALESCE(shopify_order_name, '') <> ''
+                        AND shopify_order_name = ANY(%s)
+                    )
+                    """,
+                    (order_id_values, order_names),
+                )
+                rows = cur.fetchall()
+    except Exception as error:
+        schema_message = orders_sync_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        raise
+    existing_ids = {
+        candidate
+        for row in rows
+        for candidate in _shopify_id_candidates("Order", row.get("shopify_order_id"))
+        if candidate
+    }
+    existing_names = {
+        str(row.get("shopify_order_name") or "").strip()
+        for row in rows
+        if str(row.get("shopify_order_name") or "").strip()
+    }
+    return {"order_ids": existing_ids, "order_names": existing_names}
+
+
+def list_existing_order_sync_locks(orders, *, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
+    else:
+        ensure_order_sync_lock_schema()
+    keys = sorted(
+        {
+            key
+            for order in (orders or [])
+            for key in (
+                canonical_order_sync_key((order or {}).get("shopify_order_id"), ""),
+                canonical_order_sync_key("", (order or {}).get("order_name") or (order or {}).get("name")),
+            )
+            if key
+        }
+    )
+    if not keys:
+        return set()
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT canonical_order_key
+                    FROM edition_order_sync_locks
+                    WHERE canonical_order_key = ANY(%s)
+                    """,
+                    (keys,),
+                )
+                rows = cur.fetchall()
+    except Exception as error:
+        schema_message = orders_sync_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        raise
+    return {str(row.get("canonical_order_key") or "").strip() for row in rows if row.get("canonical_order_key")}
+
+
+def _order_sync_lock_keys(shopify_order_id="", shopify_order_name=""):
+    keys = []
+    id_key = canonical_order_sync_key(shopify_order_id, "")
+    name_key = canonical_order_sync_key("", shopify_order_name)
+    for key in (id_key, name_key):
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
+def _ensure_order_sync_lock_table_with_cursor(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS edition_order_sync_locks (
+            id BIGSERIAL PRIMARY KEY,
+            canonical_order_key TEXT UNIQUE NOT NULL,
+            shopify_order_id TEXT,
+            shopify_order_name TEXT,
+            status TEXT DEFAULT 'allocated',
+            reason TEXT DEFAULT '',
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now()
+        )
+        """
+    )
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_order_sync_locks_order_id ON edition_order_sync_locks(shopify_order_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_edition_order_sync_locks_order_name ON edition_order_sync_locks(shopify_order_name)")
+
+
+def ensure_order_sync_lock_schema():
+    if not is_configured():
+        return
+    with connect() as conn:
+        with conn.cursor() as cur:
+            _ensure_order_sync_lock_table_with_cursor(cur)
+        conn.commit()
+
+
+def _find_existing_order_allocation_for_update(cur, shopify_order_id="", shopify_order_name=""):
+    order_keys = _order_sync_lock_keys(shopify_order_id, shopify_order_name)
+    order_id_candidates = _shopify_id_candidates("Order", shopify_order_id)
+    cur.execute(
+        """
+        SELECT 'lock' AS source, id::text AS id, canonical_order_key, shopify_order_id, shopify_order_name, status
+        FROM edition_order_sync_locks
+        WHERE canonical_order_key = ANY(%s)
+        ORDER BY created_at ASC NULLS LAST, id::text ASC
+        LIMIT 1
+        FOR UPDATE
+        """,
+        (order_keys or [""],),
+    )
+    existing_lock = cur.fetchone()
+    if existing_lock:
+        return existing_lock
+    cur.execute(
+        """
+        SELECT 'edition_order' AS source, eo.id::text AS id, eo.shopify_order_id,
+               COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, '')) AS shopify_order_name,
+               eo.edition_number, eo.edition_total
+        FROM edition_orders eo
+        LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+        WHERE eo.shopify_order_id = ANY(%s)
+           OR (
+                COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, '')) <> ''
+                AND UPPER(TRIM(COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, '')))) = UPPER(TRIM(%s))
+           )
+        ORDER BY eo.assigned_at ASC NULLS LAST, eo.created_at ASC NULLS LAST, eo.id::text ASC
+        LIMIT 1
+        FOR UPDATE OF eo
+        """,
+        (order_id_candidates or [""], shopify_order_name or ""),
+    )
+    return cur.fetchone()
+
+
+def _acquire_order_sync_lock(cur, *, shopify_order_id="", shopify_order_name="", status="allocated", reason=""):
+    primary_key = canonical_order_sync_key(shopify_order_id, shopify_order_name)
+    if not primary_key:
+        raise ValueError("Cannot acquire edition order sync lock without an order ID or order name.")
+    cur.execute(
+        """
+        INSERT INTO edition_order_sync_locks(
+            canonical_order_key, shopify_order_id, shopify_order_name, status, reason, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, now())
+        ON CONFLICT (canonical_order_key) DO NOTHING
+        RETURNING id::text AS id, canonical_order_key
+        """,
+        (primary_key, shopify_order_id or "", shopify_order_name or "", status or "allocated", reason or ""),
+    )
+    inserted = cur.fetchone()
+    if not inserted:
+        return None
+    name_key = canonical_order_sync_key("", shopify_order_name)
+    if name_key and name_key != primary_key:
+        cur.execute(
+            """
+            INSERT INTO edition_order_sync_locks(
+                canonical_order_key, shopify_order_id, shopify_order_name, status, reason, updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, now())
+            ON CONFLICT (canonical_order_key) DO NOTHING
+            """,
+            (name_key, shopify_order_id or "", shopify_order_name or "", status or "allocated", reason or ""),
+        )
+    return inserted
 
 
 def get_order_line_assignment_snapshot(line_item_ids):
@@ -7738,6 +8010,31 @@ def allocate_edition_for_order_line(
     with connect() as conn:
         try:
             with conn.cursor() as cur:
+                _ensure_order_sync_lock_table_with_cursor(cur)
+                order_existing = _find_existing_order_allocation_for_update(
+                    cur,
+                    shopify_order_id=shopify_order_id,
+                    shopify_order_name=shopify_order_name,
+                )
+                if order_existing:
+                    if order_existing.get("source") == "edition_order":
+                        lock_reason = "Backfilled while skipping an already allocated order."
+                        _acquire_order_sync_lock(
+                            cur,
+                            shopify_order_id=order_existing.get("shopify_order_id") or shopify_order_id,
+                            shopify_order_name=order_existing.get("shopify_order_name") or shopify_order_name,
+                            reason=lock_reason,
+                        )
+                        conn.commit()
+                        return {"created": False, "assignment": order_existing, "sold_out": False, "error": ""}
+                    conn.commit()
+                    return {
+                        "created": False,
+                        "assignment": None,
+                        "sold_out": False,
+                        "error": "",
+                        "skipped_by_order_lock": True,
+                    }
                 has_allocation_key = column_exists(cur, "edition_orders", "allocation_key")
                 allocation_key_filter = "COALESCE(eo.allocation_key, '') = %s OR" if has_allocation_key else ""
                 allocation_key_params = (allocation_key,) if has_allocation_key else ()
@@ -8160,8 +8457,46 @@ def allocate_edition_for_order_line(
                             """,
                             (allocation_key, str(exact_existing.get("id"))),
                         )
+                    _acquire_order_sync_lock(
+                        cur,
+                        shopify_order_id=exact_existing.get("shopify_order_id") or shopify_order_id,
+                        shopify_order_name=exact_existing.get("shopify_order_name") or exact_existing.get("order_name") or shopify_order_name,
+                        reason="Backfilled from exact existing edition order.",
+                    )
                     conn.commit()
                     return {"created": False, "assignment": exact_existing, "sold_out": False, "error": ""}
+
+                acquired_lock = _acquire_order_sync_lock(
+                    cur,
+                    shopify_order_id=shopify_order_id,
+                    shopify_order_name=shopify_order_name,
+                    reason="Auto allocation during Shopify order sync.",
+                )
+                if not acquired_lock:
+                    cur.execute(
+                        """
+                        SELECT eo.*, o.order_name
+                        FROM edition_orders eo
+                        LEFT JOIN shopify_orders o ON o.shopify_order_id=eo.shopify_order_id
+                        WHERE eo.shopify_order_id = ANY(%s)
+                           OR (
+                                COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, '')) <> ''
+                                AND UPPER(TRIM(COALESCE(NULLIF(eo.shopify_order_name, ''), NULLIF(o.order_name, '')))) = UPPER(TRIM(%s))
+                           )
+                        ORDER BY eo.assigned_at ASC NULLS LAST, eo.created_at ASC NULLS LAST, eo.id::text ASC
+                        LIMIT 1
+                        """,
+                        (order_id_candidates or [""], shopify_order_name or ""),
+                    )
+                    locked_existing = cur.fetchone()
+                    conn.commit()
+                    return {
+                        "created": False,
+                        "assignment": locked_existing,
+                        "sold_out": False,
+                        "error": "",
+                        "skipped_by_order_lock": not bool(locked_existing),
+                    }
 
                 allocation_key_insert_column = ", allocation_key" if has_allocation_key else ""
                 allocation_key_insert_value = ", %s" if has_allocation_key else ""
@@ -8398,6 +8733,70 @@ def process_paid_order(
             item[0],
         ),
     )
+    existing_edition_identity = list_existing_edition_order_identities(
+        [order],
+        ensure_schema_first=ensure_schema_first,
+    )
+    existing_order_locks = list_existing_order_sync_locks([order], ensure_schema_first=ensure_schema_first)
+    existing_order_ids = existing_edition_identity.get("order_ids") or set()
+    order_id_candidates = set(_shopify_id_candidates("Order", order.get("shopify_order_id")))
+    order_lock_keys = set(_order_sync_lock_keys(order.get("shopify_order_id"), _shopify_order_name(order)))
+    if (
+        bool(order_lock_keys.intersection(existing_order_locks))
+        or
+        bool(order_id_candidates.intersection(existing_order_ids))
+        or _shopify_order_name(order) in (existing_edition_identity.get("order_names") or set())
+    ):
+        return {
+            "assignments_created": 0,
+            "existing_assignments_skipped": 1,
+            "missing_mapping_skipped": 0,
+            "generated_certificates": 0,
+            "historical_lines_marked": 0,
+            "changed_handles": [],
+            "new_assignment_ids": [],
+            "errors": [],
+        }
+
+    total_order_quantity = sum(
+        max(1, int((line_item if isinstance(line_item, dict) else {}).get("quantity") or 1))
+        for _line_index, line_item in line_items_for_allocation
+    )
+    if len(line_items_for_allocation) != 1 or total_order_quantity != 1:
+        review_message = "Needs manual review: this Shopify order has multiple items or quantity above one."
+        with connect() as conn:
+            with conn.cursor() as cur:
+                for line_index, line_item in line_items_for_allocation:
+                    if not isinstance(line_item, dict):
+                        line_item = {}
+                    line_item_id = str(
+                        line_item.get("shopify_line_item_id")
+                        or f"{order['shopify_order_id']}:line:{line_index}"
+                    )
+                    _set_order_line_status(
+                        cur,
+                        line_item_id,
+                        "Needs manual review",
+                        shopify_product_id=line_item.get("shopify_product_id") or "",
+                        shopify_variant_id=line_item.get("shopify_variant_id") or line_item.get("variant_id") or "",
+                        shopify_handle=line_item.get("product_handle") or "",
+                        product_title=line_item.get("product_title") or "",
+                        variant_title=line_item.get("variant_title") or "",
+                        sku=line_item.get("sku") or "",
+                        last_error=review_message,
+                    )
+            conn.commit()
+        return {
+            "assignments_created": 0,
+            "existing_assignments_skipped": 0,
+            "missing_mapping_skipped": total_order_quantity,
+            "generated_certificates": 0,
+            "historical_lines_marked": 0,
+            "changed_handles": [],
+            "new_assignment_ids": [],
+            "errors": [f"{_shopify_order_name(order) or order.get('shopify_order_id')}: {review_message}"],
+        }
+
     for line_index, line_item in line_items_for_allocation:
         if not isinstance(line_item, dict):
             line_item = {}
@@ -8512,6 +8911,7 @@ def process_paid_order(
         line_existing = 0
         line_sold_out = False
         line_errors = []
+        line_order_skipped = 0
 
         for allocation_index in range(1, quantity + 1):
             promised_hint = promised_edition_hint_for_order_line(order, line_item, allocation_index)
@@ -8548,12 +8948,15 @@ def process_paid_order(
             elif assignment:
                 existing_assignments_skipped += 1
                 line_existing += 1
+            elif result.get("skipped_by_order_lock"):
+                existing_assignments_skipped += 1
+                line_order_skipped += 1
             if result.get("sold_out"):
                 line_sold_out = True
 
         line_status = "Needs Edition"
         line_error = line_errors[0] if line_errors else ""
-        if line_created + line_existing >= quantity:
+        if line_created + line_existing + line_order_skipped >= quantity:
             line_status = "Assigned"
             line_error = ""
         elif line_sold_out:
@@ -8924,11 +9327,26 @@ def list_existing_shopify_order_states(order_ids, *, ensure_schema_first=True):
     }
 
 
-def _latest_paid_order_needs_sync(order, existing_order_ids, existing_line_item_ids, existing_order_states):
+def _latest_paid_order_needs_sync(
+    order,
+    existing_order_ids,
+    existing_line_item_ids,
+    existing_order_states,
+    existing_edition_order_identities=None,
+    existing_order_sync_locks=None,
+):
     if not _latest_paid_order_is_processable(order):
         return False
     order_id = str(order.get("shopify_order_id") or "").strip()
     if not order_id:
+        return False
+    order_name = _shopify_order_name(order)
+    identities = existing_edition_order_identities or {}
+    order_id_candidates = set(_shopify_id_candidates("Order", order_id))
+    order_lock_keys = set(_order_sync_lock_keys(order_id, order_name))
+    if order_lock_keys.intersection(existing_order_sync_locks or set()):
+        return False
+    if order_id_candidates.intersection(identities.get("order_ids") or set()) or order_name in (identities.get("order_names") or set()):
         return False
     if order_id not in existing_order_ids:
         return True
@@ -9388,7 +9806,22 @@ def edition_allocation_duplicate_diagnostics(limit=50):
                              variant_identity, customer_identity, edition_number, edition_total
                     HAVING COUNT(*) > 1
                 ),
+                order_duplicate_groups AS (
+                    SELECT 'order_duplicate' AS duplicate_type,
+                           'order:' || canonical_order_identity AS group_key,
+                           MIN(computed_allocation_key) AS allocation_key,
+                           COUNT(*) AS actual_allocation_count,
+                           1 AS expected_quantity,
+                           MIN(created_at) AS first_created_at,
+                           MAX(created_at) AS last_created_at
+                    FROM keyed
+                    WHERE COALESCE(canonical_order_identity, '') <> ''
+                    GROUP BY canonical_order_identity
+                    HAVING COUNT(*) > 1
+                ),
                 duplicate_groups AS (
+                    SELECT * FROM order_duplicate_groups
+                    UNION ALL
                     SELECT * FROM allocation_duplicate_groups
                     UNION ALL
                     SELECT ec.*
@@ -9435,6 +9868,8 @@ def edition_allocation_duplicate_diagnostics(limit=50):
                         COALESCE(k.edition_number::text, '') || ':' ||
                         COALESCE(k.edition_total::text, '')
                     ) = dg.group_key)
+                    OR
+                    (dg.duplicate_type = 'order_duplicate' AND ('order:' || k.canonical_order_identity) = dg.group_key)
                 )
                 GROUP BY dg.duplicate_type, dg.group_key, dg.allocation_key, dg.actual_allocation_count, dg.expected_quantity,
                          dg.first_created_at, dg.last_created_at, k.shopify_order_name, k.shopify_order_id,
@@ -9498,7 +9933,16 @@ def edition_allocation_duplicate_diagnostics(limit=50):
                              variant_identity, customer_identity, edition_number, edition_total
                     HAVING COUNT(*) > 1
                 ),
+                order_duplicate_groups AS (
+                    SELECT 'order:' || canonical_order_identity AS group_key, COUNT(*) AS row_count
+                    FROM keyed
+                    WHERE COALESCE(canonical_order_identity, '') <> ''
+                    GROUP BY canonical_order_identity
+                    HAVING COUNT(*) > 1
+                ),
                 duplicate_groups AS (
+                    SELECT * FROM order_duplicate_groups
+                    UNION
                     SELECT * FROM allocation_duplicate_groups
                     UNION
                     SELECT * FROM exact_clone_groups
@@ -9667,12 +10111,22 @@ def sync_latest_paid_orders_to_supabase(
         )
         state_lookup_started = time.perf_counter()
         existing_order_states = list_existing_shopify_order_states(order_ids, ensure_schema_first=ensure_schema_first)
+        existing_edition_order_identities = list_existing_edition_order_identities(
+            processable_orders,
+            ensure_schema_first=ensure_schema_first,
+        )
+        existing_order_sync_locks = list_existing_order_sync_locks(
+            processable_orders,
+            ensure_schema_first=ensure_schema_first,
+        )
         _orders_sync_log(
             "supabase_order_read_completed",
             "completed",
             existing_orders=len(existing_order_ids),
             existing_lines=len(existing_line_item_ids),
             states=len(existing_order_states),
+            edition_order_names=len(existing_edition_order_identities.get("order_names") or []),
+            order_locks=len(existing_order_sync_locks),
         )
         _sync_perf_log(
             "Supabase existing-order state lookup time",
@@ -9722,7 +10176,14 @@ def sync_latest_paid_orders_to_supabase(
         candidate_orders = [
             order
             for order in processable_orders
-            if _latest_paid_order_needs_sync(order, existing_order_ids, existing_line_item_ids, existing_order_states)
+            if _latest_paid_order_needs_sync(
+                order,
+                existing_order_ids,
+                existing_line_item_ids,
+                existing_order_states,
+                existing_edition_order_identities,
+                existing_order_sync_locks,
+            )
         ]
         _orders_sync_log(
             "candidate_orders_count",

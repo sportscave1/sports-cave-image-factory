@@ -3301,57 +3301,35 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertFalse(any("UPDATE edition_runs" in statement for statement in statements))
         self.assertFalse(any("INSERT INTO edition_orders" in statement for statement in statements))
 
-    def test_quantity_two_allocates_two_units_and_rerun_skips_existing_units(self):
+    def test_quantity_two_is_flagged_for_manual_review_and_not_allocated(self):
         order = self.paid_order(
             processed_at="2026-06-19T00:05:00Z",
             remote_updated_at="2026-06-19T02:05:00Z",
         )
         order["line_items"][0]["quantity"] = 2
-        created_results = [
-            {"created": True, "assignment": {"id": "a1", "shopify_handle": "legends-never-die"}, "sold_out": False, "error": ""},
-            {"created": True, "assignment": {"id": "a2", "shopify_handle": "legends-never-die"}, "sold_out": False, "error": ""},
-        ]
-        existing_results = [
-            {"created": False, "assignment": {"id": "a1", "shopify_handle": "legends-never-die"}, "sold_out": False, "error": ""},
-            {"created": False, "assignment": {"id": "a2", "shopify_handle": "legends-never-die"}, "sold_out": False, "error": ""},
-        ]
 
         with patch.object(supabase_backend, "_persist_order_snapshot"), patch.object(
-            supabase_backend, "resolve_edition_product_for_order_line", return_value={"product": {"handle": "legends-never-die", "title": "Legends Never Die"}}
+            supabase_backend, "list_existing_edition_order_identities", return_value={"order_ids": set(), "order_names": set()}
         ), patch.object(
-            supabase_backend, "allocate_edition_for_order_line", side_effect=created_results
+            supabase_backend, "list_existing_order_sync_locks", return_value=set()
         ), patch.object(
-            supabase_backend, "connect"
-        ), patch.object(
+            supabase_backend, "allocate_edition_for_order_line", side_effect=AssertionError("Quantity above one must not allocate.")
+        ), patch.object(supabase_backend, "connect") as connect, patch.object(
             supabase_backend, "_set_order_line_status"
-        ):
-            first = supabase_backend.process_paid_order(
+        ) as set_status:
+            result = supabase_backend.process_paid_order(
                 order,
                 generate_certificates=False,
                 sync_product_metafields=False,
                 ensure_schema_first=False,
             )
 
-        with patch.object(supabase_backend, "_persist_order_snapshot"), patch.object(
-            supabase_backend, "resolve_edition_product_for_order_line", return_value={"product": {"handle": "legends-never-die", "title": "Legends Never Die"}}
-        ), patch.object(
-            supabase_backend, "allocate_edition_for_order_line", side_effect=existing_results
-        ), patch.object(
-            supabase_backend, "connect"
-        ), patch.object(
-            supabase_backend, "_set_order_line_status"
-        ):
-            second = supabase_backend.process_paid_order(
-                order,
-                generate_certificates=False,
-                sync_product_metafields=False,
-                ensure_schema_first=False,
-            )
-
-        self.assertEqual(first["assignments_created"], 2)
-        self.assertEqual(first["existing_assignments_skipped"], 0)
-        self.assertEqual(second["assignments_created"], 0)
-        self.assertEqual(second["existing_assignments_skipped"], 2)
+        self.assertEqual(result["assignments_created"], 0)
+        self.assertEqual(result["existing_assignments_skipped"], 0)
+        self.assertEqual(result["missing_mapping_skipped"], 2)
+        self.assertIn("Needs manual review", result["errors"][0])
+        connect.assert_called_once()
+        set_status.assert_called_once()
 
     def test_duplicate_diagnostic_blocks_latest_paid_sync_before_shopify_fetch(self):
         with patch.object(
@@ -3402,8 +3380,63 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertIn("duplicate_diagnostics", signature.parameters)
         self.assertEqual(signature.parameters["duplicate_diagnostics"].default, None)
 
-    def test_repair_plan_keeps_valid_quantity_two_rows_and_deletes_later_clones(self):
-        from scripts import repair_duplicate_edition_allocations as repair
+    def test_existing_order_name_in_edition_orders_skips_entire_sync_candidate(self):
+        order = {
+            "shopify_order_id": "gid://shopify/Order/2883",
+            "order_name": "#SC2883",
+            "financial_status": "PAID",
+            "line_items": [{"shopify_line_item_id": "gid://shopify/LineItem/9001"}],
+        }
+
+        self.assertFalse(
+            supabase_backend._latest_paid_order_needs_sync(
+                order,
+                set(),
+                set(),
+                {},
+                {"order_ids": set(), "order_names": {"#SC2883"}},
+            )
+        )
+
+    def test_existing_numeric_order_identity_matches_gid_candidate(self):
+        order = {
+            "shopify_order_id": "gid://shopify/Order/2883",
+            "order_name": "#SC2883",
+            "financial_status": "PAID",
+            "line_items": [{"shopify_line_item_id": "gid://shopify/LineItem/9001"}],
+        }
+
+        self.assertFalse(
+            supabase_backend._latest_paid_order_needs_sync(
+                order,
+                set(),
+                set(),
+                {},
+                {"order_ids": {"2883"}, "order_names": set()},
+            )
+        )
+
+    def test_existing_order_lock_skips_entire_sync_candidate(self):
+        order = {
+            "shopify_order_id": "gid://shopify/Order/2883",
+            "order_name": "#SC2883",
+            "financial_status": "PAID",
+            "line_items": [{"shopify_line_item_id": "gid://shopify/LineItem/9001"}],
+        }
+
+        self.assertFalse(
+            supabase_backend._latest_paid_order_needs_sync(
+                order,
+                set(),
+                set(),
+                {},
+                {"order_ids": set(), "order_names": set()},
+                {"id:2883"},
+            )
+        )
+
+    def test_sc2880_sc2883_repair_plan_keeps_one_expected_row_per_order(self):
+        from scripts import repair_sc2880_sc2883_single_order_duplicates as repair
 
         rows = [
             {
@@ -3458,15 +3491,81 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
                 "edition_total": 100,
                 "created_at": "2026-06-29T02:01:00Z",
             },
+            {
+                "id": "5",
+                "shopify_order_name": "#SC2880",
+                "shopify_order_id": "gid://shopify/Order/2880",
+                "shopify_line_item_id": "gid://shopify/LineItem/8001",
+                "shopify_handle": "seventh-nolan-ryan",
+                "product_title": "The Seventh Nolan Ryan Wall Art",
+                "variant_title": "Black / S",
+                "customer_name": "Nathan Baker",
+                "edition_number": 28,
+                "edition_total": 100,
+                "created_at": "2026-06-29T01:00:00Z",
+            },
+            {
+                "id": "6",
+                "shopify_order_name": "#SC2880",
+                "shopify_order_id": "2880",
+                "shopify_line_item_id": "8001",
+                "shopify_handle": "seventh-nolan-ryan",
+                "product_title": "The Seventh Nolan Ryan Wall Art",
+                "variant_title": "Black / S",
+                "customer_name": "Nathan Baker",
+                "edition_number": 25,
+                "edition_total": 100,
+                "created_at": "2026-06-29T01:01:00Z",
+            },
+            {
+                "id": "7",
+                "shopify_order_name": "#SC2880",
+                "shopify_order_id": "2880",
+                "shopify_line_item_id": "8001",
+                "shopify_handle": "seventh-nolan-ryan",
+                "product_title": "The Seventh Nolan Ryan Wall Art",
+                "variant_title": "Black / S",
+                "customer_name": "Nathan Baker",
+                "edition_number": 25,
+                "edition_total": 100,
+                "created_at": "2026-06-29T02:01:00Z",
+            },
         ]
 
         plan = repair.build_repair_plan(rows)
 
-        self.assertEqual(plan["delete_ids"], ["3", "4"])
-        kept_numbers = sorted(group["keep"]["edition_number"] for group in plan["duplicate_groups"])
-        self.assertEqual(kept_numbers, [63, 64])
-        deleted_numbers = sorted(row["edition_number"] for row in plan["delete_rows"])
-        self.assertEqual(deleted_numbers, [63, 64])
+        kept = {row["shopify_order_name"]: row["edition_number"] for row in plan["rows_to_keep"]}
+        self.assertEqual(kept, {"#SC2883": 63, "#SC2880": 25})
+        self.assertEqual(sorted(plan["delete_ids"]), ["2", "3", "4", "5", "7"])
+        self.assertEqual(len(plan["rows_to_delete"]), 5)
+
+    def test_orders_page_collapses_display_to_one_row_per_order(self):
+        import orders_page
+
+        rows = [
+            {"order": "#SC2880", "edition_number": 28, "edition_total": 100},
+            {"order": "#SC2880", "edition_number": 25, "edition_total": 100},
+            {"order": "#SC2880", "edition_number": 28, "edition_total": 100},
+            {"order": "#SC2881", "edition_number": 26, "edition_total": 100},
+        ]
+
+        collapsed = orders_page._one_row_per_order(rows)
+
+        self.assertEqual(len(collapsed), 2)
+        self.assertEqual(
+            {row["order"]: row["edition_number"] for row in collapsed},
+            {"#SC2880": 25, "#SC2881": 26},
+        )
+
+    def test_va_orders_page_hides_developer_duplicate_diagnostics_and_backfill(self):
+        import orders_page
+
+        warning_source = inspect.getsource(orders_page._render_duplicate_warning_panel)
+        actions_source = inspect.getsource(orders_page._render_top_actions)
+
+        self.assertIn("Orders need repair before new sync. Please contact Nathan/admin.", warning_source)
+        self.assertNotIn("allocation_key", warning_source)
+        self.assertNotIn("Backfill latest paid orders", actions_source)
 
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(
@@ -3599,6 +3698,14 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             supabase_backend, "list_existing_shopify_order_states", return_value={}
         ), patch.object(
             supabase_backend,
+            "list_existing_edition_order_identities",
+            return_value={"order_ids": set(), "order_names": set()},
+        ), patch.object(
+            supabase_backend,
+            "list_existing_order_sync_locks",
+            return_value=set(),
+        ), patch.object(
+            supabase_backend,
             "apply_known_missing_edition_repair",
             side_effect=lambda **_kwargs: events.append("known_repair")
             or {"applied_rows": 1, "already_exists_consistent": 0, "errors": []},
@@ -3607,7 +3714,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             "process_shopify_order_for_editions",
             side_effect=lambda *args, **kwargs: events.append("allocate")
             or {
-                "assignments_created": 2,
+                "assignments_created": 1,
                 "existing_assignments_skipped": 0,
                 "missing_mapping_skipped": 0,
                 "changed_handles": ["legends-never-die"],
@@ -3634,7 +3741,7 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["shopify_orders_fetched"], 1)
         self.assertEqual(result["new_orders_inserted"], 1)
         self.assertEqual(result["new_lines_inserted"], 1)
-        self.assertEqual(result["edition_allocations_created"], 3)
+        self.assertEqual(result["edition_allocations_created"], 2)
         self.assertEqual(result["known_missing_repairs_applied"], 1)
 
     def test_sync_latest_paid_orders_to_supabase_skips_unchanged_existing_orders(self):
@@ -3681,6 +3788,14 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
                     "synced_at": "2026-06-25T10:00:00Z",
                 }
             },
+        ), patch.object(
+            supabase_backend,
+            "list_existing_edition_order_identities",
+            return_value={"order_ids": {"gid://shopify/Order/3001", "3001"}, "order_names": {"#SC3001"}},
+        ), patch.object(
+            supabase_backend,
+            "list_existing_order_sync_locks",
+            return_value={"id:3001", "name:#SC3001"},
         ), patch.object(
             supabase_backend, "apply_known_missing_edition_repair"
         ) as known_repair, patch.object(
@@ -3751,6 +3866,14 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
             supabase_backend, "list_existing_shopify_line_item_ids", return_value=set()
         ), patch.object(
             supabase_backend, "list_existing_shopify_order_states", return_value={}
+        ), patch.object(
+            supabase_backend,
+            "list_existing_edition_order_identities",
+            return_value={"order_ids": set(), "order_names": set()},
+        ), patch.object(
+            supabase_backend,
+            "list_existing_order_sync_locks",
+            return_value=set(),
         ), patch.object(
             supabase_backend, "apply_known_missing_edition_repair"
         ) as known_repair, patch.object(
@@ -3896,6 +4019,14 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
                     "synced_at": "2026-06-29T06:25:00Z",
                 }
             },
+        ), patch.object(
+            supabase_backend,
+            "list_existing_edition_order_identities",
+            return_value={"order_ids": {"gid://shopify/Order/3001", "3001"}, "order_names": {"#SC3001"}},
+        ), patch.object(
+            supabase_backend,
+            "list_existing_order_sync_locks",
+            return_value={"id:3001", "name:#SC3001"},
         ), patch.object(
             supabase_backend, "_edition_product_handles_for_orders", return_value=[]
         ) as handles_lookup, patch.object(

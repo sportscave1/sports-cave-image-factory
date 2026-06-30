@@ -5188,6 +5188,107 @@ def _render_developer_allocation_tools():
                 st.dataframe(counters, hide_index=True, use_container_width=True)
 
     st.divider()
+    st.subheader("Repair duplicate order allocations")
+    st.caption("Developer-only SC2880-SC2883 repair. Dry-run first; apply requires typed confirmation.")
+    repair_duplicate_cols = st.columns(2)
+
+    def _run_sc2880_repair(*, apply=False):
+        repair = importlib.import_module("scripts.repair_sc2880_sc2883_single_order_duplicates")
+        supabase = importlib.import_module("supabase_backend")
+        if not supabase.is_configured():
+            raise ValueError("DATABASE_URL/Supabase is not configured.")
+        report = {"mode": "apply" if apply else "dry_run", "changes_made": False}
+        with supabase.connect() as conn:
+            try:
+                with conn.cursor() as cur:
+                    rows = repair._fetch_target_rows(cur)
+                    plan = repair.build_repair_plan(rows)
+                    counter_changes = repair._counter_plan(cur, plan["affected_products"], plan["delete_ids"])
+                    report.update(
+                        {
+                            "matching_rows_before": [repair._public_row(row) for row in rows],
+                            "orders": plan["orders"],
+                            "rows_to_keep": plan["rows_to_keep"],
+                            "rows_to_delete": plan["rows_to_delete"],
+                            "rows_to_delete_count": len(plan["delete_ids"]),
+                            "affected_products": plan["affected_products"],
+                            "proposed_counter_changes": counter_changes,
+                            "before_counts": {name: detail["before_count"] for name, detail in plan["orders"].items()},
+                            "after_counts": {name: detail["after_count"] for name, detail in plan["orders"].items()},
+                            "order_sync_locks_backfilled": False,
+                            "exact_clone_index": {"created": False, "error": ""},
+                        }
+                    )
+                    if apply:
+                        repair._apply_repair(cur, plan, counter_changes)
+                        repair._backfill_order_sync_locks(cur)
+                        report["exact_clone_index"] = repair._safe_create_exact_clone_index(cur)
+                        conn.commit()
+                        report["changes_made"] = True
+                        report["order_sync_locks_backfilled"] = True
+                    else:
+                        conn.rollback()
+            except Exception:
+                conn.rollback()
+                raise
+        return report
+
+    if repair_duplicate_cols[0].button(
+        "Dry-run SC2880-SC2883 repair",
+        key="developer-dry-run-sc2880-sc2883-repair",
+        use_container_width=True,
+    ):
+        try:
+            st.session_state.developer_sc2880_repair_result = _run_sc2880_repair(apply=False)
+        except Exception as error:
+            _developer_action_error("Dry-run SC2880-SC2883 repair", error)
+    confirmation = st.text_input(
+        "Repair confirmation",
+        value="",
+        placeholder="REPAIR SC2880 SC2881 SC2882 SC2883",
+        key="developer-sc2880-repair-confirmation",
+    )
+    if repair_duplicate_cols[1].button(
+        "Apply SC2880-SC2883 repair",
+        key="developer-apply-sc2880-sc2883-repair",
+        disabled=confirmation.strip() != "REPAIR SC2880 SC2881 SC2882 SC2883",
+        use_container_width=True,
+    ):
+        try:
+            st.session_state.developer_sc2880_repair_result = _run_sc2880_repair(apply=True)
+            st.success("Applied SC2880-SC2883 duplicate order repair.")
+            st.warning("Affected products need Shopify metafield mirror sync from Supabase.")
+            _mark_orders_snapshot_for_reload()
+        except Exception as error:
+            _developer_action_error("Apply SC2880-SC2883 repair", error)
+    sc2880_result = st.session_state.get("developer_sc2880_repair_result")
+    if sc2880_result:
+        st.json(
+            {
+                "mode": sc2880_result.get("mode"),
+                "changes_made": sc2880_result.get("changes_made"),
+                "before_counts": sc2880_result.get("before_counts"),
+                "after_counts": sc2880_result.get("after_counts"),
+                "rows_to_delete_count": sc2880_result.get("rows_to_delete_count"),
+                "affected_products": sc2880_result.get("affected_products"),
+                "order_sync_locks_backfilled": sc2880_result.get("order_sync_locks_backfilled"),
+                "exact_clone_index": sc2880_result.get("exact_clone_index"),
+            }
+        )
+        if sc2880_result.get("rows_to_keep"):
+            st.write("Rows to keep")
+            st.dataframe(sc2880_result["rows_to_keep"], hide_index=True, use_container_width=True)
+        if sc2880_result.get("rows_to_delete"):
+            st.write("Rows to delete")
+            st.dataframe(sc2880_result["rows_to_delete"], hide_index=True, use_container_width=True)
+        if sc2880_result.get("proposed_counter_changes"):
+            st.write("Affected product counter changes")
+            st.dataframe(sc2880_result["proposed_counter_changes"], hide_index=True, use_container_width=True)
+        st.caption(
+            "After apply, push Shopify product metafields from Supabase for affected handles in Edition Ops or Developer tools."
+        )
+
+    st.divider()
     st.subheader("Manual Edition Override")
     st.caption(
         "Admin-only correction for one already allocated order row. Auto-allocation remains the default."
