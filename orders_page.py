@@ -1948,7 +1948,7 @@ def _display_table_payload(rows):
     )
 
 
-def _render_top_actions(rows):
+def _render_top_actions(rows, duplicate_diagnostics=None):
     selected_rows = _selected_rows_from_state(rows)
     selected_count = len(selected_rows)
     backend = _configured_supabase_backend()

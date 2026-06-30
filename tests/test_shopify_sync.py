@@ -3394,6 +3394,14 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["shopify_orders_fetched"], 0)
         self.assertEqual(result["edition_counters_incremented"], 0)
 
+    def test_orders_top_actions_accepts_duplicate_diagnostics_argument(self):
+        import orders_page
+
+        signature = inspect.signature(orders_page._render_top_actions)
+
+        self.assertIn("duplicate_diagnostics", signature.parameters)
+        self.assertEqual(signature.parameters["duplicate_diagnostics"].default, None)
+
     def test_repair_plan_keeps_valid_quantity_two_rows_and_deletes_later_clones(self):
         from scripts import repair_duplicate_edition_allocations as repair
 
