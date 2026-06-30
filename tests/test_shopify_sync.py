@@ -3301,19 +3301,46 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertFalse(any("UPDATE edition_runs" in statement for statement in statements))
         self.assertFalse(any("INSERT INTO edition_orders" in statement for statement in statements))
 
-    def test_quantity_two_is_flagged_for_manual_review_and_not_allocated(self):
+    def test_quantity_two_order_allocates_two_units_and_marks_processed_lock(self):
         order = self.paid_order(
             processed_at="2026-06-19T00:05:00Z",
             remote_updated_at="2026-06-19T02:05:00Z",
         )
         order["line_items"][0]["quantity"] = 2
+        allocations = []
+
+        def fake_allocate(**kwargs):
+            allocations.append(kwargs)
+            return {
+                "created": True,
+                "assignment": {
+                    "id": f"eo-{kwargs['allocation_index']}",
+                    "shopify_handle": kwargs["shopify_handle"],
+                    "edition_number": 24 + kwargs["allocation_index"],
+                    "edition_total": 100,
+                    "allocation_index": kwargs["allocation_index"],
+                },
+                "sold_out": False,
+                "error": "",
+            }
 
         with patch.object(supabase_backend, "_persist_order_snapshot"), patch.object(
             supabase_backend, "list_existing_edition_order_identities", return_value={"order_ids": set(), "order_names": set()}
         ), patch.object(
             supabase_backend, "list_existing_order_sync_locks", return_value=set()
         ), patch.object(
-            supabase_backend, "allocate_edition_for_order_line", side_effect=AssertionError("Quantity above one must not allocate.")
+            supabase_backend,
+            "resolve_edition_product_for_order_line",
+            return_value={
+                "product": {
+                    "handle": "messi-the-final-crown-wall-art",
+                    "title": "Messi The Final Crown Wall Art",
+                    "shopify_product_id": "gid://shopify/Product/999",
+                    "active": True,
+                }
+            },
+        ), patch.object(
+            supabase_backend, "allocate_edition_for_order_line", side_effect=fake_allocate
         ), patch.object(supabase_backend, "connect") as connect, patch.object(
             supabase_backend, "_set_order_line_status"
         ) as set_status:
@@ -3324,12 +3351,80 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
                 ensure_schema_first=False,
             )
 
-        self.assertEqual(result["assignments_created"], 0)
+        self.assertEqual(result["assignments_created"], 2)
         self.assertEqual(result["existing_assignments_skipped"], 0)
-        self.assertEqual(result["missing_mapping_skipped"], 2)
-        self.assertIn("Needs manual review", result["errors"][0])
-        connect.assert_called_once()
-        set_status.assert_called_once()
+        self.assertEqual(result["missing_mapping_skipped"], 0)
+        self.assertEqual([call["allocation_index"] for call in allocations], [1, 2])
+        self.assertEqual(set_status.call_args.args[2], "Assigned")
+        self.assertTrue(connect.called)
+
+    def test_two_eligible_products_same_order_allocate_two_rows(self):
+        order = self.paid_order(
+            processed_at="2026-06-19T00:05:00Z",
+            remote_updated_at="2026-06-19T02:05:00Z",
+        )
+        order["line_items"].append(
+            {
+                "shopify_line_item_id": "gid://shopify/LineItem/2",
+                "shopify_product_id": "gid://shopify/Product/1000",
+                "product_title": "Second Limited Wall Art",
+                "product_handle": "second-limited-wall-art",
+                "variant_title": "Oak / L",
+                "position": 2,
+                "quantity": 1,
+            }
+        )
+        allocations = []
+
+        def fake_resolve(line_item, **_kwargs):
+            return {
+                "product": {
+                    "handle": line_item["product_handle"],
+                    "title": line_item["product_title"],
+                    "shopify_product_id": line_item["shopify_product_id"],
+                    "active": True,
+                }
+            }
+
+        def fake_allocate(**kwargs):
+            allocations.append(kwargs)
+            return {
+                "created": True,
+                "assignment": {
+                    "id": kwargs["shopify_line_item_id"],
+                    "shopify_handle": kwargs["shopify_handle"],
+                    "edition_number": len(allocations),
+                    "edition_total": 100,
+                    "allocation_index": kwargs["allocation_index"],
+                },
+                "sold_out": False,
+                "error": "",
+            }
+
+        with patch.object(supabase_backend, "_persist_order_snapshot"), patch.object(
+            supabase_backend, "list_existing_edition_order_identities", return_value={"order_ids": set(), "order_names": set()}
+        ), patch.object(
+            supabase_backend, "list_existing_order_sync_locks", return_value=set()
+        ), patch.object(
+            supabase_backend, "resolve_edition_product_for_order_line", side_effect=fake_resolve
+        ), patch.object(
+            supabase_backend, "allocate_edition_for_order_line", side_effect=fake_allocate
+        ), patch.object(supabase_backend, "connect"), patch.object(
+            supabase_backend, "_set_order_line_status"
+        ):
+            result = supabase_backend.process_paid_order(
+                order,
+                generate_certificates=False,
+                sync_product_metafields=False,
+                ensure_schema_first=False,
+            )
+
+        self.assertEqual(result["assignments_created"], 2)
+        self.assertEqual(
+            [call["shopify_line_item_id"] for call in allocations],
+            ["gid://shopify/LineItem/1", "gid://shopify/LineItem/2"],
+        )
+        self.assertEqual([call["allocation_index"] for call in allocations], [1, 1])
 
     def test_duplicate_diagnostic_blocks_latest_paid_sync_before_shopify_fetch(self):
         with patch.object(
@@ -3376,9 +3471,30 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         import orders_page
 
         signature = inspect.signature(orders_page._render_top_actions)
+        actions_source = inspect.getsource(orders_page._render_top_actions)
 
         self.assertIn("duplicate_diagnostics", signature.parameters)
         self.assertEqual(signature.parameters["duplicate_diagnostics"].default, None)
+        self.assertIn("sync_allowed", actions_source)
+        self.assertIn("Check New Paid Orders", actions_source)
+
+    def test_orders_duplicate_warning_disappears_when_raw_diagnostics_are_clean(self):
+        import orders_page
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.errors = []
+
+            def error(self, message):
+                self.errors.append(message)
+
+        fake_st = FakeStreamlit()
+        with patch.object(orders_page, "st", fake_st):
+            orders_page._render_duplicate_warning_panel({"duplicate_group_count": 0, "sync_allowed": True})
+            self.assertEqual(fake_st.errors, [])
+
+            orders_page._render_duplicate_warning_panel({"duplicate_group_count": 1, "sync_allowed": False})
+            self.assertEqual(fake_st.errors, ["Orders need repair before new sync. Please contact Nathan/admin."])
 
     def test_existing_order_name_in_edition_orders_skips_entire_sync_candidate(self):
         order = {
@@ -3539,23 +3655,92 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(sorted(plan["delete_ids"]), ["2", "3", "4", "5", "7"])
         self.assertEqual(len(plan["rows_to_delete"]), 5)
 
-    def test_orders_page_collapses_display_to_one_row_per_order(self):
+    def test_orders_page_keeps_one_visible_row_per_allocation_unit(self):
         import orders_page
 
         rows = [
-            {"order": "#SC2880", "edition_number": 28, "edition_total": 100},
-            {"order": "#SC2880", "edition_number": 25, "edition_total": 100},
-            {"order": "#SC2880", "edition_number": 28, "edition_total": 100},
-            {"order": "#SC2881", "edition_number": 26, "edition_total": 100},
+            {
+                "order": "#SC2880",
+                "edition_order_id": "eo-25",
+                "shopify_line_item_id": "gid://shopify/LineItem/8001",
+                "allocation_index": 1,
+                "edition_number": 25,
+                "edition_total": 100,
+                "customer": "Nathan Baker",
+                "product": "The Seventh Nolan Ryan Wall Art",
+                "variant": "Black / S",
+            },
+            {
+                "order": "#SC2880",
+                "edition_order_id": "eo-26",
+                "shopify_line_item_id": "gid://shopify/LineItem/8002",
+                "allocation_index": 1,
+                "edition_number": 26,
+                "edition_total": 100,
+                "customer": "Nathan Baker",
+                "product": "Second Limited Wall Art",
+                "variant": "Oak / L",
+            },
+            {"order": "#SC2881", "edition_order_id": "eo-26", "edition_number": 26, "edition_total": 100},
         ]
 
-        collapsed = orders_page._one_row_per_order(rows)
+        filtered = orders_page._filter_rows(rows, "")
+        render_source = inspect.getsource(orders_page.render_page)
 
-        self.assertEqual(len(collapsed), 2)
-        self.assertEqual(
-            {row["order"]: row["edition_number"] for row in collapsed},
-            {"#SC2880": 25, "#SC2881": 26},
-        )
+        self.assertEqual(len(filtered), 3)
+        self.assertEqual([row["edition_order_id"] for row in filtered if row["order"] == "#SC2880"], ["eo-25", "eo-26"])
+        self.assertNotIn("_one_row_per_order(_filter_rows", render_source)
+
+    def test_allocation_unit_display_preserves_selected_sc2883_row_for_certificate_actions(self):
+        import orders_page
+
+        rows = [
+            {
+                "order": "#SC2883",
+                "edition_order_id": "eo-63",
+                "shopify_line_item_id": "gid://shopify/LineItem/9001",
+                "allocation_index": 1,
+                "edition_number": 63,
+                "edition_total": 100,
+                "customer": "ANDREW KEELING",
+                "product": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant": "Black / L",
+                "certificate_status": "Needs certificate",
+            },
+            {
+                "order": "#SC2884",
+                "edition_order_id": "eo-64",
+                "shopify_line_item_id": "gid://shopify/LineItem/9002",
+                "allocation_index": 1,
+                "edition_number": 64,
+                "edition_total": 100,
+                "customer": "ANDREW KEELING",
+                "product": "Legends Never Die Messi vs Ronaldo Wall Art",
+                "variant": "Black / L",
+            },
+        ]
+
+        filtered = orders_page._filter_rows(rows, "#SC2883")
+
+        self.assertEqual(len(filtered), 1)
+        selected = filtered[0]
+        self.assertEqual(selected["order"], "#SC2883")
+        self.assertEqual(selected["edition_order_id"], "eo-63")
+        self.assertEqual(selected["edition_number"], 63)
+        self.assertEqual(selected["edition_total"], 100)
+        self.assertEqual(selected["customer"], "ANDREW KEELING")
+        self.assertEqual(selected["product"], "Legends Never Die Messi vs Ronaldo Wall Art")
+        self.assertEqual(selected["variant"], "Black / L")
+
+    def test_orders_backend_uses_shopify_mirror_first_with_supabase_edition_overlay(self):
+        list_orders_source = inspect.getsource(supabase_backend.list_orders)
+        hybrid_source = inspect.getsource(supabase_backend.list_hybrid_order_rows)
+
+        self.assertIn("FROM shopify_orders o", list_orders_source)
+        self.assertIn("LEFT JOIN LATERAL", list_orders_source)
+        self.assertIn("FROM shopify_orders o", hybrid_source)
+        self.assertIn("assignments_by_order", hybrid_source)
+        self.assertIn("assignments_by_order_name", hybrid_source)
 
     def test_va_orders_page_hides_developer_duplicate_diagnostics_and_backfill(self):
         import orders_page
@@ -3566,6 +3751,15 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertIn("Orders need repair before new sync. Please contact Nathan/admin.", warning_source)
         self.assertNotIn("allocation_key", warning_source)
         self.assertNotIn("Backfill latest paid orders", actions_source)
+
+    def test_developer_page_has_orders_cache_recheck_diagnostics_only(self):
+        import app
+
+        developer_source = inspect.getsource(app._render_developer_allocation_tools)
+
+        self.assertIn("Clear Orders Cache / Recheck Diagnostics", developer_source)
+        self.assertIn("edition_allocation_duplicate_diagnostics", developer_source)
+        self.assertIn("check_new_paid_orders_allowed", developer_source)
 
     @patch.object(supabase_backend, "ensure_schema")
     @patch.object(

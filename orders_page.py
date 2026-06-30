@@ -1497,23 +1497,6 @@ def _filter_rows(rows, search_text):
     return [row for row in [_normalise_row(item) for item in rows or []] if query in _search_blob(row)]
 
 
-def _one_row_per_order(rows):
-    by_order = {}
-    for row in [_normalise_row(item) for item in rows or []]:
-        order_key = str(row.get("order") or row.get("shopify_order_id") or "").strip()
-        if not order_key:
-            order_key = _row_key(row)
-        current = by_order.get(order_key)
-        if current is None:
-            by_order[order_key] = row
-            continue
-        current_number = int(current.get("edition_number") or 0)
-        row_number = int(row.get("edition_number") or 0)
-        if row_number and (not current_number or row_number < current_number):
-            by_order[order_key] = row
-    return list(by_order.values())
-
-
 def _open_prodigi_for_row(row):
     target_order = str((row or {}).get("order") or "").strip()
     if not target_order:
@@ -1633,11 +1616,26 @@ def _generate_upload_selected_certificates(rows):
 def _duplicate_diagnostics_snapshot(limit=10):
     backend = _configured_supabase_backend()
     if not backend or not hasattr(backend, "edition_allocation_duplicate_diagnostics"):
-        return {}
+        return {
+            "available": False,
+            "duplicate_group_count": 0,
+            "duplicate_row_count": 0,
+            "sync_allowed": False,
+            "blocked_reasons": ["Supabase duplicate diagnostics are unavailable"],
+            "groups": [],
+        }
     try:
         return backend.edition_allocation_duplicate_diagnostics(limit=limit)
     except Exception as error:
-        return {"error": str(error), "duplicate_group_count": 0, "duplicate_row_count": 0, "groups": []}
+        return {
+            "error": str(error),
+            "available": False,
+            "duplicate_group_count": 0,
+            "duplicate_row_count": 0,
+            "sync_allowed": False,
+            "blocked_reasons": ["Supabase duplicate diagnostics failed"],
+            "groups": [],
+        }
 
 
 def _render_duplicate_warning_panel(duplicates):
@@ -1957,13 +1955,16 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
     backfill_latest_paid = False
     st.session_state[ORDER_SYNC_BACKFILL_KEY] = False
     sync_label = "Check New Paid Orders"
-    duplicate_sync_blocked = int((duplicate_diagnostics or {}).get("duplicate_group_count") or 0) > 0
+    diagnostics = duplicate_diagnostics or {}
+    duplicate_sync_blocked = int(diagnostics.get("duplicate_group_count") or 0) > 0
+    diagnostics_blocked = diagnostics.get("sync_allowed") is False
+    sync_blocked = duplicate_sync_blocked or diagnostics_blocked
     action_cols = st.columns([1.2, 1.15, 1.4, 1.15, 1.35, 1.35])
     if action_cols[0].button(
         sync_label,
         type="primary",
         use_container_width=True,
-        disabled=not backend or duplicate_sync_blocked,
+        disabled=not backend or sync_blocked,
     ):
         spinner_text = "Backfilling latest paid Shopify orders..." if backfill_latest_paid else "Checking new paid Shopify orders..."
         with st.spinner(spinner_text):
@@ -2002,6 +2003,8 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
         st.caption("Order refresh is unavailable right now.")
     elif duplicate_sync_blocked:
         st.caption("Orders need repair before new sync. Please contact Nathan/admin.")
+    elif diagnostics_blocked:
+        st.caption("Order refresh is unavailable right now. Please contact Nathan/admin.")
     else:
         st.caption("Normal sync is cursor-first and keeps Shopify read-only.")
     if selected_rows and not can_generate:
@@ -2367,7 +2370,7 @@ def render_page():
             st.info("No saved orders are available in the operational ledger yet.")
         return
 
-    filtered_rows = _one_row_per_order(_filter_rows(rows, search_text))
+    filtered_rows = _filter_rows(rows, search_text)
     visible_rows = filtered_rows[:DEFAULT_VISIBLE_ROW_LIMIT]
 
     _render_top_actions(visible_rows, duplicate_diagnostics)

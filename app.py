@@ -5037,6 +5037,24 @@ def _mark_orders_snapshot_for_reload():
         }
 
 
+def _clear_orders_session_cache():
+    for key in (
+        "orders_allocation_rows",
+        "orders_allocation_meta",
+        "orders_allocation_snapshot_loaded",
+        "orders_snapshot_loaded",
+        "orders-load-error",
+        "orders-sync-result",
+        "orders-notice",
+        "orders-grid",
+        "orders-latest-fetch-preview",
+        "orders-allocation-grid",
+    ):
+        st.session_state.pop(key, None)
+    st.session_state["orders_allocation_snapshot_loaded"] = False
+    st.session_state["orders-ledger-cache-version"] = int(st.session_state.get("orders-ledger-cache-version", 0)) + 1
+
+
 def _render_developer_allocation_tools():
     if not _developer_section_enabled("developer-load-allocation-tools", "Load Allocation Repair Tools"):
         return
@@ -5050,6 +5068,50 @@ def _render_developer_allocation_tools():
         return
 
     st.caption("Admin repair tools only. Orders remains a daily fulfilment page.")
+
+    st.subheader("Orders duplicate diagnostics")
+    st.caption("Developer-only raw ledger check. This does not fetch Shopify, sync orders, or repair rows.")
+    diagnostic_cols = st.columns(2)
+    if diagnostic_cols[0].button(
+        "Clear Orders Cache / Recheck Diagnostics",
+        key="developer-clear-orders-cache-recheck-diagnostics",
+        use_container_width=True,
+    ):
+        try:
+            _clear_orders_session_cache()
+            supabase = importlib.import_module("supabase_backend")
+            st.session_state.developer_order_duplicate_diagnostics = supabase.edition_allocation_duplicate_diagnostics(limit=50)
+            st.success("Orders cache cleared and duplicate diagnostics refreshed.")
+        except Exception as error:
+            _developer_action_error("Clear Orders cache / recheck diagnostics", error)
+    if diagnostic_cols[1].button(
+        "Recheck Duplicate Diagnostics",
+        key="developer-recheck-order-duplicate-diagnostics",
+        use_container_width=True,
+    ):
+        try:
+            supabase = importlib.import_module("supabase_backend")
+            st.session_state.developer_order_duplicate_diagnostics = supabase.edition_allocation_duplicate_diagnostics(limit=50)
+        except Exception as error:
+            _developer_action_error("Recheck duplicate diagnostics", error)
+    duplicate_diagnostics = st.session_state.get("developer_order_duplicate_diagnostics")
+    if duplicate_diagnostics:
+        st.json(
+            {
+                "edition_orders_total": duplicate_diagnostics.get("edition_orders_total"),
+                "duplicate_group_count": duplicate_diagnostics.get("duplicate_group_count"),
+                "duplicate_order_group_count": duplicate_diagnostics.get("duplicate_order_group_count"),
+                "duplicate_exact_clone_group_count": duplicate_diagnostics.get("duplicate_exact_clone_group_count"),
+                "duplicate_allocation_key_group_count": duplicate_diagnostics.get("duplicate_allocation_key_group_count"),
+                "order_lock_count": duplicate_diagnostics.get("order_lock_count"),
+                "order_lock_table_ready": duplicate_diagnostics.get("order_lock_table_ready"),
+                "check_new_paid_orders_allowed": duplicate_diagnostics.get("sync_allowed"),
+                "blocked_reasons": duplicate_diagnostics.get("blocked_reasons") or [],
+            }
+        )
+        groups = duplicate_diagnostics.get("groups") or []
+        if groups:
+            st.dataframe(groups, hide_index=True, use_container_width=True)
 
     view_cols = st.columns(2)
     if view_cols[0].button("View allocation settings", key="developer-view-allocation-settings", use_container_width=True):
