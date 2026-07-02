@@ -16,7 +16,7 @@ import shutil
 import tempfile
 import time
 import traceback
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 APP_START_TIME = time.perf_counter()
 LAST_STARTUP_STAGE_TIME = APP_START_TIME
@@ -268,11 +268,23 @@ PROMPT_LABELS = {
     "13-premium-bedroom-prompt.txt": "13 - Premium Bedroom / Private Retreat (Social)",
     "14-home-gym-prompt.txt": "14 - Home Gym / Motivation Wall (Social)",
     "15-premium-gift-reveal-prompt.txt": "15 - Premium Gift Reveal Scene (Social)",
+    "16-man-cave-reel-prompt.txt": "16 - Man Cave Reel",
+    "17-living-room-reel-prompt.txt": "17 - Living Room Reel",
+    "18-office-reel-prompt.txt": "18 - Office Reel",
+    "19-home-sports-bar-reel-prompt.txt": "19 - Home Sports Bar Reel",
+    "20-collector-display-room-reel-prompt.txt": "20 - Collector Display Room Reel",
 }
 PRODUCT_PAGE_PROMPT_NAMES = {
     "01-man-cave-prompt.txt",
     "02-office-prompt.txt",
     "03-living-room-prompt.txt",
+}
+REELS_PROMPT_NAMES = {
+    "16-man-cave-reel-prompt.txt",
+    "17-living-room-reel-prompt.txt",
+    "18-office-reel-prompt.txt",
+    "19-home-sports-bar-reel-prompt.txt",
+    "20-collector-display-room-reel-prompt.txt",
 }
 EDITION_LOG_REQUEST_HEADERS = {
     "Accept": "application/json,text/plain,*/*",
@@ -3328,12 +3340,33 @@ def is_product_page_prompt(prompt_path):
     return Path(prompt_path).name in PRODUCT_PAGE_PROMPT_NAMES
 
 
+def is_reels_prompt(prompt_path):
+    return Path(prompt_path).name in REELS_PROMPT_NAMES
+
+
+def prompt_key_from_prompt_filename(prompt_filename):
+    prompt_key = Path(prompt_filename).name
+    if prompt_key.endswith("-prompt.txt"):
+        prompt_key = prompt_key[: -len("-prompt.txt")]
+    return prompt_key
+
+
 def prompt_edit_id(namespace, key):
     return f"{namespace}::{key}"
 
 
 def current_prompt_text(prompt_id, default_text):
     return prompt_store.get_prompt(prompt_id, default_text)
+
+
+def current_lifestyle_prompt_text(prompt_filename, default_text):
+    prompt_key = prompt_key_from_prompt_filename(prompt_filename)
+    prompt_id = prompt_edit_id("lifestyle", prompt_key)
+    legacy_prompt_id = prompt_edit_id("lifestyle", Path(prompt_filename).name)
+    prompt_text = prompt_store.get_prompt(prompt_id, "")
+    if prompt_text.strip():
+        return prompt_text
+    return prompt_store.get_prompt(legacy_prompt_id, default_text)
 
 
 def render_prompt_edit_button(prompt_id, *, label="✎"):
@@ -3576,26 +3609,36 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text):
     @st.dialog(f"Edit prompt: {title}", width="large")
     def _edit_prompt_dialog():
         st.caption("Developer only. Saved changes replace this prompt everywhere it is used.")
+        if not st.session_state.get("developer_unlocked"):
+            password = st.text_input(
+                "Developer password",
+                type="password",
+                key=f"mockup-prompt-unlock-password::{prompt_id}",
+            )
+            cols = st.columns([1, 1, 3])
+            if cols[0].button("Unlock Developer", key=f"mockup-prompt-unlock::{prompt_id}", type="primary", use_container_width=True):
+                if password == DEVELOPER_PAGE_PASSWORD:
+                    st.session_state.developer_unlocked = True
+                    st.rerun()
+                else:
+                    st.error("Incorrect developer password.")
+            if cols[1].button("Cancel", key=f"mockup-prompt-unlock-cancel::{prompt_id}", use_container_width=True):
+                _close_mockup_prompt_editor(prompt_id)
+                st.rerun()
+            return
+
         edited_text = st.text_area(
             "Prompt text",
             value=prompt_text,
             height=520,
             key=f"mockup-prompt-edit-text::{prompt_id}",
         )
-        password = st.text_input(
-            "Developer password",
-            type="password",
-            key=f"mockup-prompt-edit-password::{prompt_id}",
-        )
         cols = st.columns([1, 1, 3])
         if cols[0].button("Save", key=f"mockup-prompt-edit-save::{prompt_id}", type="primary", use_container_width=True):
-            if password != DEVELOPER_PAGE_PASSWORD:
-                st.error("Developer password is incorrect.")
-            else:
-                prompt_store.save_prompt(prompt_id, title, edited_text)
-                _close_mockup_prompt_editor(prompt_id)
-                st.session_state["mockup_prompt_notice"] = "Prompt saved"
-                st.rerun()
+            prompt_store.save_prompt(prompt_id, title, edited_text)
+            _close_mockup_prompt_editor(prompt_id)
+            st.session_state["mockup_prompt_notice"] = "Prompt saved"
+            st.rerun()
         if cols[1].button("Cancel", key=f"mockup-prompt-edit-cancel::{prompt_id}", use_container_width=True):
             _close_mockup_prompt_editor(prompt_id)
             st.rerun()
@@ -3608,12 +3651,13 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id):
     prompt_id_json = json.dumps(prompt_id)
     bar_id = f"mockup-prompt-bar-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
     show_edit = True
+    edit_href = f"?mockup_prompt_edit={quote(prompt_id)}"
     edit_markup = (
         f"""
         <a
           id="{bar_id}-edit"
           class="mockup-prompt-edit"
-          href="#"
+          href="{html.escape(edit_href)}"
           target="_parent"
           title="Edit prompt"
           aria-label="Edit prompt"
@@ -4294,11 +4338,13 @@ def render_primary_zip_download(result, section_key):
         st.info(result["zip_drive_error"])
 
 
-def render_prompt_cards(result, prompt_paths, heading):
+def render_prompt_cards(result, prompt_paths, heading, caption=None):
     if not prompt_paths:
         return
 
     st.subheader(heading)
+    if caption:
+        st.caption(caption)
     cols = st.columns(3)
 
     for index, prompt_path in enumerate(prompt_paths):
@@ -4307,8 +4353,8 @@ def render_prompt_cards(result, prompt_paths, heading):
             st.markdown(f"**{prompt_title}**")
             prompt_name = prompt_path.name
             default_prompt_text = prompt_path.read_text(encoding="utf-8")
-            prompt_id = prompt_edit_id("lifestyle", prompt_name)
-            prompt_text = current_prompt_text(prompt_id, default_prompt_text)
+            prompt_id = prompt_edit_id("lifestyle", prompt_key_from_prompt_filename(prompt_name))
+            prompt_text = current_lifestyle_prompt_text(prompt_name, default_prompt_text)
             prompt_key = f"{result['run_dir']}::{prompt_name}"
             render_mockup_prompt_action_row(prompt_title, prompt_text, prompt_key, prompt_id)
 
@@ -4460,13 +4506,6 @@ def render_generation_result(result):
             f"{result['drive_sync_error']}"
         )
 
-    with st.expander("Local output and Google Drive reminder"):
-        st.caption(f"Local output folder: {result['run_dir']}")
-        st.info(
-            "Upload or save the completed ZIP into the matching product's Google Drive root folder, "
-            "then add that folder or ZIP link to the product File Hub. Automatic Drive upload is not used in Phase 3."
-        )
-
     render_primary_zip_download(result, "top")
     render_generated_previews(result)
 
@@ -4487,7 +4526,12 @@ def render_generation_result(result):
             "Use the prompts below for ChatGPT lifestyle images, then upload the finished images back into the matching cards."
         )
         product_page_prompts = [path for path in prompt_paths if is_product_page_prompt(path)]
-        social_prompts = [path for path in prompt_paths if not is_product_page_prompt(path)]
+        reels_prompts = [path for path in prompt_paths if is_reels_prompt(path)]
+        social_prompts = [
+            path
+            for path in prompt_paths
+            if not is_product_page_prompt(path) and not is_reels_prompt(path)
+        ]
 
         render_prompt_cards(
             result,
@@ -4498,6 +4542,12 @@ def render_generation_result(result):
             result,
             social_prompts,
             "Social Lifestyle Mockups",
+        )
+        render_prompt_cards(
+            result,
+            reels_prompts,
+            "Reels",
+            "Vertical 9:16 lifestyle mockups for Meta, Facebook and Instagram Reels. Generate at 1080 × 1920, then upload the finished images back into the matching cards.",
         )
 
     render_primary_zip_download(result, "bottom")

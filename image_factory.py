@@ -223,6 +223,11 @@ LIFESTYLE_IMAGE_VARIANTS = {
     "13-premium-bedroom-prompt.txt": "premium-bedroom-lifestyle",
     "14-home-gym-prompt.txt": "home-gym-lifestyle",
     "15-premium-gift-reveal-prompt.txt": "premium-gift-reveal-lifestyle",
+    "16-man-cave-reel-prompt.txt": "16-man-cave-reel",
+    "17-living-room-reel-prompt.txt": "17-living-room-reel",
+    "18-office-reel-prompt.txt": "18-office-reel",
+    "19-home-sports-bar-reel-prompt.txt": "19-home-sports-bar-reel",
+    "20-collector-display-room-reel-prompt.txt": "20-collector-display-room-reel",
 }
 
 PRODUCT_PAGE_PROMPT_FILENAMES = {
@@ -1074,6 +1079,283 @@ LIFESTYLE_PROMPT_SPECS.extend([
     ),
 ])
 
+LIFESTYLE_PROMPT_SPECS.extend([
+    (
+        "16-man-cave-reel-prompt.txt",
+        "Man Cave Reel",
+        dedent(
+            """
+            Using the uploaded Sports Cave artwork and black landscape frame as the exact reference, create a 1080 x 1920 vertical 9:16 ultra-realistic lifestyle mockup for Meta/Facebook/Instagram Reels.
+
+            This image must feel like the artwork belongs in a serious fan’s premium man cave.
+
+            Keep the exact same artwork and exact same black landscape frame.
+            Do not redesign the artwork.
+            Do not change the colours, layout, text, badge, signatures, crop, or internal composition.
+            Do not blur, stretch, warp, bend, squash, or distort the artwork or frame.
+
+            Place the framed artwork realistically mounted on the wall of a premium man cave / media room.
+
+            The space should feel masculine, cinematic, collector-driven, clean, and expensive.
+            Use a refined palette: charcoal walls, matte black details, warm timber, soft beige, leather textures, subtle concrete or plaster wall finish.
+
+            Include only subtle realistic decor: a blurred leather chair edge, low media cabinet, soft TV glow, simple shelf, or warm floor lamp.
+            Keep decor minimal and out of focus.
+            The framed artwork must remain the hero.
+
+            Do not add people.
+            Do not add neon signs.
+            Do not add random sports logos.
+            Do not add beer branding.
+            Do not add extra wall art.
+            Do not add text overlays.
+            Do not add watermarks.
+            Do not add clutter.
+
+            Frame realism: premium black timber frame, realistic depth, sharp corners, subtle timber texture, clean edges, believable wall mounting, natural shadows behind and below the frame.
+
+            Glass realism: add realistic glass over the artwork with soft room reflections and subtle premium glare.
+            The glare must feel natural and expensive but must not hide the artwork.
+
+            Lighting: premium cinematic evening lighting, warm highlights, controlled shadows, soft ambient glow, realistic shadow falloff on the wall.
+
+            Vertical Reels composition:
+            1080 x 1920 vertical canvas.
+            Keep the framed artwork in the central safe area.
+            Do not place the artwork too low where Reels captions/buttons would cover it.
+            The frame should take strong visual space, roughly 70–85% of the image width.
+            Leave tasteful negative space above and below for mobile viewing.
+            Use a slight natural camera angle, but preserve correct landscape proportions.
+
+            Final result:
+            a photorealistic premium man cave Reels mockup with the exact uploaded Sports Cave framed artwork, realistic glass, strong wall presence, cinematic lighting, and a feeling that this belongs in a real fan’s cave.
+            """
+        ).strip(),
+    ),
+    (
+        "17-living-room-reel-prompt.txt",
+        "Living Room Reel",
+        dedent(
+            """
+            Using the uploaded Sports Cave artwork and black landscape frame as the exact reference, create a 1080 x 1920 vertical 9:16 ultra-realistic lifestyle mockup for Meta/Facebook/Instagram Reels.
+
+            This image must show the artwork as a premium statement piece inside a refined modern living room.
+
+            Keep the exact same artwork and exact same black landscape frame.
+            Do not redesign the artwork.
+            Do not change the colours, layout, text, badge, signatures, crop, or internal composition.
+            Do not blur, stretch, warp, bend, squash, or distort the artwork or frame.
+
+            Place the framed artwork mounted at realistic eye-level height on a premium living room wall.
+
+            The room should feel clean, masculine, expensive, and believable.
+            Use a warm neutral home interior: soft greige wall, matte plaster, warm beige, off-white, muted taupe, soft concrete, or warm grey.
+
+            Include subtle decor only: part of a premium sofa, low side table, floor lamp edge, soft rug texture, or minimal foreground object.
+            Keep everything understated.
+            The artwork must be the clear hero.
+
+            Do not add people.
+            Do not add random sports logos.
+            Do not add extra wall art.
+            Do not add neon signs.
+            Do not add text overlays.
+            Do not add watermarks.
+            Do not add clutter.
+
+            Frame realism: premium black timber frame, realistic thickness, sharp corners, subtle texture, clean edges, believable wall mounting.
+
+            Glass realism: add realistic glass over the artwork with soft natural reflections and subtle premium glare.
+            The glare should feel real and controlled without covering important artwork detail.
+
+            Lighting: soft natural daylight mixed with warm interior highlights.
+            Premium cinematic shadows behind and below the frame.
+            The artwork should look physically mounted, not pasted onto the wall.
+
+            Vertical Reels composition:
+            1080 x 1920 vertical canvas.
+            Frame sits in the central safe area and remains fully visible.
+            Do not crop the frame.
+            Do not place the frame too low.
+            Use the vertical room height to show scale, wall texture, and premium home atmosphere.
+            The framed artwork should take roughly 65–80% of the image width.
+            Use a fresh editorial camera angle with slight depth, but keep the landscape frame proportions accurate.
+
+            Final result:
+            a photorealistic premium living room Reels mockup with the exact uploaded Sports Cave framed artwork, realistic glass, warm natural light, believable scale, and a high-end home feel that makes buyers imagine it on their own wall.
+            """
+        ).strip(),
+    ),
+    (
+        "18-office-reel-prompt.txt",
+        "Office Reel",
+        dedent(
+            """
+            Using the uploaded Sports Cave artwork and black landscape frame as the exact reference, create a 1080 x 1920 vertical 9:16 ultra-realistic lifestyle mockup for Meta/Facebook/Instagram Reels.
+
+            This image must place the artwork in a premium home office or private study, where it feels like a daily reminder of greatness, discipline, rivalry, and identity.
+
+            Keep the exact same artwork and exact same black landscape frame.
+            Do not redesign the artwork.
+            Do not change the colours, layout, text, badge, signatures, crop, or internal composition.
+            Do not blur, stretch, warp, bend, squash, or distort the artwork or frame.
+
+            Place the framed artwork mounted on the wall inside a clean premium office.
+
+            The office should feel refined, masculine, focused, expensive, and realistic.
+            Use a mature interior palette: matte olive-grey, charcoal, warm beige, off-white, soft plaster, concrete, walnut timber, black metal details.
+
+            Include subtle office details only: desk edge, premium chair silhouette, bookshelf blur, laptop edge, warm desk lamp, or minimal side table.
+            Keep the space clean and professional.
+            The framed artwork must be the emotional hero.
+
+            Do not add people.
+            Do not add random sports logos.
+            Do not add extra wall art.
+            Do not add text overlays.
+            Do not add watermarks.
+            Do not add clutter.
+            Do not make it look like a corporate stock office.
+
+            Frame realism: premium black timber frame, real depth, sharp corners, subtle texture, realistic wall mounting, natural shadowing.
+
+            Glass realism: add realistic glass over the artwork with soft window reflections and controlled premium glare.
+            The reflections must not block the artwork.
+
+            Lighting: premium cinematic office lighting.
+            Soft daylight from one side.
+            Warm desk or wall light accents.
+            Clean shadows behind and below the frame.
+            The scene should feel productive, calm, and collector-driven.
+
+            Vertical Reels composition:
+            1080 x 1920 vertical canvas.
+            Keep the artwork in the central safe zone.
+            Do not place the artwork too low.
+            Show enough vertical wall and office context to make the room feel real.
+            Frame should take roughly 65–80% of image width.
+            Use a slight natural side angle with accurate landscape proportions.
+
+            Final result:
+            a photorealistic premium office Reels mockup using the exact uploaded Sports Cave framed artwork, realistic glass, premium shadows, refined office styling, and a clear feeling that this piece belongs where serious fans work and think.
+            """
+        ).strip(),
+    ),
+    (
+        "19-home-sports-bar-reel-prompt.txt",
+        "Home Sports Bar Reel",
+        dedent(
+            """
+            Using the uploaded Sports Cave artwork and black landscape frame as the exact reference, create a 1080 x 1920 vertical 9:16 ultra-realistic lifestyle mockup for Meta/Facebook/Instagram Reels.
+
+            This image must make the artwork feel like the centrepiece of a premium home sports bar where fans watch finals, rivalries, title fights, race days, derby nights, or big match moments.
+
+            Keep the exact same artwork and exact same black landscape frame.
+            Do not redesign the artwork.
+            Do not change the colours, layout, text, badge, signatures, crop, or internal composition.
+            Do not blur, stretch, warp, bend, squash, or distort the artwork or frame.
+
+            Place the framed artwork mounted behind or near a premium home bar as the main statement piece.
+
+            The room should feel cinematic, masculine, clean, expensive, and fan-owned.
+            Use refined home bar details: dark stone benchtop, matte black cabinetry, warm timber shelving, subtle glassware, premium stools, soft bar lighting, faint out-of-focus TV glow.
+
+            Keep all decor subtle and secondary.
+            The artwork must dominate visual attention.
+
+            Do not add people.
+            Do not add neon signs.
+            Do not add beer branding.
+            Do not add recognisable team logos.
+            Do not add random sports logos.
+            Do not add extra wall art.
+            Do not add text overlays.
+            Do not add watermarks.
+            Do not make it look like a commercial pub.
+
+            Frame realism: premium black timber frame, realistic depth, sharp corners, subtle texture, believable wall mounting, clean shadows.
+
+            Glass realism: add realistic glass over the artwork with warm bar-light reflections and subtle premium glare.
+            The glare must feel believable and must not hide the artwork.
+
+            Lighting: cinematic evening lighting.
+            Warm practical lights.
+            Soft highlights on glass and frame edges.
+            Deep but clean shadows.
+            Premium contrast without making the artwork too dark.
+
+            Vertical Reels composition:
+            1080 x 1920 vertical canvas.
+            Keep the framed artwork fully visible in the central safe area.
+            Do not place it too low.
+            Use the vertical space to show the bar atmosphere above and below the frame.
+            Frame should take roughly 60–75% of image width.
+            Use a slight natural camera angle, but keep the landscape frame accurate and undistorted.
+
+            Final result:
+            a photorealistic premium home sports bar Reels mockup with the exact uploaded Sports Cave framed artwork, realistic glass, warm cinematic lighting, subtle bar atmosphere, and strong “that belongs in my space” collector appeal.
+            """
+        ).strip(),
+    ),
+    (
+        "20-collector-display-room-reel-prompt.txt",
+        "Collector Display Room Reel",
+        dedent(
+            """
+            Using the uploaded Sports Cave artwork and black landscape frame as the exact reference, create a 1080 x 1920 vertical 9:16 ultra-realistic lifestyle mockup for Meta/Facebook/Instagram Reels.
+
+            This image must make the artwork feel like a prized limited-edition collector piece inside a serious fan’s private display room.
+
+            Keep the exact same artwork and exact same black landscape frame.
+            Do not redesign the artwork.
+            Do not change the colours, layout, text, badge, signatures, crop, or internal composition.
+            Do not blur, stretch, warp, bend, squash, or distort the artwork or frame.
+
+            Place the framed artwork inside a premium private collector display room.
+
+            The space should feel exclusive, cinematic, masculine, controlled, and expensive.
+            Use a refined display environment: dark matte walls, warm timber or black shelving, glass display cabinet, subtle memorabilia silhouettes, low display lighting, premium spotlights, clean negative space.
+
+            Collector items must stay subtle, tasteful, and out of focus.
+            They should add atmosphere without competing with the framed artwork.
+            The framed artwork must feel like the prized piece in the room.
+
+            Do not add people.
+            Do not add recognisable team logos.
+            Do not add random athlete photos.
+            Do not add extra wall art.
+            Do not add text overlays.
+            Do not add watermarks.
+            Do not make the room cluttered.
+            Do not make it look like a retail shop.
+
+            Frame realism: premium black timber frame, realistic depth, sharp corners, subtle texture, clean edges, believable wall mounting, natural shadows.
+
+            Glass realism: add realistic glass over the artwork with soft reflections from collector-room lighting.
+            The glare should feel subtle, premium, and natural.
+            Do not let reflections obscure the artwork.
+
+            Lighting: controlled collector-room spotlight on the artwork.
+            Soft warm highlights.
+            Deep clean shadows.
+            Cinematic black, charcoal, warm timber and gold-accent atmosphere.
+            The scene should communicate scarcity, ownership, pride, and collector value.
+
+            Vertical Reels composition:
+            1080 x 1920 vertical canvas.
+            Keep the framed artwork in the central safe area.
+            Do not place it too low.
+            Use vertical space to show the collector-room mood without shrinking the artwork too much.
+            Frame should take roughly 65–80% of image width.
+            Use a slightly angled premium interior photography perspective, but keep frame proportions accurate and undistorted.
+
+            Final result:
+            a photorealistic premium collector display room Reels mockup with the exact uploaded Sports Cave framed artwork, realistic glass, controlled cinematic lighting, subtle memorabilia atmosphere, and strong limited-edition collector energy.
+            """
+        ).strip(),
+    ),
+])
+
 
 # -----------------------------------
 # HELPERS
@@ -1573,6 +1855,33 @@ def create_prompt_pack_zip(zip_dir, product_slug, prompt_dir):
     return zip_path
 
 
+def prompt_key_from_prompt_filename(prompt_filename):
+    prompt_key = Path(prompt_filename).name
+    if prompt_key.endswith("-prompt.txt"):
+        prompt_key = prompt_key[: -len("-prompt.txt")]
+    return prompt_key
+
+
+def is_reels_prompt_filename(prompt_filename):
+    return Path(prompt_filename).name in {
+        "16-man-cave-reel-prompt.txt",
+        "17-living-room-reel-prompt.txt",
+        "18-office-reel-prompt.txt",
+        "19-home-sports-bar-reel-prompt.txt",
+        "20-collector-display-room-reel-prompt.txt",
+    }
+
+
+def get_lifestyle_prompt_text(prompt_filename, default_text):
+    prompt_filename = Path(prompt_filename).name
+    prompt_id = f"lifestyle::{prompt_key_from_prompt_filename(prompt_filename)}"
+    legacy_prompt_id = f"lifestyle::{prompt_filename}"
+    prompt_text = prompt_store.get_prompt(prompt_id, "")
+    if prompt_text.strip():
+        return prompt_text
+    return prompt_store.get_prompt(legacy_prompt_id, default_text)
+
+
 def get_prompt_group(prompt_filename):
     if prompt_filename in PRODUCT_PAGE_PROMPT_FILENAMES:
         return "product_page"
@@ -1605,16 +1914,19 @@ def generate_lifestyle_prompt_pack(product_name, sport_category, product_slug, r
 
     for filename, _, prompt_body in LIFESTYLE_PROMPT_SPECS:
         prompt_path = prompt_dir / filename
-        prompt_body = prompt_store.get_prompt(f"lifestyle::{filename}", prompt_body)
-        prompt_text = dedent(
-            f"""
-            Product name: {product_name}
-            Sport category: {sport_category}
-            Reference image: Upload the black framed WebP from this run into ChatGPT before using this prompt.
+        prompt_body = get_lifestyle_prompt_text(filename, prompt_body)
+        if is_reels_prompt_filename(filename):
+            prompt_text = prompt_body.strip()
+        else:
+            prompt_text = dedent(
+                f"""
+                Product name: {product_name}
+                Sport category: {sport_category}
+                Reference image: Upload the black framed WebP from this run into ChatGPT before using this prompt.
 
-            {prompt_body}
-            """
-        ).strip()
+                {prompt_body}
+                """
+            ).strip()
         prompt_path.write_text(prompt_text + "\n", encoding="utf-8")
         prompt_paths.append(prompt_path)
 
