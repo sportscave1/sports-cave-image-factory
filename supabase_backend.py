@@ -3778,6 +3778,7 @@ def _update_edition_product_with_cursor(
             edition_total=%s,
             next_edition_number=%s,
             last_assigned_edition=%s,
+            sold_count=%s,
             remaining_count=%s,
             active=%s,
             is_active=%s,
@@ -3792,6 +3793,7 @@ def _update_edition_product_with_cursor(
             new_name,
             new_total,
             proposed_next,
+            latest_sent,
             latest_sent,
             max(remaining, 0),
             flags["active"],
@@ -4723,6 +4725,156 @@ def sync_product_edition_metafields_for_handles(
         if ensure_schema_first:
             log_app_error("product_metafield_bulk_sync_failed", str(error), {})
         raise
+
+
+def _edition_ops_metafield_payload_from_row(row):
+    source = dict(row or {})
+    handle = str(source.get("handle") or source.get("shopify_handle") or "").strip()
+    product_id = str(
+        source.get("shopify_product_id")
+        or source.get("shopify_product_gid")
+        or source.get("synced_shopify_product_gid")
+        or source.get("synced_shopify_product_id")
+        or ""
+    ).strip()
+    edition_total = max(_int_value(source.get("edition_total"), 100), 1)
+    next_number = max(
+        _int_value(source.get("edition_next_number") or source.get("next_edition_number"), 1),
+        1,
+    )
+    sold_count = max(next_number - 1, 0)
+    remaining_count = max(edition_total - sold_count, 0)
+    edition_status = str(source.get("edition_status") or "").strip()
+    if not edition_status:
+        edition_status = "sold_out" if remaining_count <= 0 else "limited_release"
+    edition_name = str(source.get("edition_name") or source.get("edition_label") or DEFAULT_EDITION_NAME).strip()
+    edition_name = edition_name or DEFAULT_EDITION_NAME
+    return {
+        "row_key": source.get("row_key") or handle or product_id,
+        "shopify_handle": handle,
+        "handle": handle,
+        "shopify_product_id": _shopify_gid("Product", product_id),
+        "shopify_product_gid": _shopify_gid("Product", product_id),
+        "product_title": source.get("product_title") or source.get("title") or handle,
+        "title": source.get("product_title") or source.get("title") or handle,
+        "edition_enabled": bool(source.get("edition_enabled", source.get("active", True))),
+        "edition_total": edition_total,
+        "edition_next_number": next_number,
+        "next_edition_number": next_number,
+        "last_assigned_edition": sold_count,
+        "sold_count": sold_count,
+        "edition_sold_count": sold_count,
+        "remaining_count": remaining_count,
+        "edition_remaining": remaining_count,
+        "edition_status": edition_status,
+        "edition_name": edition_name,
+        "edition_label": edition_name,
+        "edition_display_text": (
+            "Sold Out Archive"
+            if remaining_count <= 0
+            else f"Next Available Edition {format_edition_display_number(next_number, edition_total)}"
+        ),
+        "is_archived": not bool(source.get("edition_enabled", source.get("active", True))),
+        "is_sold_out": remaining_count <= 0,
+    }
+
+
+def sync_edition_ops_metafields_for_rows(
+    rows,
+    config=None,
+    progress_callback=None,
+    *,
+    ensure_schema_first=True,
+):
+    if ensure_schema_first:
+        ensure_schema()
+    payloads = []
+    seen = set()
+    errors = []
+    for row in rows or []:
+        payload = _edition_ops_metafield_payload_from_row(row)
+        handle = payload.get("shopify_handle") or ""
+        product_id = payload.get("shopify_product_id") or ""
+        dedupe_key = product_id or handle
+        if not handle:
+            errors.append("Shopify handle is missing for an edited product.")
+            continue
+        if not product_id:
+            errors.append(f"{handle}: Shopify product ID is missing.")
+            continue
+        if dedupe_key in seen:
+            continue
+        payloads.append(payload)
+        seen.add(dedupe_key)
+
+    result = shopify_sync.sync_edition_ops_save_metafields_for_products(
+        payloads,
+        config=config,
+        raise_on_failure=False,
+    )
+    by_product_id = {payload.get("shopify_product_id"): payload for payload in payloads}
+    by_handle = {payload.get("shopify_handle"): payload for payload in payloads}
+    synced = 0
+    failed = 0
+    results = []
+    for item in result.get("results") or []:
+        product_id = _shopify_gid("Product", item.get("shopify_product_id"))
+        handle = str(item.get("handle") or "").strip()
+        payload = by_product_id.get(product_id) or by_handle.get(handle) or {}
+        handle = payload.get("shopify_handle") or handle
+        if item.get("ok"):
+            synced += 1
+            status = "Synced"
+            error_message = ""
+        else:
+            failed += 1
+            status = "Failed"
+            error_message = item.get("message") or "Shopify metafield push failed."
+            errors.append(f"{handle or item.get('title')}: {error_message}")
+        if handle:
+            try:
+                _mark_product_metafields_sync(handle, payload, status, error_message)
+            except Exception as mark_error:
+                failed += 1 if item.get("ok") else 0
+                synced -= 1 if item.get("ok") and synced > 0 else 0
+                status = "Failed"
+                error_message = str(mark_error)
+                errors.append(f"{handle}: {mark_error}")
+        results.append(
+            {
+                "handle": handle,
+                "row_key": payload.get("row_key") or handle,
+                "shopify_product_id": product_id,
+                "status": "updated" if status == "Synced" else "failed",
+                "ok": status == "Synced",
+                "error": error_message,
+                "source_values": {
+                    "edition_enabled": payload.get("edition_enabled"),
+                    "edition_total": payload.get("edition_total"),
+                    "edition_next_number": payload.get("edition_next_number"),
+                    "edition_remaining": payload.get("edition_remaining"),
+                },
+            }
+        )
+        if progress_callback:
+            progress_callback(len(results), len(payloads), handle)
+
+    for error in errors:
+        if error not in result.get("errors", []):
+            result.setdefault("errors", []).append(error)
+    result.update(
+        {
+            "attempted": len(payloads),
+            "synced": synced,
+            "skipped": failed + max(len(payloads) - len(results), 0),
+            "failed": failed + max(len(payloads) - len(results), 0),
+            "results": results,
+            "affected_product_handles": [payload.get("shopify_handle") for payload in payloads],
+            "canonical_namespace": "sports_cave",
+            "canonical_keys": list(shopify_sync.EDITION_OPS_SAVE_METAFIELD_KEYS),
+        }
+    )
+    return result
 
 
 def _active_mapped_edition_product_handles(search="", limit=1000, *, ensure_schema_first=True):

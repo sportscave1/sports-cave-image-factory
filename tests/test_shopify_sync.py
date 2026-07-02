@@ -2275,6 +2275,53 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(len(requests_seen[1]["variables"]["metafields"]), 21)
         self.assertEqual(len(requests_seen[2]["variables"]["metafields"]), 7)
 
+    def test_edition_ops_save_metafields_updates_only_required_keys_in_batches(self):
+        requests_seen = []
+
+        def fake_post(*args, **kwargs):
+            requests_seen.append(kwargs["json"])
+            return FakeResponse(
+                {
+                    "data": {
+                        "metafieldsSet": {
+                            "metafields": [],
+                            "userErrors": [],
+                        }
+                    }
+                }
+            )
+
+        rows = [
+            {
+                "shopify_product_id": f"gid://shopify/Product/{index}",
+                "handle": f"product-{index}",
+                "title": f"Product {index}",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": index,
+                "edition_remaining": 101 - index,
+            }
+            for index in range(1, 8)
+        ]
+
+        result = shopify_sync.sync_edition_ops_save_metafields_for_products(
+            rows,
+            config=self.config,
+            request_post=fake_post,
+        )
+
+        self.assertEqual(result["synced"], 7)
+        self.assertEqual(result["failed"], 0)
+        self.assertEqual(len(requests_seen), 2)
+        self.assertEqual(len(requests_seen[0]["variables"]["metafields"]), 24)
+        self.assertEqual(len(requests_seen[1]["variables"]["metafields"]), 4)
+        keys = {
+            metafield["key"]
+            for request in requests_seen
+            for metafield in request["variables"]["metafields"]
+        }
+        self.assertEqual(keys, set(shopify_sync.EDITION_OPS_SAVE_METAFIELD_KEYS))
+
     def test_edition_ops_metafield_definition_check_and_create_missing(self):
         requests_seen = []
         responses = [
@@ -2794,6 +2841,69 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             "auth_mode": "Admin access token mode",
             "configured": True,
         }
+
+    def test_edition_ops_row_metafield_payload_calculates_sold_and_remaining(self):
+        payload = supabase_backend._edition_ops_metafield_payload_from_row(
+            {
+                "row_key": "edition_product:1",
+                "shopify_product_gid": "gid://shopify/Product/100",
+                "handle": "wall-art",
+                "product_title": "Wall Art",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 57,
+            }
+        )
+
+        self.assertEqual(payload["sold_count"], 56)
+        self.assertEqual(payload["remaining_count"], 44)
+        self.assertEqual(payload["edition_remaining"], 44)
+        self.assertEqual(payload["shopify_product_id"], "gid://shopify/Product/100")
+
+    def test_edition_ops_row_metafield_sync_marks_failed_without_rolling_back_saved_row(self):
+        rows = [
+            {
+                "row_key": "edition_product:1",
+                "shopify_product_gid": "gid://shopify/Product/100",
+                "handle": "wall-art",
+                "product_title": "Wall Art",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 57,
+                "edition_remaining": 44,
+            }
+        ]
+        with patch.object(supabase_backend, "ensure_schema"), patch.object(
+            supabase_backend.shopify_sync,
+            "sync_edition_ops_save_metafields_for_products",
+            return_value={
+                "synced": 0,
+                "failed": 1,
+                "results": [
+                    {
+                        "shopify_product_id": "gid://shopify/Product/100",
+                        "handle": "wall-art",
+                        "ok": False,
+                        "message": "Shopify unavailable",
+                    }
+                ],
+            },
+        ), patch.object(supabase_backend, "_mark_product_metafields_sync") as mark_sync:
+            result = supabase_backend.sync_edition_ops_metafields_for_rows(
+                rows,
+                config=self.config,
+            )
+
+        self.assertEqual(result["synced"], 0)
+        self.assertEqual(result["failed"], 1)
+        mark_sync.assert_called_once()
+        self.assertEqual(mark_sync.call_args.args[2], "Failed")
+        self.assertEqual(mark_sync.call_args.args[1]["next_edition_number"], 57)
+        self.assertEqual(mark_sync.call_args.args[1]["remaining_count"], 44)
+
+    def test_manual_edition_save_updates_sold_count_column(self):
+        source = inspect.getsource(supabase_backend._update_edition_product_with_cursor)
+        self.assertIn("sold_count=%s", source)
 
     @patch.object(supabase_backend, "finish_sync_run")
     @patch.object(supabase_backend, "start_sync_run", return_value="run-1")

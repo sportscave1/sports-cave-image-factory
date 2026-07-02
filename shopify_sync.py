@@ -719,6 +719,12 @@ LIMITED_EDITION_DEFAULTS = {
     "edition_label": "Numbered Edition",
 }
 EDITION_OPS_METAFIELDS_PER_PRODUCT = 7
+EDITION_OPS_SAVE_METAFIELD_KEYS = (
+    "edition_enabled",
+    "edition_total",
+    "edition_next_number",
+    "edition_remaining",
+)
 SHOPIFY_METAFIELDS_SET_LIMIT = 25
 
 
@@ -2115,6 +2121,37 @@ def limited_edition_metafield_inputs(product_id, values):
     ]
 
 
+def edition_ops_save_metafield_inputs(product_id, values):
+    owner_id = shopify_gid("Product", product_id)
+    if not owner_id:
+        raise ShopifyAPIError("Shopify product ID is missing.")
+
+    def edition_input(key, metafield_type, value):
+        return _metafield_input(owner_id, key, metafield_type, value)
+
+    edition_total = max(
+        _parse_int_metafield(values.get("edition_total"), LIMITED_EDITION_DEFAULTS["edition_total"]),
+        1,
+    )
+    edition_next_number = max(
+        _parse_int_metafield(values.get("edition_next_number"), LIMITED_EDITION_DEFAULTS["edition_next_number"]),
+        1,
+    )
+    derived_remaining = calculate_limited_edition_remaining(edition_total, edition_next_number)
+    edition_remaining = (
+        _parse_int_metafield(values.get("edition_remaining"), derived_remaining)
+        if "edition_remaining" in values
+        else derived_remaining
+    )
+    edition_remaining = max(edition_remaining, 0)
+    return [
+        edition_input("edition_enabled", "boolean", _bool_value(values.get("edition_enabled"))),
+        edition_input("edition_total", "number_integer", edition_total),
+        edition_input("edition_next_number", "number_integer", edition_next_number),
+        edition_input("edition_remaining", "number_integer", edition_remaining),
+    ]
+
+
 def save_limited_edition_metafields(product_id, values, config=None, request_post=None):
     owner_id = shopify_gid("Product", product_id)
     metafields_set(
@@ -2134,6 +2171,76 @@ def save_limited_edition_metafields(product_id, values, config=None, request_pos
         "edition": normalize_limited_edition_metafields(metafields),
         "api_version": readback.get("api_version"),
     }
+
+
+def sync_edition_ops_save_metafields_for_products(
+    products,
+    config=None,
+    request_post=None,
+    *,
+    raise_on_failure=False,
+):
+    config = config or get_config()
+    rows = [row for row in (products or []) if row.get("shopify_product_id")]
+    results = []
+    synced = 0
+    failed = 0
+
+    fields_per_product = max(len(EDITION_OPS_SAVE_METAFIELD_KEYS), 1)
+    products_per_batch = max(1, SHOPIFY_METAFIELDS_SET_LIMIT // fields_per_product)
+    for index in range(0, len(rows), products_per_batch):
+        chunk = rows[index : index + products_per_batch]
+        inputs = []
+        for row in chunk:
+            inputs.extend(edition_ops_save_metafield_inputs(row["shopify_product_id"], row))
+
+        try:
+            metafields_set(inputs, config=config, request_post=request_post)
+            for row in chunk:
+                results.append(
+                    {
+                        "shopify_product_id": shopify_gid("Product", row["shopify_product_id"]),
+                        "handle": row.get("handle") or "",
+                        "title": row.get("title") or row.get("handle") or row["shopify_product_id"],
+                        "ok": True,
+                        "message": "Synced",
+                    }
+                )
+                synced += 1
+        except Exception as batch_error:
+            for row in chunk:
+                try:
+                    metafields_set(
+                        edition_ops_save_metafield_inputs(row["shopify_product_id"], row),
+                        config=config,
+                        request_post=request_post,
+                    )
+                    results.append(
+                        {
+                            "shopify_product_id": shopify_gid("Product", row["shopify_product_id"]),
+                            "handle": row.get("handle") or "",
+                            "title": row.get("title") or row.get("handle") or row["shopify_product_id"],
+                            "ok": True,
+                            "message": "Synced",
+                        }
+                    )
+                    synced += 1
+                except Exception as product_error:
+                    results.append(
+                        {
+                            "shopify_product_id": shopify_gid("Product", row["shopify_product_id"]),
+                            "handle": row.get("handle") or "",
+                            "title": row.get("title") or row.get("handle") or row["shopify_product_id"],
+                            "ok": False,
+                            "message": str(product_error) or str(batch_error),
+                        }
+                    )
+                    failed += 1
+
+    result = {"synced": synced, "failed": failed, "results": results}
+    if failed and raise_on_failure:
+        raise ShopifyAPIError(f"Shopify metafield sync failed: {_limited_edition_sync_error_text(results)}")
+    return result
 
 
 def _limited_edition_sync_error_text(results):

@@ -45,11 +45,12 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("_load_supabase_snapshot", source)
         self.assertIn("backend.list_edition_products", source)
         self.assertIn("backend.update_edition_product", source)
-        self.assertIn("Sync New Products", source)
-        self.assertIn("Reload Supabase Table", source)
-        self.assertIn("backend.sync_new_shopify_products_to_edition_ops", render_source)
+        self.assertIn("Save Changes", source)
+        self.assertIn("_render_advanced_controls", render_source)
+        self.assertIn("backend.sync_new_shopify_products_to_edition_ops", source)
         self.assertNotIn("backend.sync_shopify_products_to_supabase", render_source)
-        self.assertIn("Save Changed Rows", source)
+        self.assertNotIn("Save Changed Rows", render_source)
+        self.assertNotIn("Push Metafield", render_source)
         self.assertIn("Export CSV Backup", source)
         self.assertIn("Import CSV and Replace Table", source)
         self.assertIn("edition_sold_count", source)
@@ -1594,7 +1595,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_next_number"], 53)
 
-    def test_edition_ops_sync_button_calls_product_sync_helper_once(self):
+    def test_edition_ops_save_changes_updates_supabase_and_shopify_once(self):
         class RerunRequested(Exception):
             pass
 
@@ -1607,18 +1608,30 @@ class EditionOpsUiTests(unittest.TestCase):
 
         class FakeBackend:
             def __init__(self):
-                self.calls = 0
+                self.supabase_calls = 0
+                self.shopify_calls = 0
 
-            def sync_new_shopify_products_to_edition_ops(self, config=None):
-                self.calls += 1
+            def update_edition_products_batch(self, rows, reason=""):
+                self.supabase_calls += 1
+                self.saved_rows = rows
+                return [{"ok": True, "handle": rows[0]["handle"], "key": rows[0]["row_key"]}]
+
+            def sync_edition_ops_metafields_for_rows(self, rows, config=None, ensure_schema_first=True):
+                self.shopify_calls += 1
+                self.mirrored_rows = rows
                 return {
-                    "products_checked": 1,
-                    "new_products_inserted": 1,
-                    "existing_products_updated": 0,
-                    "existing_products_skipped": 0,
-                    "shopify_metafields_pushed": 1,
-                    "shopify_metafields_failed_pending": 0,
+                    "attempted": 1,
+                    "synced": 1,
+                    "skipped": 0,
                     "errors": [],
+                    "results": [
+                        {
+                            "row_key": rows[0]["row_key"],
+                            "handle": rows[0]["handle"],
+                            "status": "updated",
+                            "ok": True,
+                        }
+                    ],
                 }
 
         class FakeColumn:
@@ -1632,7 +1645,7 @@ class EditionOpsUiTests(unittest.TestCase):
                 return False
 
             def button(self, label, *args, **kwargs):
-                return label == "Sync New Products" and not self.fake_st.clicked
+                return False
 
             def download_button(self, *args, **kwargs):
                 return None
@@ -1640,17 +1653,73 @@ class EditionOpsUiTests(unittest.TestCase):
             def popover(self, *args, **kwargs):
                 return FakeContext()
 
+        class FakeSlot:
+            def __init__(self, fake_st):
+                self.fake_st = fake_st
+
+            def caption(self, message):
+                self.fake_st.captions.append(message)
+
+            def button(self, label, *args, **kwargs):
+                self.fake_st.buttons.append((label, kwargs))
+                if label == "Save Changes" and not self.fake_st.clicked:
+                    self.fake_st.clicked = True
+                    return True
+                return False
+
+            def container(self):
+                return FakeContext()
+
         class FakeStreamlit:
             def __init__(self):
                 self.clicked = False
+                self.buttons = []
+                self.captions = []
+                self.column_config = SimpleNamespace(
+                    TextColumn=lambda *args, **kwargs: None,
+                    CheckboxColumn=lambda *args, **kwargs: None,
+                    NumberColumn=lambda *args, **kwargs: None,
+                    LinkColumn=lambda *args, **kwargs: None,
+                )
                 self.session_state = {
                     edition_ops.SNAPSHOT_LOADED_KEY: True,
-                    edition_ops.ROWS_KEY: [],
-                    edition_ops.ORIGINAL_ROWS_KEY: [],
+                    edition_ops.ROWS_KEY: [
+                        {
+                            "edition_product_id": "ep-1",
+                            "shopify_product_gid": "gid://shopify/Product/100",
+                            "product_title": "Wall Art",
+                            "handle": "wall-art",
+                            "edition_enabled": True,
+                            "edition_total": 100,
+                            "edition_next_number": 10,
+                            "edition_sold_count": 9,
+                            "edition_remaining": 91,
+                            "edition_status": "Limited Edition",
+                            "sync_status": "Loaded",
+                            "sync_error": "",
+                        }
+                    ],
+                    edition_ops.ORIGINAL_ROWS_KEY: [
+                        {
+                            "edition_product_id": "ep-1",
+                            "shopify_product_gid": "gid://shopify/Product/100",
+                            "product_title": "Wall Art",
+                            "handle": "wall-art",
+                            "edition_enabled": True,
+                            "edition_total": 100,
+                            "edition_next_number": 9,
+                            "edition_sold_count": 8,
+                            "edition_remaining": 92,
+                            "edition_status": "Limited Edition",
+                            "sync_status": "Loaded",
+                            "sync_error": "",
+                        }
+                    ],
                     edition_ops.META_KEY: {},
                     edition_ops.ERRORS_KEY: {},
                     edition_ops.IMPORT_WARNINGS_KEY: [],
                     edition_ops.NOTICE_KEY: "",
+                    edition_ops.NOTICE_LEVEL_KEY: "success",
                     edition_ops.EDITOR_VERSION_KEY: 0,
                 }
 
@@ -1678,8 +1747,13 @@ class EditionOpsUiTests(unittest.TestCase):
             def columns(self, spec):
                 return [FakeColumn(self) for _ in spec]
 
+            def empty(self):
+                return FakeSlot(self)
+
+            def data_editor(self, rows, *args, **kwargs):
+                return rows
+
             def spinner(self, *args, **kwargs):
-                self.clicked = True
                 return FakeContext()
 
             def rerun(self):
@@ -1695,15 +1769,15 @@ class EditionOpsUiTests(unittest.TestCase):
             edition_ops.shopify_sync,
             "get_config",
             return_value={"configured": True},
-        ), patch.object(
-            edition_ops,
-            "_reload_products_from_supabase",
-        ):
+        ), patch.object(edition_ops, "_write_snapshot"), patch.object(edition_ops, "_invalidate_edition_ops_cache"):
             with self.assertRaises(RerunRequested):
                 edition_ops.render_page()
 
-        self.assertEqual(fake_backend.calls, 1)
-        self.assertIn("Sync New Products complete", fake_st.session_state[edition_ops.NOTICE_KEY])
+        self.assertEqual(fake_backend.supabase_calls, 1)
+        self.assertEqual(fake_backend.shopify_calls, 1)
+        self.assertEqual(fake_backend.saved_rows[0]["next_edition_number"], 10)
+        self.assertEqual(fake_backend.mirrored_rows[0]["edition_next_number"], 10)
+        self.assertIn(("Save Changes", {"type": "primary", "use_container_width": True, "disabled": False, "key": "edition-ops-save-changes"}), fake_st.buttons)
 
     def test_orders_page_open_renders_snapshot_without_shopify_or_allocation_work(self):
         class FakeContainer:
