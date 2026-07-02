@@ -84,6 +84,11 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertTrue(shopify_sync.is_orders_paid_webhook_topic("ORDERS_PAID"))
         self.assertFalse(shopify_sync.is_orders_paid_webhook_topic("orders/create"))
 
+    def test_products_create_webhook_topic_accepts_rest_and_graphql_names(self):
+        self.assertTrue(shopify_sync.is_products_create_webhook_topic("products/create"))
+        self.assertTrue(shopify_sync.is_products_create_webhook_topic("PRODUCTS_CREATE"))
+        self.assertFalse(shopify_sync.is_products_create_webhook_topic("products/update"))
+
     def test_orders_paid_webhook_callback_accepts_base_or_full_url(self):
         self.assertEqual(
             shopify_sync.orders_paid_webhook_callback_url("https://sports-cave-image-factory.onrender.com"),
@@ -108,6 +113,58 @@ class ShopifySyncClientTests(unittest.TestCase):
                 shopify_sync.orders_paid_webhook_callback_url(),
                 "https://sports-cave-os-webhooks.onrender.com/webhooks/shopify/orders-paid",
             )
+
+    def test_products_create_webhook_callback_accepts_base_or_full_url(self):
+        self.assertEqual(
+            shopify_sync.products_create_webhook_callback_url("https://sports-cave-os-webhooks.onrender.com"),
+            "https://sports-cave-os-webhooks.onrender.com/webhooks/shopify/products-create",
+        )
+        self.assertEqual(
+            shopify_sync.products_create_webhook_callback_url(
+                "https://sports-cave-os-webhooks.onrender.com/webhooks/shopify/products-create"
+            ),
+            "https://sports-cave-os-webhooks.onrender.com/webhooks/shopify/products-create",
+        )
+
+    def test_products_create_subscription_uses_graphql_registration_helper(self):
+        requests = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            requests.append(json)
+            query = json.get("query") or ""
+            if "webhookSubscriptions" in query:
+                return FakeResponse({"data": {"webhookSubscriptions": {"nodes": []}}})
+            return FakeResponse(
+                {
+                    "data": {
+                        "webhookSubscriptionCreate": {
+                            "webhookSubscription": {
+                                "id": "gid://shopify/WebhookSubscription/200",
+                                "topic": "PRODUCTS_CREATE",
+                                "endpoint": {
+                                    "__typename": "WebhookHttpEndpoint",
+                                    "callbackUrl": "https://sports-cave-os-webhooks.onrender.com/webhooks/shopify/products-create",
+                                },
+                            },
+                            "userErrors": [],
+                        }
+                    }
+                }
+            )
+
+        result = shopify_sync.ensure_products_create_webhook_subscription(
+            callback_url="https://sports-cave-os-webhooks.onrender.com",
+            config=self.config,
+            request_post=fake_post,
+        )
+
+        self.assertTrue(result["created"])
+        self.assertEqual(requests[0]["variables"]["topics"], ["PRODUCTS_CREATE"])
+        self.assertEqual(requests[1]["variables"]["topic"], "PRODUCTS_CREATE")
+        self.assertEqual(
+            requests[1]["variables"]["webhookSubscription"]["callbackUrl"],
+            "https://sports-cave-os-webhooks.onrender.com/webhooks/shopify/products-create",
+        )
 
     def test_orders_paid_fastapi_route_accepts_valid_hmac(self):
         from fastapi.testclient import TestClient
@@ -307,6 +364,94 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "skipped_duplicate")
         process_webhook.assert_not_called()
+
+    def test_products_create_fastapi_route_uses_same_hmac_helper(self):
+        from fastapi.testclient import TestClient
+        import webhook_server
+
+        raw_body = b'{"id":100,"admin_graphql_api_id":"gid://shopify/Product/100","handle":"new-wall-art","title":"New Wall Art","status":"active"}'
+        with patch.object(
+            webhook_server,
+            "verify_shopify_webhook_hmac",
+            return_value={"ok": True, "secret_env_used": "SHOPIFY_CLIENT_SECRET"},
+        ) as verify_hmac, patch.object(
+            supabase_backend,
+            "is_configured",
+            return_value=True,
+        ), patch.object(
+            supabase_backend,
+            "claim_product_create_webhook_receipt",
+            return_value={
+                "webhook_id": "product-webhook-100",
+                "duplicate": False,
+                "shopify_product_id": "gid://shopify/Product/100",
+                "shopify_handle": "new-wall-art",
+            },
+        ), patch.object(
+            supabase_backend,
+            "process_product_create_webhook",
+            return_value={"source": "webhook", "processed": True, "errors": []},
+        ) as process_product, patch.object(
+            supabase_backend,
+            "process_order_paid_webhook",
+        ) as process_order:
+            response = TestClient(webhook_server.app).post(
+                "/webhooks/shopify/products-create",
+                content=raw_body,
+                headers={
+                    "X-Shopify-Hmac-Sha256": "patched-hmac",
+                    "X-Shopify-Topic": "products/create",
+                    "X-Shopify-Webhook-Id": "product-webhook-100",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "accepted")
+        verify_hmac.assert_called_once()
+        self.assertEqual(verify_hmac.call_args.args[0], raw_body)
+        process_product.assert_called_once()
+        self.assertFalse(process_product.call_args.kwargs["claim_event"])
+        process_order.assert_not_called()
+
+    def test_products_create_fastapi_route_duplicate_receipt_skips_processing(self):
+        from fastapi.testclient import TestClient
+        import webhook_server
+
+        raw_body = b'{"id":100,"admin_graphql_api_id":"gid://shopify/Product/100","handle":"new-wall-art","title":"New Wall Art","status":"active"}'
+        secret = "client-secret"
+        signature = base64.b64encode(
+            hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
+        ).decode("utf-8")
+        with patch.dict(os.environ, {"SHOPIFY_CLIENT_SECRET": secret, "SHOPIFY_WEBHOOK_SECRET": ""}), patch.object(
+            supabase_backend,
+            "is_configured",
+            return_value=True,
+        ), patch.object(
+            supabase_backend,
+            "claim_product_create_webhook_receipt",
+            return_value={
+                "webhook_id": "product-webhook-100",
+                "duplicate": True,
+                "shopify_product_id": "gid://shopify/Product/100",
+                "shopify_handle": "new-wall-art",
+            },
+        ), patch.object(
+            supabase_backend,
+            "process_product_create_webhook",
+        ) as process_product:
+            response = TestClient(webhook_server.app).post(
+                "/webhooks/shopify/products-create",
+                content=raw_body,
+                headers={
+                    "X-Shopify-Hmac-Sha256": signature,
+                    "X-Shopify-Topic": "products/create",
+                    "X-Shopify-Webhook-Id": "product-webhook-100",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "skipped_duplicate")
+        process_product.assert_not_called()
 
     def test_orders_paid_fastapi_logs_do_not_expose_hmac_or_secret_lengths(self):
         from fastapi.testclient import TestClient
@@ -2809,6 +2954,361 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         self.assertEqual(actions[0]["action"], "update")
         self.assertEqual(actions[0]["match_type"], "shopify_product_id")
         self.assertEqual(actions[0]["fields"]["shopify_handle"], "new-handle")
+
+    def test_product_create_webhook_inserts_new_product_with_next_number_one(self):
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def cursor(self):
+                return FakeCursor()
+
+            def commit(self):
+                return None
+
+        class CaptureCursor:
+            def execute(self, sql, params=None):
+                self.sql = sql
+                self.params = params
+
+            def fetchone(self):
+                return {"shopify_handle": "new-wall-art"}
+
+        payload = {
+            "id": 100,
+            "admin_graphql_api_id": "gid://shopify/Product/100",
+            "handle": "new-wall-art",
+            "title": "New Wall Art",
+            "status": "active",
+            "created_at": "2026-07-02T00:00:00Z",
+            "updated_at": "2026-07-02T00:00:00Z",
+            "image": {"src": "https://cdn.example/new.jpg"},
+            "variants": [{"id": 200, "title": "Default", "sku": "NEW-ART", "price": "100.00"}],
+        }
+
+        def apply_plan(_cur, actions):
+            self.assertEqual(actions[0]["action"], "insert")
+            self.assertEqual(actions[0]["fields"]["shopify_handle"], "new-wall-art")
+            self.assertEqual(actions[0]["fields"]["featured_image_url"], "https://cdn.example/new.jpg")
+            capture = CaptureCursor()
+            supabase_backend._insert_edition_product_from_shopify(capture, actions[0]["fields"])
+            self.assertIn("100, 1, 0, 0, 100, 'limited_release'", capture.sql)
+            return {
+                "new_products_inserted": 1,
+                "existing_products_updated": 0,
+                "existing_products_skipped": 0,
+                "variant_sync_errors": [],
+                "errors": [],
+                "inserted_handles": ["new-wall-art"],
+                "updated_handles": [],
+            }
+
+        with patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
+            supabase_backend,
+            "connect",
+            return_value=FakeConnection(),
+        ), patch.object(
+            supabase_backend,
+            "_candidate_edition_products_for_shopify_products",
+            return_value=[],
+        ), patch.object(
+            supabase_backend,
+            "_apply_edition_product_incremental_plan",
+            side_effect=apply_plan,
+        ), patch.object(
+            supabase_backend,
+            "sync_product_edition_metafields_for_handles",
+            return_value={"attempted": 1, "synced": 1, "skipped": 0, "errors": [], "results": []},
+        ) as mirror:
+            result = supabase_backend.process_product_create_webhook(
+                payload,
+                "product-webhook-100",
+                "products/create",
+                claim_event=False,
+                config=self.config,
+            )
+
+        self.assertEqual(result["new_products_inserted"], 1)
+        self.assertEqual(result["shopify_metafields_pushed"], 1)
+        mirror.assert_called_once_with(["new-wall-art"], config=self.config, ensure_schema_first=False)
+
+    def test_product_create_webhook_existing_product_is_not_duplicated(self):
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def cursor(self):
+                return FakeCursor()
+
+            def commit(self):
+                return None
+
+        payload = {
+            "id": 100,
+            "admin_graphql_api_id": "gid://shopify/Product/100",
+            "handle": "existing-wall-art",
+            "title": "Existing Wall Art",
+            "status": "active",
+        }
+        existing = {
+            "id": "1",
+            "shopify_product_id": "gid://shopify/Product/100",
+            "shopify_product_gid": "gid://shopify/Product/100",
+            "shopify_handle": "existing-wall-art",
+            "product_title": "Existing Wall Art",
+            "active": True,
+            "is_active": True,
+            "featured_image_url": "",
+            "next_edition_number": 43,
+            "edition_total": 100,
+            "sold_count": 42,
+            "remaining_count": 58,
+        }
+
+        def apply_plan(_cur, actions):
+            self.assertEqual(actions[0]["action"], "skip")
+            return {
+                "new_products_inserted": 0,
+                "existing_products_updated": 0,
+                "existing_products_skipped": 1,
+                "variant_sync_errors": [],
+                "errors": [],
+                "inserted_handles": [],
+                "updated_handles": [],
+            }
+
+        with patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
+            supabase_backend,
+            "connect",
+            return_value=FakeConnection(),
+        ), patch.object(
+            supabase_backend,
+            "_candidate_edition_products_for_shopify_products",
+            return_value=[existing],
+        ), patch.object(
+            supabase_backend,
+            "_apply_edition_product_incremental_plan",
+            side_effect=apply_plan,
+        ), patch.object(
+            supabase_backend,
+            "sync_product_edition_metafields_for_handles",
+        ) as mirror:
+            result = supabase_backend.process_product_create_webhook(
+                payload,
+                "product-webhook-100",
+                "products/create",
+                claim_event=False,
+                config=self.config,
+            )
+
+        self.assertEqual(result["new_products_inserted"], 0)
+        self.assertEqual(result["existing_products_skipped"], 1)
+        mirror.assert_not_called()
+
+    def test_product_create_webhook_handle_change_matches_by_product_id_without_resetting_counters(self):
+        product = {
+            "shopify_product_id": "gid://shopify/Product/100",
+            "handle": "new-handle",
+            "title": "Existing Wall Art",
+            "status": "ACTIVE",
+        }
+        existing = {
+            "id": "1",
+            "shopify_product_id": "gid://shopify/Product/100",
+            "shopify_product_gid": "gid://shopify/Product/100",
+            "shopify_handle": "old-handle",
+            "product_title": "Existing Wall Art",
+            "active": True,
+            "is_active": True,
+            "featured_image_url": "",
+            "next_edition_number": 43,
+            "edition_total": 100,
+            "sold_count": 42,
+            "remaining_count": 58,
+        }
+
+        actions = supabase_backend._plan_edition_product_incremental_sync([product], [existing])
+
+        self.assertEqual(actions[0]["action"], "update")
+        self.assertEqual(actions[0]["match_type"], "shopify_product_id")
+        self.assertEqual(actions[0]["fields"]["shopify_handle"], "new-handle")
+        self.assertNotIn("next_edition_number", actions[0]["fields"])
+        self.assertNotIn("edition_total", actions[0]["fields"])
+        self.assertNotIn("sold_count", actions[0]["fields"])
+        self.assertNotIn("remaining_count", actions[0]["fields"])
+
+    def test_product_create_webhook_metafield_failure_keeps_supabase_row_and_marks_failed(self):
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def cursor(self):
+                return FakeCursor()
+
+            def commit(self):
+                return None
+
+        payload = {
+            "id": 100,
+            "admin_graphql_api_id": "gid://shopify/Product/100",
+            "handle": "new-wall-art",
+            "title": "New Wall Art",
+            "status": "active",
+        }
+        apply_summary = {
+            "new_products_inserted": 1,
+            "existing_products_updated": 0,
+            "existing_products_skipped": 0,
+            "variant_sync_errors": [],
+            "errors": [],
+            "inserted_handles": ["new-wall-art"],
+            "updated_handles": [],
+        }
+
+        with patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
+            supabase_backend,
+            "connect",
+            return_value=FakeConnection(),
+        ), patch.object(
+            supabase_backend,
+            "_candidate_edition_products_for_shopify_products",
+            return_value=[],
+        ), patch.object(
+            supabase_backend,
+            "_apply_edition_product_incremental_plan",
+            return_value=apply_summary,
+        ), patch.object(
+            supabase_backend,
+            "sync_product_edition_metafields_for_handles",
+            side_effect=RuntimeError("Shopify unavailable"),
+        ), patch.object(
+            supabase_backend,
+            "_mark_product_metafields_sync",
+        ) as mark_failed:
+            result = supabase_backend.process_product_create_webhook(
+                payload,
+                "product-webhook-100",
+                "products/create",
+                claim_event=False,
+                config=self.config,
+            )
+
+        self.assertEqual(result["new_products_inserted"], 1)
+        self.assertEqual(result["shopify_metafields_pushed"], 0)
+        self.assertEqual(result["shopify_metafields_failed_pending"], 1)
+        self.assertIn("Shopify unavailable", "\n".join(result["errors"]))
+        mark_failed.assert_called_once()
+        failed_payload = mark_failed.call_args.args[1]
+        self.assertEqual(failed_payload["next_edition_number"], 1)
+        self.assertEqual(failed_payload["edition_total"], 100)
+        self.assertEqual(failed_payload["sold_count"], 0)
+        self.assertEqual(failed_payload["remaining_count"], 100)
+        self.assertEqual(failed_payload["edition_status"], "limited_release")
+
+    def test_product_create_webhook_does_not_call_order_allocation_or_certificate_helpers(self):
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def cursor(self):
+                return FakeCursor()
+
+            def commit(self):
+                return None
+
+        payload = {
+            "id": 100,
+            "admin_graphql_api_id": "gid://shopify/Product/100",
+            "handle": "new-wall-art",
+            "title": "New Wall Art",
+            "status": "active",
+        }
+        with patch.object(supabase_backend, "_update_webhook_event_status"), patch.object(
+            supabase_backend,
+            "connect",
+            return_value=FakeConnection(),
+        ), patch.object(
+            supabase_backend,
+            "_candidate_edition_products_for_shopify_products",
+            return_value=[],
+        ), patch.object(
+            supabase_backend,
+            "_apply_edition_product_incremental_plan",
+            return_value={
+                "new_products_inserted": 0,
+                "existing_products_updated": 0,
+                "existing_products_skipped": 1,
+                "variant_sync_errors": [],
+                "errors": [],
+                "inserted_handles": [],
+                "updated_handles": [],
+            },
+        ), patch.object(
+            supabase_backend,
+            "sync_product_edition_metafields_for_handles",
+        ) as mirror, patch.object(
+            supabase_backend,
+            "process_order_paid_webhook",
+        ) as order_webhook, patch.object(
+            supabase_backend,
+            "process_shopify_order_for_editions",
+        ) as allocation, patch.object(
+            supabase_backend,
+            "generate_certificate_pdf",
+        ) as certificate:
+            result = supabase_backend.process_product_create_webhook(
+                payload,
+                "product-webhook-100",
+                "products/create",
+                claim_event=False,
+                config=self.config,
+            )
+
+        self.assertEqual(result["new_products_inserted"], 0)
+        mirror.assert_not_called()
+        order_webhook.assert_not_called()
+        allocation.assert_not_called()
+        certificate.assert_not_called()
 
     @patch.object(supabase_backend, "set_app_setting")
     @patch.object(supabase_backend, "sync_product_edition_metafields_for_handles")

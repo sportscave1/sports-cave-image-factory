@@ -144,6 +144,20 @@ def _process_orders_paid_background(payload, webhook_id, topic):
         _webhook_log("webhook_background_processing_failed", webhook_id=webhook_id, topic=topic, error=str(error))
 
 
+def _process_products_create_background(payload, webhook_id, topic):
+    try:
+        import supabase_backend
+
+        supabase_backend.process_product_create_webhook(
+            payload,
+            webhook_id,
+            topic,
+            claim_event=False,
+        )
+    except Exception as error:
+        _webhook_log("webhook_background_processing_failed", webhook_id=webhook_id, topic=topic, error=str(error))
+
+
 @app.post("/webhooks/shopify/orders-paid")
 async def shopify_orders_paid_webhook(request: Request, background_tasks: BackgroundTasks):
     raw_body = await request.body()
@@ -256,6 +270,121 @@ async def shopify_orders_paid_webhook(request: Request, background_tasks: Backgr
         "webhook_id": claim.get("webhook_id") or webhook_id,
         "order_name": claim.get("order_name") or "",
         "shopify_order_id": claim.get("shopify_order_id") or "",
+    }
+
+
+@app.post("/webhooks/shopify/products-create")
+async def shopify_products_create_webhook(request: Request, background_tasks: BackgroundTasks):
+    raw_body = await request.body()
+    topic = _header(request.headers, "X-Shopify-Topic") or "products/create"
+    webhook_id = (
+        _header(request.headers, "X-Shopify-Webhook-Id")
+        or _header(request.headers, "X-Shopify-Event-Id")
+        or ""
+    )
+    shop_domain = _header(request.headers, "X-Shopify-Shop-Domain")
+    triggered_at = _header(request.headers, "X-Shopify-Triggered-At")
+    hmac_header = _header(request.headers, "X-Shopify-Hmac-Sha256", "X-Shopify-Hmac-SHA256")
+    hmac_result = verify_shopify_webhook_hmac(raw_body, request.headers)
+    _webhook_log(
+        "shopify_products_create_webhook_received",
+        webhook_id=webhook_id,
+        topic=topic,
+        shop_domain=shop_domain,
+        triggered_at=triggered_at,
+        has_hmac_header=bool(hmac_header),
+        **_safe_hmac_log_fields(hmac_result),
+    )
+    if _debug_webhook_security_enabled() and hmac_result.get("admin_token_candidate_env_names"):
+        _webhook_log(
+            "webhook_secret_candidate_warning",
+            webhook_id=webhook_id,
+            topic=topic,
+            candidate_env_names=hmac_result.get("admin_token_candidate_env_names"),
+            warning="candidate secret looks like a Shopify Admin API token",
+        )
+
+    if not hmac_result.get("ok"):
+        _webhook_log(
+            "webhook_hmac_failed",
+            webhook_id=webhook_id,
+            topic=topic,
+            shop_domain=shop_domain,
+            has_hmac_header=bool(hmac_header),
+            **_safe_hmac_log_fields(hmac_result),
+        )
+        return Response("Invalid Shopify webhook signature.", status_code=401)
+
+    _webhook_log(
+        "webhook_hmac_verified",
+        webhook_id=webhook_id,
+        topic=topic,
+        shop_domain=shop_domain,
+        has_hmac_header=True,
+        **_safe_hmac_log_fields(hmac_result),
+    )
+
+    if _is_shopify_test_webhook(request.headers):
+        _webhook_log(
+            "webhook_shopify_test_verified",
+            webhook_id=webhook_id,
+            topic=topic,
+            shop_domain=shop_domain,
+            secret_env_used=hmac_result.get("secret_env_used"),
+        )
+        return {
+            "ok": True,
+            "status": "shopify_test_verified",
+            "source": "webhook",
+            "webhook_id": webhook_id,
+        }
+
+    try:
+        import shopify_sync
+    except Exception as error:
+        _webhook_log("webhook_product_processing_failed", webhook_id=webhook_id, error=str(error))
+        return Response("Webhook processor is unavailable.", status_code=500)
+
+    if not shopify_sync.is_products_create_webhook_topic(topic):
+        _webhook_log("webhook_product_processing_failed", webhook_id=webhook_id, topic=topic, error="Unsupported topic")
+        return Response("Unsupported Shopify webhook topic.", status_code=400)
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8") or "{}")
+    except ValueError:
+        return Response("Invalid JSON payload.", status_code=400)
+
+    try:
+        import supabase_backend
+
+        if not supabase_backend.is_configured():
+            return Response("Supabase is not configured for webhook processing.", status_code=500)
+
+        claim = supabase_backend.claim_product_create_webhook_receipt(
+            payload,
+            webhook_id,
+            topic,
+            shop_domain=shop_domain,
+        )
+    except Exception as error:
+        _webhook_log("webhook_receipt_record_failed", webhook_id=webhook_id, topic=topic, error=str(error))
+        return Response("Webhook receipt could not be recorded.", status_code=500)
+    if claim.get("duplicate"):
+        _webhook_log("webhook_duplicate_skipped", status="completed", webhook_id=webhook_id, topic=topic)
+        return {
+            "ok": True,
+            "status": "skipped_duplicate",
+            "source": "webhook",
+            "webhook_id": webhook_id,
+        }
+    background_tasks.add_task(_process_products_create_background, payload, claim.get("webhook_id") or webhook_id, topic)
+    return {
+        "ok": True,
+        "status": "accepted",
+        "source": "webhook",
+        "webhook_id": claim.get("webhook_id") or webhook_id,
+        "shopify_product_id": claim.get("shopify_product_id") or "",
+        "shopify_handle": claim.get("shopify_handle") or "",
     }
 
 

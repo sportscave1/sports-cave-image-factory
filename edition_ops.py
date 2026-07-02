@@ -987,7 +987,7 @@ def _format_shopify_product_sync_summary(result):
     errors = list(result.get("errors") or [])
     errors.extend(result.get("variant_sync_errors") or [])
     message = (
-        "Sync New Shopify Products complete. "
+        "Sync New Products complete. "
         f"Shopify products checked: {int(result.get('products_checked') or 0)}. "
         f"New products inserted: {int(result.get('new_products_inserted') or 0)}. "
         f"Existing products updated safely: {int(result.get('existing_products_updated') or 0)}. "
@@ -1430,7 +1430,7 @@ def render_page():
     st.session_state[IMPORT_WARNINGS_KEY] = []
 
     action_cols = st.columns([1.4, 1, 1, 1, 1, 1])
-    if action_cols[0].button("Sync New Shopify Products", type="primary", use_container_width=True, disabled=not backend):
+    if action_cols[0].button("Sync New Products", type="primary", use_container_width=True, disabled=not backend):
         sync_completed = False
         try:
             with st.spinner("Scanning Shopify products and updating Edition Ops..."):
@@ -1521,7 +1521,7 @@ def render_page():
             for product_title, message in errors.items():
                 st.caption(f"{product_title}: {message}")
     else:
-        st.info("No products loaded yet. Sync New Shopify Products or reload the Supabase table.")
+        st.info("No products loaded yet. Sync New Products or reload the Supabase table.")
 
     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
     print(f"PERF Edition Ops total={elapsed:.3f}s rows={len(st.session_state.get(ROWS_KEY, []))}", flush=True)

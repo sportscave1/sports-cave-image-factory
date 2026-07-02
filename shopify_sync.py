@@ -24,6 +24,7 @@ DEFAULT_FILE_POLL_ATTEMPTS = 12
 MAX_FILE_POLL_ATTEMPTS = 30
 MAX_FILE_POLL_SLEEP_SECONDS = 2.0
 ORDERS_PAID_WEBHOOK_TOPICS = {"orders/paid", "orders_paid"}
+PRODUCTS_CREATE_WEBHOOK_TOPICS = {"products/create", "products_create"}
 
 
 _TOKEN_CACHE = {}
@@ -390,6 +391,11 @@ def verify_shopify_webhook_hmac(raw_body: bytes, hmac_header: str, secret: str) 
 def is_orders_paid_webhook_topic(topic):
     normalised = str(topic or "").strip().replace("/", "_").casefold()
     return normalised in ORDERS_PAID_WEBHOOK_TOPICS
+
+
+def is_products_create_webhook_topic(topic):
+    normalised = str(topic or "").strip().replace("/", "_").casefold()
+    return normalised in PRODUCTS_CREATE_WEBHOOK_TOPICS
 
 
 SHOP_QUERY = """
@@ -2257,6 +2263,17 @@ def orders_paid_webhook_callback_url(base_url=None):
     return f"{base}/webhooks/shopify/orders-paid"
 
 
+def products_create_webhook_callback_url(base_url=None):
+    base = str(base_url or public_webhook_base_url() or "").strip().rstrip("/")
+    if not base:
+        return ""
+    if "://" not in base:
+        base = f"https://{base}"
+    if base.rstrip("/").endswith("/webhooks/shopify/products-create"):
+        return base.rstrip("/")
+    return f"{base}/webhooks/shopify/products-create"
+
+
 def _webhook_callback_url(subscription):
     endpoint = (subscription or {}).get("endpoint") or {}
     return str(endpoint.get("callbackUrl") or "").strip()
@@ -2267,6 +2284,21 @@ def list_orders_paid_webhook_subscriptions(config=None, request_post=None):
     data, served_version = graphql_request(
         ORDERS_PAID_WEBHOOK_SUBSCRIPTIONS_QUERY,
         variables={"first": 50, "topics": ["ORDERS_PAID"]},
+        config=config,
+        request_post=request_post,
+    )
+    nodes = ((data.get("webhookSubscriptions") or {}).get("nodes") or [])
+    return {
+        "subscriptions": nodes,
+        "api_version": served_version or config.get("api_version"),
+    }
+
+
+def list_products_create_webhook_subscriptions(config=None, request_post=None):
+    config = config or get_config()
+    data, served_version = graphql_request(
+        ORDERS_PAID_WEBHOOK_SUBSCRIPTIONS_QUERY,
+        variables={"first": 50, "topics": ["PRODUCTS_CREATE"]},
         config=config,
         request_post=request_post,
     )
@@ -2313,6 +2345,50 @@ def ensure_orders_paid_webhook_subscription(callback_url=None, config=None, requ
     subscription = result.get("webhookSubscription") or {}
     if not subscription.get("id"):
         raise ShopifyAPIError("Shopify did not return the created orders/paid webhook subscription.")
+    return {
+        "created": True,
+        "subscription": subscription,
+        "callback_url": target_url,
+        "api_version": served_version or config.get("api_version"),
+    }
+
+
+def ensure_products_create_webhook_subscription(callback_url=None, config=None, request_post=None):
+    config = config or get_config()
+    target_url = products_create_webhook_callback_url(callback_url)
+    if not target_url:
+        raise ShopifyConfigurationError(
+            "Webhook URL is missing. Set SPORTS_CAVE_WEBHOOK_BASE_URL, SPORTS_CAVE_OS_BASE_URL, "
+            "PUBLIC_APP_URL, or RENDER_EXTERNAL_URL before registering the Shopify products/create webhook."
+        )
+    existing = list_products_create_webhook_subscriptions(config=config, request_post=request_post)
+    for subscription in existing.get("subscriptions") or []:
+        if _webhook_callback_url(subscription).rstrip("/") == target_url.rstrip("/"):
+            return {
+                "created": False,
+                "subscription": subscription,
+                "callback_url": target_url,
+                "api_version": existing.get("api_version"),
+            }
+
+    data, served_version = graphql_request(
+        WEBHOOK_SUBSCRIPTION_CREATE_MUTATION,
+        variables={
+            "topic": "PRODUCTS_CREATE",
+            "webhookSubscription": {
+                "callbackUrl": target_url,
+                "format": "JSON",
+            },
+        },
+        config=config,
+        request_post=request_post,
+    )
+    result = data.get("webhookSubscriptionCreate") or {}
+    if result.get("userErrors"):
+        raise ShopifyAPIError(_metafields_user_error_text(result.get("userErrors")))
+    subscription = result.get("webhookSubscription") or {}
+    if not subscription.get("id"):
+        raise ShopifyAPIError("Shopify did not return the created products/create webhook subscription.")
     return {
         "created": True,
         "subscription": subscription,

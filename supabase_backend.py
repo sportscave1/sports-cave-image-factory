@@ -11339,8 +11339,26 @@ def _safe_webhook_order_payload(payload):
     }
 
 
-def _fallback_webhook_id(payload, topic):
-    safe_payload = json_dumps(_safe_webhook_order_payload(payload))
+def _safe_webhook_product_payload(payload):
+    if not isinstance(payload, dict):
+        return {}
+    variants = payload.get("variants") if isinstance(payload.get("variants"), list) else []
+    images = payload.get("images") if isinstance(payload.get("images"), list) else []
+    return {
+        "id": payload.get("id") or payload.get("shopify_product_id") or "",
+        "admin_graphql_api_id": payload.get("admin_graphql_api_id") or payload.get("shopify_product_gid") or payload.get("shopify_product_id") or "",
+        "handle": payload.get("handle") or payload.get("shopify_handle") or "",
+        "title": payload.get("title") or payload.get("product_title") or "",
+        "status": payload.get("status") or "",
+        "created_at": payload.get("created_at") or "",
+        "updated_at": payload.get("updated_at") or payload.get("remote_updated_at") or "",
+        "variant_count": len(variants),
+        "image_count": len(images),
+    }
+
+
+def _fallback_webhook_id(payload, topic, *, safe_payload=None):
+    safe_payload = json_dumps(safe_payload if safe_payload is not None else _safe_webhook_order_payload(payload))
     digest = hashlib.sha256(f"{topic}|{safe_payload}".encode("utf-8")).hexdigest()[:24]
     return f"missing-id-{digest}"
 
@@ -11397,10 +11415,23 @@ def _set_webhook_app_setting(key, value):
         _webhook_log("webhook_status_setting_failed", "failed", key=key, error=str(error))
 
 
-def _claim_webhook_event(webhook_id, topic, payload, *, shop_domain=""):
-    safe_payload = _safe_webhook_order_payload(payload)
-    shopify_order_id = str(safe_payload.get("admin_graphql_api_id") or safe_payload.get("id") or "").strip()
-    shopify_order_name = str(safe_payload.get("name") or "").strip()
+def _claim_webhook_event(
+    webhook_id,
+    topic,
+    payload,
+    *,
+    shop_domain="",
+    safe_payload=None,
+    shopify_order_id=None,
+    shopify_order_name=None,
+):
+    safe_payload = safe_payload if safe_payload is not None else _safe_webhook_order_payload(payload)
+    if shopify_order_id is None:
+        shopify_order_id = safe_payload.get("admin_graphql_api_id") or safe_payload.get("id") or ""
+    if shopify_order_name is None:
+        shopify_order_name = safe_payload.get("name") or ""
+    shopify_order_id = str(shopify_order_id or "").strip()
+    shopify_order_name = str(shopify_order_name or "").strip()
     try:
         with connect() as conn:
             with conn.cursor() as cur:
@@ -11486,6 +11517,33 @@ def claim_order_paid_webhook_receipt(payload, webhook_id, topic="orders/paid", *
     }
 
 
+def claim_product_create_webhook_receipt(payload, webhook_id, topic="products/create", *, shop_domain=""):
+    topic = str(topic or "products/create").strip()
+    safe_payload = _safe_webhook_product_payload(payload)
+    webhook_id = str(webhook_id or "").strip() or _fallback_webhook_id(payload, topic, safe_payload=safe_payload)
+    if not _claim_webhook_event(
+        webhook_id,
+        topic,
+        payload,
+        shop_domain=shop_domain,
+        safe_payload=safe_payload,
+        shopify_order_id="",
+        shopify_order_name="",
+    ):
+        return {
+            "webhook_id": webhook_id,
+            "duplicate": True,
+            "shopify_product_id": safe_payload.get("admin_graphql_api_id") or safe_payload.get("id") or "",
+            "shopify_handle": safe_payload.get("handle") or "",
+        }
+    return {
+        "webhook_id": webhook_id,
+        "duplicate": False,
+        "shopify_product_id": safe_payload.get("admin_graphql_api_id") or safe_payload.get("id") or "",
+        "shopify_handle": safe_payload.get("handle") or "",
+    }
+
+
 def _update_webhook_event_status(
     webhook_id,
     status,
@@ -11536,6 +11594,259 @@ def _update_webhook_event_status(
         if schema_message:
             raise RuntimeError(schema_message) from error
         _webhook_log("webhook_event_status_update_failed", "failed", webhook_id=webhook_id, error=str(error))
+
+
+def _normalize_product_webhook_tags(value):
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [item.strip() for item in str(value or "").split(",") if item.strip()]
+
+
+def _normalize_product_webhook_image(payload):
+    image = payload.get("image") if isinstance(payload.get("image"), dict) else {}
+    images = payload.get("images") if isinstance(payload.get("images"), list) else []
+    candidates = [image] + [item for item in images if isinstance(item, dict)]
+    normalized = []
+    for item in candidates:
+        url = item.get("url") or item.get("src") or item.get("originalSrc") or ""
+        if not url:
+            continue
+        normalized.append(
+            {
+                "url": url,
+                "src": url,
+                "alt": item.get("alt") or "",
+            }
+        )
+    return normalized
+
+
+def _normalize_product_webhook_variants(payload, product_gid):
+    variants = []
+    for variant in payload.get("variants") or []:
+        if not isinstance(variant, dict):
+            continue
+        legacy_id = str(variant.get("id") or "").strip()
+        variant_gid = str(variant.get("admin_graphql_api_id") or "").strip() or _shopify_gid("ProductVariant", legacy_id)
+        if not variant_gid:
+            continue
+        variants.append(
+            {
+                "id": variant_gid,
+                "shopify_variant_id": variant_gid,
+                "legacy_resource_id": legacy_id,
+                "shopify_product_id": product_gid,
+                "title": variant.get("title") or "",
+                "sku": variant.get("sku") or "",
+                "price": str(variant.get("price") or ""),
+                "raw": variant,
+            }
+        )
+    return variants
+
+
+def _normalize_shopify_product_create_payload(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    legacy_id = str(payload.get("id") or "").strip()
+    product_gid = str(payload.get("admin_graphql_api_id") or payload.get("shopify_product_gid") or "").strip()
+    product_gid = product_gid or _shopify_gid("Product", legacy_id)
+    store_domain = shopify_sync.normalize_store_domain(os.getenv("SHOPIFY_STORE_DOMAIN", ""))
+    images = _normalize_product_webhook_image(payload)
+    status = str(payload.get("status") or "").strip().upper()
+    return {
+        "id": product_gid,
+        "shopify_product_id": product_gid,
+        "shopify_product_gid": product_gid,
+        "legacy_resource_id": legacy_id or canonical_shopify_id(product_gid),
+        "title": payload.get("title") or "Untitled Shopify Product",
+        "handle": str(payload.get("handle") or "").strip(),
+        "status": status,
+        "vendor": payload.get("vendor") or "",
+        "product_type": payload.get("product_type") or payload.get("productType") or "",
+        "tags": _normalize_product_webhook_tags(payload.get("tags")),
+        "variants": _normalize_product_webhook_variants(payload, product_gid),
+        "images": images,
+        "thumbnail_url": (images[0] or {}).get("url") if images else "",
+        "online_store_url": "",
+        "admin_url": shopify_sync.build_admin_url(store_domain, legacy_id),
+        "created_at": payload.get("created_at") or "",
+        "remote_updated_at": payload.get("updated_at") or "",
+        "raw_payload": payload,
+    }
+
+
+def process_product_create_webhook(payload, webhook_id, topic="products/create", *, claim_event=True, config=None):
+    started = time.perf_counter()
+    topic = str(topic or "products/create").strip()
+    webhook_id = str(webhook_id or "").strip() or _fallback_webhook_id(
+        payload,
+        topic,
+        safe_payload=_safe_webhook_product_payload(payload),
+    )
+    if not shopify_sync.is_products_create_webhook_topic(topic):
+        return {
+            "source": "webhook",
+            "duplicate": False,
+            "processed": False,
+            "reason": "Unsupported Shopify webhook topic.",
+            "shopify_product_id": "",
+            "shopify_handle": "",
+            "new_products_inserted": 0,
+            "existing_products_updated": 0,
+            "existing_products_skipped": 0,
+            "shopify_metafields_pushed": 0,
+            "shopify_metafields_failed_pending": 0,
+            "errors": [],
+        }
+    if claim_event:
+        claim = claim_product_create_webhook_receipt(payload, webhook_id, topic)
+        if claim.get("duplicate"):
+            _webhook_log("webhook_duplicate_skipped", "completed", webhook_id=webhook_id, topic=topic)
+            return {
+                "source": "webhook",
+                "duplicate": True,
+                "processed": True,
+                "shopify_product_id": claim.get("shopify_product_id") or "",
+                "shopify_handle": claim.get("shopify_handle") or "",
+                "new_products_inserted": 0,
+                "existing_products_updated": 0,
+                "existing_products_skipped": 1,
+                "shopify_metafields_pushed": 0,
+                "shopify_metafields_failed_pending": 0,
+                "errors": [],
+            }
+
+    _update_webhook_event_status(webhook_id, "processing")
+    try:
+        product = _normalize_shopify_product_create_payload(payload)
+        _webhook_log(
+            "webhook_product_processing_started",
+            source="webhook",
+            shopify_product_id=product.get("shopify_product_id") or "",
+            shopify_handle=product.get("handle") or "",
+        )
+        if not _active_or_draft_product(product):
+            result = {
+                "source": "webhook",
+                "duplicate": False,
+                "processed": True,
+                "reason": "Product is not active or draft.",
+                "shopify_product_id": product.get("shopify_product_id") or "",
+                "shopify_handle": product.get("handle") or "",
+                "new_products_inserted": 0,
+                "existing_products_updated": 0,
+                "existing_products_skipped": 1,
+                "shopify_metafields_pushed": 0,
+                "shopify_metafields_failed_pending": 0,
+                "errors": [],
+            }
+            _update_webhook_event_status(
+                webhook_id,
+                "skipped",
+                skipped_count=1,
+                processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
+            )
+            return result
+
+        with connect() as conn:
+            with conn.cursor() as cur:
+                existing_rows = _candidate_edition_products_for_shopify_products(cur, [product])
+                actions = _plan_edition_product_incremental_sync([product], existing_rows)
+                apply_summary = _apply_edition_product_incremental_plan(cur, actions)
+            conn.commit()
+
+        inserted_handles = apply_summary.get("inserted_handles") or []
+        mirror_result = {"attempted": 0, "synced": 0, "skipped": 0, "errors": [], "results": []}
+        if inserted_handles:
+            try:
+                mirror_result = sync_product_edition_metafields_for_handles(
+                    inserted_handles,
+                    config=config,
+                    ensure_schema_first=False,
+                )
+            except Exception as mirror_error:
+                mirror_result = {
+                    "attempted": len(inserted_handles),
+                    "synced": 0,
+                    "skipped": len(inserted_handles),
+                    "errors": [str(mirror_error)],
+                    "results": [],
+                }
+                for handle in inserted_handles:
+                    try:
+                        _mark_product_metafields_sync(
+                            handle,
+                            {
+                                "shopify_handle": handle,
+                                "edition_name": DEFAULT_EDITION_NAME,
+                                "edition_total": 100,
+                                "next_edition_number": 1,
+                                "last_assigned_edition": 0,
+                                "sold_count": 0,
+                                "remaining_count": 100,
+                                "edition_status": "limited_release",
+                                "edition_display_text": format_edition_display_number(1, 100),
+                                "is_sold_out": False,
+                            },
+                            "Failed",
+                            str(mirror_error),
+                        )
+                    except Exception:
+                        pass
+
+        errors = list(apply_summary.get("errors") or [])
+        errors.extend(apply_summary.get("variant_sync_errors") or [])
+        errors.extend(mirror_result.get("errors") or [])
+        status = "processed" if not errors else "processed_with_warnings"
+        inserted_count = int(apply_summary.get("new_products_inserted") or 0)
+        updated_count = int(apply_summary.get("existing_products_updated") or 0)
+        skipped_count = int(apply_summary.get("existing_products_skipped") or 0)
+        result = {
+            "source": "webhook",
+            "duplicate": False,
+            "processed": True,
+            "shopify_product_id": product.get("shopify_product_id") or "",
+            "shopify_handle": product.get("handle") or "",
+            "products_checked": 1,
+            "new_products_inserted": inserted_count,
+            "existing_products_updated": updated_count,
+            "existing_products_skipped": skipped_count,
+            "shopify_metafields_pushed": int(mirror_result.get("synced") or 0),
+            "shopify_metafields_failed_pending": int(mirror_result.get("skipped") or mirror_result.get("failed") or 0),
+            "product_metafield_mirror": mirror_result,
+            "errors": errors,
+        }
+        _update_webhook_event_status(
+            webhook_id,
+            status,
+            error_message="\n".join(errors),
+            inserted_count=inserted_count,
+            skipped_count=skipped_count,
+            affected_handles_count=len(set((apply_summary.get("inserted_handles") or []) + (apply_summary.get("updated_handles") or []))),
+            processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
+        )
+        _webhook_log(
+            "webhook_product_processing_finished",
+            "completed" if not errors else "processed_with_warnings",
+            source="webhook",
+            shopify_product_id=product.get("shopify_product_id") or "",
+            shopify_handle=product.get("handle") or "",
+            inserted=inserted_count,
+            updated=updated_count,
+            skipped=skipped_count,
+        )
+        return result
+    except Exception as error:
+        schema_message = webhook_schema_error_message(error)
+        message = schema_message or str(error)
+        _update_webhook_event_status(
+            webhook_id,
+            "failed",
+            error_message=message,
+            processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
+        )
+        _webhook_log("webhook_product_processing_failed", "failed", webhook_id=webhook_id, topic=topic, error=message)
+        raise RuntimeError(message) from error
 
 
 def _single_order_gid_from_payload(payload):

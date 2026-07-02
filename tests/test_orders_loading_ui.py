@@ -38,15 +38,17 @@ class EditionOpsUiTests(unittest.TestCase):
 
     def test_edition_ops_uses_one_editor_and_no_old_data_sources(self):
         source = (ROOT / "edition_ops.py").read_text(encoding="utf-8")
+        render_source = inspect.getsource(edition_ops.render_page)
 
         self.assertIn("st.data_editor", source)
         self.assertIn("edition_ops_products_snapshot.json", source)
         self.assertIn("_load_supabase_snapshot", source)
         self.assertIn("backend.list_edition_products", source)
         self.assertIn("backend.update_edition_product", source)
-        self.assertIn("Sync New Shopify Products", source)
+        self.assertIn("Sync New Products", source)
         self.assertIn("Reload Supabase Table", source)
-        self.assertIn("backend.sync_new_shopify_products_to_edition_ops", source)
+        self.assertIn("backend.sync_new_shopify_products_to_edition_ops", render_source)
+        self.assertNotIn("backend.sync_shopify_products_to_supabase", render_source)
         self.assertIn("Save Changed Rows", source)
         self.assertIn("Export CSV Backup", source)
         self.assertIn("Import CSV and Replace Table", source)
@@ -1630,7 +1632,7 @@ class EditionOpsUiTests(unittest.TestCase):
                 return False
 
             def button(self, label, *args, **kwargs):
-                return label == "Sync New Shopify Products" and not self.fake_st.clicked
+                return label == "Sync New Products" and not self.fake_st.clicked
 
             def download_button(self, *args, **kwargs):
                 return None
@@ -1701,7 +1703,7 @@ class EditionOpsUiTests(unittest.TestCase):
                 edition_ops.render_page()
 
         self.assertEqual(fake_backend.calls, 1)
-        self.assertIn("Sync New Shopify Products complete", fake_st.session_state[edition_ops.NOTICE_KEY])
+        self.assertIn("Sync New Products complete", fake_st.session_state[edition_ops.NOTICE_KEY])
 
     def test_orders_page_open_renders_snapshot_without_shopify_or_allocation_work(self):
         class FakeContainer:

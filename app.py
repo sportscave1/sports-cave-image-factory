@@ -5953,6 +5953,7 @@ def render_settings_page():
 
     with st.expander("Shopify Webhook Setup", expanded=False):
         st.write("**Paid orders webhook endpoint:** `/webhooks/shopify/orders-paid`")
+        st.write("**Product create webhook endpoint:** `/webhooks/shopify/products-create`")
         st.write(
             "**Webhook app secret configured:** "
             f"{'Yes' if bool(os.getenv('SHOPIFY_WEBHOOK_SECRET', '').strip() or os.getenv('SHOPIFY_CLIENT_SECRET', '').strip()) else 'No'}"
@@ -5961,7 +5962,9 @@ def render_settings_page():
             sync = get_shopify_sync()
             config = sync.get_config()
             callback_url = sync.orders_paid_webhook_callback_url()
+            product_create_callback_url = sync.products_create_webhook_callback_url()
             st.write(f"**Public callback URL:** `{callback_url or 'Not configured'}`")
+            st.write(f"**Product create callback URL:** `{product_create_callback_url or 'Not configured'}`")
             if st.button(
                 "Register / Verify Orders Paid Webhook",
                 key="developer-register-orders-paid-webhook",
@@ -5973,6 +5976,18 @@ def render_settings_page():
                 status = "created" if result.get("created") else "already registered"
                 st.success(
                     f"orders/paid webhook {status}: {subscription.get('id') or result.get('callback_url')}"
+                )
+            if st.button(
+                "Register / Verify Products Create Webhook",
+                key="developer-register-products-create-webhook",
+                disabled=not bool(config.get("configured")),
+                use_container_width=True,
+            ):
+                result = sync.ensure_products_create_webhook_subscription(config=config)
+                subscription = result.get("subscription") or {}
+                status = "created" if result.get("created") else "already registered"
+                st.success(
+                    f"products/create webhook {status}: {subscription.get('id') or result.get('callback_url')}"
                 )
             try:
                 supabase = importlib.import_module("supabase_backend")
@@ -5996,7 +6011,7 @@ def render_settings_page():
         except Exception as error:
             _developer_section_error("Shopify Webhook Setup", error)
         st.caption(
-            "The paid-orders webhook runs as a separate lightweight service; the main app runs direct Streamlit."
+            "Shopify webhooks run as a separate lightweight service; the main app runs direct Streamlit."
         )
 
     with st.expander("Allocation Repair Tools", expanded=False):
