@@ -37,8 +37,10 @@ LAST_ORDERS_PAID_WEBHOOK_MIRROR_KEY = "last_orders_paid_webhook_mirror_result"
 EDITION_TRACKING_START_KEY = "edition_tracking_start_at"
 LAST_SUCCESSFUL_PRODUCT_SYNC_KEY = "last_successful_product_sync_at"
 LAST_ATTEMPTED_PRODUCT_SYNC_KEY = "last_attempted_product_sync_at"
+PRODUCT_INCREMENTAL_SYNC_STATE_KEY = "shopify_products_incremental_sync"
 SYNC_LOOKBACK_BUFFER_KEY = "sync_lookback_buffer_minutes"
 DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES = 10
+DEFAULT_PRODUCT_SYNC_LOOKBACK_HOURS = 48
 DEFAULT_INITIAL_ORDER_BOOTSTRAP_DAYS = 30
 DEFAULT_INITIAL_ORDER_ASSIGNMENT_WINDOW_DAYS = 7
 DEFAULT_INCREMENTAL_ORDER_FETCH_LIMIT = 100
@@ -1526,6 +1528,15 @@ def _ensure_schema_uncached():
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_products_handle_unique ON shopify_products(handle)", "idx_shopify_products_handle_unique")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_variants_id_unique ON shopify_variants(shopify_variant_id)", "idx_shopify_variants_id_unique")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_products_handle_unique ON edition_products(shopify_handle)", "idx_edition_products_handle_unique")
+            _safe_create_index(
+                cur,
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_edition_products_product_id_unique
+                ON edition_products(shopify_product_id)
+                WHERE shopify_product_id IS NOT NULL AND shopify_product_id <> ''
+                """,
+                "idx_edition_products_product_id_unique",
+            )
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_customers_id_unique ON shopify_customers(shopify_customer_id)", "idx_shopify_customers_id_unique")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_orders_id_unique ON shopify_orders(shopify_order_id)", "idx_shopify_orders_id_unique")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_shopify_order_lines_line_id_unique ON shopify_order_lines(shopify_line_item_id)", "idx_shopify_order_lines_line_id_unique")
@@ -2389,6 +2400,563 @@ def sync_shopify_products_to_supabase(config=None, progress_callback=None, *, mo
     except Exception as error:
         finish_sync_run(run_id, "Failed", seen, processed, "Shopify product sync failed.")
         log_app_error("shopify_product_sync_failed", str(error), {"records_seen": seen})
+        raise
+
+
+def _shopify_product_identity_candidates(product):
+    candidates = set()
+    for value in (
+        product.get("shopify_product_id"),
+        product.get("shopify_product_gid"),
+        product.get("id"),
+        product.get("legacy_resource_id"),
+    ):
+        candidates.update(_shopify_id_candidates("Product", value))
+    return {candidate for candidate in candidates if candidate}
+
+
+def _active_or_draft_product(product):
+    return str(product.get("status") or "").strip().upper() in {"ACTIVE", "DRAFT"}
+
+
+def _product_sync_image_url(product):
+    return product.get("thumbnail_url") or _first_image_url(product)
+
+
+def _product_sync_safe_fields(product):
+    product_id = product.get("shopify_product_id") or product.get("shopify_product_gid") or product.get("id") or ""
+    handle = str(product.get("handle") or "").strip()
+    status = str(product.get("status") or "").strip().upper()
+    is_active = status in {"ACTIVE", "DRAFT"}
+    return {
+        "shopify_product_id": product_id,
+        "shopify_product_gid": product_id,
+        "shopify_handle": handle,
+        "product_title": product.get("title") or "Untitled Shopify Product",
+        "active": is_active,
+        "is_active": is_active,
+        "featured_image_url": _product_sync_image_url(product),
+        "raw": product,
+    }
+
+
+def _index_existing_edition_products(rows):
+    by_id = {}
+    by_handle = {}
+    for row in rows or []:
+        for value in (row.get("shopify_product_id"), row.get("shopify_product_gid")):
+            for candidate in _shopify_id_candidates("Product", value):
+                by_id.setdefault(candidate, row)
+        handle = str(row.get("shopify_handle") or "").strip()
+        if handle:
+            by_handle.setdefault(handle.casefold(), row)
+    return by_id, by_handle
+
+
+def _same_existing_product(left, right):
+    if not left or not right:
+        return False
+    left_id = str(left.get("id") or "").strip()
+    right_id = str(right.get("id") or "").strip()
+    if left_id and right_id:
+        return left_id == right_id
+    left_candidates = {
+        candidate
+        for value in (left.get("shopify_product_id"), left.get("shopify_product_gid"))
+        for candidate in _shopify_id_candidates("Product", value)
+    }
+    right_candidates = {
+        candidate
+        for value in (right.get("shopify_product_id"), right.get("shopify_product_gid"))
+        for candidate in _shopify_id_candidates("Product", value)
+    }
+    return bool(left_candidates & right_candidates)
+
+
+def _safe_existing_product_updates(existing, product, by_handle):
+    safe = _product_sync_safe_fields(product)
+    updates = {}
+    for key in ("shopify_product_id", "shopify_product_gid", "product_title", "active", "is_active", "featured_image_url"):
+        value = safe.get(key)
+        if value in (None, "") and key in {"shopify_product_id", "shopify_product_gid"}:
+            continue
+        if existing.get(key) != value:
+            updates[key] = value
+
+    new_handle = safe.get("shopify_handle")
+    old_handle = str(existing.get("shopify_handle") or "").strip()
+    if new_handle and new_handle != old_handle:
+        handle_owner = by_handle.get(new_handle.casefold())
+        if not handle_owner or _same_existing_product(existing, handle_owner):
+            updates["shopify_handle"] = new_handle
+        else:
+            updates["handle_conflict"] = new_handle
+
+    if updates and safe.get("raw"):
+        updates["raw"] = safe["raw"]
+    return updates
+
+
+def _plan_edition_product_incremental_sync(products, existing_rows):
+    by_id, by_handle = _index_existing_edition_products(existing_rows)
+    actions = []
+    seen_products = set()
+    for product in products or []:
+        if not _active_or_draft_product(product):
+            continue
+        candidates = _shopify_product_identity_candidates(product)
+        handle = str(product.get("handle") or "").strip()
+        dedupe_key = next(iter(sorted(candidates)), "") or f"handle:{handle.casefold()}"
+        if dedupe_key in seen_products:
+            continue
+        seen_products.add(dedupe_key)
+
+        existing = None
+        for candidate in sorted(candidates):
+            existing = by_id.get(candidate)
+            if existing:
+                break
+        match_type = "shopify_product_id" if existing else ""
+        if not existing and handle:
+            existing = by_handle.get(handle.casefold())
+            match_type = "handle" if existing else ""
+
+        if not existing:
+            safe = _product_sync_safe_fields(product)
+            if not safe.get("shopify_handle"):
+                actions.append({"action": "error", "product": product, "error": "Shopify product handle is missing."})
+                continue
+            actions.append({"action": "insert", "product": product, "fields": safe})
+            continue
+
+        updates = _safe_existing_product_updates(existing, product, by_handle)
+        conflict = updates.pop("handle_conflict", "")
+        if conflict:
+            actions.append(
+                {
+                    "action": "error",
+                    "product": product,
+                    "existing": existing,
+                    "error": f"Handle {conflict} already belongs to another edition product.",
+                }
+            )
+            continue
+        if updates:
+            actions.append(
+                {
+                    "action": "update",
+                    "product": product,
+                    "existing": existing,
+                    "fields": updates,
+                    "match_type": match_type,
+                }
+            )
+        else:
+            actions.append(
+                {
+                    "action": "skip",
+                    "product": product,
+                    "existing": existing,
+                    "match_type": match_type,
+                }
+            )
+    return actions
+
+
+def _incremental_product_sync_query(sync_from):
+    timestamp = _datetime_to_shopify_query(sync_from)
+    return (
+        f"(status:active OR status:draft) "
+        f"(updated_at:>='{timestamp}' OR created_at:>='{timestamp}')"
+    )
+
+
+def _read_product_incremental_sync_state(cur):
+    cur.execute(
+        """
+        SELECT value, last_success_at
+        FROM app_sync_state
+        WHERE key=%s
+        """,
+        (PRODUCT_INCREMENTAL_SYNC_STATE_KEY,),
+    )
+    row = cur.fetchone() or {}
+    value = row.get("value") or {}
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            value = {}
+    return {
+        "last_successful_product_sync_at": (
+            (value or {}).get("last_successful_product_sync_at")
+            or row.get("last_success_at")
+            or ""
+        )
+    }
+
+
+def _write_product_incremental_sync_state(
+    cur,
+    *,
+    status,
+    summary=None,
+    error_message="",
+    attempted_at=None,
+    successful_at=None,
+):
+    payload = dict(summary or {})
+    if successful_at:
+        payload["last_successful_product_sync_at"] = _datetime_to_setting(successful_at)
+    cur.execute(
+        """
+        INSERT INTO app_sync_state(key, value, last_success_at, last_attempt_at, status, error_message, updated_at)
+        VALUES (%s, %s::jsonb, %s, %s, %s, %s, now())
+        ON CONFLICT (key) DO UPDATE SET
+            value=EXCLUDED.value,
+            last_success_at=COALESCE(EXCLUDED.last_success_at, app_sync_state.last_success_at),
+            last_attempt_at=COALESCE(EXCLUDED.last_attempt_at, app_sync_state.last_attempt_at),
+            status=EXCLUDED.status,
+            error_message=EXCLUDED.error_message,
+            updated_at=now()
+        """,
+        (
+            PRODUCT_INCREMENTAL_SYNC_STATE_KEY,
+            json_dumps(payload),
+            successful_at,
+            attempted_at,
+            status,
+            str(error_message or "")[:1000],
+        ),
+    )
+
+
+def _upsert_shopify_product_display_row(cur, product):
+    product_id = product.get("shopify_product_id") or product.get("shopify_product_gid") or product.get("id") or ""
+    if not product_id:
+        return
+    image_url = _product_sync_image_url(product)
+    raw_json = json_dumps(product)
+    cur.execute(
+        """
+        INSERT INTO shopify_products(
+            shopify_product_id, legacy_resource_id, shopify_product_gid, title, handle, status, vendor,
+            product_type, online_store_url, admin_url, image_url, featured_image_url,
+            raw_json, raw, synced_at, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, now(), now())
+        ON CONFLICT (shopify_product_id) DO UPDATE SET
+            legacy_resource_id=EXCLUDED.legacy_resource_id,
+            shopify_product_gid=EXCLUDED.shopify_product_gid,
+            title=EXCLUDED.title,
+            handle=EXCLUDED.handle,
+            status=EXCLUDED.status,
+            vendor=EXCLUDED.vendor,
+            product_type=EXCLUDED.product_type,
+            online_store_url=EXCLUDED.online_store_url,
+            admin_url=EXCLUDED.admin_url,
+            image_url=EXCLUDED.image_url,
+            featured_image_url=EXCLUDED.featured_image_url,
+            raw_json=EXCLUDED.raw_json,
+            raw=EXCLUDED.raw,
+            synced_at=now(),
+            updated_at=now()
+        """,
+        (
+            product_id,
+            product.get("legacy_resource_id"),
+            product_id,
+            product.get("title"),
+            product.get("handle"),
+            product.get("status"),
+            product.get("vendor"),
+            product.get("product_type"),
+            product.get("online_store_url"),
+            product.get("admin_url"),
+            image_url,
+            image_url,
+            raw_json,
+            raw_json,
+        ),
+    )
+
+
+def _upsert_shopify_variants_for_product(cur, product):
+    for variant in product.get("variants") or []:
+        variant_id = variant.get("id") or variant.get("shopify_variant_id")
+        if not variant_id:
+            continue
+        cur.execute(
+            """
+            INSERT INTO shopify_variants(
+                shopify_variant_id, shopify_product_id, legacy_resource_id, title,
+                sku, price, raw_json, synced_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, now())
+            ON CONFLICT (shopify_variant_id) DO UPDATE SET
+                shopify_product_id=EXCLUDED.shopify_product_id,
+                legacy_resource_id=EXCLUDED.legacy_resource_id,
+                title=EXCLUDED.title,
+                sku=EXCLUDED.sku,
+                price=EXCLUDED.price,
+                raw_json=EXCLUDED.raw_json,
+                synced_at=now()
+            """,
+            (
+                variant_id,
+                product.get("shopify_product_id") or product.get("shopify_product_gid") or product.get("id") or "",
+                variant.get("legacy_resource_id"),
+                variant.get("title"),
+                variant.get("sku"),
+                variant.get("price"),
+                json_dumps(variant),
+            ),
+        )
+
+
+def _candidate_edition_products_for_shopify_products(cur, products):
+    product_ids = sorted(
+        {
+            candidate
+            for product in products or []
+            for candidate in _shopify_product_identity_candidates(product)
+        }
+    )
+    handles = sorted({str(product.get("handle") or "").strip() for product in products or [] if str(product.get("handle") or "").strip()})
+    if not product_ids and not handles:
+        return []
+    cur.execute(
+        """
+        SELECT ep.*
+        FROM edition_products ep
+        WHERE ep.shopify_product_id = ANY(%s)
+           OR ep.shopify_product_gid = ANY(%s)
+           OR ep.shopify_handle = ANY(%s)
+        FOR UPDATE
+        """,
+        (product_ids, product_ids, handles),
+    )
+    return cur.fetchall()
+
+
+def _insert_edition_product_from_shopify(cur, fields):
+    raw_json = json_dumps(fields.get("raw") or {})
+    cur.execute(
+        """
+        INSERT INTO edition_products(
+            shopify_product_id, shopify_product_gid, shopify_handle, product_title,
+            edition_total, next_edition_number, last_assigned_edition, sold_count, remaining_count,
+            edition_status, edition_name, active, is_active, sold_out, is_sold_out,
+            featured_image_url, raw, synced_at, updated_at
+        )
+        VALUES (%s, %s, %s, %s, 100, 1, 0, 0, 100, 'limited_release', %s, TRUE, TRUE, FALSE, FALSE, %s, %s::jsonb, now(), now())
+        RETURNING shopify_handle
+        """,
+        (
+            fields.get("shopify_product_id"),
+            fields.get("shopify_product_gid"),
+            fields.get("shopify_handle"),
+            fields.get("product_title"),
+            DEFAULT_EDITION_NAME,
+            fields.get("featured_image_url"),
+            raw_json,
+        ),
+    )
+    return (cur.fetchone() or {}).get("shopify_handle") or fields.get("shopify_handle")
+
+
+def _update_existing_edition_product_safe_fields(cur, existing, updates):
+    allowed = (
+        "shopify_product_id",
+        "shopify_product_gid",
+        "shopify_handle",
+        "product_title",
+        "active",
+        "is_active",
+        "featured_image_url",
+    )
+    assignments = []
+    values = []
+    for key in allowed:
+        if key in updates:
+            assignments.append(f"{key}=%s")
+            values.append(updates[key])
+    if "raw" in updates:
+        assignments.append("raw=%s::jsonb")
+        values.append(json_dumps(updates.get("raw") or {}))
+    if not assignments:
+        return False
+    assignments.extend(["synced_at=now()", "updated_at=now()"])
+    values.append(existing.get("id"))
+    cur.execute(
+        f"""
+        UPDATE edition_products
+        SET {", ".join(assignments)}
+        WHERE id=%s
+        """,
+        values,
+    )
+    return bool(cur.rowcount)
+
+
+def _apply_edition_product_incremental_plan(cur, actions):
+    summary = {
+        "new_products_inserted": 0,
+        "existing_products_updated": 0,
+        "existing_products_skipped": 0,
+        "variant_sync_errors": [],
+        "errors": [],
+        "inserted_handles": [],
+        "updated_handles": [],
+    }
+    for action in actions or []:
+        product = action.get("product") or {}
+        try:
+            _upsert_shopify_product_display_row(cur, product)
+            try:
+                cur.execute("SAVEPOINT shopify_variant_product_sync")
+                _upsert_shopify_variants_for_product(cur, product)
+                cur.execute("RELEASE SAVEPOINT shopify_variant_product_sync")
+            except Exception as variant_error:
+                cur.execute("ROLLBACK TO SAVEPOINT shopify_variant_product_sync")
+                cur.execute("RELEASE SAVEPOINT shopify_variant_product_sync")
+                summary["variant_sync_errors"].append(f"{product.get('handle') or product.get('title')}: {variant_error}")
+
+            if action.get("action") == "insert":
+                handle = _insert_edition_product_from_shopify(cur, action.get("fields") or {})
+                summary["new_products_inserted"] += 1
+                if handle:
+                    summary["inserted_handles"].append(handle)
+            elif action.get("action") == "update":
+                if _update_existing_edition_product_safe_fields(cur, action.get("existing") or {}, action.get("fields") or {}):
+                    summary["existing_products_updated"] += 1
+                    handle = (action.get("fields") or {}).get("shopify_handle") or (action.get("existing") or {}).get("shopify_handle")
+                    if handle:
+                        summary["updated_handles"].append(handle)
+                else:
+                    summary["existing_products_skipped"] += 1
+            elif action.get("action") == "skip":
+                summary["existing_products_skipped"] += 1
+            elif action.get("action") == "error":
+                summary["errors"].append(action.get("error") or "Product sync planning failed.")
+        except Exception as error:
+            summary["errors"].append(f"{product.get('handle') or product.get('title') or 'Product'}: {error}")
+    _ensure_active_edition_runs_for_products(cur)
+    return summary
+
+
+def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None, *, lookback_hours=DEFAULT_PRODUCT_SYNC_LOOKBACK_HOURS):
+    """Incrementally onboard Shopify active/draft products into Edition Ops without touching orders."""
+    ensure_schema()
+    config = dict(config or shopify_sync.get_config())
+    config["max_products"] = max(int(config.get("max_products") or 0), 1000)
+    attempted_at = utc_now_datetime()
+    run_id = start_sync_run("shopify_products_incremental_sync")
+    products_seen = 0
+    active_draft_products = []
+    summary = {
+        "products_checked": 0,
+        "new_products_inserted": 0,
+        "existing_products_updated": 0,
+        "existing_products_skipped": 0,
+        "shopify_metafields_pushed": 0,
+        "shopify_metafields_failed_pending": 0,
+        "errors": [],
+        "variant_sync_errors": [],
+        "sync_from": "",
+        "shopify_query": "",
+    }
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                state = _read_product_incremental_sync_state(cur)
+                _write_product_incremental_sync_state(
+                    cur,
+                    status="running",
+                    summary={"started_at": _datetime_to_setting(attempted_at)},
+                    attempted_at=attempted_at,
+                )
+            conn.commit()
+
+        fallback_state = get_sync_state(ensure_schema_first=False)
+        last_success = _parse_datetime(state.get("last_successful_product_sync_at")) or _parse_datetime(
+            fallback_state.get("last_successful_product_sync_at")
+        )
+        lookback_delta = timedelta(hours=max(int(lookback_hours or DEFAULT_PRODUCT_SYNC_LOOKBACK_HOURS), 1))
+        if not last_success:
+            sync_from = attempted_at - lookback_delta
+        else:
+            sync_from = last_success - lookback_delta
+        search = _incremental_product_sync_query(sync_from)
+        summary["sync_from"] = _datetime_to_setting(sync_from)
+        summary["shopify_query"] = search
+
+        for page in shopify_sync.iter_catalog_pages(search=search, page_size=50, config=config):
+            page_products = page.get("products") or []
+            products_seen += len(page_products)
+            active_draft_products.extend([product for product in page_products if _active_or_draft_product(product)])
+            if progress_callback:
+                progress_callback(products_seen)
+        summary["products_checked"] = len(active_draft_products)
+
+        with connect() as conn:
+            with conn.cursor() as cur:
+                existing_rows = _candidate_edition_products_for_shopify_products(cur, active_draft_products)
+                actions = _plan_edition_product_incremental_sync(active_draft_products, existing_rows)
+                apply_summary = _apply_edition_product_incremental_plan(cur, actions)
+                conn.commit()
+
+        summary.update(
+            {
+                "new_products_inserted": apply_summary.get("new_products_inserted", 0),
+                "existing_products_updated": apply_summary.get("existing_products_updated", 0),
+                "existing_products_skipped": apply_summary.get("existing_products_skipped", 0),
+                "variant_sync_errors": apply_summary.get("variant_sync_errors", []),
+            }
+        )
+        summary["errors"].extend(apply_summary.get("errors", []))
+
+        inserted_handles = apply_summary.get("inserted_handles") or []
+        if inserted_handles:
+            metafield_result = sync_product_edition_metafields_for_handles(inserted_handles, config=config)
+            summary["shopify_metafields_pushed"] = int(metafield_result.get("synced") or 0)
+            summary["shopify_metafields_failed_pending"] = int(metafield_result.get("skipped") or metafield_result.get("failed") or 0)
+            summary["errors"].extend(metafield_result.get("errors") or [])
+
+        successful_at = utc_now_datetime()
+        with connect() as conn:
+            with conn.cursor() as cur:
+                _write_product_incremental_sync_state(
+                    cur,
+                    status="complete_with_warnings" if summary["errors"] else "complete",
+                    summary=summary,
+                    attempted_at=attempted_at,
+                    successful_at=successful_at,
+                )
+            conn.commit()
+        set_app_setting(LAST_SUCCESSFUL_PRODUCT_SYNC_KEY, _datetime_to_setting(successful_at), ensure_schema_first=False)
+        set_app_setting(LAST_ATTEMPTED_PRODUCT_SYNC_KEY, _datetime_to_setting(attempted_at), ensure_schema_first=False)
+        finish_sync_run(
+            run_id,
+            "Complete With Warnings" if summary["errors"] else "Complete",
+            products_seen,
+            summary["new_products_inserted"] + summary["existing_products_updated"],
+            "; ".join(summary["errors"][:3]),
+        )
+        return summary
+    except Exception as error:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                _write_product_incremental_sync_state(
+                    cur,
+                    status="failed",
+                    summary=summary,
+                    attempted_at=attempted_at,
+                    error_message=str(error),
+                )
+            conn.commit()
+        finish_sync_run(run_id, "Failed", products_seen, 0, "Shopify product incremental sync failed.")
+        log_app_error("shopify_product_incremental_sync_failed", str(error), {"products_seen": products_seen})
         raise
 
 

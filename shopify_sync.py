@@ -423,6 +423,7 @@ query SportsCaveProducts($first: Int!, $after: String, $query: String) {
       vendor
       productType
       tags
+      createdAt
       updatedAt
       onlineStoreUrl
       media(first: 10) {
@@ -700,6 +701,7 @@ def normalize_product(node, store_domain):
         "metafields": metafields,
         "online_store_url": node.get("onlineStoreUrl") or "",
         "admin_url": build_admin_url(store_domain, legacy_resource_id),
+        "created_at": node.get("createdAt") or "",
         "remote_updated_at": node.get("updatedAt") or "",
     }
 

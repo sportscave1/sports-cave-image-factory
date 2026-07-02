@@ -2704,6 +2704,200 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         upsert_products.assert_called_once()
         metafield_sync.assert_called_once()
 
+    def test_new_shopify_product_plans_insert_with_default_edition_values(self):
+        product = {
+            "shopify_product_id": "gid://shopify/Product/100",
+            "legacy_resource_id": "100",
+            "handle": "new-wall-art",
+            "title": "New Wall Art",
+            "status": "ACTIVE",
+            "images": [{"url": "https://cdn.example/new.jpg"}],
+        }
+
+        actions = supabase_backend._plan_edition_product_incremental_sync([product], [])
+
+        self.assertEqual(actions[0]["action"], "insert")
+        self.assertEqual(actions[0]["fields"]["shopify_handle"], "new-wall-art")
+
+        class CaptureCursor:
+            def execute(self, sql, params=None):
+                self.sql = sql
+                self.params = params
+
+            def fetchone(self):
+                return {"shopify_handle": "new-wall-art"}
+
+        cursor = CaptureCursor()
+        supabase_backend._insert_edition_product_from_shopify(cursor, actions[0]["fields"])
+        self.assertIn("100, 1, 0, 0, 100", cursor.sql)
+
+    def test_existing_product_is_not_duplicated_when_unchanged(self):
+        product = {
+            "shopify_product_id": "gid://shopify/Product/100",
+            "handle": "existing-wall-art",
+            "title": "Existing Wall Art",
+            "status": "ACTIVE",
+            "images": [{"url": "https://cdn.example/existing.jpg"}],
+        }
+        existing = {
+            "id": "1",
+            "shopify_product_id": "gid://shopify/Product/100",
+            "shopify_product_gid": "gid://shopify/Product/100",
+            "shopify_handle": "existing-wall-art",
+            "product_title": "Existing Wall Art",
+            "active": True,
+            "is_active": True,
+            "featured_image_url": "https://cdn.example/existing.jpg",
+            "next_edition_number": 43,
+        }
+
+        actions = supabase_backend._plan_edition_product_incremental_sync([product], [existing])
+
+        self.assertEqual(actions[0]["action"], "skip")
+
+    def test_existing_next_edition_number_is_never_reset_by_product_sync(self):
+        product = {
+            "shopify_product_id": "gid://shopify/Product/100",
+            "handle": "existing-wall-art",
+            "title": "Existing Wall Art Updated",
+            "status": "ACTIVE",
+        }
+        existing = {
+            "id": "1",
+            "shopify_product_id": "gid://shopify/Product/100",
+            "shopify_product_gid": "gid://shopify/Product/100",
+            "shopify_handle": "existing-wall-art",
+            "product_title": "Existing Wall Art",
+            "active": True,
+            "is_active": True,
+            "featured_image_url": "",
+            "next_edition_number": 43,
+            "edition_total": 100,
+            "sold_count": 42,
+            "remaining_count": 58,
+        }
+
+        actions = supabase_backend._plan_edition_product_incremental_sync([product], [existing])
+
+        self.assertEqual(actions[0]["action"], "update")
+        self.assertEqual(actions[0]["fields"]["product_title"], "Existing Wall Art Updated")
+        self.assertNotIn("next_edition_number", actions[0]["fields"])
+        self.assertNotIn("edition_total", actions[0]["fields"])
+        self.assertNotIn("sold_count", actions[0]["fields"])
+        self.assertNotIn("remaining_count", actions[0]["fields"])
+
+    def test_handle_change_updates_existing_row_by_shopify_product_id(self):
+        product = {
+            "shopify_product_id": "gid://shopify/Product/100",
+            "handle": "new-handle",
+            "title": "Existing Wall Art",
+            "status": "ACTIVE",
+        }
+        existing = {
+            "id": "1",
+            "shopify_product_id": "gid://shopify/Product/100",
+            "shopify_product_gid": "gid://shopify/Product/100",
+            "shopify_handle": "old-handle",
+            "product_title": "Existing Wall Art",
+            "active": True,
+            "is_active": True,
+            "featured_image_url": "",
+        }
+
+        actions = supabase_backend._plan_edition_product_incremental_sync([product], [existing])
+
+        self.assertEqual(actions[0]["action"], "update")
+        self.assertEqual(actions[0]["match_type"], "shopify_product_id")
+        self.assertEqual(actions[0]["fields"]["shopify_handle"], "new-handle")
+
+    @patch.object(supabase_backend, "set_app_setting")
+    @patch.object(supabase_backend, "sync_product_edition_metafields_for_handles")
+    @patch.object(supabase_backend, "_apply_edition_product_incremental_plan")
+    @patch.object(supabase_backend, "_candidate_edition_products_for_shopify_products", return_value=[])
+    @patch.object(supabase_backend.shopify_sync, "iter_catalog_pages")
+    @patch.object(
+        supabase_backend,
+        "get_sync_state",
+        return_value={"last_successful_product_sync_at": "2026-07-01T00:00:00Z"},
+    )
+    @patch.object(supabase_backend, "finish_sync_run")
+    @patch.object(supabase_backend, "start_sync_run", return_value="run-1")
+    @patch.object(supabase_backend, "ensure_schema")
+    def test_metafield_failure_does_not_rollback_supabase_product_insert(
+        self,
+        _ensure_schema,
+        _start_sync_run,
+        _finish_sync_run,
+        _get_sync_state,
+        iter_catalog_pages,
+        _candidate_rows,
+        apply_plan,
+        metafield_sync,
+        _set_app_setting,
+    ):
+        class FakeCursor:
+            rowcount = 1
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def execute(self, *args, **kwargs):
+                return None
+
+            def fetchone(self):
+                return {}
+
+            def fetchall(self):
+                return []
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def cursor(self):
+                return FakeCursor()
+
+            def commit(self):
+                return None
+
+        product = {
+            "shopify_product_id": "gid://shopify/Product/100",
+            "handle": "new-wall-art",
+            "title": "New Wall Art",
+            "status": "ACTIVE",
+        }
+        iter_catalog_pages.return_value = [{"products": [product]}]
+        apply_plan.return_value = {
+            "new_products_inserted": 1,
+            "existing_products_updated": 0,
+            "existing_products_skipped": 0,
+            "variant_sync_errors": [],
+            "errors": [],
+            "inserted_handles": ["new-wall-art"],
+        }
+        metafield_sync.return_value = {
+            "attempted": 1,
+            "synced": 0,
+            "skipped": 1,
+            "errors": ["new-wall-art: Shopify unavailable"],
+        }
+
+        with patch.object(supabase_backend, "connect", return_value=FakeConnection()):
+            result = supabase_backend.sync_new_shopify_products_to_edition_ops(config=self.config)
+
+        self.assertEqual(result["new_products_inserted"], 1)
+        self.assertEqual(result["shopify_metafields_pushed"], 0)
+        self.assertEqual(result["shopify_metafields_failed_pending"], 1)
+        expected_config = dict(self.config)
+        expected_config["max_products"] = 1000
+        metafield_sync.assert_called_once_with(["new-wall-art"], config=expected_config)
+
     def test_shopify_metafield_mirror_preview_reads_without_writing(self):
         payload = {
             "id": "101",

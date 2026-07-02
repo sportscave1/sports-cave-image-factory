@@ -44,7 +44,9 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("_load_supabase_snapshot", source)
         self.assertIn("backend.list_edition_products", source)
         self.assertIn("backend.update_edition_product", source)
-        self.assertIn("Refresh Products", source)
+        self.assertIn("Sync New Shopify Products", source)
+        self.assertIn("Reload Supabase Table", source)
+        self.assertIn("backend.sync_new_shopify_products_to_edition_ops", source)
         self.assertIn("Save Changed Rows", source)
         self.assertIn("Export CSV Backup", source)
         self.assertIn("Import CSV and Replace Table", source)
@@ -1589,6 +1591,117 @@ class EditionOpsUiTests(unittest.TestCase):
             edition_ops.render_page()
 
         self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_next_number"], 53)
+
+    def test_edition_ops_sync_button_calls_product_sync_helper_once(self):
+        class RerunRequested(Exception):
+            pass
+
+        class FakeContext:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+        class FakeBackend:
+            def __init__(self):
+                self.calls = 0
+
+            def sync_new_shopify_products_to_edition_ops(self, config=None):
+                self.calls += 1
+                return {
+                    "products_checked": 1,
+                    "new_products_inserted": 1,
+                    "existing_products_updated": 0,
+                    "existing_products_skipped": 0,
+                    "shopify_metafields_pushed": 1,
+                    "shopify_metafields_failed_pending": 0,
+                    "errors": [],
+                }
+
+        class FakeColumn:
+            def __init__(self, fake_st):
+                self.fake_st = fake_st
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def button(self, label, *args, **kwargs):
+                return label == "Sync New Shopify Products" and not self.fake_st.clicked
+
+            def download_button(self, *args, **kwargs):
+                return None
+
+            def popover(self, *args, **kwargs):
+                return FakeContext()
+
+        class FakeStreamlit:
+            def __init__(self):
+                self.clicked = False
+                self.session_state = {
+                    edition_ops.SNAPSHOT_LOADED_KEY: True,
+                    edition_ops.ROWS_KEY: [],
+                    edition_ops.ORIGINAL_ROWS_KEY: [],
+                    edition_ops.META_KEY: {},
+                    edition_ops.ERRORS_KEY: {},
+                    edition_ops.IMPORT_WARNINGS_KEY: [],
+                    edition_ops.NOTICE_KEY: "",
+                    edition_ops.EDITOR_VERSION_KEY: 0,
+                }
+
+            def markdown(self, *args, **kwargs):
+                return None
+
+            def title(self, *args, **kwargs):
+                return None
+
+            def caption(self, *args, **kwargs):
+                return None
+
+            def success(self, *args, **kwargs):
+                return None
+
+            def warning(self, *args, **kwargs):
+                return None
+
+            def info(self, *args, **kwargs):
+                return None
+
+            def error(self, *args, **kwargs):
+                return None
+
+            def columns(self, spec):
+                return [FakeColumn(self) for _ in spec]
+
+            def spinner(self, *args, **kwargs):
+                self.clicked = True
+                return FakeContext()
+
+            def rerun(self):
+                raise RerunRequested()
+
+        fake_st = FakeStreamlit()
+        fake_backend = FakeBackend()
+        with patch.object(edition_ops, "st", fake_st), patch.object(
+            edition_ops,
+            "_configured_supabase_backend",
+            return_value=fake_backend,
+        ), patch.object(
+            edition_ops.shopify_sync,
+            "get_config",
+            return_value={"configured": True},
+        ), patch.object(
+            edition_ops,
+            "_reload_products_from_supabase",
+        ):
+            with self.assertRaises(RerunRequested):
+                edition_ops.render_page()
+
+        self.assertEqual(fake_backend.calls, 1)
+        self.assertIn("Sync New Shopify Products complete", fake_st.session_state[edition_ops.NOTICE_KEY])
 
     def test_orders_page_open_renders_snapshot_without_shopify_or_allocation_work(self):
         class FakeContainer:

@@ -471,6 +471,14 @@ def _row_from_supabase_product(product):
     )
     status = str(product.get("status") or "").strip()
     sold_out = bool(product.get("sold_out")) or status.casefold() == "sold_out"
+    mirror_status = str(product.get("metafields_sync_status") or "").strip()
+    sync_status = "Loaded from Supabase"
+    sync_error = ""
+    if mirror_status.casefold() == "failed":
+        sync_status = "Shopify mirror failed"
+        sync_error = str(product.get("last_metafield_error") or "")
+    elif mirror_status.casefold() in {"pending", "never synced"}:
+        sync_status = "Shopify mirror pending"
     row = {
         "edition_product_id": product.get("id") or product.get("edition_product_id") or "",
         "shopify_product_gid": product.get("shopify_product_id") or product.get("shopify_product_gid") or "",
@@ -490,8 +498,8 @@ def _row_from_supabase_product(product):
         "online_store_url": product.get("online_store_url") or "",
         "admin_url": product.get("admin_url") or "",
         "last_synced_at": product.get("updated_at") or "",
-        "sync_status": "Loaded from Supabase",
-        "sync_error": "",
+        "sync_status": sync_status,
+        "sync_error": sync_error,
     }
     return _normalise_row(row)
 
@@ -825,7 +833,7 @@ def _apply_shopify_mirror_result(rows, originals, result):
 def _pending_shopify_mirror_handles(rows):
     handles = []
     seen = set()
-    pending_statuses = {"saved in supabase", "shopify mirror failed"}
+    pending_statuses = {"saved in supabase", "shopify mirror failed", "shopify mirror pending"}
     for row in rows:
         normalised = _normalise_row(row)
         status = str(normalised.get("sync_status") or "").strip().casefold()
@@ -972,6 +980,26 @@ def _reload_products_from_supabase():
     _write_snapshot(rows, originals, meta=st.session_state[META_KEY])
     st.session_state[NOTICE_KEY] = f"Reloaded {len(rows)} product row(s) from Supabase."
     _bump_editor_version()
+
+
+def _format_shopify_product_sync_summary(result):
+    result = result or {}
+    errors = list(result.get("errors") or [])
+    errors.extend(result.get("variant_sync_errors") or [])
+    message = (
+        "Sync New Shopify Products complete. "
+        f"Shopify products checked: {int(result.get('products_checked') or 0)}. "
+        f"New products inserted: {int(result.get('new_products_inserted') or 0)}. "
+        f"Existing products updated safely: {int(result.get('existing_products_updated') or 0)}. "
+        f"Existing products skipped: {int(result.get('existing_products_skipped') or 0)}. "
+        f"Shopify metafields pushed: {int(result.get('shopify_metafields_pushed') or 0)}. "
+        f"Shopify metafield mirror failed/pending: {int(result.get('shopify_metafields_failed_pending') or 0)}. "
+        f"Errors: {len(errors)}."
+    )
+    if errors:
+        first_errors = " | ".join(str(error)[:180] for error in errors[:3])
+        message = f"{message} First errors: {first_errors}"
+    return message
 
 
 def _mark_synced(rows, originals, results):
@@ -1401,12 +1429,33 @@ def render_page():
         st.warning(warning)
     st.session_state[IMPORT_WARNINGS_KEY] = []
 
-    action_cols = st.columns([1, 1, 1, 1, 1])
-    if action_cols[0].button("Refresh Products", type="primary", use_container_width=True, disabled=not backend):
+    action_cols = st.columns([1.4, 1, 1, 1, 1, 1])
+    if action_cols[0].button("Sync New Shopify Products", type="primary", use_container_width=True, disabled=not backend):
+        sync_completed = False
+        try:
+            with st.spinner("Scanning Shopify products and updating Edition Ops..."):
+                if not backend or not hasattr(backend, "sync_new_shopify_products_to_edition_ops"):
+                    raise ValueError("Product sync is not available.")
+                config = shopify_sync.get_config()
+                if not config.get("configured"):
+                    raise ValueError("Shopify is not configured.")
+                sync_result = backend.sync_new_shopify_products_to_edition_ops(config=config)
+                _reload_products_from_supabase()
+                st.session_state[NOTICE_KEY] = _format_shopify_product_sync_summary(sync_result)
+                sync_completed = True
+        except Exception as error:
+            st.error(f"Shopify product sync failed: {error}")
+        if sync_completed:
+            st.rerun()
+    if action_cols[1].button(
+        "Reload Supabase Table",
+        use_container_width=True,
+        disabled=not backend,
+    ):
         with st.spinner("Reloading products from Supabase..."):
             _reload_products_from_supabase()
         st.rerun()
-    if action_cols[1].button(
+    if action_cols[2].button(
         "Save Changed Rows",
         use_container_width=True,
         disabled=not bool(rows_to_save),
@@ -1414,9 +1463,12 @@ def render_page():
         with st.spinner("Saving changed rows..."):
             _save_changed_rows()
         st.rerun()
-    with action_cols[2]:
+    if hasattr(action_cols[3], "__enter__"):
+        with action_cols[3]:
+            _render_shopify_mirror_controls(backend, rows, rows_to_save)
+    else:
         _render_shopify_mirror_controls(backend, rows, rows_to_save)
-    action_cols[3].download_button(
+    action_cols[4].download_button(
         "Export CSV Backup",
         data=_export_csv(rows),
         file_name=f"edition-ops-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}.csv",
@@ -1424,7 +1476,7 @@ def render_page():
         use_container_width=True,
         disabled=not bool(rows),
     )
-    with action_cols[4].popover("Import CSV and Replace Table", use_container_width=True):
+    with action_cols[5].popover("Import CSV and Replace Table", use_container_width=True):
         st.caption("CSV values replace the edition fields and mark rows Needs Sync. They are not saved until you click Save Changed Rows.")
         uploaded_csv = st.file_uploader(
             "Choose CSV backup",
@@ -1469,7 +1521,7 @@ def render_page():
             for product_title, message in errors.items():
                 st.caption(f"{product_title}: {message}")
     else:
-        st.info("No products loaded yet. Refresh products to build the first fast saved table.")
+        st.info("No products loaded yet. Sync New Shopify Products or reload the Supabase table.")
 
     elapsed = (datetime.now(timezone.utc) - started).total_seconds()
     print(f"PERF Edition Ops total={elapsed:.3f}s rows={len(st.session_state.get(ROWS_KEY, []))}", flush=True)
