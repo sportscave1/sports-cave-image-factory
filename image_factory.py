@@ -235,6 +235,13 @@ PRODUCT_PAGE_PROMPT_FILENAMES = {
     "02-office-prompt.txt",
     "03-living-room-prompt.txt",
 }
+REELS_PROMPT_FILENAMES = {
+    "16-man-cave-reel-prompt.txt",
+    "17-living-room-reel-prompt.txt",
+    "18-office-reel-prompt.txt",
+    "19-home-sports-bar-reel-prompt.txt",
+    "20-collector-display-room-reel-prompt.txt",
+}
 
 LIFESTYLE_PROMPT_SPECS = [
     (
@@ -1530,6 +1537,7 @@ def build_asset_record(
     jpg_path=None,
     include_in_zip=True,
     asset_group="generated",
+    zip_group="core",
     prompt_filename=None,
     export_to_shopify=True,
     export_to_socials=True,
@@ -1543,6 +1551,7 @@ def build_asset_record(
         "jpg_path": jpg_path,
         "include_in_zip": include_in_zip,
         "asset_group": asset_group,
+        "zip_group": zip_group,
         "prompt_filename": prompt_filename,
         "export_to_shopify": export_to_shopify,
         "export_to_socials": export_to_socials,
@@ -1863,13 +1872,7 @@ def prompt_key_from_prompt_filename(prompt_filename):
 
 
 def is_reels_prompt_filename(prompt_filename):
-    return Path(prompt_filename).name in {
-        "16-man-cave-reel-prompt.txt",
-        "17-living-room-reel-prompt.txt",
-        "18-office-reel-prompt.txt",
-        "19-home-sports-bar-reel-prompt.txt",
-        "20-collector-display-room-reel-prompt.txt",
-    }
+    return Path(prompt_filename).name in REELS_PROMPT_FILENAMES
 
 
 def get_lifestyle_prompt_text(prompt_filename, default_text):
@@ -1883,10 +1886,28 @@ def get_lifestyle_prompt_text(prompt_filename, default_text):
 
 
 def get_prompt_group(prompt_filename):
+    prompt_filename = Path(prompt_filename).name
     if prompt_filename in PRODUCT_PAGE_PROMPT_FILENAMES:
         return "product_page"
+    if prompt_filename in REELS_PROMPT_FILENAMES:
+        return "reels"
 
-    return "socials"
+    return "social"
+
+
+def get_asset_zip_group(asset):
+    zip_group = str((asset or {}).get("zip_group") or "").strip()
+    if zip_group:
+        return zip_group
+
+    prompt_filename = (asset or {}).get("prompt_filename")
+    if prompt_filename:
+        return get_prompt_group(prompt_filename)
+
+    if (asset or {}).get("asset_group") == "lifestyle":
+        return "social"
+
+    return "core"
 
 
 def get_asset_zip_folder(file_path):
@@ -1933,14 +1954,17 @@ def generate_lifestyle_prompt_pack(product_name, sport_category, product_slug, r
     return prompt_dir, reference_image_path, prompt_paths, None
 
 
-def create_complete_pack_zip(zip_dir, product_slug, webp_dir=None, jpg_dir=None, prompt_dir=None, assets=None):
+def create_complete_pack_zip(zip_dir, product_slug, webp_dir=None, jpg_dir=None, prompt_dir=None, assets=None, zip_groups=None):
     complete_zip_path = zip_dir / f"{product_slug}-complete-package.zip"
+    selected_groups = set(zip_groups or []) if zip_groups is not None else None
 
     ensure_memory_available("Before zip creation: Complete pack")
     with zipfile.ZipFile(complete_zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         if assets is not None:
             for asset in sorted(assets, key=lambda item: item.get("label", item.get("key", "")).lower()):
                 if not asset.get("include_in_zip", True):
+                    continue
+                if selected_groups is not None and get_asset_zip_group(asset) not in selected_groups:
                     continue
 
                 webp_path = asset.get("webp_path")

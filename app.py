@@ -3229,12 +3229,26 @@ def normalize_asset(asset):
         "jpg_path": None,
         "include_in_zip": True,
         "asset_group": "generated",
+        "zip_group": None,
         "prompt_filename": None,
         "export_to_shopify": True,
         "export_to_socials": True,
     }
     normalized = defaults.copy()
     normalized.update(asset or {})
+    if not normalized.get("zip_group"):
+        prompt_filename = normalized.get("prompt_filename")
+        if prompt_filename:
+            if Path(prompt_filename).name in PRODUCT_PAGE_PROMPT_NAMES:
+                normalized["zip_group"] = "product_page"
+            elif Path(prompt_filename).name in REELS_PROMPT_NAMES:
+                normalized["zip_group"] = "reels"
+            else:
+                normalized["zip_group"] = "social"
+        elif normalized.get("asset_group") == "lifestyle":
+            normalized["zip_group"] = "social"
+        else:
+            normalized["zip_group"] = "core"
     return normalized
 
 
@@ -3342,6 +3356,15 @@ def is_product_page_prompt(prompt_path):
 
 def is_reels_prompt(prompt_path):
     return Path(prompt_path).name in REELS_PROMPT_NAMES
+
+
+def get_lifestyle_prompt_group(prompt_filename):
+    prompt_filename = Path(prompt_filename).name
+    if prompt_filename in PRODUCT_PAGE_PROMPT_NAMES:
+        return "product_page"
+    if prompt_filename in REELS_PROMPT_NAMES:
+        return "reels"
+    return "social"
 
 
 def prompt_key_from_prompt_filename(prompt_filename):
@@ -3606,8 +3629,8 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text):
     if not st.session_state.get(edit_key):
         return
 
-    @st.dialog(f"Edit prompt: {title}", width="large")
-    def _edit_prompt_dialog():
+    with st.container(border=True):
+        st.markdown(f"**Edit prompt: {title}**")
         st.caption("Developer only. Saved changes replace this prompt everywhere it is used.")
         if not st.session_state.get("developer_unlocked"):
             password = st.text_input(
@@ -3642,8 +3665,6 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text):
         if cols[1].button("Cancel", key=f"mockup-prompt-edit-cancel::{prompt_id}", use_container_width=True):
             _close_mockup_prompt_editor(prompt_id)
             st.rerun()
-
-    _edit_prompt_dialog()
 
 
 def render_mockup_prompt_bar(prompt_text, key, prompt_id):
@@ -4147,6 +4168,26 @@ def build_complete_download_pack(result):
     return result
 
 
+def build_filtered_download_zip(result, selected_groups):
+    result = normalize_generation_result(result)
+    zip_dir = Path(result["zip_dir"] or (Path(result["run_dir"]) / "zip"))
+    zip_dir.mkdir(parents=True, exist_ok=True)
+    return image_factory.create_complete_pack_zip(
+        zip_dir,
+        result["product_slug"],
+        assets=result["assets"],
+        zip_groups=selected_groups,
+    )
+
+
+def asset_has_downloadable_file(asset):
+    for path_key in ("webp_path", "jpg_path"):
+        file_path = asset.get(path_key)
+        if file_path and Path(file_path).exists():
+            return True
+    return False
+
+
 def build_lifestyle_asset(prompt_path, saved_paths):
     prompt_filename = Path(prompt_path).name
     is_product_page_asset = image_factory.is_product_page_prompt_filename(prompt_filename)
@@ -4159,6 +4200,7 @@ def build_lifestyle_asset(prompt_path, saved_paths):
         jpg_path=saved_paths.get("jpg_path"),
         include_in_zip=True,
         asset_group="lifestyle",
+        zip_group=get_lifestyle_prompt_group(prompt_filename),
         prompt_filename=prompt_filename,
         export_to_shopify=is_product_page_asset,
         export_to_socials=True,
@@ -4338,6 +4380,56 @@ def render_primary_zip_download(result, section_key):
         st.info(result["zip_drive_error"])
 
 
+def render_final_zip_download(result):
+    result = normalize_generation_result(result)
+    st.subheader("Download ZIP")
+    st.caption("Choose which image groups to include, then download one ZIP.")
+
+    filter_specs = [
+        ("core", "Core Images"),
+        ("product_page", "Product Page Mockups"),
+        ("social", "Social Mockups"),
+        ("reels", "Reels"),
+    ]
+    selected_groups = []
+    filter_cols = st.columns(4)
+    for index, (group_key, label) in enumerate(filter_specs):
+        state_key = f"download-zip-filter::{result['run_dir']}::{group_key}"
+        with filter_cols[index]:
+            if st.checkbox(label, value=True, key=state_key):
+                selected_groups.append(group_key)
+
+    if not selected_groups:
+        st.warning("Select at least one image group before downloading the ZIP.")
+        st.button("Download ZIP", key=f"download-filtered-zip-disabled::{result['run_dir']}", disabled=True, use_container_width=True)
+        return
+
+    selected_group_set = set(selected_groups)
+    if not any(
+        asset.get("include_in_zip", True)
+        and asset.get("zip_group") in selected_group_set
+        and asset_has_downloadable_file(asset)
+        for asset in result["assets"]
+    ):
+        st.warning("No files are available for the selected image groups yet.")
+        st.button("Download ZIP", key=f"download-filtered-zip-empty::{result['run_dir']}", disabled=True, use_container_width=True)
+        return
+
+    try:
+        filtered_zip_path = build_filtered_download_zip(result, selected_groups)
+    except Exception as error:
+        st.error("Could not create the ZIP.")
+        st.exception(error)
+        return
+
+    render_download_button(
+        "Download ZIP",
+        filtered_zip_path,
+        "application/zip",
+        key=f"download-filtered-zip::{result['run_dir']}::{hashlib.sha1('|'.join(selected_groups).encode('utf-8')).hexdigest()[:10]}",
+    )
+
+
 def render_prompt_cards(result, prompt_paths, heading, caption=None):
     if not prompt_paths:
         return
@@ -4506,7 +4598,6 @@ def render_generation_result(result):
             f"{result['drive_sync_error']}"
         )
 
-    render_primary_zip_download(result, "top")
     render_generated_previews(result)
 
     if result["lifestyle_pack_error"]:
@@ -4550,7 +4641,7 @@ def render_generation_result(result):
             "Vertical 9:16 lifestyle mockups for Meta, Facebook and Instagram Reels. Generate at 1080 × 1920, then upload the finished images back into the matching cards.",
         )
 
-    render_primary_zip_download(result, "bottom")
+    render_final_zip_download(result)
 
 
 def render_recent_runs_sidebar():

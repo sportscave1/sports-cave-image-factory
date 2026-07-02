@@ -1,9 +1,11 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 import image_factory
+import prompt_store
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,16 +82,93 @@ class MockupReelsTests(unittest.TestCase):
             self.assertIn("WEBP/test-black-framed-soccer-16-man-cave-reel.webp", names)
             self.assertIn("jpg/test-black-framed-soccer-16-man-cave-reel.jpg", names)
 
+    def test_complete_zip_filters_assets_by_group(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_dir = Path(tmpdir) / "zip"
+            zip_dir.mkdir()
+            asset_paths = {}
+            for group in ("core", "product_page", "social", "reels"):
+                asset_path = Path(tmpdir) / f"{group}.webp"
+                asset_path.write_bytes(group.encode("utf-8"))
+                asset_paths[group] = asset_path
+
+            zip_path = image_factory.create_complete_pack_zip(
+                zip_dir,
+                "test-product",
+                assets=[
+                    {
+                        "label": group,
+                        "include_in_zip": True,
+                        "zip_group": group,
+                        "webp_path": str(path),
+                    }
+                    for group, path in asset_paths.items()
+                ],
+                zip_groups={"core", "reels"},
+            )
+
+            with zipfile.ZipFile(zip_path) as archive:
+                names = set(archive.namelist())
+
+            self.assertEqual(names, {"WEBP/core.webp", "WEBP/reels.webp"})
+
+    def test_prompt_override_loads_for_reels_stable_key(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store_path = Path(tmpdir) / "prompt_overrides.json"
+            with patch.object(prompt_store, "PROMPT_OVERRIDES_PATH", store_path):
+                prompt_store.save_prompt(
+                    "lifestyle::16-man-cave-reel",
+                    "16 - Man Cave Reel",
+                    "Edited reel prompt",
+                )
+
+                prompt_text = image_factory.get_lifestyle_prompt_text(
+                    "16-man-cave-reel-prompt.txt",
+                    "Default reel prompt",
+                )
+
+            self.assertEqual(prompt_text, "Edited reel prompt")
+
     def test_mockups_page_has_reels_section_and_no_drive_reminder_expander(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         result_render = source[
             source.index("def render_generation_result") : source.index("\n\ndef render_recent_runs_sidebar")
         ]
+        prompt_cards = source[
+            source.index("def render_prompt_cards") : source.index("\n\ndef render_optional_package_controls")
+        ]
+        mockup_actions = source[
+            source.index("def render_mockup_prompt_editor") : source.index("\n\ndef prime_asset_selection_state")
+        ]
 
         self.assertIn('"Reels"', result_render)
         self.assertIn("Vertical 9:16 lifestyle mockups", result_render)
         self.assertIn("reels_prompts", result_render)
+        self.assertIn("render_final_zip_download(result)", result_render)
+        self.assertNotIn("render_primary_zip_download", result_render)
+        self.assertNotIn("Save ZIP", result_render)
+        self.assertNotIn("Open Drive Folder", result_render)
+        self.assertNotIn("Download ZIP Instead", result_render)
         self.assertNotIn("Local output and Google Drive reminder", result_render)
+        self.assertIn("current_lifestyle_prompt_text", prompt_cards)
+        self.assertIn("render_mockup_prompt_action_row", prompt_cards)
+        self.assertIn("render_mockup_prompt_bar(prompt_text", mockup_actions)
+        self.assertIn("st.text_area", mockup_actions)
+        self.assertIn("prompt_store.save_prompt", mockup_actions)
+
+    def test_final_zip_area_has_default_filters_and_empty_selection_warning(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        final_zip = source[
+            source.index("def render_final_zip_download") : source.index("\n\ndef render_prompt_cards")
+        ]
+
+        self.assertIn('st.subheader("Download ZIP")', final_zip)
+        self.assertIn("Choose which image groups to include, then download one ZIP.", final_zip)
+        for label in ("Core Images", "Product Page Mockups", "Social Mockups", "Reels"):
+            self.assertIn(label, final_zip)
+        self.assertIn("value=True", final_zip)
+        self.assertIn("Select at least one image group before downloading the ZIP.", final_zip)
+        self.assertIn("zip_groups=selected_groups", source)
 
 
 if __name__ == "__main__":
