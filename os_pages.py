@@ -8872,20 +8872,20 @@ def inject_marketing_factory_styles():
         """
         <style>
         .marketing-card {
-            border: 1px solid rgba(212, 165, 76, 0.28);
+            border: 1px solid #E5E1D8;
             border-radius: 16px;
-            background: linear-gradient(135deg, rgba(17, 17, 17, 0.98), rgba(26, 22, 17, 0.92));
+            background: #FFFFFF;
             padding: 18px 20px;
             margin: 0 0 14px 0;
         }
         .marketing-card-title {
-            color: #F5F2EA;
+            color: #0B0B0D;
             font-weight: 800;
             font-size: 1.02rem;
             margin-bottom: 8px;
         }
         .marketing-card-body {
-            color: #C9C2B8;
+            color: #66615A;
             line-height: 1.48;
             font-size: 0.94rem;
         }
@@ -8906,8 +8906,8 @@ def inject_marketing_factory_styles():
             opacity: 1 !important;
         }
         div[data-testid="stExpander"] {
-            background: rgba(17, 17, 17, 0.98) !important;
-            border: 1px solid rgba(212, 165, 76, 0.18) !important;
+            background: #FFFFFF !important;
+            border: 1px solid #E5E1D8 !important;
             border-radius: 12px !important;
         }
         div[data-testid="stExpander"] summary,
@@ -8915,14 +8915,14 @@ def inject_marketing_factory_styles():
         div[data-testid="stExpander"] summary:focus,
         div[data-testid="stExpander"] summary p,
         div[data-testid="stExpander"] summary span {
-            background: #111111 !important;
-            color: #F5F2EA !important;
+            background: #FAF8F1 !important;
+            color: #0B0B0D !important;
         }
         div[data-testid="stExpander"] p,
         div[data-testid="stExpander"] li,
         div[data-testid="stExpander"] label,
         div[data-testid="stExpander"] span {
-            color: #F5F2EA !important;
+            color: #0B0B0D !important;
         }
         div[data-testid="stExpander"] div[data-testid="stTextArea"] textarea,
         div[data-testid="stExpander"] div[data-testid="stTextArea"] textarea:focus,
@@ -8935,10 +8935,10 @@ def inject_marketing_factory_styles():
         div[data-testid="stExpander"] div[data-testid="stButton"] button,
         div[data-testid="stExpander"] div[data-testid="stButton"] button:hover,
         div[data-testid="stExpander"] div[data-testid="stButton"] button:focus {
-            background: #F5F2EA !important;
+            background: #D4A54C !important;
             color: #0B0B0D !important;
             -webkit-text-fill-color: #0B0B0D !important;
-            border-color: rgba(212, 165, 76, 0.55) !important;
+            border-color: #D4A54C !important;
             filter: none !important;
             transform: none !important;
         }
@@ -8953,15 +8953,16 @@ def inject_marketing_factory_styles():
         div[data-testid="stTabs"] button,
         div[data-testid="stTabs"] button:hover,
         div[data-testid="stTabs"] button:focus {
-            color: #F5F2EA !important;
-            background: #111111 !important;
-            border-color: rgba(212, 165, 76, 0.25) !important;
+            color: #0B0B0D !important;
+            background: #FFFFFF !important;
+            border-color: #E5E1D8 !important;
         }
         div[data-testid="stTabs"] button[aria-selected="true"],
         div[data-testid="stTabs"] button[aria-selected="true"]:hover,
         div[data-testid="stTabs"] button[aria-selected="true"]:focus {
             background: #D4A54C !important;
             color: #0B0B0D !important;
+            border-color: #D4A54C !important;
         }
         div[data-testid="stButton"] button,
         div[data-testid="stDownloadButton"] button,

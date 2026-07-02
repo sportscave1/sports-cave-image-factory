@@ -7,23 +7,24 @@ def inject_global_ui_styles():
     st.markdown(
         """
         <style>
+        /* Sports Cave OS light theme: colour-only update. Do not change layout here. */
         :root {
-            --sc-bg: #090909;
-            --sc-panel: #11100e;
-            --sc-panel-soft: #171512;
-            --sc-border: rgba(213, 170, 86, 0.28);
-            --sc-gold: #d9ad55;
-            --sc-gold-dark: #9a6d22;
-            --sc-cream: #f7f2e9;
-            --sc-text: #f4eee5;
-            --sc-muted: #aaa196;
-            --sc-dark-text: #191713;
-            --sc-red: #b4232a;
-            --sc-green: #1f7a4d;
+            --sc-bg: #FFFFFF;
+            --sc-panel: #FFFFFF;
+            --sc-panel-soft: #FAF8F1;
+            --sc-border: #E5E1D8;
+            --sc-gold: #D4A54C;
+            --sc-gold-dark: #C69737;
+            --sc-cream: #FFFFFF;
+            --sc-text: #0B0B0D;
+            --sc-muted: #66615A;
+            --sc-dark-text: #0B0B0D;
+            --sc-red: #B4232A;
+            --sc-green: #1F7A4D;
         }
         .sc-page-header {
             border: 1px solid var(--sc-border);
-            background: linear-gradient(135deg, #0d0c0a 0%, #17130c 72%, #21190b 100%);
+            background: linear-gradient(135deg, #FFFFFF 0%, #FAF8F1 100%);
             border-radius: 8px;
             padding: 14px 16px;
             margin-bottom: 10px;
@@ -51,8 +52,8 @@ def inject_global_ui_styles():
             flex-wrap: wrap;
             gap: 8px;
             align-items: center;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: #111;
+            border: 1px solid var(--sc-border);
+            background: #FFFFFF;
             border-radius: 8px;
             padding: 8px 10px;
             margin: 8px 0 10px 0;
@@ -141,36 +142,36 @@ def inject_global_ui_styles():
             padding: 3px 8px;
             font-size: 0.78rem;
             font-weight: 750;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            background: #1c1a17;
+            border: 1px solid var(--sc-border);
+            background: #FFFFFF;
             color: var(--sc-text);
         }
         .sc-pill.good {
-            background: rgba(31, 122, 77, 0.18);
-            border-color: rgba(31, 122, 77, 0.45);
-            color: #c8f2dc;
+            background: #EEF8F1;
+            border-color: rgba(31, 122, 77, 0.35);
+            color: #1F6A3D;
         }
         .sc-pill.warn {
-            background: rgba(217, 173, 85, 0.16);
-            border-color: rgba(217, 173, 85, 0.45);
-            color: #ffe2a3;
+            background: #FFF7E6;
+            border-color: rgba(212, 165, 76, 0.55);
+            color: #7A5414;
         }
         .sc-pill.danger {
-            background: rgba(180, 35, 42, 0.2);
-            border-color: rgba(180, 35, 42, 0.55);
-            color: #ffd3d5;
+            background: #FFF0EC;
+            border-color: rgba(180, 35, 42, 0.35);
+            color: #9D2E16;
         }
         .sc-empty {
-            border: 1px dashed rgba(255, 255, 255, 0.18);
-            background: #111;
+            border: 1px dashed var(--sc-border);
+            background: #FFFFFF;
             color: var(--sc-muted);
             border-radius: 8px;
             padding: 14px;
             font-size: 0.92rem;
         }
         .sc-table-frame {
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            background: #101010;
+            border: 1px solid var(--sc-border);
+            background: #FFFFFF;
             border-radius: 8px;
             padding: 8px;
             margin-top: 8px;
@@ -181,8 +182,8 @@ def inject_global_ui_styles():
             border-radius: 7px !important;
             min-height: 38px !important;
             font-weight: 750 !important;
-            border: 1px solid var(--sc-border) !important;
-            background: var(--sc-cream) !important;
+            border: 1px solid var(--sc-gold) !important;
+            background: var(--sc-gold) !important;
             color: var(--sc-dark-text) !important;
         }
         div.stButton > button:hover,
@@ -194,7 +195,7 @@ def inject_global_ui_styles():
         div[data-testid="stFormSubmitButton"] button:hover,
         div[data-testid="stFormSubmitButton"] button:focus,
         div[data-testid="stFormSubmitButton"] button:active {
-            background: #efe4d2 !important;
+            background: var(--sc-gold-dark) !important;
             color: var(--sc-dark-text) !important;
             border-color: var(--sc-gold-dark) !important;
             box-shadow: none !important;
@@ -206,13 +207,13 @@ def inject_global_ui_styles():
         }
         div.stButton > button:disabled,
         div.stDownloadButton > button:disabled {
-            background: #2a2927 !important;
-            color: #9e978d !important;
-            border-color: rgba(255,255,255,0.12) !important;
+            background: #E8E6E0 !important;
+            color: #6F6B64 !important;
+            border-color: #D2CEC4 !important;
         }
         .stTabs [data-baseweb="tab-list"] {
             gap: 4px;
-            border-bottom: 1px solid rgba(255,255,255,0.12);
+            border-bottom: 1px solid var(--sc-border);
         }
         .stTabs [data-baseweb="tab"] {
             height: 36px;

@@ -1180,15 +1180,17 @@ def inject_styles():
     st.markdown(
         """
         <style>
+        /* Sports Cave OS light theme: colour-only update. Do not change layout here. */
         :root {
-            --sc-bg: #0B0B0D;
-            --sc-panel: #141416;
-            --sc-panel-soft: #1B1B1E;
-            --sc-text: #F5F2EA;
-            --sc-muted: #A6A19A;
+            --sc-bg: #FFFFFF;
+            --sc-panel: #FFFFFF;
+            --sc-panel-soft: #FAF8F1;
+            --sc-text: #0B0B0D;
+            --sc-muted: #66615A;
             --sc-gold: #D4A54C;
-            --sc-border: #343238;
-            --sc-danger: #D56A4A;
+            --sc-gold-hover: #C69737;
+            --sc-border: #E5E1D8;
+            --sc-danger: #B4232A;
         }
 
         @keyframes sc-status-progress {
@@ -1198,8 +1200,8 @@ def inject_styles():
 
         [data-testid="stAppViewContainer"] {
             background:
-                radial-gradient(circle at 82% 4%, rgba(212, 165, 76, 0.10), transparent 28rem),
-                linear-gradient(180deg, #0B0B0D 0%, #111114 100%);
+                radial-gradient(circle at 82% 4%, rgba(212, 165, 76, 0.08), transparent 28rem),
+                linear-gradient(180deg, #FFFFFF 0%, #FAF8F1 100%);
             color: var(--sc-text);
         }
 
@@ -1210,7 +1212,7 @@ def inject_styles():
         }
 
         header[data-testid="stHeader"] {
-            border-bottom: 1px solid rgba(212, 165, 76, 0.16);
+            border-bottom: 1px solid var(--sc-border);
         }
 
         div[data-testid="stStatusWidget"] {
@@ -1219,7 +1221,7 @@ def inject_styles():
             min-height: 8px !important;
             border: 1px solid rgba(212, 165, 76, 0.44) !important;
             border-radius: 999px !important;
-            background: rgba(245, 242, 234, 0.12) !important;
+            background: rgba(212, 165, 76, 0.12) !important;
             overflow: hidden !important;
             position: relative !important;
             padding: 0 !important;
@@ -1249,8 +1251,8 @@ def inject_styles():
         }
 
         [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #09090B 0%, #151518 100%);
-            border-right: 1px solid rgba(212, 165, 76, 0.20);
+            background: linear-gradient(180deg, #FFFFFF 0%, #FAF8F1 100%);
+            border-right: 1px solid var(--sc-border);
         }
 
         [data-testid="stSidebar"] * {
@@ -1270,7 +1272,7 @@ def inject_styles():
         }
 
         [data-testid="stMetric"] {
-            background: linear-gradient(145deg, rgba(27, 27, 30, 0.96), rgba(17, 17, 20, 0.96));
+            background: #FFFFFF;
             border: 1px solid var(--sc-border);
             border-top: 2px solid rgba(212, 165, 76, 0.75);
             border-radius: 14px;
@@ -1278,7 +1280,7 @@ def inject_styles():
         }
 
         [data-testid="stVerticalBlockBorderWrapper"] {
-            background: rgba(20, 20, 22, 0.86);
+            background: #FFFFFF;
             border-color: var(--sc-border) !important;
         }
 
@@ -1286,9 +1288,13 @@ def inject_styles():
             border-color: var(--sc-border) !important;
         }
 
+        [data-testid="stExpander"] {
+            background: #FFFFFF !important;
+        }
+
         [data-testid="stExpander"] details,
         [data-testid="stExpander"] details[open] {
-            background: rgba(20, 20, 22, 0.92) !important;
+            background: #FFFFFF !important;
             border: 1px solid var(--sc-border) !important;
             border-radius: 16px !important;
             overflow: hidden !important;
@@ -1298,7 +1304,7 @@ def inject_styles():
         [data-testid="stExpander"] summary:hover,
         [data-testid="stExpander"] details[open] summary,
         [data-testid="stExpander"] details[open] summary:hover {
-            background: rgba(20, 20, 22, 0.96) !important;
+            background: #FAF8F1 !important;
             color: var(--sc-text) !important;
             border: none !important;
             box-shadow: none !important;
@@ -1310,6 +1316,7 @@ def inject_styles():
         [data-testid="stExpander"] details[open] summary *,
         [data-testid="stExpander"] details[open] summary svg,
         [data-testid="stExpander"] details[open] summary p {
+            background: #FAF8F1 !important;
             color: var(--sc-text) !important;
             fill: var(--sc-text) !important;
             stroke: var(--sc-text) !important;
@@ -1317,7 +1324,7 @@ def inject_styles():
 
         [data-testid="stExpander"] details > div,
         [data-testid="stExpander"] details[open] > div {
-            background: rgba(20, 20, 22, 0.96) !important;
+            background: #FFFFFF !important;
             color: var(--sc-text) !important;
         }
 
@@ -1326,11 +1333,38 @@ def inject_styles():
             color: var(--sc-text) !important;
         }
 
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"],
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] details,
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] details[open] {
+            background: #FFFFFF !important;
+        }
+
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] summary,
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] summary *,
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] summary p,
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] details[open] summary,
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] details[open] summary *,
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] details[open] summary p {
+            background: #FAF8F1 !important;
+            color: var(--sc-text) !important;
+            -webkit-text-fill-color: var(--sc-text) !important;
+            fill: var(--sc-text) !important;
+            stroke: var(--sc-text) !important;
+        }
+
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] details p,
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] details li,
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] details label,
+        html body [data-testid="stAppViewContainer"] div[data-testid="stExpander"] details span {
+            color: var(--sc-text) !important;
+            -webkit-text-fill-color: var(--sc-text) !important;
+        }
+
         /*
         Sports Cave readability contract:
-        light/cream/white controls always use black text; dark panels keep warm white.
-        Keep this near the end of the core theme so page-specific CSS cannot make
-        prompt boxes, buttons, upload cards, or admin tools unreadable.
+        light controls always use dark text. Keep this near the end of the core theme
+        so page-specific CSS cannot make prompt boxes, buttons, upload cards,
+        or admin tools unreadable.
         */
         textarea,
         textarea:focus,
@@ -1393,7 +1427,7 @@ def inject_styles():
         code,
         [data-testid="stCodeBlock"],
         [data-testid="stCodeBlock"] * {
-            background-color: #F5F2EA !important;
+            background-color: #FFFFFF !important;
             color: #000000 !important;
             -webkit-text-fill-color: #000000 !important;
         }
@@ -1414,10 +1448,10 @@ def inject_styles():
         [data-testid="stExpander"] details > div .stLinkButton > a:hover,
         [data-testid="stExpander"] details > div .stLinkButton > a:focus,
         [data-testid="stExpander"] details > div a[data-testid="stLinkButton"] {
-            background: #F5F2EA !important;
+            background: var(--sc-gold) !important;
             color: #000000 !important;
             -webkit-text-fill-color: #000000 !important;
-            border-color: rgba(212, 165, 76, 0.55) !important;
+            border-color: var(--sc-gold) !important;
             filter: none !important;
             transform: none !important;
         }
@@ -1444,10 +1478,10 @@ def inject_styles():
         div[data-testid="stPopover"] button,
         div[data-testid="stFileUploader"] button,
         section[data-testid="stFileUploaderDropzone"] button {
-            background: #F5F2EA !important;
+            background: var(--sc-gold) !important;
             color: #000000 !important;
             -webkit-text-fill-color: #000000 !important;
-            border: 1px solid rgba(212, 165, 76, 0.55) !important;
+            border: 1px solid var(--sc-gold) !important;
             box-shadow: none !important;
             text-shadow: none !important;
         }
@@ -1501,8 +1535,8 @@ def inject_styles():
         div[data-testid="stPopover"] button[aria-expanded="true"],
         div[data-testid="stFileUploader"] button:hover,
         section[data-testid="stFileUploaderDropzone"] button:hover {
-            background: #F5F2EA !important;
-            border-color: rgba(212, 165, 76, 0.55) !important;
+            background: var(--sc-gold-hover) !important;
+            border-color: var(--sc-gold-hover) !important;
             color: #000000 !important;
             -webkit-text-fill-color: #000000 !important;
             box-shadow: none !important;
@@ -1537,9 +1571,9 @@ def inject_styles():
         div[data-testid="stDownloadButton"] button:disabled,
         div[data-testid="stFileUploader"] button:disabled,
         section[data-testid="stFileUploaderDropzone"] button:disabled {
-            background: #2A2A2D !important;
-            border-color: #444149 !important;
-            color: #C2BBB0 !important;
+            background: #E8E6E0 !important;
+            border-color: #D2CEC4 !important;
+            color: #6F6B64 !important;
             opacity: 1 !important;
         }
 
@@ -1550,22 +1584,40 @@ def inject_styles():
         div[data-testid="stDownloadButton"] button:disabled *,
         div[data-testid="stFileUploader"] button:disabled *,
         section[data-testid="stFileUploaderDropzone"] button:disabled * {
-            color: #C2BBB0 !important;
-            fill: #C2BBB0 !important;
-            stroke: #C2BBB0 !important;
+            color: #6F6B64 !important;
+            fill: #6F6B64 !important;
+            stroke: #6F6B64 !important;
         }
 
         .stButton > button[kind="primary"]:hover,
         div[data-testid="stButton"] button[kind="primary"]:hover {
-            background: var(--sc-gold) !important;
-            border-color: var(--sc-gold) !important;
+            background: var(--sc-gold-hover) !important;
+            border-color: var(--sc-gold-hover) !important;
             color: #000000 !important;
             filter: none;
             transform: none !important;
         }
 
+        .stTabs [data-baseweb="tab"],
+        .stTabs button[role="tab"],
+        div[data-testid="stTabs"] [data-baseweb="tab"],
+        div[data-testid="stTabs"] button[role="tab"] {
+            background: #FFFFFF !important;
+            border-color: var(--sc-border) !important;
+            color: var(--sc-text) !important;
+        }
+
+        .stTabs [aria-selected="true"],
+        .stTabs button[role="tab"][aria-selected="true"],
+        div[data-testid="stTabs"] [aria-selected="true"],
+        div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] {
+            background: var(--sc-gold) !important;
+            border-color: var(--sc-gold) !important;
+            color: #0B0B0D !important;
+        }
+
         [data-testid="stFileUploader"] {
-            background: rgba(20, 20, 22, 0.90);
+            background: #FFFFFF;
             border: 1px solid var(--sc-border);
             border-radius: 16px;
             padding: 0.75rem 0.85rem 0.95rem;
@@ -1573,9 +1625,9 @@ def inject_styles():
 
         [data-testid="stFileUploader"] label,
         [data-testid="stFileUploader"] [data-testid="stWidgetLabel"] * {
-            color: #F5F2EA !important;
-            fill: #F5F2EA !important;
-            stroke: #F5F2EA !important;
+            color: var(--sc-text) !important;
+            fill: var(--sc-text) !important;
+            stroke: var(--sc-text) !important;
         }
 
         [data-testid="stFileUploader"] .stTooltipIcon {
@@ -1600,10 +1652,10 @@ def inject_styles():
 
         [data-testid="stFileUploader"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]),
         section[data-testid="stFileUploaderDropzone"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) {
-            background: #0B0B0D !important;
-            border-color: #0B0B0D !important;
-            color: #F5F2EA !important;
-            -webkit-text-fill-color: #F5F2EA !important;
+            background: var(--sc-gold) !important;
+            border-color: var(--sc-gold) !important;
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
             border-radius: 999px !important;
         }
 
@@ -1615,27 +1667,27 @@ def inject_styles():
         section[data-testid="stFileUploaderDropzone"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) svg,
         section[data-testid="stFileUploaderDropzone"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) span,
         section[data-testid="stFileUploaderDropzone"] button:not([aria-label*="Delete"]):not([aria-label*="Remove"]) p {
-            color: #F5F2EA !important;
-            -webkit-text-fill-color: #F5F2EA !important;
-            fill: #F5F2EA !important;
-            stroke: #F5F2EA !important;
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
+            fill: #000000 !important;
+            stroke: #000000 !important;
         }
 
         [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]) {
-            background: #0B0B0D !important;
-            border-color: #0B0B0D !important;
-            color: #F5F2EA !important;
-            -webkit-text-fill-color: #F5F2EA !important;
+            background: var(--sc-gold) !important;
+            border-color: var(--sc-gold) !important;
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
             border-radius: 999px !important;
         }
 
         [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]) *,
         [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]) svg,
         [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]) span {
-            color: #F5F2EA !important;
-            -webkit-text-fill-color: #F5F2EA !important;
-            fill: #F5F2EA !important;
-            stroke: #F5F2EA !important;
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
+            fill: #000000 !important;
+            stroke: #000000 !important;
         }
 
         [data-testid="stFileUploader"] [data-baseweb="tag"],
@@ -1721,10 +1773,10 @@ def inject_styles():
         [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]):hover,
         [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]):focus,
         [data-testid="stFileUploader"] button[aria-label]:not([aria-label*="Delete"]):not([aria-label*="Remove"]):active {
-            background: #0B0B0D !important;
-            border-color: #0B0B0D !important;
-            color: #F5F2EA !important;
-            -webkit-text-fill-color: #F5F2EA !important;
+            background: var(--sc-gold-hover) !important;
+            border-color: var(--sc-gold-hover) !important;
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important;
             box-shadow: none !important;
             filter: none !important;
             transform: none !important;
@@ -1761,7 +1813,7 @@ def inject_styles():
             border: 1px solid var(--sc-border);
             border-radius: 999px;
             padding: 0.22rem 0.62rem;
-            background: #202024;
+            background: #FFFFFF;
             color: var(--sc-text);
             font-size: 0.78rem;
             font-weight: 700;
@@ -1777,20 +1829,20 @@ def inject_styles():
         .sc-status-ready-for-upload,
         .sc-status-live-link-added,
         .sc-status-prodigi-connected {
-            border-color: #527A63;
-            color: #BFE3C9;
+            border-color: rgba(31, 106, 61, 0.35);
+            color: #1F6A3D;
         }
 
         .sc-status-shopify-active {
-            border-color: #527A63;
-            color: #BFE3C9;
+            border-color: rgba(31, 106, 61, 0.35);
+            color: #1F6A3D;
         }
 
         .sc-status-approved,
         .sc-status-asset-pack-approved,
         .sc-status-core-assets-connected {
-            border-color: #527A63;
-            color: #BFE3C9;
+            border-color: rgba(31, 106, 61, 0.35);
+            color: #1F6A3D;
         }
 
         .sc-status-ready-for-review,
@@ -1804,19 +1856,19 @@ def inject_styles():
         .sc-status-needs-edition-setup,
         .sc-status-prodigi-missing {
             border-color: var(--sc-danger);
-            color: #F0B4A1;
+            color: #9D2E16;
         }
 
         .sc-status-not-matched {
             border-color: var(--sc-danger);
-            color: #F0B4A1;
+            color: #9D2E16;
         }
 
         .sc-status-needs-review,
         .sc-status-core-assets-missing,
         .sc-status-live-product-missing-files {
             border-color: var(--sc-danger);
-            color: #F0B4A1;
+            color: #9D2E16;
         }
 
         .sc-status-selling-quickly,
@@ -1824,13 +1876,13 @@ def inject_styles():
         .sc-status-artwork-ready,
         .sc-status-admin-link-added {
             border-color: var(--sc-gold);
-            color: #E9C980;
+            color: #7A5414;
         }
 
         .sc-status-shopify-draft,
         .sc-status-id-not-synced {
             border-color: var(--sc-gold);
-            color: #E9C980;
+            color: #7A5414;
         }
 
         .sc-check {
@@ -1838,19 +1890,19 @@ def inject_styles():
             padding: 0.72rem 0.85rem;
             border: 1px solid var(--sc-border);
             border-radius: 10px;
-            background: #171719;
+            background: #FFFFFF;
         }
 
         .sc-check-ready strong {
-            color: #8CC9A0;
+            color: #1F6A3D;
         }
 
         .sc-check-missing strong {
-            color: #E38A6E;
+            color: #9D2E16;
         }
 
         .sc-shell-card {
-            background: rgba(20, 20, 22, 0.94);
+            background: #FFFFFF;
             border: 1px solid var(--sc-border);
             border-radius: 18px;
             padding: 1rem 1.15rem;
