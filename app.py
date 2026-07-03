@@ -4704,8 +4704,7 @@ def render_sidebar():
         st.sidebar.divider()
         st.sidebar.subheader("Design Studio")
         st.sidebar.write("1. Choose the artwork workflow.")
-        st.sidebar.write("2. Copy or download the right prompt.")
-        st.sidebar.write("3. Use licensed final source images for production.")
+        st.sidebar.write("2. Copy the prompt into ChatGPT.")
     elif st.session_state.selected_page == "Edition Ops":
         st.sidebar.divider()
         st.sidebar.subheader("Edition Ops")

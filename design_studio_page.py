@@ -1,6 +1,10 @@
+import hashlib
+import html
+import json
 import textwrap
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 UPGRADE_EXISTING_DESIGN_PROMPT = """
@@ -640,26 +644,22 @@ Refine until it feels premium, emotional, collector-worthy, and ready to sell.
 """
 
 
-PROMPT_DOWNLOADS = {
+PROMPT_BOXES = {
     "Upgrade Existing Design Prompt": (
         UPGRADE_EXISTING_DESIGN_PROMPT,
-        "sports_cave_upgrade_existing_design_prompt.txt",
-        "Download Upgrade Existing Design Prompt",
+        "Copy Upgrade Existing Design Prompt",
     ),
     "Find The Moment Prompt": (
         FIND_THE_MOMENT_PROMPT,
-        "sports_cave_find_the_moment_prompt.txt",
-        "Download Find The Moment Prompt",
+        "Copy Find The Moment Prompt",
     ),
     "Create Sports Cave Style Artwork Prompt": (
         CREATE_SPORTS_CAVE_STYLE_ARTWORK_PROMPT,
-        "sports_cave_create_new_ultimate_moment_prompt.txt",
-        "Download Create Sports Cave Style Artwork Prompt",
+        "Copy Create Sports Cave Style Artwork Prompt",
     ),
     "Harsh Truth Sports Cave Design Review": (
         HARSH_REVIEW_PROMPT,
-        "sports_cave_harsh_review_prompt.txt",
-        "Download Harsh Review Checklist Prompt",
+        "Copy Harsh Review Prompt",
     ),
 }
 
@@ -668,52 +668,101 @@ def _clean_prompt(prompt):
     return textwrap.dedent(prompt).strip()
 
 
-def _render_prompt_box(name, prompt, filename, button_label, key):
-    prompt_text = _clean_prompt(prompt)
-    st.markdown(f"**{name}**")
+def render_copy_prompt_box(label: str, prompt_text: str, key: str, button_label: str = "Copy Prompt"):
+    cleaned_prompt = _clean_prompt(prompt_text)
+    component_id = f"copy-prompt-{hashlib.sha1(key.encode('utf-8')).hexdigest()[:12]}"
+    prompt_json = json.dumps(cleaned_prompt)
+    safe_button_label = html.escape(button_label)
+    safe_component_id = html.escape(component_id)
+
+    st.markdown(f"**{label}**")
+    st.caption("Copy this prompt, paste it into ChatGPT inside the Sports Cave Designs project.")
     st.text_area(
-        name,
-        value=prompt_text,
+        label,
+        value=cleaned_prompt,
         height=420,
         key=f"design-studio-prompt::{key}",
         label_visibility="collapsed",
     )
-    st.download_button(
-        button_label,
-        data=(prompt_text + "\n").encode("utf-8"),
-        file_name=filename,
-        mime="text/plain",
-        key=f"design-studio-download::{key}",
-        use_container_width=True,
+    components.html(
+        f"""
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
+          <button
+            id="{safe_component_id}"
+            type="button"
+            style="
+              width: 100%;
+              border: 1px solid rgba(201, 169, 97, 0.65);
+              border-radius: 8px;
+              background: #111111;
+              color: #f6f0e6;
+              font-size: 14px;
+              font-weight: 650;
+              padding: 0.62rem 0.9rem;
+              cursor: pointer;
+            "
+          >
+            {safe_button_label}
+          </button>
+          <div
+            id="{safe_component_id}-status"
+            aria-live="polite"
+            style="min-height: 20px; margin-top: 6px; color: #b7aa90; font-size: 13px;"
+          ></div>
+        </div>
+        <script>
+          const promptText = {prompt_json};
+          const button = document.getElementById("{safe_component_id}");
+          const status = document.getElementById("{safe_component_id}-status");
+
+          function fallbackCopy(text) {{
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            textarea.setAttribute("readonly", "");
+            textarea.style.position = "fixed";
+            textarea.style.left = "-9999px";
+            textarea.style.top = "0";
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            const copied = document.execCommand("copy");
+            document.body.removeChild(textarea);
+            return copied;
+          }}
+
+          button.addEventListener("click", async () => {{
+            try {{
+              if (navigator.clipboard && window.isSecureContext) {{
+                await navigator.clipboard.writeText(promptText);
+              }} else if (!fallbackCopy(promptText)) {{
+                throw new Error("Copy fallback failed");
+              }}
+              status.textContent = "Copied - paste into ChatGPT";
+            }} catch (error) {{
+              try {{
+                if (!fallbackCopy(promptText)) {{
+                  throw error;
+                }}
+                status.textContent = "Copied - paste into ChatGPT";
+              }} catch (fallbackError) {{
+                status.textContent = "Copy failed. Select the prompt text and copy it manually.";
+              }}
+            }}
+          }});
+        </script>
+        """,
+        height=72,
     )
+
+
+def _render_prompt_box(name, prompt, button_label, key):
+    prompt_text = _clean_prompt(prompt)
+    render_copy_prompt_box(name, prompt_text, key, button_label)
 
 
 def render_design_studio_page():
     st.title("Design Studio")
-    st.caption("Sports Cave prompt hub for premium limited-edition artwork creation and design upgrades.")
-
-    with st.container(border=True):
-        st.markdown(
-            "Use this page when creating or upgrading Sports Cave artwork. It keeps the design process "
-            "consistent so every piece feels premium, collector-focused, limited-edition, realistic, "
-            "emotional, and wall-worthy."
-        )
-        st.markdown(
-            "1. For existing artwork: screenshot the current Sports Cave design, open ChatGPT, go to the "
-            "\"Sports Cave Designs\" project/folder, upload the design screenshot and the limited-edition "
-            "plaque asset, then copy the Upgrade Existing Design prompt.\n"
-            "2. For brand-new artwork: first use the Find The Moment prompt. Do not design first. After "
-            "choosing the strongest moment and sourcing the best hero/background images, upload those "
-            "images and use the Create Sports Cave Style Artwork prompt.\n"
-            "3. Only use licensed/approved images for final commercial production. Web/image search "
-            "references are for finding the correct moment, likeness, kit, car, stadium, mood, and "
-            "composition direction."
-        )
-
-    st.info(
-        "Commercial reminder: use licensed or approved final source images for production. "
-        "Web/image search is for research, reference, and choosing the strongest moment."
-    )
+    st.caption("Sports Cave prompt hub for premium collector artwork.")
 
     upgrade_tab, create_tab, review_tab = st.tabs(
         ["Upgrade Existing Design", "Create New Ultimate Moment", "Harsh Review Checklist"]
@@ -733,7 +782,7 @@ def render_design_studio_page():
         )
         _render_prompt_box(
             "Upgrade Existing Design Prompt",
-            *PROMPT_DOWNLOADS["Upgrade Existing Design Prompt"],
+            *PROMPT_BOXES["Upgrade Existing Design Prompt"],
             key="upgrade-existing-design",
         )
 
@@ -751,13 +800,13 @@ def render_design_studio_page():
         )
         _render_prompt_box(
             "Find The Moment Prompt",
-            *PROMPT_DOWNLOADS["Find The Moment Prompt"],
+            *PROMPT_BOXES["Find The Moment Prompt"],
             key="find-the-moment",
         )
         st.divider()
         _render_prompt_box(
             "Create Sports Cave Style Artwork Prompt",
-            *PROMPT_DOWNLOADS["Create Sports Cave Style Artwork Prompt"],
+            *PROMPT_BOXES["Create Sports Cave Style Artwork Prompt"],
             key="create-sports-cave-style-artwork",
         )
 
@@ -769,6 +818,6 @@ def render_design_studio_page():
         )
         _render_prompt_box(
             "Harsh Truth Sports Cave Design Review",
-            *PROMPT_DOWNLOADS["Harsh Truth Sports Cave Design Review"],
+            *PROMPT_BOXES["Harsh Truth Sports Cave Design Review"],
             key="harsh-review",
         )
