@@ -1,18 +1,31 @@
 import hashlib
 import html
 import json
+import os
 import textwrap
 
 import streamlit as st
 import streamlit.components.v1 as components
 
+import prompt_store
+
+
+DEFAULT_DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
+
 
 UPGRADE_EXISTING_DESIGN_PROMPT = """
 turn this Sports Cave piece into a premium Sports Cave collector-style limited-edition artwork.
 
-Use the uploaded Sports Cave design as the core idea and starting point.
+Use the uploaded Sports Cave design as the core idea and starting point, but do not feel locked into the old layout, old typography, old title treatment, or old border treatment if they are not premium enough.
 
-Also use the limited-edition plaque attached to this project and place it in the best possible spot inside the design so the final artwork feels genuinely limited edition, collectible, premium, and framed-first.
+Important:
+Inside this Sports Cave Designs project/folder, there are project source files called Sports Cave limited edition plaque, including files such as:
+- limited-edition-plaque.psd
+- limited-edition-plaque.png
+
+When designing, look in the project sources of this project and use the Sports Cave limited edition plaque as the badge/plaque element inside the final design.
+
+Place that plaque in the best possible spot so the final artwork feels genuinely limited edition, collectible, premium, and framed-first.
 
 Do not simply clean up the design.
 Do not make it look like a normal poster.
@@ -209,7 +222,13 @@ The background must support the story without distracting from the subject.
 
 STEP 7 - TITLE SYSTEM
 
-Add or improve the main title so it feels like a collector piece or movie title.
+Do not keep the existing title just because it is already in the design.
+
+The title should be upgraded according to the stronger concept, stronger emotional hook, and premium collector direction of the new design.
+
+If the old title is weak, generic, poorly worded, too basic, or not collector-worthy, replace it.
+
+Use the title that best fits the upgraded design direction, not the original design by default.
 
 The title must be short, emotional, memorable, and powerful.
 
@@ -248,7 +267,14 @@ Do not make the artwork look like an advertisement.
 
 STEP 8 - LIMITED EDITION PLAQUE SYSTEM
 
-Every design must include the supplied Sports Cave limited-edition plaque.
+Use the Sports Cave limited edition plaque from the project sources in the Sports Cave Designs folder.
+
+This is not optional.
+Use it as the badge/plaque element in the final design.
+
+Possible source files include:
+- limited-edition-plaque.psd
+- limited-edition-plaque.png
 
 Place the plaque in the best natural location for this specific composition.
 
@@ -266,7 +292,7 @@ Bottom left
 Bottom centre
 Bottom right
 Near the title
-Integrated into a small collector plate zone
+Integrated into a collector plate zone
 Subtle plaque area in darker negative space
 
 Do not place the plaque randomly.
@@ -274,7 +300,40 @@ Do not make it look pasted on.
 Do not make it too large.
 Do not hide it so much that it loses collector value.
 
-STEP 9 - SIGNATURE SYSTEM
+STEP 9 - BORDER SYSTEM
+
+Upgrade the border treatment so it feels more elegant and more Sports Cave.
+
+Important border direction:
+Make the border longer horizontally and slightly less tall vertically so it feels more rectangular and refined.
+
+The border must feel:
+
+Elegant
+Premium
+Collector-style
+Sports Cave branded in feel
+Balanced
+Subtle
+Clean
+Not bulky
+Not cheap
+Not overly decorative
+
+Use a refined Sports Cave style border with controlled gold detailing if needed.
+
+The border should help frame the artwork and elevate the premium collector look, not distract from the subject.
+
+Avoid:
+Thick clunky borders
+Cheap poster-style frames
+Overly ornate decorative borders
+Square-looking heavy border shapes
+Anything that feels generic or templated
+
+The border should feel sleek, tasteful, and purpose-built for a premium limited-edition Sports Cave artwork.
+
+STEP 10 - SIGNATURE SYSTEM
 
 Where appropriate, include a subtle signature-style graphic.
 
@@ -295,7 +354,7 @@ Do not make it oversized.
 Do not put it in a box unless it looks like part of a premium memorabilia plate.
 Do not use fake-looking random scribbles that distract from the design.
 
-STEP 10 - REALISM RULES
+STEP 11 - REALISM RULES
 
 Prioritise realism above everything.
 
@@ -331,16 +390,18 @@ No stretched or distorted subjects
 
 The subject must feel physically present in the scene.
 
-STEP 11 - UPGRADE THE EXISTING DESIGN
+STEP 12 - UPGRADE THE EXISTING DESIGN
 
 Keep the strongest parts of the uploaded design:
 
 The core subject
 The emotional idea
-The title if it is strong
 The sport and era
 The key fan memory
 The collector direction
+
+Only keep the existing title if it is already genuinely strong enough for the upgraded premium concept.
+Otherwise replace it with a stronger, more collector-worthy title.
 
 Upgrade the weak parts:
 
@@ -351,6 +412,8 @@ Improve typography
 Improve background atmosphere
 Improve composition
 Improve plaque integration
+Improve border elegance
+Make the border longer horizontally and slightly shorter vertically so it feels more rectangular and premium
 Improve premium black-and-gold collector feeling
 Remove clutter
 Remove cheap poster-shop elements
@@ -359,7 +422,7 @@ Remove anything that does not increase emotion, collectibility, or wall appeal
 
 The final should feel like a Sports Cave premium limited-edition drop, not just a redesigned poster.
 
-STEP 12 - FINAL BESTSELLER CHECKLIST
+STEP 13 - FINAL BESTSELLER CHECKLIST
 
 Before finalising, make sure the artwork passes this checklist:
 
@@ -369,8 +432,9 @@ Does it feel emotional?
 Does it feel premium?
 Does it feel collectible?
 Does it work in black and gold?
-Is the title powerful?
-Is the limited-edition plaque subtle but visible?
+Is the title powerful and upgraded where needed?
+Is the Sports Cave limited-edition plaque properly used?
+Is the border elegant, longer horizontally, and slightly less tall vertically?
 Is the subject realistic?
 Is the lighting cinematic?
 Does it look print-ready?
@@ -390,8 +454,9 @@ Use better realistic source references from web/image search where needed.
 
 Make the subject heroic.
 Make the background atmospheric.
-Make the title feel legendary.
-Make the limited-edition plaque feel collectible.
+Make the title stronger where needed.
+Use the Sports Cave limited edition plaque from the project sources as the badge/plaque element.
+Make the border more elegant, more Sports Cave styled, longer horizontally, and slightly less tall vertically.
 Make the whole design feel framed-first and wall-worthy.
 
 This must look like:
@@ -647,19 +712,19 @@ Refine until it feels premium, emotional, collector-worthy, and ready to sell.
 PROMPT_BOXES = {
     "Upgrade Existing Design Prompt": (
         UPGRADE_EXISTING_DESIGN_PROMPT,
-        "Copy Upgrade Existing Design Prompt",
+        "upgrade-existing-design",
     ),
     "Find The Moment Prompt": (
         FIND_THE_MOMENT_PROMPT,
-        "Copy Find The Moment Prompt",
+        "find-the-moment",
     ),
     "Create Sports Cave Style Artwork Prompt": (
         CREATE_SPORTS_CAVE_STYLE_ARTWORK_PROMPT,
-        "Copy Create Sports Cave Style Artwork Prompt",
+        "create-sports-cave-style-artwork",
     ),
     "Harsh Truth Sports Cave Design Review": (
         HARSH_REVIEW_PROMPT,
-        "Copy Harsh Review Prompt",
+        "harsh-review",
     ),
 }
 
@@ -668,22 +733,20 @@ def _clean_prompt(prompt):
     return textwrap.dedent(prompt).strip()
 
 
-def render_copy_prompt_box(label: str, prompt_text: str, key: str, button_label: str = "Copy Prompt"):
-    cleaned_prompt = _clean_prompt(prompt_text)
+def _design_studio_prompt_id(key: str) -> str:
+    return f"design-studio::{key}"
+
+
+def _developer_password_matches(password: str, developer_password: str | None) -> bool:
+    expected_password = developer_password if developer_password is not None else DEFAULT_DEVELOPER_PAGE_PASSWORD
+    return str(password or "") == str(expected_password or "")
+
+
+def _render_copy_button(prompt_text: str, key: str):
     component_id = f"copy-prompt-{hashlib.sha1(key.encode('utf-8')).hexdigest()[:12]}"
-    prompt_json = json.dumps(cleaned_prompt)
-    safe_button_label = html.escape(button_label)
+    prompt_json = json.dumps(prompt_text)
     safe_component_id = html.escape(component_id)
 
-    st.markdown(f"**{label}**")
-    st.caption("Copy this prompt, paste it into ChatGPT inside the Sports Cave Designs project.")
-    st.text_area(
-        label,
-        value=cleaned_prompt,
-        height=420,
-        key=f"design-studio-prompt::{key}",
-        label_visibility="collapsed",
-    )
     components.html(
         f"""
         <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
@@ -702,7 +765,7 @@ def render_copy_prompt_box(label: str, prompt_text: str, key: str, button_label:
               cursor: pointer;
             "
           >
-            {safe_button_label}
+            Copy Prompt
           </button>
           <div
             id="{safe_component_id}-status"
@@ -755,12 +818,81 @@ def render_copy_prompt_box(label: str, prompt_text: str, key: str, button_label:
     )
 
 
-def _render_prompt_box(name, prompt, button_label, key):
-    prompt_text = _clean_prompt(prompt)
-    render_copy_prompt_box(name, prompt_text, key, button_label)
+def _render_prompt_editor(label: str, prompt_id: str, prompt_text: str, key: str, developer_password: str | None):
+    editor_key = f"design-studio-edit-open::{key}"
+    if not st.session_state.get(editor_key):
+        return
+
+    with st.container(border=True):
+        st.caption("Developer only. Saving writes this prompt override to backend storage.")
+        edited_prompt = st.text_area(
+            "Edit prompt",
+            value=prompt_text,
+            height=460,
+            key=f"design-studio-edit-text::{key}",
+        )
+        password = st.text_input(
+            "Developer password",
+            type="password",
+            key=f"design-studio-edit-password::{key}",
+        )
+        save_col, cancel_col, _ = st.columns([1, 1, 4])
+        if save_col.button("Save", key=f"design-studio-edit-save::{key}", use_container_width=True):
+            if not edited_prompt.strip():
+                st.error("Prompt cannot be empty.")
+            elif not _developer_password_matches(password, developer_password):
+                st.error("Developer password is incorrect.")
+            else:
+                prompt_store.save_prompt(prompt_id, label, edited_prompt)
+                st.session_state[editor_key] = False
+                st.success("Prompt saved to backend.")
+                st.rerun()
+        if cancel_col.button("Cancel", key=f"design-studio-edit-cancel::{key}", use_container_width=True):
+            st.session_state[editor_key] = False
+            st.rerun()
 
 
-def render_design_studio_page():
+def render_copy_prompt_box(
+    label: str,
+    default_prompt_text: str,
+    key: str,
+    developer_password: str | None = None,
+):
+    prompt_id = _design_studio_prompt_id(key)
+    effective_prompt = prompt_store.get_prompt(prompt_id, _clean_prompt(default_prompt_text))
+
+    st.markdown(f"**{label}**")
+    st.caption("Copy this prompt, paste it into ChatGPT inside the Sports Cave Designs project.")
+    st.text_area(
+        label,
+        value=effective_prompt,
+        height=420,
+        key=f"design-studio-prompt::{key}::{hashlib.sha1(effective_prompt.encode('utf-8')).hexdigest()[:10]}",
+        label_visibility="collapsed",
+        disabled=True,
+    )
+    copy_col, edit_col = st.columns([6, 1])
+    with copy_col:
+        _render_copy_button(effective_prompt, key)
+    if edit_col.button(
+        "Edit",
+        key=f"design-studio-edit-button::{key}",
+        help="Edit prompt.",
+        icon=":material/edit:",
+        use_container_width=True,
+    ):
+        st.session_state[f"design-studio-edit-text::{key}"] = effective_prompt
+        st.session_state[f"design-studio-edit-open::{key}"] = True
+        st.rerun()
+
+    _render_prompt_editor(label, prompt_id, effective_prompt, key, developer_password)
+
+
+def _render_prompt_box(name, prompt, key, developer_password):
+    render_copy_prompt_box(name, prompt, key, developer_password)
+
+
+def render_design_studio_page(developer_password: str | None = None):
     st.title("Design Studio")
     st.caption("Sports Cave prompt hub for premium collector artwork.")
 
@@ -783,7 +915,7 @@ def render_design_studio_page():
         _render_prompt_box(
             "Upgrade Existing Design Prompt",
             *PROMPT_BOXES["Upgrade Existing Design Prompt"],
-            key="upgrade-existing-design",
+            developer_password=developer_password,
         )
 
     with create_tab:
@@ -801,13 +933,13 @@ def render_design_studio_page():
         _render_prompt_box(
             "Find The Moment Prompt",
             *PROMPT_BOXES["Find The Moment Prompt"],
-            key="find-the-moment",
+            developer_password=developer_password,
         )
         st.divider()
         _render_prompt_box(
             "Create Sports Cave Style Artwork Prompt",
             *PROMPT_BOXES["Create Sports Cave Style Artwork Prompt"],
-            key="create-sports-cave-style-artwork",
+            developer_password=developer_password,
         )
 
     with review_tab:
@@ -819,5 +951,5 @@ def render_design_studio_page():
         _render_prompt_box(
             "Harsh Truth Sports Cave Design Review",
             *PROMPT_BOXES["Harsh Truth Sports Cave Design Review"],
-            key="harsh-review",
+            developer_password=developer_password,
         )

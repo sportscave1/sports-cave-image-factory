@@ -6507,7 +6507,7 @@ def render_selected_page(current_page):
     elif current_page == "Mockups":
         render_mockups_page()
     elif current_page == "Design Studio":
-        get_design_studio_page().render_design_studio_page()
+        get_design_studio_page().render_design_studio_page(developer_password=DEVELOPER_PAGE_PASSWORD)
     elif current_page == "Edition Ops":
         get_edition_ops().render_page()
     elif current_page == "Orders":
