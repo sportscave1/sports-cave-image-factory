@@ -13,6 +13,11 @@ import prompt_store
 DEFAULT_DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
 
 
+UPGRADE_EXISTING_DESIGN_VIDEO_URL = (
+    "https://cdn.shopify.com/videos/c/o/v/67bad26ad6f24cca9527772f226b5320.mp4"
+)
+
+
 UPGRADE_EXISTING_DESIGN_PROMPT = """
 turn this Sports Cave piece into a premium Sports Cave collector-style limited-edition artwork.
 
@@ -902,16 +907,21 @@ def render_design_studio_page(developer_password: str | None = None):
 
     with upgrade_tab:
         st.subheader("Upgrade Existing Sports Cave Design")
-        st.markdown(
-            "1. Screenshot the current Sports Cave design.\n"
-            "2. Open ChatGPT.\n"
-            "3. Go to the \"Sports Cave Designs\" project/folder.\n"
-            "4. Upload the current design screenshot.\n"
-            "5. Upload or attach the Sports Cave limited-edition plaque asset from the project.\n"
-            "6. Copy and paste this prompt.\n"
-            "7. Generate the upgraded collector version.\n"
-            "8. Save final PSD and flattened JPG in the correct Google Drive folder when approved."
-        )
+        with st.expander("How To Upgrade an Existing Sports Cave Design"):
+            st.markdown("Watch this quick guide before upgrading a design.")
+            st.video(UPGRADE_EXISTING_DESIGN_VIDEO_URL)
+            st.caption(
+                f"If the video does not load, open it here: {UPGRADE_EXISTING_DESIGN_VIDEO_URL}"
+            )
+            st.markdown(
+                "1. Screenshot the current Sports Cave design.\n"
+                "2. Open ChatGPT.\n"
+                "3. Go to the \"Sports Cave Designs\" project/folder.\n"
+                "4. Upload the current design screenshot.\n"
+                "5. Upload or attach the Sports Cave limited-edition plaque asset from the project.\n"
+                "6. Copy and paste this prompt.\n"
+                "7. Generate the upgraded collector version."
+            )
         _render_prompt_box(
             "Upgrade Existing Design Prompt",
             *PROMPT_BOXES["Upgrade Existing Design Prompt"],
