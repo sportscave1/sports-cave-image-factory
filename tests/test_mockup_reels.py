@@ -153,6 +153,9 @@ class MockupReelsTests(unittest.TestCase):
         self.assertIn("current_lifestyle_prompt_text", prompt_cards)
         self.assertIn("render_mockup_prompt_action_row", prompt_cards)
         self.assertIn("render_mockup_prompt_bar(prompt_text", mockup_actions)
+        self.assertIn("prompt_edit", mockup_actions)
+        self.assertIn("mockup-prompt-edit-button", mockup_actions)
+        self.assertIn("_mockup_prompt_edit_key(prompt_id)", mockup_actions)
         self.assertIn("st.text_area", mockup_actions)
         self.assertIn("prompt_store.save_prompt", mockup_actions)
 

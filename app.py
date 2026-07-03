@@ -3600,13 +3600,17 @@ def _clear_mockup_prompt_edit_query():
     try:
         if "mockup_prompt_edit" in st.query_params:
             del st.query_params["mockup_prompt_edit"]
+        if "prompt_edit" in st.query_params:
+            del st.query_params["prompt_edit"]
     except Exception:
         pass
 
 
 def _consume_mockup_prompt_edit_request(prompt_id):
     try:
-        requested_prompt_id = st.query_params.get("mockup_prompt_edit", "")
+        requested_prompt_id = st.query_params.get("prompt_edit", "")
+        if not requested_prompt_id:
+            requested_prompt_id = st.query_params.get("mockup_prompt_edit", "")
     except Exception:
         requested_prompt_id = ""
     if isinstance(requested_prompt_id, list):
@@ -3667,12 +3671,11 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text):
             st.rerun()
 
 
-def render_mockup_prompt_bar(prompt_text, key, prompt_id):
+def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
     prompt_text_json = json.dumps(prompt_text)
     prompt_id_json = json.dumps(prompt_id)
     bar_id = f"mockup-prompt-bar-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
-    show_edit = True
-    edit_href = f"?mockup_prompt_edit={quote(prompt_id)}"
+    edit_href = f"?prompt_edit={quote(prompt_id)}"
     edit_markup = (
         f"""
         <a
@@ -3775,10 +3778,10 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id):
               event.stopPropagation();
               try {{
                 const target = new URL(window.parent.location.href);
-                target.searchParams.set("mockup_prompt_edit", promptId);
+                target.searchParams.set("prompt_edit", promptId);
                 window.parent.location.href = target.toString();
               }} catch (error) {{
-                window.open("?mockup_prompt_edit=" + encodeURIComponent(promptId), "_parent");
+                window.open("?prompt_edit=" + encodeURIComponent(promptId), "_parent");
               }}
             }});
           }}
@@ -3856,7 +3859,13 @@ def render_mockup_prompt_action_row(title, prompt_text, key, prompt_id):
     notice = st.session_state.pop("mockup_prompt_notice", "")
     if notice:
         st.success(notice)
-    render_mockup_prompt_bar(prompt_text, f"mockup-copy::{key}", prompt_id)
+    action_cols = st.columns([8, 1])
+    with action_cols[0]:
+        render_mockup_prompt_bar(prompt_text, f"mockup-copy::{key}", prompt_id, show_edit=False)
+    with action_cols[1]:
+        if st.button("✎", key=f"mockup-prompt-edit-button::{prompt_id}", help="Edit prompt", use_container_width=True):
+            st.session_state[_mockup_prompt_edit_key(prompt_id)] = True
+            st.rerun()
     render_mockup_prompt_editor(title, prompt_id, prompt_text)
 
 
