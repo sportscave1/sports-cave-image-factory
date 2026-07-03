@@ -43,6 +43,7 @@ shopify_sync = None
 edition_ops_module = None
 orders_page_module = None
 ads_intelligence_module = None
+design_studio_page_module = None
 requests_module = None
 components_module = None
 pillow_modules = None
@@ -140,6 +141,15 @@ def get_ads_intelligence_page():
     return ads_intelligence_module
 
 
+def get_design_studio_page():
+    global design_studio_page_module
+    if design_studio_page_module is None:
+        log_startup_stage("DESIGN STUDIO IMPORT START")
+        design_studio_page_module = importlib.import_module("design_studio_page")
+        log_startup_stage("DESIGN STUDIO IMPORT DONE")
+    return design_studio_page_module
+
+
 def get_requests_module():
     global requests_module
     if requests_module is None:
@@ -187,6 +197,7 @@ ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
 MENU_OPTIONS = [
     "Dashboard",
     "Mockups",
+    "Design Studio",
     "Product Uploads",
     "Edition Ops",
     "Orders",
@@ -4689,6 +4700,12 @@ def render_sidebar():
         st.sidebar.write("3. Review lightweight previews.")
         st.sidebar.write("4. Download one ZIP bundle.")
         st.sidebar.write("5. Use the prompt sections below if you want ChatGPT lifestyle images.")
+    elif st.session_state.selected_page == "Design Studio":
+        st.sidebar.divider()
+        st.sidebar.subheader("Design Studio")
+        st.sidebar.write("1. Choose the artwork workflow.")
+        st.sidebar.write("2. Copy or download the right prompt.")
+        st.sidebar.write("3. Use licensed final source images for production.")
     elif st.session_state.selected_page == "Edition Ops":
         st.sidebar.divider()
         st.sidebar.subheader("Edition Ops")
@@ -6490,6 +6507,8 @@ def render_selected_page(current_page):
         render_placeholder_page("Products", "Full product sync is paused. Use Edition Ops for product edition fields.")
     elif current_page == "Mockups":
         render_mockups_page()
+    elif current_page == "Design Studio":
+        get_design_studio_page().render_design_studio_page()
     elif current_page == "Edition Ops":
         get_edition_ops().render_page()
     elif current_page == "Orders":
