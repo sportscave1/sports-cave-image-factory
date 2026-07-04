@@ -197,37 +197,30 @@ ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
 MENU_OPTIONS = [
     "Dashboard",
     "Orders",
+    "Prodigi",
     "Edition Ops",
     "Mockups",
     "Product Uploads",
     "Design Studio",
-    "Prodigi",
     "Ads Intelligence",
     "Marketing Factory",
     "VA Training",
     "Developer",
 ]
-SIDEBAR_NAV_SECTIONS = [
-    ("Core", ["Dashboard", "Orders"]),
-    ("Build", ["Edition Ops", "Mockups", "Product Uploads", "Design Studio"]),
-    ("Operations", ["Prodigi"]),
-    ("Growth", ["Ads Intelligence", "Marketing Factory"]),
-    ("Admin", ["VA Training", "Developer"]),
-]
 SIDEBAR_NAV_LABELS = {
     "Dashboard": "Home",
 }
 SIDEBAR_NAV_ICONS = {
-    "Dashboard": "⌂",
-    "Orders": "□",
-    "Edition Ops": "◇",
-    "Mockups": "▣",
-    "Product Uploads": "↑",
-    "Design Studio": "✎",
-    "Prodigi": "↗",
-    "Ads Intelligence": "≋",
-    "Marketing Factory": "◧",
-    "VA Training": "✓",
+    "Dashboard": "H",
+    "Orders": "O",
+    "Prodigi": "P",
+    "Edition Ops": "E",
+    "Mockups": "M",
+    "Product Uploads": "U",
+    "Design Studio": "D",
+    "Ads Intelligence": "A",
+    "Marketing Factory": "F",
+    "VA Training": "V",
     "Developer": "{}",
 }
 HIDDEN_PAGE_OPTIONS = [
@@ -1306,11 +1299,11 @@ def inject_styles():
         }
 
         section[data-testid="stSidebar"] > div {
-            padding-top: 0.9rem;
+            padding-top: 0.75rem;
         }
 
         section[data-testid="stSidebar"] .sc-sidebar-brand {
-            padding: 0.1rem 0.15rem 0.45rem;
+            padding: 0.05rem 0.15rem 0.6rem;
         }
 
         section[data-testid="stSidebar"] .sc-sidebar-title {
@@ -1332,17 +1325,7 @@ def inject_styles():
             color: #777770 !important;
             font-size: 0.68rem;
             line-height: 1.25;
-            margin-top: 0.45rem;
-        }
-
-        section[data-testid="stSidebar"] .sc-sidebar-section-label {
-            color: #777770 !important;
-            font-size: 0.66rem;
-            font-weight: 700;
-            letter-spacing: 0.06em;
-            line-height: 1;
-            margin: 0.7rem 0 0.2rem;
-            text-transform: uppercase;
+            margin-top: 0.35rem;
         }
 
         section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] p {
@@ -1350,7 +1333,7 @@ def inject_styles():
         }
 
         section[data-testid="stSidebar"] div[data-testid="stButton"] {
-            margin: 0.03rem 0;
+            margin: 0.02rem 0;
         }
 
         section[data-testid="stSidebar"] div[data-testid="stButton"] button {
@@ -1364,8 +1347,8 @@ def inject_styles():
             display: flex;
             font-weight: 520 !important;
             justify-content: flex-start;
-            min-height: 2.05rem;
-            padding: 0.35rem 0.65rem !important;
+            min-height: 1.95rem;
+            padding: 0.32rem 0.62rem !important;
             text-align: left;
             transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
             width: 100%;
@@ -1391,21 +1374,10 @@ def inject_styles():
             font-weight: 720 !important;
         }
 
-        section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"]::before,
-        section[data-testid="stSidebar"] div[data-testid="stButton"] button[data-testid="stBaseButton-primary"]::before {
-            background: #8A6A2F;
-            border-radius: 999px;
-            content: "";
-            display: inline-block;
-            height: 1.1rem;
-            margin-right: 0.5rem;
-            width: 0.18rem;
-        }
-
         section[data-testid="stSidebar"] div[data-testid="stButton"] button p,
         section[data-testid="stSidebar"] div[data-testid="stButton"] button span {
             color: inherit !important;
-            font-size: 0.86rem;
+            font-size: 0.84rem;
             letter-spacing: 0;
             line-height: 1.1;
             overflow: hidden;
@@ -4827,100 +4799,31 @@ def render_sidebar():
         if st.session_state.selected_page in MENU_OPTIONS
         else "Dashboard"
     )
-    for section_label, section_pages in SIDEBAR_NAV_SECTIONS:
-        st.sidebar.markdown(
-            f'<div class="sc-sidebar-section-label">{html.escape(section_label)}</div>',
-            unsafe_allow_html=True,
-        )
-        for page in section_pages:
-            label = SIDEBAR_NAV_LABELS.get(page, page)
-            icon = SIDEBAR_NAV_ICONS.get(page, "•")
-            button_label = f"{icon}  {label}"
-            if st.sidebar.button(
-                button_label,
-                key=f"sidebar-nav::{page}",
-                use_container_width=True,
-                type="primary" if page == visible_page else "secondary",
-            ):
-                if page != visible_page:
-                    st.session_state.selected_page = page
-                    st.rerun()
+    for page in MENU_OPTIONS:
+        label = SIDEBAR_NAV_LABELS.get(page, page)
+        icon = SIDEBAR_NAV_ICONS.get(page, "")
+        button_label = f"{icon}  {label}".strip()
+        if st.sidebar.button(
+            button_label,
+            key=f"sidebar-nav::{page}",
+            use_container_width=True,
+            type="primary" if page == visible_page else "secondary",
+        ):
+            if page != visible_page:
+                st.session_state.selected_page = page
+                st.rerun()
     if st.session_state.selected_page not in MENU_OPTIONS:
         st.sidebar.caption(f"Internal page open: {st.session_state.selected_page}")
-        if st.sidebar.button("⌂  Back to Home", use_container_width=True):
+        if st.sidebar.button("H  Back to Home", use_container_width=True):
             st.session_state.selected_page = "Dashboard"
             st.rerun()
 
-    if st.session_state.selected_page == "Mockups":
+    if st.session_state.selected_page == "Developer":
         st.sidebar.divider()
-        st.sidebar.subheader("Mockup Workflow")
-        st.sidebar.write("1. Upload artwork.")
-        st.sidebar.write("2. Generate core Shopify images.")
-        st.sidebar.write("3. Review lightweight previews.")
-        st.sidebar.write("4. Download one ZIP bundle.")
-        st.sidebar.write("5. Use the prompt sections below if you want ChatGPT lifestyle images.")
-    elif st.session_state.selected_page == "Design Studio":
-        st.sidebar.divider()
-        st.sidebar.subheader("Design Studio")
-        st.sidebar.write("1. Choose the artwork workflow.")
-        st.sidebar.write("2. Copy the prompt into ChatGPT.")
-    elif st.session_state.selected_page == "Edition Ops":
-        st.sidebar.divider()
-        st.sidebar.subheader("Edition Ops")
-        st.sidebar.write("1. Refresh active products only when needed.")
-        st.sidebar.write("2. Edit edition totals and next numbers in one chart.")
-        st.sidebar.write("3. Save changed rows to product fields.")
-        st.sidebar.write("4. Use CSV import only when replacing the table.")
-    elif st.session_state.selected_page == "Orders":
-        st.sidebar.divider()
-        st.sidebar.subheader("Orders")
-        st.sidebar.write("1. Refresh recent paid orders only when needed.")
-        st.sidebar.write("2. Edition numbers are read-only and come from Edition Ops/order allocations.")
-        st.sidebar.write("3. Select rows, then generate or upload certificates from the top buttons.")
-        st.sidebar.write("4. Use Open PDF after a certificate is generated/uploaded.")
-    elif st.session_state.selected_page == "Prodigi":
-        st.sidebar.divider()
-        st.sidebar.subheader("Prodigi")
-        st.sidebar.write("1. Open the Prodigi dashboard and search the order.")
-        st.sidebar.write("2. Match Shopify size to Prodigi size: XL=A1, L=A2, M=A3, S=A4.")
-        st.sidebar.write("3. Copy the exact Prodigi name or code.")
-        st.sidebar.write("4. Check the frame colour before sending to production.")
-    elif st.session_state.selected_page == "Ads Intelligence":
-        st.sidebar.divider()
-        st.sidebar.subheader("Ads Intelligence")
-        st.sidebar.write("1. Review stored Meta performance from Supabase.")
-        st.sidebar.write("2. Sync Meta Ads data only when you click the manual button.")
-        st.sidebar.write("3. Tag creatives and export ChatGPT-ready analysis packs.")
-    elif st.session_state.selected_page == "Dashboard":
-        st.sidebar.divider()
-        st.sidebar.subheader("Today's Focus")
-        st.sidebar.write("Open Edition Ops only when product edition fields need a manual update.")
-    elif st.session_state.selected_page == "Files":
-        st.sidebar.divider()
-        st.sidebar.subheader("Asset Control")
-        st.sidebar.write("Filter missing or review assets, then open the master product record to update them.")
-    elif st.session_state.selected_page == "Persistence Check":
-        st.sidebar.divider()
-        st.sidebar.subheader("Persistence Check")
-        st.sidebar.write("Confirm Supabase tables, imports, assets, certificates, and orders are permanently stored.")
-    elif st.session_state.selected_page == "Product Uploads":
-        st.sidebar.divider()
-        st.sidebar.subheader("Upload Workflow")
-        st.sidebar.write("Work through products by stage, then use the Shopify prompt tools when needed.")
-    elif st.session_state.selected_page == "Developer":
-        st.sidebar.divider()
-        st.sidebar.subheader("Developer")
-        st.sidebar.write("Run connection tests, imports, diagnostics, and admin checks only when needed.")
         st.sidebar.caption("File Hub hidden until PSD/Drive asset workflow is active.")
         if st.sidebar.button("File Hub (Coming Soon)", use_container_width=True):
             st.session_state.selected_page = "Files"
             st.rerun()
-
-    st.sidebar.divider()
-    st.sidebar.subheader("MVP Mode")
-    st.sidebar.caption(
-        "Edition Ops controls product edition fields. Orders handles fulfilment and certificates from a lightweight saved snapshot."
-    )
 
 
 def render_mockups_page():
