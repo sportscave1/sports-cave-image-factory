@@ -196,17 +196,40 @@ ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
 # File Hub hidden until PSD/Drive asset workflow is active.
 MENU_OPTIONS = [
     "Dashboard",
-    "Mockups",
-    "Design Studio",
-    "Product Uploads",
-    "Edition Ops",
     "Orders",
+    "Edition Ops",
+    "Mockups",
+    "Product Uploads",
+    "Design Studio",
     "Prodigi",
     "Ads Intelligence",
     "Marketing Factory",
     "VA Training",
     "Developer",
 ]
+SIDEBAR_NAV_SECTIONS = [
+    ("Core", ["Dashboard", "Orders"]),
+    ("Build", ["Edition Ops", "Mockups", "Product Uploads", "Design Studio"]),
+    ("Operations", ["Prodigi"]),
+    ("Growth", ["Ads Intelligence", "Marketing Factory"]),
+    ("Admin", ["VA Training", "Developer"]),
+]
+SIDEBAR_NAV_LABELS = {
+    "Dashboard": "Home",
+}
+SIDEBAR_NAV_ICONS = {
+    "Dashboard": "⌂",
+    "Orders": "□",
+    "Edition Ops": "◇",
+    "Mockups": "▣",
+    "Product Uploads": "↑",
+    "Design Studio": "✎",
+    "Prodigi": "↗",
+    "Ads Intelligence": "≋",
+    "Marketing Factory": "◧",
+    "VA Training": "✓",
+    "Developer": "{}",
+}
 HIDDEN_PAGE_OPTIONS = [
     "Files",
     "Products",
@@ -1274,12 +1297,132 @@ def inject_styles():
         }
 
         [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #FFFFFF 0%, #FAF8F1 100%);
-            border-right: 1px solid var(--sc-border);
+            background: #F1F1EF !important;
+            border-right: 1px solid #D9D9D4;
         }
 
         [data-testid="stSidebar"] * {
             color: var(--sc-text);
+        }
+
+        section[data-testid="stSidebar"] > div {
+            padding-top: 0.9rem;
+        }
+
+        section[data-testid="stSidebar"] .sc-sidebar-brand {
+            padding: 0.1rem 0.15rem 0.45rem;
+        }
+
+        section[data-testid="stSidebar"] .sc-sidebar-title {
+            color: #1F1F21;
+            font-size: 1rem;
+            font-weight: 750;
+            line-height: 1.2;
+            margin: 0;
+        }
+
+        section[data-testid="stSidebar"] .sc-sidebar-subtitle {
+            color: #6E6E73 !important;
+            font-size: 0.76rem;
+            line-height: 1.25;
+            margin-top: 0.15rem;
+        }
+
+        section[data-testid="stSidebar"] .sc-sidebar-version {
+            color: #777770 !important;
+            font-size: 0.68rem;
+            line-height: 1.25;
+            margin-top: 0.45rem;
+        }
+
+        section[data-testid="stSidebar"] .sc-sidebar-section-label {
+            color: #777770 !important;
+            font-size: 0.66rem;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            line-height: 1;
+            margin: 0.7rem 0 0.2rem;
+            text-transform: uppercase;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] p {
+            margin-bottom: 0;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stButton"] {
+            margin: 0.03rem 0;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button {
+            align-items: center;
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            border-radius: 0.55rem !important;
+            box-shadow: none !important;
+            color: #303033 !important;
+            cursor: pointer;
+            display: flex;
+            font-weight: 520 !important;
+            justify-content: flex-start;
+            min-height: 2.05rem;
+            padding: 0.35rem 0.65rem !important;
+            text-align: left;
+            transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+            width: 100%;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button:hover {
+            background: #E7E7E3 !important;
+            border-color: #E1E1DC !important;
+            color: #161617 !important;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button:focus {
+            box-shadow: 0 0 0 2px rgba(48, 48, 51, 0.08) !important;
+            outline: none !important;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"],
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button[data-testid="stBaseButton-primary"] {
+            background: #FFFFFF !important;
+            border-color: #DADAD4 !important;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06) !important;
+            color: #111113 !important;
+            font-weight: 720 !important;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button[kind="primary"]::before,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button[data-testid="stBaseButton-primary"]::before {
+            background: #8A6A2F;
+            border-radius: 999px;
+            content: "";
+            display: inline-block;
+            height: 1.1rem;
+            margin-right: 0.5rem;
+            width: 0.18rem;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button p,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button span {
+            color: inherit !important;
+            font-size: 0.86rem;
+            letter-spacing: 0;
+            line-height: 1.1;
+            overflow: hidden;
+            text-align: left;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        section[data-testid="stSidebar"] hr {
+            margin: 0.75rem 0 0.55rem;
+        }
+
+        section[data-testid="stSidebar"] h3 {
+            color: #303033;
+            font-size: 0.82rem;
+            font-weight: 720;
+            margin-bottom: 0.25rem;
         }
 
         div[data-testid="stRadio"] label p {
@@ -4669,26 +4812,42 @@ def render_recent_runs_sidebar():
 
 
 def render_sidebar():
-    st.sidebar.title("Sports Cave OS")
-    st.sidebar.caption("Internal operations command centre")
-    st.sidebar.caption(APP_VERSION)
+    st.sidebar.markdown(
+        f"""
+        <div class="sc-sidebar-brand">
+            <div class="sc-sidebar-title">Sports Cave OS</div>
+            <div class="sc-sidebar-subtitle">Internal operations command centre</div>
+            <div class="sc-sidebar-version">{html.escape(APP_VERSION)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     visible_page = (
         st.session_state.selected_page
         if st.session_state.selected_page in MENU_OPTIONS
         else "Dashboard"
     )
-    chosen_page = st.sidebar.radio(
-        "Navigation",
-        MENU_OPTIONS,
-        index=MENU_OPTIONS.index(visible_page),
-        label_visibility="collapsed",
-    )
-    if chosen_page != visible_page:
-        st.session_state.selected_page = chosen_page
-        st.rerun()
+    for section_label, section_pages in SIDEBAR_NAV_SECTIONS:
+        st.sidebar.markdown(
+            f'<div class="sc-sidebar-section-label">{html.escape(section_label)}</div>',
+            unsafe_allow_html=True,
+        )
+        for page in section_pages:
+            label = SIDEBAR_NAV_LABELS.get(page, page)
+            icon = SIDEBAR_NAV_ICONS.get(page, "•")
+            button_label = f"{icon}  {label}"
+            if st.sidebar.button(
+                button_label,
+                key=f"sidebar-nav::{page}",
+                use_container_width=True,
+                type="primary" if page == visible_page else "secondary",
+            ):
+                if page != visible_page:
+                    st.session_state.selected_page = page
+                    st.rerun()
     if st.session_state.selected_page not in MENU_OPTIONS:
         st.sidebar.caption(f"Internal page open: {st.session_state.selected_page}")
-        if st.sidebar.button("Back to Dashboard", use_container_width=True):
+        if st.sidebar.button("⌂  Back to Home", use_container_width=True):
             st.session_state.selected_page = "Dashboard"
             st.rerun()
 
