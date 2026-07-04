@@ -3691,6 +3691,10 @@ def _update_edition_product_with_cursor(
 
     old_next = max(_int_value(run.get("next_edition_number"), 1), 1)
     old_total = max(_int_value(run.get("edition_total"), 100), 1)
+    old_enabled_value = product.get("active")
+    old_enabled = bool(old_enabled_value) if old_enabled_value is not None else run.get("status") == ACTIVE_RUN_STATUS
+    old_sold_out_value = product.get("sold_out")
+    old_sold_out = bool(old_sold_out_value) if old_sold_out_value is not None else run.get("status") == SOLD_OUT_RUN_STATUS
     new_total = max(_int_value(edition_total, old_total), 1)
     if current_edition is not None:
         current = _int_value(current_edition, 0)
@@ -3770,6 +3774,7 @@ def _update_edition_product_with_cursor(
     )
     updated_run = cur.fetchone() or run
     flags = _status_flags_from_run(requested_status)
+    archive_transition = old_enabled and not flags["active"] and flags["sold_out"]
     cur.execute(
         """
         UPDATE edition_products
@@ -3815,6 +3820,33 @@ def _update_edition_product_with_cursor(
         reason=reason,
         source="manual_app",
     )
+    if archive_transition:
+        _insert_audit_log(
+            cur,
+            event_type="edition_product_archived",
+            entity_type="edition_product",
+            entity_id=product.get("id"),
+            shopify_handle=handle,
+            old_value={
+                "product_title": product.get("product_title"),
+                "enabled": old_enabled,
+                "sold_out": old_sold_out,
+                "next_edition_number": old_next,
+                "edition_total": old_total,
+            },
+            new_value={
+                "product_title": product.get("product_title"),
+                "enabled": flags["active"],
+                "sold_out": flags["sold_out"],
+                "next_edition_number": proposed_next,
+                "edition_total": new_total,
+                "remaining_count": max(remaining, 0),
+                "status": requested_status,
+            },
+            reason="Edition archived from Edition Ops",
+            actor="edition_ops",
+            source="manual_app",
+        )
     return {"handle": handle, "next_edition_number": proposed_next, "edition_total": new_total}
 
 
@@ -3827,6 +3859,7 @@ def update_edition_products_batch(rows, reason="Manual edition edit"):
                 key = str((row or {}).get("row_key") or (row or {}).get("edition_product_id") or handle or "")
                 cur.execute("SAVEPOINT edition_ops_batch_row")
                 try:
+                    row_reason = str((row or {}).get("reason") or reason or "Manual edition edit")
                     _update_edition_product_with_cursor(
                         cur,
                         handle,
@@ -3835,8 +3868,9 @@ def update_edition_products_batch(rows, reason="Manual edition edit"):
                         next_edition_number=(row or {}).get("next_edition_number"),
                         active=(row or {}).get("active"),
                         sold_out=(row or {}).get("sold_out"),
+                        status=(row or {}).get("status"),
                         allow_history_override=bool((row or {}).get("allow_history_override")),
-                        reason=reason,
+                        reason=row_reason,
                     )
                     results.append({"ok": True, "handle": handle, "key": key})
                     cur.execute("RELEASE SAVEPOINT edition_ops_batch_row")
@@ -4744,7 +4778,10 @@ def _edition_ops_metafield_payload_from_row(row):
     )
     sold_count = max(next_number - 1, 0)
     remaining_count = max(edition_total - sold_count, 0)
+    edition_enabled = bool(source.get("edition_enabled", source.get("active", True)))
     edition_status = str(source.get("edition_status") or "").strip()
+    if not edition_enabled:
+        edition_status = "archived"
     if not edition_status:
         edition_status = "sold_out" if remaining_count <= 0 else "limited_release"
     edition_name = str(source.get("edition_name") or source.get("edition_label") or DEFAULT_EDITION_NAME).strip()
@@ -4757,7 +4794,7 @@ def _edition_ops_metafield_payload_from_row(row):
         "shopify_product_gid": _shopify_gid("Product", product_id),
         "product_title": source.get("product_title") or source.get("title") or handle,
         "title": source.get("product_title") or source.get("title") or handle,
-        "edition_enabled": bool(source.get("edition_enabled", source.get("active", True))),
+        "edition_enabled": edition_enabled,
         "edition_total": edition_total,
         "edition_next_number": next_number,
         "next_edition_number": next_number,
@@ -4774,7 +4811,7 @@ def _edition_ops_metafield_payload_from_row(row):
             if remaining_count <= 0
             else f"Next Available Edition {format_edition_display_number(next_number, edition_total)}"
         ),
-        "is_archived": not bool(source.get("edition_enabled", source.get("active", True))),
+        "is_archived": not edition_enabled,
         "is_sold_out": remaining_count <= 0,
     }
 

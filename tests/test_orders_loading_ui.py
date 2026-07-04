@@ -1137,16 +1137,20 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("st.expander", prompt_cards)
         self.assertNotIn("render_copyable_prompt", prompt_cards)
         self.assertIn("render_mockup_prompt_bar", mockup_actions)
-        self.assertIn("st.dialog", mockup_actions)
+        self.assertIn("st.container(border=True)", mockup_actions)
+        self.assertIn("st.text_area", mockup_actions)
         self.assertIn("Prompt saved", mockup_actions)
         self.assertIn("Prompt copied", mockup_actions)
         self.assertIn("prompt_store.save_prompt", mockup_actions)
         self.assertIn("Developer password", mockup_actions)
         self.assertIn("mockup_prompt_edit", mockup_actions)
+        self.assertIn("prompt_edit", mockup_actions)
+        self.assertIn("mockup-prompt-edit-button", mockup_actions)
+        self.assertIn("_mockup_prompt_edit_key(prompt_id)", mockup_actions)
         self.assertIn("window.parent.location.href", mockup_actions)
         self.assertIn("encodeURIComponent(promptId)", mockup_actions)
         self.assertIn("stopPropagation", mockup_actions)
-        self.assertIn("show_edit = True", mockup_actions)
+        self.assertIn("show_edit=True", mockup_actions)
         self.assertIn('target="_parent"', mockup_actions)
         self.assertNotIn("Preview", mockup_actions)
         self.assertNotIn("preview", mockup_actions.casefold())
@@ -1486,16 +1490,16 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Open Fulfilment", dashboard_source)
         self.assertNotIn("Open Prodigi", dashboard_source)
 
-    def test_edition_ops_normal_view_hides_ledger_copy(self):
+    def test_edition_ops_normal_view_shows_supabase_source_without_old_help_copy(self):
         source = (ROOT / "edition_ops.py").read_text(encoding="utf-8")
         render_page = source[source.index("def render_page():") :]
 
         self.assertIn('st.title("Edition Ops")', render_page)
         self.assertIn("Manage edition limits, next numbers, and active limited-edition products.", render_page)
+        self.assertIn("Source: Supabase ledger", render_page)
         self.assertIn("_cached_supabase_products_snapshot", source)
         self.assertIn("_invalidate_edition_ops_cache", source)
         self.assertNotIn("Supabase connected", render_page)
-        self.assertNotIn("Source: Supabase ledger", render_page)
         self.assertNotIn("Refresh products when new products are added.", render_page)
         self.assertNotIn("Import CSV and Replace Table when you have a new spreadsheet.", render_page)
         self.assertNotIn("Edit Enabled, Edition Total, and Next Edition Number.", render_page)
@@ -1573,6 +1577,12 @@ class EditionOpsUiTests(unittest.TestCase):
             def data_editor(self, *args, **kwargs):
                 return [edited]
 
+            def form(self, *args, **kwargs):
+                return FakePopover()
+
+            def form_submit_button(self, *args, **kwargs):
+                return False
+
             def file_uploader(self, *args, **kwargs):
                 return None
 
@@ -1593,12 +1603,9 @@ class EditionOpsUiTests(unittest.TestCase):
         ):
             edition_ops.render_page()
 
-        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_next_number"], 53)
+        self.assertEqual(fake_st.session_state[edition_ops.ROWS_KEY][0]["edition_next_number"], 52)
 
     def test_edition_ops_save_changes_updates_supabase_and_shopify_once(self):
-        class RerunRequested(Exception):
-            pass
-
         class FakeContext:
             def __enter__(self):
                 return self
@@ -1661,10 +1668,6 @@ class EditionOpsUiTests(unittest.TestCase):
                 self.fake_st.captions.append(message)
 
             def button(self, label, *args, **kwargs):
-                self.fake_st.buttons.append((label, kwargs))
-                if label == "Save Changes" and not self.fake_st.clicked:
-                    self.fake_st.clicked = True
-                    return True
                 return False
 
             def container(self):
@@ -1753,11 +1756,21 @@ class EditionOpsUiTests(unittest.TestCase):
             def data_editor(self, rows, *args, **kwargs):
                 return rows
 
+            def form(self, *args, **kwargs):
+                return FakeContext()
+
+            def form_submit_button(self, label, *args, **kwargs):
+                self.buttons.append((label, kwargs))
+                if label == "Save Changes" and not self.clicked:
+                    self.clicked = True
+                    return True
+                return False
+
             def spinner(self, *args, **kwargs):
                 return FakeContext()
 
             def rerun(self):
-                raise RerunRequested()
+                raise AssertionError("Edition Ops save should not force a rerun.")
 
         fake_st = FakeStreamlit()
         fake_backend = FakeBackend()
@@ -1770,8 +1783,7 @@ class EditionOpsUiTests(unittest.TestCase):
             "get_config",
             return_value={"configured": True},
         ), patch.object(edition_ops, "_write_snapshot"), patch.object(edition_ops, "_invalidate_edition_ops_cache"):
-            with self.assertRaises(RerunRequested):
-                edition_ops.render_page()
+            edition_ops.render_page()
 
         self.assertEqual(fake_backend.supabase_calls, 1)
         self.assertEqual(fake_backend.shopify_calls, 1)
@@ -3273,7 +3285,7 @@ class EditionOpsUiTests(unittest.TestCase):
         render_page = source[source.index("def render_page():") :]
 
         self.assertIn("_render_import_popover_styles()", render_page)
-        self.assertIn('if st.button("Replace Table From CSV", use_container_width=True):', render_page)
+        self.assertIn('if st.button("Replace Table From CSV", use_container_width=True):', source)
         self.assertNotIn("disabled=uploaded_csv is None", render_page)
         self.assertIn("background: #FFFFFF", source)
         self.assertIn("color: #FFFFFF", source)
@@ -3422,7 +3434,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(changed_rows, [])
         self.assertEqual(updated_rows[0]["sync_status"], "Loaded")
 
-    def test_rows_to_save_includes_needs_sync_even_without_edit_diff(self):
+    def test_rows_to_save_only_includes_dirty_rows(self):
         original = edition_ops._normalise_row(
             {
                 "shopify_product_gid": "gid://shopify/Product/1",
@@ -3434,7 +3446,7 @@ class EditionOpsUiTests(unittest.TestCase):
         imported = dict(original)
         imported["sync_status"] = "Needs Sync"
 
-        self.assertEqual(edition_ops._rows_to_save([imported], [original]), [imported])
+        self.assertEqual(edition_ops._rows_to_save([imported], [original]), [])
 
     def test_save_changed_rows_updates_only_changed_rows(self):
         original = edition_ops._normalise_row(
@@ -3450,24 +3462,94 @@ class EditionOpsUiTests(unittest.TestCase):
                 edition_ops.ROWS_KEY: [changed, untouched],
                 edition_ops.ORIGINAL_ROWS_KEY: [original, untouched],
                 edition_ops.NOTICE_KEY: "",
+                edition_ops.NOTICE_LEVEL_KEY: "success",
             }
         )
+        saved_batches = []
         fake_backend = SimpleNamespace(
-            update_edition_products_batch=lambda rows, reason=None: [{"ok": True, "handle": rows[0]["handle"], "key": rows[0]["edition_product_id"]}],
+            update_edition_products_batch=lambda rows, reason=None: saved_batches.append(rows)
+            or [{"ok": True, "handle": rows[0]["handle"], "key": rows[0]["row_key"]}],
         )
 
         with patch.object(edition_ops, "st", fake_st), patch.object(
             edition_ops, "_configured_supabase_backend", return_value=fake_backend
         ), patch.object(edition_ops.shopify_sync, "get_config", return_value={"configured": False}), patch.object(
-            edition_ops, "_mark_supabase_saved_without_shopify"
-        ) as mark_pending:
+            edition_ops, "_write_snapshot"
+        ):
             edition_ops._save_changed_rows()
 
-        mark_pending.assert_called_once()
-        saved_keys = mark_pending.call_args.args[2]
-        self.assertEqual(len(saved_keys), 1)
-        self.assertIn("edition_product:101", saved_keys[0])
-        self.assertIn("Changed rows saved: 1", fake_st.session_state[edition_ops.NOTICE_KEY])
+        self.assertEqual(len(saved_batches), 1)
+        self.assertEqual(len(saved_batches[0]), 1)
+        self.assertEqual(saved_batches[0][0]["row_key"], "edition_product:101")
+        self.assertEqual(saved_batches[0][0]["next_edition_number"], 43)
+        self.assertIn("Supabase saved, Shopify mirror failed / retry needed", fake_st.session_state[edition_ops.NOTICE_KEY])
+
+    def test_save_changed_rows_archives_when_enabled_is_unchecked(self):
+        original = edition_ops._normalise_row(
+            {
+                "edition_product_id": "101",
+                "shopify_product_gid": "gid://shopify/Product/1",
+                "product_title": "Legends Never Die Wall Art",
+                "handle": "legends-never-die",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 42,
+                "edition_sold_count": 41,
+                "edition_remaining": 59,
+                "edition_status": "Limited Edition",
+            }
+        )
+        changed = dict(original)
+        changed["edition_enabled"] = False
+        fake_st = SimpleNamespace(
+            session_state={
+                edition_ops.ROWS_KEY: [changed],
+                edition_ops.ORIGINAL_ROWS_KEY: [original],
+                edition_ops.NOTICE_KEY: "",
+                edition_ops.NOTICE_LEVEL_KEY: "success",
+            }
+        )
+        saved_batches = []
+        fake_backend = SimpleNamespace(
+            update_edition_products_batch=lambda rows, reason=None: saved_batches.append(rows)
+            or [{"ok": True, "handle": rows[0]["handle"], "key": rows[0]["row_key"]}],
+        )
+
+        with patch.object(edition_ops, "st", fake_st), patch.object(
+            edition_ops, "_configured_supabase_backend", return_value=fake_backend
+        ), patch.object(edition_ops.shopify_sync, "get_config", return_value={"configured": False}), patch.object(
+            edition_ops, "_write_snapshot"
+        ):
+            edition_ops._save_changed_rows()
+
+        saved = saved_batches[0][0]
+        self.assertFalse(saved["active"])
+        self.assertTrue(saved["sold_out"])
+        self.assertEqual(saved["next_edition_number"], 101)
+        self.assertEqual(saved["reason"], "Edition archived from Edition Ops")
+        display_row = fake_st.session_state[edition_ops.ROWS_KEY][0]
+        self.assertEqual(display_row["edition_remaining"], 0)
+        self.assertEqual(display_row["edition_status"], "Sold Out Archive")
+
+    def test_reenabling_archived_row_requires_next_number_inside_total(self):
+        original = edition_ops._normalise_row(
+            {
+                "edition_product_id": "101",
+                "handle": "legends-never-die",
+                "edition_enabled": False,
+                "edition_total": 100,
+                "edition_next_number": 101,
+            }
+        )
+        changed = dict(original)
+        changed["edition_enabled"] = True
+
+        message = edition_ops._save_validation_error(changed, original)
+
+        self.assertEqual(
+            message,
+            "This edition is archived. To reopen it, set Next edition number back within the edition total first.",
+        )
 
     def test_save_changed_rows_reports_no_changes(self):
         row = edition_ops._normalise_row(

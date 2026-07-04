@@ -2860,6 +2860,26 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         self.assertEqual(payload["edition_remaining"], 44)
         self.assertEqual(payload["shopify_product_id"], "gid://shopify/Product/100")
 
+    def test_edition_ops_row_metafield_payload_marks_archived_rows(self):
+        payload = supabase_backend._edition_ops_metafield_payload_from_row(
+            {
+                "row_key": "edition_product:1",
+                "shopify_product_gid": "gid://shopify/Product/100",
+                "handle": "wall-art",
+                "product_title": "Wall Art",
+                "edition_enabled": False,
+                "edition_total": 100,
+                "edition_next_number": 101,
+                "edition_remaining": 0,
+                "edition_status": "Sold Out Archive",
+            }
+        )
+
+        self.assertFalse(payload["edition_enabled"])
+        self.assertEqual(payload["edition_status"], "archived")
+        self.assertEqual(payload["edition_remaining"], 0)
+        self.assertEqual(payload["edition_next_number"], 101)
+
     def test_edition_ops_row_metafield_sync_marks_failed_without_rolling_back_saved_row(self):
         rows = [
             {
@@ -6078,6 +6098,9 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
                         "edition_total": 100,
                         "next_edition_number": 43,
                         "active": True,
+                        "sold_out": False,
+                        "status": None,
+                        "reason": "Edition Ops save",
                     }
                 ],
                 reason="Edition Ops save",
@@ -6086,6 +6109,8 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
         self.assertEqual(results, [{"ok": True, "handle": "legends-never-die", "key": "edition_product:101"}])
         self.assertTrue(fake_connection.committed)
         update_row.assert_called_once()
+        self.assertEqual(update_row.call_args.kwargs["status"], None)
+        self.assertEqual(update_row.call_args.kwargs["reason"], "Edition Ops save")
 
     @patch.object(supabase_backend, "process_paid_order")
     @patch.object(

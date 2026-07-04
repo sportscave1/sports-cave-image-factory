@@ -27,7 +27,9 @@ IMPORT_WARNINGS_KEY = "edition_ops_import_warnings"
 SHOPIFY_MIRROR_PREVIEW_KEY = "edition_ops_shopify_mirror_preview"
 SHOPIFY_MIRROR_RESULT_KEY = "edition_ops_shopify_mirror_result"
 EDITOR_VERSION_KEY = "edition_ops_editor_version"
+EDITOR_KEY = "edition_ops_editor_v3"
 SNAPSHOT_LOADED_KEY = "edition_ops_snapshot_loaded"
+LOADED_AT_KEY = "edition_ops_loaded_at"
 ORDERS_CACHE_VERSION_KEY = "orders-ledger-cache-version"
 EDITION_OPS_CACHE_VERSION_KEY = "edition-ops-ledger-cache-version"
 EDITION_OPS_CACHE_TTL_SECONDS = max(int(os.getenv("SUPABASE_EDITION_OPS_CACHE_TTL_SECONDS", "180")), 30)
@@ -535,10 +537,18 @@ def _ensure_state():
     st.session_state.setdefault(SHOPIFY_MIRROR_PREVIEW_KEY, None)
     st.session_state.setdefault(SHOPIFY_MIRROR_RESULT_KEY, None)
     st.session_state.setdefault(EDITOR_VERSION_KEY, 0)
+    st.session_state.setdefault(LOADED_AT_KEY, "")
 
 
 def _bump_editor_version():
     st.session_state[EDITOR_VERSION_KEY] = int(st.session_state.get(EDITOR_VERSION_KEY) or 0) + 1
+
+
+def _clear_editor_state():
+    try:
+        st.session_state.pop(EDITOR_KEY, None)
+    except AttributeError:
+        pass
 
 
 def _load_snapshot():
@@ -597,6 +607,7 @@ def _hydrate_from_snapshot_once():
     if snapshot:
         st.session_state[ROWS_KEY] = snapshot["rows"]
         st.session_state[ORIGINAL_ROWS_KEY] = snapshot["original_rows"]
+        st.session_state[LOADED_AT_KEY] = _now_iso()
         st.session_state[META_KEY] = {
             "last_refreshed_from_shopify": snapshot.get("last_refreshed_from_shopify") or "",
             "saved_at": snapshot.get("saved_at") or "",
@@ -631,11 +642,6 @@ def _rows_to_save(rows, originals):
         key = _stable_row_key(row)
         if key:
             by_product_id[key] = _normalise_row(row)
-    for row in rows:
-        if str(row.get("sync_status") or "").strip().casefold() in SHOPIFY_RETRY_STATUSES:
-            key = _stable_row_key(row)
-            if key:
-                by_product_id[key] = _normalise_row(row)
     return list(by_product_id.values())
 
 
@@ -671,6 +677,44 @@ def _mark_current_changes(rows, originals):
     return updated_rows
 
 
+def _original_rows_by_key(originals):
+    return {
+        _stable_row_key(row): _normalise_row(row)
+        for row in originals
+        if _stable_row_key(row)
+    }
+
+
+def _product_label(row):
+    normalised = _normalise_row(row)
+    title = normalised.get("product_title") or ""
+    handle = normalised.get("handle") or ""
+    if title and handle:
+        return f"{title} ({handle})"
+    return title or handle or "Edition row"
+
+
+def _prepare_rows_for_save(rows, originals):
+    original_by_key = _original_rows_by_key(originals)
+    prepared = []
+    for row in rows:
+        updated = _normalise_row(row, preserve_derived=False)
+        original = original_by_key.get(_stable_row_key(updated))
+        old_enabled = bool(original.get("edition_enabled")) if original else bool(updated.get("edition_enabled"))
+        new_enabled = bool(updated.get("edition_enabled"))
+        if old_enabled and not new_enabled:
+            total = _coerce_int(updated.get("edition_total"), 100)
+            protected_next = _coerce_nonnegative_int((original or {}).get("edition_sold_count"), 0) + 1
+            updated["edition_next_number"] = max(total + 1, protected_next)
+            updated["edition_sold_count"] = max(total, protected_next - 1)
+            updated["edition_remaining"] = 0
+            updated["edition_status"] = "Sold Out Archive"
+            updated["sync_status"] = "Unsaved"
+            updated["sync_error"] = ""
+        prepared.append(_normalise_row(updated, preserve_derived=True))
+    return prepared
+
+
 def _shopify_values_from_row(row):
     recalculated = _normalise_row(row, preserve_derived=False)
     return {
@@ -683,17 +727,28 @@ def _shopify_values_from_row(row):
     }
 
 
-def _save_validation_error(row):
+def _save_validation_error(row, original=None):
     normalised = _normalise_row(row, preserve_derived=False)
-    label = normalised.get("product_title") or normalised.get("handle") or "Edition row"
+    original = _normalise_row(original) if original else None
+    label = _product_label(normalised)
     if not normalised.get("handle"):
         return f"{label}: Shopify handle is required."
     total = _coerce_int(normalised.get("edition_total"), 0)
     next_number = _coerce_int(normalised.get("edition_next_number"), 0)
+    enabled = bool(normalised.get("edition_enabled"))
     if total < 1:
         return f"{label}: edition_total must be 1 or higher."
     if next_number < 1:
         return f"{label}: next_edition_number must be 1 or higher."
+    minimum_next = 1
+    if original:
+        minimum_next = max(_coerce_nonnegative_int(original.get("edition_sold_count"), 0) + 1, 1)
+    if next_number < minimum_next:
+        return f"{label}: next_edition_number cannot be below {minimum_next}; assigned editions are already protected."
+    if original and bool(original.get("edition_enabled")) is False and enabled and next_number > total:
+        return "This edition is archived. To reopen it, set Next edition number back within the edition total first."
+    if enabled and next_number > total:
+        return f"{label}: next_edition_number must be between 1 and edition_total for enabled editions."
     if next_number > total + 1:
         return f"{label}: next_edition_number cannot be more than one past edition_total."
     remaining = total - max(next_number - 1, 0)
@@ -960,6 +1015,7 @@ def _load_active_products_from_shopify():
         st.session_state[NOTICE_KEY] = (
             f"Synced products into Supabase. {result.get('products_seen', len(snapshot['rows']))} product(s) checked."
         )
+        _clear_editor_state()
         _bump_editor_version()
         return
     loaded = shopify_sync.fetch_edition_ops_active_products(
@@ -980,6 +1036,7 @@ def _load_active_products_from_shopify():
     )
     _invalidate_edition_ops_cache(bump_orders=True)
     st.session_state[NOTICE_KEY] = f"Refreshed {len(rows)} active products."
+    _clear_editor_state()
     _bump_editor_version()
 
 
@@ -998,6 +1055,7 @@ def _reload_products_from_supabase():
     originals = [_normalise_row(row) for row in (snapshot.get("original_rows") or rows)]
     st.session_state[ROWS_KEY] = rows
     st.session_state[ORIGINAL_ROWS_KEY] = deepcopy(originals)
+    st.session_state[LOADED_AT_KEY] = _now_iso()
     st.session_state[ERRORS_KEY] = {}
     st.session_state[IMPORT_WARNINGS_KEY] = []
     st.session_state[META_KEY] = {
@@ -1007,6 +1065,7 @@ def _reload_products_from_supabase():
     }
     _write_snapshot(rows, originals, meta=st.session_state[META_KEY])
     st.session_state[NOTICE_KEY] = f"Reloaded {len(rows)} product row(s) from Supabase."
+    _clear_editor_state()
     _bump_editor_version()
 
 
@@ -1091,7 +1150,6 @@ def _apply_row_errors_only(rows, originals, errors):
     st.session_state[ORIGINAL_ROWS_KEY] = updated_originals
     st.session_state[ERRORS_KEY] = dict(errors or {})
     _write_snapshot(updated_rows, updated_originals, meta={"mirror_status": "validation_failed"})
-    _bump_editor_version()
 
 
 def _apply_combined_save_result(rows, originals, rows_to_save, supabase_errors, shopify_errors, shopify_success_keys):
@@ -1136,8 +1194,6 @@ def _apply_combined_save_result(rows, originals, rows_to_save, supabase_errors, 
     st.session_state[ORIGINAL_ROWS_KEY] = updated_originals
     st.session_state[ERRORS_KEY] = errors
     _write_snapshot(updated_rows, updated_originals, meta={"mirror_status": "failed" if errors else "updated"})
-    _invalidate_edition_ops_cache(bump_orders=True)
-    _bump_editor_version()
 
 
 def _mark_supabase_saved_without_shopify(rows, originals, row_ids):
@@ -1160,22 +1216,31 @@ def _mark_supabase_saved_without_shopify(rows, originals, row_ids):
     st.session_state[ORIGINAL_ROWS_KEY] = new_originals
     st.session_state[ERRORS_KEY] = {}
     _write_snapshot(new_rows, new_originals, meta={"mirror_status": "not_mirrored"})
-    _invalidate_edition_ops_cache(bump_orders=True)
-    _bump_editor_version()
 
 
-def _save_changed_rows():
-    rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
+def _is_archive_transition(row, original):
+    if not original:
+        return False
+    return bool(original.get("edition_enabled")) and not bool(_normalise_row(row).get("edition_enabled"))
+
+
+def _save_changed_rows(edited_rows=None):
+    current_rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
     originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
+    if edited_rows is not None:
+        current_rows = _merge_visible_rows(_rows_from_editor(edited_rows), current_rows)
+    rows = _mark_current_changes(_prepare_rows_for_save(current_rows, originals), originals)
+    st.session_state[ROWS_KEY] = rows
+    st.session_state[ORIGINAL_ROWS_KEY] = originals
+
     dirty_rows = [_normalise_row(row, preserve_derived=False) for row in _changed_rows(rows, originals)]
-    retry_rows = [_normalise_row(row, preserve_derived=False) for row in _pending_shopify_sync_rows(rows)]
-    rows_to_save_by_key = {}
-    for row in [*dirty_rows, *retry_rows]:
-        key = _stable_row_key(row)
-        if key:
-            rows_to_save_by_key[key] = row
-    rows_to_save = list(rows_to_save_by_key.values())
-    if not rows_to_save:
+    dirty_rows_by_key = {
+        _stable_row_key(row): row
+        for row in dirty_rows
+        if _stable_row_key(row)
+    }
+    rows_to_save = list(dirty_rows_by_key.values())
+    if not dirty_rows_by_key:
         st.session_state[NOTICE_KEY] = "No changes to save."
         st.session_state[NOTICE_LEVEL_KEY] = "warning"
         return
@@ -1188,24 +1253,26 @@ def _save_changed_rows():
         return
     supabase_errors = {}
     shopify_errors = {}
-    dirty_keys = {_stable_row_key(row) for row in dirty_rows if _stable_row_key(row)}
-    retry_keys = {_stable_row_key(row) for row in retry_rows if _stable_row_key(row)}
+    dirty_keys = set(dirty_rows_by_key)
+    original_by_key = _original_rows_by_key(originals)
     for row in rows_to_save:
-        message = _save_validation_error(row)
+        message = _save_validation_error(row, original_by_key.get(_stable_row_key(row)))
         if message:
             supabase_errors[_stable_row_key(row)] = message
     if supabase_errors:
         _apply_row_errors_only(rows, originals, supabase_errors)
-        st.session_state[NOTICE_KEY] = f"{len(supabase_errors)} product(s) need a valid edition total and next number before saving."
+        st.session_state[NOTICE_KEY] = " ".join(supabase_errors.values())
         st.session_state[NOTICE_LEVEL_KEY] = "error"
         return
 
     supabase_saved_keys = set()
-    dirty_rows_to_save = [row for row in dirty_rows if _stable_row_key(row) in dirty_keys]
+    dirty_rows_to_save = [row for row in rows_to_save if _stable_row_key(row) in dirty_keys]
     if dirty_rows_to_save and hasattr(backend, "update_edition_products_batch"):
         batch_rows = []
         for row in dirty_rows_to_save:
             normalised = _normalise_row(row, preserve_derived=False)
+            original = original_by_key.get(_stable_row_key(normalised))
+            archive_transition = _is_archive_transition(normalised, original)
             batch_rows.append(
                 {
                     "row_key": _stable_row_key(normalised),
@@ -1216,6 +1283,8 @@ def _save_changed_rows():
                     "next_edition_number": normalised.get("edition_next_number"),
                     "active": bool(normalised.get("edition_enabled")),
                     "sold_out": normalised.get("edition_remaining") <= 0,
+                    "status": "sold_out" if normalised.get("edition_remaining") <= 0 else None,
+                    "reason": "Edition archived from Edition Ops" if archive_transition else "Edition Ops save",
                 }
             )
         try:
@@ -1239,6 +1308,8 @@ def _save_changed_rows():
         for row in dirty_rows_to_save:
             normalised = _normalise_row(row, preserve_derived=False)
             key = _stable_row_key(normalised) or normalised.get("handle")
+            original = original_by_key.get(_stable_row_key(normalised))
+            archive_transition = _is_archive_transition(normalised, original)
             try:
                 backend.update_edition_product(
                     normalised.get("handle"),
@@ -1247,7 +1318,8 @@ def _save_changed_rows():
                     next_edition_number=normalised.get("edition_next_number"),
                     active=bool(normalised.get("edition_enabled")),
                     sold_out=normalised.get("edition_remaining") <= 0,
-                    reason="Edition Ops save",
+                    status="sold_out" if normalised.get("edition_remaining") <= 0 else None,
+                    reason="Edition archived from Edition Ops" if archive_transition else "Edition Ops save",
                 )
                 supabase_saved_keys.add(key)
             except Exception as error:
@@ -1261,7 +1333,7 @@ def _save_changed_rows():
             continue
         if key in dirty_keys and key not in supabase_saved_keys:
             continue
-        if key in dirty_keys or key in retry_keys:
+        if key in dirty_keys:
             mirror_rows.append(_normalise_row(row, preserve_derived=False))
             mirror_keys.add(key)
 
@@ -1308,13 +1380,13 @@ def _save_changed_rows():
     )
     if supabase_errors:
         saved_count = max(len(dirty_keys) - len(supabase_errors), 0)
-        st.session_state[NOTICE_KEY] = f"Saved {saved_count} product(s). {len(supabase_errors)} product(s) could not be saved."
+        st.session_state[NOTICE_KEY] = f"Saved {saved_count} Edition Ops change(s). {len(supabase_errors)} product(s) could not be saved."
         st.session_state[NOTICE_LEVEL_KEY] = "error"
     elif shopify_errors:
-        st.session_state[NOTICE_KEY] = f"Saved locally. Shopify metafield push failed for {len(shopify_errors)} product(s)."
+        st.session_state[NOTICE_KEY] = f"Supabase saved, Shopify mirror failed / retry needed for {len(shopify_errors)} product(s)."
         st.session_state[NOTICE_LEVEL_KEY] = "warning"
     else:
-        st.session_state[NOTICE_KEY] = "Saved to Supabase and Shopify metafields"
+        st.session_state[NOTICE_KEY] = f"Saved {len(supabase_saved_keys)} Edition Ops change(s)."
         st.session_state[NOTICE_LEVEL_KEY] = "success"
 
 
@@ -1519,6 +1591,7 @@ def _apply_csv_import(uploaded_file):
     st.session_state[NOTICE_KEY] = f"Imported and replaced edition fields for {changed_count} rows. Click Save Changes to sync."
     st.session_state[IMPORT_WARNINGS_KEY] = warnings
     st.session_state[ORIGINAL_ROWS_KEY] = originals
+    _clear_editor_state()
     _write_snapshot(rows, originals)
     _bump_editor_version()
     return True
@@ -1695,6 +1768,7 @@ def render_page():
 
     st.title("Edition Ops")
     st.caption("Manage edition limits, next numbers, and active limited-edition products.")
+    st.caption("Source: Supabase ledger")
     st.caption(f"Last refreshed: {_format_time(meta.get('last_refreshed_from_shopify'))}")
 
     _render_notice()
@@ -1705,37 +1779,52 @@ def render_page():
     st.session_state[IMPORT_WARNINGS_KEY] = []
 
     summary_slot = st.empty() if hasattr(st, "empty") else None
-    save_slot = st.empty() if hasattr(st, "empty") else None
     advanced_slot = st.empty() if hasattr(st, "empty") else None
 
     if rows:
-        edited = st.data_editor(
-            rows,
-            hide_index=True,
-            use_container_width=True,
-            num_rows="fixed",
-            key=f"edition-ops-editor-{st.session_state[EDITOR_VERSION_KEY]}",
-            column_order=VISIBLE_COLUMNS,
-            column_config=_column_config(),
-            disabled=[
-                "product_title",
-                "handle",
-                "edition_sold_count",
-                "edition_remaining",
-                "edition_status",
-                "sync_status",
-                "admin_url",
-                "online_store_url",
-            ],
-        )
-        current_rows = _mark_current_changes(_merge_visible_rows(_rows_from_editor(edited), rows), originals)
+        st.caption("Unticking Enabled archives the edition and sets remaining to 0.")
+        current_rows = _mark_current_changes(rows, originals)
         st.session_state[ROWS_KEY] = current_rows
         st.session_state[ORIGINAL_ROWS_KEY] = originals
         changed_rows = _changed_rows(current_rows, originals)
         retry_rows = _pending_shopify_sync_rows(current_rows)
         rows_to_save = _rows_to_save(current_rows, originals)
         _slot_caption(summary_slot, _edition_ops_summary(current_rows, changed_rows, retry_rows))
-        _render_save_changes_button(save_slot, disabled=not backend or not bool(rows_to_save))
+        with st.form("edition-ops-editor-form", clear_on_submit=False):
+            save_clicked = st.form_submit_button(
+                "Save Changes",
+                type="primary",
+                use_container_width=True,
+                disabled=not backend or not bool(current_rows),
+                key="edition-ops-save-changes",
+            )
+            edited = st.data_editor(
+                current_rows,
+                hide_index=True,
+                use_container_width=True,
+                num_rows="fixed",
+                key=EDITOR_KEY,
+                column_order=VISIBLE_COLUMNS,
+                column_config=_column_config(),
+                disabled=[
+                    "product_title",
+                    "handle",
+                    "edition_sold_count",
+                    "edition_remaining",
+                    "edition_status",
+                    "sync_status",
+                    "admin_url",
+                    "online_store_url",
+                ],
+            )
+        if save_clicked:
+            with st.spinner("Saving..."):
+                _save_changed_rows(edited)
+            _render_notice()
+            current_rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
+            changed_rows = _changed_rows(current_rows, originals)
+            retry_rows = _pending_shopify_sync_rows(current_rows)
+            rows_to_save = _rows_to_save(current_rows, originals)
         if advanced_slot is not None and hasattr(advanced_slot, "container"):
             with advanced_slot.container():
                 _render_advanced_controls(backend, current_rows)
@@ -1749,7 +1838,6 @@ def render_page():
                 st.caption(f"{product_title}: {message}")
     else:
         _slot_caption(summary_slot, _edition_ops_summary([], [], []))
-        _render_save_changes_button(save_slot, disabled=True)
         if advanced_slot is not None and hasattr(advanced_slot, "container"):
             with advanced_slot.container():
                 _render_advanced_controls(backend, [])
