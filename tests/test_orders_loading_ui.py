@@ -1,5 +1,6 @@
 import inspect
 import json
+from copy import deepcopy
 from pathlib import Path
 import tempfile
 import unittest
@@ -3618,6 +3619,95 @@ class EditionOpsUiTests(unittest.TestCase):
             fake_st.session_state[edition_ops.NOTICE_KEY],
         )
         self.assertEqual(fake_st.session_state[edition_ops.NOTICE_LEVEL_KEY], "warning")
+
+    def test_repeated_saves_use_latest_editor_widget_state(self):
+        row_a = edition_ops._normalise_row(
+            {"edition_product_id": "101", "handle": "legends-never-die", "edition_total": 100, "edition_next_number": 10}
+        )
+        row_b = edition_ops._normalise_row(
+            {"edition_product_id": "102", "handle": "goat-debate-wall-art", "edition_total": 100, "edition_next_number": 20}
+        )
+        fake_st = SimpleNamespace(
+            session_state={
+                edition_ops.ROWS_KEY: [row_a, row_b],
+                edition_ops.ORIGINAL_ROWS_KEY: [row_a, row_b],
+                edition_ops.NOTICE_KEY: "",
+                edition_ops.NOTICE_LEVEL_KEY: "success",
+            }
+        )
+        saved_batches = []
+        fake_backend = SimpleNamespace(
+            update_edition_products_batch=lambda rows, reason=None: saved_batches.append(rows)
+            or [{"ok": True, "handle": rows[0]["handle"], "key": rows[0]["row_key"]}],
+        )
+
+        first_submit = [dict(row_a, edition_next_number=11), row_b]
+        with patch.object(edition_ops, "st", fake_st), patch.object(
+            edition_ops, "_configured_supabase_backend", return_value=fake_backend
+        ), patch.object(edition_ops.shopify_sync, "get_config", return_value={"configured": False}), patch.object(
+            edition_ops, "_write_snapshot"
+        ):
+            edition_ops._save_changed_rows(first_submit)
+            fake_st.session_state[edition_ops.EDITOR_KEY] = {
+                "edited_rows": {"1": {"edition_next_number": 21}}
+            }
+            stale_submit = deepcopy(fake_st.session_state[edition_ops.ROWS_KEY])
+            edition_ops._save_changed_rows(stale_submit)
+
+        self.assertEqual(len(saved_batches), 2)
+        self.assertEqual(saved_batches[0][0]["row_key"], "edition_product:101")
+        self.assertEqual(saved_batches[0][0]["next_edition_number"], 11)
+        self.assertEqual(saved_batches[1][0]["row_key"], "edition_product:102")
+        self.assertEqual(saved_batches[1][0]["next_edition_number"], 21)
+        self.assertNotEqual(fake_st.session_state[edition_ops.NOTICE_KEY], "No changes to save.")
+        self.assertEqual(
+            fake_st.session_state[edition_ops.ORIGINAL_ROWS_KEY][1]["edition_next_number"],
+            21,
+        )
+        self.assertEqual(
+            fake_st.session_state[edition_ops.EDITOR_ROWS_KEY][1]["edition_next_number"],
+            21,
+        )
+
+    def test_same_row_can_save_twice_without_page_reload(self):
+        row = edition_ops._normalise_row(
+            {"edition_product_id": "101", "handle": "legends-never-die", "edition_total": 100, "edition_next_number": 10}
+        )
+        fake_st = SimpleNamespace(
+            session_state={
+                edition_ops.ROWS_KEY: [row],
+                edition_ops.ORIGINAL_ROWS_KEY: [row],
+                edition_ops.NOTICE_KEY: "",
+                edition_ops.NOTICE_LEVEL_KEY: "success",
+            }
+        )
+        saved_batches = []
+        fake_backend = SimpleNamespace(
+            update_edition_products_batch=lambda rows, reason=None: saved_batches.append(rows)
+            or [{"ok": True, "handle": rows[0]["handle"], "key": rows[0]["row_key"]}],
+        )
+
+        with patch.object(edition_ops, "st", fake_st), patch.object(
+            edition_ops, "_configured_supabase_backend", return_value=fake_backend
+        ), patch.object(edition_ops.shopify_sync, "get_config", return_value={"configured": False}), patch.object(
+            edition_ops, "_write_snapshot"
+        ):
+            edition_ops._save_changed_rows([dict(row, edition_next_number=11)])
+            fake_st.session_state[edition_ops.EDITOR_KEY] = {
+                "edited_rows": {0: {"edition_next_number": 12}}
+            }
+            edition_ops._save_changed_rows(deepcopy(fake_st.session_state[edition_ops.ROWS_KEY]))
+
+        self.assertEqual([batch[0]["next_edition_number"] for batch in saved_batches], [11, 12])
+        self.assertEqual(fake_st.session_state[edition_ops.ORIGINAL_ROWS_KEY][0]["edition_next_number"], 12)
+
+    def test_editor_key_remains_stable(self):
+        source = (ROOT / "edition_ops.py").read_text(encoding="utf-8")
+        render_page = source[source.index("def render_page():") :]
+
+        self.assertIn('EDITOR_KEY = "edition_ops_editor_v3"', source)
+        self.assertIn("key=EDITOR_KEY", render_page)
+        self.assertNotIn('key=f"edition-ops-editor-', render_page)
 
     def test_save_changed_rows_reports_no_changes(self):
         row = edition_ops._normalise_row(

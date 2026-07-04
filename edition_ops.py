@@ -19,6 +19,7 @@ SNAPSHOT_VERSION = 1
 
 ROWS_KEY = "edition_ops_rows"
 ORIGINAL_ROWS_KEY = "edition_ops_original_rows"
+EDITOR_ROWS_KEY = "edition_ops_editor_rows"
 META_KEY = "edition_ops_snapshot_meta"
 ERRORS_KEY = "edition_ops_sync_errors"
 NOTICE_KEY = "edition_ops_notice"
@@ -522,6 +523,7 @@ def _load_supabase_snapshot():
 def _ensure_state():
     st.session_state.setdefault(ROWS_KEY, [])
     st.session_state.setdefault(ORIGINAL_ROWS_KEY, [])
+    st.session_state.setdefault(EDITOR_ROWS_KEY, deepcopy(st.session_state.get(ROWS_KEY, [])))
     st.session_state.setdefault(
         META_KEY,
         {
@@ -607,6 +609,7 @@ def _hydrate_from_snapshot_once():
     if snapshot:
         st.session_state[ROWS_KEY] = snapshot["rows"]
         st.session_state[ORIGINAL_ROWS_KEY] = snapshot["original_rows"]
+        st.session_state[EDITOR_ROWS_KEY] = deepcopy(snapshot["rows"])
         st.session_state[LOADED_AT_KEY] = _now_iso()
         st.session_state[META_KEY] = {
             "last_refreshed_from_shopify": snapshot.get("last_refreshed_from_shopify") or "",
@@ -634,6 +637,10 @@ def _changed_rows(rows, originals):
         if not key or not original or _editable_snapshot(row) != _editable_snapshot(original):
             changed.append(row)
     return changed
+
+
+def _editable_changed_keys(rows, originals):
+    return [_stable_row_key(row) for row in _changed_rows(rows, originals) if _stable_row_key(row)]
 
 
 def _rows_to_save(rows, originals):
@@ -902,6 +909,7 @@ def _apply_shopify_mirror_result(rows, originals, result):
         updated_rows.append(updated)
     st.session_state[ROWS_KEY] = updated_rows
     st.session_state[ORIGINAL_ROWS_KEY] = updated_originals
+    st.session_state[EDITOR_ROWS_KEY] = deepcopy(updated_rows)
     st.session_state[ERRORS_KEY] = errors
     _write_snapshot(updated_rows, updated_originals, meta={"mirror_status": "failed" if errors else "updated"})
     _invalidate_edition_ops_cache(bump_orders=False)
@@ -977,6 +985,7 @@ def _apply_save_errors(rows, originals, rows_to_save, errors):
         updated_rows.append(normalised)
     st.session_state[ROWS_KEY] = updated_rows
     st.session_state[ORIGINAL_ROWS_KEY] = updated_originals
+    st.session_state[EDITOR_ROWS_KEY] = deepcopy(updated_rows)
     st.session_state[ERRORS_KEY] = errors
     _write_snapshot(updated_rows, updated_originals, meta={"mirror_status": "failed" if errors else "pending"})
     _invalidate_edition_ops_cache(bump_orders=True)
@@ -1000,6 +1009,7 @@ def _load_active_products_from_shopify():
         }
         st.session_state[ROWS_KEY] = snapshot["rows"]
         st.session_state[ORIGINAL_ROWS_KEY] = snapshot["original_rows"]
+        st.session_state[EDITOR_ROWS_KEY] = deepcopy(snapshot["rows"])
         st.session_state[ERRORS_KEY] = {}
         st.session_state[IMPORT_WARNINGS_KEY] = []
         st.session_state[META_KEY] = {
@@ -1022,6 +1032,7 @@ def _load_active_products_from_shopify():
     rows = [_row_from_product(product) for product in loaded.get("products") or []]
     st.session_state[ROWS_KEY] = rows
     st.session_state[ORIGINAL_ROWS_KEY] = deepcopy(rows)
+    st.session_state[EDITOR_ROWS_KEY] = deepcopy(rows)
     st.session_state[ERRORS_KEY] = {}
     st.session_state[IMPORT_WARNINGS_KEY] = []
     _write_snapshot(
@@ -1050,6 +1061,7 @@ def _reload_products_from_supabase():
     originals = [_normalise_row(row) for row in (snapshot.get("original_rows") or rows)]
     st.session_state[ROWS_KEY] = rows
     st.session_state[ORIGINAL_ROWS_KEY] = deepcopy(originals)
+    st.session_state[EDITOR_ROWS_KEY] = deepcopy(rows)
     st.session_state[LOADED_AT_KEY] = _now_iso()
     st.session_state[ERRORS_KEY] = {}
     st.session_state[IMPORT_WARNINGS_KEY] = []
@@ -1115,6 +1127,7 @@ def _mark_synced(rows, originals, results):
 
     st.session_state[ROWS_KEY] = new_rows
     st.session_state[ORIGINAL_ROWS_KEY] = new_originals
+    st.session_state[EDITOR_ROWS_KEY] = deepcopy(new_rows)
     st.session_state[ERRORS_KEY] = failed
     _write_snapshot(
         new_rows,
@@ -1143,6 +1156,7 @@ def _apply_row_errors_only(rows, originals, errors):
         updated_originals.append(deepcopy(original_by_key.get(key, normalised)))
     st.session_state[ROWS_KEY] = updated_rows
     st.session_state[ORIGINAL_ROWS_KEY] = updated_originals
+    st.session_state[EDITOR_ROWS_KEY] = deepcopy(updated_rows)
     st.session_state[ERRORS_KEY] = dict(errors or {})
     _write_snapshot(updated_rows, updated_originals, meta={"mirror_status": "validation_failed"})
 
@@ -1187,6 +1201,7 @@ def _apply_combined_save_result(rows, originals, rows_to_save, supabase_errors, 
         updated_rows.append(normalised)
     st.session_state[ROWS_KEY] = updated_rows
     st.session_state[ORIGINAL_ROWS_KEY] = updated_originals
+    st.session_state[EDITOR_ROWS_KEY] = deepcopy(updated_rows)
     st.session_state[ERRORS_KEY] = errors
     _write_snapshot(updated_rows, updated_originals, meta={"mirror_status": "failed" if errors else "updated"})
 
@@ -1209,6 +1224,7 @@ def _mark_supabase_saved_without_shopify(rows, originals, row_ids):
         new_rows.append(updated)
     st.session_state[ROWS_KEY] = new_rows
     st.session_state[ORIGINAL_ROWS_KEY] = new_originals
+    st.session_state[EDITOR_ROWS_KEY] = deepcopy(new_rows)
     st.session_state[ERRORS_KEY] = {}
     _write_snapshot(new_rows, new_originals, meta={"mirror_status": "not_mirrored"})
 
@@ -1241,11 +1257,12 @@ def _manual_lower_warning(row, original):
 
 def _save_changed_rows(edited_rows=None):
     current_rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
-    originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
+    originals = [deepcopy(_normalise_row(row)) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
     if edited_rows is not None:
-        current_rows = _merge_visible_rows(_rows_from_editor(edited_rows), current_rows)
+        current_rows = _submitted_editor_rows(edited_rows, current_rows)
     rows = _mark_current_changes(_prepare_rows_for_save(current_rows, originals), originals)
     st.session_state[ROWS_KEY] = rows
+    st.session_state[EDITOR_ROWS_KEY] = deepcopy(rows)
     st.session_state[ORIGINAL_ROWS_KEY] = originals
 
     dirty_rows = [_normalise_row(row, preserve_derived=False) for row in _changed_rows(rows, originals)]
@@ -1255,6 +1272,13 @@ def _save_changed_rows(edited_rows=None):
         if _stable_row_key(row)
     }
     rows_to_save = list(dirty_rows_by_key.values())
+    dirty_keys_for_log = sorted(dirty_rows_by_key)
+    st.session_state["edition_ops_last_dirty_count"] = len(dirty_keys_for_log)
+    st.session_state["edition_ops_last_dirty_keys"] = dirty_keys_for_log
+    print(
+        f"PERF Edition Ops save dirty_count={len(dirty_keys_for_log)} dirty_keys={','.join(dirty_keys_for_log[:12])}",
+        flush=True,
+    )
     if not dirty_rows_by_key:
         st.session_state[NOTICE_KEY] = "No changes to save."
         st.session_state[NOTICE_LEVEL_KEY] = "warning"
@@ -1443,6 +1467,42 @@ def _rows_from_editor(value):
     if hasattr(value, "to_dict"):
         return [dict(row) for row in value.to_dict("records")]
     return [dict(row) for row in (value or [])]
+
+
+def _editor_widget_edited_rows():
+    try:
+        state = st.session_state.get(EDITOR_KEY)
+    except AttributeError:
+        return {}
+    if not isinstance(state, dict):
+        return {}
+    edited = state.get("edited_rows") or {}
+    return edited if isinstance(edited, dict) else {}
+
+
+def _apply_editor_widget_edits(rows):
+    edited_by_index = _editor_widget_edited_rows()
+    if not edited_by_index:
+        return [_normalise_row(row, preserve_derived=False) for row in rows]
+    merged = [_normalise_row(row, preserve_derived=False) for row in rows]
+    for raw_index, changes in edited_by_index.items():
+        if not isinstance(changes, dict):
+            continue
+        try:
+            index = int(raw_index)
+        except (TypeError, ValueError):
+            continue
+        if index < 0 or index >= len(merged):
+            continue
+        updated = dict(merged[index])
+        updated.update(changes)
+        merged[index] = _normalise_row(updated, preserve_derived=False)
+    return merged
+
+
+def _submitted_editor_rows(edited_rows, source_rows):
+    merged_rows = _merge_visible_rows(_rows_from_editor(edited_rows), source_rows)
+    return _apply_editor_widget_edits(merged_rows)
 
 
 def _merge_visible_rows(edited_rows, source_rows):
@@ -1640,6 +1700,7 @@ def _apply_csv_import(uploaded_file):
     st.session_state[NOTICE_KEY] = f"Imported and replaced edition fields for {changed_count} rows. Click Save Changes to sync."
     st.session_state[IMPORT_WARNINGS_KEY] = warnings
     st.session_state[ORIGINAL_ROWS_KEY] = originals
+    st.session_state[EDITOR_ROWS_KEY] = deepcopy(rows)
     _clear_editor_state()
     _write_snapshot(rows, originals)
     _bump_editor_version()
@@ -1834,6 +1895,7 @@ def render_page():
         st.caption("Unticking Enabled archives the edition and sets remaining to 0.")
         current_rows = _mark_current_changes(rows, originals)
         st.session_state[ROWS_KEY] = current_rows
+        st.session_state[EDITOR_ROWS_KEY] = deepcopy(current_rows)
         st.session_state[ORIGINAL_ROWS_KEY] = originals
         changed_rows = _changed_rows(current_rows, originals)
         retry_rows = _pending_shopify_sync_rows(current_rows)
