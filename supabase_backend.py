@@ -3715,13 +3715,8 @@ def _update_edition_product_with_cursor(
         (handle,),
     )
     max_assigned = _int_value((cur.fetchone() or {}).get("max_assigned"), 0)
-    if not allow_history_override:
-        minimum_next = max_assigned + 1 if max_assigned > 0 else 1
-        if proposed_next < minimum_next:
-            raise ValueError(
-                f"Next edition number cannot be below {minimum_next}; "
-                f"{max_assigned} edition(s) are already assigned."
-            )
+    minimum_next = max_assigned + 1 if max_assigned > 0 else 1
+    manual_lower_correction = proposed_next < minimum_next
 
     if proposed_next < 1:
         raise ValueError("Next edition number must be at least 1.")
@@ -3847,7 +3842,36 @@ def _update_edition_product_with_cursor(
             actor="edition_ops",
             source="manual_app",
         )
-    return {"handle": handle, "next_edition_number": proposed_next, "edition_total": new_total}
+    if manual_lower_correction:
+        _insert_audit_log(
+            cur,
+            event_type="manual_next_number_lowered",
+            entity_type="edition_product",
+            entity_id=product.get("id"),
+            shopify_handle=handle,
+            old_value={
+                "product_title": product.get("product_title"),
+                "handle": handle,
+                "next_edition_number": old_next,
+                "highest_assigned_edition": max_assigned,
+            },
+            new_value={
+                "product_title": product.get("product_title"),
+                "handle": handle,
+                "next_edition_number": proposed_next,
+                "highest_assigned_edition": max_assigned,
+            },
+            reason="manual_next_number_lowered",
+            actor="edition_ops",
+            source="manual_app",
+        )
+    return {
+        "handle": handle,
+        "next_edition_number": proposed_next,
+        "edition_total": new_total,
+        "manual_next_number_lowered": manual_lower_correction,
+        "highest_assigned_edition": max_assigned,
+    }
 
 
 def update_edition_products_batch(rows, reason="Manual edition edit"):
@@ -3860,7 +3884,7 @@ def update_edition_products_batch(rows, reason="Manual edition edit"):
                 cur.execute("SAVEPOINT edition_ops_batch_row")
                 try:
                     row_reason = str((row or {}).get("reason") or reason or "Manual edition edit")
-                    _update_edition_product_with_cursor(
+                    update_result = _update_edition_product_with_cursor(
                         cur,
                         handle,
                         edition_name=(row or {}).get("edition_name"),
@@ -3872,7 +3896,19 @@ def update_edition_products_batch(rows, reason="Manual edition edit"):
                         allow_history_override=bool((row or {}).get("allow_history_override")),
                         reason=row_reason,
                     )
-                    results.append({"ok": True, "handle": handle, "key": key})
+                    results.append(
+                        {
+                            "ok": True,
+                            "handle": handle,
+                            "key": key,
+                            "manual_next_number_lowered": bool(
+                                (update_result or {}).get("manual_next_number_lowered")
+                                or (row or {}).get("manual_next_number_lowered")
+                            ),
+                            "highest_assigned_edition": (update_result or {}).get("highest_assigned_edition")
+                            or (row or {}).get("highest_assigned_edition"),
+                        }
+                    )
                     cur.execute("RELEASE SAVEPOINT edition_ops_batch_row")
                 except Exception as error:
                     cur.execute("ROLLBACK TO SAVEPOINT edition_ops_batch_row")

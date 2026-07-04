@@ -6106,11 +6106,30 @@ class SupabaseOrderSyncLogicTests(unittest.TestCase):
                 reason="Edition Ops save",
             )
 
-        self.assertEqual(results, [{"ok": True, "handle": "legends-never-die", "key": "edition_product:101"}])
+        self.assertEqual(
+            results,
+            [
+                {
+                    "ok": True,
+                    "handle": "legends-never-die",
+                    "key": "edition_product:101",
+                    "manual_next_number_lowered": False,
+                    "highest_assigned_edition": None,
+                }
+            ],
+        )
         self.assertTrue(fake_connection.committed)
         update_row.assert_called_once()
         self.assertEqual(update_row.call_args.kwargs["status"], None)
         self.assertEqual(update_row.call_args.kwargs["reason"], "Edition Ops save")
+
+    def test_update_edition_product_allows_manual_lower_with_audit(self):
+        source = inspect.getsource(supabase_backend._update_edition_product_with_cursor)
+
+        self.assertNotIn("Next edition number cannot be below", source)
+        self.assertIn("manual_lower_correction = proposed_next < minimum_next", source)
+        self.assertIn('event_type="manual_next_number_lowered"', source)
+        self.assertIn('"highest_assigned_edition": max_assigned', source)
 
     @patch.object(supabase_backend, "process_paid_order")
     @patch.object(

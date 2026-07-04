@@ -740,11 +740,6 @@ def _save_validation_error(row, original=None):
         return f"{label}: edition_total must be 1 or higher."
     if next_number < 1:
         return f"{label}: next_edition_number must be 1 or higher."
-    minimum_next = 1
-    if original:
-        minimum_next = max(_coerce_nonnegative_int(original.get("edition_sold_count"), 0) + 1, 1)
-    if next_number < minimum_next:
-        return f"{label}: next_edition_number cannot be below {minimum_next}; assigned editions are already protected."
     if original and bool(original.get("edition_enabled")) is False and enabled and next_number > total:
         return "This edition is archived. To reopen it, set Next edition number back within the edition total first."
     if enabled and next_number > total:
@@ -1224,6 +1219,26 @@ def _is_archive_transition(row, original):
     return bool(original.get("edition_enabled")) and not bool(_normalise_row(row).get("edition_enabled"))
 
 
+def _highest_assigned_from_original(original):
+    if not original:
+        return 0
+    return _coerce_nonnegative_int(original.get("edition_sold_count"), 0)
+
+
+def _is_manual_lower_correction(row, original):
+    if not original or _is_archive_transition(row, original):
+        return False
+    normalised = _normalise_row(row, preserve_derived=False)
+    highest_assigned = _highest_assigned_from_original(original)
+    return highest_assigned > 0 and _coerce_int(normalised.get("edition_next_number"), 1) < highest_assigned + 1
+
+
+def _manual_lower_warning(row, original):
+    if not _is_manual_lower_correction(row, original):
+        return ""
+    return "Warning: this product has assigned editions above this next number. Manual correction saved."
+
+
 def _save_changed_rows(edited_rows=None):
     current_rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
     originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
@@ -1266,6 +1281,7 @@ def _save_changed_rows(edited_rows=None):
         return
 
     supabase_saved_keys = set()
+    manual_lower_warnings = {}
     dirty_rows_to_save = [row for row in rows_to_save if _stable_row_key(row) in dirty_keys]
     if dirty_rows_to_save and hasattr(backend, "update_edition_products_batch"):
         batch_rows = []
@@ -1273,6 +1289,9 @@ def _save_changed_rows(edited_rows=None):
             normalised = _normalise_row(row, preserve_derived=False)
             original = original_by_key.get(_stable_row_key(normalised))
             archive_transition = _is_archive_transition(normalised, original)
+            manual_lower = _is_manual_lower_correction(normalised, original)
+            if manual_lower:
+                manual_lower_warnings[_stable_row_key(normalised)] = _manual_lower_warning(normalised, original)
             batch_rows.append(
                 {
                     "row_key": _stable_row_key(normalised),
@@ -1284,7 +1303,15 @@ def _save_changed_rows(edited_rows=None):
                     "active": bool(normalised.get("edition_enabled")),
                     "sold_out": normalised.get("edition_remaining") <= 0,
                     "status": "sold_out" if normalised.get("edition_remaining") <= 0 else None,
-                    "reason": "Edition archived from Edition Ops" if archive_transition else "Edition Ops save",
+                    "reason": (
+                        "Edition archived from Edition Ops"
+                        if archive_transition
+                        else "manual_next_number_lowered"
+                        if manual_lower
+                        else "Edition Ops save"
+                    ),
+                    "manual_next_number_lowered": manual_lower,
+                    "highest_assigned_edition": _highest_assigned_from_original(original),
                 }
             )
         try:
@@ -1310,6 +1337,9 @@ def _save_changed_rows(edited_rows=None):
             key = _stable_row_key(normalised) or normalised.get("handle")
             original = original_by_key.get(_stable_row_key(normalised))
             archive_transition = _is_archive_transition(normalised, original)
+            manual_lower = _is_manual_lower_correction(normalised, original)
+            if manual_lower:
+                manual_lower_warnings[key] = _manual_lower_warning(normalised, original)
             try:
                 backend.update_edition_product(
                     normalised.get("handle"),
@@ -1319,7 +1349,13 @@ def _save_changed_rows(edited_rows=None):
                     active=bool(normalised.get("edition_enabled")),
                     sold_out=normalised.get("edition_remaining") <= 0,
                     status="sold_out" if normalised.get("edition_remaining") <= 0 else None,
-                    reason="Edition archived from Edition Ops" if archive_transition else "Edition Ops save",
+                    reason=(
+                        "Edition archived from Edition Ops"
+                        if archive_transition
+                        else "manual_next_number_lowered"
+                        if manual_lower
+                        else "Edition Ops save"
+                    ),
                 )
                 supabase_saved_keys.add(key)
             except Exception as error:
@@ -1383,7 +1419,20 @@ def _save_changed_rows(edited_rows=None):
         st.session_state[NOTICE_KEY] = f"Saved {saved_count} Edition Ops change(s). {len(supabase_errors)} product(s) could not be saved."
         st.session_state[NOTICE_LEVEL_KEY] = "error"
     elif shopify_errors:
-        st.session_state[NOTICE_KEY] = f"Supabase saved, Shopify mirror failed / retry needed for {len(shopify_errors)} product(s)."
+        lower_warning_text = " ".join(
+            manual_lower_warnings[key]
+            for key in sorted(manual_lower_warnings)
+            if key in supabase_saved_keys
+        )
+        suffix = f" {lower_warning_text}" if lower_warning_text else ""
+        st.session_state[NOTICE_KEY] = f"Supabase saved, Shopify mirror failed / retry needed for {len(shopify_errors)} product(s).{suffix}"
+        st.session_state[NOTICE_LEVEL_KEY] = "warning"
+    elif manual_lower_warnings:
+        warnings = []
+        for key in sorted(manual_lower_warnings):
+            if key in supabase_saved_keys:
+                warnings.append(manual_lower_warnings[key])
+        st.session_state[NOTICE_KEY] = f"Saved {len(supabase_saved_keys)} Edition Ops change(s). " + " ".join(warnings)
         st.session_state[NOTICE_LEVEL_KEY] = "warning"
     else:
         st.session_state[NOTICE_KEY] = f"Saved {len(supabase_saved_keys)} Edition Ops change(s)."

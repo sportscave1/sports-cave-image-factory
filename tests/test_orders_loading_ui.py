@@ -3551,6 +3551,74 @@ class EditionOpsUiTests(unittest.TestCase):
             "This edition is archived. To reopen it, set Next edition number back within the edition total first.",
         )
 
+    def test_manual_lower_below_assigned_history_warns_without_blocking(self):
+        original = edition_ops._normalise_row(
+            {
+                "edition_product_id": "101",
+                "handle": "legends-never-die",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 95,
+                "edition_sold_count": 94,
+            }
+        )
+        changed = dict(original)
+        changed["edition_next_number"] = 80
+
+        self.assertEqual(edition_ops._save_validation_error(changed, original), "")
+        self.assertEqual(
+            edition_ops._manual_lower_warning(changed, original),
+            "Warning: this product has assigned editions above this next number. Manual correction saved.",
+        )
+
+    def test_save_changed_rows_allows_manual_lower_and_warns(self):
+        original = edition_ops._normalise_row(
+            {
+                "edition_product_id": "101",
+                "shopify_product_gid": "gid://shopify/Product/1",
+                "product_title": "Legends Never Die Wall Art",
+                "handle": "legends-never-die",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 95,
+                "edition_sold_count": 94,
+                "edition_remaining": 6,
+            }
+        )
+        changed = dict(original)
+        changed["edition_next_number"] = 80
+        fake_st = SimpleNamespace(
+            session_state={
+                edition_ops.ROWS_KEY: [changed],
+                edition_ops.ORIGINAL_ROWS_KEY: [original],
+                edition_ops.NOTICE_KEY: "",
+                edition_ops.NOTICE_LEVEL_KEY: "success",
+            }
+        )
+        saved_batches = []
+        fake_backend = SimpleNamespace(
+            update_edition_products_batch=lambda rows, reason=None: saved_batches.append(rows)
+            or [{"ok": True, "handle": rows[0]["handle"], "key": rows[0]["row_key"]}],
+        )
+
+        with patch.object(edition_ops, "st", fake_st), patch.object(
+            edition_ops, "_configured_supabase_backend", return_value=fake_backend
+        ), patch.object(edition_ops.shopify_sync, "get_config", return_value={"configured": False}), patch.object(
+            edition_ops, "_write_snapshot"
+        ):
+            edition_ops._save_changed_rows()
+
+        saved = saved_batches[0][0]
+        self.assertEqual(saved["next_edition_number"], 80)
+        self.assertEqual(saved["reason"], "manual_next_number_lowered")
+        self.assertTrue(saved["manual_next_number_lowered"])
+        self.assertEqual(saved["highest_assigned_edition"], 94)
+        self.assertIn(
+            "Warning: this product has assigned editions above this next number. Manual correction saved.",
+            fake_st.session_state[edition_ops.NOTICE_KEY],
+        )
+        self.assertEqual(fake_st.session_state[edition_ops.NOTICE_LEVEL_KEY], "warning")
+
     def test_save_changed_rows_reports_no_changes(self):
         row = edition_ops._normalise_row(
             {"edition_product_id": "101", "handle": "legends-never-die", "edition_total": 100, "edition_next_number": 42}
