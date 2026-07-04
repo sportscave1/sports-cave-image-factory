@@ -3,6 +3,7 @@ import html
 import json
 import os
 import textwrap
+from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -11,6 +12,10 @@ import prompt_store
 
 
 DEFAULT_DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
+BASE_DIR = Path(__file__).resolve().parent
+EXPIRED_EDITION_NEXT_CHAPTER_PROMPT_PATH = (
+    BASE_DIR / "design_studio_prompts" / "expired_edition_next_chapter_prompt.txt"
+)
 
 
 UPGRADE_EXISTING_DESIGN_VIDEO_URL = (
@@ -478,6 +483,13 @@ Premium limited-edition sports wall art for fans who collect moments, not poster
 """
 
 
+EXPIRED_EDITION_NEXT_CHAPTER_DESIGN_PROMPT = (
+    EXPIRED_EDITION_NEXT_CHAPTER_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    if EXPIRED_EDITION_NEXT_CHAPTER_PROMPT_PATH.exists()
+    else "SPORTS CAVE EXPIRED EDITION / NEXT CHAPTER DESIGN PROMPT"
+)
+
+
 FIND_THE_MOMENT_PROMPT = """
 I am creating a premium limited-edition Sports Cave collector artwork for [PLAYER / TEAM / RIVALRY / MOMENT].
 
@@ -719,6 +731,10 @@ PROMPT_BOXES = {
         UPGRADE_EXISTING_DESIGN_PROMPT,
         "upgrade-existing-design",
     ),
+    "Expired Edition / Next Chapter Design Prompt": (
+        EXPIRED_EDITION_NEXT_CHAPTER_DESIGN_PROMPT,
+        "expired-edition-next-chapter",
+    ),
     "Find The Moment Prompt": (
         FIND_THE_MOMENT_PROMPT,
         "find-the-moment",
@@ -901,8 +917,13 @@ def render_design_studio_page(developer_password: str | None = None):
     st.title("Design Studio")
     st.caption("Sports Cave prompt hub for premium collector artwork.")
 
-    upgrade_tab, create_tab, review_tab = st.tabs(
-        ["Upgrade Existing Design", "Create New Ultimate Moment", "Harsh Review Checklist"]
+    upgrade_tab, expired_tab, create_tab, review_tab = st.tabs(
+        [
+            "Upgrade Existing Design",
+            "Update Expired Edition",
+            "Create New Ultimate Moment",
+            "Harsh Review Checklist",
+        ]
     )
 
     with upgrade_tab:
@@ -925,6 +946,18 @@ def render_design_studio_page(developer_password: str | None = None):
         _render_prompt_box(
             "Upgrade Existing Design Prompt",
             *PROMPT_BOXES["Upgrade Existing Design Prompt"],
+            developer_password=developer_password,
+        )
+
+    with expired_tab:
+        st.subheader("Update Expired Edition")
+        st.markdown(
+            "Use this when an expired or sold-out limited edition needs a fresh next-chapter "
+            "collector artwork without reprinting the original design."
+        )
+        _render_prompt_box(
+            "Expired Edition / Next Chapter Design Prompt",
+            *PROMPT_BOXES["Expired Edition / Next Chapter Design Prompt"],
             developer_password=developer_password,
         )
 
