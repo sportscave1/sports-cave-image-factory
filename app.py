@@ -210,19 +210,6 @@ MENU_OPTIONS = [
 SIDEBAR_NAV_LABELS = {
     "Dashboard": "Home",
 }
-SIDEBAR_NAV_ICONS = {
-    "Dashboard": "H",
-    "Orders": "O",
-    "Prodigi": "P",
-    "Edition Ops": "E",
-    "Mockups": "M",
-    "Product Uploads": "U",
-    "Design Studio": "D",
-    "Ads Intelligence": "A",
-    "Marketing Factory": "F",
-    "VA Training": "V",
-    "Developer": "{}",
-}
 HIDDEN_PAGE_OPTIONS = [
     "Files",
     "Products",
@@ -1351,6 +1338,11 @@ def inject_styles():
             padding: 0.32rem 0.62rem !important;
             text-align: left;
             transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+            width: 100%;
+        }
+
+        section[data-testid="stSidebar"] div[data-testid="stButton"] button > div {
+            justify-content: flex-start;
             width: 100%;
         }
 
@@ -4800,9 +4792,7 @@ def render_sidebar():
         else "Dashboard"
     )
     for page in MENU_OPTIONS:
-        label = SIDEBAR_NAV_LABELS.get(page, page)
-        icon = SIDEBAR_NAV_ICONS.get(page, "")
-        button_label = f"{icon}  {label}".strip()
+        button_label = SIDEBAR_NAV_LABELS.get(page, page)
         if st.sidebar.button(
             button_label,
             key=f"sidebar-nav::{page}",
@@ -4814,7 +4804,7 @@ def render_sidebar():
                 st.rerun()
     if st.session_state.selected_page not in MENU_OPTIONS:
         st.sidebar.caption(f"Internal page open: {st.session_state.selected_page}")
-        if st.sidebar.button("H  Back to Home", use_container_width=True):
+        if st.sidebar.button("Back to Home", use_container_width=True):
             st.session_state.selected_page = "Dashboard"
             st.rerun()
 
