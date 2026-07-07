@@ -16042,6 +16042,49 @@ def list_product_edition_summary():
         return []
 
 
+def list_marketing_factory_product_options(search="", limit=150):
+    if not is_configured():
+        return []
+    search_value = f"%{str(search or '').strip().lower()}%" if str(search or "").strip() else None
+    limit_value = max(min(int(limit or 150), 500), 1)
+    where_sql = ""
+    params = []
+    if search_value:
+        where_sql = """
+            WHERE LOWER(COALESCE(ep.product_title, '')) LIKE %s
+               OR LOWER(COALESCE(ep.shopify_handle, '')) LIKE %s
+        """
+        params.extend([search_value, search_value])
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT
+                        ep.product_title,
+                        ep.shopify_handle,
+                        ep.shopify_product_id,
+                        ep.edition_total,
+                        ep.next_edition_number,
+                        GREATEST(COALESCE(ep.edition_total, 100) - COALESCE(ep.next_edition_number, 1) + 1, 0) AS remaining_editions,
+                        COALESCE(ep.edition_status, '') AS edition_status,
+                        COALESCE(ep.is_active, ep.active, TRUE) AS is_active,
+                        COALESCE(ep.is_sold_out, ep.sold_out, FALSE) AS is_sold_out,
+                        sp.admin_url,
+                        sp.online_store_url
+                    FROM edition_products ep
+                    LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle
+                    {where_sql}
+                    ORDER BY ep.product_title NULLS LAST, ep.shopify_handle NULLS LAST
+                    LIMIT %s
+                    """,
+                    (*params, limit_value),
+                )
+                return cur.fetchall()
+    except Exception:
+        return []
+
+
 def list_ads_product_candidates(limit=500):
     if not is_configured():
         return []

@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 import streamlit as st
 import streamlit.components.v1 as components
 
-import meta_ads_client
 import supabase_backend
 
 
@@ -332,13 +331,15 @@ def _card(title, helper=""):
 
 
 @st.cache_data(ttl=180, show_spinner=False)
-def _load_products():
+def _load_product_options(search="", limit=150):
     if not supabase_backend.is_configured():
         return []
     try:
+        if hasattr(supabase_backend, "list_marketing_factory_product_options"):
+            return supabase_backend.list_marketing_factory_product_options(search=search, limit=limit)
         if hasattr(supabase_backend, "list_edition_products_read_only"):
-            return supabase_backend.list_edition_products_read_only(search="", limit=1000)
-        return supabase_backend.list_edition_products(search="", limit=1000)
+            return supabase_backend.list_edition_products_read_only(search=search, limit=limit)
+        return supabase_backend.list_edition_products(search=search, limit=limit)
     except Exception:
         return []
 
@@ -367,39 +368,13 @@ def _load_meta_summary(date_range="last_30_days"):
 
 
 @st.cache_data(ttl=180, show_spinner=False)
-def _load_status():
-    meta_status = meta_ads_client.safe_meta_config_status()
-    supabase_connected = False
-    product_sync_at = ""
-    ads_sync_at = ""
-    saved_count = 0
-    if supabase_backend.is_configured():
-        try:
-            db_status = supabase_backend.database_status(run_schema_check=False)
-            supabase_connected = bool(db_status.get("connected"))
-        except Exception:
-            supabase_connected = False
-        try:
-            sync_state = supabase_backend.get_sync_state_read_only()
-            product_sync_at = sync_state.get("last_successful_product_sync_at") or ""
-        except Exception:
-            product_sync_at = ""
-        try:
-            ads_sync = supabase_backend.get_ads_sync_status_read_only()
-            ads_sync_at = ads_sync.get("last_successful_sync_at") or ads_sync.get("last_sync_at") or ""
-        except Exception:
-            ads_sync_at = ""
-        try:
-            saved_count = len(supabase_backend.list_ads_copy_packs(limit=500))
-        except Exception:
-            saved_count = 0
-    return {
-        "meta_connected": bool(meta_status.get("configured")),
-        "supabase_connected": supabase_connected,
-        "product_sync_at": product_sync_at,
-        "ads_sync_at": ads_sync_at,
-        "saved_count": saved_count,
-    }
+def _load_saved_packs(limit=50):
+    if not supabase_backend.is_configured():
+        return []
+    try:
+        return supabase_backend.list_ads_copy_packs(limit=limit)
+    except Exception:
+        return []
 
 
 def _product_handle(row):
@@ -944,16 +919,14 @@ def _pack_payload(pack, status="Draft"):
     }
 
 
-def _render_header(status):
+def _render_header():
     selected_stage = st.session_state.get("mf_selected_stage") or "Not selected"
     chips = [
-        ("Meta connected", "Yes" if status.get("meta_connected") else "No"),
-        ("Supabase connected", "Yes" if status.get("supabase_connected") else "No"),
-        ("Mode", "Read-only Meta"),
-        ("Last Meta sync", _format_time(status.get("ads_sync_at"))),
-        ("Last product sync", _format_time(status.get("product_sync_at"))),
-        ("Edition stage", selected_stage),
-        ("Saved packs", str(status.get("saved_count") or 0)),
+        ("Start", "Choose product"),
+        ("Then", "Pick market"),
+        ("Next", "Generate pack"),
+        ("Current stage", selected_stage),
+        ("Safety", "No live ad changes"),
     ]
     chip_html = "".join(f"<span class='mf-chip'><strong>{html.escape(label)}:</strong> {html.escape(value)}</span>" for label, value in chips)
     st.markdown(
@@ -978,8 +951,15 @@ def _product_selector(products):
 
 
 def _render_meta_signal_panel(product, meta_summary):
-    rows = _meta_rows_for_product(meta_summary, product) if product else []
-    with _card("Meta Signal", "Read-only stored Meta data. Buttons only prefill this prompt builder."):
+    with _card("Meta Signal", "Optional past ad results. Buttons only fill this prompt builder."):
+        if st.button("Load Meta Signals", use_container_width=True, key="mf-load-builder-meta"):
+            st.session_state["mf_ad_builder_meta_loaded"] = True
+            st.session_state["mf_ad_builder_meta_summary"] = _load_meta_summary("last_30_days")
+        if not st.session_state.get("mf_ad_builder_meta_loaded"):
+            st.info("Load Meta Signals only if you want past ad results to guide this pack.")
+            return "No Meta signal loaded. Use product story + edition stage."
+        meta_summary = st.session_state.get("mf_ad_builder_meta_summary") or meta_summary or {"mapping": []}
+        rows = _meta_rows_for_product(meta_summary, product) if product else []
         if not rows:
             st.info("No Meta signal found for this product yet. Use product story + edition stage.")
             return "No Meta signal found for this product yet. Use product story + edition stage."
@@ -1051,8 +1031,29 @@ def _apply_pending_builder_prefill(products):
 
 
 def _render_product_facts(product):
-    with _card("Product", "Choose a product first. Edition fields fill from Supabase when available."):
-        selected = _product_selector(_load_products())
+    with _card("Product", "Choose a product, or build a manual pack without loading data."):
+        search = st.text_input(
+            "Search products",
+            value=st.session_state.get("mf_product_search_value", ""),
+            placeholder="Search title or handle",
+            key="mf_product_search_value",
+        )
+        load_cols = st.columns([1, 1])
+        if load_cols[0].button("Load Products", use_container_width=True, key="mf-load-products"):
+            st.session_state["mf_products_loaded"] = True
+            st.session_state["mf_product_search_active"] = search
+        if load_cols[1].button("Refresh Products", use_container_width=True, key="mf-refresh-products"):
+            _load_product_options.clear()
+            st.session_state["mf_products_loaded"] = True
+            st.session_state["mf_product_search_active"] = search
+        products = []
+        if st.session_state.get("mf_products_loaded"):
+            products = _load_product_options(st.session_state.get("mf_product_search_active", search), limit=150)
+            if not products:
+                st.warning("Product data unavailable. You can still create a manual prompt.")
+        else:
+            st.info("Click Load Products when you are ready to choose a product. Manual prompt creation is available now.")
+        selected = _product_selector(products)
         if selected:
             product.clear()
             product.update(selected)
@@ -1063,6 +1064,12 @@ def _render_product_facts(product):
             st.session_state["mf_product_handle"] = _product_handle(product) if product else ""
             st.session_state["mf_product_url"] = _plain_text(product.get("online_store_url") or product.get("product_url")) if product else ""
             st.session_state["mf_sport"] = _infer_sport(product) if product else ""
+            if product:
+                st.session_state["mf_edition_stage"] = _edition_stage_from_number(
+                    _next_number(product),
+                    _edition_total(product),
+                    _is_sold_out(product),
+                )
         manual_title_default = _product_title(product) if product else ""
         product_name = st.text_input("Product title", value=manual_title_default, key="mf_product_title")
         product_handle = st.text_input("Product handle", value=_product_handle(product), key="mf_product_handle")
@@ -1087,9 +1094,11 @@ def _render_product_facts(product):
 
 
 def _render_ad_builder():
-    products = _load_products()
+    products = []
+    if st.session_state.get("mf_products_loaded"):
+        products = _load_product_options(st.session_state.get("mf_product_search_active", ""), limit=150)
     _apply_pending_builder_prefill(products)
-    meta_summary = _load_meta_summary("last_30_days")
+    meta_summary = st.session_state.get("mf_ad_builder_meta_summary") or {"insights": [], "mapping": [], "opportunities": [], "actions": []}
     product = {}
     left, right = st.columns([0.95, 1.2], gap="large")
 
@@ -1114,7 +1123,7 @@ def _render_ad_builder():
             funnel_stage = st.selectbox("Funnel stage", FUNNEL_OPTIONS, index=0, key="mf_funnel_stage")
             st.caption(FUNNEL_RULES[funnel_stage])
 
-        with _card("Edition Stage", "Autofilled from Supabase. Manual override affects this prompt only."):
+        with _card("Edition Stage", "Autofilled when product data is loaded. Manual override affects this prompt only."):
             manual_stage = st.selectbox(
                 "Edition stage for prompt",
                 EDITION_STAGE_OPTIONS,
@@ -1122,7 +1131,7 @@ def _render_ad_builder():
                 key="mf_edition_stage",
             )
             if manual_stage != derived_stage:
-                st.warning("Manual override changes the ad prompt only. It does not update Supabase, Shopify, or edition numbers.")
+                st.warning("Manual override changes the ad prompt only. It does not update product records or edition numbers.")
             include_exact = st.checkbox("Include exact edition number in prompt", value=False, key="mf_include_exact")
             if include_exact:
                 st.warning("Only use exact edition numbers if the ad will be updated when numbers move.")
@@ -1161,7 +1170,7 @@ def _render_ad_builder():
                 "full_prompt": st.checkbox("Include full copy/paste ChatGPT prompt", value=True, key="mf_include_full_prompt"),
                 "csv": st.checkbox("Include CSV export format", value=False, key="mf_include_csv"),
             }
-            save_after = st.checkbox("Save pack to Supabase after generation", value=False, key="mf_save_after_generate")
+            save_after = st.checkbox("Save pack after generation", value=False, key="mf_save_after_generate")
 
         edition_truth = "Edition data missing. Use safe generic copy." if not product else (
             f"{manual_stage}. Next edition {next_number} of {total}; {remaining} remaining."
@@ -1198,7 +1207,7 @@ def _render_ad_builder():
                 try:
                     saved = supabase_backend.save_ads_copy_pack(_pack_payload(pack), created_by="marketing_factory")
                     st.session_state["mf_last_save"] = saved
-                    _load_status.clear()
+                    _load_saved_packs.clear()
                 except Exception:
                     st.session_state["mf_last_save"] = {"saved": False}
             st.success("Prompt pack generated.")
@@ -1240,23 +1249,23 @@ def _render_outputs(pack):
         try:
             saved = supabase_backend.save_ads_copy_pack(_pack_payload(pack), created_by="marketing_factory")
             st.success(f"Saved pack {saved.get('id')}.")
-            _load_status.clear()
+            _load_saved_packs.clear()
         except Exception:
-            st.error("Pack could not be saved to Supabase. Check configuration and table migration.")
+            st.error("Pack could not be saved. You can still copy or download it.")
     if save_cols[1].button("Mark Ready", use_container_width=True, key="mf-save-ready"):
         try:
             saved = supabase_backend.save_ads_copy_pack(_pack_payload(pack, status="Ready"), created_by="marketing_factory")
             st.success(f"Saved as Ready: {saved.get('id')}.")
-            _load_status.clear()
+            _load_saved_packs.clear()
         except Exception:
-            st.error("Pack could not be saved to Supabase.")
+            st.error("Pack could not be saved. You can still copy or download it.")
     if save_cols[2].button("Mark Needs Review", use_container_width=True, key="mf-save-review"):
         try:
             saved = supabase_backend.save_ads_copy_pack(_pack_payload(pack, status="Needs Review"), created_by="marketing_factory")
             st.success(f"Saved as Needs Review: {saved.get('id')}.")
-            _load_status.clear()
+            _load_saved_packs.clear()
         except Exception:
-            st.error("Pack could not be saved to Supabase.")
+            st.error("Pack could not be saved. You can still copy or download it.")
 
     section_map = [
         ("Strategy Summary", "strategy", "Copy Strategy"),
@@ -1279,12 +1288,23 @@ def _render_outputs(pack):
 
 
 def _render_meta_intelligence_tab():
-    st.subheader("Meta Intelligence")
-    st.caption("Stored Meta signals only. No campaign editing, budget changes, or live Meta writes.")
+    st.subheader("Meta Signals")
+    st.caption("Use past ad results to choose better hooks. This page only helps build copy packs.")
     date_range = st.selectbox("Date range", ["last_7_days", "last_14_days", "last_30_days", "last_90_days", "all"], index=2, key="mf-meta-date")
     market = st.selectbox("Market", ["All", *COUNTRY_OPTIONS], key="mf-meta-market")
     product_query = st.text_input("Product filter", key="mf-meta-product-filter")
-    data = _load_meta_summary(date_range)
+    signal_cols = st.columns([1, 1, 2])
+    if signal_cols[0].button("Load Meta Signals", use_container_width=True, key="mf-load-meta-tab"):
+        st.session_state["mf_meta_tab_loaded_range"] = date_range
+        st.session_state["mf_meta_tab_summary"] = _load_meta_summary(date_range)
+    if signal_cols[1].button("Refresh Signals", use_container_width=True, key="mf-refresh-meta-tab"):
+        _load_meta_summary.clear()
+        st.session_state["mf_meta_tab_loaded_range"] = date_range
+        st.session_state["mf_meta_tab_summary"] = _load_meta_summary(date_range)
+    if st.session_state.get("mf_meta_tab_loaded_range") != date_range:
+        st.info("Click Load Meta Signals to see stored ad results for this range.")
+        return
+    data = st.session_state.get("mf_meta_tab_summary") or {"insights": [], "mapping": [], "opportunities": [], "actions": []}
     insights = data.get("insights") or []
     mapping = data.get("mapping") or []
     opportunities = data.get("opportunities") or []
@@ -1338,8 +1358,9 @@ def _render_meta_intelligence_tab():
                     "primary_angle": angle,
                     "story_context": _meta_signal_summary([row]),
                 }
+                st.session_state["mf_requested_tab"] = "Ad Builder"
                 st.rerun()
-    with _card("Product Mapping", "Read-only mapping status from Ads Intelligence."):
+    with _card("Product Mapping", "Shows which ads are tied to products."):
         st.dataframe(
             [
                 {
@@ -1355,7 +1376,7 @@ def _render_meta_intelligence_tab():
             use_container_width=True,
             height=280,
         )
-    with _card("Action Log", "Recent Ads Intelligence actions."):
+    with _card("Recent Signal Updates", "Recent stored updates for ad signal data."):
         st.dataframe(
             [
                 {
@@ -1428,21 +1449,26 @@ def _render_prompt_library_tab():
             try:
                 saved = supabase_backend.save_ads_copy_pack(_pack_payload(pack), created_by="marketing_factory")
                 st.success(f"Saved template pack {saved.get('id')}.")
-                _load_status.clear()
+                _load_saved_packs.clear()
             except Exception:
-                st.error("Template could not be saved to Supabase.")
+                st.error("Template could not be saved. You can still copy or download it.")
 
 
 def _render_saved_packs_tab():
     st.subheader("Saved Packs")
     st.caption("Saved prompt/copy packs attached to products.")
-    if not supabase_backend.is_configured():
-        st.warning("Supabase is not configured. Generate, copy, and download packs locally.")
+    action_cols = st.columns([1, 1, 2])
+    if action_cols[0].button("Load Saved Packs", use_container_width=True, key="mf-load-saved-packs"):
+        st.session_state["mf_saved_packs_loaded"] = True
+    if action_cols[1].button("Refresh Packs", use_container_width=True, key="mf-refresh-saved-packs"):
+        _load_saved_packs.clear()
+        st.session_state["mf_saved_packs_loaded"] = True
+    if not st.session_state.get("mf_saved_packs_loaded"):
+        st.info("Click Load Saved Packs when you need an existing prompt pack.")
         return
-    try:
-        packs = supabase_backend.list_ads_copy_packs(limit=100)
-    except Exception:
-        st.error("Saved packs could not be loaded. Check Supabase migration status.")
+    packs = _load_saved_packs(limit=50)
+    if not packs:
+        st.warning("Saved packs are unavailable or empty. You can still generate, copy, and download a new pack.")
         return
     table = [
         {
@@ -1470,11 +1496,11 @@ def _render_saved_packs_tab():
             action_cols[1].download_button("Download JSON", data=json.dumps(dict(row), indent=2, default=_json_default).encode("utf-8"), file_name="saved-marketing-pack.json", mime="application/json", use_container_width=True, key=f"saved-json-{row.get('id')}")
             if action_cols[2].button("Mark Ready", use_container_width=True, key=f"saved-ready-{row.get('id')}"):
                 supabase_backend.update_ads_copy_pack_status(row.get("id"), "Ready")
-                _load_status.clear()
+                _load_saved_packs.clear()
                 st.rerun()
             if action_cols[3].button("Mark Needs Review", use_container_width=True, key=f"saved-review-{row.get('id')}"):
                 supabase_backend.update_ads_copy_pack_status(row.get("id"), "Needs Review")
-                _load_status.clear()
+                _load_saved_packs.clear()
                 st.rerun()
             st.text_area("Prompt", value=prompt, height=220, key=f"saved-text-{row.get('id')}", label_visibility="collapsed")
 
@@ -1492,28 +1518,35 @@ def _render_quality_tab():
 def render_page():
     started = time.perf_counter()
     _inject_styles()
-    status = _load_status()
-    _render_header(status)
-    tabs = st.tabs(
-        [
-            "Ad Builder",
-            "Meta Intelligence",
-            "Winning Angles",
-            "Prompt Library",
-            "Saved Packs",
-            "Quality Checklist",
-        ]
+    _render_header()
+    tab_names = [
+        "Ad Builder",
+        "Meta Signals",
+        "Winning Angles",
+        "Prompt Library",
+        "Saved Packs",
+        "Quality Checklist",
+    ]
+    requested_tab = st.session_state.pop("mf_requested_tab", None)
+    if requested_tab in tab_names:
+        st.session_state["mf_active_tab"] = requested_tab
+    active_tab = st.radio(
+        "Marketing Factory section",
+        tab_names,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="mf_active_tab",
     )
-    with tabs[0]:
+    if active_tab == "Ad Builder":
         _render_ad_builder()
-    with tabs[1]:
+    elif active_tab == "Meta Signals":
         _render_meta_intelligence_tab()
-    with tabs[2]:
+    elif active_tab == "Winning Angles":
         _render_winning_angles_tab()
-    with tabs[3]:
+    elif active_tab == "Prompt Library":
         _render_prompt_library_tab()
-    with tabs[4]:
+    elif active_tab == "Saved Packs":
         _render_saved_packs_tab()
-    with tabs[5]:
+    elif active_tab == "Quality Checklist":
         _render_quality_tab()
-    st.caption(f"Marketing Factory loaded in {time.perf_counter() - started:.2f}s. Meta is read-only here.")
+    print(f"marketing_factory_shell_ms={int((time.perf_counter() - started) * 1000)}")

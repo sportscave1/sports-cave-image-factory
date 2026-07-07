@@ -43,7 +43,6 @@ os_pages = None
 shopify_sync = None
 edition_ops_module = None
 orders_page_module = None
-ads_intelligence_module = None
 design_studio_page_module = None
 requests_module = None
 components_module = None
@@ -133,15 +132,6 @@ def get_orders_page():
     return orders_page_module
 
 
-def get_ads_intelligence_page():
-    global ads_intelligence_module
-    if ads_intelligence_module is None:
-        log_startup_stage("ADS INTELLIGENCE IMPORT START")
-        ads_intelligence_module = importlib.import_module("ads_intelligence_page")
-        log_startup_stage("ADS INTELLIGENCE IMPORT DONE")
-    return ads_intelligence_module
-
-
 def get_design_studio_page():
     global design_studio_page_module
     if design_studio_page_module is None:
@@ -203,7 +193,6 @@ MENU_OPTIONS = [
     "Mockups",
     "Product Uploads",
     "Design Studio",
-    "Ads Intelligence",
     "Marketing Factory",
     "VA Training",
     "Developer",
@@ -6643,14 +6632,6 @@ def render_selected_page(current_page):
         os_route_pages().render_product_assets_page()
     elif current_page == "Prodigi":
         os_route_pages().render_prodigi_page()
-    elif current_page == "Ads Intelligence":
-        if not _developer_unlocked():
-            _render_developer_password_gate(
-                title="Admin access required.",
-                caption="Unlock Developer access to open Ads Intelligence.",
-            )
-        else:
-            get_ads_intelligence_page().render_page()
     elif current_page == "Webhook Events":
         os_route_pages().render_webhook_events_page()
     elif current_page == "Sync Runs":
