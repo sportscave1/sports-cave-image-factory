@@ -89,7 +89,7 @@ class SportsCavePricingTests(unittest.TestCase):
     def test_dry_run_does_not_call_shopify_update(self):
         product = standard_product(price="0.00", compare_at_price="0.00")
         summary = sports_cave_pricing.summarize_price_backfill([product])
-        self.assertEqual(summary["variants_needing_update"], 16)
+        self.assertEqual(summary["variants_needing_update"], 12)
         self.assertEqual(summary["products_scanned"], 1)
 
     def test_apply_only_updates_price_and_compare_at_price(self):

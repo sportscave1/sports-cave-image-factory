@@ -400,6 +400,8 @@ Never publish a new product automatically.
 Every new product must be created as:
 - Status: Draft
 - Published: false
+Never set the product status to Active.
+Never publish to the Online Store or make the product live.
 Only the user may approve publication after checking the full draft.
 
 REQUIRED ASSETS
@@ -855,6 +857,7 @@ FINAL EXECUTION PROMPT
 I have uploaded the final approved Sports Cave WebP assets for one product.
 Use SOP 07B and create the Shopify product directly through the connected Shopify tool.
 Create it as Draft and keep it unpublished.
+Do not make it live, do not set it Active, and do not publish it to the Online Store.
 Use the exact gallery order: Black frame, three lifestyle mockups, Size Guide, Oak frame, White frame, Unframed.
 Write a complete 90–130-word product description with one bold hook, two concise story paragraphs, and one bold scarcity close. Keep it specific and grounded, avoid generic clichés, and invent no specifications.
 Apply search-intent-led SEO metadata and unique, accurate image alt text.
@@ -863,7 +866,7 @@ Create the exact 16 variants with Frame ordered Black, Oak, White, Unframed and 
 Use the current Sports Cave selling-price matrix and preserve the listed RRP compare-at prices.
 Enable Continue selling when out of stock for all variants.
 Map each frame image to its matching variants.
-Do not publish. Return the draft link and validation results.
+Do not publish. Return the Shopify draft/admin link and validation results for manual review.
 """
 UPDATE_EXISTING_PRODUCT_PROMPT = """SOP 07C — Sports Cave Existing Shopify Product Update and Standardisation
 Direct Existing-Product Update — No CSV Import Required
