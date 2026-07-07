@@ -48,24 +48,24 @@ class SportsCavePricingTests(unittest.TestCase):
     def test_price_ladder_mapping(self):
         self.assertEqual(
             sports_cave_pricing.SPORTS_CAVE_AU_PRICE_LADDER["framed"]["XL"],
-            {"price": "349.00", "compare_at_price": "429.00"},
+            {"price": "329.00", "compare_at_price": "429.00"},
         )
         self.assertEqual(
             sports_cave_pricing.SPORTS_CAVE_AU_PRICE_LADDER["unframed"]["S"],
-            {"price": "55.00", "compare_at_price": "69.00"},
+            {"price": "49.00", "compare_at_price": "64.00"},
         )
 
     def test_black_oak_white_map_to_framed(self):
         for frame in ("Black", "Oak", "White"):
             expected = sports_cave_pricing.expected_price_for_variant(variant(f"{frame} / L"))
             self.assertEqual(expected["price_group"], "framed")
-            self.assertEqual(expected["price"], "269.00")
+            self.assertEqual(expected["price"], "249.00")
             self.assertEqual(expected["compare_at_price"], "329.00")
 
     def test_unframed_maps_to_unframed(self):
         expected = sports_cave_pricing.expected_price_for_variant(variant("Unframed / M"))
         self.assertEqual(expected["price_group"], "unframed")
-        self.assertEqual(expected["price"], "89.00")
+        self.assertEqual(expected["price"], "79.00")
         self.assertEqual(expected["compare_at_price"], "109.00")
 
     def test_robust_size_parsing(self):
@@ -87,7 +87,7 @@ class SportsCavePricingTests(unittest.TestCase):
         self.assertEqual(len(summary["skipped_variants"]), 1)
 
     def test_dry_run_does_not_call_shopify_update(self):
-        product = standard_product(price="149.00", compare_at_price="199.00")
+        product = standard_product(price="0.00", compare_at_price="0.00")
         summary = sports_cave_pricing.summarize_price_backfill([product])
         self.assertEqual(summary["variants_needing_update"], 16)
         self.assertEqual(summary["products_scanned"], 1)
@@ -112,7 +112,7 @@ class SportsCavePricingTests(unittest.TestCase):
                             "productVariants": [
                                 {
                                     "id": "gid://shopify/ProductVariant/1",
-                                    "price": "349.00",
+                                    "price": "329.00",
                                     "compareAtPrice": "429.00",
                                 }
                             ],
@@ -127,7 +127,7 @@ class SportsCavePricingTests(unittest.TestCase):
             [
                 {
                     "variant_id": "gid://shopify/ProductVariant/1",
-                    "new_price": "349.00",
+                    "new_price": "329.00",
                     "new_compare_at_price": "429.00",
                     "sku": "MUST-NOT-SEND",
                 }
@@ -139,7 +139,7 @@ class SportsCavePricingTests(unittest.TestCase):
         sent_variant = requests_seen[0]["variables"]["variants"][0]
         self.assertEqual(result["updated"], 1)
         self.assertEqual(set(sent_variant.keys()), {"id", "price", "compareAtPrice"})
-        self.assertEqual(sent_variant["price"], "349.00")
+        self.assertEqual(sent_variant["price"], "329.00")
         self.assertEqual(sent_variant["compareAtPrice"], "429.00")
 
 
