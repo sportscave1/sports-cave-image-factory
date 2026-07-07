@@ -10472,22 +10472,9 @@ def render_email_marketing_section():
 
 
 def render_marketing_factory_page():
-    started = time.perf_counter()
-    inject_marketing_factory_styles()
-    st.title("Marketing Factory")
-    st.caption("Prompt and SOP hub for Sports Cave operators. No live AI generation.")
-    meta_tab, seo_tab, social_tab, email_tab = st.tabs(
-        ["Meta Ads", "SEO", "Social Media", "Email Marketing"]
-    )
-    with meta_tab:
-        render_meta_ads_section()
-    with seo_tab:
-        render_simple_seo_section()
-    with social_tab:
-        render_social_media_section()
-    with email_tab:
-        render_email_marketing_section()
-    perf_log(f"PERF MarketingFactory total={(time.perf_counter() - started):.3f}s prompt_load=rendered")
+    import marketing_factory_page
+
+    marketing_factory_page.render_page()
 
 
 def render_developer_widget_status(shopify_config):

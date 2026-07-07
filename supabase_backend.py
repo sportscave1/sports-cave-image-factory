@@ -14840,6 +14840,7 @@ ADS_SCHEMA_MIGRATIONS = (
     BASE_DIR / "migrations" / "20260626_ads_intelligence_v1.sql",
     BASE_DIR / "migrations" / "20260626_ads_intelligence_v2_breakdowns.sql",
     BASE_DIR / "migrations" / "20260626_ads_product_mapping_v1.sql",
+    BASE_DIR / "migrations" / "20260707_marketing_factory_copy_packs.sql",
 )
 
 
@@ -14850,6 +14851,112 @@ def ensure_ads_schema():
             for migration in ADS_SCHEMA_MIGRATIONS:
                 cur.execute(migration.read_text(encoding="utf-8"))
         conn.commit()
+
+
+def save_ads_copy_pack(pack, *, created_by="sports_cave_os"):
+    ensure_ads_schema()
+    payload = dict(pack or {})
+    preview = payload.get("generated_preview") or {}
+    input_payload = payload.get("input_payload") or {}
+    secondary_angles = payload.get("secondary_angles") or []
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO ads_copy_packs(
+                    product_handle, product_title, shopify_product_id, country, ad_format,
+                    funnel_stage, edition_stage, next_edition_number, edition_total,
+                    edition_remaining, primary_angle, secondary_angles, input_payload,
+                    generated_prompt, generated_preview, status, created_by, updated_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, %s, %s::jsonb, %s::jsonb,
+                    %s, %s::jsonb, %s, %s, now()
+                )
+                RETURNING id
+                """,
+                (
+                    str(payload.get("product_handle") or ""),
+                    str(payload.get("product_title") or ""),
+                    str(payload.get("shopify_product_id") or ""),
+                    str(payload.get("country") or ""),
+                    str(payload.get("ad_format") or ""),
+                    str(payload.get("funnel_stage") or ""),
+                    str(payload.get("edition_stage") or ""),
+                    _int_value(payload.get("next_edition_number"), 0) or None,
+                    _int_value(payload.get("edition_total"), 0) or None,
+                    _int_value(payload.get("edition_remaining"), 0) if payload.get("edition_remaining") not in (None, "") else None,
+                    str(payload.get("primary_angle") or ""),
+                    json_dumps(secondary_angles),
+                    json_dumps(input_payload),
+                    str(payload.get("generated_prompt") or ""),
+                    json_dumps(preview),
+                    str(payload.get("status") or "Draft"),
+                    str(created_by or "sports_cave_os"),
+                ),
+            )
+            pack_id = (cur.fetchone() or {}).get("id")
+            cur.execute(
+                """
+                INSERT INTO ads_copy_pack_versions(pack_id, version_number, generated_prompt, generated_preview)
+                VALUES (
+                    %s,
+                    COALESCE((SELECT MAX(version_number) + 1 FROM ads_copy_pack_versions WHERE pack_id=%s), 1),
+                    %s,
+                    %s::jsonb
+                )
+                """,
+                (pack_id, pack_id, str(payload.get("generated_prompt") or ""), json_dumps(preview)),
+            )
+        conn.commit()
+    return {"saved": True, "id": str(pack_id or "")}
+
+
+def list_ads_copy_packs(limit=100, product_handle=None):
+    if not is_configured():
+        return []
+    ensure_ads_schema()
+    params = []
+    where_sql = ""
+    handle = str(product_handle or "").strip()
+    if handle:
+        where_sql = "WHERE product_handle=%s"
+        params.append(handle)
+    params.append(max(min(int(limit or 100), 500), 1))
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT *
+                FROM ads_copy_packs
+                {where_sql}
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                tuple(params),
+            )
+            return cur.fetchall()
+
+
+def update_ads_copy_pack_status(pack_id, status):
+    ensure_ads_schema()
+    clean_status = str(status or "").strip() or "Draft"
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE ads_copy_packs
+                SET status=%s, updated_at=now()
+                WHERE id=%s
+                RETURNING id, status
+                """,
+                (clean_status, str(pack_id or "")),
+            )
+            row = cur.fetchone() or {}
+        conn.commit()
+    return {"updated": bool(row), "id": str(row.get("id") or ""), "status": row.get("status") or clean_status}
 
 
 def _ads_float(value, default=0.0):
