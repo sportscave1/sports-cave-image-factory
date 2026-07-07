@@ -5061,139 +5061,6 @@ def render_mockups_page():
         render_generation_result(st.session_state.last_generation_result)
 
 
-def _shopify_products_for_price_backfill(search, max_products):
-    shopify_sync = get_shopify_sync()
-    config = shopify_sync.get_config()
-    if max_products:
-        config = {**config, "max_products": int(max_products)}
-    products = []
-    for page in shopify_sync.iter_catalog_pages(
-        search=str(search or "").strip(),
-        page_size=50,
-        config=config,
-    ):
-        products.extend(page.get("products") or [])
-        if max_products and len(products) >= int(max_products):
-            return products[: int(max_products)]
-    return products
-
-
-def _render_price_backfill_summary(summary):
-    metric_cols = st.columns(6)
-    metric_cols[0].metric("Products scanned", summary.get("products_scanned", 0))
-    metric_cols[1].metric("Variants scanned", summary.get("variants_scanned", 0))
-    metric_cols[2].metric("Already correct", summary.get("variants_already_correct", 0))
-    metric_cols[3].metric("Need update", summary.get("variants_needing_update", 0))
-    metric_cols[4].metric("Skipped products", len(summary.get("skipped_products") or []))
-    metric_cols[5].metric("Skipped variants", len(summary.get("skipped_variants") or []))
-
-    changes = summary.get("changes") or []
-    if changes:
-        st.markdown("**Variants needing update**")
-        st.dataframe(changes, use_container_width=True, hide_index=True)
-    else:
-        st.success("No matching variants need a price update.")
-
-    skipped_products = summary.get("skipped_products") or []
-    if skipped_products:
-        st.markdown("**Skipped products**")
-        st.dataframe(
-            [
-                {
-                    "product": item.get("title"),
-                    "handle": item.get("handle"),
-                    "variants": item.get("variants_scanned"),
-                    "reason": item.get("skipped_product_reason"),
-                }
-                for item in skipped_products
-            ],
-            use_container_width=True,
-            hide_index=True,
-        )
-
-    skipped_variants = summary.get("skipped_variants") or []
-    if skipped_variants:
-        st.markdown("**Skipped variants**")
-        st.dataframe(skipped_variants, use_container_width=True, hide_index=True)
-
-
-def render_product_price_ladder_admin_section():
-    st.subheader("Current Price Ladder")
-    st.caption("Central Sports Cave AUD pricing used by Product Upload prompts and price backfill checks.")
-    st.dataframe(sports_cave_pricing.price_ladder_rows(), use_container_width=True, hide_index=True)
-
-    with st.expander("Existing Shopify product price update", expanded=False):
-        st.caption(
-            "Manual admin-only tool. Dry run reads Shopify products only after the button is clicked. "
-            "Apply updates only variant price and compare-at/RRP after confirmation."
-        )
-        password = st.text_input(
-            "Developer password",
-            type="password",
-            key="price-backfill-developer-password",
-        )
-        search = st.text_input(
-            "Optional Shopify product search",
-            value=st.session_state.get("price_backfill_search", ""),
-            key="price-backfill-search",
-            placeholder="Example: vendor:'Sports Cave' status:active",
-        )
-        max_products = st.number_input(
-            "Maximum products to scan",
-            min_value=1,
-            max_value=500,
-            value=100,
-            step=25,
-            key="price-backfill-max-products",
-        )
-        if st.button(
-            "Dry run existing product price update",
-            disabled=password != DEVELOPER_PAGE_PASSWORD,
-            key="price-backfill-dry-run",
-            use_container_width=True,
-        ):
-            with st.spinner("Scanning Shopify products for price differences..."):
-                try:
-                    products = _shopify_products_for_price_backfill(search, max_products)
-                    summary = sports_cave_pricing.summarize_price_backfill(products)
-                except Exception as error:
-                    st.error(f"Price dry run failed: {error}")
-                else:
-                    st.session_state["price_backfill_summary"] = summary
-                    st.session_state["price_backfill_search"] = search
-                    st.success("Dry run complete. No prices were updated.")
-
-        summary = st.session_state.get("price_backfill_summary")
-        if summary:
-            _render_price_backfill_summary(summary)
-            changes = summary.get("changes") or []
-            if changes:
-                confirmation = st.text_input(
-                    "Type UPDATE PRICES to apply these exact variant price changes",
-                    key="price-backfill-confirmation",
-                )
-                if st.button(
-                    "Apply price update to matching existing products",
-                    disabled=confirmation != "UPDATE PRICES" or password != DEVELOPER_PAGE_PASSWORD,
-                    key="price-backfill-apply",
-                    type="primary",
-                    use_container_width=True,
-                ):
-                    grouped = {}
-                    for change in changes:
-                        grouped.setdefault(change["product_id"], []).append(change)
-                    applied = 0
-                    try:
-                        shopify_sync = get_shopify_sync()
-                        for product_id, product_changes in grouped.items():
-                            result = shopify_sync.update_product_variant_prices(product_id, product_changes)
-                            applied += int(result.get("updated") or 0)
-                    except Exception as error:
-                        st.error(f"Price update failed: {error}")
-                    else:
-                        st.success(f"Applied {applied} variant price update(s). Run dry run again to verify.")
-
-
 def render_product_uploads_page():
     started = time.perf_counter()
     log_app_memory("Page load: Product Uploads")
@@ -5229,8 +5096,6 @@ def render_product_uploads_page():
         "update-existing-shopify-product-prompt",
         prompt_id=prompt_edit_id("product-upload", "update-existing-shopify-product"),
     )
-    st.divider()
-    render_product_price_ladder_admin_section()
     safe_startup_print(f"PERF Product Uploads total={(time.perf_counter() - started):.3f}s")
 
 
@@ -6367,6 +6232,7 @@ def render_settings_page():
     with st.expander("Shopify Webhook Setup", expanded=False):
         st.write("**Paid orders webhook endpoint:** `/webhooks/shopify/orders-paid`")
         st.write("**Product create webhook endpoint:** `/webhooks/shopify/products-create`")
+        st.write("**Product update webhook endpoint:** `/webhooks/shopify/products-update`")
         st.write(
             "**Webhook app secret configured:** "
             f"{'Yes' if bool(os.getenv('SHOPIFY_WEBHOOK_SECRET', '').strip() or os.getenv('SHOPIFY_CLIENT_SECRET', '').strip()) else 'No'}"
@@ -6376,8 +6242,10 @@ def render_settings_page():
             config = sync.get_config()
             callback_url = sync.orders_paid_webhook_callback_url()
             product_create_callback_url = sync.products_create_webhook_callback_url()
+            product_update_callback_url = sync.products_update_webhook_callback_url()
             st.write(f"**Public callback URL:** `{callback_url or 'Not configured'}`")
             st.write(f"**Product create callback URL:** `{product_create_callback_url or 'Not configured'}`")
+            st.write(f"**Product update callback URL:** `{product_update_callback_url or 'Not configured'}`")
             if st.button(
                 "Register / Verify Orders Paid Webhook",
                 key="developer-register-orders-paid-webhook",
@@ -6401,6 +6269,18 @@ def render_settings_page():
                 status = "created" if result.get("created") else "already registered"
                 st.success(
                     f"products/create webhook {status}: {subscription.get('id') or result.get('callback_url')}"
+                )
+            if st.button(
+                "Register / Verify Products Update Webhook",
+                key="developer-register-products-update-webhook",
+                disabled=not bool(config.get("configured")),
+                use_container_width=True,
+            ):
+                result = sync.ensure_products_update_webhook_subscription(config=config)
+                subscription = result.get("subscription") or {}
+                status = "created" if result.get("created") else "already registered"
+                st.success(
+                    f"products/update webhook {status}: {subscription.get('id') or result.get('callback_url')}"
                 )
             try:
                 supabase = importlib.import_module("supabase_backend")

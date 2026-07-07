@@ -144,20 +144,6 @@ def _process_orders_paid_background(payload, webhook_id, topic):
         _webhook_log("webhook_background_processing_failed", webhook_id=webhook_id, topic=topic, error=str(error))
 
 
-def _process_products_create_background(payload, webhook_id, topic):
-    try:
-        import supabase_backend
-
-        supabase_backend.process_product_create_webhook(
-            payload,
-            webhook_id,
-            topic,
-            claim_event=False,
-        )
-    except Exception as error:
-        _webhook_log("webhook_background_processing_failed", webhook_id=webhook_id, topic=topic, error=str(error))
-
-
 @app.post("/webhooks/shopify/orders-paid")
 async def shopify_orders_paid_webhook(request: Request, background_tasks: BackgroundTasks):
     raw_body = await request.body()
@@ -273,10 +259,9 @@ async def shopify_orders_paid_webhook(request: Request, background_tasks: Backgr
     }
 
 
-@app.post("/webhooks/shopify/products-create")
-async def shopify_products_create_webhook(request: Request, background_tasks: BackgroundTasks):
+async def _shopify_products_webhook(request: Request, *, default_topic: str):
     raw_body = await request.body()
-    topic = _header(request.headers, "X-Shopify-Topic") or "products/create"
+    topic = _header(request.headers, "X-Shopify-Topic") or default_topic
     webhook_id = (
         _header(request.headers, "X-Shopify-Webhook-Id")
         or _header(request.headers, "X-Shopify-Event-Id")
@@ -377,15 +362,35 @@ async def shopify_products_create_webhook(request: Request, background_tasks: Ba
             "source": "webhook",
             "webhook_id": webhook_id,
         }
-    background_tasks.add_task(_process_products_create_background, payload, claim.get("webhook_id") or webhook_id, topic)
+    try:
+        result = supabase_backend.process_product_create_webhook(
+            payload,
+            claim.get("webhook_id") or webhook_id,
+            topic,
+            claim_event=False,
+        )
+    except Exception as error:
+        _webhook_log("webhook_product_processing_failed", webhook_id=webhook_id, topic=topic, error=str(error))
+        return Response("Webhook product could not be processed.", status_code=500)
+
     return {
         "ok": True,
-        "status": "accepted",
+        "status": "processed" if not (result.get("errors") or []) else "processed_with_warnings",
         "source": "webhook",
         "webhook_id": claim.get("webhook_id") or webhook_id,
-        "shopify_product_id": claim.get("shopify_product_id") or "",
-        "shopify_handle": claim.get("shopify_handle") or "",
+        "shopify_product_id": result.get("shopify_product_id") or claim.get("shopify_product_id") or "",
+        "shopify_handle": result.get("shopify_handle") or claim.get("shopify_handle") or "",
     }
+
+
+@app.post("/webhooks/shopify/products-create")
+async def shopify_products_create_webhook(request: Request, background_tasks: BackgroundTasks):
+    return await _shopify_products_webhook(request, default_topic="products/create")
+
+
+@app.post("/webhooks/shopify/products-update")
+async def shopify_products_update_webhook(request: Request, background_tasks: BackgroundTasks):
+    return await _shopify_products_webhook(request, default_topic="products/update")
 
 
 if __name__ == "__main__":

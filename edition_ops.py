@@ -27,6 +27,7 @@ NOTICE_LEVEL_KEY = "edition_ops_notice_level"
 IMPORT_WARNINGS_KEY = "edition_ops_import_warnings"
 SHOPIFY_MIRROR_PREVIEW_KEY = "edition_ops_shopify_mirror_preview"
 SHOPIFY_MIRROR_RESULT_KEY = "edition_ops_shopify_mirror_result"
+MANUAL_PRODUCT_SYNC_RESULT_KEY = "edition_ops_manual_product_sync_result"
 EDITOR_VERSION_KEY = "edition_ops_editor_version"
 EDITOR_KEY = "edition_ops_editor_v3"
 SNAPSHOT_LOADED_KEY = "edition_ops_snapshot_loaded"
@@ -1082,6 +1083,7 @@ def _format_shopify_product_sync_summary(result):
     errors.extend(result.get("variant_sync_errors") or [])
     message = (
         "Sync New Products complete. "
+        f"Shopify products fetched: {int(result.get('products_fetched') or result.get('products_checked') or 0)}. "
         f"Shopify products checked: {int(result.get('products_checked') or 0)}. "
         f"New products inserted: {int(result.get('new_products_inserted') or 0)}. "
         f"Existing products updated safely: {int(result.get('existing_products_updated') or 0)}. "
@@ -1746,6 +1748,58 @@ def _render_ledger_diagnostics():
             st.caption(f"{label}: {int(counts.get(key) or 0)}")
 
 
+def _render_product_sync_diagnostics(backend, rows):
+    ui_count = len(rows or [])
+    if not backend or not hasattr(backend, "get_product_sync_diagnostics"):
+        st.caption("Source: Supabase ledger")
+        st.caption("Supabase connected: no")
+        st.caption(f"Current table count shown in UI: {ui_count}")
+        return
+    try:
+        diagnostics = backend.get_product_sync_diagnostics(ensure_schema_first=False)
+    except Exception as error:
+        st.caption("Source: Supabase ledger")
+        st.caption("Supabase connected: no")
+        st.caption(f"Product sync diagnostics unavailable: {error}")
+        st.caption(f"Current table count shown in UI: {ui_count}")
+        return
+
+    supabase_count = int(diagnostics.get("edition_products_count") or 0)
+    manual_result = st.session_state.get(MANUAL_PRODUCT_SYNC_RESULT_KEY) or diagnostics.get("last_product_sync_result") or {}
+    manual_errors = list((manual_result or {}).get("errors") or [])
+    manual_errors.extend((manual_result or {}).get("variant_sync_errors") or [])
+    st.caption(f"Source: {diagnostics.get('source') or 'Supabase ledger'}")
+    st.caption(f"Supabase connected: {'yes' if diagnostics.get('supabase_connected') else 'no'}")
+    st.caption(f"edition_products count: {supabase_count}")
+    st.caption(f"last product sync timestamp: {_format_time(diagnostics.get('last_product_sync_timestamp'))}")
+    st.caption(f"last product sync status: {diagnostics.get('last_product_sync_status') or 'Unknown'}")
+    st.caption(f"last product webhook timestamp: {_format_time(diagnostics.get('last_product_webhook_timestamp'))}")
+    st.caption(f"last product webhook status: {diagnostics.get('last_product_webhook_status') or 'Unknown'}")
+    if diagnostics.get("last_product_webhook_handle") or diagnostics.get("last_product_webhook_product"):
+        st.caption(
+            "last product webhook product: "
+            f"{diagnostics.get('last_product_webhook_handle') or diagnostics.get('last_product_webhook_product')}"
+        )
+    st.caption(
+        "manual sync result: "
+        f"fetched {int((manual_result or {}).get('products_fetched') or (manual_result or {}).get('products_checked') or 0)}, "
+        f"created {int((manual_result or {}).get('new_products_inserted') or 0)}, "
+        f"updated {int((manual_result or {}).get('existing_products_updated') or 0)}, "
+        f"skipped {int((manual_result or {}).get('existing_products_skipped') or 0)}, "
+        f"errors {len(manual_errors)}"
+    )
+    st.caption(f"current table count shown in UI: {ui_count}")
+    if diagnostics.get("error"):
+        st.warning(f"Product sync diagnostics warning: {diagnostics.get('error')}")
+    if diagnostics.get("last_product_webhook_error"):
+        st.warning(f"Last product webhook error: {diagnostics.get('last_product_webhook_error')}")
+    if supabase_count and supabase_count != ui_count:
+        st.warning(
+            f"UI table may be stale: Supabase has {supabase_count} edition product(s), "
+            f"but this page is showing {ui_count}."
+        )
+
+
 def _plural(value, singular, plural=None):
     return f"{value} {singular if int(value) == 1 else (plural or singular + 's')}"
 
@@ -1813,6 +1867,7 @@ def _render_advanced_controls(backend, rows):
     if not hasattr(st, "expander"):
         return
     with st.expander("Advanced", expanded=False):
+        _render_product_sync_diagnostics(backend, rows)
         action_cols = st.columns([1, 1, 1, 1])
         if action_cols[0].button("Sync New Products", use_container_width=True, disabled=not backend):
             sync_completed = False
@@ -1824,9 +1879,12 @@ def _render_advanced_controls(backend, rows):
                     if not config.get("configured"):
                         raise ValueError("Shopify is not configured.")
                     sync_result = backend.sync_new_shopify_products_to_edition_ops(config=config)
+                    st.session_state[MANUAL_PRODUCT_SYNC_RESULT_KEY] = sync_result
                     _reload_products_from_supabase()
                     st.session_state[NOTICE_KEY] = _format_shopify_product_sync_summary(sync_result)
-                    st.session_state[NOTICE_LEVEL_KEY] = "success"
+                    sync_errors = list(sync_result.get("errors") or [])
+                    sync_errors.extend(sync_result.get("variant_sync_errors") or [])
+                    st.session_state[NOTICE_LEVEL_KEY] = "warning" if sync_errors else "success"
                     sync_completed = True
             except Exception as error:
                 st.session_state[NOTICE_KEY] = f"Shopify product sync failed: {error}"

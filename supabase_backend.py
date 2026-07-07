@@ -37,6 +37,14 @@ LAST_ORDERS_PAID_WEBHOOK_MIRROR_KEY = "last_orders_paid_webhook_mirror_result"
 EDITION_TRACKING_START_KEY = "edition_tracking_start_at"
 LAST_SUCCESSFUL_PRODUCT_SYNC_KEY = "last_successful_product_sync_at"
 LAST_ATTEMPTED_PRODUCT_SYNC_KEY = "last_attempted_product_sync_at"
+LAST_PRODUCT_SYNC_STATUS_KEY = "last_product_sync_status"
+LAST_PRODUCT_SYNC_RESULT_KEY = "last_product_sync_result"
+LAST_PRODUCT_WEBHOOK_RECEIVED_KEY = "last_product_webhook_received_at"
+LAST_PRODUCT_WEBHOOK_PROCESSED_KEY = "last_product_webhook_processed_at"
+LAST_PRODUCT_WEBHOOK_PRODUCT_KEY = "last_product_webhook_product"
+LAST_PRODUCT_WEBHOOK_HANDLE_KEY = "last_product_webhook_handle"
+LAST_PRODUCT_WEBHOOK_RESULT_KEY = "last_product_webhook_result"
+LAST_PRODUCT_WEBHOOK_ERROR_KEY = "last_product_webhook_error"
 PRODUCT_INCREMENTAL_SYNC_STATE_KEY = "shopify_products_incremental_sync"
 SYNC_LOOKBACK_BUFFER_KEY = "sync_lookback_buffer_minutes"
 DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES = 10
@@ -2984,6 +2992,105 @@ def _apply_edition_product_incremental_plan(cur, actions):
     return summary
 
 
+def upsert_shopify_products_to_edition_products(
+    products,
+    *,
+    source="manual_sync",
+    config=None,
+    sync_inserted_metafields=False,
+    metafield_ensure_schema_first=None,
+    raise_on_apply_errors=False,
+):
+    """Shared Shopify product -> edition_products upsert path.
+
+    Existing rows only receive Shopify identity/display updates. Edition counters
+    remain owned by Edition Ops and order allocation.
+    """
+    active_draft_products = [product for product in (products or []) if _active_or_draft_product(product)]
+    summary = {
+        "source": source,
+        "products_checked": len(active_draft_products),
+        "new_products_inserted": 0,
+        "existing_products_updated": 0,
+        "existing_products_skipped": 0,
+        "shopify_metafields_pushed": 0,
+        "shopify_metafields_failed_pending": 0,
+        "errors": [],
+        "variant_sync_errors": [],
+        "inserted_handles": [],
+        "updated_handles": [],
+    }
+    if not active_draft_products:
+        return summary
+
+    with connect() as conn:
+        with conn.cursor() as cur:
+            existing_rows = _candidate_edition_products_for_shopify_products(cur, active_draft_products)
+            actions = _plan_edition_product_incremental_sync(active_draft_products, existing_rows)
+            apply_summary = _apply_edition_product_incremental_plan(cur, actions)
+        conn.commit()
+
+    summary.update(
+        {
+            "new_products_inserted": int(apply_summary.get("new_products_inserted") or 0),
+            "existing_products_updated": int(apply_summary.get("existing_products_updated") or 0),
+            "existing_products_skipped": int(apply_summary.get("existing_products_skipped") or 0),
+            "variant_sync_errors": list(apply_summary.get("variant_sync_errors") or []),
+            "inserted_handles": list(apply_summary.get("inserted_handles") or []),
+            "updated_handles": list(apply_summary.get("updated_handles") or []),
+        }
+    )
+    summary["errors"].extend(apply_summary.get("errors") or [])
+    if raise_on_apply_errors and summary["errors"]:
+        raise RuntimeError("; ".join(summary["errors"][:3]))
+
+    inserted_handles = summary.get("inserted_handles") or []
+    if sync_inserted_metafields and inserted_handles:
+        try:
+            metafield_kwargs = {"config": config}
+            if metafield_ensure_schema_first is not None:
+                metafield_kwargs["ensure_schema_first"] = metafield_ensure_schema_first
+            metafield_result = sync_product_edition_metafields_for_handles(inserted_handles, **metafield_kwargs)
+            summary["shopify_metafields_pushed"] = int(metafield_result.get("synced") or 0)
+            summary["shopify_metafields_failed_pending"] = int(
+                metafield_result.get("skipped") or metafield_result.get("failed") or 0
+            )
+            summary["errors"].extend(metafield_result.get("errors") or [])
+            summary["product_metafield_mirror"] = metafield_result
+        except Exception as mirror_error:
+            summary["shopify_metafields_failed_pending"] = len(inserted_handles)
+            summary["errors"].append(str(mirror_error))
+            summary["product_metafield_mirror"] = {
+                "attempted": len(inserted_handles),
+                "synced": 0,
+                "skipped": len(inserted_handles),
+                "errors": [str(mirror_error)],
+                "results": [],
+            }
+            for handle in inserted_handles:
+                try:
+                    _mark_product_metafields_sync(
+                        handle,
+                        {
+                            "shopify_handle": handle,
+                            "edition_name": DEFAULT_EDITION_NAME,
+                            "edition_total": 100,
+                            "next_edition_number": 1,
+                            "last_assigned_edition": 0,
+                            "sold_count": 0,
+                            "remaining_count": 100,
+                            "edition_status": "limited_release",
+                            "edition_display_text": format_edition_display_number(1, 100),
+                            "is_sold_out": False,
+                        },
+                        "Failed",
+                        str(mirror_error),
+                    )
+                except Exception:
+                    pass
+    return summary
+
+
 def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None, *, lookback_hours=DEFAULT_PRODUCT_SYNC_LOOKBACK_HOURS):
     """Incrementally onboard Shopify active/draft products into Edition Ops without touching orders."""
     ensure_schema()
@@ -2994,6 +3101,7 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
     products_seen = 0
     active_draft_products = []
     summary = {
+        "products_fetched": 0,
         "products_checked": 0,
         "new_products_inserted": 0,
         "existing_products_updated": 0,
@@ -3008,7 +3116,6 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
     try:
         with connect() as conn:
             with conn.cursor() as cur:
-                state = _read_product_incremental_sync_state(cur)
                 _write_product_incremental_sync_state(
                     cur,
                     status="running",
@@ -3017,17 +3124,8 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
                 )
             conn.commit()
 
-        fallback_state = get_sync_state(ensure_schema_first=False)
-        last_success = _parse_datetime(state.get("last_successful_product_sync_at")) or _parse_datetime(
-            fallback_state.get("last_successful_product_sync_at")
-        )
-        lookback_delta = timedelta(hours=max(int(lookback_hours or DEFAULT_PRODUCT_SYNC_LOOKBACK_HOURS), 1))
-        if not last_success:
-            sync_from = attempted_at - lookback_delta
-        else:
-            sync_from = last_success - lookback_delta
-        search = _incremental_product_sync_query(sync_from)
-        summary["sync_from"] = _datetime_to_setting(sync_from)
+        search = "(status:active OR status:draft)"
+        summary["sync_from"] = ""
         summary["shopify_query"] = search
 
         for page in shopify_sync.iter_catalog_pages(search=search, page_size=50, config=config):
@@ -3036,31 +3134,27 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
             active_draft_products.extend([product for product in page_products if _active_or_draft_product(product)])
             if progress_callback:
                 progress_callback(products_seen)
+        summary["products_fetched"] = products_seen
         summary["products_checked"] = len(active_draft_products)
 
-        with connect() as conn:
-            with conn.cursor() as cur:
-                existing_rows = _candidate_edition_products_for_shopify_products(cur, active_draft_products)
-                actions = _plan_edition_product_incremental_sync(active_draft_products, existing_rows)
-                apply_summary = _apply_edition_product_incremental_plan(cur, actions)
-                conn.commit()
-
+        upsert_summary = upsert_shopify_products_to_edition_products(
+            active_draft_products,
+            source="manual_sync",
+            config=config,
+            sync_inserted_metafields=True,
+        )
         summary.update(
             {
-                "new_products_inserted": apply_summary.get("new_products_inserted", 0),
-                "existing_products_updated": apply_summary.get("existing_products_updated", 0),
-                "existing_products_skipped": apply_summary.get("existing_products_skipped", 0),
-                "variant_sync_errors": apply_summary.get("variant_sync_errors", []),
+                "products_checked": upsert_summary.get("products_checked", summary["products_checked"]),
+                "new_products_inserted": upsert_summary.get("new_products_inserted", 0),
+                "existing_products_updated": upsert_summary.get("existing_products_updated", 0),
+                "existing_products_skipped": upsert_summary.get("existing_products_skipped", 0),
+                "shopify_metafields_pushed": upsert_summary.get("shopify_metafields_pushed", 0),
+                "shopify_metafields_failed_pending": upsert_summary.get("shopify_metafields_failed_pending", 0),
+                "variant_sync_errors": upsert_summary.get("variant_sync_errors", []),
             }
         )
-        summary["errors"].extend(apply_summary.get("errors", []))
-
-        inserted_handles = apply_summary.get("inserted_handles") or []
-        if inserted_handles:
-            metafield_result = sync_product_edition_metafields_for_handles(inserted_handles, config=config)
-            summary["shopify_metafields_pushed"] = int(metafield_result.get("synced") or 0)
-            summary["shopify_metafields_failed_pending"] = int(metafield_result.get("skipped") or metafield_result.get("failed") or 0)
-            summary["errors"].extend(metafield_result.get("errors") or [])
+        summary["errors"].extend(upsert_summary.get("errors", []))
 
         successful_at = utc_now_datetime()
         with connect() as conn:
@@ -3071,10 +3165,16 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
                     summary=summary,
                     attempted_at=attempted_at,
                     successful_at=successful_at,
-                )
+            )
             conn.commit()
         set_app_setting(LAST_SUCCESSFUL_PRODUCT_SYNC_KEY, _datetime_to_setting(successful_at), ensure_schema_first=False)
         set_app_setting(LAST_ATTEMPTED_PRODUCT_SYNC_KEY, _datetime_to_setting(attempted_at), ensure_schema_first=False)
+        set_app_setting(
+            LAST_PRODUCT_SYNC_STATUS_KEY,
+            "complete_with_warnings" if summary["errors"] else "complete",
+            ensure_schema_first=False,
+        )
+        set_app_setting(LAST_PRODUCT_SYNC_RESULT_KEY, json_dumps(summary), ensure_schema_first=False)
         finish_sync_run(
             run_id,
             "Complete With Warnings" if summary["errors"] else "Complete",
@@ -3094,6 +3194,13 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
                     error_message=str(error),
                 )
             conn.commit()
+        try:
+            set_app_setting(LAST_PRODUCT_SYNC_STATUS_KEY, "failed", ensure_schema_first=False)
+            failed_summary = dict(summary)
+            failed_summary["errors"] = list(failed_summary.get("errors") or []) + [str(error)]
+            set_app_setting(LAST_PRODUCT_SYNC_RESULT_KEY, json_dumps(failed_summary), ensure_schema_first=False)
+        except Exception:
+            pass
         finish_sync_run(run_id, "Failed", products_seen, 0, "Shopify product incremental sync failed.")
         log_app_error("shopify_product_incremental_sync_failed", str(error), {"products_seen": products_seen})
         raise
@@ -12081,6 +12188,7 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             }
 
     _update_webhook_event_status(webhook_id, "processing")
+    _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_RECEIVED_KEY, utc_now())
     try:
         product = _normalize_shopify_product_create_payload(payload)
         _webhook_log(
@@ -12110,61 +12218,37 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
                 skipped_count=1,
                 processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
             )
+            _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_PROCESSED_KEY, utc_now())
+            _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_PRODUCT_KEY, product.get("shopify_product_id") or "")
+            _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_HANDLE_KEY, product.get("handle") or "")
+            _set_webhook_app_setting(
+                LAST_PRODUCT_WEBHOOK_RESULT_KEY,
+                json_dumps({"status": "skipped", "topic": topic, "reason": result.get("reason") or ""}),
+            )
+            _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_ERROR_KEY, "")
             return result
 
-        with connect() as conn:
-            with conn.cursor() as cur:
-                existing_rows = _candidate_edition_products_for_shopify_products(cur, [product])
-                actions = _plan_edition_product_incremental_sync([product], existing_rows)
-                apply_summary = _apply_edition_product_incremental_plan(cur, actions)
-            conn.commit()
-
-        inserted_handles = apply_summary.get("inserted_handles") or []
-        mirror_result = {"attempted": 0, "synced": 0, "skipped": 0, "errors": [], "results": []}
-        if inserted_handles:
-            try:
-                mirror_result = sync_product_edition_metafields_for_handles(
-                    inserted_handles,
-                    config=config,
-                    ensure_schema_first=False,
-                )
-            except Exception as mirror_error:
-                mirror_result = {
-                    "attempted": len(inserted_handles),
-                    "synced": 0,
-                    "skipped": len(inserted_handles),
-                    "errors": [str(mirror_error)],
-                    "results": [],
-                }
-                for handle in inserted_handles:
-                    try:
-                        _mark_product_metafields_sync(
-                            handle,
-                            {
-                                "shopify_handle": handle,
-                                "edition_name": DEFAULT_EDITION_NAME,
-                                "edition_total": 100,
-                                "next_edition_number": 1,
-                                "last_assigned_edition": 0,
-                                "sold_count": 0,
-                                "remaining_count": 100,
-                                "edition_status": "limited_release",
-                                "edition_display_text": format_edition_display_number(1, 100),
-                                "is_sold_out": False,
-                            },
-                            "Failed",
-                            str(mirror_error),
-                        )
-                    except Exception:
-                        pass
-
+        apply_summary = upsert_shopify_products_to_edition_products(
+            [product],
+            source="webhook",
+            config=config,
+            sync_inserted_metafields=True,
+            metafield_ensure_schema_first=False,
+            raise_on_apply_errors=True,
+        )
         errors = list(apply_summary.get("errors") or [])
         errors.extend(apply_summary.get("variant_sync_errors") or [])
-        errors.extend(mirror_result.get("errors") or [])
         status = "processed" if not errors else "processed_with_warnings"
         inserted_count = int(apply_summary.get("new_products_inserted") or 0)
         updated_count = int(apply_summary.get("existing_products_updated") or 0)
         skipped_count = int(apply_summary.get("existing_products_skipped") or 0)
+        mirror_result = apply_summary.get("product_metafield_mirror") or {
+            "attempted": 0,
+            "synced": 0,
+            "skipped": 0,
+            "errors": [],
+            "results": [],
+        }
         result = {
             "source": "webhook",
             "duplicate": False,
@@ -12186,9 +12270,27 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             error_message="\n".join(errors),
             inserted_count=inserted_count,
             skipped_count=skipped_count,
-            affected_handles_count=len(set((apply_summary.get("inserted_handles") or []) + (apply_summary.get("updated_handles") or []))),
+            affected_handles_count=len(
+                set((apply_summary.get("inserted_handles") or []) + (apply_summary.get("updated_handles") or []))
+            ),
             processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
         )
+        _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_PROCESSED_KEY, utc_now())
+        _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_PRODUCT_KEY, product.get("shopify_product_id") or "")
+        _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_HANDLE_KEY, product.get("handle") or "")
+        _set_webhook_app_setting(
+            LAST_PRODUCT_WEBHOOK_RESULT_KEY,
+            json_dumps(
+                {
+                    "status": status,
+                    "topic": topic,
+                    "new_products_inserted": inserted_count,
+                    "existing_products_updated": updated_count,
+                    "existing_products_skipped": skipped_count,
+                }
+            ),
+        )
+        _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_ERROR_KEY, "\n".join(errors))
         _webhook_log(
             "webhook_product_processing_finished",
             "completed" if not errors else "processed_with_warnings",
@@ -12209,6 +12311,7 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             error_message=message,
             processing_elapsed_ms=int((time.perf_counter() - started) * 1000),
         )
+        _set_webhook_app_setting(LAST_PRODUCT_WEBHOOK_ERROR_KEY, message)
         _webhook_log("webhook_product_processing_failed", "failed", webhook_id=webhook_id, topic=topic, error=message)
         raise RuntimeError(message) from error
 
@@ -12568,6 +12671,130 @@ def get_orders_paid_webhook_status(*, ensure_schema_first=True):
         }
     )
     return status
+
+
+def get_product_sync_diagnostics(*, ensure_schema_first=True):
+    if ensure_schema_first:
+        ensure_schema()
+    diagnostics = {
+        "source": "Supabase ledger",
+        "supabase_configured": is_configured(),
+        "supabase_connected": False,
+        "edition_products_count": 0,
+        "last_product_sync_timestamp": "",
+        "last_product_sync_status": "",
+        "last_product_sync_result": {},
+        "last_product_webhook_timestamp": "",
+        "last_product_webhook_status": "",
+        "last_product_webhook_product": "",
+        "last_product_webhook_handle": "",
+        "last_product_webhook_error": "",
+        "last_webhook_event": {},
+        "error": "",
+    }
+    if not diagnostics["supabase_configured"]:
+        diagnostics["error"] = "Supabase is not configured."
+        return diagnostics
+
+    app_setting_keys = (
+        LAST_SUCCESSFUL_PRODUCT_SYNC_KEY,
+        LAST_ATTEMPTED_PRODUCT_SYNC_KEY,
+        LAST_PRODUCT_SYNC_STATUS_KEY,
+        LAST_PRODUCT_SYNC_RESULT_KEY,
+        LAST_PRODUCT_WEBHOOK_RECEIVED_KEY,
+        LAST_PRODUCT_WEBHOOK_PROCESSED_KEY,
+        LAST_PRODUCT_WEBHOOK_PRODUCT_KEY,
+        LAST_PRODUCT_WEBHOOK_HANDLE_KEY,
+        LAST_PRODUCT_WEBHOOK_RESULT_KEY,
+        LAST_PRODUCT_WEBHOOK_ERROR_KEY,
+    )
+    try:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                diagnostics["supabase_connected"] = True
+                cur.execute("SELECT COUNT(*) AS count FROM edition_products")
+                diagnostics["edition_products_count"] = int((cur.fetchone() or {}).get("count") or 0)
+                cur.execute("SELECT key, value FROM app_settings WHERE key = ANY(%s)", (list(app_setting_keys),))
+                settings = {row.get("key"): row.get("value") for row in cur.fetchall()}
+                cur.execute(
+                    """
+                    SELECT value, last_success_at, last_attempt_at, status, error_message, updated_at
+                    FROM app_sync_state
+                    WHERE key=%s
+                    """,
+                    (PRODUCT_INCREMENTAL_SYNC_STATE_KEY,),
+                )
+                sync_state = cur.fetchone() or {}
+                cur.execute(
+                    """
+                    SELECT webhook_id, topic, status, received_at, processed_at, error_message
+                    FROM webhook_events
+                    WHERE topic ILIKE %s
+                       OR topic ILIKE %s
+                       OR topic ILIKE %s
+                       OR topic ILIKE %s
+                    ORDER BY received_at DESC
+                    LIMIT 1
+                    """,
+                    ("products/create", "PRODUCTS_CREATE", "products/update", "PRODUCTS_UPDATE"),
+                )
+                diagnostics["last_webhook_event"] = cur.fetchone() or {}
+    except Exception as error:
+        schema_message = webhook_schema_error_message(error) or orders_sync_schema_error_message(error)
+        if schema_message:
+            raise RuntimeError(schema_message) from error
+        diagnostics["error"] = str(error)
+        return diagnostics
+
+    sync_value = sync_state.get("value") or {}
+    if isinstance(sync_value, str):
+        try:
+            sync_value = json.loads(sync_value)
+        except ValueError:
+            sync_value = {}
+    sync_value = sync_value if isinstance(sync_value, dict) else {}
+    webhook_result = settings.get(LAST_PRODUCT_WEBHOOK_RESULT_KEY) or {}
+    if isinstance(webhook_result, str):
+        try:
+            webhook_result = json.loads(webhook_result)
+        except ValueError:
+            webhook_result = {"status": webhook_result}
+    webhook_result = webhook_result if isinstance(webhook_result, dict) else {}
+    sync_result = settings.get(LAST_PRODUCT_SYNC_RESULT_KEY) or sync_value or {}
+    if isinstance(sync_result, str):
+        try:
+            sync_result = json.loads(sync_result)
+        except ValueError:
+            sync_result = {"status": sync_result}
+    sync_result = sync_result if isinstance(sync_result, dict) else {}
+    webhook_event = diagnostics.get("last_webhook_event") or {}
+    diagnostics.update(
+        {
+            "last_product_sync_timestamp": (
+                _datetime_to_setting(sync_state.get("last_success_at"))
+                if sync_state.get("last_success_at")
+                else settings.get(LAST_SUCCESSFUL_PRODUCT_SYNC_KEY, "")
+            ),
+            "last_product_sync_attempted_at": (
+                _datetime_to_setting(sync_state.get("last_attempt_at"))
+                if sync_state.get("last_attempt_at")
+                else settings.get(LAST_ATTEMPTED_PRODUCT_SYNC_KEY, "")
+            ),
+            "last_product_sync_status": sync_state.get("status") or settings.get(LAST_PRODUCT_SYNC_STATUS_KEY, ""),
+            "last_product_sync_result": sync_result,
+            "last_product_sync_error": sync_state.get("error_message") or "",
+            "last_product_webhook_timestamp": (
+                settings.get(LAST_PRODUCT_WEBHOOK_PROCESSED_KEY)
+                or settings.get(LAST_PRODUCT_WEBHOOK_RECEIVED_KEY)
+                or _datetime_to_setting(webhook_event.get("processed_at") or webhook_event.get("received_at"))
+            ),
+            "last_product_webhook_status": webhook_result.get("status") or webhook_event.get("status") or "",
+            "last_product_webhook_product": settings.get(LAST_PRODUCT_WEBHOOK_PRODUCT_KEY, ""),
+            "last_product_webhook_handle": settings.get(LAST_PRODUCT_WEBHOOK_HANDLE_KEY, ""),
+            "last_product_webhook_error": settings.get(LAST_PRODUCT_WEBHOOK_ERROR_KEY, "") or webhook_event.get("error_message") or "",
+        }
+    )
+    return diagnostics
 
 
 def _normalize_cached_order_snapshot(raw_value):
