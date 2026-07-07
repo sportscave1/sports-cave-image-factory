@@ -4,16 +4,16 @@ import re
 
 SPORTS_CAVE_AU_PRICE_LADDER = {
     "framed": {
-        "XL": {"price": "349.00", "compare_at_price": "429.00"},
-        "L": {"price": "269.00", "compare_at_price": "329.00"},
-        "M": {"price": "209.00", "compare_at_price": "259.00"},
-        "S": {"price": "159.00", "compare_at_price": "199.00"},
+        "XL": {"price": "329.00", "compare_at_price": "429.00"},
+        "L": {"price": "249.00", "compare_at_price": "329.00"},
+        "M": {"price": "199.00", "compare_at_price": "259.00"},
+        "S": {"price": "149.00", "compare_at_price": "199.00"},
     },
     "unframed": {
-        "XL": {"price": "159.00", "compare_at_price": "199.00"},
-        "L": {"price": "119.00", "compare_at_price": "149.00"},
-        "M": {"price": "89.00", "compare_at_price": "109.00"},
-        "S": {"price": "55.00", "compare_at_price": "69.00"},
+        "XL": {"price": "149.00", "compare_at_price": "199.00"},
+        "L": {"price": "109.00", "compare_at_price": "149.00"},
+        "M": {"price": "79.00", "compare_at_price": "109.00"},
+        "S": {"price": "49.00", "compare_at_price": "64.00"},
     },
 }
 
