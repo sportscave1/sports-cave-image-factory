@@ -1,15 +1,199 @@
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 
 
 BASE_DIR = Path(__file__).resolve().parent
 PROMPT_OVERRIDES_PATH = BASE_DIR / "output" / "_cache" / "prompt_overrides.json"
-PROMPT_STORE_VERSION = 1
+PROMPT_STORE_VERSION = 2
+ENABLE_LOCAL_PROMPT_FILE_WRITES = (
+    os.getenv("ENABLE_LOCAL_PROMPT_FILE_WRITES", "").strip().casefold() == "true"
+)
+
+SOURCE_SUPABASE = "supabase_saved"
+SOURCE_DEFAULT = "default_fallback"
+SOURCE_UNAVAILABLE = "supabase_unavailable"
 
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _local_file_enabled():
+    return os.getenv("ENABLE_LOCAL_PROMPT_FILE_WRITES", "").strip().casefold() == "true"
+
+
+def clear_prompt_cache():
+    try:
+        _load_prompt_from_supabase.cache_clear()
+    except AttributeError:
+        pass
+
+
+def source_label(source):
+    if source == SOURCE_SUPABASE:
+        return "Source: Supabase saved"
+    if source == SOURCE_DEFAULT:
+        return "Source: Default file fallback"
+    return "Not persisted — Supabase unavailable"
+
+
+def _default_record(prompt_id, default_text, *, warning=""):
+    return {
+        "prompt_key": str(prompt_id or "").strip(),
+        "prompt_name": "",
+        "module": "",
+        "text": str(default_text or ""),
+        "prompt_text": str(default_text or ""),
+        "source": SOURCE_UNAVAILABLE if warning else SOURCE_DEFAULT,
+        "source_label": source_label(SOURCE_UNAVAILABLE if warning else SOURCE_DEFAULT),
+        "persisted": False,
+        "warning": warning,
+    }
+
+
+def _supabase_backend():
+    import supabase_backend
+
+    return supabase_backend
+
+
+def _load_prompt_from_supabase(prompt_id):
+    backend = _supabase_backend()
+    if not backend.is_configured():
+        raise backend.SupabaseNotConfigured("Supabase/Postgres is not configured.")
+    backend.ensure_prompt_template_schema()
+    return backend.get_prompt_template(prompt_id)
+
+
+try:
+    from functools import lru_cache
+
+    _load_prompt_from_supabase = lru_cache(maxsize=512)(_load_prompt_from_supabase)
+except Exception:
+    pass
+
+
+def _upsert_prompt_to_supabase(prompt_id, title, text, *, module="", updated_by="sports_cave_os", source="supabase"):
+    backend = _supabase_backend()
+    if not backend.is_configured():
+        raise backend.SupabaseNotConfigured("Supabase/Postgres is not configured.")
+    backend.ensure_prompt_template_schema()
+    clear_prompt_cache()
+    record = backend.upsert_prompt_template(
+        prompt_id,
+        prompt_name=title,
+        module=module,
+        prompt_text=text,
+        updated_by=updated_by,
+        source=source,
+    )
+    clear_prompt_cache()
+    return record
+
+
+def load_prompt(prompt_id, default_text="", *, prompt_name="", module="", seed_default=True):
+    prompt_id = str(prompt_id or "").strip()
+    if not prompt_id:
+        return _default_record(prompt_id, default_text, warning="Prompt key is missing.")
+
+    try:
+        record = _load_prompt_from_supabase(prompt_id) or {}
+        prompt_text = record.get("prompt_text")
+        if isinstance(prompt_text, str) and prompt_text.strip():
+            return {
+                **record,
+                "text": prompt_text,
+                "source": SOURCE_SUPABASE,
+                "source_label": source_label(SOURCE_SUPABASE),
+                "persisted": True,
+                "warning": "",
+            }
+        if seed_default and str(default_text or "").strip():
+            seeded = _upsert_prompt_to_supabase(
+                prompt_id,
+                prompt_name or prompt_id,
+                str(default_text or ""),
+                module=module,
+                updated_by="system_seed",
+                source="default_seed",
+            )
+            prompt_text = seeded.get("prompt_text") or str(default_text or "")
+            return {
+                **seeded,
+                "text": prompt_text,
+                "source": SOURCE_SUPABASE,
+                "source_label": source_label(SOURCE_SUPABASE),
+                "persisted": True,
+                "warning": "",
+            }
+    except Exception as error:
+        return _default_record(
+            prompt_id,
+            default_text,
+            warning=(
+                "Supabase prompt storage is unavailable. This prompt is using the default "
+                "fallback and edits will not persist permanently."
+            ),
+        )
+
+    return _default_record(prompt_id, default_text)
+
+
+def get_prompt_record(prompt_id, default_text="", **kwargs):
+    return load_prompt(prompt_id, default_text, **kwargs)
+
+
+def get_prompt(prompt_id, default_text):
+    return load_prompt(prompt_id, default_text).get("text") or ""
+
+
+def get_prompt_source(prompt_id, default_text="", **kwargs):
+    return load_prompt(prompt_id, default_text, **kwargs)
+
+
+def save_prompt(prompt_id, title, text, *, module="", updated_by="sports_cave_os"):
+    prompt_id = str(prompt_id or "").strip()
+    if not prompt_id:
+        raise ValueError("Prompt ID is missing.")
+    edited_text = str(text or "")
+    if not edited_text.strip():
+        raise ValueError("Prompt text is empty.")
+    try:
+        record = _upsert_prompt_to_supabase(
+            prompt_id,
+            str(title or prompt_id),
+            edited_text,
+            module=module,
+            updated_by=updated_by,
+            source="supabase",
+        )
+        return {
+            **record,
+            "text": record.get("prompt_text") or edited_text,
+            "source": SOURCE_SUPABASE,
+            "source_label": source_label(SOURCE_SUPABASE),
+            "persisted": True,
+            "warning": "",
+        }
+    except Exception:
+        if _local_file_enabled():
+            return _save_prompt_local_dev_only(prompt_id, title, edited_text)
+        raise RuntimeError(
+            "Prompt was not saved. Supabase prompt storage is unavailable, so this edit "
+            "would not persist after Render restart or redeploy."
+        )
+
+
+def reset_prompt_to_default(prompt_id, title, default_text, *, module="", updated_by="sports_cave_os"):
+    return save_prompt(
+        prompt_id,
+        title,
+        str(default_text or ""),
+        module=module,
+        updated_by=updated_by,
+    )
 
 
 def load_prompt_store():
@@ -27,7 +211,20 @@ def load_prompt_store():
     return payload
 
 
+def _atomic_write_text(path, text):
+    path = Path(path).resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    tmp_path.write_text(text, encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
 def save_prompt_store(payload):
+    if not _local_file_enabled():
+        raise RuntimeError(
+            "Local prompt file writes are disabled. Set ENABLE_LOCAL_PROMPT_FILE_WRITES=true "
+            "for local development only."
+        )
     store = {"version": PROMPT_STORE_VERSION, "prompts": {}}
     if isinstance(payload, dict):
         store.update(payload)
@@ -35,30 +232,11 @@ def save_prompt_store(payload):
         store["prompts"] = {}
     store["version"] = PROMPT_STORE_VERSION
     store["updated_at"] = now_iso()
-    PROMPT_OVERRIDES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    PROMPT_OVERRIDES_PATH.write_text(json.dumps(store, indent=2, sort_keys=True), encoding="utf-8")
+    _atomic_write_text(PROMPT_OVERRIDES_PATH, json.dumps(store, indent=2, sort_keys=True))
     return store
 
 
-def get_prompt_record(prompt_id):
-    prompt_id = str(prompt_id or "").strip()
-    if not prompt_id:
-        return {}
-    return dict((load_prompt_store().get("prompts") or {}).get(prompt_id) or {})
-
-
-def get_prompt(prompt_id, default_text):
-    record = get_prompt_record(prompt_id)
-    override = record.get("text")
-    if isinstance(override, str) and override.strip():
-        return override
-    return str(default_text or "")
-
-
-def save_prompt(prompt_id, title, text):
-    prompt_id = str(prompt_id or "").strip()
-    if not prompt_id:
-        raise ValueError("Prompt ID is missing.")
+def _save_prompt_local_dev_only(prompt_id, title, text):
     store = load_prompt_store()
     prompts = dict(store.get("prompts") or {})
     prompts[prompt_id] = {
@@ -67,4 +245,14 @@ def save_prompt(prompt_id, title, text):
         "updated_at": now_iso(),
     }
     store["prompts"] = prompts
-    return save_prompt_store(store)["prompts"][prompt_id]
+    saved = save_prompt_store(store)["prompts"][prompt_id]
+    return {
+        **saved,
+        "prompt_key": prompt_id,
+        "prompt_name": saved.get("title") or prompt_id,
+        "prompt_text": saved.get("text") or "",
+        "source": SOURCE_UNAVAILABLE,
+        "source_label": "Not persisted — Supabase unavailable",
+        "persisted": False,
+        "warning": "Saved to local development file only. Render will not persist this change.",
+    }

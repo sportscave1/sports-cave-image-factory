@@ -452,6 +452,7 @@ query SportsCaveProducts($first: Int!, $after: String, $query: String) {
           title
           sku
           price
+          compareAtPrice
           inventoryQuantity
           selectedOptions {
             name
@@ -580,6 +581,7 @@ query SportsCaveProductById($id: ID!) {
         title
         sku
         price
+        compareAtPrice
         inventoryQuantity
         selectedOptions {
           name
@@ -668,6 +670,7 @@ def normalize_product(node, store_domain):
                 "title": item.get("title") or "",
                 "sku": item.get("sku") or "",
                 "price": str(item.get("price") or ""),
+                "compare_at_price": str(item.get("compareAtPrice") or ""),
                 "inventory_quantity": item.get("inventoryQuantity"),
                 "selected_options": item.get("selectedOptions") or [],
             }
@@ -998,6 +1001,48 @@ def fetch_product_by_shopify_id(shopify_product_id, config=None, request_post=No
     return normalized
 
 
+def update_product_variant_prices(product_id, variant_updates, config=None, request_post=None):
+    product_gid = shopify_gid("Product", product_id)
+    if not product_gid:
+        raise ShopifyAPIError("Shopify product ID is missing.")
+    variants = []
+    for update in variant_updates or []:
+        variant_id = str(update.get("variant_id") or update.get("id") or "").strip()
+        price = str(update.get("new_price") or update.get("price") or "").strip()
+        compare_at_price = str(
+            update.get("new_compare_at_price")
+            or update.get("compare_at_price")
+            or update.get("compareAtPrice")
+            or ""
+        ).strip()
+        if not variant_id:
+            raise ShopifyAPIError("Shopify variant ID is missing.")
+        variants.append(
+            {
+                "id": variant_id,
+                "price": price,
+                "compareAtPrice": compare_at_price,
+            }
+        )
+    if not variants:
+        return {"updated": 0, "variants": []}
+    data, served_version = graphql_request(
+        PRODUCT_VARIANTS_BULK_UPDATE_PRICES_MUTATION,
+        variables={"productId": product_gid, "variants": variants},
+        config=config,
+        request_post=request_post,
+    )
+    result = data.get("productVariantsBulkUpdate") or {}
+    errors = result.get("userErrors") or []
+    if errors:
+        raise ShopifyAPIError(_metafields_user_error_text(errors))
+    return {
+        "updated": len(result.get("productVariants") or variants),
+        "variants": result.get("productVariants") or [],
+        "api_version": served_version or (config or {}).get("api_version"),
+    }
+
+
 METAFIELDS_SET_MUTATION = """
 mutation SportsCaveSetEditionMetafields($metafields: [MetafieldsSetInput!]!) {
   metafieldsSet(metafields: $metafields) {
@@ -1008,6 +1053,23 @@ mutation SportsCaveSetEditionMetafields($metafields: [MetafieldsSetInput!]!) {
       type
       value
       compareDigest
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+"""
+
+
+PRODUCT_VARIANTS_BULK_UPDATE_PRICES_MUTATION = """
+mutation SportsCaveUpdateVariantPrices($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+  productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+    productVariants {
+      id
+      price
+      compareAtPrice
     }
     userErrors {
       field

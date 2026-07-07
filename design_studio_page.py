@@ -839,13 +839,21 @@ def _render_copy_button(prompt_text: str, key: str):
     )
 
 
-def _render_prompt_editor(label: str, prompt_id: str, prompt_text: str, key: str, developer_password: str | None):
+def _render_prompt_editor(label: str, prompt_id: str, prompt_text: str, key: str, developer_password: str | None, default_text: str | None = None):
     editor_key = f"design-studio-edit-open::{key}"
     if not st.session_state.get(editor_key):
         return
 
     with st.container(border=True):
-        st.caption("Developer only. Saving writes this prompt override to backend storage.")
+        source_record = prompt_store.get_prompt_source(
+            prompt_id,
+            prompt_text,
+            prompt_name=label,
+            module="design_studio",
+        )
+        st.caption(f"Developer only. {source_record.get('source_label')}")
+        if source_record.get("warning"):
+            st.warning(source_record["warning"])
         edited_prompt = st.text_area(
             "Edit prompt",
             value=prompt_text,
@@ -864,13 +872,47 @@ def _render_prompt_editor(label: str, prompt_id: str, prompt_text: str, key: str
             elif not _developer_password_matches(password, developer_password):
                 st.error("Developer password is incorrect.")
             else:
-                prompt_store.save_prompt(prompt_id, label, edited_prompt)
-                st.session_state[editor_key] = False
-                st.success("Prompt saved to backend.")
-                st.rerun()
+                try:
+                    saved = prompt_store.save_prompt(prompt_id, label, edited_prompt, module="design_studio")
+                except Exception as error:
+                    st.error(str(error))
+                else:
+                    st.session_state[editor_key] = False
+                    if saved.get("persisted"):
+                        st.success(saved.get("source_label") or "Source: Supabase saved")
+                    else:
+                        st.warning(saved.get("warning") or saved.get("source_label"))
+                    st.rerun()
         if cancel_col.button("Cancel", key=f"design-studio-edit-cancel::{key}", use_container_width=True):
             st.session_state[editor_key] = False
             st.rerun()
+        if default_text is not None:
+            reset_confirmation = st.text_input(
+                "Type RESET PROMPT to restore the default prompt",
+                key=f"design-studio-reset-confirm::{key}",
+            )
+            if st.button(
+                "Reset to default prompt",
+                key=f"design-studio-reset::{key}",
+                disabled=reset_confirmation != "RESET PROMPT",
+                use_container_width=True,
+            ):
+                try:
+                    saved = prompt_store.reset_prompt_to_default(
+                        prompt_id,
+                        label,
+                        default_text,
+                        module="design_studio",
+                    )
+                except Exception as error:
+                    st.error(str(error))
+                else:
+                    st.session_state[editor_key] = False
+                    if saved.get("persisted"):
+                        st.success(saved.get("source_label") or "Source: Supabase saved")
+                    else:
+                        st.warning(saved.get("warning") or saved.get("source_label"))
+                    st.rerun()
 
 
 def render_copy_prompt_box(
@@ -881,9 +923,17 @@ def render_copy_prompt_box(
 ):
     prompt_id = _design_studio_prompt_id(key)
     effective_prompt = prompt_store.get_prompt(prompt_id, _clean_prompt(default_prompt_text))
+    source_record = prompt_store.get_prompt_source(
+        prompt_id,
+        _clean_prompt(default_prompt_text),
+        prompt_name=label,
+        module="design_studio",
+    )
 
     st.markdown(f"**{label}**")
-    st.caption("Copy this prompt, paste it into ChatGPT inside the Sports Cave Designs project.")
+    st.caption(source_record.get("source_label") or "Copy this prompt, paste it into ChatGPT inside the Sports Cave Designs project.")
+    if source_record.get("warning"):
+        st.warning(source_record["warning"])
     st.text_area(
         label,
         value=effective_prompt,
@@ -906,7 +956,14 @@ def render_copy_prompt_box(
         st.session_state[f"design-studio-edit-open::{key}"] = True
         st.rerun()
 
-    _render_prompt_editor(label, prompt_id, effective_prompt, key, developer_password)
+    _render_prompt_editor(
+        label,
+        prompt_id,
+        effective_prompt,
+        key,
+        developer_password,
+        default_text=_clean_prompt(default_prompt_text),
+    )
 
 
 def _render_prompt_box(name, prompt, key, developer_password):

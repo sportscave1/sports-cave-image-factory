@@ -578,6 +578,45 @@ def _safe_create_index(cur, sql, index_name):
         )
 
 
+def _create_prompt_template_tables(cur):
+    cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prompt_templates (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            prompt_key TEXT UNIQUE NOT NULL,
+            prompt_name TEXT,
+            module TEXT,
+            prompt_text TEXT NOT NULL,
+            source TEXT DEFAULT 'supabase',
+            updated_by TEXT,
+            updated_at TIMESTAMPTZ DEFAULT now(),
+            created_at TIMESTAMPTZ DEFAULT now()
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prompt_template_versions (
+            id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+            prompt_key TEXT NOT NULL,
+            old_prompt_text TEXT,
+            new_prompt_text TEXT,
+            updated_by TEXT,
+            created_at TIMESTAMPTZ DEFAULT now()
+        )
+        """
+    )
+    _safe_create_index(
+        cur,
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_prompt_templates_key_unique ON prompt_templates(prompt_key)",
+        "idx_prompt_templates_key_unique",
+    )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prompt_template_versions_key ON prompt_template_versions(prompt_key, created_at DESC)"
+    )
+
+
 def _ensure_schema_uncached():
     if not is_configured():
         raise SupabaseNotConfigured(
@@ -1015,6 +1054,7 @@ def _ensure_schema_uncached():
                 )
                 """
             )
+            _create_prompt_template_tables(cur)
 
             additive_columns = {
                 "shopify_products": (
@@ -1761,6 +1801,105 @@ def ensure_schema():
         elapsed = time.perf_counter() - started
         print(f"PERF DB migration time={elapsed:.3f}s", flush=True)
         _SCHEMA_READY = True
+
+
+def ensure_prompt_template_schema():
+    if not is_configured():
+        raise SupabaseNotConfigured(
+            "No Supabase/Postgres database URL is configured. Set DATABASE_URL, "
+            "SUPABASE_DATABASE_URL, or POSTGRES_URL in Render."
+        )
+    with _SCHEMA_LOCK:
+        with connect() as conn:
+            with conn.cursor() as cur:
+                _create_prompt_template_tables(cur)
+            conn.commit()
+
+
+def get_prompt_template(prompt_key):
+    prompt_key = str(prompt_key or "").strip()
+    if not prompt_key:
+        return None
+    ensure_prompt_template_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, prompt_key, prompt_name, module, prompt_text, source,
+                       updated_by, updated_at, created_at
+                FROM prompt_templates
+                WHERE prompt_key = %s
+                """,
+                (prompt_key,),
+            )
+            row = cur.fetchone()
+    return dict(row or {}) or None
+
+
+def upsert_prompt_template(
+    prompt_key,
+    *,
+    prompt_name="",
+    module="",
+    prompt_text="",
+    updated_by="sports_cave_os",
+    source="supabase",
+):
+    prompt_key = str(prompt_key or "").strip()
+    if not prompt_key:
+        raise ValueError("Prompt key is missing.")
+    prompt_text = str(prompt_text or "")
+    ensure_prompt_template_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT prompt_text
+                FROM prompt_templates
+                WHERE prompt_key = %s
+                """,
+                (prompt_key,),
+            )
+            existing = cur.fetchone() or {}
+            old_prompt_text = existing.get("prompt_text")
+            if old_prompt_text is not None and old_prompt_text != prompt_text:
+                cur.execute(
+                    """
+                    INSERT INTO prompt_template_versions(
+                        prompt_key, old_prompt_text, new_prompt_text, updated_by
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (prompt_key, old_prompt_text, prompt_text, str(updated_by or "")),
+                )
+            cur.execute(
+                """
+                INSERT INTO prompt_templates(
+                    prompt_key, prompt_name, module, prompt_text, source, updated_by, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, now())
+                ON CONFLICT (prompt_key) DO UPDATE SET
+                    prompt_name = EXCLUDED.prompt_name,
+                    module = EXCLUDED.module,
+                    prompt_text = EXCLUDED.prompt_text,
+                    source = EXCLUDED.source,
+                    updated_by = EXCLUDED.updated_by,
+                    updated_at = now()
+                RETURNING id, prompt_key, prompt_name, module, prompt_text, source,
+                          updated_by, updated_at, created_at
+                """,
+                (
+                    prompt_key,
+                    str(prompt_name or prompt_key),
+                    str(module or ""),
+                    prompt_text,
+                    str(source or "supabase"),
+                    str(updated_by or ""),
+                ),
+            )
+            row = cur.fetchone() or {}
+        conn.commit()
+    return dict(row)
 
 
 def ensure_order_read_schema():

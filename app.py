@@ -35,6 +35,7 @@ from dotenv import load_dotenv
 import streamlit as st
 
 import prompt_store
+import sports_cave_pricing
 
 db = None
 image_factory = None
@@ -704,19 +705,7 @@ CURRENT SELLING PRICES AND RRP
 Currency: AUD
 The Shopify Price field is the current selling price.
 The Shopify Compare-at price field is the RRP.
-Keep the RRP values below unchanged.
-
-Black, Oak, and White framed variants:
-- XL: Price 349.00 | Compare-at/RRP 428.00
-- L: Price 269.00 | Compare-at/RRP 324.00
-- M: Price 209.00 | Compare-at/RRP 259.00
-- S: Price 159.00 | Compare-at/RRP 194.00
-
-Unframed variants:
-- XL: Price 159.00 | Compare-at/RRP 194.00
-- L: Price 119.00 | Compare-at/RRP 142.00
-- M: Price 89.00 | Compare-at/RRP 103.00
-- S: Price 55.00 | Compare-at/RRP 64.00
+Use the central Sports Cave AUD price ladder appended to this prompt.
 
 Do not reverse Price and Compare-at price.
 Do not apply the unframed price to a framed variant.
@@ -1083,18 +1072,7 @@ CURRENT SELLING PRICES AND RRP IN FULL STANDARDISATION MODE
 Currency: AUD
 Price = current selling price.
 Compare-at price = RRP.
-
-Black, Oak, and White framed variants:
-- XL: Price 349.00 | Compare-at/RRP 428.00
-- L: Price 269.00 | Compare-at/RRP 324.00
-- M: Price 209.00 | Compare-at/RRP 259.00
-- S: Price 159.00 | Compare-at/RRP 194.00
-
-Unframed variants:
-- XL: Price 159.00 | Compare-at/RRP 194.00
-- L: Price 119.00 | Compare-at/RRP 142.00
-- M: Price 89.00 | Compare-at/RRP 103.00
-- S: Price 55.00 | Compare-at/RRP 64.00
+Use the central Sports Cave AUD price ladder appended to this prompt.
 
 Keep the RRP values unchanged.
 Do not reverse Price and Compare-at price.
@@ -3226,16 +3204,7 @@ VARIANTS
 - Unframed variants show unframed image
 
 PRICING — AUD
-Framed Black/Oak/White:
-- XL 349.00 / RRP 428.00
-- L 269.00 / RRP 324.00
-- M 209.00 / RRP 259.00
-- S 159.00 / RRP 194.00
-Unframed:
-- XL 159.00 / RRP 194.00
-- L 119.00 / RRP 142.00
-- M 89.00 / RRP 103.00
-- S 55.00 / RRP 64.00
+Verify every variant matches the central Sports Cave AUD price ladder appended to this prompt.
 Verify Price and Compare-at/RRP are not reversed.
 
 INVENTORY AND FULFILMENT
@@ -3256,6 +3225,8 @@ FINAL
 def product_upload_embedded_sections():
     return f"""ADDITIONAL REQUIRED SUB-PROMPTS
 Use these sections inside the product creation/update workflow. Do not run them as separate prompts unless the user explicitly asks.
+
+{sports_cave_pricing.price_ladder_prompt_text()}
 
 IMAGE ALT TEXT SUB-PROMPT
 {PRODUCT_UPLOAD_ALT_TEXT_PROMPT.strip()}
@@ -3500,6 +3471,15 @@ def current_prompt_text(prompt_id, default_text):
     return prompt_store.get_prompt(prompt_id, default_text)
 
 
+def current_prompt_record(prompt_id, default_text, *, title="", module=""):
+    return prompt_store.get_prompt_source(
+        prompt_id,
+        default_text,
+        prompt_name=title,
+        module=module,
+    )
+
+
 def current_lifestyle_prompt_text(prompt_filename, default_text):
     prompt_key = prompt_key_from_prompt_filename(prompt_filename)
     prompt_id = prompt_edit_id("lifestyle", prompt_key)
@@ -3517,13 +3497,16 @@ def render_prompt_edit_button(prompt_id, *, label="✎"):
         st.session_state[panel_key] = True
 
 
-def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=420):
+def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=420, default_text=None):
     panel_key = f"prompt-edit-open::{prompt_id}"
     if not st.session_state.get(panel_key):
         return
 
     with st.container(border=True):
-        st.caption("Developer only. Saved changes replace this prompt everywhere it is used.")
+        source_record = prompt_store.get_prompt_source(prompt_id, prompt_text, prompt_name=title)
+        st.caption(f"Developer only. {source_record.get('source_label')}")
+        if source_record.get("warning"):
+            st.warning(source_record["warning"])
         edited_text = st.text_area(
             "Prompt text",
             value=prompt_text,
@@ -3540,13 +3523,42 @@ def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=420):
             if password != DEVELOPER_PAGE_PASSWORD:
                 st.error("Developer password is incorrect.")
             else:
-                prompt_store.save_prompt(prompt_id, title, edited_text)
-                st.session_state[panel_key] = False
-                st.success("Prompt saved to backend.")
-                st.rerun()
+                try:
+                    saved = prompt_store.save_prompt(prompt_id, title, edited_text)
+                except Exception as error:
+                    st.error(str(error))
+                else:
+                    st.session_state[panel_key] = False
+                    if saved.get("persisted"):
+                        st.success(saved.get("source_label") or "Source: Supabase saved")
+                    else:
+                        st.warning(saved.get("warning") or saved.get("source_label"))
+                    st.rerun()
         if cols[1].button("Cancel", key=f"prompt-edit-cancel::{prompt_id}", use_container_width=True):
             st.session_state[panel_key] = False
             st.rerun()
+        if default_text is not None:
+            reset_confirmation = st.text_input(
+                "Type RESET PROMPT to restore the default prompt",
+                key=f"prompt-edit-reset-confirm::{prompt_id}",
+            )
+            if st.button(
+                "Reset to default prompt",
+                key=f"prompt-edit-reset::{prompt_id}",
+                disabled=reset_confirmation != "RESET PROMPT",
+                use_container_width=True,
+            ):
+                try:
+                    saved = prompt_store.reset_prompt_to_default(prompt_id, title, default_text)
+                except Exception as error:
+                    st.error(str(error))
+                else:
+                    st.session_state[panel_key] = False
+                    if saved.get("persisted"):
+                        st.success(saved.get("source_label") or "Source: Supabase saved")
+                    else:
+                        st.warning(saved.get("warning") or saved.get("source_label"))
+                    st.rerun()
 
 
 def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=420, label="✎"):
@@ -3676,7 +3688,9 @@ def render_copy_prompt_button(
 
 def render_copyable_prompt(title, prompt_text, key, show_title=True, prompt_id=None):
     prompt_id = prompt_id or prompt_edit_id("app", key)
-    prompt_text = current_prompt_text(prompt_id, prompt_text).strip()
+    default_prompt_text = prompt_text
+    prompt_record = current_prompt_record(prompt_id, default_prompt_text, title=title, module="app")
+    prompt_text = (prompt_record.get("text") or "").strip()
 
     textarea_height = min(780, max(320, (prompt_text.count("\n") + 1) * 18 + 80))
     safe_text = html.escape(prompt_text)
@@ -3685,6 +3699,9 @@ def render_copyable_prompt(title, prompt_text, key, show_title=True, prompt_id=N
         if show_title:
             header_cols = st.columns([6, 1.2, 0.35])
             header_cols[0].markdown(f"**{title}**")
+            header_cols[0].caption(prompt_record.get("source_label") or "")
+            if prompt_record.get("warning"):
+                header_cols[0].warning(prompt_record["warning"])
             with header_cols[1]:
                 render_copy_prompt_button(prompt_text, f"copy::{key}")
             with header_cols[2]:
@@ -3696,7 +3713,7 @@ def render_copyable_prompt(title, prompt_text, key, show_title=True, prompt_id=N
             with header_cols[1]:
                 render_prompt_edit_button(prompt_id)
 
-        render_prompt_edit_panel(title, prompt_id, prompt_text)
+        render_prompt_edit_panel(title, prompt_id, prompt_text, default_text=default_prompt_text)
 
         get_components_module().html(
             f"""
@@ -3745,7 +3762,7 @@ def _close_mockup_prompt_editor(prompt_id):
     _clear_mockup_prompt_edit_query()
 
 
-def render_mockup_prompt_editor(title, prompt_id, prompt_text):
+def render_mockup_prompt_editor(title, prompt_id, prompt_text, default_text=None):
     _consume_mockup_prompt_edit_request(prompt_id)
     edit_key = _mockup_prompt_edit_key(prompt_id)
     if not st.session_state.get(edit_key):
@@ -3753,7 +3770,10 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text):
 
     with st.container(border=True):
         st.markdown(f"**Edit prompt: {title}**")
-        st.caption("Developer only. Saved changes replace this prompt everywhere it is used.")
+        source_record = prompt_store.get_prompt_source(prompt_id, prompt_text, prompt_name=title, module="lifestyle")
+        st.caption(f"Developer only. {source_record.get('source_label')}")
+        if source_record.get("warning"):
+            st.warning(source_record["warning"])
         if not st.session_state.get("developer_unlocked"):
             password = st.text_input(
                 "Developer password",
@@ -3780,13 +3800,49 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text):
         )
         cols = st.columns([1, 1, 3])
         if cols[0].button("Save", key=f"mockup-prompt-edit-save::{prompt_id}", type="primary", use_container_width=True):
-            prompt_store.save_prompt(prompt_id, title, edited_text)
-            _close_mockup_prompt_editor(prompt_id)
-            st.session_state["mockup_prompt_notice"] = "Prompt saved"
-            st.rerun()
+            try:
+                saved = prompt_store.save_prompt(prompt_id, title, edited_text, module="lifestyle")
+            except Exception as error:
+                st.error(str(error))
+            else:
+                _close_mockup_prompt_editor(prompt_id)
+                st.session_state["mockup_prompt_notice"] = (
+                    "Prompt saved to Supabase"
+                    if saved.get("persisted")
+                    else (saved.get("warning") or saved.get("source_label") or "Not persisted — Supabase unavailable")
+                )
+                st.rerun()
         if cols[1].button("Cancel", key=f"mockup-prompt-edit-cancel::{prompt_id}", use_container_width=True):
             _close_mockup_prompt_editor(prompt_id)
             st.rerun()
+        if default_text is not None:
+            reset_confirmation = st.text_input(
+                "Type RESET PROMPT to restore the default prompt",
+                key=f"mockup-prompt-reset-confirm::{prompt_id}",
+            )
+            if st.button(
+                "Reset to default prompt",
+                key=f"mockup-prompt-reset::{prompt_id}",
+                disabled=reset_confirmation != "RESET PROMPT",
+                use_container_width=True,
+            ):
+                try:
+                    saved = prompt_store.reset_prompt_to_default(
+                        prompt_id,
+                        title,
+                        default_text,
+                        module="lifestyle",
+                    )
+                except Exception as error:
+                    st.error(str(error))
+                else:
+                    _close_mockup_prompt_editor(prompt_id)
+                    st.session_state["mockup_prompt_notice"] = (
+                        "Prompt reset to default in Supabase"
+                        if saved.get("persisted")
+                        else (saved.get("warning") or saved.get("source_label") or "Not persisted — Supabase unavailable")
+                    )
+                    st.rerun()
 
 
 def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
@@ -3973,7 +4029,8 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
 
 
 def render_mockup_prompt_action_row(title, prompt_text, key, prompt_id):
-    prompt_text = current_prompt_text(prompt_id, prompt_text).strip()
+    default_prompt_text = prompt_text
+    prompt_text = current_prompt_text(prompt_id, default_prompt_text).strip()
     notice = st.session_state.pop("mockup_prompt_notice", "")
     if notice:
         st.success(notice)
@@ -3984,7 +4041,7 @@ def render_mockup_prompt_action_row(title, prompt_text, key, prompt_id):
         if st.button("✎", key=f"mockup-prompt-edit-button::{prompt_id}", help="Edit prompt", use_container_width=True):
             st.session_state[_mockup_prompt_edit_key(prompt_id)] = True
             st.rerun()
-    render_mockup_prompt_editor(title, prompt_id, prompt_text)
+    render_mockup_prompt_editor(title, prompt_id, prompt_text, default_text=default_prompt_text)
 
 
 def prime_asset_selection_state(result):
@@ -5001,6 +5058,139 @@ def render_mockups_page():
         render_generation_result(st.session_state.last_generation_result)
 
 
+def _shopify_products_for_price_backfill(search, max_products):
+    shopify_sync = get_shopify_sync()
+    config = shopify_sync.get_config()
+    if max_products:
+        config = {**config, "max_products": int(max_products)}
+    products = []
+    for page in shopify_sync.iter_catalog_pages(
+        search=str(search or "").strip(),
+        page_size=50,
+        config=config,
+    ):
+        products.extend(page.get("products") or [])
+        if max_products and len(products) >= int(max_products):
+            return products[: int(max_products)]
+    return products
+
+
+def _render_price_backfill_summary(summary):
+    metric_cols = st.columns(6)
+    metric_cols[0].metric("Products scanned", summary.get("products_scanned", 0))
+    metric_cols[1].metric("Variants scanned", summary.get("variants_scanned", 0))
+    metric_cols[2].metric("Already correct", summary.get("variants_already_correct", 0))
+    metric_cols[3].metric("Need update", summary.get("variants_needing_update", 0))
+    metric_cols[4].metric("Skipped products", len(summary.get("skipped_products") or []))
+    metric_cols[5].metric("Skipped variants", len(summary.get("skipped_variants") or []))
+
+    changes = summary.get("changes") or []
+    if changes:
+        st.markdown("**Variants needing update**")
+        st.dataframe(changes, use_container_width=True, hide_index=True)
+    else:
+        st.success("No matching variants need a price update.")
+
+    skipped_products = summary.get("skipped_products") or []
+    if skipped_products:
+        st.markdown("**Skipped products**")
+        st.dataframe(
+            [
+                {
+                    "product": item.get("title"),
+                    "handle": item.get("handle"),
+                    "variants": item.get("variants_scanned"),
+                    "reason": item.get("skipped_product_reason"),
+                }
+                for item in skipped_products
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    skipped_variants = summary.get("skipped_variants") or []
+    if skipped_variants:
+        st.markdown("**Skipped variants**")
+        st.dataframe(skipped_variants, use_container_width=True, hide_index=True)
+
+
+def render_product_price_ladder_admin_section():
+    st.subheader("Current Price Ladder")
+    st.caption("Central Sports Cave AUD pricing used by Product Upload prompts and price backfill checks.")
+    st.dataframe(sports_cave_pricing.price_ladder_rows(), use_container_width=True, hide_index=True)
+
+    with st.expander("Existing Shopify product price update", expanded=False):
+        st.caption(
+            "Manual admin-only tool. Dry run reads Shopify products only after the button is clicked. "
+            "Apply updates only variant price and compare-at/RRP after confirmation."
+        )
+        password = st.text_input(
+            "Developer password",
+            type="password",
+            key="price-backfill-developer-password",
+        )
+        search = st.text_input(
+            "Optional Shopify product search",
+            value=st.session_state.get("price_backfill_search", ""),
+            key="price-backfill-search",
+            placeholder="Example: vendor:'Sports Cave' status:active",
+        )
+        max_products = st.number_input(
+            "Maximum products to scan",
+            min_value=1,
+            max_value=500,
+            value=100,
+            step=25,
+            key="price-backfill-max-products",
+        )
+        if st.button(
+            "Dry run existing product price update",
+            disabled=password != DEVELOPER_PAGE_PASSWORD,
+            key="price-backfill-dry-run",
+            use_container_width=True,
+        ):
+            with st.spinner("Scanning Shopify products for price differences..."):
+                try:
+                    products = _shopify_products_for_price_backfill(search, max_products)
+                    summary = sports_cave_pricing.summarize_price_backfill(products)
+                except Exception as error:
+                    st.error(f"Price dry run failed: {error}")
+                else:
+                    st.session_state["price_backfill_summary"] = summary
+                    st.session_state["price_backfill_search"] = search
+                    st.success("Dry run complete. No prices were updated.")
+
+        summary = st.session_state.get("price_backfill_summary")
+        if summary:
+            _render_price_backfill_summary(summary)
+            changes = summary.get("changes") or []
+            if changes:
+                confirmation = st.text_input(
+                    "Type UPDATE PRICES to apply these exact variant price changes",
+                    key="price-backfill-confirmation",
+                )
+                if st.button(
+                    "Apply price update to matching existing products",
+                    disabled=confirmation != "UPDATE PRICES" or password != DEVELOPER_PAGE_PASSWORD,
+                    key="price-backfill-apply",
+                    type="primary",
+                    use_container_width=True,
+                ):
+                    grouped = {}
+                    for change in changes:
+                        grouped.setdefault(change["product_id"], []).append(change)
+                    applied = 0
+                    try:
+                        shopify_sync = get_shopify_sync()
+                        for product_id, product_changes in grouped.items():
+                            result = shopify_sync.update_product_variant_prices(product_id, product_changes)
+                            applied += int(result.get("updated") or 0)
+                    except Exception as error:
+                        st.error(f"Price update failed: {error}")
+                    else:
+                        st.success(f"Applied {applied} variant price update(s). Run dry run again to verify.")
+
+
 def render_product_uploads_page():
     started = time.perf_counter()
     log_app_memory("Page load: Product Uploads")
@@ -5036,6 +5226,8 @@ def render_product_uploads_page():
         "update-existing-shopify-product-prompt",
         prompt_id=prompt_edit_id("product-upload", "update-existing-shopify-product"),
     )
+    st.divider()
+    render_product_price_ladder_admin_section()
     safe_startup_print(f"PERF Product Uploads total={(time.perf_counter() - started):.3f}s")
 
 

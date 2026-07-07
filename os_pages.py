@@ -8769,13 +8769,21 @@ def render_prompt_edit_button(prompt_id, *, label="✎"):
         st.session_state[panel_key] = True
 
 
-def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=360):
+def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=360, default_text=None):
     panel_key = f"prompt-edit-open::{prompt_id}"
     if not st.session_state.get(panel_key):
         return prompt_text
 
     with st.container(border=True):
-        st.caption("Developer only. Saved changes replace this prompt everywhere it is used.")
+        source_record = prompt_store.get_prompt_source(
+            prompt_id,
+            prompt_text,
+            prompt_name=title,
+            module="marketing",
+        )
+        st.caption(f"Developer only. {source_record.get('source_label')}")
+        if source_record.get("warning"):
+            st.warning(source_record["warning"])
         edited_text = st.text_area(
             "Prompt text",
             value=prompt_text,
@@ -8792,13 +8800,47 @@ def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=360):
             if password != DEVELOPER_PAGE_PASSWORD:
                 st.error("Developer password is incorrect.")
             else:
-                prompt_store.save_prompt(prompt_id, title, edited_text)
-                st.session_state[panel_key] = False
-                st.success("Prompt saved to backend.")
-                st.rerun()
+                try:
+                    saved = prompt_store.save_prompt(prompt_id, title, edited_text, module="marketing")
+                except Exception as error:
+                    st.error(str(error))
+                else:
+                    st.session_state[panel_key] = False
+                    if saved.get("persisted"):
+                        st.success(saved.get("source_label") or "Source: Supabase saved")
+                    else:
+                        st.warning(saved.get("warning") or saved.get("source_label"))
+                    st.rerun()
         if cols[1].button("Cancel", key=f"prompt-edit-cancel::{prompt_id}", use_container_width=True):
             st.session_state[panel_key] = False
             st.rerun()
+        if default_text is not None:
+            reset_confirmation = st.text_input(
+                "Type RESET PROMPT to restore the default prompt",
+                key=f"prompt-edit-reset-confirm::{prompt_id}",
+            )
+            if st.button(
+                "Reset to default prompt",
+                key=f"prompt-edit-reset::{prompt_id}",
+                disabled=reset_confirmation != "RESET PROMPT",
+                use_container_width=True,
+            ):
+                try:
+                    saved = prompt_store.reset_prompt_to_default(
+                        prompt_id,
+                        title,
+                        default_text,
+                        module="marketing",
+                    )
+                except Exception as error:
+                    st.error(str(error))
+                else:
+                    st.session_state[panel_key] = False
+                    if saved.get("persisted"):
+                        st.success(saved.get("source_label") or "Source: Supabase saved")
+                    else:
+                        st.warning(saved.get("warning") or saved.get("source_label"))
+                    st.rerun()
     return prompt_text
 
 
@@ -8809,11 +8851,14 @@ def render_prompt_edit_controls(title, prompt_id, prompt_text, *, height=360, la
 
 def render_prompt_block(title, prompt, key, when_to_use=None, height=220):
     prompt_id = _prompt_edit_id("marketing", key)
-    prompt_text = prompt_store.get_prompt(prompt_id, prompt).strip()
+    source_record = prompt_store.get_prompt_source(prompt_id, prompt, prompt_name=title, module="marketing")
+    prompt_text = (source_record.get("text") or "").strip()
     with st.expander(title, expanded=False):
         if when_to_use:
             st.caption(f"When to use this: {when_to_use}")
-        st.caption("Copy this prompt into ChatGPT.")
+        st.caption(source_record.get("source_label") or "Copy this prompt into ChatGPT.")
+        if source_record.get("warning"):
+            st.warning(source_record["warning"])
         st.text_area(
             f"{title} prompt",
             value=prompt_text,
@@ -8826,7 +8871,7 @@ def render_prompt_block(title, prompt, key, when_to_use=None, height=220):
             render_copy_text_button(prompt_text, f"marketing-{key}", "Copy Prompt")
         with action_cols[1]:
             render_prompt_edit_button(prompt_id)
-        render_prompt_edit_panel(title, prompt_id, prompt_text)
+        render_prompt_edit_panel(title, prompt_id, prompt_text, default_text=prompt)
 
 
 def render_marketing_card(title, body, *, key=None, copy_label=None):

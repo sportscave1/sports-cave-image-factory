@@ -113,9 +113,38 @@ class MockupReelsTests(unittest.TestCase):
             self.assertEqual(names, {"WEBP/core.webp", "WEBP/reels.webp"})
 
     def test_prompt_override_loads_for_reels_stable_key(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            store_path = Path(tmpdir) / "prompt_overrides.json"
-            with patch.object(prompt_store, "PROMPT_OVERRIDES_PATH", store_path):
+        class FakeSupabaseBackend:
+            class SupabaseNotConfigured(RuntimeError):
+                pass
+
+            def __init__(self):
+                self.records = {}
+
+            def is_configured(self):
+                return True
+
+            def ensure_prompt_template_schema(self):
+                return None
+
+            def get_prompt_template(self, prompt_key):
+                return self.records.get(prompt_key)
+
+            def upsert_prompt_template(self, prompt_key, **kwargs):
+                record = {
+                    "prompt_key": prompt_key,
+                    "prompt_text": kwargs.get("prompt_text"),
+                    "prompt_name": kwargs.get("prompt_name"),
+                    "module": kwargs.get("module"),
+                    "source": kwargs.get("source"),
+                    "updated_by": kwargs.get("updated_by"),
+                }
+                self.records[prompt_key] = record
+                return record
+
+        backend = FakeSupabaseBackend()
+        with patch.object(prompt_store, "_supabase_backend", return_value=backend):
+            prompt_store.clear_prompt_cache()
+            try:
                 prompt_store.save_prompt(
                     "lifestyle::16-man-cave-reel",
                     "16 - Man Cave Reel",
@@ -126,8 +155,10 @@ class MockupReelsTests(unittest.TestCase):
                     "16-man-cave-reel-prompt.txt",
                     "Default reel prompt",
                 )
+            finally:
+                prompt_store.clear_prompt_cache()
 
-            self.assertEqual(prompt_text, "Edited reel prompt")
+        self.assertEqual(prompt_text, "Edited reel prompt")
 
     def test_mockups_page_has_reels_section_and_no_drive_reminder_expander(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
