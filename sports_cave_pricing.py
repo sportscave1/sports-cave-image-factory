@@ -72,6 +72,18 @@ def price_ladder_prompt_text():
         lines.append(
             f"- {size}: Price {ladder['price']} | Compare-at/RRP {ladder['compare_at_price']}"
         )
+    lines.extend(
+        [
+            "",
+            "NEW PRODUCT CREATION SAFETY",
+            "When creating a new Shopify product:",
+            "- Never set product status to Active.",
+            "- Never publish to Online Store.",
+            "- Keep the product Draft and unpublished.",
+            "- Return the Shopify draft/admin link for manual review.",
+            "These rules do not authorise live publishing or live Shopify price updates.",
+        ]
+    )
     return "\n".join(lines)
 
 
