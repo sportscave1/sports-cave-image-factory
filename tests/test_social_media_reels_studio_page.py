@@ -284,8 +284,79 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         image_prompts = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")
 
         for prompt in image_prompts.values():
+            self.assertIn("Use the uploaded product image as Image A", prompt)
+            self.assertIn("uploaded background/reference room image as Image B", prompt)
+            self.assertIn("Use the supplied image(s), not screenshots.", prompt)
             self.assertIn("Use the original full-resolution Image A and Image B uploads", prompt)
             self.assertIn("High-resolution 1:1 square output", prompt)
+
+    def test_mockup_prompts_do_not_expose_internal_metadata_headers(self):
+        image_prompts = reels.build_image_prompts(
+            "roger-federer",
+            "Roger Federer",
+            "Tennis",
+            "Warm collector room",
+        )
+        disallowed_headers = (
+            "Product handle:",
+            "Product title:",
+            "Sport category:",
+            "Scene:",
+            "Scene slug:",
+            "Video scene:",
+            "Video scene slug:",
+            "Version:",
+            "Status:",
+        )
+
+        for prompt in image_prompts.values():
+            for header in disallowed_headers:
+                with self.subTest(header=header):
+                    self.assertNotIn(header, prompt)
+
+    def test_video_prompts_do_not_expose_internal_metadata_headers(self):
+        video_prompts = reels.build_video_prompts(
+            "roger-federer",
+            "Roger Federer",
+            "Tennis",
+            {
+                "collector-admire": {"version": "v03", "status": "winner"},
+            },
+        )
+        disallowed_headers = (
+            "Product handle:",
+            "Product title:",
+            "Sport category:",
+            "Scene:",
+            "Scene slug:",
+            "Video scene:",
+            "Video scene slug:",
+            "Version:",
+            "Status:",
+        )
+
+        for prompt in video_prompts.values():
+            self.assertIn("Use the uploaded mockup image as the source image.", prompt)
+            self.assertIn("Keep the framed Sports Cave artwork 100% unchanged.", prompt)
+            for header in disallowed_headers:
+                with self.subTest(header=header):
+                    self.assertNotIn(header, prompt)
+
+    def test_background_finder_prompt_uses_uploaded_image_not_metadata_headers(self):
+        prompt = reels.build_background_finder_prompt(
+            "roger-federer",
+            "Roger Federer",
+            "Tennis",
+            "Warm collector room",
+        )
+
+        self.assertIn("Use the uploaded black framed Sports Cave product mockup as the product reference.", prompt)
+        self.assertIn("Analyse the uploaded product image directly instead of relying on product metadata.", prompt)
+        self.assertIn("Use the supplied image, not a screenshot or compressed preview.", prompt)
+        self.assertNotIn("Product handle:", prompt)
+        self.assertNotIn("Product title:", prompt)
+        self.assertNotIn("Sport category:", prompt)
+        self.assertNotIn("Creative notes:", prompt)
 
     def test_zip_export_creates_required_folder_structure_and_manifest(self):
         with tempfile.TemporaryDirectory() as tmpdir:

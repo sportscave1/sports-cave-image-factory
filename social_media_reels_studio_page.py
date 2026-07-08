@@ -146,10 +146,11 @@ SCENES = (
 )
 
 
-IMAGE_MASTER_RULES = """Image A is the exact Sports Cave black framed product mockup.
-Image B is the selected background/reference room.
-Use Image A for the product and Image B for the environment.
-The uploaded product artwork is the hero. Preserve it exactly.
+IMAGE_MASTER_RULES = """Use the uploaded product image as Image A and the uploaded background/reference room image as Image B.
+Use Image A as the product reference and Image B as the environment reference.
+Keep the framed Sports Cave artwork and black frame in Image A 100% unchanged.
+Use the supplied image(s), not screenshots.
+The uploaded product artwork is the hero.
 The output must look like a real premium Sports Cave lifestyle photograph, not AI.
 
 Non-negotiables:
@@ -170,7 +171,8 @@ Non-negotiables:
 - Do not make it CGI, cartoon, glossy, or fake"""
 
 
-VIDEO_MASTER_RULES = """Create a premium ultra-realistic 6-8 second image-to-video ad from this exact still image.
+VIDEO_MASTER_RULES = """Use the uploaded mockup image as the source image.
+Create a premium ultra-realistic 6-8 second image-to-video ad from this exact still image.
 
 Keep the framed Sports Cave artwork 100% unchanged.
 Do not alter the artwork, text, badge, frame, colours, proportions, or layout.
@@ -469,14 +471,14 @@ def build_background_finder_prompt(product_handle: str, product_title: str, spor
     product_title = str(product_title or "").strip() or "Untitled Sports Cave product"
     sport_category = str(sport_category or "").strip() or "sport"
     creative_notes = str(creative_notes or "").strip() or "No extra creative notes supplied."
+    creative_context = ""
+    if creative_notes != "No extra creative notes supplied.":
+        creative_context = f"\n\nAdditional creative direction from the VA: {creative_notes}"
     return f"""Act as the premium creative director for Sports Cave.
 
-I have uploaded a black framed Sports Cave product mockup.
-
-Product handle: {product_handle}
-Product title: {product_title}
-Sport category: {sport_category}
-Creative notes: {creative_notes}
+Use the uploaded black framed Sports Cave product mockup as the product reference.
+Analyse the uploaded product image directly instead of relying on product metadata.
+Use the supplied image, not a screenshot or compressed preview.{creative_context}
 
 Your job is to find the perfect background / room reference for social media reel content and lifestyle mockups for this exact product.
 
@@ -553,21 +555,15 @@ Only help me choose the best background/reference room for this product."""
 
 
 def build_image_prompt(scene: dict, product_handle: str, product_title: str, sport_category: str, creative_notes: str) -> str:
-    product_handle = sanitize_handle(product_handle, "product-handle")
-    product_title = str(product_title or "").strip() or "Untitled Sports Cave product"
-    sport_category = str(sport_category or "").strip() or "sport"
     creative_notes = str(creative_notes or "").strip() or "No extra creative notes supplied."
+    creative_direction = ""
+    if creative_notes != "No extra creative notes supplied.":
+        creative_direction = f"\n\nFollow this extra creative direction if it helps the scene: {creative_notes}"
     prompt = f"""{IMAGE_MASTER_RULES}
 
-Product handle: {product_handle}
-Product title: {product_title}
-Sport category: {sport_category}
-Creative notes: {creative_notes}
-Scene: {scene["name"]}
-Scene slug: {scene["slug"]}
-
-Task:
+Create this scene:
 {scene["image_direction"]}
+{creative_direction}
 
 Composition:
 - Premium Shopify-grade Sports Cave product photography
@@ -587,18 +583,7 @@ Do not accept low-resolution, cluttered, logo-heavy, or distorted backgrounds.""
 
 
 def build_video_prompt(scene: dict, product_handle: str, product_title: str, sport_category: str, version: str = "v01", status: str = "final") -> str:
-    product_handle = sanitize_handle(product_handle, "product-handle")
-    product_title = str(product_title or "").strip() or "Untitled Sports Cave product"
-    sport_category = str(sport_category or "").strip() or "sport"
     prompt = f"""{VIDEO_MASTER_RULES}
-
-Product handle: {product_handle}
-Product title: {product_title}
-Sport category: {sport_category}
-Video scene: {scene["video_name"]}
-Video scene slug: {scene["slug"]}
-Version: {sanitize_version(version)}
-Status: {sanitize_status(status)}
 
 Movement:
 {scene["video_direction"]}
