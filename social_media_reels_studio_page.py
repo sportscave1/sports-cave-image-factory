@@ -22,6 +22,43 @@ MOCKUP_UPLOAD_TYPES = ["png"]
 VIDEO_UPLOAD_TYPES = ["mp4"]
 PACK_VERSION = "v01"
 STATUS_OPTIONS = ["draft", "final", "posted", "ad-test", "winner", "archive"]
+SPORT_CATEGORY_OPTIONS = [
+    "",
+    "Soccer",
+    "Basketball",
+    "Cricket",
+    "Motorsport",
+    "Tennis",
+    "Combat Sports",
+    "Golf",
+    "Horse Racing",
+    "AFL",
+    "Baseball",
+    "NFL",
+]
+WIZARD_FLAG_DEFAULTS = {
+    "reels_step_1_complete": False,
+    "reels_step_2_complete": False,
+    "reels_step_3_complete": False,
+    "reels_step_4_complete": False,
+    "reels_product_generated": False,
+    "reels_background_generated": False,
+    "reels_image_prompts_generated": False,
+    "reels_video_prompts_generated": False,
+}
+SPORT_KEYWORDS = (
+    ("NFL", ("nfl", "superbowl", "super-bowl", "brady", "mahomes")),
+    ("Soccer", ("soccer", "football", "ronaldo", "messi", "mbappe", "neymar", "haaland", "bellingham", "ronaldinho", "zidane")),
+    ("Basketball", ("nba", "basketball", "jordan", "bryant", "kobe", "lebron", "curry", "wembanyama", "shaq")),
+    ("Cricket", ("cricket", "warne", "bradman", "ponting", "cummins", "lillee")),
+    ("Motorsport", ("motorsport", "motor-racing", "racing", "f1", "formula-one", "formula-1", "bathurst", "brock", "moffat", "lowndes", "supercars", "v8")),
+    ("Tennis", ("tennis", "federer", "nadal", "djokovic", "alcaraz", "barty")),
+    ("Combat Sports", ("ufc", "mma", "boxing", "ali", "tyson", "jones", "gaethje")),
+    ("Golf", ("golf", "tiger", "woods", "masters")),
+    ("Horse Racing", ("horse", "racing", "melbourne-cup", "black-caviar", "phar-lap")),
+    ("AFL", ("afl", "footy", "ben-cousins", "taylor-walker")),
+    ("Baseball", ("baseball", "mlb", "ohtani", "judge")),
+)
 
 
 SCENES = (
@@ -132,14 +169,69 @@ def sanitize_handle(value: str, fallback: str = "") -> str:
     return slug or fallback
 
 
-def suggest_handle_from_filename(filename: str) -> str:
-    stem = Path(str(filename or "")).stem
-    stem = re.sub(
-        r"(?i)\b(black|framed|frame|mockup|product|sports|cave|wall|art|final|v\d+|xl|a1)\b",
-        " ",
-        stem,
+def strip_trailing_random_id(slug: str) -> str:
+    cleaned = sanitize_handle(slug)
+    cleaned = re.sub(
+        r"-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
     )
-    return sanitize_handle(stem) or sanitize_handle(Path(str(filename or "")).stem)
+    while True:
+        trimmed = re.sub(r"-[0-9a-f]{10,}$", "", cleaned, flags=re.IGNORECASE)
+        trimmed = re.sub(r"-[a-z0-9]{16,}$", "", trimmed, flags=re.IGNORECASE)
+        if trimmed == cleaned:
+            break
+        cleaned = trimmed
+    return cleaned.strip("-")
+
+
+def title_from_handle(product_handle: str) -> str:
+    words = []
+    for part in sanitize_handle(product_handle).split("-"):
+        if not part:
+            continue
+        if part in {"f1", "v8", "nba", "nfl", "afl", "ufc", "mma", "mlb"}:
+            words.append(part.upper())
+        else:
+            words.append(part.capitalize())
+    return " ".join(words)
+
+
+def detect_sport_category(value: str) -> str:
+    handle = sanitize_handle(value)
+    padded = f"-{handle}-"
+    for sport, keywords in SPORT_KEYWORDS:
+        for keyword in keywords:
+            if f"-{sanitize_handle(keyword)}-" in padded:
+                return sport
+    return ""
+
+
+def derive_product_details_from_filename(filename: str) -> dict[str, str]:
+    stem = Path(str(filename or "")).stem
+    product_handle = strip_trailing_random_id(stem)
+    product_handle = sanitize_handle(product_handle)
+    return {
+        "product_handle": product_handle,
+        "product_title": title_from_handle(product_handle),
+        "sport_category": detect_sport_category(product_handle),
+    }
+
+
+def suggest_handle_from_filename(filename: str) -> str:
+    return derive_product_details_from_filename(filename)["product_handle"]
+
+
+def wizard_unlocks(flags: dict) -> dict[str, bool]:
+    flags = flags or {}
+    return {
+        "step_1": True,
+        "step_2": bool(flags.get("reels_step_1_complete")),
+        "step_3": bool(flags.get("reels_step_2_complete")),
+        "step_4": bool(flags.get("reels_video_prompts_generated")),
+        "step_5": bool(flags.get("reels_step_4_complete")),
+    }
 
 
 def image_mockup_filename(product_handle: str, scene_slug: str) -> str:
@@ -388,6 +480,24 @@ def _state() -> dict:
     if PAGE_STATE_KEY not in st.session_state:
         st.session_state[PAGE_STATE_KEY] = _empty_state()
     return st.session_state[PAGE_STATE_KEY]
+
+
+def _ensure_wizard_flags() -> None:
+    for key, default in WIZARD_FLAG_DEFAULTS.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+
+
+def _reset_reels_studio_session_state() -> None:
+    for key in list(st.session_state.keys()):
+        if key == "smrs_start_new_pack":
+            continue
+        if key == PAGE_STATE_KEY or str(key).startswith("smrs_") or str(key).startswith("reels_"):
+            del st.session_state[key]
+
+
+def _wizard_flags() -> dict:
+    return {key: bool(st.session_state.get(key, default)) for key, default in WIZARD_FLAG_DEFAULTS.items()}
 
 
 def _run_dir(state: dict) -> Path:
@@ -877,10 +987,11 @@ def _render_video_preview(record: dict | None) -> None:
 
 def _step_statuses(state: dict, product_handle: str) -> list[tuple[str, bool]]:
     files = state["files"]
-    step1 = bool(files.get("product_mockup") and product_handle)
-    step2 = bool(st.session_state.get("smrs_background_prompt_copied") or files.get("selected_background"))
-    step3 = bool(files.get("image_mockups"))
-    step4 = bool(files.get("videos"))
+    flags = _wizard_flags()
+    step1 = bool(flags["reels_step_1_complete"] and files.get("product_mockup") and product_handle)
+    step2 = bool(flags["reels_step_2_complete"] and files.get("selected_background"))
+    step3 = bool(flags["reels_step_3_complete"] and files.get("image_mockups"))
+    step4 = bool(flags["reels_step_4_complete"] and files.get("videos"))
     return [
         ("1 Product", step1),
         ("2 Background", step2),
@@ -910,8 +1021,53 @@ def _render_warning_block() -> None:
     )
 
 
+def _locked_step(title: str, message: str) -> None:
+    with st.container(border=True):
+        st.markdown(f"**{html.escape(title)}**")
+        st.info(message)
+
+
+def _summary_card(title: str, product_handle: str, sport_category: str) -> None:
+    st.markdown(
+        f"""
+        <div class="smrs-warning-list">
+          <strong>Detected product:</strong><br>
+          Title: {html.escape(title or "Not detected")}<br>
+          Handle: {html.escape(product_handle or "Not detected")}<br>
+          Sport: {html.escape(sport_category or "Not detected")}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _sport_selectbox(current_value: str) -> str:
+    options = list(SPORT_CATEGORY_OPTIONS)
+    if current_value and current_value not in options:
+        options.append(current_value)
+    index = options.index(current_value) if current_value in options else 0
+    return st.selectbox(
+        "Sport category",
+        options,
+        index=index,
+        key="smrs_sport_category_edit",
+        accept_new_options=True,
+    )
+
+
+def _render_reference_pair(state: dict) -> None:
+    columns = st.columns(2)
+    with columns[0]:
+        st.markdown("**Image A - Product Mockup**")
+        _render_image_preview(state["files"].get("product_mockup"), width=260)
+    with columns[1]:
+        st.markdown("**Image B - Selected Background**")
+        _render_image_preview(state["files"].get("selected_background"), width=260)
+
+
 def render_page() -> None:
     _inject_styles()
+    _ensure_wizard_flags()
     state = _state()
     files = state["files"]
 
@@ -925,60 +1081,99 @@ def render_page() -> None:
         unsafe_allow_html=True,
     )
 
-    product_handle = sanitize_handle(st.session_state.get("smrs_product_handle", ""))
-    step1_complete = bool(files.get("product_mockup") and product_handle)
+    reset_cols = st.columns([1, 3])
+    if reset_cols[0].button("Start New Reel Pack", key="smrs_start_new_pack", use_container_width=True):
+        _reset_reels_studio_session_state()
+        st.rerun()
 
-    with st.container(border=True):
-        _step_header("1. Upload Product Mockup", step1_complete)
-        st.caption("Save the original full-resolution file. Product handle is required before export naming is ready.")
-        uploaded_product = st.file_uploader(
-            "Upload the black framed product mockup",
-            type=IMAGE_UPLOAD_TYPES,
-            key="smrs_product_upload",
-        )
-        if uploaded_product is not None:
-            suggestion = suggest_handle_from_filename(uploaded_product.name)
-            if (
-                not st.session_state.get("smrs_product_handle")
-                or st.session_state.get("smrs_last_suggested_handle") == st.session_state.get("smrs_product_handle")
-            ):
-                st.session_state["smrs_product_handle"] = suggestion
-            st.session_state["smrs_last_suggested_handle"] = suggestion
-            _store_source_upload(state, uploaded_product, "product_mockup", "product-mockup-original", "product_mockup")
-
-        product_title = st.text_input("Product title", key="smrs_product_title")
-        raw_handle = st.text_input("Shopify product handle", key="smrs_product_handle")
-        product_handle = sanitize_handle(raw_handle)
-        if raw_handle and raw_handle != product_handle:
-            st.caption(f"Sanitized handle used for filenames: {product_handle}")
-        sport_category = st.text_input("Sport category", key="smrs_sport_category", placeholder="Example: Soccer")
-        creative_notes = st.text_area("Creative notes", key="smrs_creative_notes", height=90)
-        _render_image_preview(files.get("product_mockup"))
+    flags = _wizard_flags()
+    unlocks = wizard_unlocks(flags)
+    raw_handle = st.session_state.get("smrs_product_handle", "")
+    product_handle = sanitize_handle(raw_handle)
+    product_title = st.session_state.get("smrs_product_title", "")
+    sport_category = st.session_state.get("smrs_sport_category", "")
+    creative_notes = st.session_state.get("smrs_creative_notes", "")
 
     if product_handle:
         _sync_scene_filenames(state, product_handle)
 
-    step1_complete = bool(files.get("product_mockup") and product_handle)
-    background_prompt = build_background_finder_prompt(product_handle, product_title, sport_category, creative_notes)
-    image_prompts = build_image_prompts(product_handle, product_title, sport_category, creative_notes)
-    video_meta = {
-        slug: {
-            "version": (files.get("videos") or {}).get(slug, {}).get("version", "v01"),
-            "status": (files.get("videos") or {}).get(slug, {}).get("status", "final"),
-        }
-        for slug in [scene["slug"] for scene in SCENES]
-    }
-    video_prompts = build_video_prompts(product_handle, product_title, sport_category, video_meta)
-
-    _render_progress(state, product_handle)
-    _render_warning_block()
-
-    step2_complete = bool(st.session_state.get("smrs_background_prompt_copied") or files.get("selected_background"))
+    step1_complete = bool(flags["reels_step_1_complete"] and files.get("product_mockup") and product_handle)
     with st.container(border=True):
-        _step_header("2. Find the Perfect Background", step2_complete)
-        st.caption("Copy this prompt into ChatGPT with the product mockup uploaded.")
+        _step_header("1. Upload Product Mockup", step1_complete)
+        st.caption("Upload the black framed product mockup, then generate the reel workflow.")
+
+        if not step1_complete:
+            uploaded_product = st.file_uploader(
+                "Upload the black framed product mockup",
+                type=IMAGE_UPLOAD_TYPES,
+                key="smrs_product_upload",
+            )
+            if st.button(
+                "Generate",
+                key="smrs_generate_product",
+                type="primary",
+                use_container_width=True,
+                disabled=uploaded_product is None,
+            ):
+                details = derive_product_details_from_filename(uploaded_product.name)
+                _store_source_upload(state, uploaded_product, "product_mockup", "product-mockup-original", "product_mockup")
+                st.session_state["smrs_product_title"] = details["product_title"]
+                st.session_state["smrs_product_handle"] = details["product_handle"]
+                st.session_state["smrs_sport_category"] = details["sport_category"]
+                st.session_state.setdefault("smrs_creative_notes", "")
+                st.session_state["reels_step_1_complete"] = True
+                st.session_state["reels_product_generated"] = True
+                st.session_state["reels_step_2_complete"] = False
+                st.session_state["reels_background_generated"] = False
+                st.session_state["reels_step_3_complete"] = False
+                st.session_state["reels_image_prompts_generated"] = False
+                st.session_state["reels_step_4_complete"] = False
+                st.session_state["reels_video_prompts_generated"] = False
+                st.rerun()
+        else:
+            _render_image_preview(files.get("product_mockup"))
+            _summary_card(product_title, product_handle, sport_category)
+            if not sport_category:
+                st.warning("Sport could not be detected. Open Edit detected details and select a sport category.")
+            with st.expander("Edit detected details", expanded=False):
+                product_title = st.text_input("Product title", key="smrs_product_title")
+                raw_handle = st.text_input("Shopify product handle", key="smrs_product_handle")
+                product_handle = sanitize_handle(raw_handle)
+                if raw_handle and raw_handle != product_handle:
+                    st.caption(f"Sanitized handle used for filenames: {product_handle}")
+                sport_category = _sport_selectbox(st.session_state.get("smrs_sport_category", ""))
+                st.session_state["smrs_sport_category"] = sport_category
+                creative_notes = st.text_area("Creative notes", key="smrs_creative_notes", height=90)
+
+    flags = _wizard_flags()
+    unlocks = wizard_unlocks(flags)
+    product_handle = sanitize_handle(st.session_state.get("smrs_product_handle", ""))
+    product_title = st.session_state.get("smrs_product_title", "")
+    sport_category = st.session_state.get("smrs_sport_category", "")
+    creative_notes = st.session_state.get("smrs_creative_notes", "")
+    if product_handle:
+        _sync_scene_filenames(state, product_handle)
+
+    if step1_complete:
+        _render_progress(state, product_handle)
+        _render_warning_block()
+
+    if not unlocks["step_2"]:
+        _locked_step("2. Find / Upload Background", "Complete Step 1 first to unlock this section.")
+        return
+
+    background_prompt = build_background_finder_prompt(product_handle, product_title, sport_category, creative_notes)
+    step2_complete = bool(flags["reels_step_2_complete"] and files.get("selected_background"))
+    with st.container(border=True):
+        _step_header("2. Find / Upload Background", step2_complete)
+        st.caption("Use ChatGPT to choose the best background, then upload the selected room here.")
+        st.markdown(
+            "A) Copy the background finder prompt into ChatGPT with the product mockup uploaded.\n\n"
+            "B) Choose the best room/background from ChatGPT.\n\n"
+            "C) Upload the selected background/reference room here.\n\n"
+            "D) Click Generate."
+        )
         _copy_button(background_prompt, "background-finder", "Copy Background Finder Prompt", large=True)
-        st.checkbox("I copied this background prompt", key="smrs_background_prompt_copied")
         st.text_area(
             "Background finder prompt",
             value=background_prompt,
@@ -986,26 +1181,47 @@ def render_page() -> None:
             key=_prompt_preview_key("smrs_background_prompt_preview", "background", background_prompt),
             disabled=True,
         )
-
-        st.markdown("**2B. Upload Selected Background**")
-        st.caption("Upload the selected room/background here after choosing it.")
         uploaded_background = st.file_uploader(
             "Upload selected background/reference room",
             type=IMAGE_UPLOAD_TYPES,
             key="smrs_background_upload",
-            disabled=not step1_complete,
         )
-        if uploaded_background is not None:
-            _store_source_upload(state, uploaded_background, "selected_background", "selected-background-original", "selected_background")
+        if st.button(
+            "Generate",
+            key="smrs_generate_background",
+            type="primary",
+            use_container_width=True,
+            disabled=uploaded_background is None and not files.get("selected_background"),
+        ):
+            if uploaded_background is not None:
+                _store_source_upload(state, uploaded_background, "selected_background", "selected-background-original", "selected_background")
+            st.session_state["reels_step_2_complete"] = True
+            st.session_state["reels_background_generated"] = True
+            st.session_state["reels_image_prompts_generated"] = True
+            st.session_state["reels_step_3_complete"] = False
+            st.session_state["reels_video_prompts_generated"] = False
+            st.session_state["reels_step_4_complete"] = False
+            st.rerun()
         _render_image_preview(files.get("selected_background"))
 
-    background_ready = bool(files.get("selected_background") and step1_complete)
-    step3_complete = bool(files.get("image_mockups"))
+    flags = _wizard_flags()
+    unlocks = wizard_unlocks(flags)
+    if not unlocks["step_3"]:
+        _locked_step("3. Create Image Mockups", "Complete Step 2 first to unlock this section.")
+        return
+
+    image_prompts = build_image_prompts(product_handle, product_title, sport_category, creative_notes)
+    step3_complete = bool(flags["reels_step_3_complete"] and files.get("image_mockups"))
     with st.container(border=True):
         _step_header("3. Create Image Mockups", step3_complete)
-        st.caption("Copy this image prompt into ChatGPT with Image A + Image B uploaded. Upload the generated mockup back here.")
-        if not background_ready:
-            st.warning("Upload the selected background/reference room before using image mockup prompts.")
+        st.caption("Upload Image A and Image B to ChatGPT, then paste a prompt below.")
+        st.info(
+            "Upload BOTH reference files into ChatGPT:\n\n"
+            "Image A = product mockup\n\n"
+            "Image B = selected background/reference room\n\n"
+            "Then paste one of the prompts below."
+        )
+        _render_reference_pair(state)
 
         columns = st.columns(2)
         for index, scene in enumerate(SCENES):
@@ -1014,7 +1230,7 @@ def render_page() -> None:
                     st.markdown(f'<div class="smrs-card-title">{html.escape(scene["name"])}</div>', unsafe_allow_html=True)
                     st.caption(f"Scene slug: {scene['slug']}")
                     prompt_text = image_prompts[scene["slug"]]
-                    _copy_button(prompt_text, f"image-{scene['slug']}", "Copy Image Prompt")
+                    _copy_button(prompt_text, f"image-{scene['slug']}", "Copy Prompt")
                     st.text_area(
                         "Generated prompt",
                         value=prompt_text,
@@ -1022,28 +1238,43 @@ def render_page() -> None:
                         key=_prompt_preview_key("smrs_image_prompt", scene["slug"], prompt_text),
                         disabled=True,
                     )
-                    st.markdown(
-                        f'<div class="smrs-filename">{html.escape(image_mockup_filename(product_handle, scene["slug"]))}</div>',
-                        unsafe_allow_html=True,
-                    )
                     uploaded_mockup = st.file_uploader(
                         "Upload final generated mockup image",
                         type=MOCKUP_UPLOAD_TYPES,
                         key=f"smrs_mockup_upload_{scene['slug']}",
-                        disabled=not background_ready,
                     )
-                    if uploaded_mockup is not None and background_ready:
+                    if uploaded_mockup is not None:
                         _store_image_mockup_upload(state, uploaded_mockup, product_handle, scene["slug"])
+                        st.session_state["reels_step_3_complete"] = True
                     _render_image_preview(files["image_mockups"].get(scene["slug"]), width=240)
 
-    step4_complete = bool(files.get("videos"))
+        if files.get("image_mockups"):
+            if st.button(
+                "Generate Video Prompts / Continue to Step 4",
+                key="smrs_generate_video_prompts",
+                type="primary",
+                use_container_width=True,
+            ):
+                st.session_state["reels_step_3_complete"] = True
+                st.session_state["reels_video_prompts_generated"] = True
+                st.rerun()
+
+    flags = _wizard_flags()
+    unlocks = wizard_unlocks(flags)
+    if not unlocks["step_4"]:
+        _locked_step("4. Create Image-To-Video Reels", "Complete Step 3 first to unlock this section.")
+        return
+
     with st.container(border=True):
-        _step_header("4. Create Reels From Mockups", step4_complete)
-        st.caption("Copy this video prompt into your AI video editor with the generated mockup uploaded. Upload the final MP4 here.")
+        step4_complete = bool(flags["reels_step_4_complete"] and files.get("videos"))
+        _step_header("4. Create Image-To-Video Reels", step4_complete)
+        st.caption("Upload the generated mockup into your AI video tool, then paste the matching prompt.")
+        st.info("Upload the generated mockup image into your AI video editor. Then paste the matching prompt below.")
+
+        uploaded_scenes = [scene for scene in SCENES if files["image_mockups"].get(scene["slug"])]
         video_columns = st.columns(2)
-        for index, scene in enumerate(SCENES):
+        for index, scene in enumerate(uploaded_scenes):
             slug = scene["slug"]
-            mockup_ready = bool(files["image_mockups"].get(slug))
             with video_columns[index % 2]:
                 with st.container(border=True):
                     st.markdown(f'<div class="smrs-card-title">{html.escape(scene["video_name"])}</div>', unsafe_allow_html=True)
@@ -1072,38 +1303,37 @@ def render_page() -> None:
                         key=_prompt_preview_key("smrs_video_prompt", slug, current_video_prompt),
                         disabled=True,
                     )
-                    st.markdown(
-                        f'<div class="smrs-filename">{html.escape(video_filename(product_handle, slug, version, status))}</div>',
-                        unsafe_allow_html=True,
-                    )
                     uploaded_video = st.file_uploader(
                         "Upload the final MP4 here",
                         type=VIDEO_UPLOAD_TYPES,
                         key=f"smrs_video_upload_{slug}",
-                        disabled=not mockup_ready,
                     )
-                    if uploaded_video is not None and mockup_ready:
+                    if uploaded_video is not None:
                         record = _store_video_upload(state, uploaded_video, product_handle, slug, version, status)
+                        st.session_state["reels_step_4_complete"] = True
                         if record and record.get("version") != sanitize_version(version):
                             st.info(f"Filename already existed, so this upload was saved as {record['version']}.")
-                    if not mockup_ready:
-                        st.caption("Upload the matching Step 3 mockup before adding this reel.")
                     _render_video_preview(files["videos"].get(slug))
 
-    with st.container(border=True):
-        _step_header("5. Export Content Pack", step1_complete)
-        st.caption("Creates one ZIP with the exact Sports Cave folder structure, prompts, manifest, and instructions.")
-        missing = []
-        if not files.get("selected_background"):
-            missing.append("selected background")
-        if not files.get("image_mockups"):
-            missing.append("at least one generated mockup")
-        if not files.get("videos"):
-            missing.append("at least one final reel video")
-        if missing:
-            st.warning("ZIP can be created after Step 1, but this pack is still missing: " + ", ".join(missing) + ".")
+    flags = _wizard_flags()
+    unlocks = wizard_unlocks(flags)
+    if not unlocks["step_5"]:
+        _locked_step("5. Export Content Pack", "Complete Step 4 first to unlock this section.")
+        return
 
-        if st.button("Create Reels ZIP", key="smrs_create_zip", type="primary", use_container_width=True, disabled=not step1_complete):
+    video_meta = {
+        scene["slug"]: {
+            "version": st.session_state.get(f"smrs_video_version_{scene['slug']}", (files["videos"].get(scene["slug"]) or {}).get("version", "v01")),
+            "status": st.session_state.get(f"smrs_video_status_{scene['slug']}", (files["videos"].get(scene["slug"]) or {}).get("status", "final")),
+        }
+        for scene in SCENES
+    }
+    video_prompts = build_video_prompts(product_handle, product_title, sport_category, video_meta)
+    with st.container(border=True):
+        _step_header("5. Export Content Pack", True)
+        st.caption("Export all files, prompts, videos, and instructions into one VA-ready ZIP.")
+
+        if st.button("Create Reels ZIP", key="smrs_create_zip", type="primary", use_container_width=True):
             zip_path = build_social_media_reels_zip(
                 _run_dir(state),
                 product_handle,
@@ -1112,18 +1342,7 @@ def render_page() -> None:
                 state,
                 background_prompt,
                 image_prompts,
-                build_video_prompts(
-                    product_handle,
-                    product_title,
-                    sport_category,
-                    {
-                        scene["slug"]: {
-                            "version": st.session_state.get(f"smrs_video_version_{scene['slug']}", "v01"),
-                            "status": st.session_state.get(f"smrs_video_status_{scene['slug']}", "final"),
-                        }
-                        for scene in SCENES
-                    },
-                ),
+                video_prompts,
                 PACK_VERSION,
             )
             state["zip_path"] = str(zip_path)

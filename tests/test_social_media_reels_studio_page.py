@@ -42,6 +42,80 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
             "roger-federer__meta-reel__wall-admire__9x16__v02__ad-test.mp4",
         )
 
+    def test_filename_parsing_removes_uuid_and_detects_sport(self):
+        cases = [
+            (
+                "cristiano-ronaldo-soccer-art-e157b372-b7b0-4fa7-a667-b6aaca3ed2a5.jpeg",
+                "cristiano-ronaldo-soccer-art",
+                "Cristiano Ronaldo Soccer Art",
+                "Soccer",
+            ),
+            (
+                "roger-federer-the-art-of-greatness.png",
+                "roger-federer-the-art-of-greatness",
+                "Roger Federer The Art Of Greatness",
+                "Tennis",
+            ),
+            (
+                "legends-never-die-kobe-jordan.webp",
+                "legends-never-die-kobe-jordan",
+                "Legends Never Die Kobe Jordan",
+                "Basketball",
+            ),
+            (
+                "mbappe-born-for-the-world-stage.jpg",
+                "mbappe-born-for-the-world-stage",
+                "Mbappe Born For The World Stage",
+                "Soccer",
+            ),
+            (
+                "peter-brock-bathurst-v8-supercars.jpeg",
+                "peter-brock-bathurst-v8-supercars",
+                "Peter Brock Bathurst V8 Supercars",
+                "Motorsport",
+            ),
+            (
+                "ohtani-judge-legends-never-die-baseball.png",
+                "ohtani-judge-legends-never-die-baseball",
+                "Ohtani Judge Legends Never Die Baseball",
+                "Baseball",
+            ),
+        ]
+
+        for filename, handle, title, sport in cases:
+            with self.subTest(filename=filename):
+                details = reels.derive_product_details_from_filename(filename)
+                self.assertEqual(details["product_handle"], handle)
+                self.assertEqual(details["product_title"], title)
+                self.assertEqual(details["sport_category"], sport)
+
+    def test_sport_detection_ambiguity_and_meaningful_numbers(self):
+        self.assertEqual(reels.detect_sport_category("classic-football-wall-art"), "Soccer")
+        self.assertEqual(reels.detect_sport_category("brady-super-bowl-football-wall-art"), "NFL")
+        self.assertEqual(reels.strip_trailing_random_id("lebron-23"), "lebron-23")
+
+    def test_wizard_unlocks_are_linear(self):
+        self.assertEqual(
+            reels.wizard_unlocks({}),
+            {"step_1": True, "step_2": False, "step_3": False, "step_4": False, "step_5": False},
+        )
+        self.assertTrue(reels.wizard_unlocks({"reels_step_1_complete": True})["step_2"])
+        self.assertFalse(reels.wizard_unlocks({"reels_step_1_complete": True})["step_3"])
+        self.assertTrue(
+            reels.wizard_unlocks({"reels_step_1_complete": True, "reels_step_2_complete": True})["step_3"]
+        )
+        self.assertFalse(
+            reels.wizard_unlocks(
+                {
+                    "reels_step_1_complete": True,
+                    "reels_step_2_complete": True,
+                    "reels_step_3_complete": True,
+                }
+            )["step_4"]
+        )
+        self.assertTrue(reels.wizard_unlocks({"reels_video_prompts_generated": True})["step_4"])
+        self.assertTrue(reels.wizard_unlocks({"reels_step_4_complete": True})["step_5"])
+
     def test_zip_export_creates_required_folder_structure_and_manifest(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
@@ -120,6 +194,55 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
             self.assertIn(f"sport-videos/tennis/roger-federer/{video.name}", names)
             self.assertIn("README-INSTRUCTIONS.txt", names)
             self.assertIn('"product_handle": "roger-federer"', manifest)
+
+    def test_zip_uses_cleaned_detected_handle_not_uuid_filename(self):
+        details = reels.derive_product_details_from_filename(
+            "cristiano-ronaldo-soccer-art-e157b372-b7b0-4fa7-a667-b6aaca3ed2a5.jpeg"
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            product = run_dir / "source" / "product-mockup-original.jpeg"
+            product.parent.mkdir(parents=True, exist_ok=True)
+            product.write_bytes(b"product")
+            state = {
+                "files": {
+                    "product_mockup": {"path": str(product), "filename": product.name},
+                    "selected_background": None,
+                    "image_mockups": {},
+                    "videos": {},
+                }
+            }
+            background_prompt = reels.build_background_finder_prompt(
+                details["product_handle"],
+                details["product_title"],
+                details["sport_category"],
+                "",
+            )
+            image_prompts = reels.build_image_prompts(
+                details["product_handle"],
+                details["product_title"],
+                details["sport_category"],
+                "",
+            )
+            video_prompts = reels.build_video_prompts(
+                details["product_handle"],
+                details["product_title"],
+                details["sport_category"],
+            )
+
+            zip_path = reels.build_social_media_reels_zip(
+                run_dir,
+                details["product_handle"],
+                details["product_title"],
+                details["sport_category"],
+                state,
+                background_prompt,
+                image_prompts,
+                video_prompts,
+            )
+
+            self.assertEqual(zip_path.name, "cristiano-ronaldo-soccer-art__social-media-reels-pack__v01.zip")
 
 
 if __name__ == "__main__":
