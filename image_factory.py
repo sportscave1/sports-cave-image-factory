@@ -12,6 +12,8 @@ from textwrap import dedent
 
 import prompt_store
 
+from sports_cave_prompt_blocks import append_sports_cave_prompt_blocks, prompt_includes_human_scene
+
 try:
     import psutil
 except ImportError:
@@ -1948,6 +1950,11 @@ def generate_lifestyle_prompt_pack(product_name, sport_category, product_slug, r
                 {prompt_body}
                 """
             ).strip()
+        prompt_text = append_sports_cave_prompt_blocks(
+            prompt_text,
+            include_human=prompt_includes_human_scene(prompt_text),
+            include_video=is_reels_prompt_filename(filename),
+        )
         prompt_path.write_text(prompt_text + "\n", encoding="utf-8")
         prompt_paths.append(prompt_path)
 

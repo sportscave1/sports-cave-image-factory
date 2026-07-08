@@ -17,6 +17,13 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, UnidentifiedImageError
 
+from sports_cave_prompt_blocks import (
+    SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK,
+    SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK,
+    SPORTS_CAVE_UGC_VIDEO_REALISM_BLOCK,
+    append_sports_cave_prompt_blocks,
+)
+
 
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
@@ -76,11 +83,13 @@ SCENES = (
         "name": "Person Holding & Admiring",
         "slug": "collector-admire",
         "video_name": "Holding & Admiring Video",
+        "has_person": True,
         "image_direction": (
-            "Create a realistic male customer holding the black framed artwork at chest height, "
+            "Create a real everyday customer holding the black framed artwork at chest height, "
             "admiring it with an ownership feel. Hands must sit only on the outside frame edges. "
             "The artwork must remain fully visible. Use the selected premium room as the environment, "
-            "with realistic glass, realistic frame weight, natural hand contact, and believable scale."
+            "with realistic glass, realistic frame weight, natural hand contact, believable scale, "
+            "and premium UGC-style customer realism."
         ),
         "video_direction": (
             "A real customer holds and admires the artwork. Tiny breathing, slight hand grip adjustment, "
@@ -91,11 +100,12 @@ SCENES = (
         "name": "Person Hanging / Adjusting Frame",
         "slug": "wall-hanging-adjust",
         "video_name": "Hanging / Adjusting Video",
+        "has_person": True,
         "image_direction": (
-            "Create a realistic male customer making the final tiny adjustment after hanging the frame. "
+            "Create a real everyday customer making the final tiny adjustment after hanging the frame. "
             "Both hands must be on the outer frame edges only. Use a subtle straightening pose, with the "
             "frame mounted at realistic eye-level height, natural wall shadows, premium lighting, and "
-            "realistic glass."
+            "realistic glass. The moment should feel like premium UGC-style home content."
         ),
         "video_direction": (
             "Customer makes final wall adjustment. Both hands gently straighten the frame, tiny left-right "
@@ -107,10 +117,11 @@ SCENES = (
         "name": "Person Standing Back Admiring Wall",
         "slug": "wall-admire",
         "video_name": "Standing Back Admiring Video",
+        "has_person": True,
         "image_direction": (
-            "Create the frame mounted on the wall with a realistic male customer standing a few steps back "
+            "Create the frame mounted on the wall with a real everyday customer standing a few steps back "
             "admiring it. The customer must not touch the frame, must not block the artwork, and should "
-            "communicate quiet pride, ownership, and collector emotion."
+            "communicate quiet pride, ownership, and collector emotion in a natural UGC-style home moment."
         ),
         "video_direction": (
             "Customer stands back admiring the mounted frame. Subtle breathing, tiny head movement, slight "
@@ -121,6 +132,7 @@ SCENES = (
         "name": "Artwork Only On Wall",
         "slug": "wall-only",
         "video_name": "Artwork Only Wall Video",
+        "has_person": False,
         "image_direction": (
             "Create artwork only, mounted on the wall with no people. Use the selected premium room setting, "
             "realistic A1 or XL wall scale depending on the product, accurate black frame depth, realistic "
@@ -254,7 +266,7 @@ def wizard_unlocks(flags: dict) -> dict[str, bool]:
         "step_1": True,
         "step_2": bool(flags.get("reels_step_1_complete")),
         "step_3": bool(flags.get("reels_step_2_complete")),
-        "step_4": bool(flags.get("reels_video_prompts_generated")),
+        "step_4": bool(flags.get("reels_step_3_complete")),
         "step_5": bool(flags.get("reels_step_4_complete")),
     }
 
@@ -383,10 +395,41 @@ def _asset_bytes(asset: dict | None) -> bytes:
     return b""
 
 
-def _asset_data_url(asset: dict) -> str:
+def has_valid_image_asset(asset: dict | None) -> bool:
+    if not asset:
+        return False
     image_bytes = _asset_bytes(asset)
-    mime_type = asset.get("mime_type") or mime_type_from_filename(asset.get("filename", ""))
-    return f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
+    mime_type = str(asset.get("mime_type") or mime_type_from_filename(asset.get("filename", ""))).lower()
+    width = asset.get("width")
+    height = asset.get("height")
+    return bool(
+        image_bytes
+        and mime_type.startswith("image/")
+        and isinstance(width, int)
+        and isinstance(height, int)
+        and width > 0
+        and height > 0
+    )
+
+
+def has_any_valid_image_asset(records: dict | None) -> bool:
+    return any(has_valid_image_asset(asset) for asset in (records or {}).values())
+
+
+def _sync_wizard_completion_from_assets(state: dict) -> None:
+    files = state.get("files", {})
+    product_complete = has_valid_image_asset(files.get("product_mockup"))
+    background_complete = has_valid_image_asset(files.get("selected_background"))
+    mockups_complete = has_any_valid_image_asset(files.get("image_mockups"))
+    videos_complete = bool(files.get("videos"))
+
+    st.session_state["reels_step_1_complete"] = product_complete
+    st.session_state["reels_step_2_complete"] = background_complete
+    st.session_state["reels_step_3_complete"] = mockups_complete
+    st.session_state["reels_step_4_complete"] = videos_complete
+    st.session_state["reels_background_generated"] = background_complete
+    st.session_state["reels_image_prompts_generated"] = background_complete
+    st.session_state["reels_video_prompts_generated"] = mockups_complete
 
 
 def image_mockup_filename(product_handle: str, scene_slug: str) -> str:
@@ -514,7 +557,7 @@ def build_image_prompt(scene: dict, product_handle: str, product_title: str, spo
     product_title = str(product_title or "").strip() or "Untitled Sports Cave product"
     sport_category = str(sport_category or "").strip() or "sport"
     creative_notes = str(creative_notes or "").strip() or "No extra creative notes supplied."
-    return f"""{IMAGE_MASTER_RULES}
+    prompt = f"""{IMAGE_MASTER_RULES}
 
 Product handle: {product_handle}
 Product title: {product_title}
@@ -539,13 +582,14 @@ Quality control:
 Reject and regenerate if text, badge, edition plate, artwork colour, or frame shape changes.
 Reject and regenerate if the frame looks pasted on, warped, too glossy, blurry, or fake.
 Do not accept low-resolution, cluttered, logo-heavy, or distorted backgrounds."""
+    return append_sports_cave_prompt_blocks(prompt, include_human=bool(scene.get("has_person")))
 
 
 def build_video_prompt(scene: dict, product_handle: str, product_title: str, sport_category: str, version: str = "v01", status: str = "final") -> str:
     product_handle = sanitize_handle(product_handle, "product-handle")
     product_title = str(product_title or "").strip() or "Untitled Sports Cave product"
     sport_category = str(sport_category or "").strip() or "sport"
-    return f"""{VIDEO_MASTER_RULES}
+    prompt = f"""{VIDEO_MASTER_RULES}
 
 Product handle: {product_handle}
 Product title: {product_title}
@@ -566,6 +610,11 @@ Camera and realism:
 - Natural shadows and realistic depth
 
 Output: 9:16 vertical, 1080p, 6-8 seconds, photorealistic, smooth natural motion, Meta Reels/Stories ready."""
+    return append_sports_cave_prompt_blocks(
+        prompt,
+        include_human=bool(scene.get("has_person")),
+        include_video=True,
+    )
 
 
 def build_image_prompts(product_handle: str, product_title: str, sport_category: str, creative_notes: str) -> dict[str, str]:
@@ -1262,78 +1311,11 @@ def render_full_resolution_image_tools(asset: dict | None, label: str, key: str)
     size = asset.get("size_bytes") or len(image_bytes)
 
     st.markdown(f"**{label}**")
-    st.caption("Original full-resolution image is preserved. Use Download, Open, or Copy full-res image.")
     st.caption(
-        f"Original filename: `{filename}` | Dimensions: `{dimensions}` | "
+        f"`{filename}` | Dimensions: `{dimensions}` | "
         f"Size: `{format_file_size(size)}` | Type: `{mime_type}` | Source: `{asset.get('source', 'upload')}`"
     )
     st.image(image_bytes, caption=filename, width=320)
-
-    tool_cols = st.columns(3)
-    with tool_cols[0]:
-        st.download_button(
-            "Download original",
-            data=image_bytes,
-            file_name=filename,
-            mime=mime_type,
-            key=f"smrs_download_original_{key}",
-            use_container_width=True,
-        )
-
-    data_url = _asset_data_url(asset)
-    with tool_cols[1]:
-        components.html(
-            f"""
-            <button id="open-{sanitize_handle(key, 'image')}" type="button" style="width:100%;min-height:38px;border:1px solid #D4A54C;border-radius:7px;background:#D4A54C;color:#0B0B0D;font-weight:750;cursor:pointer;">Open full-resolution image</button>
-            <script>
-            (() => {{
-              const button = document.getElementById("open-{sanitize_handle(key, 'image')}");
-              const dataUrl = {json.dumps(data_url)};
-              button.addEventListener("click", (event) => {{
-                event.preventDefault();
-                const win = window.open();
-                if (win) {{
-                  win.document.write('<img src="' + dataUrl + '" style="max-width:none;width:auto;height:auto;" />');
-                  win.document.title = {json.dumps(filename)};
-                }} else {{
-                  button.innerText = "Popup blocked";
-                }}
-              }});
-            }})();
-            </script>
-            """,
-            height=48,
-        )
-    with tool_cols[2]:
-        components.html(
-            f"""
-            <button id="copy-{sanitize_handle(key, 'image')}" type="button" style="width:100%;min-height:38px;border:1px solid #D4A54C;border-radius:7px;background:#D4A54C;color:#0B0B0D;font-weight:750;cursor:pointer;">Copy full-res image</button>
-            <div id="copy-status-{sanitize_handle(key, 'image')}" style="font-size:12px;color:#66615A;margin-top:4px;"></div>
-            <script>
-            (() => {{
-              const button = document.getElementById("copy-{sanitize_handle(key, 'image')}");
-              const status = document.getElementById("copy-status-{sanitize_handle(key, 'image')}");
-              const dataUrl = {json.dumps(data_url)};
-              const mimeType = {json.dumps(mime_type)};
-              button.addEventListener("click", async (event) => {{
-                event.preventDefault();
-                try {{
-                  if (!navigator.clipboard || !window.ClipboardItem) {{
-                    throw new Error("Clipboard image write unavailable");
-                  }}
-                  const response = await fetch(dataUrl);
-                  const blob = await response.blob();
-                  await navigator.clipboard.write([new ClipboardItem({{ [mimeType]: blob }})]);
-                  status.innerText = "Full-res image copied";
-                }} catch (error) {{
-                  status.innerText = "Copy not available in this browser. Use Download original or Open full-resolution image.";
-                }}
-              }});
-            }})();
-            </script>
-            """,
-            height=72,
-        )
 
 
 def _render_video_preview(record: dict | None) -> None:
@@ -1351,11 +1333,11 @@ def _render_video_preview(record: dict | None) -> None:
 
 def _step_statuses(state: dict, product_handle: str) -> list[tuple[str, bool]]:
     files = state["files"]
-    flags = _wizard_flags()
-    step1 = bool(flags["reels_step_1_complete"] and files.get("product_mockup") and product_handle)
-    step2 = bool(flags["reels_step_2_complete"] and files.get("selected_background"))
-    step3 = bool(flags["reels_step_3_complete"] and files.get("image_mockups"))
-    step4 = bool(flags["reels_step_4_complete"] and files.get("videos"))
+    image_mockups = files.get("image_mockups") or {}
+    step1 = has_valid_image_asset(files.get("product_mockup"))
+    step2 = has_valid_image_asset(files.get("selected_background"))
+    step3 = any(has_valid_image_asset(asset) for asset in image_mockups.values())
+    step4 = bool(files.get("videos"))
     return [
         ("1 Product", step1),
         ("2 Background", step2),
@@ -1440,6 +1422,7 @@ def render_page() -> None:
     _ensure_wizard_flags()
     state = _state()
     files = state["files"]
+    _sync_wizard_completion_from_assets(state)
 
     st.markdown(
         """
@@ -1467,7 +1450,7 @@ def render_page() -> None:
     if product_handle:
         _sync_scene_filenames(state, product_handle)
 
-    step1_complete = bool(flags["reels_step_1_complete"] and files.get("product_mockup") and product_handle)
+    step1_complete = has_valid_image_asset(files.get("product_mockup"))
     with st.container(border=True):
         _step_header("1. Upload Product Mockup", step1_complete)
         st.caption("Upload the black framed product mockup, then generate the reel workflow.")
@@ -1480,14 +1463,26 @@ def render_page() -> None:
                 asset_type="product-mockup",
                 product_handle=product_handle,
             )
-            if product_asset:
+            if has_valid_image_asset(product_asset):
+                details = derive_product_details_from_asset(product_asset)
+                _store_source_image_asset(state, product_asset, "product_mockup", "product-mockup-original", "product_mockup")
+                if not st.session_state.get("smrs_product_handle"):
+                    st.session_state["smrs_product_title"] = details["product_title"]
+                    st.session_state["smrs_product_handle"] = details["product_handle"]
+                    st.session_state["smrs_sport_category"] = details["sport_category"]
+                    st.session_state.setdefault("smrs_creative_notes", "")
+                    if not details["sport_category"] or details["product_handle"] == "pasted-product-mockup":
+                        st.session_state["smrs_force_edit_details"] = True
+                st.session_state["reels_product_generated"] = True
+                _sync_wizard_completion_from_assets(state)
                 render_full_resolution_image_tools(product_asset, "Product mockup ready", "step1_product_pending")
+                st.rerun()
             if st.button(
                 "Generate",
                 key="smrs_generate_product",
                 type="primary",
                 use_container_width=True,
-                disabled=product_asset is None,
+                disabled=not has_valid_image_asset(product_asset),
             ):
                 details = derive_product_details_from_asset(product_asset)
                 _store_source_image_asset(state, product_asset, "product_mockup", "product-mockup-original", "product_mockup")
@@ -1505,6 +1500,7 @@ def render_page() -> None:
                 st.session_state["reels_image_prompts_generated"] = False
                 st.session_state["reels_step_4_complete"] = False
                 st.session_state["reels_video_prompts_generated"] = False
+                _sync_wizard_completion_from_assets(state)
                 st.rerun()
         else:
             render_full_resolution_image_tools(files.get("product_mockup"), "Product Mockup", "step1_product")
@@ -1539,7 +1535,7 @@ def render_page() -> None:
         return
 
     background_prompt = build_background_finder_prompt(product_handle, product_title, sport_category, creative_notes)
-    step2_complete = bool(flags["reels_step_2_complete"] and files.get("selected_background"))
+    step2_complete = has_valid_image_asset(files.get("selected_background"))
     with st.container(border=True):
         _step_header("2. Find / Upload Background", step2_complete)
         st.caption("Use ChatGPT to choose the best background, then upload the selected room here.")
@@ -1564,14 +1560,18 @@ def render_page() -> None:
             asset_type="background",
             product_handle=product_handle,
         )
-        if background_asset:
+        if has_valid_image_asset(background_asset):
+            _store_source_image_asset(state, background_asset, "selected_background", "selected-background-original", "selected_background")
+            _sync_wizard_completion_from_assets(state)
             render_full_resolution_image_tools(background_asset, "Selected background ready", "step2_background_pending")
+            if not step2_complete:
+                st.rerun()
         if st.button(
             "Generate",
             key="smrs_generate_background",
             type="primary",
             use_container_width=True,
-            disabled=background_asset is None and not files.get("selected_background"),
+            disabled=not has_valid_image_asset(background_asset) and not has_valid_image_asset(files.get("selected_background")),
         ):
             if background_asset is not None:
                 _store_source_image_asset(state, background_asset, "selected_background", "selected-background-original", "selected_background")
@@ -1581,6 +1581,7 @@ def render_page() -> None:
             st.session_state["reels_step_3_complete"] = False
             st.session_state["reels_video_prompts_generated"] = False
             st.session_state["reels_step_4_complete"] = False
+            _sync_wizard_completion_from_assets(state)
             st.rerun()
         render_full_resolution_image_tools(files.get("selected_background"), "Selected Background", "step2_background")
 
@@ -1591,7 +1592,7 @@ def render_page() -> None:
         return
 
     image_prompts = build_image_prompts(product_handle, product_title, sport_category, creative_notes)
-    step3_complete = bool(flags["reels_step_3_complete"] and files.get("image_mockups"))
+    step3_complete = has_any_valid_image_asset(files.get("image_mockups"))
     with st.container(border=True):
         _step_header("3. Create Image Mockups", step3_complete)
         st.caption("Upload Image A and Image B to ChatGPT, then paste a prompt below.")
@@ -1627,25 +1628,16 @@ def render_page() -> None:
                         product_handle=product_handle,
                         scene_slug=scene["slug"],
                     )
-                    if mockup_asset is not None:
+                    if has_valid_image_asset(mockup_asset):
                         _store_image_mockup_asset(state, mockup_asset, product_handle, scene["slug"])
-                        st.session_state["reels_step_3_complete"] = True
+                        _sync_wizard_completion_from_assets(state)
+                        if not step3_complete:
+                            st.rerun()
                     render_full_resolution_image_tools(
                         files["image_mockups"].get(scene["slug"]),
                         f"{scene['name']} Mockup",
                         f"step3_{scene['slug']}",
                     )
-
-        if files.get("image_mockups"):
-            if st.button(
-                "Generate Video Prompts / Continue to Step 4",
-                key="smrs_generate_video_prompts",
-                type="primary",
-                use_container_width=True,
-            ):
-                st.session_state["reels_step_3_complete"] = True
-                st.session_state["reels_video_prompts_generated"] = True
-                st.rerun()
 
     flags = _wizard_flags()
     unlocks = wizard_unlocks(flags)

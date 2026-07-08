@@ -4,10 +4,16 @@ import io
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 from PIL import Image
 
 import social_media_reels_studio_page as reels
+from sports_cave_prompt_blocks import (
+    SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK,
+    SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK,
+    SPORTS_CAVE_UGC_VIDEO_REALISM_BLOCK,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -113,6 +119,7 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertEqual(asset["size_bytes"], len(original))
         self.assertEqual(asset["mime_type"], "image/png")
         self.assertEqual(asset["source"], "upload")
+        self.assertTrue(reels.has_valid_image_asset(asset))
 
     def test_pasted_image_payload_decodes_and_generates_safe_filename(self):
         original = self._png_bytes(size=(4, 4))
@@ -131,6 +138,22 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertEqual(asset["source"], "paste")
         self.assertEqual(asset["width"], 4)
         self.assertEqual(asset["height"], 4)
+        self.assertTrue(reels.has_valid_image_asset(asset))
+
+    def test_dropped_image_payload_decodes_as_valid_asset(self):
+        original = self._png_bytes(size=(5, 3))
+        payload = {
+            "filename": "Dropped Image.PNG",
+            "mime": "image/png",
+            "data_base64": base64.b64encode(original).decode("ascii"),
+            "source": "drop",
+        }
+
+        asset = reels.image_asset_from_paste_payload(payload, "roger-federer", "product-mockup")
+
+        self.assertEqual(asset["bytes"], original)
+        self.assertEqual(asset["source"], "drop")
+        self.assertTrue(reels.has_valid_image_asset(asset))
 
     def test_wizard_unlocks_are_linear(self):
         self.assertEqual(
@@ -149,10 +172,113 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
                     "reels_step_2_complete": True,
                     "reels_step_3_complete": True,
                 }
-            )["step_4"]
+            )["step_5"]
         )
-        self.assertTrue(reels.wizard_unlocks({"reels_video_prompts_generated": True})["step_4"])
+        self.assertTrue(reels.wizard_unlocks({"reels_step_3_complete": True})["step_4"])
         self.assertTrue(reels.wizard_unlocks({"reels_step_4_complete": True})["step_5"])
+
+    def test_wizard_completion_is_based_on_valid_image_assets(self):
+        original = self._png_bytes(size=(8, 8))
+        product = reels.image_asset_from_bytes(original, "product.png", "image/png", source="upload")
+        background = reels.image_asset_from_bytes(original, "background.png", "image/png", source="paste")
+        mockup = reels.image_asset_from_bytes(original, "mockup.png", "image/png", source="drop")
+        state = {
+            "files": {
+                "product_mockup": product,
+                "selected_background": background,
+                "image_mockups": {"collector-admire": mockup},
+                "videos": {},
+            }
+        }
+
+        try:
+            reels._ensure_wizard_flags()
+            reels._sync_wizard_completion_from_assets(state)
+            flags = reels._wizard_flags()
+        finally:
+            for key in reels.WIZARD_FLAG_DEFAULTS:
+                reels.st.session_state.pop(key, None)
+
+        self.assertTrue(flags["reels_step_1_complete"])
+        self.assertTrue(flags["reels_step_2_complete"])
+        self.assertTrue(flags["reels_step_3_complete"])
+        self.assertTrue(reels.wizard_unlocks(flags)["step_2"])
+        self.assertTrue(reels.wizard_unlocks(flags)["step_3"])
+        self.assertTrue(reels.wizard_unlocks(flags)["step_4"])
+
+    def test_step_one_upload_paste_and_drop_assets_unlock_step_two(self):
+        for source in ("upload", "paste", "drop"):
+            with self.subTest(source=source):
+                asset = reels.image_asset_from_bytes(
+                    self._png_bytes(size=(6, 4)),
+                    f"{source}-product.png",
+                    "image/png",
+                    source=source,
+                )
+                state = {
+                    "files": {
+                        "product_mockup": asset,
+                        "selected_background": None,
+                        "image_mockups": {},
+                        "videos": {},
+                    }
+                }
+                try:
+                    reels._ensure_wizard_flags()
+                    reels._sync_wizard_completion_from_assets(state)
+                    unlocks = reels.wizard_unlocks(reels._wizard_flags())
+                finally:
+                    for key in reels.WIZARD_FLAG_DEFAULTS:
+                        reels.st.session_state.pop(key, None)
+
+                self.assertTrue(unlocks["step_2"])
+
+    def test_image_display_uses_original_bytes_without_action_buttons(self):
+        original = self._png_bytes(size=(10, 10))
+        asset = reels.image_asset_from_bytes(original, "full-res.png", "image/png", source="upload")
+
+        with patch.object(reels.st, "image") as image_mock:
+            reels.render_full_resolution_image_tools(asset, "Product Mockup", "test_product")
+
+        image_mock.assert_called()
+        self.assertEqual(image_mock.call_args.args[0], original)
+
+        source = (ROOT / "social_media_reels_studio_page.py").read_text(encoding="utf-8")
+        self.assertNotIn("Download original", source)
+        self.assertNotIn("Open full-resolution image", source)
+        self.assertNotIn("Copy full-res image", source)
+        self.assertNotIn("Copy not available in this browser", source)
+
+    def test_person_image_prompts_include_ugc_human_realism_block(self):
+        prompts = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")
+
+        self.assertIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, prompts["wall-hanging-adjust"])
+        self.assertIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, prompts["collector-admire"])
+        self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompts["wall-hanging-adjust"])
+        self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompts["collector-admire"])
+
+    def test_artwork_only_prompt_excludes_human_block_but_keeps_product_lock(self):
+        prompt = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")["wall-only"]
+
+        self.assertNotIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, prompt)
+        self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompt)
+
+    def test_person_video_prompt_includes_video_and_product_lock_blocks(self):
+        prompts = reels.build_video_prompts("roger-federer", "Roger Federer", "Tennis")
+
+        self.assertIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, prompts["collector-admire"])
+        self.assertIn(SPORTS_CAVE_UGC_VIDEO_REALISM_BLOCK, prompts["collector-admire"])
+        self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompts["collector-admire"])
+        self.assertNotIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, prompts["wall-only"])
+        self.assertNotIn(SPORTS_CAVE_UGC_VIDEO_REALISM_BLOCK, prompts["wall-only"])
+        self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompts["wall-only"])
+
+    def test_product_lock_block_is_in_all_reels_studio_mockup_and_video_prompts(self):
+        image_prompts = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")
+        video_prompts = reels.build_video_prompts("roger-federer", "Roger Federer", "Tennis")
+
+        for prompt in list(image_prompts.values()) + list(video_prompts.values()):
+            self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompt)
 
     def test_zip_export_creates_required_folder_structure_and_manifest(self):
         with tempfile.TemporaryDirectory() as tmpdir:
