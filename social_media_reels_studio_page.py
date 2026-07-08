@@ -571,11 +571,12 @@ Task:
 
 Composition:
 - Premium Shopify-grade Sports Cave product photography
+- Use the original full-resolution Image A and Image B uploads, not screenshots or compressed previews
 - Realistic room perspective and believable frame scale
 - Black frame should feel physically present in the room
 - Natural shadows behind the frame and around any hands
 - Subtle glass reflection only, never covering key artwork detail
-- 1:1 square output for Meta feed testing
+- High-resolution 1:1 square output for Meta feed testing
 - Clean, premium, masculine collector-room mood
 
 Quality control:
@@ -1304,6 +1305,7 @@ def render_full_resolution_image_tools(asset: dict | None, label: str, key: str)
         f"`{filename}` | Dimensions: `{dimensions}` | "
         f"Size: `{format_file_size(size)}` | Type: `{mime_type}` | Source: `{asset.get('source', 'upload')}`"
     )
+    st.caption("Original source bytes are preserved. The image below is visually constrained only.")
     st.image(image_bytes, caption=filename, width=320)
 
 
@@ -1391,6 +1393,10 @@ def _sport_selectbox(current_value: str) -> str:
 
 
 def _render_reference_pair(state: dict) -> None:
+    st.caption(
+        "Use these exact original source images as Image A and Image B in ChatGPT. "
+        "Do not screenshot the previews; the app keeps the uploaded bytes at their original resolution."
+    )
     columns = st.columns(2)
     with columns[0]:
         render_full_resolution_image_tools(

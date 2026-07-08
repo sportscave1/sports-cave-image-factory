@@ -280,6 +280,13 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         for prompt in list(image_prompts.values()) + list(video_prompts.values()):
             self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompt)
 
+    def test_image_prompts_require_original_full_resolution_reference_uploads(self):
+        image_prompts = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")
+
+        for prompt in image_prompts.values():
+            self.assertIn("Use the original full-resolution Image A and Image B uploads", prompt)
+            self.assertIn("High-resolution 1:1 square output", prompt)
+
     def test_zip_export_creates_required_folder_structure_and_manifest(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
