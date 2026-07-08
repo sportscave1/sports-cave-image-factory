@@ -17,13 +17,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, UnidentifiedImageError
 
-from sports_cave_prompt_blocks import (
-    SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK,
-    SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK,
-    append_sports_cave_prompt_blocks,
-)
-
-
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
 PASTE_COMPONENT_DIR = BASE_DIR / "components" / "reels_image_paste_zone"
@@ -145,29 +138,167 @@ SCENES = (
 )
 
 
-IMAGE_MASTER_RULES = """Use the uploaded product image as Image A and the uploaded background/reference room image as Image B.
-Use Image A as the product reference and Image B as the environment reference.
-Keep the framed Sports Cave artwork and black frame in Image A 100% unchanged.
-Use the supplied image(s), not screenshots.
-The uploaded product artwork is the hero.
+IMAGE_PROMPT_OPENING = """Create a 1024 x 1024 ultra-realistic Sports Cave lifestyle mockup using the uploaded references.
+
+Image A is the exact Sports Cave black framed product mockup.
+Image B is the selected background/reference room.
+Use Image A for the product and Image B for the environment.
+
+The uploaded product artwork is the hero. Preserve it exactly.
 The output must look like a real premium Sports Cave lifestyle photograph, not AI.
 
-Non-negotiables:
-- The uploaded Sports Cave artwork and black frame must remain 100% unchanged
-- Do not redesign the artwork
-- Do not change the colours
-- Do not change the typography
-- Do not change the badge
-- Do not change the edition plate
-- Do not crop the artwork
-- Do not blur the artwork
-- Do not stretch, warp, bend, squash, distort, or regenerate the frame or artwork
-- Do not distort proportions
-- Do not make the frame look pasted on
-- Do not cover important artwork details with hands
-- Do not add fake logos, fake text overlays, or watermarks
-- Do not add clutter
-- Do not make it CGI, cartoon, glossy, or fake"""
+Product title: {product_title}
+Sport category: {sport_category}
+Creative notes: {creative_notes}"""
+
+
+IMAGE_PRODUCT_LOCK = """PRODUCT LOCK
+
+Keep the uploaded Sports Cave artwork and black frame exactly the same.
+
+Do not redesign the artwork.
+Do not change the athlete, subject, team, colours, text, typography, badge, edition plate, plaque, layout, crop, frame colour, frame shape, or composition inside the frame.
+Do not blur, stretch, warp, bend, squash, distort, repaint, redraw, replace, regenerate, or reinterpret the artwork.
+
+The artwork must remain sharp, rectangular, correctly aligned, and physically believable inside the frame."""
+
+
+IMAGE_PERSON_REALISM_HOLDING = """PERSON REALISM
+
+Add one realistic male customer only.
+
+He should look 30-50 years old.
+Natural believable appearance.
+Smart casual clothing.
+Not model-like.
+Realistic skin texture.
+Realistic arms and hands.
+realistic hands.
+Correct number of fingers.
+Natural finger placement.
+No melted fingers.
+No extra fingers.
+No warped hands.
+
+He should be looking at the artwork, not the camera.
+
+His posture should show the natural weight of a real framed product.
+
+Hands must hold the outside black frame edges only.
+hands must only touch the outer frame edges.
+Hands must never cover important artwork details.
+Hands must not cover the title, player, badge, edition plate, signature, or main subject."""
+
+
+IMAGE_PERSON_REALISM_HANGING = """PERSON REALISM
+
+Add one realistic male customer only.
+
+He should look 30-50 years old.
+Natural believable appearance.
+Smart casual clothing.
+Realistic skin texture.
+Realistic arms and hands.
+realistic hands.
+Correct number of fingers.
+Natural finger placement.
+No melted fingers.
+No extra fingers.
+No warped hands.
+Natural body posture.
+Realistic shoulder and arm positioning while holding a heavy frame.
+
+He should be focused on lining up the artwork on the wall, not looking at the camera.
+
+Hands must only touch the outer black frame edges.
+hands must only touch the outer frame edges.
+Hands must never cover the title, player, badge, edition plate, signature, or main subject."""
+
+
+IMAGE_PERSON_REALISM_ADMIRE = """PERSON REALISM
+
+Add one realistic male customer only.
+
+He should look 30-50 years old.
+Natural believable appearance.
+Smart casual clothing.
+Realistic skin texture.
+realistic hands.
+Correct number of fingers.
+Realistic body scale.
+Natural posture.
+Relaxed stance.
+Slightly turned toward the artwork.
+Not looking at the camera.
+
+No warped limbs.
+No extra fingers.
+No warped hands.
+No distorted body.
+No fake model pose.
+
+The person must not block the artwork."""
+
+
+HUMAN_ANATOMY_LOCK = """HUMAN ANATOMY LOCK:
+The scene must contain exactly one real everyday adult customer.
+The person must have a physically possible pose with all visible body parts connected naturally.
+Both shoulders, upper arms, elbows, forearms, wrists, hands, torso, hips, legs, and feet must align anatomically.
+No detached limbs.
+No floating hands.
+No hands appearing without visible wrists and arms.
+No arm emerging from behind the frame unless the full arm connection to the shoulder is clearly visible.
+No duplicated arms.
+No extra hands.
+No missing elbows.
+No twisted wrists.
+No broken fingers.
+No stretched arms.
+No rubbery limbs.
+No impossible reach across the frame.
+No cropped-off body parts that make limbs look disconnected.
+No mannequin, model, waxy, or AI-looking body.
+Keep the person's pose simple, natural, and believable."""
+
+
+NEGATIVE_HUMAN_ANATOMY = """NEGATIVE HUMAN ANATOMY:
+Do not create detached arms, floating hands, disconnected wrists, duplicate limbs, extra fingers, missing fingers, twisted fingers, broken elbows, impossible shoulders, arms coming from the wrong body position, hands appearing from behind the artwork, cropped limbs, warped anatomy, mannequin body, stock-photo model pose, waxy skin, plastic skin, uncanny face, or AI-looking human proportions."""
+
+
+HUMAN_ANATOMY_QA_REJECT = """Reject and regenerate if any hand, wrist, forearm, elbow, upper arm, shoulder, leg, foot, head, or torso is detached, duplicated, warped, hidden in an impossible way, or not physically connected to the same person."""
+
+
+WALL_HANGING_SAFE_POSE = """A single customer stands centered in front of the frame, back or three-quarter back view, with full torso and both shoulders visible. Both arms are visible and naturally connected from shoulder to hand. The customer lightly holds the left and right outer edges of the frame with both hands while making a tiny final straightening adjustment. Elbows are slightly bent. Wrists and fingers are normal. The hands touch only the outer frame edges and do not cover important artwork details. The pose must be physically possible and natural."""
+
+
+IMAGE_GLASS_REALISM = """GLASS REALISM
+
+Add ultra-realistic museum-quality glass over the artwork.
+
+The glass should have soft natural room reflections.
+Use subtle premium glare only.
+The glare must never hide or ruin the artwork.
+The artwork must remain sharp and readable."""
+
+
+IMAGE_ROOM_REALISM = """ROOM REALISM
+
+Use the selected background/reference room as the base environment.
+
+The room must remain realistic, premium, and believable.
+
+Do not distort walls, furniture, lamps, sofas, curtains, shelves, floors, or architecture.
+No warped walls.
+No impossible furniture.
+No random logos.
+No fake trophies.
+No clutter.
+No messy room.
+No obvious AI room.
+No neon signs unless extremely subtle and already suited to the background.
+No extra wall art competing with the product.
+
+The framed artwork must look mounted, held, or placed naturally in the room, not pasted on."""
 
 
 VIDEO_PROMPT_OPENING = """Create an ultra-realistic 5 second cinematic lifestyle video from this exact image.
@@ -1054,31 +1185,471 @@ Only help me choose the best background/reference room for this product."""
 
 
 def build_image_prompt(scene: dict, product_handle: str, product_title: str, sport_category: str, creative_notes: str) -> str:
+    product_title = str(product_title or "").strip() or "the uploaded Sports Cave product"
+    sport_category = str(sport_category or "").strip() or "sports"
     creative_notes = str(creative_notes or "").strip() or "No extra creative notes supplied."
-    creative_direction = ""
-    if creative_notes != "No extra creative notes supplied.":
-        creative_direction = f"\n\nFollow this extra creative direction if it helps the scene: {creative_notes}"
-    prompt = f"""{IMAGE_MASTER_RULES}
+    opening = IMAGE_PROMPT_OPENING.format(
+        product_title=product_title,
+        sport_category=sport_category,
+        creative_notes=creative_notes,
+    )
+    slug = scene.get("slug")
 
-Create this scene:
-{scene["image_direction"]}
-{creative_direction}
+    if slug == "collector-admire":
+        return f"""{opening}
 
-Composition:
-- Premium Shopify-grade Sports Cave product photography
-- Use the original full-resolution Image A and Image B uploads, not screenshots or compressed previews
-- Realistic room perspective and believable frame scale
-- Black frame should feel physically present in the room
-- Natural shadows behind the frame and around any hands
-- Subtle glass reflection only, never covering key artwork detail
-- High-resolution 1:1 square output for Meta feed testing
-- Clean, premium, masculine collector-room mood
+{IMAGE_PRODUCT_LOCK}
 
-Quality control:
-Reject and regenerate if text, badge, edition plate, artwork colour, or frame shape changes.
-Reject and regenerate if the frame looks pasted on, warped, too glossy, blurry, or fake.
-Do not accept low-resolution, cluttered, logo-heavy, or distorted backgrounds."""
-    return append_sports_cave_prompt_blocks(prompt, include_human=bool(scene.get("has_person")))
+SCENE
+
+Create a premium Sports Cave lifestyle scene inside the selected background/reference room.
+
+A lifelong {sport_category} collector is holding the framed artwork naturally with both hands at chest height.
+
+He is admiring the artwork before deciding where to hang it in his Sports Cave.
+
+The moment should feel authentic, quiet, proud, and collector-driven.
+
+The room should feel masculine, premium, warm, and believable.
+
+Use the selected background as the base environment.
+Keep the background restrained and realistic.
+
+{IMAGE_PERSON_REALISM_HOLDING}
+
+{HUMAN_ANATOMY_LOCK}
+
+{NEGATIVE_HUMAN_ANATOMY}
+
+{HUMAN_ANATOMY_QA_REJECT}
+
+FRAME REALISM
+
+The black frame must look like a real premium framed product:
+- premium matte black timber frame
+- realistic timber or frame depth
+- sharp square mitred corners
+- subtle frame texture
+- accurate landscape proportions
+- believable thickness
+- realistic physical weight in the hands
+- natural pressure where hands touch the frame
+- realistic contact shadows around the fingers
+- frame edges remain perfectly straight
+- no bending
+- no wobbling
+- no rubbery frame
+- no pasted-on look
+- no floating frame
+
+GLASS REALISM
+
+Add ultra-realistic museum-quality glass over the artwork.
+
+The glass should have soft natural reflections from the room.
+Use subtle premium glare only.
+The glare must never hide or ruin the artwork.
+The artwork must remain sharp and readable.
+
+ROOM REALISM
+
+Use the selected background/reference room as the base.
+
+The room must remain realistic, premium, and believable.
+
+Do not distort walls, furniture, lamps, sofas, curtains, shelves, floors, or architecture.
+No warped walls.
+No impossible furniture.
+No random logos.
+No fake trophies.
+No clutter.
+No messy room.
+No obvious AI room.
+No extra wall art competing with the product.
+
+The scene should feel like a real customer has just received the framed Sports Cave artwork and is about to place it in his dream room.
+
+LIGHTING
+
+Use premium cinematic lighting.
+
+Soft natural light.
+Warm interior glow.
+Controlled highlights.
+Realistic shadows.
+Soft ambient bounce light.
+Subtle reflection on glass.
+The lighting should feel like a luxury home, not a studio.
+
+COMPOSITION
+
+Square 1024 x 1024 canvas.
+
+The framed artwork is the hero.
+
+Show the full artwork and full frame clearly.
+Show believable scale.
+Use a professional DSLR / 50mm lens look.
+Slight natural viewing angle is allowed, but the frame and artwork must keep correct landscape proportions.
+The person should support the artwork naturally without blocking it.
+
+NEGATIVE RULES
+
+Do not add text overlays.
+Do not add watermarks.
+Do not add fake logos.
+Do not add extra people.
+Do not add random sports branding.
+Do not make the room cluttered.
+Do not make the person look AI.
+Do not make the hands distorted.
+Do not make the frame float.
+Do not make the frame glossy, cartoon, CGI, rubbery, warped, or fake.
+
+FINAL RESULT
+
+Photorealistic premium Sports Cave collector-room mockup with a realistic customer holding the exact uploaded framed artwork, perfect frame realism, realistic hands, museum glass, premium shadows, and believable lighting."""
+
+    if slug == "wall-hanging-adjust":
+        return f"""{opening}
+
+{IMAGE_PRODUCT_LOCK}
+
+SCENE
+
+Create a premium Sports Cave installation scene inside the selected background/reference room.
+
+A lifelong {sport_category} collector is holding the framed artwork up against the wall and is about to hang it or make the final adjustment.
+
+This should feel like the real moment just before the artwork becomes the centrepiece of his Sports Cave.
+
+The frame is close to the wall at realistic eye-level height.
+
+{WALL_HANGING_SAFE_POSE}
+
+The artwork must be fully visible.
+
+{IMAGE_PERSON_REALISM_HANGING}
+
+{HUMAN_ANATOMY_LOCK}
+
+{NEGATIVE_HUMAN_ANATOMY}
+
+{HUMAN_ANATOMY_QA_REJECT}
+
+FRAME REALISM
+
+The black frame must look like a real premium framed product:
+- premium matte black timber frame
+- realistic timber or frame depth
+- sharp square mitred corners
+- subtle frame texture
+- accurate landscape proportions
+- believable thickness
+- realistic physical weight
+- realistic pressure where hands hold the frame
+- realistic contact shadow between the frame and hands
+- realistic near-wall shadow behind the frame
+- believable gap or contact point near the wall
+- frame must feel physically held and about to be mounted
+- no floating frame
+- no warped frame
+- no bent corners
+- no rubbery edges
+- no pasted-on look
+
+GLASS REALISM
+
+Add ultra-realistic museum-quality glass over the artwork.
+
+The glass should show soft room reflections.
+Use subtle controlled glare only.
+The glare must never hide the artwork.
+The artwork must stay sharp, readable, and undistorted.
+
+ROOM REALISM
+
+Use the selected background/reference room as the base environment.
+
+The wall must look physically real.
+The frame must sit naturally against or close to the wall.
+The wall shadow must match the light direction.
+
+Do not distort walls, furniture, lamps, sofas, curtains, shelves, floors, or architecture.
+No warped walls.
+No impossible furniture.
+No random logos.
+No fake trophies.
+No clutter.
+No messy room.
+No obvious AI room.
+No extra wall art competing with the product.
+
+LIGHTING
+
+Use premium cinematic lighting.
+
+Soft natural light.
+Warm room glow.
+Controlled highlights.
+Realistic shadows behind the frame and person.
+Soft ambient bounce light.
+Subtle glass reflection.
+Luxury home atmosphere, not a studio.
+
+COMPOSITION
+
+Square 1024 x 1024 canvas.
+
+The framed artwork is the hero.
+
+Show full frame and full artwork.
+Show believable human scale.
+Place the frame at realistic eye-level wall height.
+Use a professional DSLR / 50mm lens look.
+A slight natural angle is allowed, but frame proportions must stay correct.
+The scene should be close enough to feel personal but wide enough to show the room and installation moment.
+
+NEGATIVE RULES
+
+Do not add text overlays.
+Do not add watermarks.
+Do not add fake logos.
+Do not add extra people.
+Do not add random sports branding.
+Do not make the person look AI.
+Do not make the hands distorted.
+Do not make the frame float.
+Do not make the frame bend.
+Do not cover the artwork.
+Do not make it CGI, cartoon, glossy, fake, or over-staged.
+
+FINAL RESULT
+
+Photorealistic premium Sports Cave installation mockup showing a realistic customer holding the exact uploaded framed artwork against the wall, about to hang it, with perfect frame realism, natural hands, museum glass, realistic wall shadows, and believable luxury-room lighting."""
+
+    if slug == "wall-admire":
+        return f"""{opening}
+
+{IMAGE_PRODUCT_LOCK}
+
+SCENE
+
+Create a premium Sports Cave lifestyle scene inside the selected background/reference room.
+
+The exact framed artwork is already mounted cleanly on the wall.
+
+A lifelong {sport_category} collector stands a few steps back, admiring the finished wall.
+
+He is not touching the frame.
+
+He is looking at the artwork with pride, nostalgia, and satisfaction.
+
+The room should feel like a real collector-owned Sports Cave, not a staged showroom.
+
+{IMAGE_PERSON_REALISM_ADMIRE}
+
+{HUMAN_ANATOMY_LOCK}
+
+{NEGATIVE_HUMAN_ANATOMY}
+
+{HUMAN_ANATOMY_QA_REJECT}
+
+FRAME REALISM
+
+The black frame must look like a real premium framed product mounted on the wall:
+- premium matte black timber frame
+- realistic timber or frame depth
+- sharp square mitred corners
+- subtle frame texture
+- accurate landscape proportions
+- believable thickness
+- perfectly straight edges
+- realistic wall mounting
+- realistic wall shadow behind and below the frame
+- believable scale relative to the person and room
+- no floating frame
+- no warped frame
+- no bent edges
+- no pasted-on look
+
+GLASS REALISM
+
+Add ultra-realistic museum-quality glass over the artwork.
+
+The glass should have soft natural room reflections.
+Use subtle premium glare only.
+The glare must never hide the artwork.
+The artwork must remain sharp and readable.
+
+ROOM REALISM
+
+Use the selected background/reference room as the base environment.
+
+The room must remain realistic, premium, and believable.
+
+Do not distort walls, furniture, lamps, sofas, curtains, shelves, floors, or architecture.
+No warped walls.
+No impossible furniture.
+No random logos.
+No fake trophies.
+No clutter.
+No messy room.
+No obvious AI room.
+No extra wall art competing with the product.
+
+The artwork should feel naturally installed as the centrepiece of the room.
+
+LIGHTING
+
+Use premium cinematic lighting.
+
+Soft natural light.
+Warm room glow.
+Controlled highlights.
+Realistic wall shadows behind the frame.
+Soft ambient bounce light.
+Subtle glass reflection.
+Luxury home atmosphere.
+
+COMPOSITION
+
+Square 1024 x 1024 canvas.
+
+The framed artwork is the hero.
+
+Show the full frame and full artwork.
+Show believable scale relative to the person.
+Place the frame at realistic eye-level height.
+Use a professional DSLR / 50mm lens look.
+The person should add emotional ownership without overpowering the product.
+
+NEGATIVE RULES
+
+Do not add text overlays.
+Do not add watermarks.
+Do not add fake logos.
+Do not add extra people.
+Do not add random sports branding.
+Do not make the person look AI.
+Do not distort the room.
+Do not make the frame float.
+Do not make the frame look pasted on.
+Do not make the frame glossy, cartoon, CGI, rubbery, warped, or fake.
+
+FINAL RESULT
+
+Photorealistic premium Sports Cave lifestyle mockup showing the exact uploaded framed artwork mounted on the wall with a realistic collector standing back admiring it, perfect frame realism, museum glass, premium wall shadows, believable room scale, and cinematic lighting."""
+
+    return f"""{opening}
+
+{IMAGE_PRODUCT_LOCK}
+
+SCENE
+
+Create a premium Sports Cave wall mockup inside the selected background/reference room.
+
+No people.
+
+The exact framed artwork is mounted cleanly on the wall as the centrepiece of the room.
+
+The room should feel masculine, premium, minimal, warm, collector-driven, and believable.
+
+Use the selected background as the base environment.
+Keep the room restrained and realistic.
+
+FRAME REALISM
+
+The black frame must look like a real premium framed product mounted on the wall:
+- premium matte black timber frame
+- realistic timber or frame depth
+- sharp square mitred corners
+- subtle frame texture
+- accurate landscape proportions
+- believable thickness
+- perfectly straight edges
+- realistic wall mounting
+- believable contact with the wall
+- realistic wall shadow behind and below the frame
+- accurate perspective
+- correct scale relative to the room
+- no floating frame
+- no warped frame
+- no bent edges
+- no rubbery frame
+- no pasted-on look
+
+GLASS REALISM
+
+Add ultra-realistic museum-quality glass over the artwork.
+
+The glass should have soft natural room reflections.
+Use subtle premium glare only.
+The glare must never hide or ruin the artwork.
+The artwork must remain sharp, readable, and undistorted.
+
+ROOM REALISM
+
+Use the selected background/reference room as the base environment.
+
+The room must remain realistic, premium, and believable.
+
+Do not distort walls, furniture, lamps, sofas, curtains, shelves, floors, or architecture.
+No warped walls.
+No impossible furniture.
+No random logos.
+No fake trophies.
+No clutter.
+No messy room.
+No obvious AI room.
+No neon signs unless extremely subtle and already suited to the background.
+No extra wall art competing with the product.
+
+The artwork should look physically mounted, not pasted on.
+
+LIGHTING
+
+Use premium cinematic lighting.
+
+Soft natural light.
+Warm interior glow.
+Controlled highlights.
+Realistic shadow falloff behind and below the frame.
+Soft ambient bounce light.
+Subtle glass reflection.
+The lighting should feel like a luxury home, not a studio.
+
+COMPOSITION
+
+Square 1024 x 1024 canvas.
+
+The framed artwork is the hero.
+
+Show the full frame and full artwork.
+Place it at realistic eye-level height.
+Show believable scale.
+Use a professional DSLR / 50mm lens look.
+Slight natural viewing angle is allowed, but frame and artwork proportions must stay correct.
+Keep the background minimal and premium.
+
+NEGATIVE RULES
+
+Do not add people.
+Do not add text overlays.
+Do not add watermarks.
+Do not add fake logos.
+Do not add random sports branding.
+Do not add fake trophies.
+Do not add extra wall art.
+Do not add clutter.
+Do not distort the room.
+Do not make the frame float.
+Do not make the frame look pasted on.
+Do not make it CGI, cartoon, glossy, fake, or over-staged.
+
+FINAL RESULT
+
+Photorealistic premium Sports Cave wall mockup showing the exact uploaded framed artwork mounted naturally in the selected room, with perfect black frame realism, museum glass, realistic shadows, believable wall mounting, premium lighting, and no people."""
 
 
 def build_video_prompt(scene: dict, product_handle: str, product_title: str, sport_category: str, version: str = "v01", status: str = "final") -> str:
@@ -2061,8 +2632,10 @@ def render_page() -> None:
         st.info(
             "Upload BOTH reference files into ChatGPT:\n\n"
             "Image A = product mockup\n\n"
-            "Image B = selected background/reference room\n\n"
-            "Then paste one of the prompts below."
+            "Image B = selected background/reference room.\n\n"
+            "Then paste one of the still-image prompts below. These prompts are designed to create realistic "
+            "source images for the AI video editor. Reject any image where the frame, artwork, text, badge, "
+            "edition plate, person, hands, wall, or room looks distorted."
         )
         _render_reference_pair(state)
 

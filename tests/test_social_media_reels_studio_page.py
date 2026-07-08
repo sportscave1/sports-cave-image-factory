@@ -9,12 +9,6 @@ from unittest.mock import patch
 from PIL import Image
 
 import social_media_reels_studio_page as reels
-from sports_cave_prompt_blocks import (
-    SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK,
-    SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK,
-)
-
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -248,19 +242,102 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertNotIn("Copy full-res image", source)
         self.assertNotIn("Copy not available in this browser", source)
 
-    def test_person_image_prompts_include_ugc_human_realism_block(self):
+    def test_image_prompts_use_premium_still_mockup_structure(self):
+        prompts = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")
+        required_text = (
+            "Create a 1024 x 1024 ultra-realistic Sports Cave lifestyle mockup",
+            "Image A is the exact Sports Cave black framed product mockup.",
+            "Image B is the selected background/reference room.",
+            "The uploaded product artwork is the hero. Preserve it exactly.",
+            "PRODUCT LOCK",
+            "FRAME REALISM",
+            "GLASS REALISM",
+            "ROOM REALISM",
+            "LIGHTING",
+            "COMPOSITION",
+            "NEGATIVE RULES",
+            "FINAL RESULT",
+            "Do not redesign the artwork.",
+            "Do not change the athlete, subject, team, colours, text, typography, badge, edition plate",
+            "premium matte black timber frame",
+            "realistic timber or frame depth",
+            "sharp square mitred corners",
+            "museum-quality glass",
+            "no floating frame",
+            "no pasted-on look",
+            "Do not add text overlays.",
+            "Do not add watermarks.",
+        )
+
+        for prompt in prompts.values():
+            for text in required_text:
+                with self.subTest(text=text):
+                    self.assertIn(text, prompt)
+
+    def test_person_image_prompts_include_person_and_hand_realism(self):
         prompts = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")
 
-        self.assertIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, prompts["wall-hanging-adjust"])
-        self.assertIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, prompts["collector-admire"])
-        self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompts["wall-hanging-adjust"])
-        self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompts["collector-admire"])
+        for slug in ("collector-admire", "wall-hanging-adjust", "wall-admire"):
+            prompt = prompts[slug]
+            self.assertIn("PERSON REALISM", prompt)
+            self.assertIn("one realistic male customer only", prompt)
+            self.assertIn("realistic hands", prompt)
+            self.assertIn("Correct number of fingers", prompt)
+            self.assertIn("No extra fingers", prompt)
 
-    def test_artwork_only_prompt_excludes_human_block_but_keeps_product_lock(self):
+        self.assertIn("No warped hands", prompts["collector-admire"])
+        self.assertIn("No warped hands", prompts["wall-hanging-adjust"])
+        self.assertIn("hands must only touch the outer frame edges", prompts["collector-admire"])
+        self.assertIn("hands must only touch the outer frame edges", prompts["wall-hanging-adjust"])
+
+    def test_person_image_prompts_include_human_anatomy_lock(self):
+        prompts = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")
+        required_text = (
+            "HUMAN ANATOMY LOCK:",
+            "exactly one real everyday adult customer",
+            "all visible body parts connected naturally",
+            "Both shoulders, upper arms, elbows, forearms, wrists, hands, torso, hips, legs, and feet must align anatomically.",
+            "No detached limbs.",
+            "No floating hands.",
+            "No hands appearing without visible wrists and arms.",
+            "No arm emerging from behind the frame unless the full arm connection to the shoulder is clearly visible.",
+            "No duplicated arms.",
+            "No extra hands.",
+            "No missing elbows.",
+            "No twisted wrists.",
+            "No broken fingers.",
+            "No stretched arms.",
+            "No rubbery limbs.",
+            "No impossible reach across the frame.",
+            "No cropped-off body parts that make limbs look disconnected.",
+            "NEGATIVE HUMAN ANATOMY:",
+            "Do not create detached arms, floating hands, disconnected wrists, duplicate limbs",
+            "Reject and regenerate if any hand, wrist, forearm, elbow, upper arm, shoulder, leg, foot, head, or torso is detached",
+        )
+
+        for slug in ("collector-admire", "wall-hanging-adjust", "wall-admire"):
+            prompt = prompts[slug]
+            for text in required_text:
+                with self.subTest(slug=slug, text=text):
+                    self.assertIn(text, prompt)
+
+    def test_wall_hanging_prompt_uses_safe_connected_body_pose(self):
+        prompt = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")["wall-hanging-adjust"]
+
+        self.assertIn("A single customer stands centered in front of the frame", prompt)
+        self.assertIn("full torso and both shoulders visible", prompt)
+        self.assertIn("Both arms are visible and naturally connected from shoulder to hand.", prompt)
+        self.assertIn("Elbows are slightly bent.", prompt)
+        self.assertIn("Wrists and fingers are normal.", prompt)
+        self.assertIn("The pose must be physically possible and natural.", prompt)
+
+    def test_wall_only_image_prompt_has_no_people_and_no_person_realism_section(self):
         prompt = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")["wall-only"]
 
-        self.assertNotIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, prompt)
-        self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompt)
+        self.assertIn("No people.", prompt)
+        self.assertNotIn("PERSON REALISM", prompt)
+        self.assertNotIn("HUMAN ANATOMY LOCK:", prompt)
+        self.assertNotIn("NEGATIVE HUMAN ANATOMY:", prompt)
 
     def test_video_prompts_use_premium_commercial_structure(self):
         prompts = reels.build_video_prompts("roger-federer", "Roger Federer", "Tennis")
@@ -296,22 +373,6 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
                 with self.subTest(text=text):
                     self.assertIn(text, prompt)
 
-    def test_product_lock_block_is_in_all_reels_studio_mockup_and_video_prompts(self):
-        image_prompts = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")
-
-        for prompt in image_prompts.values():
-            self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompt)
-
-    def test_image_prompts_require_original_full_resolution_reference_uploads(self):
-        image_prompts = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")
-
-        for prompt in image_prompts.values():
-            self.assertIn("Use the uploaded product image as Image A", prompt)
-            self.assertIn("uploaded background/reference room image as Image B", prompt)
-            self.assertIn("Use the supplied image(s), not screenshots.", prompt)
-            self.assertIn("Use the original full-resolution Image A and Image B uploads", prompt)
-            self.assertIn("High-resolution 1:1 square output", prompt)
-
     def test_mockup_prompts_do_not_expose_internal_metadata_headers(self):
         image_prompts = reels.build_image_prompts(
             "roger-federer",
@@ -321,9 +382,6 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         )
         disallowed_headers = (
             "Product handle:",
-            "Product title:",
-            "Sport category:",
-            "Scene:",
             "Scene slug:",
             "Video scene:",
             "Video scene slug:",
