@@ -1282,17 +1282,6 @@ def _step_header(title: str, complete: bool) -> None:
     st.subheader(title)
 
 
-def _render_image_preview(record: dict | None, width: int = 260) -> None:
-    if not record:
-        st.caption("No file uploaded yet.")
-        return
-    image_bytes = _asset_bytes(record)
-    if image_bytes:
-        st.image(image_bytes, caption=record.get("filename") or record.get("safe_filename") or "Image", width=width)
-    else:
-        st.caption("Saved preview is missing.")
-
-
 def render_full_resolution_image_tools(asset: dict | None, label: str, key: str) -> None:
     if not asset:
         st.caption("No image available yet.")
