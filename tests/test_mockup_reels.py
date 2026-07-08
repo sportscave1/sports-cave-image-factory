@@ -9,6 +9,7 @@ import prompt_store
 from sports_cave_prompt_blocks import (
     SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK,
     SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK,
+    SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK,
 )
 
 
@@ -58,14 +59,18 @@ class MockupReelsTests(unittest.TestCase):
             self.assertNotIn("Product name: Test Product", reel_prompt)
             self.assertIn("roughly 70–85% of the image width", reel_prompt)
             self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, reel_prompt)
+            self.assertIn(SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK, reel_prompt)
+            self.assertIn("ARTWORK FREEZE LOCK", reel_prompt)
+            self.assertIn("Treat the artwork inside the frame as a flat, frozen, printed poster texture", reel_prompt)
+            self.assertIn("Do not zoom closer than the starting composition", reel_prompt)
             self.assertNotIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, reel_prompt)
 
             for prompt_path in prompt_paths:
                 with self.subTest(prompt=prompt_path.name):
-                    self.assertIn(
-                        SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK,
-                        prompt_path.read_text(encoding="utf-8"),
-                    )
+                    prompt_text = prompt_path.read_text(encoding="utf-8")
+                    self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompt_text)
+                    if prompt_path.name in image_factory.REELS_PROMPT_FILENAMES:
+                        self.assertIn(SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK, prompt_text)
 
     def test_complete_zip_includes_uploaded_reels_assets(self):
         with tempfile.TemporaryDirectory() as tmpdir:

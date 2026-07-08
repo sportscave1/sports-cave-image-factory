@@ -17,6 +17,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image, UnidentifiedImageError
 
+from sports_cave_prompt_blocks import SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK
+
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
 PASTE_COMPONENT_DIR = BASE_DIR / "components" / "reels_image_paste_zone"
@@ -90,7 +92,7 @@ SCENES = (
         ),
         "video_direction": (
             "A real customer holds and admires the artwork. Tiny breathing, slight hand grip adjustment, "
-            "small head movement, slow cinematic push-in, soft glass reflection, realistic shadows."
+            "small head movement, locked-off premium lifestyle video, soft glass reflection, realistic shadows."
         ),
     },
     {
@@ -106,7 +108,7 @@ SCENES = (
         ),
         "video_direction": (
             "Customer makes final wall adjustment. Both hands gently straighten the frame, tiny left-right "
-            "corrections, hands slowly release, frame settles level, slow push-in, realistic wall shadow, "
+            "corrections, hands slowly release, frame settles level, subtle tripod drift, realistic wall shadow, "
             "glass reflection."
         ),
     },
@@ -122,7 +124,7 @@ SCENES = (
         ),
         "video_direction": (
             "Customer stands back admiring the mounted frame. Subtle breathing, tiny head movement, slight "
-            "stance shift, slow push-in, emotional pause, soft glass reflection."
+            "stance shift, locked-off premium lifestyle video, emotional pause, soft glass reflection."
         ),
     },
     {
@@ -136,7 +138,7 @@ SCENES = (
             "glass, natural shadows, and premium lighting."
         ),
         "video_direction": (
-            "No people. Artwork mounted on wall. Slow push-in, subtle wall shadow shift, soft glass reflection, "
+            "No people. Artwork mounted on wall. Locked-off premium lifestyle video, subtle wall shadow shift, soft glass reflection, "
             "ambient light movement, luxury stillness."
         ),
     },
@@ -334,19 +336,34 @@ Do NOT create AI shimmer or flickering.
 The artwork must stay razor sharp throughout the entire video."""
 
 
-VIDEO_CAMERA_BLOCK = """CAMERA
+VIDEO_ARTWORK_FREEZE_LOCK = SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK
+
+
+SAFE_VIDEO_CAMERA_DEFAULTS = """SAFE VIDEO CAMERA DEFAULTS
+
+Use a premium locked-off DSLR video shot with only very subtle motion.
+The camera should feel mounted on a tripod with a tiny natural drift.
+Keep the framed artwork fully visible for the entire video.
+Do not zoom closer than the starting composition.
+Do not crop into the artwork.
+Do not move fast.
+Do not create dramatic camera movement.
+The product must remain readable, stable, and physically real from the first frame to the last frame."""
+
+
+VIDEO_CAMERA_BLOCK = f"""CAMERA
 
 Professional cinema camera.
 
 50mm lens.
 
-Slow cinematic push-in.
+{SAFE_VIDEO_CAMERA_DEFAULTS}
 
-Extremely subtle handheld micro movement.
+Subtle tripod drift only.
 
 Natural focus breathing.
 
-No dramatic camera movement.
+No camera move that changes or distorts the artwork.
 
 No spinning.
 
@@ -389,6 +406,8 @@ Indistinguishable from a professionally filmed product commercial."""
 
 VIDEO_PROMPTS_BY_SCENE = {
     "collector-admire": f"""{VIDEO_PROMPT_OPENING.format(people_rule="Do NOT add extra people.")}
+
+{VIDEO_ARTWORK_FREEZE_LOCK}
 
 SCENE
 
@@ -497,6 +516,8 @@ The viewer should immediately imagine this exact piece becoming the centrepiece 
 
 {VIDEO_OUTPUT_BLOCK}""",
     "wall-hanging-adjust": f"""{VIDEO_PROMPT_OPENING.format(people_rule="Do NOT add extra people.")}
+
+{VIDEO_ARTWORK_FREEZE_LOCK}
 
 SCENE
 
@@ -609,6 +630,8 @@ It should feel like the final moment after installing a limited-edition collecto
 {VIDEO_OUTPUT_BLOCK}""",
     "wall-admire": f"""{VIDEO_PROMPT_OPENING.format(people_rule="Do NOT add extra people.")}
 
+{VIDEO_ARTWORK_FREEZE_LOCK}
+
 SCENE
 
 A lifelong sports collector stands a few steps back inside his dream Sports Cave or premium collector room.
@@ -717,6 +740,8 @@ The viewer should immediately imagine this exact artwork hanging in their own Sp
 
 {VIDEO_OUTPUT_BLOCK}""",
     "wall-only": f"""{VIDEO_PROMPT_OPENING.format(people_rule="Do NOT add people.")}
+
+{VIDEO_ARTWORK_FREEZE_LOCK}
 
 SCENE
 

@@ -139,6 +139,67 @@ The video should feel like a real happy customer or friend filmed it on a phone 
 Premium UGC, not fake commercial footage."""
 
 
+SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK = """ARTWORK FREEZE LOCK - CRITICAL
+
+The framed Sports Cave artwork is a locked source image and must remain visually identical for the entire video.
+
+Treat the artwork inside the frame as a flat, frozen, printed poster texture.
+Do not regenerate, repaint, redraw, reinterpret, enhance, upscale, sharpen, stylise, or re-render the artwork.
+Do not alter any text, typography, title, plaque, badge, edition number, athlete, face, uniform, colours, layout, signatures, border, or composition inside the frame.
+
+The artwork must remain perfectly stable frame-to-frame.
+No morphing.
+No melting.
+No text changes.
+No letter scrambling.
+No plaque distortion.
+No badge distortion.
+No face changes.
+No colour shifts.
+No AI enhancement effects applied to the artwork.
+No moving elements inside the printed artwork.
+No animated artwork.
+No changing reflections that obscure or rewrite the artwork.
+
+The camera must not move aggressively toward the frame, zoom toward the print, move laterally over the artwork, tilt over the artwork, or crop into the artwork.
+Avoid close-up moves over the text, faces, plaque, badge, or edition number.
+Keep the full framed artwork visible and readable for the entire shot.
+Keep the frame edges straight, rectangular, and locked to correct perspective.
+
+Camera movement must be extremely subtle and slow:
+- locked-off tripod shot preferred
+- or very slow micro dolly / gentle handheld realism only
+- no fast zoom
+- no crash zoom
+- no parallax warp across the artwork
+- no orbiting movement around the frame
+- no whip pan
+- no rack-focus that blurs the artwork
+- no motion blur over the artwork
+- no lens distortion on the frame
+
+Only the room environment may have subtle life:
+soft natural light shift, tiny glass reflection movement, slight ambient camera breathing, realistic shadows, subtle customer movement if present.
+The printed artwork itself must remain unchanged like a real physical poster behind glass.
+
+If the model cannot preserve the artwork perfectly, choose the safest fallback:
+use a mostly static camera, keep the full frame visible, animate only the surrounding room lighting/reflections very subtly, and do not move the camera closer to the artwork.
+
+QUALITY CONTROL RULE:
+Reject the video if the artwork text changes, the title becomes unreadable, the plaque or edition number changes, the player face changes, the frame bends, the artwork crops in, or the camera movement causes any warping.
+
+SAFE VIDEO CAMERA DEFAULTS
+
+Use a premium locked-off DSLR video shot with only very subtle motion.
+The camera should feel mounted on a tripod with a tiny natural drift.
+Keep the framed artwork fully visible for the entire video.
+Do not zoom closer than the starting composition.
+Do not crop into the artwork.
+Do not move fast.
+Do not create dramatic camera movement.
+The product must remain readable, stable, and physically real from the first frame to the last frame."""
+
+
 HUMAN_SCENE_TERMS = (
     "person holding",
     "person hanging",
@@ -217,6 +278,8 @@ def append_sports_cave_prompt_blocks(
         result = append_unique_block(result, SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK)
     if include_product_lock:
         result = append_unique_block(result, SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK)
+    if include_video:
+        result = append_unique_block(result, SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK)
     if include_human and include_video:
         result = append_unique_block(result, SPORTS_CAVE_UGC_VIDEO_REALISM_BLOCK)
     return result

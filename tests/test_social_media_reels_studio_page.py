@@ -501,6 +501,11 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
             "ENDING",
             "OUTPUT",
             "The existing room from the uploaded still image must remain the same.",
+            "ARTWORK FREEZE LOCK",
+            "Treat the artwork inside the frame as a flat, frozen, printed poster texture",
+            "Do not zoom closer than the starting composition",
+            "Keep the framed artwork fully visible",
+            "Reject the video if the artwork text changes",
             "9:16 vertical.",
             "5 seconds.",
             "4K quality.",
@@ -511,6 +516,46 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
             for text in required_text:
                 with self.subTest(text=text):
                     self.assertIn(text, prompt)
+
+    def test_video_prompts_use_artwork_freeze_lock_and_safe_camera_defaults(self):
+        prompts = reels.build_video_prompts("roger-federer", "Roger Federer", "Tennis")
+        required_text = (
+            "ARTWORK FREEZE LOCK",
+            "Treat the artwork inside the frame as a flat, frozen, printed poster texture",
+            "The artwork must remain perfectly stable frame-to-frame.",
+            "No text changes.",
+            "No plaque distortion.",
+            "No badge distortion.",
+            "No moving elements inside the printed artwork.",
+            "Keep the full framed artwork visible and readable for the entire shot.",
+            "SAFE VIDEO CAMERA DEFAULTS",
+            "Do not zoom closer than the starting composition",
+            "Keep the framed artwork fully visible",
+            "Reject the video if the artwork text changes",
+        )
+
+        for slug, prompt in prompts.items():
+            for text in required_text:
+                with self.subTest(slug=slug, text=text):
+                    self.assertIn(text, prompt)
+
+    def test_video_prompts_do_not_include_risky_camera_phrases(self):
+        prompts = reels.build_video_prompts("roger-federer", "Roger Federer", "Tennis")
+        risky_phrases = (
+            "dramatic push-in",
+            "slow zoom into the artwork",
+            "pan across the artwork",
+            "orbit around the frame",
+            "dynamic camera movement",
+            "macro shot of the badge",
+            "cinematic push-in",
+        )
+
+        for slug, prompt in prompts.items():
+            prompt_lower = prompt.lower()
+            for phrase in risky_phrases:
+                with self.subTest(slug=slug, phrase=phrase):
+                    self.assertNotIn(phrase, prompt_lower)
 
     def test_mockup_prompts_do_not_expose_internal_metadata_headers(self):
         image_prompts = reels.build_image_prompts(
