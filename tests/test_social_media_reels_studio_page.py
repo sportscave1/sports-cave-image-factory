@@ -160,6 +160,73 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertIn("has_valid_image_asset(uploaded_asset)", helper_source)
         self.assertIn("could not be read as a valid image", helper_source)
 
+    def test_reels_hub_prompts_are_available_without_uploads(self):
+        payload = reels.build_reels_hub_payload("", "", "", "", "collector-admire")
+
+        self.assertIn("Use the uploaded black framed Sports Cave product mockup", payload["background_prompt"])
+        self.assertIn("Image A is the exact Sports Cave black framed product mockup.", payload["image_prompt"])
+        self.assertIn("PRODUCT LOCK", payload["image_prompt"])
+        self.assertIn("Create an ultra-realistic 5 second cinematic lifestyle video", payload["video_prompt"])
+        self.assertEqual(payload["product_handle"], "product-handle")
+
+    def test_reels_hub_scene_changes_image_and_video_prompts(self):
+        holding = reels.build_reels_hub_payload("roger-federer", "Roger Federer", "Tennis", "", "collector-admire")
+        wall_only = reels.build_reels_hub_payload("roger-federer", "Roger Federer", "Tennis", "", "wall-only")
+
+        self.assertNotEqual(holding["image_prompt"], wall_only["image_prompt"])
+        self.assertNotEqual(holding["video_prompt"], wall_only["video_prompt"])
+        self.assertIn("HUMAN ANATOMY LOCK:", holding["image_prompt"])
+        self.assertIn("NEGATIVE HUMAN ANATOMY:", holding["image_prompt"])
+        self.assertIn("Reject and regenerate if any hand, wrist, forearm", holding["image_prompt"])
+        self.assertNotIn("HUMAN ANATOMY LOCK:", wall_only["image_prompt"])
+        self.assertNotIn("NEGATIVE HUMAN ANATOMY:", wall_only["image_prompt"])
+
+    def test_reels_hub_wall_hanging_keeps_connected_arm_wording(self):
+        payload = reels.build_reels_hub_payload("roger-federer", "Roger Federer", "Tennis", "", "wall-hanging-adjust")
+
+        self.assertIn("A single customer stands centered in front of the frame", payload["image_prompt"])
+        self.assertIn("Both arms are visible and naturally connected from shoulder to hand.", payload["image_prompt"])
+        self.assertIn("The pose must be physically possible and natural.", payload["image_prompt"])
+
+    def test_reels_hub_filename_and_save_instructions(self):
+        payload = reels.build_reels_hub_payload(
+            "roger-federer",
+            "Roger Federer",
+            "Tennis",
+            "",
+            "wall-admire",
+            "v01",
+            "final",
+        )
+
+        self.assertEqual(
+            payload["video_filename"],
+            "roger-federer__meta-reel__wall-admire__9x16__v01__final.mp4",
+        )
+        self.assertEqual(
+            payload["mockup_filename"],
+            "roger-federer__mockup__wall-admire__1x1__v01__final.png",
+        )
+        for folder in (
+            "mockup-backgrounds",
+            "social-media-mockups",
+            "social-media-reels",
+            "social-media-video-content",
+        ):
+            self.assertIn(folder, payload["save_instructions"])
+
+    def test_render_page_is_non_gated_prompt_hub(self):
+        source = (ROOT / "social_media_reels_studio_page.py").read_text(encoding="utf-8")
+        render_source = source[source.index("def render_page") :]
+
+        self.assertIn("1. Find the Best Background", render_source)
+        self.assertIn("2. Create the Real-Life Mockup", render_source)
+        self.assertIn("3. Create the Reel Video", render_source)
+        self.assertIn("4. Upload Final Reel / File Naming", render_source)
+        self.assertNotIn("Complete Step", render_source)
+        self.assertNotIn("Upload Product Mockup", render_source)
+        self.assertEqual(render_source.count("st.file_uploader("), 1)
+
     def test_wizard_unlocks_are_linear(self):
         self.assertEqual(
             reels.wizard_unlocks({}),
@@ -394,6 +461,9 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         )
         disallowed_headers = (
             "Product handle:",
+            "Product title:",
+            "Sport category:",
+            "Creative notes:",
             "Scene slug:",
             "Video scene:",
             "Video scene slug:",
