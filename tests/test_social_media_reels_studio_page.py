@@ -148,6 +148,18 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertEqual(asset["source"], "drop")
         self.assertTrue(reels.has_valid_image_asset(asset))
 
+    def test_reels_image_uploader_does_not_client_reject_image_extensions(self):
+        source = (ROOT / "social_media_reels_studio_page.py").read_text(encoding="utf-8")
+        helper_source = source[
+            source.index("def reels_image_input") : source.index("def _prompt_preview_key")
+        ]
+
+        self.assertNotIn("type=list(accepted_types)", helper_source)
+        self.assertIn("Supported image types", helper_source)
+        self.assertIn("uploaded_asset = image_asset_from_uploaded_file", helper_source)
+        self.assertIn("has_valid_image_asset(uploaded_asset)", helper_source)
+        self.assertIn("could not be read as a valid image", helper_source)
+
     def test_wizard_unlocks_are_linear(self):
         self.assertEqual(
             reels.wizard_unlocks({}),

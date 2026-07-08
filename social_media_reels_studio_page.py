@@ -2291,12 +2291,18 @@ def reels_image_input(
     state_key = _image_asset_state_key(key)
     uploaded_file = st.file_uploader(
         label,
-        type=list(accepted_types),
         key=f"{key}_uploader",
-        help="Upload, drag and drop, or paste an image below.",
+        help=(
+            "Upload, drag and drop, or paste an image below. "
+            f"Supported image types: {', '.join(accepted_types)}."
+        ),
     )
     if uploaded_file is not None:
-        st.session_state[state_key] = image_asset_from_uploaded_file(uploaded_file, source="upload")
+        uploaded_asset = image_asset_from_uploaded_file(uploaded_file, source="upload")
+        if has_valid_image_asset(uploaded_asset):
+            st.session_state[state_key] = uploaded_asset
+        else:
+            st.error("That file could not be read as a valid image. Please upload a PNG, JPG, JPEG, or WEBP file.")
 
     payload = _paste_zone(key, "Paste image here", asset_type, product_handle, scene_slug)
     pasted_asset = image_asset_from_paste_payload(payload, product_handle, asset_type, scene_slug)
