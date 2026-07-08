@@ -1,7 +1,11 @@
 from pathlib import Path
+import base64
+import io
 import tempfile
 import unittest
 import zipfile
+
+from PIL import Image
 
 import social_media_reels_studio_page as reels
 
@@ -10,6 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SocialMediaReelsStudioPageTests(unittest.TestCase):
+    def _png_bytes(self, size=(3, 2), color=(212, 165, 76)):
+        buffer = io.BytesIO()
+        Image.new("RGB", size, color).save(buffer, format="PNG")
+        return buffer.getvalue()
+
     def test_app_sidebar_and_router_include_reels_studio_page(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
 
@@ -93,6 +102,35 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertEqual(reels.detect_sport_category("classic-football-wall-art"), "Soccer")
         self.assertEqual(reels.detect_sport_category("brady-super-bowl-football-wall-art"), "NFL")
         self.assertEqual(reels.strip_trailing_random_id("lebron-23"), "lebron-23")
+
+    def test_image_asset_preserves_original_bytes_and_dimensions(self):
+        original = self._png_bytes(size=(7, 5))
+        asset = reels.image_asset_from_bytes(original, "Original Mockup.PNG", "image/png", source="upload")
+
+        self.assertEqual(asset["bytes"], original)
+        self.assertEqual(asset["width"], 7)
+        self.assertEqual(asset["height"], 5)
+        self.assertEqual(asset["size_bytes"], len(original))
+        self.assertEqual(asset["mime_type"], "image/png")
+        self.assertEqual(asset["source"], "upload")
+
+    def test_pasted_image_payload_decodes_and_generates_safe_filename(self):
+        original = self._png_bytes(size=(4, 4))
+        payload = {
+            "filename": "",
+            "mime": "image/png",
+            "data_base64": base64.b64encode(original).decode("ascii"),
+            "source": "paste",
+        }
+
+        asset = reels.image_asset_from_paste_payload(payload, "roger-federer", "mockup", "collector-admire")
+
+        self.assertIsNotNone(asset)
+        self.assertEqual(asset["bytes"], original)
+        self.assertEqual(asset["filename"], "roger-federer__mockup__collector-admire__pasted__v01.png")
+        self.assertEqual(asset["source"], "paste")
+        self.assertEqual(asset["width"], 4)
+        self.assertEqual(asset["height"], 4)
 
     def test_wizard_unlocks_are_linear(self):
         self.assertEqual(
@@ -243,6 +281,43 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
             )
 
             self.assertEqual(zip_path.name, "cristiano-ronaldo-soccer-art__social-media-reels-pack__v01.zip")
+
+    def test_zip_export_uses_original_asset_bytes(self):
+        original = self._png_bytes(size=(6, 6), color=(11, 11, 13))
+        product_asset = reels.image_asset_from_bytes(original, "full-res-product.png", "image/png", source="paste")
+        state = {
+            "files": {
+                "product_mockup": {
+                    **product_asset,
+                    "path": "",
+                    "filename": "product-mockup-original.png",
+                    "original_name": "full-res-product.png",
+                },
+                "selected_background": None,
+                "image_mockups": {},
+                "videos": {},
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            zip_path = reels.build_social_media_reels_zip(
+                run_dir,
+                "roger-federer",
+                "Roger Federer",
+                "Tennis",
+                state,
+                reels.build_background_finder_prompt("roger-federer", "Roger Federer", "Tennis", ""),
+                reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", ""),
+                reels.build_video_prompts("roger-federer", "Roger Federer", "Tennis"),
+            )
+
+            with zipfile.ZipFile(zip_path) as archive:
+                zipped = archive.read("mockup-backgrounds/roger-federer/product-mockup-original.png")
+                manifest = archive.read("manifest.json").decode("utf-8")
+
+        self.assertEqual(zipped, original)
+        self.assertIn('"product_mockup_source": "paste"', manifest)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
 import html
 import hashlib
+import io
 import json
+import mimetypes
 import re
 import shutil
 import zipfile
@@ -12,10 +15,12 @@ from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
+from PIL import Image, UnidentifiedImageError
 
 
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
+PASTE_COMPONENT_DIR = BASE_DIR / "components" / "reels_image_paste_zone"
 PAGE_STATE_KEY = "smrs_state"
 IMAGE_UPLOAD_TYPES = ["jpg", "jpeg", "png", "webp"]
 MOCKUP_UPLOAD_TYPES = ["png"]
@@ -58,6 +63,11 @@ SPORT_KEYWORDS = (
     ("Horse Racing", ("horse", "racing", "melbourne-cup", "black-caviar", "phar-lap")),
     ("AFL", ("afl", "footy", "ben-cousins", "taylor-walker")),
     ("Baseball", ("baseball", "mlb", "ohtani", "judge")),
+)
+
+_paste_zone_component = components.declare_component(
+    "reels_image_paste_zone",
+    path=str(PASTE_COMPONENT_DIR),
 )
 
 
@@ -219,6 +229,21 @@ def derive_product_details_from_filename(filename: str) -> dict[str, str]:
     }
 
 
+def derive_product_details_from_asset(asset: dict | None) -> dict[str, str]:
+    if not asset:
+        return {"product_handle": "", "product_title": "", "sport_category": ""}
+    filename = asset.get("original_name") or asset.get("filename") or ""
+    details = derive_product_details_from_filename(filename)
+    is_generated_paste_name = asset.get("source") in {"paste", "drop"} and "pasted" in sanitize_handle(filename)
+    if is_generated_paste_name and sanitize_handle(filename).startswith("sports-cave"):
+        return {
+            "product_handle": "pasted-product-mockup",
+            "product_title": "Pasted Product Mockup",
+            "sport_category": "",
+        }
+    return details
+
+
 def suggest_handle_from_filename(filename: str) -> str:
     return derive_product_details_from_filename(filename)["product_handle"]
 
@@ -232,6 +257,136 @@ def wizard_unlocks(flags: dict) -> dict[str, bool]:
         "step_4": bool(flags.get("reels_video_prompts_generated")),
         "step_5": bool(flags.get("reels_step_4_complete")),
     }
+
+
+def mime_type_from_filename(filename: str, fallback: str = "image/png") -> str:
+    guessed, _ = mimetypes.guess_type(str(filename or ""))
+    if guessed in {"image/png", "image/jpeg", "image/webp"}:
+        return guessed
+    suffix = Path(str(filename or "")).suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".webp":
+        return "image/webp"
+    if suffix == ".png":
+        return "image/png"
+    return fallback
+
+
+def extension_from_mime(mime_type: str, fallback: str = ".png") -> str:
+    mime_type = str(mime_type or "").lower()
+    if mime_type == "image/jpeg":
+        return ".jpg"
+    if mime_type == "image/webp":
+        return ".webp"
+    if mime_type == "image/png":
+        return ".png"
+    return fallback
+
+
+def format_file_size(size_bytes: int | None) -> str:
+    size = int(size_bytes or 0)
+    if size >= 1024 * 1024:
+        return f"{size / 1024 / 1024:.1f} MB"
+    if size >= 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size} B"
+
+
+def generated_pasted_filename(product_handle: str, asset_type: str, scene_slug: str = "", mime_type: str = "image/png") -> str:
+    handle = sanitize_handle(product_handle, "sports-cave")
+    clean_asset_type = sanitize_handle(asset_type, "image")
+    ext = extension_from_mime(mime_type, ".png")
+    parts = [handle, clean_asset_type]
+    if scene_slug:
+        parts.append(sanitize_handle(scene_slug, "scene"))
+    parts.extend(["pasted", "v01"])
+    return "__".join(parts) + ext
+
+
+def _image_dimensions(image_bytes: bytes) -> tuple[int | None, int | None]:
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            return image.size
+    except (UnidentifiedImageError, OSError, ValueError):
+        return None, None
+
+
+def image_asset_from_bytes(
+    image_bytes: bytes,
+    filename: str,
+    mime_type: str = "",
+    source: str = "upload",
+) -> dict:
+    data = bytes(image_bytes or b"")
+    safe_filename = Path(sanitize_handle(Path(filename or "image").stem, "image")).with_suffix(
+        Path(filename or "").suffix.lower() or extension_from_mime(mime_type)
+    ).name
+    resolved_mime = mime_type or mime_type_from_filename(safe_filename)
+    width, height = _image_dimensions(data)
+    return {
+        "filename": filename or safe_filename,
+        "safe_filename": safe_filename,
+        "mime_type": resolved_mime,
+        "bytes": data,
+        "source": source if source in {"upload", "paste", "drop"} else "upload",
+        "width": width,
+        "height": height,
+        "size_bytes": len(data),
+        "created_at": _now_iso(),
+    }
+
+
+def image_asset_from_uploaded_file(uploaded_file, source: str = "upload") -> dict:
+    uploaded_file.seek(0)
+    data = uploaded_file.read()
+    uploaded_file.seek(0)
+    return image_asset_from_bytes(
+        data,
+        getattr(uploaded_file, "name", "uploaded-image.png"),
+        mime_type_from_filename(getattr(uploaded_file, "name", "")),
+        source=source,
+    )
+
+
+def image_asset_from_paste_payload(payload: dict | None, product_handle: str, asset_type: str, scene_slug: str = "") -> dict | None:
+    if not isinstance(payload, dict):
+        return None
+    data_base64 = str(payload.get("data_base64") or "").strip()
+    if not data_base64:
+        return None
+    if "," in data_base64 and data_base64.lower().startswith("data:"):
+        data_base64 = data_base64.split(",", 1)[1]
+    try:
+        image_bytes = base64.b64decode(data_base64, validate=False)
+    except (ValueError, TypeError):
+        return None
+    mime_type = str(payload.get("mime") or payload.get("mime_type") or "image/png")
+    filename = str(payload.get("filename") or "").strip()
+    if not filename or filename.lower() in {"image.png", "clipboard.png", "pasted-image.png"}:
+        filename = generated_pasted_filename(product_handle, asset_type, scene_slug, mime_type)
+    source = str(payload.get("source") or "paste").strip().lower()
+    return image_asset_from_bytes(image_bytes, filename, mime_type, source=source)
+
+
+def _asset_bytes(asset: dict | None) -> bytes:
+    if not asset:
+        return b""
+    data = asset.get("bytes")
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, bytearray):
+        return bytes(data)
+    path = Path(asset.get("path", ""))
+    if path.exists() and path.is_file():
+        return path.read_bytes()
+    return b""
+
+
+def _asset_data_url(asset: dict) -> str:
+    image_bytes = _asset_bytes(asset)
+    mime_type = asset.get("mime_type") or mime_type_from_filename(asset.get("filename", ""))
+    return f"data:{mime_type};base64,{base64.b64encode(image_bytes).decode('ascii')}"
 
 
 def image_mockup_filename(product_handle: str, scene_slug: str) -> str:
@@ -454,6 +609,7 @@ Instructions:
 5. Final videos are ready for Meta Reels/Stories testing.
 6. Prompt files are included for traceability.
 7. Do not rename files manually unless updating version/status.
+8. Image files are preserved at original full resolution.
 """
 
 
@@ -517,6 +673,13 @@ def _uploaded_signature(uploaded_file) -> str:
     return f"{getattr(uploaded_file, 'name', '')}:{getattr(uploaded_file, 'size', '')}"
 
 
+def _asset_signature(asset: dict | None) -> str:
+    if not asset:
+        return ""
+    digest = hashlib.sha1(_asset_bytes(asset)).hexdigest()[:16]
+    return f"{asset.get('filename', '')}:{asset.get('size_bytes', '')}:{digest}"
+
+
 def _save_upload(uploaded_file, target_path: Path, record_type: str, extra: dict | None = None) -> dict:
     target_path.parent.mkdir(parents=True, exist_ok=True)
     uploaded_file.seek(0)
@@ -536,21 +699,57 @@ def _save_upload(uploaded_file, target_path: Path, record_type: str, extra: dict
     return record
 
 
-def _store_source_upload(state: dict, uploaded_file, field: str, target_stem: str, label: str) -> dict | None:
-    if uploaded_file is None:
+def _save_image_asset_to_path(asset: dict, target_path: Path, record_type: str, extra: dict | None = None) -> dict:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    image_bytes = _asset_bytes(asset)
+    target_path.write_bytes(image_bytes)
+    record = {
+        **asset,
+        "type": record_type,
+        "path": str(target_path),
+        "filename": target_path.name,
+        "original_name": asset.get("filename") or target_path.name,
+        "safe_filename": target_path.name,
+        "size": len(image_bytes),
+        "size_bytes": len(image_bytes),
+        "signature": _asset_signature(asset),
+        "saved_at": _now_iso(),
+    }
+    record.update(extra or {})
+    return record
+
+
+def _store_source_image_asset(state: dict, asset: dict | None, field: str, target_stem: str, label: str) -> dict | None:
+    if asset is None:
         return state["files"].get(field)
 
     current = state["files"].get(field)
-    signature = _uploaded_signature(uploaded_file)
+    signature = _asset_signature(asset)
     if current and current.get("signature") == signature and Path(current.get("path", "")).exists():
         return current
 
-    ext = _safe_ext(getattr(uploaded_file, "name", ""), IMAGE_UPLOAD_TYPES, ".png")
+    ext = extension_from_mime(asset.get("mime_type") or "", _safe_ext(asset.get("filename", ""), IMAGE_UPLOAD_TYPES, ".png"))
     target = _run_dir(state) / "source" / f"{target_stem}{ext}"
-    record = _save_upload(uploaded_file, target, label)
+    record = _save_image_asset_to_path(asset, target, label)
     state["files"][field] = record
+    if field == "product_mockup":
+        st.session_state["reels_product_mockup_asset"] = record
+    elif field == "selected_background":
+        st.session_state["reels_background_asset"] = record
     state["zip_path"] = None
     return record
+
+
+def _store_source_upload(state: dict, uploaded_file, field: str, target_stem: str, label: str) -> dict | None:
+    if uploaded_file is None:
+        return state["files"].get(field)
+    return _store_source_image_asset(
+        state,
+        image_asset_from_uploaded_file(uploaded_file),
+        field,
+        target_stem,
+        label,
+    )
 
 
 def _unique_video_target(state: dict, product_handle: str, scene_slug: str, version: str, status: str) -> tuple[Path, str]:
@@ -562,13 +761,13 @@ def _unique_video_target(state: dict, product_handle: str, scene_slug: str, vers
     return target, clean_version
 
 
-def _store_image_mockup_upload(state: dict, uploaded_file, product_handle: str, scene_slug: str) -> dict | None:
+def _store_image_mockup_asset(state: dict, asset: dict | None, product_handle: str, scene_slug: str) -> dict | None:
     records = state["files"]["image_mockups"]
     current = records.get(scene_slug)
-    if uploaded_file is None:
+    if asset is None:
         return current
 
-    signature = _uploaded_signature(uploaded_file)
+    signature = _asset_signature(asset)
     expected_name = image_mockup_filename(product_handle, scene_slug)
     if current and current.get("signature") == signature and current.get("filename") == expected_name and Path(current.get("path", "")).exists():
         return current
@@ -581,10 +780,23 @@ def _store_image_mockup_upload(state: dict, uploaded_file, product_handle: str, 
             current.update({"path": str(target), "filename": target.name})
             return current
 
-    record = _save_upload(uploaded_file, target, "image_mockup", {"scene_slug": scene_slug})
+    record = _save_image_asset_to_path(asset, target, "image_mockup", {"scene_slug": scene_slug})
     records[scene_slug] = record
+    generated_assets = st.session_state.setdefault("reels_generated_mockup_assets", {})
+    generated_assets[scene_slug] = record
     state["zip_path"] = None
     return record
+
+
+def _store_image_mockup_upload(state: dict, uploaded_file, product_handle: str, scene_slug: str) -> dict | None:
+    if uploaded_file is None:
+        return state["files"]["image_mockups"].get(scene_slug)
+    return _store_image_mockup_asset(
+        state,
+        image_asset_from_uploaded_file(uploaded_file),
+        product_handle,
+        scene_slug,
+    )
 
 
 def _store_video_upload(state: dict, uploaded_file, product_handle: str, scene_slug: str, version: str, status: str) -> dict | None:
@@ -700,6 +912,14 @@ def _manifest(
         "created_at": _now_iso(),
         "product_mockup_filename": (files.get("product_mockup") or {}).get("filename"),
         "selected_background_filename": (files.get("selected_background") or {}).get("filename"),
+        "product_mockup_source": (files.get("product_mockup") or {}).get("source"),
+        "selected_background_source": (files.get("selected_background") or {}).get("source"),
+        "product_mockup_width": (files.get("product_mockup") or {}).get("width"),
+        "product_mockup_height": (files.get("product_mockup") or {}).get("height"),
+        "product_mockup_size_bytes": (files.get("product_mockup") or {}).get("size_bytes"),
+        "selected_background_width": (files.get("selected_background") or {}).get("width"),
+        "selected_background_height": (files.get("selected_background") or {}).get("height"),
+        "selected_background_size_bytes": (files.get("selected_background") or {}).get("size_bytes"),
         "image_mockups": [
             {
                 "scene_slug": scene["slug"],
@@ -707,6 +927,10 @@ def _manifest(
                 "filename": (image_records.get(scene["slug"]) or {}).get("filename"),
                 "uploaded": bool(image_records.get(scene["slug"])),
                 "original_filename": (image_records.get(scene["slug"]) or {}).get("original_name"),
+                "source": (image_records.get(scene["slug"]) or {}).get("source"),
+                "width": (image_records.get(scene["slug"]) or {}).get("width"),
+                "height": (image_records.get(scene["slug"]) or {}).get("height"),
+                "size_bytes": (image_records.get(scene["slug"]) or {}).get("size_bytes"),
             }
             for scene in SCENES
         ],
@@ -736,9 +960,9 @@ def _manifest(
 def _zip_write_record(zipf: zipfile.ZipFile, record: dict | None, arcname: str) -> None:
     if not record:
         return
-    path = Path(record.get("path", ""))
-    if path.exists() and path.is_file():
-        zipf.write(path, arcname=arcname)
+    image_bytes = _asset_bytes(record)
+    if image_bytes:
+        zipf.writestr(arcname, image_bytes)
 
 
 def build_social_media_reels_zip(
@@ -947,6 +1171,54 @@ def _copy_button(text: str, key: str, label: str = "Copy Prompt", large: bool = 
     )
 
 
+def _paste_zone(key: str, label: str, asset_type: str, product_handle: str = "", scene_slug: str = "") -> dict | None:
+    return _paste_zone_component(
+        label=label,
+        asset_type=asset_type,
+        product_handle=sanitize_handle(product_handle, ""),
+        scene_slug=sanitize_handle(scene_slug, ""),
+        key=f"smrs_paste_zone_{key}",
+        default=None,
+    )
+
+
+def _image_asset_state_key(key: str) -> str:
+    return f"smrs_image_asset::{key}"
+
+
+def reels_image_input(
+    label: str,
+    key: str,
+    help_text: str,
+    asset_type: str,
+    accepted_types: tuple[str, ...] = ("png", "jpg", "jpeg", "webp"),
+    product_handle: str = "",
+    scene_slug: str = "",
+) -> dict | None:
+    st.caption("Upload, drag and drop, or paste an image.")
+    if help_text:
+        st.caption(help_text)
+    st.caption("Do not use screenshots if the original image download is available. Screenshots reduce quality.")
+
+    state_key = _image_asset_state_key(key)
+    uploaded_file = st.file_uploader(
+        label,
+        type=list(accepted_types),
+        key=f"{key}_uploader",
+        help="Upload, drag and drop, or paste an image below.",
+    )
+    if uploaded_file is not None:
+        st.session_state[state_key] = image_asset_from_uploaded_file(uploaded_file, source="upload")
+
+    payload = _paste_zone(key, "Paste image here", asset_type, product_handle, scene_slug)
+    pasted_asset = image_asset_from_paste_payload(payload, product_handle, asset_type, scene_slug)
+    if pasted_asset:
+        st.session_state[state_key] = pasted_asset
+        st.success(f"Image received from {pasted_asset.get('source', 'paste')}.")
+
+    return st.session_state.get(state_key)
+
+
 def _prompt_preview_key(prefix: str, slug: str, text: str) -> str:
     digest = hashlib.sha1(str(text or "").encode("utf-8")).hexdigest()[:10]
     return f"{prefix}_{sanitize_handle(slug, 'prompt')}_{digest}"
@@ -965,11 +1237,103 @@ def _render_image_preview(record: dict | None, width: int = 260) -> None:
     if not record:
         st.caption("No file uploaded yet.")
         return
-    path = Path(record.get("path", ""))
-    if path.exists():
-        st.image(str(path), caption=record.get("filename") or path.name, width=width)
+    image_bytes = _asset_bytes(record)
+    if image_bytes:
+        st.image(image_bytes, caption=record.get("filename") or record.get("safe_filename") or "Image", width=width)
     else:
-        st.caption("Saved preview is missing on disk.")
+        st.caption("Saved preview is missing.")
+
+
+def render_full_resolution_image_tools(asset: dict | None, label: str, key: str) -> None:
+    if not asset:
+        st.caption("No image available yet.")
+        return
+
+    image_bytes = _asset_bytes(asset)
+    if not image_bytes:
+        st.caption("Original image bytes are not available.")
+        return
+
+    filename = asset.get("filename") or asset.get("safe_filename") or "image.png"
+    mime_type = asset.get("mime_type") or mime_type_from_filename(filename)
+    width = asset.get("width")
+    height = asset.get("height")
+    dimensions = f"{width} x {height}" if width and height else "Unknown"
+    size = asset.get("size_bytes") or len(image_bytes)
+
+    st.markdown(f"**{label}**")
+    st.caption("Original full-resolution image is preserved. Use Download, Open, or Copy full-res image.")
+    st.caption(
+        f"Original filename: `{filename}` | Dimensions: `{dimensions}` | "
+        f"Size: `{format_file_size(size)}` | Type: `{mime_type}` | Source: `{asset.get('source', 'upload')}`"
+    )
+    st.image(image_bytes, caption=filename, width=320)
+
+    tool_cols = st.columns(3)
+    with tool_cols[0]:
+        st.download_button(
+            "Download original",
+            data=image_bytes,
+            file_name=filename,
+            mime=mime_type,
+            key=f"smrs_download_original_{key}",
+            use_container_width=True,
+        )
+
+    data_url = _asset_data_url(asset)
+    with tool_cols[1]:
+        components.html(
+            f"""
+            <button id="open-{sanitize_handle(key, 'image')}" type="button" style="width:100%;min-height:38px;border:1px solid #D4A54C;border-radius:7px;background:#D4A54C;color:#0B0B0D;font-weight:750;cursor:pointer;">Open full-resolution image</button>
+            <script>
+            (() => {{
+              const button = document.getElementById("open-{sanitize_handle(key, 'image')}");
+              const dataUrl = {json.dumps(data_url)};
+              button.addEventListener("click", (event) => {{
+                event.preventDefault();
+                const win = window.open();
+                if (win) {{
+                  win.document.write('<img src="' + dataUrl + '" style="max-width:none;width:auto;height:auto;" />');
+                  win.document.title = {json.dumps(filename)};
+                }} else {{
+                  button.innerText = "Popup blocked";
+                }}
+              }});
+            }})();
+            </script>
+            """,
+            height=48,
+        )
+    with tool_cols[2]:
+        components.html(
+            f"""
+            <button id="copy-{sanitize_handle(key, 'image')}" type="button" style="width:100%;min-height:38px;border:1px solid #D4A54C;border-radius:7px;background:#D4A54C;color:#0B0B0D;font-weight:750;cursor:pointer;">Copy full-res image</button>
+            <div id="copy-status-{sanitize_handle(key, 'image')}" style="font-size:12px;color:#66615A;margin-top:4px;"></div>
+            <script>
+            (() => {{
+              const button = document.getElementById("copy-{sanitize_handle(key, 'image')}");
+              const status = document.getElementById("copy-status-{sanitize_handle(key, 'image')}");
+              const dataUrl = {json.dumps(data_url)};
+              const mimeType = {json.dumps(mime_type)};
+              button.addEventListener("click", async (event) => {{
+                event.preventDefault();
+                try {{
+                  if (!navigator.clipboard || !window.ClipboardItem) {{
+                    throw new Error("Clipboard image write unavailable");
+                  }}
+                  const response = await fetch(dataUrl);
+                  const blob = await response.blob();
+                  await navigator.clipboard.write([new ClipboardItem({{ [mimeType]: blob }})]);
+                  status.innerText = "Full-res image copied";
+                }} catch (error) {{
+                  status.innerText = "Copy not available in this browser. Use Download original or Open full-resolution image.";
+                }}
+              }});
+            }})();
+            </script>
+            """,
+            height=72,
+        )
 
 
 def _render_video_preview(record: dict | None) -> None:
@@ -1058,11 +1422,17 @@ def _sport_selectbox(current_value: str) -> str:
 def _render_reference_pair(state: dict) -> None:
     columns = st.columns(2)
     with columns[0]:
-        st.markdown("**Image A - Product Mockup**")
-        _render_image_preview(state["files"].get("product_mockup"), width=260)
+        render_full_resolution_image_tools(
+            state["files"].get("product_mockup"),
+            "Image A - Product Mockup",
+            "reference_product_mockup",
+        )
     with columns[1]:
-        st.markdown("**Image B - Selected Background**")
-        _render_image_preview(state["files"].get("selected_background"), width=260)
+        render_full_resolution_image_tools(
+            state["files"].get("selected_background"),
+            "Image B - Selected Background",
+            "reference_selected_background",
+        )
 
 
 def render_page() -> None:
@@ -1103,24 +1473,30 @@ def render_page() -> None:
         st.caption("Upload the black framed product mockup, then generate the reel workflow.")
 
         if not step1_complete:
-            uploaded_product = st.file_uploader(
+            product_asset = reels_image_input(
                 "Upload the black framed product mockup",
-                type=IMAGE_UPLOAD_TYPES,
-                key="smrs_product_upload",
+                key="smrs_product_mockup",
+                help_text="Upload, drag and drop, or paste an image below.",
+                asset_type="product-mockup",
+                product_handle=product_handle,
             )
+            if product_asset:
+                render_full_resolution_image_tools(product_asset, "Product mockup ready", "step1_product_pending")
             if st.button(
                 "Generate",
                 key="smrs_generate_product",
                 type="primary",
                 use_container_width=True,
-                disabled=uploaded_product is None,
+                disabled=product_asset is None,
             ):
-                details = derive_product_details_from_filename(uploaded_product.name)
-                _store_source_upload(state, uploaded_product, "product_mockup", "product-mockup-original", "product_mockup")
+                details = derive_product_details_from_asset(product_asset)
+                _store_source_image_asset(state, product_asset, "product_mockup", "product-mockup-original", "product_mockup")
                 st.session_state["smrs_product_title"] = details["product_title"]
                 st.session_state["smrs_product_handle"] = details["product_handle"]
                 st.session_state["smrs_sport_category"] = details["sport_category"]
                 st.session_state.setdefault("smrs_creative_notes", "")
+                if not details["sport_category"] or details["product_handle"] == "pasted-product-mockup":
+                    st.session_state["smrs_force_edit_details"] = True
                 st.session_state["reels_step_1_complete"] = True
                 st.session_state["reels_product_generated"] = True
                 st.session_state["reels_step_2_complete"] = False
@@ -1131,11 +1507,11 @@ def render_page() -> None:
                 st.session_state["reels_video_prompts_generated"] = False
                 st.rerun()
         else:
-            _render_image_preview(files.get("product_mockup"))
+            render_full_resolution_image_tools(files.get("product_mockup"), "Product Mockup", "step1_product")
             _summary_card(product_title, product_handle, sport_category)
             if not sport_category:
                 st.warning("Sport could not be detected. Open Edit detected details and select a sport category.")
-            with st.expander("Edit detected details", expanded=False):
+            with st.expander("Edit detected details", expanded=bool(st.session_state.get("smrs_force_edit_details"))):
                 product_title = st.text_input("Product title", key="smrs_product_title")
                 raw_handle = st.text_input("Shopify product handle", key="smrs_product_handle")
                 product_handle = sanitize_handle(raw_handle)
@@ -1181,20 +1557,24 @@ def render_page() -> None:
             key=_prompt_preview_key("smrs_background_prompt_preview", "background", background_prompt),
             disabled=True,
         )
-        uploaded_background = st.file_uploader(
+        background_asset = reels_image_input(
             "Upload selected background/reference room",
-            type=IMAGE_UPLOAD_TYPES,
-            key="smrs_background_upload",
+            key="smrs_background",
+            help_text="Use ChatGPT to choose the best background, then upload, drag/drop, or paste the selected room here.",
+            asset_type="background",
+            product_handle=product_handle,
         )
+        if background_asset:
+            render_full_resolution_image_tools(background_asset, "Selected background ready", "step2_background_pending")
         if st.button(
             "Generate",
             key="smrs_generate_background",
             type="primary",
             use_container_width=True,
-            disabled=uploaded_background is None and not files.get("selected_background"),
+            disabled=background_asset is None and not files.get("selected_background"),
         ):
-            if uploaded_background is not None:
-                _store_source_upload(state, uploaded_background, "selected_background", "selected-background-original", "selected_background")
+            if background_asset is not None:
+                _store_source_image_asset(state, background_asset, "selected_background", "selected-background-original", "selected_background")
             st.session_state["reels_step_2_complete"] = True
             st.session_state["reels_background_generated"] = True
             st.session_state["reels_image_prompts_generated"] = True
@@ -1202,7 +1582,7 @@ def render_page() -> None:
             st.session_state["reels_video_prompts_generated"] = False
             st.session_state["reels_step_4_complete"] = False
             st.rerun()
-        _render_image_preview(files.get("selected_background"))
+        render_full_resolution_image_tools(files.get("selected_background"), "Selected Background", "step2_background")
 
     flags = _wizard_flags()
     unlocks = wizard_unlocks(flags)
@@ -1238,15 +1618,23 @@ def render_page() -> None:
                         key=_prompt_preview_key("smrs_image_prompt", scene["slug"], prompt_text),
                         disabled=True,
                     )
-                    uploaded_mockup = st.file_uploader(
+                    mockup_asset = reels_image_input(
                         "Upload final generated mockup image",
-                        type=MOCKUP_UPLOAD_TYPES,
-                        key=f"smrs_mockup_upload_{scene['slug']}",
+                        key=f"smrs_mockup_{scene['slug']}",
+                        help_text="Upload, drag and drop, or paste the generated mockup image.",
+                        asset_type="mockup",
+                        accepted_types=("png", "jpg", "jpeg", "webp"),
+                        product_handle=product_handle,
+                        scene_slug=scene["slug"],
                     )
-                    if uploaded_mockup is not None:
-                        _store_image_mockup_upload(state, uploaded_mockup, product_handle, scene["slug"])
+                    if mockup_asset is not None:
+                        _store_image_mockup_asset(state, mockup_asset, product_handle, scene["slug"])
                         st.session_state["reels_step_3_complete"] = True
-                    _render_image_preview(files["image_mockups"].get(scene["slug"]), width=240)
+                    render_full_resolution_image_tools(
+                        files["image_mockups"].get(scene["slug"]),
+                        f"{scene['name']} Mockup",
+                        f"step3_{scene['slug']}",
+                    )
 
         if files.get("image_mockups"):
             if st.button(
