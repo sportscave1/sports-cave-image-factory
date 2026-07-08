@@ -12,7 +12,6 @@ import social_media_reels_studio_page as reels
 from sports_cave_prompt_blocks import (
     SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK,
     SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK,
-    SPORTS_CAVE_UGC_VIDEO_REALISM_BLOCK,
 )
 
 
@@ -263,21 +262,44 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertNotIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, prompt)
         self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompt)
 
-    def test_person_video_prompt_includes_video_and_product_lock_blocks(self):
+    def test_video_prompts_use_premium_commercial_structure(self):
         prompts = reels.build_video_prompts("roger-federer", "Roger Federer", "Tennis")
 
-        self.assertIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, prompts["collector-admire"])
-        self.assertIn(SPORTS_CAVE_UGC_VIDEO_REALISM_BLOCK, prompts["collector-admire"])
-        self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompts["collector-admire"])
-        self.assertNotIn(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK, prompts["wall-only"])
-        self.assertNotIn(SPORTS_CAVE_UGC_VIDEO_REALISM_BLOCK, prompts["wall-only"])
-        self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompts["wall-only"])
+        required_text = (
+            "Create an ultra-realistic 5 second cinematic lifestyle video from this exact image.",
+            "This is a premium Sports Cave advertisement.",
+            "MUST remain EXACTLY the same",
+            "NON-NEGOTIABLE:",
+            "Do NOT regenerate the artwork.",
+            "Do NOT alter the typography.",
+            "Do NOT alter the badge.",
+            "Do NOT alter the edition plate.",
+            "The artwork must stay razor sharp throughout the entire video.",
+            "SCENE",
+            "CAMERA",
+            "MOVEMENT",
+            "FRAME REALISM",
+            "GLASS",
+            "LIGHTING",
+            "BACKGROUND",
+            "ENDING",
+            "OUTPUT",
+            "The existing room from the uploaded still image must remain the same.",
+            "9:16 vertical.",
+            "5 seconds.",
+            "4K quality.",
+            "Meta Ads ready.",
+        )
+
+        for prompt in prompts.values():
+            for text in required_text:
+                with self.subTest(text=text):
+                    self.assertIn(text, prompt)
 
     def test_product_lock_block_is_in_all_reels_studio_mockup_and_video_prompts(self):
         image_prompts = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")
-        video_prompts = reels.build_video_prompts("roger-federer", "Roger Federer", "Tennis")
 
-        for prompt in list(image_prompts.values()) + list(video_prompts.values()):
+        for prompt in image_prompts.values():
             self.assertIn(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK, prompt)
 
     def test_image_prompts_require_original_full_resolution_reference_uploads(self):
@@ -336,11 +358,37 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         )
 
         for prompt in video_prompts.values():
-            self.assertIn("Use the uploaded mockup image as the source image.", prompt)
-            self.assertIn("Keep the framed Sports Cave artwork 100% unchanged.", prompt)
+            self.assertIn("Create an ultra-realistic 5 second cinematic lifestyle video from this exact image.", prompt)
+            self.assertIn("Do NOT change the room from the uploaded still image.", prompt)
             for header in disallowed_headers:
                 with self.subTest(header=header):
                     self.assertNotIn(header, prompt)
+
+    def test_video_prompts_remove_old_six_to_eight_second_language(self):
+        video_prompts = reels.build_video_prompts("roger-federer", "Roger Federer", "Tennis")
+
+        for prompt in video_prompts.values():
+            self.assertNotIn("6-8 second", prompt)
+            self.assertNotIn("6–8 second", prompt)
+
+    def test_video_prompts_include_scene_specific_premium_reel_details(self):
+        prompts = reels.build_video_prompts("roger-federer", "Roger Federer", "Tennis")
+
+        self.assertIn(
+            "holding the framed artwork naturally with both hands at chest height",
+            prompts["collector-admire"],
+        )
+        self.assertIn("His hands never cover important parts", prompts["collector-admire"])
+
+        self.assertIn("final adjustment after hanging", prompts["wall-hanging-adjust"])
+        self.assertIn("Hands only touch the outer frame edges.", prompts["wall-hanging-adjust"])
+        self.assertIn("The frame is perfectly level.", prompts["wall-hanging-adjust"])
+
+        self.assertIn("stands a few steps back", prompts["wall-admire"])
+        self.assertIn("He is not touching the frame.", prompts["wall-admire"])
+
+        self.assertIn("No people.", prompts["wall-only"])
+        self.assertIn("No movement inside the artwork.", prompts["wall-only"])
 
     def test_background_finder_prompt_uses_uploaded_image_not_metadata_headers(self):
         prompt = reels.build_background_finder_prompt(

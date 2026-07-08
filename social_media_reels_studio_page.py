@@ -20,7 +20,6 @@ from PIL import Image, UnidentifiedImageError
 from sports_cave_prompt_blocks import (
     SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK,
     SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK,
-    SPORTS_CAVE_UGC_VIDEO_REALISM_BLOCK,
     append_sports_cave_prompt_blocks,
 )
 
@@ -82,7 +81,7 @@ SCENES = (
     {
         "name": "Person Holding & Admiring",
         "slug": "collector-admire",
-        "video_name": "Holding & Admiring Video",
+        "video_name": "Holding & Admiring - 5s Premium Reel",
         "has_person": True,
         "image_direction": (
             "Create a real everyday customer holding the black framed artwork at chest height, "
@@ -99,7 +98,7 @@ SCENES = (
     {
         "name": "Person Hanging / Adjusting Frame",
         "slug": "wall-hanging-adjust",
-        "video_name": "Hanging / Adjusting Video",
+        "video_name": "Hanging / Adjusting - 5s Premium Reel",
         "has_person": True,
         "image_direction": (
             "Create a real everyday customer making the final tiny adjustment after hanging the frame. "
@@ -116,7 +115,7 @@ SCENES = (
     {
         "name": "Person Standing Back Admiring Wall",
         "slug": "wall-admire",
-        "video_name": "Standing Back Admiring Video",
+        "video_name": "Standing Back Admiring - 5s Premium Reel",
         "has_person": True,
         "image_direction": (
             "Create the frame mounted on the wall with a real everyday customer standing a few steps back "
@@ -131,7 +130,7 @@ SCENES = (
     {
         "name": "Artwork Only On Wall",
         "slug": "wall-only",
-        "video_name": "Artwork Only Wall Video",
+        "video_name": "Artwork Only Wall - 5s Premium Reel",
         "has_person": False,
         "image_direction": (
             "Create artwork only, mounted on the wall with no people. Use the selected premium room setting, "
@@ -171,19 +170,519 @@ Non-negotiables:
 - Do not make it CGI, cartoon, glossy, or fake"""
 
 
-VIDEO_MASTER_RULES = """Use the uploaded mockup image as the source image.
-Create a premium ultra-realistic 6-8 second image-to-video ad from this exact still image.
+VIDEO_PROMPT_OPENING = """Create an ultra-realistic 5 second cinematic lifestyle video from this exact image.
 
-Keep the framed Sports Cave artwork 100% unchanged.
-Do not alter the artwork, text, badge, frame, colours, proportions, or layout.
-Do not warp, redraw, crop, blur, or regenerate the artwork or frame.
-Do not distort the frame.
-Do not change the room.
-Do not add text overlays.
-Do not add logos.
-Do not add extra people.
-Do not make it cartoon, glossy, or CGI.
-The artwork must remain razor sharp and stable throughout."""
+This is a premium Sports Cave advertisement.
+
+The uploaded Sports Cave artwork and black timber frame are the hero and MUST remain EXACTLY the same.
+
+NON-NEGOTIABLE:
+
+Do NOT regenerate the artwork.
+Do NOT redraw the artwork.
+Do NOT alter the colours.
+Do NOT alter the typography.
+Do NOT alter the badge.
+Do NOT alter the edition plate.
+Do NOT blur the artwork.
+Do NOT crop the artwork.
+Do NOT stretch, warp, bend or distort the frame.
+Do NOT change the proportions.
+Do NOT replace any part of the frame or artwork.
+Do NOT change the room from the uploaded still image.
+Do NOT add fake logos.
+Do NOT add fake readable text.
+{people_rule}
+Do NOT make the frame float.
+Do NOT create AI shimmer or flickering.
+
+The artwork must stay razor sharp throughout the entire video."""
+
+
+VIDEO_CAMERA_BLOCK = """CAMERA
+
+Professional cinema camera.
+
+50mm lens.
+
+Slow cinematic push-in.
+
+Extremely subtle handheld micro movement.
+
+Natural focus breathing.
+
+No dramatic camera movement.
+
+No spinning.
+
+No zoom effects.
+
+No cinematic gimmicks."""
+
+
+VIDEO_GLASS_BLOCK = """GLASS
+
+Ultra-realistic museum glass.
+
+Very soft moving reflections.
+
+Natural ambient reflections only.
+
+Subtle premium glare moving across the glass.
+
+Reflections must never hide the artwork."""
+
+
+VIDEO_OUTPUT_BLOCK = """OUTPUT
+
+9:16 vertical.
+
+5 seconds.
+
+Photorealistic.
+
+4K quality.
+
+Smooth natural motion.
+
+Luxury commercial quality.
+
+Meta Ads ready.
+
+Indistinguishable from a professionally filmed product commercial."""
+
+
+VIDEO_PROMPTS_BY_SCENE = {
+    "collector-admire": f"""{VIDEO_PROMPT_OPENING.format(people_rule="Do NOT add extra people.")}
+
+SCENE
+
+A lifelong sports collector stands inside his dream Sports Cave or premium collector room.
+
+Use the existing room from the uploaded still image.
+The existing room from the uploaded still image must remain the same. Do not remodel the room. Do not add new major furniture, new wall art, random memorabilia, fake trophies, or extra logos. Only add subtle natural motion, light movement, reflections, and realistic human micro-movement if a person is already part of the scene.
+The room must remain authentic, premium and believable.
+Do not remodel the room.
+Do not add new major furniture.
+Do not add random memorabilia.
+Do not add fake trophies.
+Do not add extra wall art competing with the product.
+
+The collector is holding the framed artwork naturally with both hands at chest height.
+
+He slowly studies the artwork with genuine admiration.
+
+He is imagining exactly where it will go in his collection.
+
+The artwork is always fully visible.
+
+His hands never cover important parts of the design, badge, title, edition plate, player, signature or frame.
+
+{VIDEO_CAMERA_BLOCK}
+
+MOVEMENT
+
+Very small natural breathing.
+
+Tiny shifts in body weight.
+
+Slight movement of wrists while supporting the frame.
+
+Tiny movement in fingers from the weight of the frame.
+
+Natural blink.
+
+Very subtle head movement while admiring the artwork.
+
+Nothing exaggerated.
+
+FRAME REALISM
+
+Premium matte black timber frame.
+
+Realistic frame depth.
+
+Sharp corners.
+
+Museum-quality glass.
+
+Natural weight in the collector's hands.
+
+Perfect landscape proportions.
+
+The frame must never wobble unnaturally.
+
+{VIDEO_GLASS_BLOCK}
+
+LIGHTING
+
+Warm cinematic lighting.
+
+Natural window fill if present in the still image.
+
+Soft LED or lamp glow if present in the still image.
+
+Realistic shadows.
+
+Natural shadow movement.
+
+Soft ambient bounce light.
+
+The lighting should feel like a luxury home, not a studio.
+
+BACKGROUND
+
+Everything behind the artwork remains softly out of focus.
+
+The Sports Cave feels expensive, authentic and collector owned.
+
+No clutter.
+
+No fake trophies.
+
+No distorted memorabilia.
+
+No random sports logos.
+
+No extra wall art competing with the product.
+
+ENDING
+
+The collector pauses.
+
+Looks proudly at the artwork.
+
+Small smile of satisfaction.
+
+Camera settles on the framed artwork.
+
+Hold for one second.
+
+The viewer should immediately imagine this exact piece becoming the centrepiece of their own Sports Cave.
+
+{VIDEO_OUTPUT_BLOCK}""",
+    "wall-hanging-adjust": f"""{VIDEO_PROMPT_OPENING.format(people_rule="Do NOT add extra people.")}
+
+SCENE
+
+A lifelong sports collector is making the final adjustment after hanging his Sports Cave framed artwork on the wall.
+
+Use the existing room from the uploaded still image.
+The existing room from the uploaded still image must remain the same. Do not remodel the room. Do not add new major furniture, new wall art, random memorabilia, fake trophies, or extra logos. Only add subtle natural motion, light movement, reflections, and realistic human micro-movement if a person is already part of the scene.
+The room must remain the same.
+Do not remodel the room.
+Do not add new furniture, fake trophies, random memorabilia, random sports logos or extra wall art.
+
+The framed artwork is already mounted on the wall.
+
+The collector gently holds the outside edges of the frame and carefully straightens it.
+
+The movement feels real, slow and controlled.
+
+The artwork is always fully visible.
+
+Hands only touch the outer frame edges.
+
+Hands never cover the title, badge, edition plate, player, signature or main artwork details.
+
+{VIDEO_CAMERA_BLOCK}
+
+MOVEMENT
+
+Both hands gently straighten the frame.
+
+Tiny left-right correction.
+
+Small final level adjustment.
+
+Hands slowly release.
+
+The frame settles perfectly level on the wall.
+
+The collector's hands move out of frame naturally or relax by his side.
+
+Nothing exaggerated.
+
+No sudden movements.
+
+FRAME REALISM
+
+Premium matte black timber frame.
+
+Realistic frame depth.
+
+Sharp corners.
+
+Museum-quality glass.
+
+Perfect landscape proportions.
+
+The frame must feel physically mounted to the wall.
+
+The frame must never float.
+
+The frame must never wobble unnaturally.
+
+{VIDEO_GLASS_BLOCK}
+
+LIGHTING
+
+Warm cinematic lighting.
+
+Natural window fill if present in the still image.
+
+Soft LED or lamp glow if present in the still image.
+
+Realistic shadows.
+
+Subtle wall shadow behind the frame.
+
+Natural shadow movement from the hands and frame.
+
+Soft ambient bounce light.
+
+The lighting should feel like a luxury home, not a studio.
+
+BACKGROUND
+
+The existing room remains softly cinematic and believable.
+
+No clutter.
+
+No fake trophies.
+
+No distorted memorabilia.
+
+No random sports logos.
+
+No extra wall art competing with the product.
+
+The artwork remains the clear hero.
+
+ENDING
+
+The frame is perfectly level.
+
+The collector releases it.
+
+Camera settles on the framed artwork.
+
+Hold for one second.
+
+It should feel like the final moment after installing a limited-edition collector piece in a dream Sports Cave.
+
+{VIDEO_OUTPUT_BLOCK}""",
+    "wall-admire": f"""{VIDEO_PROMPT_OPENING.format(people_rule="Do NOT add extra people.")}
+
+SCENE
+
+A lifelong sports collector stands a few steps back inside his dream Sports Cave or premium collector room.
+
+The framed Sports Cave artwork is already mounted on the wall.
+
+Use the existing room from the uploaded still image.
+The existing room from the uploaded still image must remain the same. Do not remodel the room. Do not add new major furniture, new wall art, random memorabilia, fake trophies, or extra logos. Only add subtle natural motion, light movement, reflections, and realistic human micro-movement if a person is already part of the scene.
+The room must remain the same.
+Do not remodel the room.
+Do not add new furniture, fake trophies, random memorabilia, random sports logos or extra wall art.
+
+The collector quietly admires the finished wall.
+
+He is not touching the frame.
+
+He looks at the artwork with pride, nostalgia and satisfaction.
+
+The artwork is always fully visible and remains the hero.
+
+{VIDEO_CAMERA_BLOCK}
+
+MOVEMENT
+
+Very small natural breathing.
+
+Tiny shift in stance.
+
+Subtle head movement while looking at the artwork.
+
+Natural blink.
+
+Small emotional pause.
+
+Optional small satisfied smile.
+
+Nothing exaggerated.
+
+No pointing.
+
+No dramatic gestures.
+
+FRAME REALISM
+
+Premium matte black timber frame.
+
+Realistic frame depth.
+
+Sharp corners.
+
+Museum-quality glass.
+
+Perfect landscape proportions.
+
+The frame must feel physically mounted to the wall.
+
+The frame must never float.
+
+The frame must never wobble or distort.
+
+{VIDEO_GLASS_BLOCK}
+
+LIGHTING
+
+Warm cinematic lighting.
+
+Natural window fill if present in the still image.
+
+Soft LED or lamp glow if present in the still image.
+
+Realistic shadows.
+
+Subtle wall shadow behind the frame.
+
+Natural shadow movement.
+
+Soft ambient bounce light.
+
+The lighting should feel like a luxury home, not a studio.
+
+BACKGROUND
+
+Everything behind the artwork remains premium, softly cinematic and believable.
+
+No clutter.
+
+No fake trophies.
+
+No distorted memorabilia.
+
+No random sports logos.
+
+No extra wall art competing with the product.
+
+The Sports Cave feels expensive, authentic and collector owned.
+
+ENDING
+
+The collector pauses and keeps admiring the piece.
+
+Camera settles on the framed artwork.
+
+Hold for one second.
+
+The viewer should immediately imagine this exact artwork hanging in their own Sports Cave.
+
+{VIDEO_OUTPUT_BLOCK}""",
+    "wall-only": f"""{VIDEO_PROMPT_OPENING.format(people_rule="Do NOT add people.")}
+
+SCENE
+
+The framed Sports Cave artwork is mounted on the wall inside a premium Sports Cave, collector room, man cave, lounge, office or private retreat.
+
+Use the existing room from the uploaded still image.
+The existing room from the uploaded still image must remain the same. Do not remodel the room. Do not add new major furniture, new wall art, random memorabilia, fake trophies, or extra logos. Only add subtle natural motion, light movement, reflections, and realistic human micro-movement if a person is already part of the scene.
+The room must remain the same.
+Do not remodel the room.
+Do not add new furniture.
+Do not add fake trophies.
+Do not add random memorabilia.
+Do not add random sports logos.
+Do not add extra wall art.
+
+No people.
+
+The artwork is the centrepiece.
+
+The video should feel like a luxury product reveal after the piece has just been installed.
+
+{VIDEO_CAMERA_BLOCK}
+
+MOVEMENT
+
+No movement inside the artwork.
+
+No movement of the frame.
+
+No people entering.
+
+Only subtle environmental motion:
+soft ambient light shift,
+tiny natural shadow movement,
+very soft glass reflection movement,
+luxury stillness.
+
+FRAME REALISM
+
+Premium matte black timber frame.
+
+Realistic frame depth.
+
+Sharp corners.
+
+Museum-quality glass.
+
+Perfect landscape proportions.
+
+The frame must feel physically mounted to the wall.
+
+The frame must never float.
+
+The frame must never wobble or distort.
+
+{VIDEO_GLASS_BLOCK}
+
+LIGHTING
+
+Warm cinematic lighting.
+
+Natural window fill if present in the still image.
+
+Soft LED or lamp glow if present in the still image.
+
+Realistic shadows.
+
+Subtle wall shadow behind the frame.
+
+Natural shadow movement.
+
+Soft ambient bounce light.
+
+The lighting should feel like a luxury home, not a studio.
+
+BACKGROUND
+
+Everything around the artwork remains premium, softly cinematic and believable.
+
+No clutter.
+
+No fake trophies.
+
+No distorted memorabilia.
+
+No random sports logos.
+
+No extra wall art competing with the product.
+
+The Sports Cave feels expensive, authentic and collector owned.
+
+ENDING
+
+Camera settles on the framed artwork.
+
+Hold for one second.
+
+The viewer should immediately imagine this exact piece becoming the centrepiece of their own Sports Cave.
+
+{VIDEO_OUTPUT_BLOCK}""",
+}
 
 
 def sanitize_handle(value: str, fallback: str = "") -> str:
@@ -583,24 +1082,7 @@ Do not accept low-resolution, cluttered, logo-heavy, or distorted backgrounds.""
 
 
 def build_video_prompt(scene: dict, product_handle: str, product_title: str, sport_category: str, version: str = "v01", status: str = "final") -> str:
-    prompt = f"""{VIDEO_MASTER_RULES}
-
-Movement:
-{scene["video_direction"]}
-
-Camera and realism:
-- Keep motion subtle, premium, and natural
-- Preserve the still-image composition and room
-- Keep the artwork razor sharp and stable
-- Soft realistic glass reflection is okay only if it does not obscure details
-- Natural shadows and realistic depth
-
-Output: 9:16 vertical, 1080p, 6-8 seconds, photorealistic, smooth natural motion, Meta Reels/Stories ready."""
-    return append_sports_cave_prompt_blocks(
-        prompt,
-        include_human=bool(scene.get("has_person")),
-        include_video=True,
-    )
+    return VIDEO_PROMPTS_BY_SCENE.get(scene.get("slug"), VIDEO_PROMPTS_BY_SCENE["wall-only"])
 
 
 def build_image_prompts(product_handle: str, product_title: str, sport_category: str, creative_notes: str) -> dict[str, str]:
@@ -1629,7 +2111,11 @@ def render_page() -> None:
         step4_complete = bool(flags["reels_step_4_complete"] and files.get("videos"))
         _step_header("4. Create Image-To-Video Reels", step4_complete)
         st.caption("Upload the generated mockup into your AI video tool, then paste the matching prompt.")
-        st.info("Upload the generated mockup image into your AI video editor. Then paste the matching prompt below.")
+        st.info(
+            "Upload the generated mockup image into your AI video editor. Then paste the matching "
+            "5-second premium Sports Cave video prompt below. Keep the artwork and frame unchanged. "
+            "Reject any video where the artwork, text, badge, edition plate, frame shape or room changes."
+        )
 
         uploaded_scenes = [scene for scene in SCENES if files["image_mockups"].get(scene["slug"])]
         video_columns = st.columns(2)
