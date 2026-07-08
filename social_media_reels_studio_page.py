@@ -25,6 +25,11 @@ IMAGE_UPLOAD_TYPES = ["jpg", "jpeg", "png", "webp"]
 MOCKUP_UPLOAD_TYPES = ["png"]
 VIDEO_UPLOAD_TYPES = ["mp4"]
 PACK_VERSION = "v01"
+GENERIC_PRODUCT_HANDLE_PLACEHOLDER = "[PRODUCT HANDLE]"
+GENERIC_PRODUCT_TITLE_PLACEHOLDER = "[PRODUCT TITLE]"
+GENERIC_SPORT_PLACEHOLDER = "[SPORT]"
+GENERIC_PRODUCT_ANGLE_PLACEHOLDER = "[PRODUCT ANGLE]"
+FILENAME_HANDLE_PLACEHOLDER = "athlete-name-product-handle"
 STATUS_OPTIONS = ["draft", "final", "posted", "ad-test", "winner", "archive"]
 SPORT_CATEGORY_OPTIONS = [
     "",
@@ -1065,6 +1070,15 @@ def _sync_wizard_completion_from_assets(state: dict) -> None:
 
 def image_mockup_filename(product_handle: str, scene_slug: str) -> str:
     return f"{sanitize_handle(product_handle, 'product')}__mockup__{scene_slug}__1x1__v01__final.png"
+
+
+def image_mockup_filename_with_meta(product_handle: str, scene_slug: str, version: str = "v01", status: str = "final") -> str:
+    clean_version = sanitize_version(version)
+    clean_status = sanitize_status(status)
+    return (
+        f"{sanitize_handle(product_handle, FILENAME_HANDLE_PLACEHOLDER)}__mockup__{scene_slug}"
+        f"__1x1__{clean_version}__{clean_status}.png"
+    )
 
 
 def video_filename(product_handle: str, scene_slug: str, version: str = "v01", status: str = "final") -> str:
@@ -2464,7 +2478,7 @@ def get_scene_by_slug(scene_slug: str) -> dict:
 
 
 def build_save_instructions(product_handle: str, sport_category: str) -> str:
-    handle = sanitize_handle(product_handle, "product-handle")
+    handle = sanitize_handle(product_handle, FILENAME_HANDLE_PLACEHOLDER)
     sport_folder = sanitize_handle(sport_category, "sport-category")
     return (
         "Background/reference image:\n"
@@ -2489,21 +2503,27 @@ def build_reels_hub_payload(
     version: str = "v01",
     status: str = "final",
 ) -> dict[str, str]:
-    handle = sanitize_handle(product_handle, "product-handle")
+    handle = sanitize_handle(product_handle, "")
+    filename_handle = handle or FILENAME_HANDLE_PLACEHOLDER
+    prompt_handle = handle or GENERIC_PRODUCT_HANDLE_PLACEHOLDER
+    prompt_title = str(product_title or "").strip() or GENERIC_PRODUCT_TITLE_PLACEHOLDER
+    prompt_sport = str(sport_category or "").strip() or GENERIC_SPORT_PLACEHOLDER
+    prompt_notes = str(creative_notes or "").strip() or GENERIC_PRODUCT_ANGLE_PLACEHOLDER
     scene = get_scene_by_slug(scene_slug)
     clean_version = sanitize_version(version)
     clean_status = sanitize_status(status)
     return {
-        "product_handle": handle,
+        "product_handle": filename_handle,
+        "prompt_product_handle": prompt_handle,
         "scene_slug": scene["slug"],
         "scene_name": scene["name"],
         "video_scene_name": scene["video_name"],
-        "background_prompt": build_background_finder_prompt(handle, product_title, sport_category, creative_notes),
-        "image_prompt": build_image_prompt(scene, handle, product_title, sport_category, creative_notes),
-        "video_prompt": build_video_prompt(scene, handle, product_title, sport_category, clean_version, clean_status),
-        "mockup_filename": image_mockup_filename(handle, scene["slug"]),
-        "video_filename": video_filename(handle, scene["slug"], clean_version, clean_status),
-        "save_instructions": build_save_instructions(handle, sport_category),
+        "background_prompt": build_background_finder_prompt(prompt_handle, prompt_title, prompt_sport, prompt_notes),
+        "image_prompt": build_image_prompt(scene, prompt_handle, prompt_title, prompt_sport, prompt_notes),
+        "video_prompt": build_video_prompt(scene, prompt_handle, prompt_title, prompt_sport, clean_version, clean_status),
+        "mockup_filename": image_mockup_filename_with_meta(filename_handle, scene["slug"], clean_version, clean_status),
+        "video_filename": video_filename(filename_handle, scene["slug"], clean_version, clean_status),
+        "save_instructions": build_save_instructions(filename_handle, sport_category),
         "version": clean_version,
         "status": clean_status,
     }
@@ -2536,58 +2556,16 @@ def render_page() -> None:
         unsafe_allow_html=True,
     )
 
-    if st.button("Reset Reels Studio", key="smrs_start_new_pack"):
-        _reset_reels_studio_session_state()
-        st.rerun()
-
-    with st.container(border=True):
-        st.markdown('<div class="smrs-card-title">Product setup</div>', unsafe_allow_html=True)
-        st.caption("These fields personalise prompts and generate filenames. They are not required to unlock anything.")
-        setup_cols = st.columns([1, 1, 1])
-        raw_handle = setup_cols[0].text_input(
-            "Product handle",
-            key="smrs_product_handle",
-            placeholder="roger-federer",
-        )
-        product_title = setup_cols[1].text_input(
-            "Product title",
-            key="smrs_product_title",
-            placeholder="Roger Federer Wall Art",
-        )
-        current_sport = st.session_state.get("smrs_sport_category", "")
-        sport_options = list(SPORT_CATEGORY_OPTIONS)
-        if current_sport and current_sport not in sport_options:
-            sport_options.append(current_sport)
-        sport_category = setup_cols[2].selectbox(
-            "Sport category",
-            sport_options,
-            index=sport_options.index(current_sport) if current_sport in sport_options else 0,
-            key="smrs_sport_category",
-            accept_new_options=True,
-        )
-        creative_notes = st.text_area(
-            "Optional notes / product angle",
-            key="smrs_creative_notes",
-            height=80,
-            placeholder="Example: dark premium collector room, warm lighting, masculine lounge.",
-        )
-
-    product_handle = sanitize_handle(raw_handle, "product-handle")
-    if raw_handle and raw_handle != product_handle:
-        st.caption(f"Filenames will use sanitized handle: `{product_handle}`")
-    if product_handle:
-        _sync_scene_filenames(state, product_handle)
-
     scene_options = {scene["name"]: scene["slug"] for scene in SCENES}
     default_scene = st.session_state.get("smrs_selected_scene_slug", SCENES[0]["slug"])
     default_label = next((name for name, slug in scene_options.items() if slug == default_scene), SCENES[0]["name"])
     selected_scene_label = default_label
 
     payload = build_reels_hub_payload(
-        product_handle,
-        product_title,
-        sport_category,
-        creative_notes,
+        "",
+        "",
+        "",
+        "",
         default_scene,
     )
 
@@ -2598,7 +2576,7 @@ def render_page() -> None:
                 f"""
 Paste the black framed product image into ChatGPT with this prompt. ChatGPT will analyse the artwork directly and help choose the best background/reference room for this exact product. Save the selected background/reference image into:
 
-`mockup-backgrounds/{product_handle}/`
+`mockup-backgrounds/{GENERIC_PRODUCT_HANDLE_PLACEHOLDER}/`
 
 Do not upload a screenshot. Use the full-resolution black framed product mockup.
                 """.strip()
@@ -2610,7 +2588,7 @@ Do not upload a screenshot. Use the full-resolution black framed product mockup.
             "Copy background prompt",
             height=420,
         )
-        st.caption(f"Folder reminder: `mockup-backgrounds/{product_handle}/`")
+        st.caption(f"Folder reminder: `mockup-backgrounds/{GENERIC_PRODUCT_HANDLE_PLACEHOLDER}/`")
 
     with st.container(border=True):
         st.markdown('<div class="smrs-card-title">2. Create the Real-Life Mockup</div>', unsafe_allow_html=True)
@@ -2624,10 +2602,10 @@ Do not upload a screenshot. Use the full-resolution black framed product mockup.
         selected_scene_slug = scene_options[selected_scene_label]
         st.session_state["smrs_selected_scene_slug"] = selected_scene_slug
         payload = build_reels_hub_payload(
-            product_handle,
-            product_title,
-            sport_category,
-            creative_notes,
+            "",
+            "",
+            "",
+            "",
             selected_scene_slug,
         )
         with st.expander("How to use", expanded=False):
@@ -2635,7 +2613,7 @@ Do not upload a screenshot. Use the full-resolution black framed product mockup.
                 f"""
 Upload the full-resolution black framed product image and the selected background/reference room image into ChatGPT. Use one of the prompts below to generate the realistic lifestyle mockup. Save the finished mockup image into:
 
-`social-media-mockups/{product_handle}/`
+`social-media-mockups/{GENERIC_PRODUCT_HANDLE_PLACEHOLDER}/`
 
 Use the full-resolution generated mockup, not a screenshot.
                 """.strip()
@@ -2657,10 +2635,10 @@ Use the full-resolution generated mockup, not a screenshot.
                 f"""
 Upload the finished realistic mockup image into your image-to-video editor. Paste the matching video prompt below. Export as a vertical 9:16 reel, 6-8 seconds, 1080p minimum. Save the final video into:
 
-`social-media-reels/{product_handle}/`
+`social-media-reels/{GENERIC_PRODUCT_HANDLE_PLACEHOLDER}/`
 
 Optional final archive location:
-`social-media-video-content/{product_handle}/final/`
+`social-media-video-content/{GENERIC_PRODUCT_HANDLE_PLACEHOLDER}/final/`
                 """.strip()
             )
         st.caption(f"Matching scene: {payload['video_scene_name']} | `{payload['scene_slug']}`")
@@ -2675,21 +2653,43 @@ Optional final archive location:
 
     with st.container(border=True):
         st.markdown('<div class="smrs-card-title">4. Upload Final Reel / File Naming</div>', unsafe_allow_html=True)
-        final_cols = st.columns([1, 1, 1, 1])
-        final_cols[0].text_input(
+        final_cols = st.columns([1, 1])
+        raw_final_handle = final_cols[0].text_input(
             "Product handle",
-            value=product_handle,
-            disabled=True,
-            key=f"smrs_final_handle_display_{sanitize_handle(product_handle, 'product-handle')}",
+            key="smrs_final_product_handle",
+            placeholder="athlete-name-product-handle",
         )
-        final_cols[1].text_input(
-            "Selected scene",
-            value=payload["scene_slug"],
-            disabled=True,
-            key=f"smrs_final_scene_display_{payload['scene_slug']}",
+        final_product_title = final_cols[1].text_input(
+            "Product title",
+            key="smrs_final_product_title",
+            placeholder="Athlete Name Wall Art",
         )
-        version = final_cols[2].text_input("Version", value=st.session_state.get("smrs_final_video_version", "v01"), key="smrs_final_video_version")
-        status = final_cols[3].selectbox(
+        final_cols = st.columns([1, 1])
+        athlete_or_product_name = final_cols[0].text_input(
+            "Athlete / product name",
+            key="smrs_final_athlete_product_name",
+            placeholder="Athlete name",
+        )
+        final_sport_category = final_cols[1].text_input(
+            "Sport category",
+            key="smrs_final_sport_category",
+            placeholder="Choose or add sport category",
+        )
+        final_scene_labels = list(scene_options.keys())
+        final_scene_label = st.selectbox(
+            "Scene",
+            final_scene_labels,
+            index=final_scene_labels.index(selected_scene_label) if selected_scene_label in final_scene_labels else 0,
+            key="smrs_final_scene_label",
+        )
+        final_scene_slug = scene_options[final_scene_label]
+        final_cols = st.columns([1, 1])
+        version = final_cols[0].text_input(
+            "Version",
+            value=st.session_state.get("smrs_final_video_version", "v01"),
+            key="smrs_final_video_version",
+        )
+        status = final_cols[1].selectbox(
             "Status",
             STATUS_OPTIONS,
             index=STATUS_OPTIONS.index(st.session_state.get("smrs_final_video_status", "final"))
@@ -2697,18 +2697,21 @@ Optional final archive location:
             else STATUS_OPTIONS.index("final"),
             key="smrs_final_video_status",
         )
+        final_product_handle = sanitize_handle(raw_final_handle, FILENAME_HANDLE_PLACEHOLDER)
         payload = build_reels_hub_payload(
-            product_handle,
-            product_title,
-            sport_category,
-            creative_notes,
-            selected_scene_slug,
+            final_product_handle,
+            final_product_title,
+            final_sport_category,
+            athlete_or_product_name,
+            final_scene_slug,
             version,
             status,
         )
-        _store_video_upload(state, None, product_handle, payload["scene_slug"], payload["version"], payload["status"])
-        st.caption("Generated filename")
+        _store_video_upload(state, None, final_product_handle, payload["scene_slug"], payload["version"], payload["status"])
+        st.caption("Generated video filename")
         st.markdown(f'<div class="smrs-filename">{html.escape(payload["video_filename"])}</div>', unsafe_allow_html=True)
+        st.caption("Matching mockup filename suggestion")
+        st.markdown(f'<div class="smrs-filename">{html.escape(payload["mockup_filename"])}</div>', unsafe_allow_html=True)
 
         uploaded_video = st.file_uploader(
             "Upload final video",
@@ -2716,7 +2719,7 @@ Optional final archive location:
             key=f"smrs_final_video_upload_{payload['scene_slug']}",
         )
         if uploaded_video is not None:
-            record = _store_video_upload(state, uploaded_video, product_handle, payload["scene_slug"], payload["version"], payload["status"])
+            record = _store_video_upload(state, uploaded_video, final_product_handle, payload["scene_slug"], payload["version"], payload["status"])
             if record:
                 st.success(f"Saved as {record['filename']}")
                 if record.get("version") != payload["version"]:

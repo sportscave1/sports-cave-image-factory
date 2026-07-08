@@ -167,7 +167,11 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertIn("Image A is the exact Sports Cave black framed product mockup.", payload["image_prompt"])
         self.assertIn("PRODUCT LOCK", payload["image_prompt"])
         self.assertIn("Create an ultra-realistic 5 second cinematic lifestyle video", payload["video_prompt"])
-        self.assertEqual(payload["product_handle"], "product-handle")
+        self.assertEqual(payload["product_handle"], "athlete-name-product-handle")
+        self.assertEqual(payload["prompt_product_handle"], "[PRODUCT HANDLE]")
+        self.assertIn("[SPORT]", payload["background_prompt"])
+        self.assertIn("[PRODUCT TITLE]", payload["image_prompt"])
+        self.assertIn("[PRODUCT ANGLE]", payload["image_prompt"])
 
     def test_reels_hub_scene_changes_image_and_video_prompts(self):
         holding = reels.build_reels_hub_payload("roger-federer", "Roger Federer", "Tennis", "", "collector-admire")
@@ -219,13 +223,69 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         source = (ROOT / "social_media_reels_studio_page.py").read_text(encoding="utf-8")
         render_source = source[source.index("def render_page") :]
 
+        self.assertNotIn("Product setup", render_source)
         self.assertIn("1. Find the Best Background", render_source)
         self.assertIn("2. Create the Real-Life Mockup", render_source)
         self.assertIn("3. Create the Reel Video", render_source)
         self.assertIn("4. Upload Final Reel / File Naming", render_source)
+        self.assertLess(render_source.index("1. Find the Best Background"), render_source.index("2. Create the Real-Life Mockup"))
         self.assertNotIn("Complete Step", render_source)
         self.assertNotIn("Upload Product Mockup", render_source)
+        self.assertNotIn("roger-federer", render_source)
+        self.assertNotIn("Roger Federer", render_source)
         self.assertEqual(render_source.count("st.file_uploader("), 1)
+
+    def test_final_file_naming_card_contains_bottom_product_fields(self):
+        source = (ROOT / "social_media_reels_studio_page.py").read_text(encoding="utf-8")
+        render_source = source[source.index("def render_page") :]
+
+        for text in (
+            "Product handle",
+            "Product title",
+            "Athlete / product name",
+            "Sport category",
+            "Scene",
+            "Version",
+            "Status",
+            "athlete-name-product-handle",
+            "Athlete Name Wall Art",
+            "Athlete name",
+            "Choose or add sport category",
+        ):
+            with self.subTest(text=text):
+                self.assertIn(text, render_source)
+
+    def test_bottom_filename_generation_uses_version_status_and_scene(self):
+        payload = reels.build_reels_hub_payload(
+            "athlete-name-product-handle",
+            "Athlete Name Wall Art",
+            "Soccer",
+            "Athlete name",
+            "collector-admire",
+            "v02",
+            "ad-test",
+        )
+
+        self.assertEqual(
+            payload["video_filename"],
+            "athlete-name-product-handle__meta-reel__collector-admire__9x16__v02__ad-test.mp4",
+        )
+        self.assertEqual(
+            payload["mockup_filename"],
+            "athlete-name-product-handle__mockup__collector-admire__1x1__v02__ad-test.png",
+        )
+
+    def test_mockups_sport_dropdown_options_are_alphabetical_with_custom_last(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        options_source = source[source.index("SPORT_OPTIONS = [") : source.index("]\nPROMPT_LABELS")]
+        options = [
+            line.strip().strip('",')
+            for line in options_source.splitlines()
+            if line.strip().startswith('"')
+        ]
+
+        self.assertEqual(options[:-1], sorted(options[:-1]))
+        self.assertEqual(options[-1], "Custom")
 
     def test_wizard_unlocks_are_linear(self):
         self.assertEqual(

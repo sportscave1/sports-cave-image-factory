@@ -254,16 +254,16 @@ LEGACY_BASE_ASSET_SPECS = [
     ("unframed", "Unframed"),
 ]
 SPORT_OPTIONS = [
-    "Soccer",
-    "Motorsport",
-    "Basketball",
     "AFL",
+    "Baseball",
+    "Basketball",
+    "Cricket",
+    "Hockey",
+    "Motorsport",
+    "NFL",
     "NRL",
     "Rugby Union",
-    "Cricket",
-    "NFL",
-    "Baseball",
-    "Hockey",
+    "Soccer",
     "Tennis",
     "Custom",
 ]
