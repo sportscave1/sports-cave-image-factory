@@ -44,6 +44,7 @@ shopify_sync = None
 edition_ops_module = None
 orders_page_module = None
 design_studio_page_module = None
+social_media_reels_studio_page_module = None
 requests_module = None
 components_module = None
 pillow_modules = None
@@ -141,6 +142,15 @@ def get_design_studio_page():
     return design_studio_page_module
 
 
+def get_social_media_reels_studio_page():
+    global social_media_reels_studio_page_module
+    if social_media_reels_studio_page_module is None:
+        log_startup_stage("SOCIAL MEDIA REELS STUDIO IMPORT START")
+        social_media_reels_studio_page_module = importlib.import_module("social_media_reels_studio_page")
+        log_startup_stage("SOCIAL MEDIA REELS STUDIO IMPORT DONE")
+    return social_media_reels_studio_page_module
+
+
 def get_requests_module():
     global requests_module
     if requests_module is None:
@@ -191,6 +201,7 @@ MENU_OPTIONS = [
     "Prodigi",
     "Edition Ops",
     "Mockups",
+    "Social Media Reels Studio",
     "Product Uploads",
     "Design Studio",
     "Marketing Factory",
@@ -6622,6 +6633,8 @@ def render_selected_page(current_page):
         render_placeholder_page("Products", "Full product sync is paused. Use Edition Ops for product edition fields.")
     elif current_page == "Mockups":
         render_mockups_page()
+    elif current_page == "Social Media Reels Studio":
+        get_social_media_reels_studio_page().render_page()
     elif current_page == "Design Studio":
         get_design_studio_page().render_design_studio_page(developer_password=DEVELOPER_PAGE_PASSWORD)
     elif current_page == "Edition Ops":

@@ -42,6 +42,7 @@ def clear_prompt_cache(prompt_id=None):
     except AttributeError:
         pass
     if prompt_id is None:
+        _RUNTIME_PROMPT_CACHE.clear()
         return
     _RUNTIME_PROMPT_CACHE.pop(str(prompt_id or "").strip(), None)
 
