@@ -547,6 +547,10 @@ class EditionOpsUiTests(unittest.TestCase):
             "list_orders",
             return_value=raw_rows,
         ) as list_orders, patch.object(
+            os_pages.supabase_backend,
+            "list_edition_orders",
+            return_value=[],
+        ) as list_edition_orders, patch.object(
             os_pages,
             "prodigi_load_dispatch_rows",
             return_value=existing_rows,
@@ -558,11 +562,266 @@ class EditionOpsUiTests(unittest.TestCase):
             rows, existing = os_pages.prodigi_find_order_rows_from_cache("#SC2843")
 
         list_orders.assert_called_once()
+        list_edition_orders.assert_called_once_with(search="#SC2843", limit=200)
         load_dispatch.assert_called_once_with("Search", search_text="#SC2843", limit=100)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["shopify_order_name"], "#SC2843")
         self.assertEqual(rows[0]["prodigi_code"], "GLOBAL-CFP-A1")
         self.assertEqual(existing, existing_rows)
+
+    def test_prodigi_lookup_keeps_multiple_allocations_for_same_variant(self):
+        raw_rows = [
+            {
+                "shopify_order_id": "gid://shopify/Order/2906",
+                "order_name": "#SC2906",
+                "customer_name": "Guy Fairclough",
+                "customer_email": "guy@example.com",
+                "processed_at": "2026-07-09T10:00:00Z",
+                "created_at": "2026-07-09T09:55:00Z",
+                "order_raw_json": {"shipping_lines": [{"title": "Standard Tracked Shipping"}]},
+                "shopify_line_item_id": "gid://shopify/LineItem/9061",
+                "shopify_product_id": "gid://shopify/Product/31031",
+                "product_title": "Greg Murphy Lap of the Gods Wall Art",
+                "variant_title": "Oak / XL",
+                "quantity": 1,
+                "assignments": [
+                    {
+                        "edition_order_id": "eo-greg-031",
+                        "edition_number": 31,
+                        "edition_total": 100,
+                        "allocation_index": 1,
+                        "certificate_status": "Uploaded",
+                    }
+                ],
+            },
+            {
+                "shopify_order_id": "gid://shopify/Order/2906",
+                "order_name": "#SC2906",
+                "customer_name": "Guy Fairclough",
+                "customer_email": "guy@example.com",
+                "processed_at": "2026-07-09T10:00:00Z",
+                "created_at": "2026-07-09T09:55:00Z",
+                "order_raw_json": {"shipping_lines": [{"title": "Standard Tracked Shipping"}]},
+                "shopify_line_item_id": "gid://shopify/LineItem/9062",
+                "shopify_product_id": "gid://shopify/Product/31080",
+                "product_title": "Six Laps Ahead Peter Brock Wall Art",
+                "variant_title": "Black / M",
+                "quantity": 2,
+                "assignments": [
+                    {
+                        "edition_order_id": "eo-six-080",
+                        "edition_number": 80,
+                        "edition_total": 100,
+                        "allocation_index": 1,
+                        "certificate_status": "Uploaded",
+                    }
+                ],
+            },
+        ]
+        edition_rows = [
+            {
+                "id": "eo-greg-031",
+                "shopify_order_id": "gid://shopify/Order/2906",
+                "shopify_order_name": "#SC2906",
+                "shopify_line_item_id": "gid://shopify/LineItem/9061",
+                "shopify_product_id": "gid://shopify/Product/31031",
+                "product_title": "Greg Murphy Lap of the Gods Wall Art",
+                "variant_title": "Oak / XL",
+                "customer_name": "Guy Fairclough",
+                "customer_email": "guy@example.com",
+                "edition_number": 31,
+                "edition_total": 100,
+                "allocation_index": 1,
+                "certificate_status": "Uploaded",
+            },
+            {
+                "id": "eo-six-080",
+                "shopify_order_id": "gid://shopify/Order/2906",
+                "shopify_order_name": "#SC2906",
+                "shopify_line_item_id": "gid://shopify/LineItem/9062",
+                "shopify_product_id": "gid://shopify/Product/31080",
+                "product_title": "Six Laps Ahead Peter Brock Wall Art",
+                "variant_title": "Black / M",
+                "customer_name": "Guy Fairclough",
+                "customer_email": "guy@example.com",
+                "edition_number": 80,
+                "edition_total": 100,
+                "allocation_index": 1,
+                "certificate_status": "Uploaded",
+            },
+            {
+                "id": "eo-six-081",
+                "shopify_order_id": "gid://shopify/Order/2906",
+                "shopify_order_name": "#SC2906",
+                "shopify_line_item_id": "gid://shopify/LineItem/9062",
+                "shopify_product_id": "gid://shopify/Product/31080",
+                "product_title": "Six Laps Ahead Peter Brock Wall Art",
+                "variant_title": "Black / M",
+                "customer_name": "Guy Fairclough",
+                "customer_email": "guy@example.com",
+                "edition_number": 81,
+                "edition_total": 100,
+                "allocation_index": 2,
+                "certificate_status": "Certificate Missing",
+            },
+        ]
+        existing_rows = [
+            {
+                "row_id": "gid://shopify/Order/2906|gid://shopify/LineItem/9062|1",
+                "shopify_order_id": "gid://shopify/Order/2906",
+                "shopify_order_name": "#SC2906",
+                "shopify_line_item_id": "gid://shopify/LineItem/9062",
+                "product_title": "Six Laps Ahead Peter Brock Wall Art",
+                "edition_number": 80,
+                "prodigi_status": "Complete",
+                "source": "prodigi_dispatch_log",
+            }
+        ]
+
+        with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
+            os_pages.supabase_backend,
+            "list_orders",
+            return_value=raw_rows,
+        ), patch.object(
+            os_pages.supabase_backend,
+            "list_edition_orders",
+            return_value=edition_rows,
+        ), patch.object(
+            os_pages,
+            "prodigi_load_dispatch_rows",
+            return_value=existing_rows,
+        ):
+            rows, existing = os_pages.prodigi_find_order_rows_from_cache("2906")
+            rows_again, _ = os_pages.prodigi_find_order_rows_from_cache("2906")
+
+        self.assertEqual(len(edition_rows), 3)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(sorted(row["edition_number"] for row in rows), [31, 80, 81])
+        six_laps = sorted(
+            [row for row in rows if row["product_title"] == "Six Laps Ahead Peter Brock Wall Art"],
+            key=lambda row: row["edition_number"],
+        )
+        self.assertEqual([row["edition_number"] for row in six_laps], [80, 81])
+        self.assertEqual([row["allocation_index"] for row in six_laps], [1, 2])
+        self.assertEqual(six_laps[0]["row_id"], "gid://shopify/Order/2906|gid://shopify/LineItem/9062|1")
+        self.assertEqual(six_laps[0]["prodigi_status"], "Complete")
+        self.assertEqual(six_laps[1]["row_id"], "edition-order|eo-six-081")
+        self.assertEqual(six_laps[1]["prodigi_status"], "Ready to Send")
+        self.assertEqual(len({row["row_id"] for row in rows}), 3)
+        self.assertEqual([row["row_id"] for row in rows_again], [row["row_id"] for row in rows])
+        self.assertEqual(existing, existing_rows)
+
+    def test_prodigi_dispatch_save_is_independent_per_allocation_unit(self):
+        base = {
+            "order": "#SC2906",
+            "customer": "Guy Fairclough",
+            "product": "Six Laps Ahead Peter Brock Wall Art",
+            "variant": "Black / M",
+            "edition_total": 100,
+            "shipping": "Standard Tracked Shipping",
+            "certificate": "Uploaded",
+            "shopify_order_id": "gid://shopify/Order/2906",
+            "shopify_line_item_id": "gid://shopify/LineItem/9062",
+            "shopify_product_id": "gid://shopify/Product/31080",
+        }
+        first = os_pages.prodigi_tracker_row_from_order(
+            {**base, "edition_order_id": "eo-six-080", "edition_number": 80, "allocation_index": 1}
+        )
+        second = os_pages.prodigi_tracker_row_from_order(
+            {**base, "edition_order_id": "eo-six-081", "edition_number": 81, "allocation_index": 2}
+        )
+        answers = {
+            "certificate": "Yes",
+            "artwork_upload": "Yes",
+            "product_option": "Yes",
+            "frame": "Yes",
+            "size": "Yes",
+            "edition_number": "Yes",
+            "shipping": "Yes",
+            "sent_to_production": "Yes",
+            "final_check": "Yes",
+        }
+
+        saved_rows, saved_first = os_pages.prodigi_upsert_dispatch_row([second], first, status="Complete", notes="First done", qa_answers=answers)
+
+        self.assertEqual(len(saved_rows), 2)
+        self.assertEqual(saved_first["prodigi_status"], "Complete")
+        untouched_second = next(row for row in saved_rows if row["edition_number"] == 81)
+        self.assertEqual(untouched_second["prodigi_status"], "Ready to Send")
+
+        saved_rows, saved_second = os_pages.prodigi_upsert_dispatch_row(saved_rows, second, status="Complete", notes="Second done", qa_answers=answers)
+        saved_rows, _ = os_pages.prodigi_upsert_dispatch_row(saved_rows, first, status="Complete", notes="First done again", qa_answers=answers)
+        saved_rows, _ = os_pages.prodigi_upsert_dispatch_row(saved_rows, second, status="Complete", notes="Second done again", qa_answers=answers)
+
+        self.assertEqual(len(saved_rows), 2)
+        self.assertEqual(sorted(row["edition_number"] for row in saved_rows), [80, 81])
+        self.assertEqual(len({row["row_id"] for row in saved_rows}), 2)
+        self.assertNotEqual(saved_first["row_id"], saved_second["row_id"])
+
+    def test_prodigi_quantity_one_lookup_still_works_with_edition_overlay(self):
+        raw_rows = [
+            {
+                "shopify_order_id": "gid://shopify/Order/2908",
+                "order_name": "#SC2908",
+                "customer_name": "John Millard",
+                "customer_email": "john@example.com",
+                "processed_at": "2026-07-09T10:00:00Z",
+                "created_at": "2026-07-09T09:55:00Z",
+                "order_raw_json": {"shipping_lines": [{"title": "Standard Tracked Shipping"}]},
+                "shopify_line_item_id": "gid://shopify/LineItem/9081",
+                "shopify_product_id": "gid://shopify/Product/39076",
+                "product_title": "Justin Gaethje Undisputed Wall Art",
+                "variant_title": "Black / L",
+                "quantity": 1,
+                "assignments": [
+                    {
+                        "edition_order_id": "eo-gaethje-076",
+                        "edition_number": 76,
+                        "edition_total": 100,
+                        "allocation_index": 1,
+                        "certificate_status": "Uploaded",
+                    }
+                ],
+            }
+        ]
+        edition_rows = [
+            {
+                "id": "eo-gaethje-076",
+                "shopify_order_id": "gid://shopify/Order/2908",
+                "shopify_order_name": "#SC2908",
+                "shopify_line_item_id": "gid://shopify/LineItem/9081",
+                "shopify_product_id": "gid://shopify/Product/39076",
+                "product_title": "Justin Gaethje Undisputed Wall Art",
+                "variant_title": "Black / L",
+                "customer_name": "John Millard",
+                "customer_email": "john@example.com",
+                "edition_number": 76,
+                "edition_total": 100,
+                "allocation_index": 1,
+                "certificate_status": "Uploaded",
+            }
+        ]
+
+        with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
+            os_pages.supabase_backend,
+            "list_orders",
+            return_value=raw_rows,
+        ), patch.object(
+            os_pages.supabase_backend,
+            "list_edition_orders",
+            return_value=edition_rows,
+        ), patch.object(
+            os_pages,
+            "prodigi_load_dispatch_rows",
+            return_value=[],
+        ):
+            rows, _ = os_pages.prodigi_find_order_rows_from_cache("#SC2908")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["edition_number"], 76)
+        self.assertEqual(rows[0]["allocation_index"], 1)
+        self.assertEqual(rows[0]["row_id"], "edition-order|eo-gaethje-076")
+        self.assertEqual(rows[0]["prodigi_code"], "GLOBAL-CFP-A2")
 
     def test_prodigi_dispatch_save_writes_single_persistent_supabase_row(self):
         row = os_pages.prodigi_tracker_row_from_order(

@@ -684,13 +684,84 @@ def prodigi_product_option_display(row):
     return ""
 
 
-def prodigi_tracker_row_id(row):
-    order_id = _prodigi_clean(row.get("shopify_order_id") or row.get("order_id") or row.get("shopify_order_name") or row.get("order"))
-    line_id = _prodigi_clean(row.get("shopify_line_item_id") or row.get("line_item_id") or row.get("product_title") or row.get("product"))
+def _prodigi_resource_id_candidates(resource_type, value):
+    raw = _prodigi_clean(value)
+    if not raw:
+        return []
+    canonical = supabase_backend.canonical_shopify_id(raw)
+    candidates = []
+    for candidate in (raw, canonical, shopify_sync.shopify_gid(resource_type, canonical) if canonical else ""):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+def _prodigi_unit_index(row):
     unit_index = _prodigi_int(row.get("line_item_unit_index"), 0) or _prodigi_int(row.get("allocation_index"), 0)
     if not unit_index:
         unit_index = _prodigi_int(row.get("edition_offset"), 0) + 1
-    return "|".join([order_id or "order-missing", line_id or "line-missing", str(max(unit_index, 1))])
+    return max(unit_index, 1)
+
+
+def _prodigi_legacy_tracker_row_id(row):
+    order_id = _prodigi_clean(row.get("shopify_order_id") or row.get("order_id") or row.get("shopify_order_name") or row.get("order"))
+    line_id = _prodigi_clean(row.get("shopify_line_item_id") or row.get("line_item_id") or row.get("product_title") or row.get("product"))
+    return "|".join([order_id or "order-missing", line_id or "line-missing", str(_prodigi_unit_index(row))])
+
+
+def prodigi_tracker_row_id(row):
+    edition_order_id = _prodigi_clean(row.get("edition_order_id"))
+    if edition_order_id:
+        return f"edition-order|{edition_order_id}"
+    return _prodigi_legacy_tracker_row_id(row)
+
+
+def _prodigi_identity_keys(row):
+    keys = []
+
+    def add(value):
+        clean = _prodigi_clean(value)
+        if clean and clean not in keys:
+            keys.append(clean)
+
+    add(row.get("row_id"))
+    edition_order_id = _prodigi_clean(row.get("edition_order_id"))
+    if edition_order_id:
+        add(f"edition-order|{edition_order_id}")
+
+    order_candidates = _prodigi_resource_id_candidates("Order", row.get("shopify_order_id") or row.get("order_id"))
+    if not order_candidates:
+        add_order = _prodigi_clean(row.get("shopify_order_name") or row.get("order_name") or row.get("order"))
+        order_candidates = [add_order] if add_order else []
+    line_candidates = _prodigi_resource_id_candidates("LineItem", row.get("shopify_line_item_id") or row.get("line_item_id"))
+    if not line_candidates:
+        add_line = _prodigi_clean(row.get("product_title") or row.get("product"))
+        line_candidates = [add_line] if add_line else []
+
+    unit_index = _prodigi_unit_index(row)
+    edition_number = _prodigi_int(row.get("edition_number") or row.get("edition"), 0)
+    for order_id in order_candidates:
+        for line_id in line_candidates:
+            add("|".join([order_id or "order-missing", line_id or "line-missing", str(unit_index)]))
+            if edition_number:
+                add("|".join([order_id or "order-missing", line_id or "line-missing", f"edition-{edition_number}"]))
+    add(_prodigi_legacy_tracker_row_id(row))
+    return keys
+
+
+def _prodigi_rows_by_identity(rows):
+    indexed = {}
+    for row in rows or []:
+        for key in _prodigi_identity_keys(row):
+            indexed.setdefault(key, row)
+    return indexed
+
+
+def _prodigi_stored_row_for_order_row(stored_by_identity, order_row):
+    for key in _prodigi_identity_keys(order_row):
+        if key in stored_by_identity:
+            return stored_by_identity[key]
+    return None
 
 
 def _prodigi_status_from_sheet(value):
@@ -837,10 +908,20 @@ def prodigi_tracker_row_from_order(order_row, stored=None):
     size = stored.get("size") or _prodigi_size_from_variant(variant)
     mapping = prodigi_mapping_for_frame_size(frame, size)
     edition_number = _prodigi_int(order_row.get("edition_number") or order_row.get("edition"), 0)
+    allocation_index = _prodigi_int(
+        order_row.get("allocation_index")
+        or order_row.get("line_item_unit_index")
+        or stored.get("allocation_index")
+        or stored.get("line_item_unit_index"),
+        1,
+    )
     created_at = stored.get("created_at") or _prodigi_now_iso()
     row = {
         "row_id": stored.get("row_id") or prodigi_tracker_row_id(order_row),
         "edition_order_id": stored.get("edition_order_id") or order_row.get("edition_order_id") or "",
+        "allocation_index": allocation_index,
+        "line_item_unit_index": allocation_index,
+        "allocation_key": stored.get("allocation_key") or order_row.get("allocation_key") or "",
         "shopify_order_id": order_row.get("shopify_order_id") or stored.get("shopify_order_id") or "",
         "shopify_order_name": order_row.get("order") or order_row.get("order_name") or stored.get("shopify_order_name") or "",
         "shopify_order_number": order_row.get("order") or order_row.get("order_name") or stored.get("shopify_order_number") or stored.get("shopify_order_name") or "",
@@ -955,16 +1036,15 @@ def save_prodigi_tracker_rows(rows, path=None):
 
 
 def build_prodigi_tracker_rows(order_rows, stored_rows=None):
-    stored_by_id = {row.get("row_id"): row for row in stored_rows or [] if row.get("row_id")}
+    stored_by_identity = _prodigi_rows_by_identity(stored_rows)
     rows = []
     seen = set()
     for order_row in order_rows or []:
-        row_id = prodigi_tracker_row_id(order_row)
-        tracker_row = prodigi_tracker_row_from_order(order_row, stored_by_id.get(row_id))
+        tracker_row = prodigi_tracker_row_from_order(order_row, _prodigi_stored_row_for_order_row(stored_by_identity, order_row))
         rows.append(tracker_row)
-        seen.add(tracker_row["row_id"])
+        seen.update(_prodigi_identity_keys(tracker_row))
     for row in stored_rows or []:
-        if row.get("row_id") and row["row_id"] not in seen:
+        if row.get("row_id") and not any(key in seen for key in _prodigi_identity_keys(row)):
             preserved = prodigi_tracker_row_from_order(row, row)
             preserved["source"] = row.get("source") or "tracker_import"
             rows.append(preserved)
@@ -3686,8 +3766,15 @@ def _prodigi_edition_label(row):
     return f"#{edition:03d} / {total}" if total else f"#{edition:03d}"
 
 
-def _prodigi_existing_dispatch_row(rows, row_id):
-    return next((row for row in rows or [] if row.get("row_id") == row_id), None)
+def _prodigi_existing_dispatch_row(rows, row_or_id):
+    if isinstance(row_or_id, dict):
+        wanted = set(_prodigi_identity_keys(row_or_id))
+    else:
+        wanted = {_prodigi_clean(row_or_id)}
+    for row in rows or []:
+        if wanted.intersection(_prodigi_identity_keys(row)):
+            return row
+    return None
 
 
 def _prodigi_dispatch_status(row):
@@ -3733,6 +3820,120 @@ def _prodigi_search_blob(row):
     )
 
 
+def _prodigi_context_maps(order_rows):
+    by_line = {}
+    by_order = {}
+    for row in order_rows or []:
+        for line_id in _prodigi_resource_id_candidates("LineItem", row.get("shopify_line_item_id")):
+            by_line.setdefault(line_id, row)
+        for order_id in _prodigi_resource_id_candidates("Order", row.get("shopify_order_id")):
+            by_order.setdefault(order_id, row)
+        order_name = _prodigi_normalise_order_name(row.get("order") or row.get("order_name") or row.get("shopify_order_name"))
+        if order_name:
+            by_order.setdefault(order_name, row)
+    return by_line, by_order
+
+
+def _prodigi_lookup_context_for_edition_row(edition_row, by_line, by_order):
+    for line_id in _prodigi_resource_id_candidates("LineItem", edition_row.get("shopify_line_item_id")):
+        if line_id in by_line:
+            return by_line[line_id]
+    for order_id in _prodigi_resource_id_candidates("Order", edition_row.get("shopify_order_id")):
+        if order_id in by_order:
+            return by_order[order_id]
+    order_name = _prodigi_normalise_order_name(edition_row.get("shopify_order_name") or edition_row.get("order_name"))
+    if order_name and order_name in by_order:
+        return by_order[order_name]
+    return {}
+
+
+def _prodigi_date_text(value):
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).date().isoformat() if value.tzinfo else value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return _prodigi_clean(value)
+
+
+def _prodigi_order_rows_from_edition_rows(edition_rows, context_rows=None):
+    by_line, by_order = _prodigi_context_maps(context_rows)
+    rows = []
+    seen = set()
+    for raw in edition_rows or []:
+        edition_row = dict(raw or {})
+        edition_order_id = _prodigi_clean(edition_row.get("edition_order_id") or edition_row.get("id"))
+        edition_number = _prodigi_int(edition_row.get("edition_number"), 0)
+        if not edition_order_id or not edition_number:
+            continue
+        context = _prodigi_lookup_context_for_edition_row(edition_row, by_line, by_order)
+        allocation_index = _prodigi_int(edition_row.get("allocation_index"), 1)
+        certificate_url = (
+            edition_row.get("shopify_file_url")
+            or edition_row.get("certificate_file_url")
+            or edition_row.get("certificate_pdf_url")
+            or context.get("shopify_file_url")
+            or context.get("certificate_pdf_url")
+            or ""
+        )
+        row = {
+            "order": edition_row.get("shopify_order_name") or edition_row.get("order_name") or context.get("order") or context.get("shopify_order_name") or "",
+            "date": _prodigi_date_text(edition_row.get("purchase_date") or edition_row.get("assigned_at") or context.get("date")),
+            "customer": edition_row.get("customer_name") or context.get("customer") or context.get("customer_name") or "",
+            "customer_email": edition_row.get("customer_email") or context.get("customer_email") or "",
+            "shipping": context.get("shipping") or context.get("shipping_method") or "",
+            "shipping_method": context.get("shipping_method") or context.get("shipping") or "",
+            "product": edition_row.get("product_title") or context.get("product") or context.get("product_title") or "",
+            "variant": edition_row.get("variant_title") or context.get("variant") or context.get("variant_title") or "",
+            "admin_url": edition_row.get("admin_url") or context.get("admin_url") or "",
+            "shopify_order_id": edition_row.get("shopify_order_id") or context.get("shopify_order_id") or "",
+            "shopify_line_item_id": edition_row.get("shopify_line_item_id") or context.get("shopify_line_item_id") or "",
+            "shopify_product_id": edition_row.get("shopify_product_id") or context.get("shopify_product_id") or "",
+            "variant_id": edition_row.get("shopify_variant_id") or context.get("variant_id") or context.get("shopify_variant_id") or "",
+            "product_handle": edition_row.get("shopify_handle") or edition_row.get("product_handle") or context.get("product_handle") or "",
+            "edition_order_id": edition_order_id,
+            "edition_number": edition_number,
+            "edition": f"#{edition_number:03d}",
+            "edition_total": _prodigi_int(edition_row.get("edition_total") or context.get("edition_total"), 100),
+            "has_saved_allocation": True,
+            "edition_offset": max(allocation_index - 1, 0),
+            "allocation_index": allocation_index,
+            "line_item_unit_index": allocation_index,
+            "allocation_key": edition_row.get("allocation_key") or "",
+            "assignment_status": edition_row.get("status") or edition_row.get("edition_order_status") or "Assigned",
+            "certificate": edition_row.get("certificate_status") or context.get("certificate") or context.get("certificate_status") or "",
+            "certificate_status": edition_row.get("certificate_status") or context.get("certificate_status") or "",
+            "certificate_pdf_path": edition_row.get("local_file_path") or context.get("certificate_pdf_path") or "",
+            "certificate_pdf_url": certificate_url,
+            "shopify_file_url": certificate_url,
+            "certificate_shopify_file_id": edition_row.get("shopify_file_id") or context.get("certificate_shopify_file_id") or "",
+            "certificate_generated_at": _prodigi_date_text(edition_row.get("generated_at") or edition_row.get("assigned_at") or context.get("certificate_generated_at")),
+            "certificate_preview_path": edition_row.get("certificate_preview_r2_key") or context.get("certificate_preview_path") or "",
+            "processed_at": context.get("processed_at") or "",
+            "created_at": _prodigi_date_text(edition_row.get("created_at") or context.get("created_at")),
+        }
+        identity_keys = _prodigi_identity_keys(row)
+        if any(key in seen for key in identity_keys):
+            continue
+        seen.update(identity_keys)
+        rows.append(row)
+    return rows
+
+
+def _prodigi_merge_allocation_lookup_rows(base_rows, allocation_rows):
+    if not allocation_rows:
+        return list(base_rows or [])
+    merged = []
+    seen = set()
+    for row in allocation_rows or []:
+        merged.append(row)
+        seen.update(_prodigi_identity_keys(row))
+    for row in base_rows or []:
+        if not any(key in seen for key in _prodigi_identity_keys(row)):
+            merged.append(row)
+            seen.update(_prodigi_identity_keys(row))
+    return merged
+
+
 def prodigi_find_order_rows(order_rows, search_text, stored_rows=None):
     query = _prodigi_clean(search_text)
     if not query:
@@ -3764,8 +3965,8 @@ def prodigi_find_order_rows(order_rows, search_text, stored_rows=None):
             )
         ]
 
-    stored_by_id = {row.get("row_id"): row for row in stored_rows or [] if row.get("row_id")}
-    rows = [prodigi_tracker_row_from_order(row, stored_by_id.get(prodigi_tracker_row_id(row))) for row in matched_raw]
+    stored_by_identity = _prodigi_rows_by_identity(stored_rows)
+    rows = [prodigi_tracker_row_from_order(row, _prodigi_stored_row_for_order_row(stored_by_identity, row)) for row in matched_raw]
     return sort_prodigi_tracker_rows(rows)
 
 
@@ -3822,7 +4023,10 @@ def prodigi_find_order_rows_from_cache(search_text):
         try:
             order_allocator = importlib.import_module("order_allocator")
             raw_rows = supabase_backend.list_orders(search=query, sort="Date newest", status_filter="All", limit=50)
-            order_rows = order_allocator._snapshot_rows_from_supabase_order_rows(raw_rows)
+            base_order_rows = order_allocator._snapshot_rows_from_supabase_order_rows(raw_rows)
+            edition_rows = supabase_backend.list_edition_orders(search=query, limit=200)
+            allocation_rows = _prodigi_order_rows_from_edition_rows(edition_rows, base_order_rows)
+            order_rows = _prodigi_merge_allocation_lookup_rows(base_order_rows, allocation_rows)
             existing_rows = prodigi_load_dispatch_rows("Search", search_text=query, limit=100)
             matches = prodigi_find_order_rows(order_rows, query, existing_rows)
             _prodigi_log_timing("order lookup", started, f"source=supabase rows={len(matches)}")
@@ -4166,7 +4370,7 @@ def _prodigi_order_line_table(matches, existing_dispatch_rows, selected_id):
     for row in matches:
         row_id = row.get("row_id") or ""
         row_key = safe_filename_part(row_id)
-        existing = _prodigi_existing_dispatch_row(existing_dispatch_rows, row_id)
+        existing = _prodigi_existing_dispatch_row(existing_dispatch_rows, row)
         selected = row_id == selected_id or (not selected_id and len(matches) == 1)
         status_label = _prodigi_status_label(row, existing, selected=selected)
         already_complete = status_label == "Complete"
@@ -4280,7 +4484,7 @@ def render_prodigi_page():
         _prodigi_order_line_table(matches, existing_dispatch_rows, selected_id)
 
     if selected_row:
-        existing = _prodigi_existing_dispatch_row(existing_dispatch_rows, selected_row.get("row_id"))
+        existing = _prodigi_existing_dispatch_row(existing_dispatch_rows, selected_row)
         already_submitted = existing and _prodigi_dispatch_status(existing) in {"Submitted", "Complete"}
         if already_submitted:
             st.info(f"Already submitted on {_prodigi_display_date(existing.get('date_sent_to_prodigi'))}.")
