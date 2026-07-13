@@ -544,13 +544,9 @@ class EditionOpsUiTests(unittest.TestCase):
 
         with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
             os_pages.supabase_backend,
-            "list_orders",
+            "list_hybrid_order_rows",
             return_value=raw_rows,
-        ) as list_orders, patch.object(
-            os_pages.supabase_backend,
-            "list_edition_orders",
-            return_value=[],
-        ) as list_edition_orders, patch.object(
+        ) as list_hybrid_order_rows, patch.object(
             os_pages,
             "prodigi_load_dispatch_rows",
             return_value=existing_rows,
@@ -561,8 +557,7 @@ class EditionOpsUiTests(unittest.TestCase):
         ):
             rows, existing = os_pages.prodigi_find_order_rows_from_cache("#SC2843")
 
-        list_orders.assert_called_once()
-        list_edition_orders.assert_called_once_with(search="#SC2843", limit=200)
+        list_hybrid_order_rows.assert_called_once_with(search="#SC2843", limit=50)
         load_dispatch.assert_called_once_with("Search", search_text="#SC2843", limit=100)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["shopify_order_name"], "#SC2843")
@@ -665,6 +660,15 @@ class EditionOpsUiTests(unittest.TestCase):
                 "certificate_status": "Certificate Missing",
             },
         ]
+        raw_rows[1]["assignments"].append(
+            {
+                "edition_order_id": "eo-six-081",
+                "edition_number": 81,
+                "edition_total": 100,
+                "allocation_index": 2,
+                "certificate_status": "Certificate Missing",
+            }
+        )
         existing_rows = [
             {
                 "row_id": "gid://shopify/Order/2906|gid://shopify/LineItem/9062|1",
@@ -680,12 +684,8 @@ class EditionOpsUiTests(unittest.TestCase):
 
         with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
             os_pages.supabase_backend,
-            "list_orders",
+            "list_hybrid_order_rows",
             return_value=raw_rows,
-        ), patch.object(
-            os_pages.supabase_backend,
-            "list_edition_orders",
-            return_value=edition_rows,
         ), patch.object(
             os_pages,
             "prodigi_load_dispatch_rows",
@@ -804,12 +804,8 @@ class EditionOpsUiTests(unittest.TestCase):
 
         with patch.object(os_pages.supabase_backend, "is_configured", return_value=True), patch.object(
             os_pages.supabase_backend,
-            "list_orders",
+            "list_hybrid_order_rows",
             return_value=raw_rows,
-        ), patch.object(
-            os_pages.supabase_backend,
-            "list_edition_orders",
-            return_value=edition_rows,
         ), patch.object(
             os_pages,
             "prodigi_load_dispatch_rows",
@@ -1467,7 +1463,8 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("_compact_variant_label", source)
         self.assertIn("selection_mode=\"multi-row\"", source)
         self.assertIn("DEFAULT_VISIBLE_ROW_LIMIT = 50", source)
-        self.assertIn("Search orders", render_page)
+        self.assertIn("_render_orders_search_form", render_page)
+        self.assertIn("Search orders", inspect.getsource(orders_page._render_orders_search_form))
         self.assertNotIn("Show all rows", render_page)
         self.assertNotIn("_render_admin_panel", render_page)
         self.assertIn("Check New Paid Orders", top_actions)
@@ -2329,7 +2326,7 @@ class EditionOpsUiTests(unittest.TestCase):
         ) as direct_read:
             payload = orders_page._read_orders_snapshot()
 
-        direct_read.assert_called_once_with(limit=1000)
+        direct_read.assert_called_once_with(limit=50, search="")
         self.assertEqual(payload["rows"][0]["order"], "#SC2843")
 
     def test_hybrid_orders_overlay_protects_goat_supabase_editions(self):
@@ -4040,6 +4037,182 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn('"key": "certificates_json"', shopify_source)
         self.assertNotIn("FOREIGN KEY (edition_order_id)", source)
         self.assertNotIn("FOREIGN KEY (related_edition_order_id)", source)
+
+
+class OrdersDatabaseReadRepairTests(unittest.TestCase):
+    class Cursor:
+        def __init__(self, rows=None, error=None, statements=None):
+            self.rows = list(rows or [])
+            self.error = error
+            self.statements = statements if statements is not None else []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params=None):
+            self.statements.append((str(sql), tuple(params or ())))
+            if self.error:
+                raise self.error
+
+        def fetchall(self):
+            return list(self.rows)
+
+        def read(self):
+            if self.error:
+                raise self.error
+            return list(self.rows)
+
+    class Connection:
+        def __init__(self, cursor):
+            self._cursor = cursor
+            self.closed = False
+            self.rollback_calls = 0
+            self.close_calls = 0
+
+        def cursor(self):
+            return self._cursor
+
+        def rollback(self):
+            self.rollback_calls += 1
+
+        def close(self):
+            self.close_calls += 1
+            self.closed = True
+
+    def test_closed_connection_is_discarded_and_read_retries_once(self):
+        stale = self.Connection(self.Cursor(error=RuntimeError("EDBHANDLEREXITED connection to database closed")))
+        fresh = self.Connection(self.Cursor(rows=[{"ok": 1}]))
+
+        with patch.object(supabase_backend, "connect", side_effect=[stale, fresh]) as connect:
+            value, diagnostic = supabase_backend._run_read_operation("orders.test", lambda cur: cur.read())
+
+        self.assertEqual(value, [{"ok": 1}])
+        self.assertEqual(connect.call_count, 2)
+        self.assertTrue(diagnostic["recovered"])
+        self.assertEqual(stale.close_calls, 1)
+        self.assertEqual(fresh.close_calls, 1)
+        self.assertEqual(fresh.rollback_calls, 1)
+
+    def test_permanent_sql_error_is_not_retried_or_hidden(self):
+        failed = self.Connection(self.Cursor(error=ValueError("syntax error near SELECT")))
+
+        with patch.object(supabase_backend, "connect", return_value=failed) as connect:
+            with self.assertRaises(supabase_backend.DatabaseReadError) as raised:
+                supabase_backend._run_read_operation("orders.test", lambda cur: cur.read())
+
+        self.assertEqual(connect.call_count, 1)
+        self.assertIsInstance(raised.exception.__cause__, ValueError)
+        self.assertEqual(raised.exception.diagnostic["category"], "sql_query_error")
+        self.assertEqual(failed.close_calls, 1)
+        self.assertEqual(failed.rollback_calls, 1)
+
+    def test_latest_50_and_search_are_two_bulk_read_queries_without_writes(self):
+        statements = []
+        base_rows = [
+            {
+                "shopify_order_id": "gid://shopify/Order/2906",
+                "order_name": "#SC2906",
+                "shopify_line_item_id": "gid://shopify/LineItem/9062",
+                "product_title": "Six Laps Ahead Peter Brock Wall Art",
+                "variant_title": "Black / M",
+                "quantity": 2,
+            }
+        ]
+        allocations = [
+            {
+                "edition_order_id": "eo-six-080",
+                "shopify_order_id": "gid://shopify/Order/2906",
+                "shopify_order_name": "#SC2906",
+                "shopify_line_item_id": "gid://shopify/LineItem/9062",
+                "edition_number": 80,
+                "edition_total": 100,
+                "allocation_index": 1,
+            },
+            {
+                "edition_order_id": "eo-six-081",
+                "shopify_order_id": "gid://shopify/Order/2906",
+                "shopify_order_name": "#SC2906",
+                "shopify_line_item_id": "gid://shopify/LineItem/9062",
+                "edition_number": 81,
+                "edition_total": 100,
+                "allocation_index": 2,
+            },
+        ]
+        connections = [
+            self.Connection(self.Cursor(rows=base_rows, statements=statements)),
+            self.Connection(self.Cursor(rows=allocations, statements=statements)),
+        ]
+
+        with patch.object(supabase_backend, "connect", side_effect=connections) as connect:
+            rows = supabase_backend.list_hybrid_order_rows(limit=50, search="#SC2906")
+
+        self.assertEqual(connect.call_count, 2)
+        self.assertEqual(len(statements), 2)
+        self.assertIn("WITH selected_orders AS", statements[0][0])
+        self.assertEqual(statements[0][1][-1], 50)
+        self.assertIn("EXISTS", statements[0][0])
+        self.assertNotIn("1000", statements[0][0])
+        for sql, _ in statements:
+            upper = sql.upper()
+            for write_token in ("INSERT ", "UPDATE ", "DELETE ", "ALTER ", "CREATE "):
+                self.assertNotIn(write_token, upper)
+        self.assertEqual(len(rows[0]["assignments"]), 2)
+        snapshot_rows = order_allocator._snapshot_rows_from_supabase_order_rows(rows)
+        self.assertEqual(sorted(row["edition_number"] for row in snapshot_rows), [80, 81])
+        self.assertEqual(
+            sorted(row["edition_order_id"] for row in snapshot_rows),
+            ["eo-six-080", "eo-six-081"],
+        )
+        self.assertEqual(
+            os_pages.prodigi_tracker_row_id(snapshot_rows[0]),
+            f"edition-order|{snapshot_rows[0]['edition_order_id']}",
+        )
+        self.assertTrue(all(connection.closed for connection in connections))
+
+    def test_orders_search_is_explicit_and_normal_render_skips_duplicate_audit(self):
+        form_source = inspect.getsource(orders_page._render_orders_search_form)
+        render_source = inspect.getsource(orders_page.render_page)
+
+        self.assertIn('st.form("orders-search-form"', form_source)
+        self.assertIn("form_submit_button", form_source)
+        self.assertNotIn("_duplicate_diagnostics_snapshot", render_source)
+        self.assertIn("_load_snapshot_once(search_text, force=True)", render_source)
+
+    def test_failed_load_keeps_safe_error_state_without_local_fallback(self):
+        error = supabase_backend.DatabaseReadError(
+            "The database query failed. Check Developer diagnostics.",
+            {
+                "operation": "orders.latest_50.base",
+                "category": "sql_query_error",
+                "exception_class": "UndefinedColumn",
+                "duration_ms": 12,
+            },
+        )
+        fake_st = SimpleNamespace(
+            session_state={
+                orders_page.ROWS_KEY: [{"order": "#stale"}],
+                orders_page.META_KEY: {},
+                orders_page.LOAD_ERROR_KEY: "",
+            }
+        )
+
+        with patch.object(orders_page, "st", fake_st), patch.object(
+            orders_page, "_read_orders_snapshot", side_effect=error
+        ), patch.object(
+            orders_page.order_allocator,
+            "load_orders_snapshot",
+            side_effect=AssertionError("Supabase failures must not use the local allocation snapshot."),
+        ):
+            orders_page._load_snapshot_once(force=True)
+
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [])
+        diagnostic = fake_st.session_state[orders_page.META_KEY]["database_read"]
+        self.assertEqual(diagnostic["exception_class"], "UndefinedColumn")
+        self.assertEqual(diagnostic["operation"], "orders.latest_50.base")
+        self.assertIn("Developer diagnostics", fake_st.session_state[orders_page.LOAD_ERROR_KEY])
 
 
 if __name__ == "__main__":

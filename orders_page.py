@@ -46,6 +46,7 @@ ORDERS_SYNC_TIMEOUT_SECONDS = 90
 ORDERS_SUPABASE_LIVE_MARKER_KEY = "orders_supabase_live_visibility_marker"
 ORDERS_SUPABASE_LIVE_CHECK_SECONDS = 25
 SEARCH_KEY = "orders_search_text"
+LOADED_QUERY_KEY = "orders_loaded_query"
 SHOW_ALL_KEY = "orders_show_all_rows"
 LOAD_ERROR_KEY = "orders_load_error"
 DEFAULT_VISIBLE_ROW_LIMIT = 50
@@ -176,6 +177,7 @@ def _ensure_state():
     st.session_state.setdefault(LATEST_FETCH_PREVIEW_KEY, {})
     st.session_state.setdefault(ORDER_SYNC_BACKFILL_KEY, False)
     st.session_state.setdefault(SEARCH_KEY, "")
+    st.session_state.setdefault(LOADED_QUERY_KEY, "")
     st.session_state.setdefault(SHOW_ALL_KEY, False)
     st.session_state.setdefault(LOAD_ERROR_KEY, "")
 
@@ -193,13 +195,28 @@ def _configured_supabase_backend():
     return backend
 
 
-def _read_orders_snapshot():
+def _read_orders_snapshot(search="", limit=DEFAULT_VISIBLE_ROW_LIMIT):
     backend = _configured_supabase_backend()
     if backend:
         if HYBRID_FAST_ORDERS_ENABLED and hasattr(order_allocator, "load_hybrid_orders_snapshot"):
-            return order_allocator.load_hybrid_orders_snapshot(limit=1000)
-        return order_allocator.load_supabase_orders_snapshot(limit=1000, include_summary=False)
+            return order_allocator.load_hybrid_orders_snapshot(
+                limit=max(int(limit or DEFAULT_VISIBLE_ROW_LIMIT), 1),
+                search=str(search or "").strip(),
+            )
+        return order_allocator.load_supabase_orders_snapshot(
+            limit=max(int(limit or DEFAULT_VISIBLE_ROW_LIMIT), 1),
+            include_summary=False,
+        )
     return order_allocator.load_orders_snapshot()
+
+
+def _database_load_diagnostic(error):
+    diagnostic = dict(getattr(error, "diagnostic", {}) or {})
+    diagnostic.setdefault("operation", "orders.load")
+    diagnostic.setdefault("category", "database_unavailable")
+    diagnostic.setdefault("exception_class", error.__class__.__name__)
+    diagnostic.setdefault("duration_ms", 0)
+    return diagnostic
 
 
 def _ledger_status():
@@ -567,10 +584,12 @@ def _update_matching_row(target_row, updates):
     _write_snapshot(st.session_state[ROWS_KEY], meta=st.session_state.get(META_KEY) or {})
 
 
-def _load_snapshot_once():
+def _load_snapshot_once(search="", *, force=False):
+    query = str(search or "").strip()
     if (
-        st.session_state.get(SNAPSHOT_LOADED_KEY)
-        and st.session_state.get(ROWS_KEY)
+        not force
+        and st.session_state.get(SNAPSHOT_LOADED_KEY)
+        and st.session_state.get(LOADED_QUERY_KEY, "") == query
         and not st.session_state.get(LOAD_ERROR_KEY)
     ):
         print(f"Orders load cached rows: {len(st.session_state.get(ROWS_KEY) or [])}", flush=True)
@@ -581,34 +600,10 @@ def _load_snapshot_once():
         return
     start = time.perf_counter()
     try:
-        payload = _read_orders_snapshot()
+        payload = _read_orders_snapshot(search=query, limit=DEFAULT_VISIBLE_ROW_LIMIT)
     except Exception as error:
-        existing_rows = st.session_state.get(ROWS_KEY) or []
-        existing_meta = st.session_state.get(META_KEY) or {}
-        existing_source = str(existing_meta.get("source") or "")
-        if existing_rows and "supabase" in existing_source:
-            updated_meta = dict(existing_meta)
-            updated_meta["error"] = str(error)
-            st.session_state[META_KEY] = updated_meta
-            st.session_state[LOAD_ERROR_KEY] = str(error)
-            st.session_state[SNAPSHOT_LOADED_KEY] = True
-            print(f"WARN Orders hybrid load failed; keeping existing Supabase rows: {error}", flush=True)
-            _perf_log("load snapshot failed kept existing", start, rows=len(existing_rows))
-            return
-        try:
-            fallback_payload = order_allocator.load_orders_snapshot()
-        except Exception:
-            fallback_payload = None
-        if fallback_payload and fallback_payload.get("rows"):
-            fallback_payload = dict(fallback_payload)
-            fallback_payload["source"] = "local_snapshot_read_only_fallback"
-            fallback_payload["error"] = str(error)
-            _apply_snapshot_payload(fallback_payload)
-            st.session_state[LOAD_ERROR_KEY] = str(error)
-            st.session_state[SNAPSHOT_LOADED_KEY] = True
-            print(f"WARN Orders hybrid load failed; rendered local read-only fallback: {error}", flush=True)
-            _perf_log("load snapshot fallback", start, rows=len(st.session_state.get(ROWS_KEY) or []))
-            return
+        diagnostic = _database_load_diagnostic(error)
+        safe_error = str(error) or "Orders database read failed."
         st.session_state[ROWS_KEY] = []
         st.session_state[META_KEY] = {
             "last_refreshed": "",
@@ -617,14 +612,24 @@ def _load_snapshot_once():
             "order_count": 0,
             "row_count": 0,
             "source": "supabase_error",
-            "error": str(error),
+            "error": safe_error,
+            "database_read": diagnostic,
         }
-        st.session_state[LOAD_ERROR_KEY] = str(error)
-        print(f"ERROR Orders Supabase snapshot failed: {error}", flush=True)
+        st.session_state[LOAD_ERROR_KEY] = safe_error
+        st.session_state[LOADED_QUERY_KEY] = query
+        st.session_state[SNAPSHOT_LOADED_KEY] = True
+        print(
+            "ERROR Orders Supabase snapshot failed "
+            f"operation={diagnostic.get('operation')} category={diagnostic.get('category')} "
+            f"exception_class={diagnostic.get('exception_class')} "
+            f"duration_ms={diagnostic.get('duration_ms')}",
+            flush=True,
+        )
         _perf_log("load snapshot failed", start)
         return
     st.session_state[LOAD_ERROR_KEY] = ""
     _apply_snapshot_payload(payload)
+    st.session_state[LOADED_QUERY_KEY] = query
     st.session_state[SNAPSHOT_LOADED_KEY] = True
     _perf_log("load snapshot", start, rows=len(st.session_state[ROWS_KEY]))
     print("Orders load persisted rows: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
@@ -645,12 +650,16 @@ def _apply_snapshot_payload(payload):
         "row_count": payload.get("row_count") or len(payload.get("rows") or []),
         "source": payload.get("source") or "local_snapshot",
         "error": payload.get("error") or "",
+        "database_read": dict(payload.get("database_read") or {}),
+        "search": str(payload.get("search") or ""),
     }
 
 
 def _reload_orders_from_source():
-    payload = _read_orders_snapshot()
+    query = str(st.session_state.get(LOADED_QUERY_KEY) or "").strip()
+    payload = _read_orders_snapshot(search=query, limit=DEFAULT_VISIBLE_ROW_LIMIT)
     _apply_snapshot_payload(payload)
+    st.session_state[LOADED_QUERY_KEY] = query
     st.session_state[SNAPSHOT_LOADED_KEY] = True
 
 
@@ -2302,22 +2311,51 @@ def _render_orders_table(rows):
     print("Table render: {:.0f} ms".format((time.perf_counter() - start) * 1000), flush=True)
 
 
+def _render_orders_search_form():
+    if hasattr(st, "form") and hasattr(st, "form_submit_button"):
+        with st.form("orders-search-form", clear_on_submit=False):
+            search_cols = st.columns([3.2, 1])
+            query = search_cols[0].text_input(
+                "Search orders",
+                key=SEARCH_KEY,
+                placeholder="Order, customer, product, variant, edition",
+            )
+            search_cols[1].caption("Latest 50")
+            submitted = st.form_submit_button("Search", use_container_width=False)
+        return str(query or "").strip(), bool(submitted)
+
+    search_cols = st.columns([3.2, 1])
+    query = search_cols[0].text_input(
+        "Search orders",
+        key=SEARCH_KEY,
+        placeholder="Order, customer, product, variant, edition",
+    )
+    search_cols[1].caption("Latest 50")
+    return str(query or "").strip(), False
+
+
 def render_page():
     _ensure_state()
-    _load_snapshot_once()
+    st.title("Orders")
+    st.caption("Orders sync automatically after payment.")
+    search_text, search_submitted = _render_orders_search_form()
+    if search_submitted:
+        _load_snapshot_once(search_text, force=True)
+    elif not st.session_state.get(SNAPSHOT_LOADED_KEY):
+        _load_snapshot_once("")
+
     _render_orders_supabase_live_refresh()
     prep_started = time.perf_counter()
     rows = _apply_latest_product_numbers(st.session_state.get(ROWS_KEY, []))
     st.session_state[ROWS_KEY] = rows
     _perf_log("table render prep", prep_started, rows=len(rows))
 
-    st.title("Orders")
-    st.caption("Orders sync automatically after payment.")
     meta = st.session_state.get(META_KEY) or {}
     if meta.get("error"):
         st.caption(f"Orders load warning: {meta.get('error')}")
-    duplicate_diagnostics = _duplicate_diagnostics_snapshot(limit=10)
-    _render_duplicate_warning_panel(duplicate_diagnostics)
+    read_diagnostic = dict(meta.get("database_read") or {})
+    if read_diagnostic.get("recovered"):
+        st.info("A stale database connection was replaced automatically. These results are current.")
 
     notice = st.session_state.get(NOTICE_KEY)
     if notice:
@@ -2326,30 +2364,31 @@ def render_page():
     if _developer_mode():
         _render_sync_diagnostics(st.session_state.get(SYNC_RESULT_KEY) or {})
 
-    search_cols = st.columns([3.2, 1])
-    search_text = search_cols[0].text_input(
-        "Search orders",
-        key=SEARCH_KEY,
-        placeholder="Order, customer, product, variant, edition",
-    )
-    search_cols[1].caption("Latest 50")
-
     if not rows:
         load_error = st.session_state.get(LOAD_ERROR_KEY) or (st.session_state.get(META_KEY) or {}).get("error") or ""
         if load_error:
             st.error("Orders could not be loaded. Please check Developer diagnostics.")
+            if _developer_mode():
+                st.caption(
+                    "Database diagnostic: "
+                    f"{read_diagnostic.get('category') or 'database_unavailable'}; "
+                    f"exception={read_diagnostic.get('exception_class') or 'Unknown'}; "
+                    f"operation={read_diagnostic.get('operation') or 'orders.load'}; "
+                    f"duration={int(read_diagnostic.get('duration_ms') or 0)} ms."
+                )
         else:
             st.info("No saved orders are available in the operational ledger yet.")
         return
 
-    filtered_rows = _filter_rows(rows, search_text)
-    visible_rows = filtered_rows[:DEFAULT_VISIBLE_ROW_LIMIT]
+    # The database is already bounded to 50 orders. Keep every fulfilment unit for
+    # those orders so a quantity-2 line can never lose its second allocation here.
+    visible_rows = rows
 
-    _render_top_actions(visible_rows, duplicate_diagnostics)
+    _render_top_actions(visible_rows, None)
 
-    if len(filtered_rows) > len(visible_rows):
-        st.caption(f"Showing latest {len(visible_rows)} of {len(filtered_rows)} matching orders.")
+    if st.session_state.get(LOADED_QUERY_KEY):
+        st.caption(f"{len(visible_rows)} matching fulfilment row(s) shown from Supabase.")
     else:
-        st.caption(f"{len(visible_rows)} order row(s) shown.")
+        st.caption(f"{len(visible_rows)} fulfilment row(s) shown from the latest 50 orders.")
 
     _render_orders_table(visible_rows)

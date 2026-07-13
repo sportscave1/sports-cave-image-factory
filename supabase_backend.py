@@ -1,4 +1,5 @@
 import csv
+import contextvars
 import gc
 import hashlib
 import io
@@ -7,6 +8,7 @@ import os
 import re
 import threading
 import time
+import traceback
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -83,6 +85,10 @@ _SCHEMA_READY = False
 _ORDER_READ_SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
 _LAST_DATABASE_STATUS = {}
+_LAST_DATABASE_READ_DIAGNOSTIC = contextvars.ContextVar(
+    "last_database_read_diagnostic",
+    default={},
+)
 DEFAULT_EDITION_NAME = "Original Edition"
 ACTIVE_RUN_STATUS = "active"
 SOLD_OUT_RUN_STATUS = "sold_out"
@@ -198,6 +204,14 @@ ASSET_LABELS = {
 
 class SupabaseNotConfigured(RuntimeError):
     pass
+
+
+class DatabaseReadError(RuntimeError):
+    """Safe read failure with non-secret diagnostics for the Orders UI."""
+
+    def __init__(self, message, diagnostic):
+        super().__init__(message)
+        self.diagnostic = dict(diagnostic or {})
 
 
 def utc_now():
@@ -466,6 +480,145 @@ def connect():
             f"-c idle_in_transaction_session_timeout={_db_statement_timeout_ms()}"
         ),
     )
+
+
+def _database_error_sqlstate(error):
+    return str(getattr(error, "sqlstate", "") or getattr(error, "pgcode", "") or "").strip()
+
+
+def _is_stale_connection_error(error):
+    """Only recognise transport/closed-connection failures that are safe to retry once."""
+    sqlstate = _database_error_sqlstate(error)
+    if sqlstate in {"08003", "08006", "08007", "08P01", "57P01", "57P02", "57P03"}:
+        return True
+    message = str(error or "").casefold()
+    return any(
+        token in message
+        for token in (
+            "edbhandlerexited",
+            "connection to database closed",
+            "connection is closed",
+            "connection already closed",
+            "connection not open",
+            "server closed the connection unexpectedly",
+            "ssl connection has been closed unexpectedly",
+            "terminating connection due to administrator command",
+        )
+    )
+
+
+def _database_error_category(error):
+    sqlstate = _database_error_sqlstate(error)
+    if sqlstate == "57014" or isinstance(error, TimeoutError):
+        return "request_timeout"
+    if _is_stale_connection_error(error):
+        return "stale_connection"
+    if sqlstate.startswith("08") or error.__class__.__name__.casefold() in {
+        "interfaceerror",
+        "operationalerror",
+        "connectionfailure",
+    }:
+        return "database_unavailable"
+    return "sql_query_error"
+
+
+def _safe_database_read_message(category):
+    return {
+        "request_timeout": "The database read timed out. Please retry.",
+        "stale_connection": "The database connection closed before the read completed. Please retry.",
+        "database_unavailable": "The database is temporarily unavailable. Please retry.",
+        "sql_query_error": "The database query failed. Check Developer diagnostics.",
+    }.get(category, "The database read failed. Check Developer diagnostics.")
+
+
+def _rollback_read_connection(conn):
+    if conn is None or bool(getattr(conn, "closed", False)):
+        return
+    try:
+        conn.rollback()
+    except Exception:
+        # The connection is discarded below. Never return a failed transaction for reuse.
+        pass
+
+
+def _close_read_connection(conn):
+    if conn is None:
+        return
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+def _run_read_operation(operation, read_callable):
+    """Run one read on one fresh connection, retrying one recognised stale failure."""
+    started = time.perf_counter()
+    first_error_type = ""
+    for attempt in range(2):
+        conn = None
+        try:
+            conn = connect()
+            with conn.cursor() as cur:
+                value = read_callable(cur)
+            _rollback_read_connection(conn)
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            diagnostic = {
+                "operation": str(operation or "database_read"),
+                "category": "stale_connection_recovered" if attempt else "ok",
+                "exception_class": first_error_type,
+                "sqlstate": "",
+                "attempts": attempt + 1,
+                "recovered": bool(attempt),
+                "duration_ms": elapsed_ms,
+            }
+            _LAST_DATABASE_READ_DIAGNOSTIC.set(diagnostic)
+            print(
+                "PERF DB read "
+                f"operation={diagnostic['operation']} duration_ms={elapsed_ms} "
+                f"attempts={attempt + 1} recovered={str(bool(attempt)).lower()}",
+                flush=True,
+            )
+            return value, diagnostic
+        except Exception as error:
+            _rollback_read_connection(conn)
+            category = _database_error_category(error)
+            exception_class = error.__class__.__name__
+            sqlstate = _database_error_sqlstate(error)
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
+            diagnostic = {
+                "operation": str(operation or "database_read"),
+                "category": category,
+                "exception_class": exception_class,
+                "sqlstate": sqlstate,
+                "attempts": attempt + 1,
+                "recovered": False,
+                "duration_ms": elapsed_ms,
+            }
+            _LAST_DATABASE_READ_DIAGNOSTIC.set(diagnostic)
+            retry = attempt == 0 and category == "stale_connection"
+            print(
+                "WARN DB read "
+                f"operation={diagnostic['operation']} category={category} "
+                f"exception_class={exception_class} sqlstate={sqlstate or 'none'} "
+                f"duration_ms={elapsed_ms} retry={str(retry).lower()}",
+                flush=True,
+            )
+            if retry:
+                first_error_type = exception_class
+                continue
+            print(
+                "TRACE DB read "
+                f"operation={diagnostic['operation']} exception_class={exception_class}\n"
+                + "".join(traceback.format_tb(error.__traceback__)),
+                flush=True,
+            )
+            raise DatabaseReadError(_safe_database_read_message(category), diagnostic) from error
+        finally:
+            _close_read_connection(conn)
+
+
+def get_last_database_read_diagnostic():
+    return dict(_LAST_DATABASE_READ_DIAGNOSTIC.get() or {})
 
 
 def database_status(run_schema_check=True):
@@ -13547,160 +13700,152 @@ def _order_sort_clause(sort):
     }.get(sort, "COALESCE(created_at, synced_at) DESC NULLS LAST, order_name DESC")
 
 
-def list_hybrid_order_rows(limit=250):
+def list_hybrid_order_rows(limit=50, search=""):
+    """Read a bounded order window plus all matching allocations in two bulk queries."""
     total_started = time.perf_counter()
-    base_started = time.perf_counter()
-    limit_value = max(min(int(limit or 250), 1000), 1)
-    with connect() as conn:
-        with conn.cursor() as cur:
+    limit_value = max(min(int(limit or 50), 200), 1)
+    raw_search = str(search or "").strip()
+    search_value = f"%{raw_search.casefold()}%"
+    where_sql = ""
+    search_params = []
+    if raw_search:
+        where_sql = """
+            WHERE LOWER(COALESCE(o.order_name, '')) LIKE %s
+               OR LOWER(COALESCE(o.order_number, '')) LIKE %s
+               OR LOWER(COALESCE(o.customer_name, '')) LIKE %s
+               OR LOWER(COALESCE(o.customer_email, '')) LIKE %s
+               OR EXISTS (
+                    SELECT 1
+                    FROM shopify_order_lines search_li
+                    WHERE search_li.shopify_order_id = o.shopify_order_id
+                      AND (
+                          LOWER(COALESCE(search_li.product_title, '')) LIKE %s
+                          OR LOWER(COALESCE(search_li.variant_title, '')) LIKE %s
+                          OR LOWER(COALESCE(search_li.sku, '')) LIKE %s
+                          OR LOWER(COALESCE(search_li.shopify_handle, '')) LIKE %s
+                      )
+               )
+               OR EXISTS (
+                    SELECT 1
+                    FROM edition_orders search_eo
+                    WHERE (
+                        search_eo.shopify_order_id = o.shopify_order_id
+                        OR UPPER(TRIM(COALESCE(search_eo.shopify_order_name, '')))=UPPER(TRIM(COALESCE(o.order_name, '')))
+                    )
+                      AND (
+                          LOWER(COALESCE(search_eo.product_title, '')) LIKE %s
+                          OR LOWER(COALESCE(search_eo.variant_title, '')) LIKE %s
+                          OR COALESCE(search_eo.edition_number::text, '') LIKE %s
+                      )
+               )
+        """
+        search_params = [search_value] * 10 + [f"%{raw_search.lstrip('#')}%"]
+
+    def load_base_rows(cur):
+        cur.execute(
+            f"""
+            WITH selected_orders AS (
+                SELECT o.*
+                FROM shopify_orders o
+                {where_sql}
+                ORDER BY COALESCE(o.created_at, o.processed_at, o.synced_at) DESC NULLS LAST,
+                         o.order_name DESC
+                LIMIT %s
+            )
+            SELECT
+                o.shopify_order_id, o.order_name, o.order_number, o.admin_url,
+                o.customer_name, o.customer_email, o.financial_status, o.fulfillment_status,
+                o.total_price, o.currency, o.created_at, o.remote_updated_at, o.processed_at,
+                o.cancelled_at, o.synced_at, o.raw_json AS order_raw_json,
+                li.id AS order_line_id, li.shopify_line_item_id, li.quantity,
+                li.assignment_status, li.last_error, li.shopify_handle, li.shopify_product_id,
+                COALESCE(NULLIF(li.raw_json->>'shopify_variant_id', ''), NULLIF(li.raw_json->>'variant_id', ''), NULLIF(li.raw_json->'variant'->>'id', '')) AS shopify_variant_id,
+                COALESCE(NULLIF(li.product_title, ''), NULLIF(li.raw_json->>'product_title', ''), NULLIF(li.raw_json->>'title', '')) AS product_title,
+                COALESCE(NULLIF(li.variant_title, ''), NULLIF(li.raw_json->>'variant_title', ''), NULLIF(li.raw_json->>'variantTitle', ''), NULLIF(li.raw_json->'variant'->>'title', '')) AS variant_title,
+                li.sku,
+                COALESCE(pd.prodigi_status, '') AS prodigi_status,
+                COALESCE(pd.row_id, '') AS prodigi_row_id,
+                COALESCE(NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url
+            FROM selected_orders o
+            LEFT JOIN shopify_order_lines li ON li.shopify_order_id = o.shopify_order_id
+            LEFT JOIN shopify_products sp ON sp.handle = li.shopify_handle
+            LEFT JOIN LATERAL (
+                SELECT pd.row_id, pd.prodigi_status
+                FROM prodigi_dispatch_rows pd
+                WHERE pd.shopify_line_item_id = li.shopify_line_item_id
+                ORDER BY pd.updated_at DESC NULLS LAST, pd.submitted_at DESC NULLS LAST
+                LIMIT 1
+            ) pd ON TRUE
+            ORDER BY COALESCE(o.created_at, o.processed_at, o.synced_at) DESC NULLS LAST,
+                     o.order_name DESC, li.id ASC NULLS LAST
+            """,
+            (*search_params, limit_value),
+        )
+        return cur.fetchall()
+
+    base_rows, base_diagnostic = _run_read_operation(
+        "orders.search.base" if raw_search else "orders.latest_50.base",
+        load_base_rows,
+    )
+
+    line_id_lookup_values = sorted({
+        candidate
+        for row in base_rows
+        for candidate in _shopify_id_candidates("LineItem", row.get("shopify_line_item_id"))
+        if candidate
+    })
+    order_id_lookup_values = sorted({
+        candidate
+        for row in base_rows
+        for candidate in _shopify_id_candidates("Order", row.get("shopify_order_id"))
+        if candidate
+    })
+    order_name_lookup_values = sorted({
+        str(row.get("order_name") or "").strip().upper()
+        for row in base_rows
+        if str(row.get("order_name") or "").strip()
+    })
+
+    edition_rows = []
+    overlay_diagnostic = {"category": "skipped", "attempts": 0, "recovered": False, "duration_ms": 0}
+    if line_id_lookup_values or order_id_lookup_values or order_name_lookup_values:
+        def load_edition_rows(cur):
             cur.execute(
                 """
                 SELECT
-                    o.shopify_order_id,
-                    o.order_name,
-                    o.order_number,
-                    o.admin_url,
-                    o.customer_name,
-                    o.customer_email,
-                    o.financial_status,
-                    o.fulfillment_status,
-                    o.total_price,
-                    o.currency,
-                    o.created_at,
-                    o.remote_updated_at,
-                    o.processed_at,
-                    o.cancelled_at,
-                    o.synced_at,
-                    o.raw_json AS order_raw_json,
-                    li.id AS order_line_id,
-                    li.shopify_line_item_id,
-                    li.quantity,
-                    li.assignment_status,
-                    li.last_error,
-                    li.shopify_handle,
-                    li.shopify_product_id,
-                    COALESCE(NULLIF(li.raw_json->>'shopify_variant_id', ''), NULLIF(li.raw_json->>'variant_id', ''), NULLIF(li.raw_json->'variant'->>'id', '')) AS shopify_variant_id,
-                    COALESCE(NULLIF(li.product_title, ''), NULLIF(li.raw_json->>'product_title', ''), NULLIF(li.raw_json->>'title', '')) AS product_title,
-                    COALESCE(NULLIF(li.variant_title, ''), NULLIF(li.raw_json->>'variant_title', ''), NULLIF(li.raw_json->>'variantTitle', ''), NULLIF(li.raw_json->'variant'->>'title', '')) AS variant_title,
-                    li.sku,
-                    COALESCE(pd.prodigi_status, '') AS prodigi_status,
-                    COALESCE(pd.row_id, '') AS prodigi_row_id,
-                    COALESCE(NULLIF(sp.featured_image_url, ''), NULLIF(sp.image_url, '')) AS image_url
-                FROM shopify_orders o
-                LEFT JOIN shopify_order_lines li ON li.shopify_order_id = o.shopify_order_id
-                LEFT JOIN shopify_products sp ON sp.handle = li.shopify_handle
-                LEFT JOIN LATERAL (
-                    SELECT pd.row_id, pd.prodigi_status
-                    FROM prodigi_dispatch_rows pd
-                    WHERE pd.shopify_line_item_id = li.shopify_line_item_id
-                    ORDER BY pd.updated_at DESC NULLS LAST, pd.submitted_at DESC NULLS LAST
-                    LIMIT 1
-                ) pd ON TRUE
-                ORDER BY COALESCE(o.created_at, o.synced_at) DESC NULLS LAST,
-                         o.order_name DESC,
-                         li.id ASC NULLS LAST
-                LIMIT %s
+                    eo.id AS edition_order_id, eo.shopify_order_id, eo.shopify_order_name,
+                    eo.shopify_line_item_id, eo.shopify_product_id, eo.shopify_variant_id,
+                    eo.shopify_handle, eo.product_handle, eo.product_title, eo.variant_title,
+                    eo.sku, eo.customer_name, eo.customer_email, eo.edition_number,
+                    eo.edition_total, eo.allocation_index, eo.assigned_at,
+                    eo.certificate_status, eo.status AS edition_order_status,
+                    eo.source AS assignment_source, eo.manual_override,
+                    c.certificate_id, c.local_file_path,
+                    COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
+                    c.certificate_pdf_url, c.certificate_print_jpg_url,
+                    c.certificate_preview_image_url, c.shopify_pdf_file_id,
+                    c.shopify_print_jpg_file_id, c.shopify_preview_file_id,
+                    c.asset_sync_status, c.asset_sync_error, c.generated_at,
+                    c.certificate_r2_bucket, c.certificate_r2_key,
+                    c.certificate_preview_r2_bucket, c.certificate_preview_r2_key
+                FROM edition_orders eo
+                LEFT JOIN certificates c
+                  ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
+                WHERE eo.shopify_line_item_id = ANY(%s)
+                   OR eo.shopify_order_id = ANY(%s)
+                   OR UPPER(TRIM(COALESCE(eo.shopify_order_name, ''))) = ANY(%s)
+                ORDER BY eo.shopify_line_item_id ASC,
+                         eo.allocation_index ASC NULLS LAST,
+                         eo.edition_number ASC NULLS LAST
                 """,
-                (limit_value,),
+                (line_id_lookup_values, order_id_lookup_values, order_name_lookup_values),
             )
-            base_rows = cur.fetchall()
-            print(
-                f"PERF Orders base rows load {(time.perf_counter() - base_started):.3f}s rows={len(base_rows)}",
-                flush=True,
-            )
+            return cur.fetchall()
 
-            line_ids = [
-                str(row.get("shopify_line_item_id") or "").strip()
-                for row in base_rows
-                if str(row.get("shopify_line_item_id") or "").strip()
-            ]
-            order_ids = [
-                str(row.get("shopify_order_id") or "").strip()
-                for row in base_rows
-                if str(row.get("shopify_order_id") or "").strip()
-            ]
-            order_names = [
-                str(row.get("order_name") or "").strip().upper()
-                for row in base_rows
-                if str(row.get("order_name") or "").strip()
-            ]
-            line_id_lookup_values = sorted(
-                {
-                    candidate
-                    for line_id in line_ids
-                    for candidate in _shopify_id_candidates("LineItem", line_id)
-                    if candidate
-                }
-            )
-            order_id_lookup_values = sorted(
-                {
-                    candidate
-                    for order_id in order_ids
-                    for candidate in _shopify_id_candidates("Order", order_id)
-                    if candidate
-                }
-            )
-            order_name_lookup_values = sorted(set(order_names))
-            overlay_started = time.perf_counter()
-            edition_rows = []
-            if line_id_lookup_values or order_id_lookup_values or order_name_lookup_values:
-                cur.execute(
-                    """
-                    SELECT
-                        eo.id AS edition_order_id,
-                        eo.shopify_order_id,
-                        eo.shopify_order_name,
-                        eo.shopify_line_item_id,
-                        eo.shopify_product_id,
-                        eo.shopify_variant_id,
-                        eo.shopify_handle,
-                        eo.product_handle,
-                        eo.product_title,
-                        eo.variant_title,
-                        eo.sku,
-                        eo.customer_name,
-                        eo.customer_email,
-                        eo.edition_number,
-                        eo.edition_total,
-                        eo.allocation_index,
-                        eo.assigned_at,
-                        eo.certificate_status,
-                        eo.status AS edition_order_status,
-                        eo.source AS assignment_source,
-                        eo.manual_override,
-                        c.certificate_id,
-                        c.local_file_path,
-                        COALESCE(NULLIF(c.shopify_file_url, ''), NULLIF(c.certificate_file_url, '')) AS shopify_file_url,
-                        c.certificate_pdf_url,
-                        c.certificate_print_jpg_url,
-                        c.certificate_preview_image_url,
-                        c.shopify_pdf_file_id,
-                        c.shopify_print_jpg_file_id,
-                        c.shopify_preview_file_id,
-                        c.asset_sync_status,
-                        c.asset_sync_error,
-                        c.generated_at,
-                        c.certificate_r2_bucket,
-                        c.certificate_r2_key,
-                        c.certificate_preview_r2_bucket,
-                        c.certificate_preview_r2_key
-                    FROM edition_orders eo
-                    LEFT JOIN certificates c
-                      ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
-                    WHERE eo.shopify_line_item_id = ANY(%s)
-                       OR eo.shopify_order_id = ANY(%s)
-                       OR UPPER(TRIM(COALESCE(eo.shopify_order_name, ''))) = ANY(%s)
-                    ORDER BY eo.shopify_line_item_id ASC,
-                             eo.allocation_index ASC NULLS LAST,
-                             eo.edition_number ASC NULLS LAST
-                    """,
-                    (line_id_lookup_values, order_id_lookup_values, order_name_lookup_values),
-                )
-                edition_rows = cur.fetchall()
-            print(
-                f"PERF Orders Supabase edition overlay load {(time.perf_counter() - overlay_started):.3f}s rows={len(edition_rows)}",
-                flush=True,
-            )
+        edition_rows, overlay_diagnostic = _run_read_operation(
+            "orders.search.allocations" if raw_search else "orders.latest_50.allocations",
+            load_edition_rows,
+        )
 
     merge_started = time.perf_counter()
     assignments_by_line = {}
@@ -13765,6 +13910,19 @@ def list_hybrid_order_rows(limit=250):
         f"PERF Orders hybrid read total {(time.perf_counter() - total_started):.3f}s rows={len(merged_rows)}",
         flush=True,
     )
+    aggregate_diagnostic = {
+        "operation": "orders.search" if raw_search else "orders.latest_50",
+        "category": "stale_connection_recovered"
+        if base_diagnostic.get("recovered") or overlay_diagnostic.get("recovered")
+        else "ok",
+        "exception_class": base_diagnostic.get("exception_class") or overlay_diagnostic.get("exception_class") or "",
+        "sqlstate": base_diagnostic.get("sqlstate") or overlay_diagnostic.get("sqlstate") or "",
+        "attempts": int(base_diagnostic.get("attempts") or 0) + int(overlay_diagnostic.get("attempts") or 0),
+        "query_count": 1 + int(bool(line_id_lookup_values or order_id_lookup_values or order_name_lookup_values)),
+        "recovered": bool(base_diagnostic.get("recovered") or overlay_diagnostic.get("recovered")),
+        "duration_ms": int((time.perf_counter() - total_started) * 1000),
+    }
+    _LAST_DATABASE_READ_DIAGNOSTIC.set(aggregate_diagnostic)
     return merged_rows
 
 

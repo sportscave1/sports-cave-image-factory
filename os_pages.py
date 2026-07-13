@@ -4022,11 +4022,8 @@ def prodigi_find_order_rows_from_cache(search_text):
     if supabase_backend.is_configured():
         try:
             order_allocator = importlib.import_module("order_allocator")
-            raw_rows = supabase_backend.list_orders(search=query, sort="Date newest", status_filter="All", limit=50)
-            base_order_rows = order_allocator._snapshot_rows_from_supabase_order_rows(raw_rows)
-            edition_rows = supabase_backend.list_edition_orders(search=query, limit=200)
-            allocation_rows = _prodigi_order_rows_from_edition_rows(edition_rows, base_order_rows)
-            order_rows = _prodigi_merge_allocation_lookup_rows(base_order_rows, allocation_rows)
+            raw_rows = supabase_backend.list_hybrid_order_rows(search=query, limit=50)
+            order_rows = order_allocator._snapshot_rows_from_supabase_order_rows(raw_rows)
             existing_rows = prodigi_load_dispatch_rows("Search", search_text=query, limit=100)
             matches = prodigi_find_order_rows(order_rows, query, existing_rows)
             _prodigi_log_timing("order lookup", started, f"source=supabase rows={len(matches)}")

@@ -1679,28 +1679,29 @@ def load_supabase_orders_snapshot(limit=1000, *, include_summary=True):
     }
 
 
-def load_hybrid_orders_snapshot(limit=1000):
+def load_hybrid_orders_snapshot(limit=50, search=""):
     backend = _configured_supabase_backend()
     if not backend:
         return None
     started = time.perf_counter()
-    raw_rows = backend.list_hybrid_order_rows(limit=max(int(limit or 1000), 1))
+    raw_rows = backend.list_hybrid_order_rows(
+        limit=max(int(limit or 50), 1),
+        search=str(search or "").strip(),
+    )
     list_elapsed = time.perf_counter() - started
-    sync_started = time.perf_counter()
-    if hasattr(backend, "get_sync_state_read_only"):
-        sync_state = backend.get_sync_state_read_only()
-    else:
-        sync_state = backend.get_sync_state()
-    print(f"PERF Orders sync state read {time.perf_counter() - sync_started:.3f}s", flush=True)
     convert_started = time.perf_counter()
     rows = _snapshot_rows_from_supabase_order_rows(raw_rows)
     print(f"PERF Orders row conversion {time.perf_counter() - convert_started:.3f}s rows={len(rows)}", flush=True)
-    last_synced = (
-        sync_state.get("last_successful_order_fetch_at")
-        or sync_state.get("last_successful_order_sync_at")
-        or ""
+    last_synced = max(
+        (_safe_iso(row.get("synced_at")) for row in raw_rows if row.get("synced_at")),
+        default="",
     )
     order_count = len({str(row.get("shopify_order_id") or "") for row in raw_rows if row.get("shopify_order_id")})
+    read_diagnostic = (
+        backend.get_last_database_read_diagnostic()
+        if hasattr(backend, "get_last_database_read_diagnostic")
+        else {}
+    )
     return {
         "version": SNAPSHOT_VERSION,
         "saved_at": now_iso(),
@@ -1710,6 +1711,8 @@ def load_hybrid_orders_snapshot(limit=1000):
         "order_count": order_count,
         "row_count": len(rows),
         "rows": rows,
+        "search": str(search or "").strip(),
+        "database_read": read_diagnostic,
         "timing": {
             "base_overlay_seconds": round(list_elapsed, 3),
         },
