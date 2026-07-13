@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 
 import streamlit as st
 
@@ -32,9 +33,15 @@ EDITOR_VERSION_KEY = "edition_ops_editor_version"
 EDITOR_KEY = "edition_ops_editor_v3"
 SNAPSHOT_LOADED_KEY = "edition_ops_snapshot_loaded"
 LOADED_AT_KEY = "edition_ops_loaded_at"
+LOAD_ERROR_KEY = "edition_ops_load_error"
+LOAD_DIAGNOSTIC_KEY = "edition_ops_load_diagnostic"
+EDITOR_PAGE_SELECTION_KEY = "edition_ops_editor_page_selection"
+EDITOR_RENDERED_PAGE_KEY = "edition_ops_editor_rendered_page"
 ORDERS_CACHE_VERSION_KEY = "orders-ledger-cache-version"
 EDITION_OPS_CACHE_VERSION_KEY = "edition-ops-ledger-cache-version"
 EDITION_OPS_CACHE_TTL_SECONDS = max(int(os.getenv("SUPABASE_EDITION_OPS_CACHE_TTL_SECONDS", "180")), 30)
+EDITION_OPS_PRODUCT_LIMIT = max(min(int(os.getenv("SUPABASE_EDITION_OPS_PRODUCT_LIMIT", "500")), 1000), 1)
+EDITION_OPS_EDITOR_PAGE_SIZE = max(min(int(os.getenv("EDITION_OPS_EDITOR_PAGE_SIZE", "50")), 100), 10)
 
 EDITABLE_FIELDS = (
     "edition_enabled",
@@ -413,24 +420,30 @@ def _invalidate_edition_ops_cache(*, bump_orders=False):
 
 @st.cache_data(ttl=EDITION_OPS_CACHE_TTL_SECONDS, show_spinner=False)
 def _cached_supabase_products_snapshot(cache_version):
+    started = time.perf_counter()
     backend = _configured_supabase_backend()
     if not backend:
         return None
     if hasattr(backend, "list_edition_products_read_only"):
-        products = backend.list_edition_products_read_only(search="", limit=5000)
+        products = backend.list_edition_products_read_only(
+            search="",
+            limit=EDITION_OPS_PRODUCT_LIMIT,
+        )
     else:
-        products = backend.list_edition_products(search="", limit=5000)
+        products = backend.list_edition_products(search="", limit=EDITION_OPS_PRODUCT_LIMIT)
     rows = [_row_from_supabase_product(product) for product in products or []]
-    try:
-        if hasattr(backend, "get_sync_state_read_only"):
-            sync_state = backend.get_sync_state_read_only()
-        else:
-            sync_state = backend.get_sync_state()
-    except Exception:
-        sync_state = {}
-    last_synced = sync_state.get("last_successful_product_sync_at") or max(
+    last_synced = max(
         (str(row.get("last_synced_at") or "") for row in rows),
         default="",
+    )
+    diagnostic = {}
+    if hasattr(backend, "get_last_database_read_diagnostic"):
+        diagnostic = backend.get_last_database_read_diagnostic()
+    print(
+        "PERF Edition Ops snapshot "
+        f"duration_ms={int((time.perf_counter() - started) * 1000)} "
+        f"rows={len(rows)} queries={int(diagnostic.get('query_count') or 1)}",
+        flush=True,
     )
     return {
         "version": SNAPSHOT_VERSION,
@@ -439,7 +452,10 @@ def _cached_supabase_products_snapshot(cache_version):
         "last_refreshed_from_shopify": last_synced,
         "saved_at": last_synced,
         "source": "supabase",
+        "cached": False,
         "mirror_status": "",
+        "database_read": diagnostic,
+        "limit": EDITION_OPS_PRODUCT_LIMIT,
     }
 
 
@@ -541,6 +557,9 @@ def _ensure_state():
     st.session_state.setdefault(SHOPIFY_MIRROR_RESULT_KEY, None)
     st.session_state.setdefault(EDITOR_VERSION_KEY, 0)
     st.session_state.setdefault(LOADED_AT_KEY, "")
+    st.session_state.setdefault(LOAD_ERROR_KEY, "")
+    st.session_state.setdefault(LOAD_DIAGNOSTIC_KEY, {})
+    st.session_state.setdefault(EDITOR_RENDERED_PAGE_KEY, -1)
 
 
 def _bump_editor_version():
@@ -554,14 +573,46 @@ def _clear_editor_state():
         pass
 
 
-def _load_snapshot():
-    try:
-        supabase_snapshot = _load_supabase_snapshot()
-    except Exception as error:
-        print(f"WARN Edition Ops Supabase snapshot fallback: {error}", flush=True)
-        supabase_snapshot = None
-    if supabase_snapshot is not None:
-        return supabase_snapshot
+def _safe_edition_ops_load_failure(error=None, *, diagnostic=None):
+    details = dict(diagnostic or getattr(error, "diagnostic", {}) or {})
+    category = str(details.get("category") or "database_unavailable")
+    message = {
+        "request_timeout": "Edition Ops could not refresh because the database read timed out.",
+        "stale_connection": "Edition Ops could not refresh because the database connection closed.",
+        "database_unavailable": "Edition Ops could not refresh because Supabase is temporarily unavailable.",
+        "sql_query_error": "Edition Ops could not refresh because its database query failed.",
+    }.get(category, "Edition Ops could not refresh from Supabase.")
+    details.update(
+        {
+            "category": category,
+            "exception_class": details.get("exception_class") or (error.__class__.__name__ if error else ""),
+            "operation": details.get("operation") or "edition_ops.products.latest",
+            "message": message,
+        }
+    )
+    return details
+
+
+def _session_cached_snapshot():
+    meta = dict(st.session_state.get(META_KEY) or {})
+    rows = st.session_state.get(ROWS_KEY)
+    if not isinstance(rows, list) or (not rows and not meta.get("source")):
+        return None
+    originals = st.session_state.get(ORIGINAL_ROWS_KEY)
+    originals = originals if isinstance(originals, list) else rows
+    return {
+        "version": SNAPSHOT_VERSION,
+        "rows": [_normalise_row(row) for row in rows],
+        "original_rows": [_normalise_row(row) for row in originals],
+        "last_refreshed_from_shopify": meta.get("last_refreshed_from_shopify") or "",
+        "saved_at": meta.get("saved_at") or "",
+        "source": "session_cache",
+        "cached": True,
+        "mirror_status": meta.get("mirror_status") or "",
+    }
+
+
+def _local_cached_snapshot():
     if not SNAPSHOT_PATH.exists():
         return None
     try:
@@ -570,17 +621,68 @@ def _load_snapshot():
         return None
     rows = [_normalise_row(row) for row in payload.get("rows") or []]
     original_rows = payload.get("original_rows")
-    if isinstance(original_rows, list):
-        originals = [_normalise_row(row) for row in original_rows]
-    else:
-        originals = deepcopy(rows)
+    originals = (
+        [_normalise_row(row) for row in original_rows]
+        if isinstance(original_rows, list)
+        else deepcopy(rows)
+    )
     return {
         "version": payload.get("version") or SNAPSHOT_VERSION,
         "rows": rows,
         "original_rows": originals,
         "last_refreshed_from_shopify": payload.get("last_refreshed_from_shopify") or "",
         "saved_at": payload.get("saved_at") or "",
+        "source": "local_cache",
+        "cached": True,
+        "mirror_status": payload.get("mirror_status") or "",
     }
+
+
+def _load_snapshot():
+    started = time.perf_counter()
+    failure = None
+    try:
+        supabase_snapshot = _load_supabase_snapshot()
+    except Exception as error:
+        backend = _configured_supabase_backend()
+        diagnostic = {}
+        if backend and hasattr(backend, "get_last_database_read_diagnostic"):
+            diagnostic = backend.get_last_database_read_diagnostic()
+        failure = _safe_edition_ops_load_failure(error, diagnostic=diagnostic)
+        supabase_snapshot = None
+    if supabase_snapshot is not None:
+        print(
+            "PERF Edition Ops load complete "
+            f"duration_ms={int((time.perf_counter() - started) * 1000)} "
+            f"rows={len(supabase_snapshot.get('rows') or [])} source=supabase",
+            flush=True,
+        )
+        return supabase_snapshot
+    if failure is None:
+        failure = _safe_edition_ops_load_failure()
+    cached_snapshot = _session_cached_snapshot() or _local_cached_snapshot()
+    if cached_snapshot is None:
+        cached_snapshot = {
+            "version": SNAPSHOT_VERSION,
+            "rows": [],
+            "original_rows": [],
+            "last_refreshed_from_shopify": "",
+            "saved_at": "",
+            "source": "supabase_error",
+            "cached": False,
+            "mirror_status": "",
+        }
+    cached_snapshot["load_error"] = failure.get("message") or "Edition Ops could not refresh from Supabase."
+    cached_snapshot["database_read"] = failure
+    print(
+        "WARN Edition Ops load failed "
+        f"operation={failure.get('operation')} category={failure.get('category')} "
+        f"exception_class={failure.get('exception_class') or 'unknown'} "
+        f"duration_ms={int((time.perf_counter() - started) * 1000)} "
+        f"cached={str(bool(cached_snapshot.get('cached'))).lower()}",
+        flush=True,
+    )
+    return cached_snapshot
 
 
 def _write_snapshot(rows, originals=None, meta=None):
@@ -616,7 +718,12 @@ def _hydrate_from_snapshot_once():
             "last_refreshed_from_shopify": snapshot.get("last_refreshed_from_shopify") or "",
             "saved_at": snapshot.get("saved_at") or "",
             "mirror_status": snapshot.get("mirror_status") or "",
+            "source": snapshot.get("source") or "supabase",
+            "cached": bool(snapshot.get("cached")),
+            "limit": snapshot.get("limit") or EDITION_OPS_PRODUCT_LIMIT,
         }
+        st.session_state[LOAD_ERROR_KEY] = snapshot.get("load_error") or ""
+        st.session_state[LOAD_DIAGNOSTIC_KEY] = dict(snapshot.get("database_read") or {})
     st.session_state[SNAPSHOT_LOADED_KEY] = True
 
 
@@ -1070,7 +1177,12 @@ def _reload_products_from_supabase():
         "last_refreshed_from_shopify": snapshot.get("last_refreshed_from_shopify") or "",
         "saved_at": snapshot.get("saved_at") or _now_iso(),
         "mirror_status": snapshot.get("mirror_status") or "",
+        "source": "supabase",
+        "cached": False,
+        "limit": snapshot.get("limit") or EDITION_OPS_PRODUCT_LIMIT,
     }
+    st.session_state[LOAD_ERROR_KEY] = ""
+    st.session_state[LOAD_DIAGNOSTIC_KEY] = dict(snapshot.get("database_read") or {})
     _write_snapshot(rows, originals, meta=st.session_state[META_KEY])
     st.session_state[NOTICE_KEY] = f"Reloaded {len(rows)} product row(s) from Supabase."
     _clear_editor_state()
@@ -1206,6 +1318,10 @@ def _apply_combined_save_result(rows, originals, rows_to_save, supabase_errors, 
     st.session_state[EDITOR_ROWS_KEY] = deepcopy(updated_rows)
     st.session_state[ERRORS_KEY] = errors
     _write_snapshot(updated_rows, updated_originals, meta={"mirror_status": "failed" if errors else "updated"})
+    if not supabase_errors:
+        _clear_editor_state()
+        _invalidate_edition_ops_cache(bump_orders=False)
+        _bump_editor_version()
 
 
 def _mark_supabase_saved_without_shopify(rows, originals, row_ids):
@@ -1257,11 +1373,28 @@ def _manual_lower_warning(row, original):
     return "Warning: this product has assigned editions above this next number. Manual correction saved."
 
 
-def _save_changed_rows(edited_rows=None):
+def _save_changed_rows(edited_rows=None, source_rows=None):
     current_rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
     originals = [deepcopy(_normalise_row(row)) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
     if edited_rows is not None:
-        current_rows = _submitted_editor_rows(edited_rows, current_rows)
+        submitted_source_rows = (
+            [_normalise_row(row) for row in source_rows]
+            if source_rows is not None
+            else current_rows
+        )
+        submitted_rows = _submitted_editor_rows(edited_rows, submitted_source_rows)
+        if source_rows is None:
+            current_rows = submitted_rows
+        else:
+            submitted_by_key = {
+                _stable_row_key(row): _normalise_row(row)
+                for row in submitted_rows
+                if _stable_row_key(row)
+            }
+            current_rows = [
+                submitted_by_key.get(_stable_row_key(row), row)
+                for row in current_rows
+            ]
     rows = _mark_current_changes(_prepare_rows_for_save(current_rows, originals), originals)
     st.session_state[ROWS_KEY] = rows
     st.session_state[EDITOR_ROWS_KEY] = deepcopy(rows)
@@ -1709,6 +1842,39 @@ def _apply_csv_import(uploaded_file):
     return True
 
 
+def _editor_payload(row):
+    normalised = _normalise_row(row)
+    keys = ("edition_product_id", "shopify_product_gid", *VISIBLE_COLUMNS)
+    return {key: normalised.get(key) for key in keys}
+
+
+def _editor_page_rows(rows):
+    total_rows = len(rows)
+    page_count = max((total_rows + EDITION_OPS_EDITOR_PAGE_SIZE - 1) // EDITION_OPS_EDITOR_PAGE_SIZE, 1)
+    page_index = 0
+    if page_count > 1 and hasattr(st, "selectbox"):
+        labels = []
+        for index in range(page_count):
+            start = index * EDITION_OPS_EDITOR_PAGE_SIZE + 1
+            end = min((index + 1) * EDITION_OPS_EDITOR_PAGE_SIZE, total_rows)
+            labels.append(f"Products {start}-{end} of {total_rows}")
+        selected = st.selectbox(
+            "Product rows",
+            labels,
+            key=EDITOR_PAGE_SELECTION_KEY,
+            label_visibility="collapsed",
+        )
+        if selected in labels:
+            page_index = labels.index(selected)
+    previous_page = int(st.session_state.get(EDITOR_RENDERED_PAGE_KEY, -1))
+    if previous_page != page_index:
+        st.session_state.pop(EDITOR_KEY, None)
+        st.session_state[EDITOR_RENDERED_PAGE_KEY] = page_index
+    start = page_index * EDITION_OPS_EDITOR_PAGE_SIZE
+    end = min(start + EDITION_OPS_EDITOR_PAGE_SIZE, total_rows)
+    return rows[start:end], page_index, page_count
+
+
 def _column_config():
     return {
         "product_title": st.column_config.TextColumn("Product title"),
@@ -1867,7 +2033,21 @@ def _render_advanced_controls(backend, rows):
     if not hasattr(st, "expander"):
         return
     with st.expander("Advanced", expanded=False):
-        _render_product_sync_diagnostics(backend, rows)
+        if st.button(
+            "Load Sync Diagnostics",
+            key="edition-ops-load-sync-diagnostics",
+            use_container_width=True,
+        ):
+            diagnostic_started = time.perf_counter()
+            print("PERF Edition Ops diagnostics start", flush=True)
+            _render_product_sync_diagnostics(backend, rows)
+            print(
+                "PERF Edition Ops diagnostics done "
+                f"duration_ms={int((time.perf_counter() - diagnostic_started) * 1000)}",
+                flush=True,
+            )
+        else:
+            st.caption("Sync diagnostics load only when requested.")
         action_cols = st.columns([1, 1, 1, 1])
         if action_cols[0].button("Sync New Products", use_container_width=True, disabled=not backend):
             sync_completed = False
@@ -1896,9 +2076,18 @@ def _render_advanced_controls(backend, rows):
             use_container_width=True,
             disabled=not backend,
         ):
-            with st.spinner("Reloading products from Supabase..."):
-                _reload_products_from_supabase()
-            st.rerun()
+            try:
+                with st.spinner("Reloading products from Supabase..."):
+                    _reload_products_from_supabase()
+            except Exception as error:
+                failure = _safe_edition_ops_load_failure(error)
+                st.session_state[LOAD_ERROR_KEY] = failure["message"]
+                st.session_state[LOAD_DIAGNOSTIC_KEY] = failure
+                st.session_state[NOTICE_KEY] = failure["message"]
+                st.session_state[NOTICE_LEVEL_KEY] = "error"
+                st.error(failure["message"])
+            else:
+                st.rerun()
         action_cols[2].download_button(
             "Export CSV Backup",
             data=_export_csv(rows),
@@ -1924,20 +2113,44 @@ def _render_advanced_controls(backend, rows):
 
 
 def render_page():
-    started = datetime.now(timezone.utc)
+    started = time.perf_counter()
     _ensure_state()
+    st.title("Edition Ops")
+    st.caption("Manage edition limits, next numbers, and active limited-edition products.")
+    print("PERF Edition Ops render start", flush=True)
+
+    load_started = time.perf_counter()
     _hydrate_from_snapshot_once()
+    print(
+        "PERF Edition Ops hydrate "
+        f"duration_ms={int((time.perf_counter() - load_started) * 1000)}",
+        flush=True,
+    )
     _render_import_popover_styles()
     backend = _configured_supabase_backend()
     rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
     originals = [_normalise_row(row) for row in st.session_state.get(ORIGINAL_ROWS_KEY, [])]
     rows_to_save = _rows_to_save(rows, originals)
     meta = st.session_state.get(META_KEY) or {}
+    load_error = str(st.session_state.get(LOAD_ERROR_KEY) or "")
+    load_diagnostic = dict(st.session_state.get(LOAD_DIAGNOSTIC_KEY) or {})
 
-    st.title("Edition Ops")
-    st.caption("Manage edition limits, next numbers, and active limited-edition products.")
-    st.caption("Source: Supabase ledger")
+    if meta.get("cached"):
+        st.caption("Source: cached Supabase snapshot")
+    else:
+        st.caption("Source: Supabase ledger")
     st.caption(f"Last refreshed: {_format_time(meta.get('last_refreshed_from_shopify'))}")
+    if load_error:
+        if meta.get("cached"):
+            st.warning(f"{load_error} Showing the last successfully loaded cached display.")
+        else:
+            st.error(load_error)
+        if hasattr(st, "expander"):
+            with st.expander("Developer diagnostics", expanded=False):
+                st.caption(f"Operation: {load_diagnostic.get('operation') or 'edition_ops.products.latest'}")
+                st.caption(f"Category: {load_diagnostic.get('category') or 'database_unavailable'}")
+                st.caption(f"Exception: {load_diagnostic.get('exception_class') or 'Unavailable'}")
+                st.caption(f"Duration: {int(load_diagnostic.get('duration_ms') or 0)} ms")
 
     _render_notice()
 
@@ -1959,6 +2172,19 @@ def render_page():
         retry_rows = _pending_shopify_sync_rows(current_rows)
         rows_to_save = _rows_to_save(current_rows, originals)
         _slot_caption(summary_slot, _edition_ops_summary(current_rows, changed_rows, retry_rows))
+        page_rows, page_index, page_count = _editor_page_rows(current_rows)
+        editor_rows = [_editor_payload(row) for row in page_rows]
+        if page_count > 1:
+            st.caption(
+                f"Editing page {page_index + 1} of {page_count}. "
+                f"Each page is limited to {EDITION_OPS_EDITOR_PAGE_SIZE} products for stability."
+            )
+        editor_started = time.perf_counter()
+        print(
+            "PERF Edition Ops editor start "
+            f"rows={len(editor_rows)} total_rows={len(current_rows)} page={page_index + 1}",
+            flush=True,
+        )
         with st.form("edition-ops-editor-form", clear_on_submit=False):
             save_clicked = st.form_submit_button(
                 "Save Changes",
@@ -1968,9 +2194,9 @@ def render_page():
                 key="edition-ops-save-changes",
             )
             edited = st.data_editor(
-                current_rows,
+                editor_rows,
                 hide_index=True,
-                use_container_width=True,
+                width="stretch",
                 num_rows="fixed",
                 key=EDITOR_KEY,
                 column_order=VISIBLE_COLUMNS,
@@ -1986,9 +2212,15 @@ def render_page():
                     "online_store_url",
                 ],
             )
+        print(
+            "PERF Edition Ops editor done "
+            f"duration_ms={int((time.perf_counter() - editor_started) * 1000)} "
+            f"rows={len(editor_rows)}",
+            flush=True,
+        )
         if save_clicked:
             with st.spinner("Saving..."):
-                _save_changed_rows(edited)
+                _save_changed_rows(edited, source_rows=page_rows)
             _render_notice()
             current_rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
             changed_rows = _changed_rows(current_rows, originals)
@@ -2012,7 +2244,14 @@ def render_page():
                 _render_advanced_controls(backend, [])
         else:
             _render_advanced_controls(backend, [])
-        st.info("No products loaded yet. Products are added by Shopify webhooks or Advanced sync.")
+        if not load_error:
+            st.info("No products loaded yet. Products are added by Shopify webhooks or Advanced sync.")
 
-    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
-    print(f"PERF Edition Ops total={elapsed:.3f}s rows={len(st.session_state.get(ROWS_KEY, []))}", flush=True)
+    elapsed = time.perf_counter() - started
+    print(
+        "PERF Edition Ops total="
+        f"{elapsed:.3f}s rows={len(st.session_state.get(ROWS_KEY, []))} "
+        f"queries={int(load_diagnostic.get('query_count') or (1 if rows and not meta.get('cached') else 0))} "
+        f"cached={str(bool(meta.get('cached'))).lower()}",
+        flush=True,
+    )
