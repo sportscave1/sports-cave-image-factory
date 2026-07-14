@@ -48,6 +48,8 @@ LAST_PRODUCT_WEBHOOK_HANDLE_KEY = "last_product_webhook_handle"
 LAST_PRODUCT_WEBHOOK_RESULT_KEY = "last_product_webhook_result"
 LAST_PRODUCT_WEBHOOK_ERROR_KEY = "last_product_webhook_error"
 PRODUCT_INCREMENTAL_SYNC_STATE_KEY = "shopify_products_incremental_sync"
+NEW_PRODUCT_DISCOVERY_SYNC_STATE_KEY = "shopify_new_product_discovery"
+NEW_PRODUCT_DISCOVERY_PAGE_SIZE = 50
 SYNC_LOOKBACK_BUFFER_KEY = "sync_lookback_buffer_minutes"
 DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES = 10
 DEFAULT_PRODUCT_SYNC_LOOKBACK_HOURS = 48
@@ -3244,8 +3246,476 @@ def upsert_shopify_products_to_edition_products(
     return summary
 
 
-def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None, *, lookback_hours=DEFAULT_PRODUCT_SYNC_LOOKBACK_HOURS):
-    """Incrementally onboard Shopify active/draft products into Edition Ops without touching orders."""
+def _read_new_product_discovery_state(cur):
+    cur.execute(
+        """
+        SELECT value, last_success_at, last_attempt_at, status, error_message
+        FROM app_sync_state
+        WHERE key=%s
+        """,
+        (NEW_PRODUCT_DISCOVERY_SYNC_STATE_KEY,),
+    )
+    row = cur.fetchone() or {}
+    value = row.get("value") or {}
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            value = {}
+    value = value if isinstance(value, dict) else {}
+    return {
+        "last_successful_new_product_sync_at": (
+            value.get("last_successful_new_product_sync_at")
+            or row.get("last_success_at")
+            or ""
+        ),
+        "latest_shopify_product_created_at": value.get("latest_shopify_product_created_at") or "",
+        "latest_shopify_product_id": value.get("latest_shopify_product_id") or "",
+        "last_attempt_at": row.get("last_attempt_at") or "",
+        "status": row.get("status") or "",
+        "error_message": row.get("error_message") or "",
+    }
+
+
+def _write_new_product_discovery_state_with_cursor(
+    cur,
+    previous_state,
+    *,
+    status,
+    summary=None,
+    attempted_at=None,
+    successful_at=None,
+    latest_product_created_at=None,
+    latest_product_id=None,
+    error_message="",
+):
+    previous_state = dict(previous_state or {})
+    payload = {
+        "last_successful_new_product_sync_at": previous_state.get("last_successful_new_product_sync_at") or "",
+        "latest_shopify_product_created_at": previous_state.get("latest_shopify_product_created_at") or "",
+        "latest_shopify_product_id": previous_state.get("latest_shopify_product_id") or "",
+        **dict(summary or {}),
+    }
+    if successful_at:
+        payload["last_successful_new_product_sync_at"] = _datetime_to_setting(successful_at)
+    if latest_product_created_at is not None:
+        payload["latest_shopify_product_created_at"] = str(latest_product_created_at or "")
+    if latest_product_id is not None:
+        payload["latest_shopify_product_id"] = str(latest_product_id or "")
+    cur.execute(
+        """
+        INSERT INTO app_sync_state(key, value, last_success_at, last_attempt_at, status, error_message, updated_at)
+        VALUES (%s, %s::jsonb, %s, %s, %s, %s, now())
+        ON CONFLICT (key) DO UPDATE SET
+            value=EXCLUDED.value,
+            last_success_at=COALESCE(EXCLUDED.last_success_at, app_sync_state.last_success_at),
+            last_attempt_at=COALESCE(EXCLUDED.last_attempt_at, app_sync_state.last_attempt_at),
+            status=EXCLUDED.status,
+            error_message=EXCLUDED.error_message,
+            updated_at=now()
+        """,
+        (
+            NEW_PRODUCT_DISCOVERY_SYNC_STATE_KEY,
+            json_dumps(payload),
+            successful_at,
+            attempted_at,
+            status,
+            str(error_message or "")[:1000],
+        ),
+    )
+
+
+def _start_new_product_discovery(attempted_at):
+    """Read the minimal Supabase identity set once and mark the pull as running."""
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT shopify_product_id, shopify_product_gid, shopify_handle
+                FROM edition_products
+                """
+            )
+            existing_rows = cur.fetchall()
+            state = _read_new_product_discovery_state(cur)
+            _write_new_product_discovery_state_with_cursor(
+                cur,
+                state,
+                status="running",
+                summary={"started_at": _datetime_to_setting(attempted_at)},
+                attempted_at=attempted_at,
+            )
+        conn.commit()
+    return existing_rows, state
+
+
+def _classify_new_shopify_products(products, existing_rows):
+    existing_ids = {
+        candidate
+        for row in (existing_rows or [])
+        for value in (row.get("shopify_product_id"), row.get("shopify_product_gid"))
+        for candidate in _shopify_id_candidates("Product", value)
+    }
+    legacy_handles = {
+        str(row.get("shopify_handle") or "").strip().casefold()
+        for row in (existing_rows or [])
+        if str(row.get("shopify_handle") or "").strip()
+        and not any(
+            _shopify_id_candidates("Product", value)
+            for value in (row.get("shopify_product_id"), row.get("shopify_product_gid"))
+        )
+    }
+    missing = []
+    skipped = 0
+    errors = []
+    seen_ids = set()
+    for product in products or []:
+        if not _active_or_draft_product(product):
+            continue
+        candidates = set(_shopify_product_identity_candidates(product))
+        canonical_id = canonical_shopify_id(
+            product.get("shopify_product_id")
+            or product.get("shopify_product_gid")
+            or product.get("id")
+        )
+        handle = str(product.get("handle") or "").strip()
+        if not canonical_id:
+            errors.append(f"{handle or product.get('title') or 'Shopify product'}: immutable Shopify product ID is missing.")
+            continue
+        if canonical_id in seen_ids:
+            continue
+        seen_ids.add(canonical_id)
+        if candidates & existing_ids:
+            skipped += 1
+            continue
+        if handle and handle.casefold() in legacy_handles:
+            skipped += 1
+            continue
+        missing.append(product)
+    return {
+        "missing_products": missing,
+        "existing_products_skipped": skipped,
+        "errors": errors,
+    }
+
+
+def _insert_shopify_product_display_if_missing(cur, product):
+    product_id = product.get("shopify_product_id") or product.get("shopify_product_gid") or product.get("id") or ""
+    if not product_id:
+        return False
+    image_url = _product_sync_image_url(product)
+    raw_json = json_dumps(product)
+    cur.execute(
+        """
+        INSERT INTO shopify_products(
+            shopify_product_id, legacy_resource_id, shopify_product_gid, title, handle, status,
+            online_store_url, admin_url, image_url, featured_image_url,
+            raw_json, raw, synced_at, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, now(), now())
+        ON CONFLICT DO NOTHING
+        RETURNING shopify_product_id
+        """,
+        (
+            product_id,
+            product.get("legacy_resource_id"),
+            product_id,
+            product.get("title"),
+            product.get("handle"),
+            product.get("status"),
+            product.get("online_store_url"),
+            product.get("admin_url"),
+            image_url,
+            image_url,
+            raw_json,
+            raw_json,
+        ),
+    )
+    return bool(cur.fetchone())
+
+
+def _insert_edition_product_if_missing(cur, product):
+    fields = _product_sync_safe_fields(product)
+    product_id = fields.get("shopify_product_id") or fields.get("shopify_product_gid") or ""
+    handle = fields.get("shopify_handle") or ""
+    if not product_id or not handle:
+        return None
+    cur.execute(
+        f"""
+        INSERT INTO edition_products(
+            shopify_product_id, shopify_product_gid, shopify_handle, product_title,
+            edition_total, next_edition_number, last_assigned_edition, sold_count, remaining_count,
+            edition_status, edition_name, active, is_active, sold_out, is_sold_out,
+            featured_image_url, raw, synced_at, updated_at
+        )
+        VALUES (%s, %s, %s, %s, 100, 1, 0, 0, 100, 'limited_release', %s, TRUE, TRUE, FALSE, FALSE, %s, %s::jsonb, now(), now())
+        ON CONFLICT DO NOTHING
+        RETURNING id, shopify_product_id, shopify_handle, product_title,
+                  edition_total, next_edition_number, edition_name
+        """,
+        (
+            product_id,
+            product_id,
+            handle,
+            fields.get("product_title"),
+            DEFAULT_EDITION_NAME,
+            fields.get("featured_image_url"),
+            json_dumps(fields.get("raw") or {}),
+        ),
+    )
+    inserted = cur.fetchone()
+    if not inserted:
+        return None
+    cur.execute(
+        f"""
+        INSERT INTO edition_runs(
+            edition_product_id, shopify_product_id, shopify_handle, product_title,
+            edition_name, edition_total, next_edition_number, status, started_at, updated_at
+        )
+        VALUES (%s, %s, %s, %s, %s, 100, 1, '{ACTIVE_RUN_STATUS}', now(), now())
+        RETURNING id
+        """,
+        (
+            inserted.get("id"),
+            inserted.get("shopify_product_id"),
+            inserted.get("shopify_handle"),
+            inserted.get("product_title"),
+            inserted.get("edition_name") or DEFAULT_EDITION_NAME,
+        ),
+    )
+    run = cur.fetchone() or {}
+    if run.get("id"):
+        cur.execute(
+            """
+            UPDATE edition_products
+            SET active_edition_run_id=%s
+            WHERE id=%s
+            """,
+            (run.get("id"), inserted.get("id")),
+        )
+    return inserted
+
+
+def _insert_new_product_candidates(products):
+    inserted_handles = []
+    concurrent_skips = 0
+    if not products:
+        return {"inserted_handles": [], "new_products_inserted": 0, "concurrent_skips": 0}
+    with connect() as conn:
+        with conn.cursor() as cur:
+            for product in products:
+                _insert_shopify_product_display_if_missing(cur, product)
+                inserted = _insert_edition_product_if_missing(cur, product)
+                if inserted:
+                    inserted_handles.append(inserted.get("shopify_handle") or product.get("handle") or "")
+                else:
+                    # A webhook or another pull won the unique-ID/handle race. Never update it here.
+                    concurrent_skips += 1
+        conn.commit()
+    inserted_handles = [handle for handle in inserted_handles if handle]
+    return {
+        "inserted_handles": inserted_handles,
+        "new_products_inserted": len(inserted_handles),
+        "concurrent_skips": concurrent_skips,
+    }
+
+
+def _new_product_page_watermark(products):
+    candidates = []
+    for product in products or []:
+        created_at = _parse_datetime(product.get("created_at") or product.get("createdAt"))
+        product_id = str(
+            product.get("shopify_product_id")
+            or product.get("shopify_product_gid")
+            or product.get("id")
+            or ""
+        ).strip()
+        if created_at and product_id:
+            candidates.append((created_at, _numeric_sort_value(canonical_shopify_id(product_id)), product_id))
+    if not candidates:
+        return "", ""
+    created_at, _, product_id = max(candidates)
+    return _datetime_to_setting(created_at), product_id
+
+
+def _finish_new_product_discovery_state(
+    previous_state,
+    summary,
+    *,
+    attempted_at,
+    successful_at=None,
+    status,
+    error_message="",
+):
+    with connect() as conn:
+        with conn.cursor() as cur:
+            _write_new_product_discovery_state_with_cursor(
+                cur,
+                previous_state,
+                status=status,
+                summary=summary,
+                attempted_at=attempted_at,
+                successful_at=successful_at,
+                latest_product_created_at=(
+                    summary.get("latest_shopify_product_created_at")
+                    if summary.get("watermark_advanced")
+                    else None
+                ),
+                latest_product_id=(
+                    summary.get("latest_shopify_product_id")
+                    if summary.get("watermark_advanced")
+                    else None
+                ),
+                error_message=error_message,
+            )
+        conn.commit()
+
+
+def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None):
+    """Pull one newest-first Shopify page and insert only immutable IDs missing from Edition Ops."""
+    started = time.perf_counter()
+    attempted_at = utc_now_datetime()
+    config = dict(config or shopify_sync.get_config())
+    previous_state = {}
+    summary = {
+        "mode": "new_products_only",
+        "products_fetched": 0,
+        "products_checked": 0,
+        "new_products_inserted": 0,
+        "existing_products_updated": 0,
+        "existing_products_skipped": 0,
+        "shopify_metafields_pushed": 0,
+        "shopify_metafields_failed_pending": 0,
+        "errors": [],
+        "variant_sync_errors": [],
+        "shopify_discovery_requests": 1,
+        "maximum_products_fetched": NEW_PRODUCT_DISCOVERY_PAGE_SIZE,
+        "watermark_advanced": False,
+        "latest_shopify_product_created_at": "",
+        "latest_shopify_product_id": "",
+        "stop_condition": "one_bounded_newest_products_page",
+        "duration_seconds": 0.0,
+    }
+    try:
+        existing_rows, previous_state = _start_new_product_discovery(attempted_at)
+        created_after = previous_state.get("latest_shopify_product_created_at") or ""
+        page = shopify_sync.fetch_newest_products_for_edition_ops(
+            created_after=created_after,
+            page_size=NEW_PRODUCT_DISCOVERY_PAGE_SIZE,
+            config=config,
+        )
+        products = list(page.get("products") or [])[:NEW_PRODUCT_DISCOVERY_PAGE_SIZE]
+        summary["products_fetched"] = len(products)
+        summary["products_checked"] = len(products)
+        summary["shopify_query"] = page.get("query") or ""
+        if progress_callback:
+            progress_callback(len(products))
+
+        classification = _classify_new_shopify_products(products, existing_rows)
+        missing_products = classification.get("missing_products") or []
+        summary["existing_products_skipped"] = int(classification.get("existing_products_skipped") or 0)
+        discovery_errors = list(classification.get("errors") or [])
+        summary["errors"].extend(discovery_errors)
+
+        insert_result = _insert_new_product_candidates(missing_products)
+        inserted_handles = insert_result.get("inserted_handles") or []
+        summary["new_products_inserted"] = int(insert_result.get("new_products_inserted") or 0)
+        summary["existing_products_skipped"] += int(insert_result.get("concurrent_skips") or 0)
+
+        if inserted_handles:
+            try:
+                mirror_result = sync_product_edition_metafields_for_handles(
+                    inserted_handles,
+                    config=config,
+                    ensure_schema_first=False,
+                )
+                summary["shopify_metafields_pushed"] = int(mirror_result.get("synced") or 0)
+                failed = int(mirror_result.get("failed") or mirror_result.get("skipped") or 0)
+                if not failed:
+                    failed = max(len(inserted_handles) - summary["shopify_metafields_pushed"], 0)
+                summary["shopify_metafields_failed_pending"] = failed
+                summary["errors"].extend(mirror_result.get("errors") or [])
+                summary["product_metafield_mirror"] = mirror_result
+            except Exception as mirror_error:
+                summary["shopify_metafields_failed_pending"] = len(inserted_handles)
+                summary["errors"].append(str(mirror_error))
+                for handle in inserted_handles:
+                    try:
+                        _mark_product_metafields_sync(
+                            handle,
+                            {
+                                "shopify_handle": handle,
+                                "edition_name": DEFAULT_EDITION_NAME,
+                                "edition_total": 100,
+                                "next_edition_number": 1,
+                                "last_assigned_edition": 0,
+                                "sold_count": 0,
+                                "remaining_count": 100,
+                                "edition_status": "limited_release",
+                                "edition_display_text": format_edition_display_number(1, 100),
+                                "is_sold_out": False,
+                            },
+                            "Failed",
+                            str(mirror_error),
+                        )
+                    except Exception:
+                        pass
+
+        page_created_at, page_product_id = _new_product_page_watermark(products)
+        safe_to_advance = bool(page_created_at) and (
+            not page.get("has_next_page")
+            or not missing_products
+        ) and not discovery_errors
+        if safe_to_advance:
+            summary["watermark_advanced"] = True
+            summary["latest_shopify_product_created_at"] = page_created_at
+            summary["latest_shopify_product_id"] = page_product_id
+        else:
+            summary["latest_shopify_product_created_at"] = previous_state.get("latest_shopify_product_created_at") or ""
+            summary["latest_shopify_product_id"] = previous_state.get("latest_shopify_product_id") or ""
+            if page.get("has_next_page") and missing_products:
+                summary["stop_condition"] = "page_limit_reached_watermark_held_for_safety"
+
+        successful_at = utc_now_datetime()
+        summary["duration_seconds"] = round(time.perf_counter() - started, 3)
+        status = "complete_with_warnings" if summary["errors"] else "complete"
+        _finish_new_product_discovery_state(
+            previous_state,
+            summary,
+            attempted_at=attempted_at,
+            successful_at=successful_at,
+            status=status,
+        )
+        print(
+            "PERF Edition Ops pull new products "
+            f"duration={summary['duration_seconds']:.3f}s fetched={summary['products_fetched']} "
+            f"inserted={summary['new_products_inserted']} skipped={summary['existing_products_skipped']} "
+            f"failures={len(summary['errors'])}",
+            flush=True,
+        )
+        return summary
+    except Exception as error:
+        summary["duration_seconds"] = round(time.perf_counter() - started, 3)
+        summary["errors"] = list(summary.get("errors") or []) + [str(error)]
+        try:
+            _finish_new_product_discovery_state(
+                previous_state,
+                summary,
+                attempted_at=attempted_at,
+                status="failed",
+                error_message=str(error),
+            )
+        except Exception:
+            pass
+        print(
+            "WARN Edition Ops pull new products failed "
+            f"duration={summary['duration_seconds']:.3f}s exception_class={error.__class__.__name__}",
+            flush=True,
+        )
+        raise
+
+
+def reconcile_all_shopify_products_to_edition_ops(config=None, progress_callback=None):
+    """Explicit full-catalog reconciliation; never used by normal Edition Ops loading."""
     ensure_schema()
     config = dict(config or shopify_sync.get_config())
     config["max_products"] = max(int(config.get("max_products") or 0), 1000)
@@ -12880,11 +13350,16 @@ def get_product_sync_diagnostics(*, ensure_schema_first=True):
                 settings = {row.get("key"): row.get("value") for row in cur.fetchall()}
                 cur.execute(
                     """
-                    SELECT value, last_success_at, last_attempt_at, status, error_message, updated_at
+                    SELECT key, value, last_success_at, last_attempt_at, status, error_message, updated_at
                     FROM app_sync_state
-                    WHERE key=%s
+                    WHERE key = ANY(%s)
+                    ORDER BY CASE WHEN key=%s THEN 0 ELSE 1 END
+                    LIMIT 1
                     """,
-                    (PRODUCT_INCREMENTAL_SYNC_STATE_KEY,),
+                    (
+                        [NEW_PRODUCT_DISCOVERY_SYNC_STATE_KEY, PRODUCT_INCREMENTAL_SYNC_STATE_KEY],
+                        NEW_PRODUCT_DISCOVERY_SYNC_STATE_KEY,
+                    ),
                 )
                 sync_state = cur.fetchone() or {}
                 cur.execute(

@@ -2980,7 +2980,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             "configured": True,
         }
 
-    def test_manual_product_sync_uses_shared_edition_product_upsert(self):
+    def test_full_product_reconciliation_uses_shared_edition_product_upsert(self):
         class FakeCursor:
             rowcount = 1
 
@@ -3056,7 +3056,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             supabase_backend,
             "set_app_setting",
         ):
-            result = supabase_backend.sync_new_shopify_products_to_edition_ops(config=self.config)
+            result = supabase_backend.reconcile_all_shopify_products_to_edition_ops(config=self.config)
 
         shared_upsert.assert_called_once()
         self.assertEqual(shared_upsert.call_args.args[0], [product])
@@ -3676,7 +3676,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
     @patch.object(supabase_backend, "finish_sync_run")
     @patch.object(supabase_backend, "start_sync_run", return_value="run-1")
     @patch.object(supabase_backend, "ensure_schema")
-    def test_metafield_failure_does_not_rollback_supabase_product_insert(
+    def test_full_reconciliation_metafield_failure_does_not_rollback_supabase_product_insert(
         self,
         _ensure_schema,
         _start_sync_run,
@@ -3742,7 +3742,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         }
 
         with patch.object(supabase_backend, "connect", return_value=FakeConnection()):
-            result = supabase_backend.sync_new_shopify_products_to_edition_ops(config=self.config)
+            result = supabase_backend.reconcile_all_shopify_products_to_edition_ops(config=self.config)
 
         self.assertEqual(result["new_products_inserted"], 1)
         self.assertEqual(result["shopify_metafields_pushed"], 0)

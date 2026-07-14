@@ -1185,6 +1185,7 @@ def _reload_products_from_supabase():
     st.session_state[LOAD_DIAGNOSTIC_KEY] = dict(snapshot.get("database_read") or {})
     _write_snapshot(rows, originals, meta=st.session_state[META_KEY])
     st.session_state[NOTICE_KEY] = f"Reloaded {len(rows)} product row(s) from Supabase."
+    st.session_state[SNAPSHOT_LOADED_KEY] = True
     _clear_editor_state()
     _bump_editor_version()
 
@@ -1193,21 +1194,33 @@ def _format_shopify_product_sync_summary(result):
     result = result or {}
     errors = list(result.get("errors") or [])
     errors.extend(result.get("variant_sync_errors") or [])
-    message = (
-        "Sync New Products complete. "
-        f"Shopify products fetched: {int(result.get('products_fetched') or result.get('products_checked') or 0)}. "
-        f"Shopify products checked: {int(result.get('products_checked') or 0)}. "
-        f"New products inserted: {int(result.get('new_products_inserted') or 0)}. "
-        f"Existing products updated safely: {int(result.get('existing_products_updated') or 0)}. "
-        f"Existing products skipped: {int(result.get('existing_products_skipped') or 0)}. "
-        f"Shopify metafields pushed: {int(result.get('shopify_metafields_pushed') or 0)}. "
-        f"Shopify metafield mirror failed/pending: {int(result.get('shopify_metafields_failed_pending') or 0)}. "
-        f"Errors: {len(errors)}."
+    message = " · ".join(
+        (
+            f"{int(result.get('new_products_inserted') or 0)} new products added",
+            f"{int(result.get('existing_products_skipped') or 0)} existing products skipped",
+            f"{int(result.get('shopify_metafields_pushed') or 0)} metafield mirrors updated",
+            f"{len(errors)} failures",
+            f"Completed in {float(result.get('duration_seconds') or 0):.1f} seconds",
+        )
     )
     if errors:
         first_errors = " | ".join(str(error)[:180] for error in errors[:3])
         message = f"{message} First errors: {first_errors}"
     return message
+
+
+def _format_full_product_reconciliation_summary(result):
+    result = result or {}
+    errors = list(result.get("errors") or [])
+    errors.extend(result.get("variant_sync_errors") or [])
+    return (
+        "Full Product Reconciliation complete. "
+        f"{int(result.get('products_fetched') or 0)} fetched; "
+        f"{int(result.get('new_products_inserted') or 0)} added; "
+        f"{int(result.get('existing_products_updated') or 0)} identity/display updates; "
+        f"{int(result.get('existing_products_skipped') or 0)} unchanged; "
+        f"{len(errors)} failures."
+    )
 
 
 def _mark_synced(rows, originals, results):
@@ -2048,13 +2061,14 @@ def _render_advanced_controls(backend, rows):
             )
         else:
             st.caption("Sync diagnostics load only when requested.")
+        st.caption("Checks only the newest Shopify products and adds products not already in Sports Cave OS.")
         action_cols = st.columns([1, 1, 1, 1])
-        if action_cols[0].button("Sync New Products", use_container_width=True, disabled=not backend):
+        if action_cols[0].button("Pull New Products", use_container_width=True, disabled=not backend):
             sync_completed = False
             try:
-                with st.spinner("Scanning Shopify products and updating Edition Ops..."):
+                with st.spinner("Checking the newest Shopify products..."):
                     if not backend or not hasattr(backend, "sync_new_shopify_products_to_edition_ops"):
-                        raise ValueError("Product sync is not available.")
+                        raise ValueError("New-product pull is not available.")
                     config = shopify_sync.get_config()
                     if not config.get("configured"):
                         raise ValueError("Shopify is not configured.")
@@ -2067,7 +2081,7 @@ def _render_advanced_controls(backend, rows):
                     st.session_state[NOTICE_LEVEL_KEY] = "warning" if sync_errors else "success"
                     sync_completed = True
             except Exception as error:
-                st.session_state[NOTICE_KEY] = f"Shopify product sync failed: {error}"
+                st.session_state[NOTICE_KEY] = f"Shopify new-product pull failed: {error}"
                 st.session_state[NOTICE_LEVEL_KEY] = "error"
             if sync_completed:
                 st.rerun()
@@ -2110,6 +2124,42 @@ def _render_advanced_controls(backend, rows):
                 if st.button("Replace Table From CSV", use_container_width=True):
                     if _apply_csv_import(uploaded_csv):
                         st.rerun()
+
+        st.caption("Full Product Reconciliation is a recovery action and may inspect the complete Shopify catalogue.")
+        reconciliation_confirmed = False
+        if hasattr(st, "checkbox"):
+            reconciliation_confirmed = st.checkbox(
+                "I confirm I want to inspect the complete Shopify product catalogue.",
+                key="edition-ops-confirm-full-product-reconciliation",
+            )
+        if st.button(
+            "Full Product Reconciliation",
+            key="edition-ops-full-product-reconciliation",
+            use_container_width=True,
+            disabled=not backend or not reconciliation_confirmed,
+        ):
+            reconciliation_completed = False
+            try:
+                with st.spinner("Reconciling the complete Shopify product catalogue..."):
+                    if not hasattr(backend, "reconcile_all_shopify_products_to_edition_ops"):
+                        raise ValueError("Full product reconciliation is not available.")
+                    config = shopify_sync.get_config()
+                    if not config.get("configured"):
+                        raise ValueError("Shopify is not configured.")
+                    reconciliation_result = backend.reconcile_all_shopify_products_to_edition_ops(config=config)
+                    _reload_products_from_supabase()
+                    st.session_state[NOTICE_KEY] = _format_full_product_reconciliation_summary(
+                        reconciliation_result
+                    )
+                    reconciliation_errors = list(reconciliation_result.get("errors") or [])
+                    reconciliation_errors.extend(reconciliation_result.get("variant_sync_errors") or [])
+                    st.session_state[NOTICE_LEVEL_KEY] = "warning" if reconciliation_errors else "success"
+                    reconciliation_completed = True
+            except Exception as error:
+                st.session_state[NOTICE_KEY] = f"Full product reconciliation failed: {error}"
+                st.session_state[NOTICE_LEVEL_KEY] = "error"
+            if reconciliation_completed:
+                st.rerun()
 
 
 def render_page():

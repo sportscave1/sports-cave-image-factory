@@ -555,6 +555,34 @@ query EditionOpsActiveProducts($first: Int!, $after: String, $query: String) {
 """
 
 
+NEWEST_PRODUCTS_DISCOVERY_QUERY = """
+query SportsCaveNewestProducts($first: Int!, $query: String) {
+  products(first: $first, query: $query, sortKey: CREATED_AT, reverse: true) {
+    pageInfo { hasNextPage endCursor }
+    nodes {
+      id
+      legacyResourceId
+      title
+      handle
+      status
+      createdAt
+      updatedAt
+      onlineStoreUrl
+      media(first: 1) {
+        nodes {
+          ... on MediaImage {
+            id
+            alt
+            image { url width height }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
 PRODUCT_BY_ID_QUERY = """
 query SportsCaveProductById($id: ID!) {
   product(id: $id) {
@@ -2123,6 +2151,44 @@ def fetch_edition_ops_active_products(max_products=None, page_size=50, config=No
         "products": products[:limit],
         "api_version": served_version,
         "max_products": limit,
+    }
+
+
+def fetch_newest_products_for_edition_ops(
+    *,
+    created_after="",
+    page_size=50,
+    config=None,
+    request_post=None,
+):
+    """Fetch one lightweight, newest-first product page for Edition Ops discovery."""
+    config = config or get_config()
+    first = min(max(int(page_size or 50), 1), 50)
+    search_parts = ["(status:active OR status:draft)"]
+    watermark = str(created_after or "").strip().replace("'", "")
+    if watermark:
+        # Include the watermark second. Immutable product IDs resolve timestamp ties.
+        search_parts.append(f"created_at:>='{watermark}'")
+    search = " ".join(search_parts)
+    data, served_version = graphql_request(
+        NEWEST_PRODUCTS_DISCOVERY_QUERY,
+        variables={"first": first, "query": search},
+        config=config,
+        request_post=request_post,
+    )
+    connection = data.get("products") or {}
+    products = [
+        normalize_product(node, config["store_domain"])
+        for node in (connection.get("nodes") or [])
+    ]
+    page_info = connection.get("pageInfo") or {}
+    return {
+        "products": products,
+        "has_next_page": bool(page_info.get("hasNextPage")),
+        "end_cursor": page_info.get("endCursor"),
+        "api_version": served_version or config.get("api_version"),
+        "query": search,
+        "page_size": first,
     }
 
 
