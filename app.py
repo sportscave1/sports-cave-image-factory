@@ -45,6 +45,7 @@ edition_ops_module = None
 orders_page_module = None
 design_studio_page_module = None
 social_media_reels_studio_page_module = None
+marketing_factory_page_module = None
 requests_module = None
 components_module = None
 pillow_modules = None
@@ -149,6 +150,15 @@ def get_social_media_reels_studio_page():
         social_media_reels_studio_page_module = importlib.import_module("social_media_reels_studio_page")
         log_startup_stage("SOCIAL MEDIA REELS STUDIO IMPORT DONE")
     return social_media_reels_studio_page_module
+
+
+def get_marketing_factory_page():
+    global marketing_factory_page_module
+    if marketing_factory_page_module is None:
+        log_startup_stage("MARKETING FACTORY IMPORT START")
+        marketing_factory_page_module = importlib.import_module("marketing_factory_page")
+        log_startup_stage("MARKETING FACTORY IMPORT DONE")
+    return marketing_factory_page_module
 
 
 def get_requests_module():
@@ -6634,7 +6644,9 @@ def render_selected_page(current_page):
     elif current_page == "Mockups":
         render_mockups_page()
     elif current_page == "Social Media Reels Studio":
-        get_social_media_reels_studio_page().render_page()
+        get_social_media_reels_studio_page().render_page(
+            developer_password=DEVELOPER_PAGE_PASSWORD
+        )
     elif current_page == "Design Studio":
         get_design_studio_page().render_design_studio_page(developer_password=DEVELOPER_PAGE_PASSWORD)
     elif current_page == "Edition Ops":
@@ -6658,7 +6670,7 @@ def render_selected_page(current_page):
     elif current_page == "Files":
         os_route_pages().render_files_page()
     elif current_page == "Marketing Factory":
-        os_route_pages().render_marketing_factory_page()
+        get_marketing_factory_page().render_page()
     elif current_page in {"Settings", "Developer"}:
         render_settings_page()
     else:
@@ -6692,7 +6704,10 @@ def main():
         print(f"ERROR {error_message}", flush=True)
         logging.exception(error_message)
         st.error("This page failed to load, but Sports Cave OS is still running.")
-        st.exception(error)
+        if _developer_unlocked():
+            st.exception(error)
+        else:
+            st.caption("Open Developer diagnostics for the technical exception details.")
     log_startup_stage("PAGE RENDER DONE", current_page)
     log_app_memory(f"Page load end: {current_page}")
 

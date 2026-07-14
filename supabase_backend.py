@@ -85,6 +85,7 @@ DATABASE_URL_ENV_KEYS = (
 REQUIRED_DATABASE_ENV_VARS = ("DATABASE_URL",)
 _SCHEMA_READY = False
 _ORDER_READ_SCHEMA_READY = False
+_PROMPT_TEMPLATE_SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
 _LAST_DATABASE_STATUS = {}
 _LAST_DATABASE_READ_DIAGNOSTIC = contextvars.ContextVar(
@@ -1946,10 +1947,11 @@ def _ensure_schema_uncached():
 
 
 def reset_schema_cache():
-    global _SCHEMA_READY, _ORDER_READ_SCHEMA_READY
+    global _SCHEMA_READY, _ORDER_READ_SCHEMA_READY, _PROMPT_TEMPLATE_SCHEMA_READY
     with _SCHEMA_LOCK:
         _SCHEMA_READY = False
         _ORDER_READ_SCHEMA_READY = False
+        _PROMPT_TEMPLATE_SCHEMA_READY = False
 
 
 def ensure_schema():
@@ -1967,16 +1969,22 @@ def ensure_schema():
 
 
 def ensure_prompt_template_schema():
+    global _PROMPT_TEMPLATE_SCHEMA_READY
+    if _PROMPT_TEMPLATE_SCHEMA_READY:
+        return
     if not is_configured():
         raise SupabaseNotConfigured(
             "No Supabase/Postgres database URL is configured. Set DATABASE_URL, "
             "SUPABASE_DATABASE_URL, or POSTGRES_URL in Render."
         )
     with _SCHEMA_LOCK:
+        if _PROMPT_TEMPLATE_SCHEMA_READY:
+            return
         with connect() as conn:
             with conn.cursor() as cur:
                 _create_prompt_template_tables(cur)
             conn.commit()
+        _PROMPT_TEMPLATE_SCHEMA_READY = True
 
 
 def get_prompt_template(prompt_key):
@@ -1997,6 +2005,33 @@ def get_prompt_template(prompt_key):
             )
             row = cur.fetchone()
     return dict(row or {}) or None
+
+
+def get_prompt_templates(prompt_keys):
+    """Load a bounded set of prompt overrides in one read."""
+    prompt_keys = list(
+        dict.fromkeys(
+            str(prompt_key or "").strip()
+            for prompt_key in (prompt_keys or ())
+            if str(prompt_key or "").strip()
+        )
+    )
+    if not prompt_keys:
+        return []
+    ensure_prompt_template_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, prompt_key, prompt_name, module, prompt_text, source,
+                       updated_by, updated_at, created_at
+                FROM prompt_templates
+                WHERE prompt_key = ANY(%s)
+                """,
+                (prompt_keys,),
+            )
+            rows = cur.fetchall() or []
+    return [dict(row) for row in rows]
 
 
 def upsert_prompt_template(

@@ -5,18 +5,21 @@ import html
 import hashlib
 import io
 import json
+import logging
 import mimetypes
 import re
 import shutil
+import time
 import zipfile
 from contextlib import suppress
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
-from PIL import Image, UnidentifiedImageError
 
+import prompt_store
 from sports_cave_prompt_blocks import SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -978,6 +981,8 @@ def generated_pasted_filename(product_handle: str, asset_type: str, scene_slug: 
 
 
 def _image_dimensions(image_bytes: bytes) -> tuple[int | None, int | None]:
+    from PIL import Image, UnidentifiedImageError
+
     try:
         with Image.open(io.BytesIO(image_bytes)) as image:
             return image.size
@@ -1134,7 +1139,7 @@ def sanitize_status(value: str) -> str:
     return status if status in STATUS_OPTIONS else "final"
 
 
-def build_background_finder_prompt(product_handle: str, product_title: str, sport_category: str, creative_notes: str) -> str:
+def _build_background_finder_default(product_handle: str, product_title: str, sport_category: str, creative_notes: str) -> str:
     product_handle = sanitize_handle(product_handle, "product-handle")
     product_title = str(product_title or "").strip() or "Untitled Sports Cave product"
     sport_category = str(sport_category or "").strip() or "sport"
@@ -1222,7 +1227,7 @@ Do not generate the mockup yet.
 Only help me choose the best background/reference room for this product."""
 
 
-def build_image_prompt(scene: dict, product_handle: str, product_title: str, sport_category: str, creative_notes: str) -> str:
+def _build_image_prompt_default(scene: dict, product_handle: str, product_title: str, sport_category: str, creative_notes: str) -> str:
     product_title = str(product_title or "").strip() or "the uploaded Sports Cave product"
     sport_category = str(sport_category or "").strip() or "sports"
     creative_notes = str(creative_notes or "").strip() or "No extra creative notes supplied."
@@ -1690,18 +1695,226 @@ FINAL RESULT
 Photorealistic premium Sports Cave wall mockup showing the exact uploaded framed artwork mounted naturally in the selected room, with perfect black frame realism, museum glass, realistic shadows, believable wall mounting, premium lighting, and no people."""
 
 
-def build_video_prompt(scene: dict, product_handle: str, product_title: str, sport_category: str, version: str = "v01", status: str = "final") -> str:
-    return VIDEO_PROMPTS_BY_SCENE.get(scene.get("slug"), VIDEO_PROMPTS_BY_SCENE["wall-only"])
+SOCIAL_REELS_MODULE = "social_reels"
+BACKGROUND_FINDER_PROMPT_KEY = "social_reels.background_finder"
+IMAGE_PROMPT_KEYS = {
+    scene["slug"]: f"social_reels.mockup_creation.{scene['slug'].replace('-', '_')}"
+    for scene in SCENES
+}
+VIDEO_PROMPT_KEYS = {
+    scene["slug"]: f"social_reels.image_to_video.{scene['slug'].replace('-', '_')}"
+    for scene in SCENES
+}
 
 
-def build_image_prompts(product_handle: str, product_title: str, sport_category: str, creative_notes: str) -> dict[str, str]:
+def _background_finder_default_template() -> str:
+    return _build_background_finder_default(
+        GENERIC_PRODUCT_HANDLE_PLACEHOLDER,
+        GENERIC_PRODUCT_TITLE_PLACEHOLDER,
+        GENERIC_SPORT_PLACEHOLDER,
+        GENERIC_PRODUCT_ANGLE_PLACEHOLDER,
+    )
+
+
+def _image_default_template(scene: dict) -> str:
+    return _build_image_prompt_default(
+        scene,
+        GENERIC_PRODUCT_HANDLE_PLACEHOLDER,
+        GENERIC_PRODUCT_TITLE_PLACEHOLDER,
+        GENERIC_SPORT_PLACEHOLDER,
+        GENERIC_PRODUCT_ANGLE_PLACEHOLDER,
+    )
+
+
+@lru_cache(maxsize=1)
+def social_reels_prompt_specs() -> tuple[dict, ...]:
+    """Locked defaults and stable Supabase keys for every prompt shown on this page."""
+    specs = [
+        {
+            "prompt_key": BACKGROUND_FINDER_PROMPT_KEY,
+            "prompt_name": "Background Finder",
+            "module": SOCIAL_REELS_MODULE,
+            "default_text": _background_finder_default_template(),
+        }
+    ]
+    for scene in SCENES:
+        specs.append(
+            {
+                "prompt_key": IMAGE_PROMPT_KEYS[scene["slug"]],
+                "prompt_name": f"Mockup Creation — {scene['name']}",
+                "module": SOCIAL_REELS_MODULE,
+                "default_text": _image_default_template(scene),
+            }
+        )
+    for scene in SCENES:
+        specs.append(
+            {
+                "prompt_key": VIDEO_PROMPT_KEYS[scene["slug"]],
+                "prompt_name": f"Image-to-Video — {scene['name']}",
+                "module": SOCIAL_REELS_MODULE,
+                "default_text": VIDEO_PROMPTS_BY_SCENE[scene["slug"]],
+            }
+        )
+    return tuple(specs)
+
+
+def load_social_reels_prompt_records() -> dict[str, dict]:
+    return prompt_store.load_prompt_records(
+        social_reels_prompt_specs(),
+        module=SOCIAL_REELS_MODULE,
+    )
+
+
+def _prompt_spec(prompt_key: str) -> dict:
+    return next(spec for spec in social_reels_prompt_specs() if spec["prompt_key"] == prompt_key)
+
+
+def _effective_prompt_template(
+    prompt_key: str,
+    default_text: str,
+    prompt_records: dict[str, dict] | None,
+) -> str:
+    if prompt_records is not None:
+        record = prompt_records.get(prompt_key) or {}
+    else:
+        spec = _prompt_spec(prompt_key)
+        record = prompt_store.get_prompt_source(
+            prompt_key,
+            default_text,
+            prompt_name=spec["prompt_name"],
+            module=SOCIAL_REELS_MODULE,
+            seed_default=False,
+        )
+    return str(record.get("text") or default_text)
+
+
+def _render_prompt_placeholders(
+    prompt_template: str,
+    product_handle: str,
+    product_title: str,
+    sport_category: str,
+    creative_notes: str,
+) -> str:
+    rendered_handle = (
+        GENERIC_PRODUCT_HANDLE_PLACEHOLDER
+        if str(product_handle or "").strip() == GENERIC_PRODUCT_HANDLE_PLACEHOLDER
+        else sanitize_handle(product_handle, "product-handle")
+    )
+    replacements = {
+        GENERIC_PRODUCT_HANDLE_PLACEHOLDER: rendered_handle,
+        GENERIC_PRODUCT_TITLE_PLACEHOLDER: str(product_title or "").strip() or "the uploaded Sports Cave product",
+        GENERIC_SPORT_PLACEHOLDER: str(sport_category or "").strip() or "sports",
+        GENERIC_PRODUCT_ANGLE_PLACEHOLDER: str(creative_notes or "").strip() or "No extra creative notes supplied.",
+    }
+    rendered = str(prompt_template or "")
+    for placeholder, value in replacements.items():
+        rendered = rendered.replace(placeholder, value)
+    return rendered
+
+
+def build_background_finder_prompt(
+    product_handle: str,
+    product_title: str,
+    sport_category: str,
+    creative_notes: str,
+    prompt_records: dict[str, dict] | None = None,
+) -> str:
+    default_template = _background_finder_default_template()
+    template = _effective_prompt_template(
+        BACKGROUND_FINDER_PROMPT_KEY,
+        default_template,
+        prompt_records,
+    )
+    if not str(creative_notes or "").strip():
+        template = template.replace(
+            f"\n\nAdditional creative direction from the VA: {GENERIC_PRODUCT_ANGLE_PLACEHOLDER}",
+            "",
+        )
+    return _render_prompt_placeholders(
+        template,
+        product_handle,
+        product_title,
+        sport_category,
+        creative_notes,
+    )
+
+
+def build_image_prompt(
+    scene: dict,
+    product_handle: str,
+    product_title: str,
+    sport_category: str,
+    creative_notes: str,
+    prompt_records: dict[str, dict] | None = None,
+) -> str:
+    slug = scene.get("slug") if scene.get("slug") in IMAGE_PROMPT_KEYS else "wall-only"
+    default_template = _image_default_template(scene if slug != "wall-only" else get_scene_by_slug("wall-only"))
+    template = _effective_prompt_template(
+        IMAGE_PROMPT_KEYS[slug],
+        default_template,
+        prompt_records,
+    )
+    return _render_prompt_placeholders(
+        template,
+        product_handle,
+        product_title,
+        sport_category,
+        creative_notes,
+    )
+
+
+def build_video_prompt(
+    scene: dict,
+    product_handle: str,
+    product_title: str,
+    sport_category: str,
+    version: str = "v01",
+    status: str = "final",
+    prompt_records: dict[str, dict] | None = None,
+) -> str:
+    slug = scene.get("slug") if scene.get("slug") in VIDEO_PROMPTS_BY_SCENE else "wall-only"
+    default_template = VIDEO_PROMPTS_BY_SCENE[slug]
+    template = _effective_prompt_template(
+        VIDEO_PROMPT_KEYS[slug],
+        default_template,
+        prompt_records,
+    )
+    return _render_prompt_placeholders(
+        template,
+        product_handle,
+        product_title,
+        sport_category,
+        "",
+    )
+
+
+def build_image_prompts(
+    product_handle: str,
+    product_title: str,
+    sport_category: str,
+    creative_notes: str,
+    prompt_records: dict[str, dict] | None = None,
+) -> dict[str, str]:
     return {
-        scene["slug"]: build_image_prompt(scene, product_handle, product_title, sport_category, creative_notes)
+        scene["slug"]: build_image_prompt(
+            scene,
+            product_handle,
+            product_title,
+            sport_category,
+            creative_notes,
+            prompt_records,
+        )
         for scene in SCENES
     }
 
 
-def build_video_prompts(product_handle: str, product_title: str, sport_category: str, video_meta: dict[str, dict] | None = None) -> dict[str, str]:
+def build_video_prompts(
+    product_handle: str,
+    product_title: str,
+    sport_category: str,
+    video_meta: dict[str, dict] | None = None,
+    prompt_records: dict[str, dict] | None = None,
+) -> dict[str, str]:
     video_meta = video_meta or {}
     prompts = {}
     for scene in SCENES:
@@ -1713,6 +1926,7 @@ def build_video_prompts(product_handle: str, product_title: str, sport_category:
             sport_category,
             version=meta.get("version", "v01"),
             status=meta.get("status", "final"),
+            prompt_records=prompt_records,
         )
     return prompts
 
@@ -2527,6 +2741,7 @@ def build_reels_hub_payload(
     scene_slug: str,
     version: str = "v01",
     status: str = "final",
+    prompt_records: dict[str, dict] | None = None,
 ) -> dict[str, str]:
     handle = sanitize_handle(product_handle, "")
     filename_handle = handle or FILENAME_HANDLE_PLACEHOLDER
@@ -2537,15 +2752,48 @@ def build_reels_hub_payload(
     scene = get_scene_by_slug(scene_slug)
     clean_version = sanitize_version(version)
     clean_status = sanitize_status(status)
+    background_spec = _prompt_spec(BACKGROUND_FINDER_PROMPT_KEY)
+    image_spec = _prompt_spec(IMAGE_PROMPT_KEYS[scene["slug"]])
+    video_spec = _prompt_spec(VIDEO_PROMPT_KEYS[scene["slug"]])
     return {
         "product_handle": filename_handle,
         "prompt_product_handle": prompt_handle,
         "scene_slug": scene["slug"],
         "scene_name": scene["name"],
         "video_scene_name": scene["video_name"],
-        "background_prompt": build_background_finder_prompt(prompt_handle, prompt_title, prompt_sport, prompt_notes),
-        "image_prompt": build_image_prompt(scene, prompt_handle, prompt_title, prompt_sport, prompt_notes),
-        "video_prompt": build_video_prompt(scene, prompt_handle, prompt_title, prompt_sport, clean_version, clean_status),
+        "background_prompt": build_background_finder_prompt(
+            prompt_handle,
+            prompt_title,
+            prompt_sport,
+            prompt_notes,
+            prompt_records,
+        ),
+        "background_prompt_key": BACKGROUND_FINDER_PROMPT_KEY,
+        "background_prompt_name": background_spec["prompt_name"],
+        "background_prompt_default": background_spec["default_text"],
+        "image_prompt": build_image_prompt(
+            scene,
+            prompt_handle,
+            prompt_title,
+            prompt_sport,
+            prompt_notes,
+            prompt_records,
+        ),
+        "image_prompt_key": IMAGE_PROMPT_KEYS[scene["slug"]],
+        "image_prompt_name": image_spec["prompt_name"],
+        "image_prompt_default": image_spec["default_text"],
+        "video_prompt": build_video_prompt(
+            scene,
+            prompt_handle,
+            prompt_title,
+            prompt_sport,
+            clean_version,
+            clean_status,
+            prompt_records,
+        ),
+        "video_prompt_key": VIDEO_PROMPT_KEYS[scene["slug"]],
+        "video_prompt_name": video_spec["prompt_name"],
+        "video_prompt_default": video_spec["default_text"],
         "mockup_filename": image_mockup_filename_with_meta(filename_handle, scene["slug"], clean_version, clean_status),
         "video_filename": video_filename(filename_handle, scene["slug"], clean_version, clean_status),
         "save_instructions": build_save_instructions(filename_handle, sport_category),
@@ -2554,22 +2802,106 @@ def build_reels_hub_payload(
     }
 
 
-def _render_copyable_prompt(label: str, prompt_text: str, key: str, copy_label: str, height: int = 360) -> None:
-    _copy_button(prompt_text, key, copy_label, large=True)
-    st.text_area(
+def _render_editable_prompt(
+    label: str,
+    prompt_text: str,
+    prompt_key: str,
+    prompt_name: str,
+    default_text: str,
+    source_record: dict | None,
+    key: str,
+    copy_label: str,
+    height: int = 360,
+    editing_enabled: bool = True,
+) -> None:
+    editor_key = f"social-reels-prompt-editor::{prompt_key}"
+    pending_key = f"social-reels-prompt-pending::{prompt_key}"
+    notice_key = f"social-reels-prompt-notice::{prompt_key}"
+    if pending_key in st.session_state:
+        st.session_state[editor_key] = st.session_state.pop(pending_key)
+
+    source_record = source_record or {}
+    st.caption(source_record.get("source_label") or "Source: Default file fallback")
+    if source_record.get("warning"):
+        st.warning(source_record["warning"])
+    if notice := st.session_state.pop(notice_key, ""):
+        st.success(notice)
+
+    edited_text = st.text_area(
         label,
         value=prompt_text,
         height=height,
-        key=_prompt_preview_key(f"smrs_hub_{key}", key, prompt_text),
-        disabled=True,
+        key=editor_key,
+        disabled=not editing_enabled,
+    )
+    if not editing_enabled:
+        st.caption("Unlock Developer prompt editing above to save or restore prompts.")
+    cols = st.columns([1.25, 1, 1])
+    with cols[0]:
+        _copy_button(edited_text, key, copy_label, large=True)
+    save_clicked = cols[1].button(
+        "Save Prompt",
+        key=f"social-reels-prompt-save::{prompt_key}",
+        type="primary",
+        use_container_width=True,
+        disabled=not editing_enabled,
+    )
+    restore_clicked = cols[2].button(
+        "Restore Default",
+        key=f"social-reels-prompt-restore::{prompt_key}",
+        use_container_width=True,
+        disabled=not editing_enabled,
     )
 
+    if save_clicked:
+        if edited_text == prompt_text:
+            st.info("No changes to save")
+        else:
+            try:
+                prompt_store.save_prompt(
+                    prompt_key,
+                    prompt_name,
+                    edited_text,
+                    module=SOCIAL_REELS_MODULE,
+                )
+            except Exception:
+                logging.exception("Social Reels prompt save failed key=%s", prompt_key)
+                st.error("Save failed — existing prompt remains unchanged")
+            else:
+                st.session_state[notice_key] = "Prompt saved"
+                st.rerun()
 
-def render_page() -> None:
+    if restore_clicked:
+        try:
+            prompt_store.reset_prompt_to_default(
+                prompt_key,
+                prompt_name,
+                default_text,
+                module=SOCIAL_REELS_MODULE,
+            )
+        except Exception:
+            logging.exception("Social Reels prompt restore failed key=%s", prompt_key)
+            st.error("Restore failed — existing prompt remains unchanged")
+        else:
+            st.session_state[pending_key] = default_text
+            st.session_state[notice_key] = "Prompt restored to default"
+            st.rerun()
+
+
+def render_page(developer_password: str = "") -> None:
+    page_started = time.perf_counter()
     _inject_styles()
     _ensure_wizard_flags()
     state = _state()
     files = state["files"]
+
+    prompt_load_started = time.perf_counter()
+    prompt_records = load_social_reels_prompt_records()
+    logging.info(
+        "PERF Social Reels prompt_load_ms=%d prompt_count=%d",
+        int((time.perf_counter() - prompt_load_started) * 1000),
+        len(prompt_records),
+    )
 
     st.markdown(
         """
@@ -2580,6 +2912,28 @@ def render_page() -> None:
         """,
         unsafe_allow_html=True,
     )
+
+    editing_enabled = bool(st.session_state.get("developer_unlocked")) or not developer_password
+    with st.expander("Prompt editing", expanded=False):
+        if editing_enabled:
+            st.success("Developer prompt editing is unlocked.")
+        else:
+            st.caption("Use the existing Developer password to edit, save, or restore persistent prompts.")
+            entered_password = st.text_input(
+                "Developer password",
+                type="password",
+                key="social-reels-prompt-developer-password",
+            )
+            if st.button(
+                "Unlock Prompt Editing",
+                key="social-reels-prompt-developer-unlock",
+                use_container_width=True,
+            ):
+                if entered_password == developer_password:
+                    st.session_state["developer_unlocked"] = True
+                    st.rerun()
+                else:
+                    st.error("Developer password is incorrect.")
 
     scene_options = {scene["name"]: scene["slug"] for scene in SCENES}
     default_scene = st.session_state.get("smrs_selected_scene_slug", SCENES[0]["slug"])
@@ -2592,6 +2946,7 @@ def render_page() -> None:
         "",
         "",
         default_scene,
+        prompt_records=prompt_records,
     )
 
     with st.container(border=True):
@@ -2606,12 +2961,17 @@ Paste the black framed product image into ChatGPT with this prompt. ChatGPT will
 Do not upload a screenshot. Use the full-resolution black framed product mockup.
                 """.strip()
             )
-        _render_copyable_prompt(
+        _render_editable_prompt(
             "Background finder prompt",
             payload["background_prompt"],
+            payload["background_prompt_key"],
+            payload["background_prompt_name"],
+            payload["background_prompt_default"],
+            prompt_records.get(payload["background_prompt_key"]),
             "background-finder",
             "Copy background prompt",
             height=420,
+            editing_enabled=editing_enabled,
         )
         st.caption(f"Folder reminder: `mockup-backgrounds/{GENERIC_PRODUCT_HANDLE_PLACEHOLDER}/`")
 
@@ -2632,6 +2992,7 @@ Do not upload a screenshot. Use the full-resolution black framed product mockup.
             "",
             "",
             selected_scene_slug,
+            prompt_records=prompt_records,
         )
         with st.expander("How to use", expanded=False):
             st.markdown(
@@ -2645,12 +3006,17 @@ Use the full-resolution generated mockup, not a screenshot.
             )
         st.caption(f"Selected scene: {payload['scene_name']} | `{payload['scene_slug']}`")
         st.markdown(f'<div class="smrs-filename">{html.escape(payload["mockup_filename"])}</div>', unsafe_allow_html=True)
-        _render_copyable_prompt(
+        _render_editable_prompt(
             "Image mockup prompt",
             payload["image_prompt"],
+            payload["image_prompt_key"],
+            payload["image_prompt_name"],
+            payload["image_prompt_default"],
+            prompt_records.get(payload["image_prompt_key"]),
             f"image-{payload['scene_slug']}",
             "Copy image prompt",
             height=520,
+            editing_enabled=editing_enabled,
         )
 
     with st.container(border=True):
@@ -2668,12 +3034,17 @@ Optional final archive location:
             )
         st.caption(f"Matching scene: {payload['video_scene_name']} | `{payload['scene_slug']}`")
         st.markdown(f'<div class="smrs-filename">{html.escape(payload["video_filename"])}</div>', unsafe_allow_html=True)
-        _render_copyable_prompt(
+        _render_editable_prompt(
             "Image-to-video prompt",
             payload["video_prompt"],
+            payload["video_prompt_key"],
+            payload["video_prompt_name"],
+            payload["video_prompt_default"],
+            prompt_records.get(payload["video_prompt_key"]),
             f"video-{payload['scene_slug']}",
             "Copy video prompt",
             height=520,
+            editing_enabled=editing_enabled,
         )
 
     with st.container(border=True):
@@ -2731,6 +3102,7 @@ Optional final archive location:
             final_scene_slug,
             version,
             status,
+            prompt_records,
         )
         _store_video_upload(state, None, final_product_handle, payload["scene_slug"], payload["version"], payload["status"])
         st.caption("Generated video filename")
@@ -2758,3 +3130,7 @@ Optional final archive location:
             key=_prompt_preview_key("smrs_save_instructions", payload["scene_slug"], payload["save_instructions"]),
             disabled=True,
         )
+    logging.info(
+        "PERF Social Reels render_ms=%d",
+        int((time.perf_counter() - page_started) * 1000),
+    )

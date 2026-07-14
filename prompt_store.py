@@ -41,6 +41,10 @@ def clear_prompt_cache(prompt_id=None):
         _load_prompt_from_supabase.cache_clear()
     except AttributeError:
         pass
+    try:
+        _load_prompts_from_supabase.cache_clear()
+    except (AttributeError, NameError):
+        pass
     if prompt_id is None:
         _RUNTIME_PROMPT_CACHE.clear()
         return
@@ -120,10 +124,20 @@ def _load_prompt_from_supabase(prompt_id):
     return backend.get_prompt_template(prompt_id)
 
 
+def _load_prompts_from_supabase(prompt_ids):
+    backend = _supabase_backend()
+    if not backend.is_configured():
+        raise backend.SupabaseNotConfigured("Supabase/Postgres is not configured.")
+    backend.ensure_prompt_template_schema()
+    records = backend.get_prompt_templates(list(prompt_ids))
+    return tuple(dict(record) for record in (records or ()))
+
+
 try:
     from functools import lru_cache
 
     _load_prompt_from_supabase = lru_cache(maxsize=512)(_load_prompt_from_supabase)
+    _load_prompts_from_supabase = lru_cache(maxsize=128)(_load_prompts_from_supabase)
 except Exception:
     pass
 
@@ -221,6 +235,80 @@ def get_prompt(prompt_id, default_text, **kwargs):
 
 def get_prompt_source(prompt_id, default_text="", **kwargs):
     return load_prompt(prompt_id, default_text, **kwargs)
+
+
+def load_prompt_records(prompt_specs, *, module="", force_supabase=False):
+    """Load multiple saved overrides with one Supabase read and no implicit writes.
+
+    ``prompt_specs`` is an iterable of dictionaries containing ``prompt_key``,
+    ``prompt_name`` and ``default_text``. Missing rows use their locked code
+    defaults. Defaults are deliberately not seeded here, so merely opening a
+    page cannot write to prompt storage.
+    """
+    specs = []
+    for raw_spec in prompt_specs or ():
+        spec = dict(raw_spec or {})
+        prompt_id = str(spec.get("prompt_key") or "").strip()
+        if not prompt_id:
+            continue
+        spec["prompt_key"] = prompt_id
+        specs.append(spec)
+
+    loaded = {}
+    missing = []
+    for spec in specs:
+        prompt_id = spec["prompt_key"]
+        runtime_record = _runtime_saved_record(prompt_id)
+        if runtime_record:
+            loaded[prompt_id] = runtime_record
+        elif _is_lifestyle_prompt(prompt_id) and not force_supabase and not _lifestyle_supabase_reads_enabled():
+            loaded[prompt_id] = _default_record(prompt_id, spec.get("default_text", ""))
+        else:
+            missing.append(prompt_id)
+
+    warning = ""
+    saved_by_id = {}
+    if missing:
+        try:
+            rows = _load_prompts_from_supabase(tuple(sorted(set(missing))))
+            saved_by_id = {
+                str(record.get("prompt_key") or "").strip(): record
+                for record in rows
+                if str(record.get("prompt_key") or "").strip()
+            }
+        except Exception:
+            warning = (
+                "Supabase prompt storage is unavailable. These prompts are using code "
+                "defaults and edits cannot be persisted until the connection recovers."
+            )
+
+    for spec in specs:
+        prompt_id = spec["prompt_key"]
+        if prompt_id in loaded:
+            continue
+        record = saved_by_id.get(prompt_id) or {}
+        prompt_text = record.get("prompt_text")
+        if isinstance(prompt_text, str) and prompt_text.strip():
+            loaded_record = {
+                **record,
+                "text": prompt_text,
+                "prompt_text": prompt_text,
+                "source": SOURCE_SUPABASE,
+                "source_label": source_label(SOURCE_SUPABASE),
+                "persisted": True,
+                "warning": "",
+            }
+            _cache_runtime_record(prompt_id, loaded_record, fallback_text=prompt_text)
+            loaded[prompt_id] = loaded_record
+        else:
+            loaded[prompt_id] = _default_record(
+                prompt_id,
+                spec.get("default_text", ""),
+                warning=warning,
+            )
+            loaded[prompt_id]["prompt_name"] = str(spec.get("prompt_name") or prompt_id)
+            loaded[prompt_id]["module"] = str(spec.get("module") or module or "")
+    return loaded
 
 
 def save_prompt(prompt_id, title, text, *, module="", updated_by="sports_cave_os"):

@@ -8,11 +8,52 @@ from unittest.mock import patch
 
 from PIL import Image
 
+import prompt_store
 import social_media_reels_studio_page as reels
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class FakePromptBackend:
+    class SupabaseNotConfigured(RuntimeError):
+        pass
+
+    def __init__(self, records=None, fail_writes=False):
+        self.records = dict(records or {})
+        self.fail_writes = fail_writes
+        self.bulk_reads = 0
+        self.writes = 0
+
+    def is_configured(self):
+        return True
+
+    def ensure_prompt_template_schema(self):
+        return None
+
+    def get_prompt_template(self, prompt_key):
+        return self.records.get(prompt_key)
+
+    def get_prompt_templates(self, prompt_keys):
+        self.bulk_reads += 1
+        return [self.records[key] for key in prompt_keys if key in self.records]
+
+    def upsert_prompt_template(self, prompt_key, **kwargs):
+        self.writes += 1
+        if self.fail_writes:
+            raise RuntimeError("simulated database failure")
+        record = {
+            "prompt_key": prompt_key,
+            "prompt_name": kwargs.get("prompt_name"),
+            "module": kwargs.get("module"),
+            "prompt_text": kwargs.get("prompt_text"),
+        }
+        self.records[prompt_key] = record
+        return record
+
+
 class SocialMediaReelsStudioPageTests(unittest.TestCase):
+    def tearDown(self):
+        prompt_store.clear_prompt_cache()
+
     def _png_bytes(self, size=(3, 2), color=(212, 165, 76)):
         buffer = io.BytesIO()
         Image.new("RGB", size, color).save(buffer, format="PNG")
@@ -22,7 +63,24 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
 
         self.assertIn('"Social Media Reels Studio"', source)
-        self.assertIn("get_social_media_reels_studio_page().render_page()", source)
+        self.assertIn("get_social_media_reels_studio_page().render_page(", source)
+        self.assertIn("developer_password=DEVELOPER_PAGE_PASSWORD", source)
+
+    def test_marketing_factory_route_does_not_import_legacy_page_bundle(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        route_source = source[source.index("def render_selected_page") : source.index("def main")]
+
+        self.assertIn('elif current_page == "Marketing Factory":', route_source)
+        self.assertIn("get_marketing_factory_page().render_page()", route_source)
+        self.assertNotIn("os_route_pages().render_marketing_factory_page()", route_source)
+
+    def test_top_level_page_errors_keep_technical_details_developer_only(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        main_source = source[source.index("def main") :]
+
+        self.assertIn("if _developer_unlocked():", main_source)
+        self.assertIn("st.exception(error)", main_source)
+        self.assertIn("Open Developer diagnostics for the technical exception details.", main_source)
 
     def test_video_filename_generator_for_required_handles(self):
         handles = [
@@ -172,6 +230,143 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertIn("[SPORT]", payload["background_prompt"])
         self.assertIn("[PRODUCT TITLE]", payload["image_prompt"])
         self.assertIn("[PRODUCT ANGLE]", payload["image_prompt"])
+
+    def test_every_social_reels_prompt_has_a_stable_unique_key(self):
+        specs = reels.social_reels_prompt_specs()
+        keys = [spec["prompt_key"] for spec in specs]
+
+        self.assertEqual(len(specs), 9)
+        self.assertEqual(len(keys), len(set(keys)))
+        self.assertIn("social_reels.background_finder", keys)
+        self.assertIn("social_reels.mockup_creation.wall_only", keys)
+        self.assertIn("social_reels.image_to_video.collector_admire", keys)
+        self.assertTrue(all(spec["default_text"].strip() for spec in specs))
+
+    def test_saved_custom_prompt_loads_and_bulk_read_does_not_write(self):
+        key = reels.IMAGE_PROMPT_KEYS["collector-admire"]
+        custom = "Custom mockup for [PRODUCT TITLE] in [SPORT]. Direction: [PRODUCT ANGLE]"
+        backend = FakePromptBackend({key: {"prompt_key": key, "prompt_text": custom}})
+        with patch.object(prompt_store, "_supabase_backend", return_value=backend):
+            prompt_store.clear_prompt_cache()
+            records = reels.load_social_reels_prompt_records()
+            prompt = reels.build_image_prompt(
+                reels.get_scene_by_slug("collector-admire"),
+                "roger-federer",
+                "Roger Federer",
+                "Tennis",
+                "Warm room",
+                records,
+            )
+
+        self.assertEqual(prompt, "Custom mockup for Roger Federer in Tennis. Direction: Warm room")
+        self.assertEqual(backend.bulk_reads, 1)
+        self.assertEqual(backend.writes, 0)
+
+    def test_unsaved_edit_does_not_overwrite_saved_prompt(self):
+        key = reels.BACKGROUND_FINDER_PROMPT_KEY
+        backend = FakePromptBackend({key: {"prompt_key": key, "prompt_text": "Saved prompt"}})
+        unsaved_editor_text = "Unsaved editor text"
+        with patch.object(prompt_store, "_supabase_backend", return_value=backend):
+            prompt_store.clear_prompt_cache()
+            records = reels.load_social_reels_prompt_records()
+            self.assertEqual(records[key]["text"], "Saved prompt")
+
+        self.assertEqual(unsaved_editor_text, "Unsaved editor text")
+        self.assertEqual(backend.records[key]["prompt_text"], "Saved prompt")
+        self.assertEqual(backend.writes, 0)
+
+    def test_save_persists_and_restore_returns_locked_default(self):
+        key = reels.BACKGROUND_FINDER_PROMPT_KEY
+        spec = next(item for item in reels.social_reels_prompt_specs() if item["prompt_key"] == key)
+        backend = FakePromptBackend()
+        with patch.object(prompt_store, "_supabase_backend", return_value=backend):
+            prompt_store.clear_prompt_cache()
+            prompt_store.save_prompt(key, spec["prompt_name"], "Edited prompt", module=reels.SOCIAL_REELS_MODULE)
+            self.assertEqual(backend.records[key]["prompt_text"], "Edited prompt")
+            prompt_store.reset_prompt_to_default(
+                key,
+                spec["prompt_name"],
+                spec["default_text"],
+                module=reels.SOCIAL_REELS_MODULE,
+            )
+
+        self.assertEqual(backend.records[key]["prompt_text"], spec["default_text"])
+        self.assertEqual(backend.writes, 2)
+
+    def test_one_social_reels_prompt_cannot_overwrite_another(self):
+        first = reels.IMAGE_PROMPT_KEYS["collector-admire"]
+        second = reels.IMAGE_PROMPT_KEYS["wall-only"]
+        backend = FakePromptBackend(
+            {
+                first: {"prompt_key": first, "prompt_text": "First saved"},
+                second: {"prompt_key": second, "prompt_text": "Second saved"},
+            }
+        )
+        with patch.object(prompt_store, "_supabase_backend", return_value=backend):
+            prompt_store.clear_prompt_cache()
+            prompt_store.save_prompt(first, "First", "First edited", module=reels.SOCIAL_REELS_MODULE)
+
+        self.assertEqual(backend.records[first]["prompt_text"], "First edited")
+        self.assertEqual(backend.records[second]["prompt_text"], "Second saved")
+
+    def test_save_failure_preserves_editor_text_and_saved_value(self):
+        key = reels.VIDEO_PROMPT_KEYS["wall-only"]
+        backend = FakePromptBackend(
+            {key: {"prompt_key": key, "prompt_text": "Existing saved prompt"}},
+            fail_writes=True,
+        )
+        editor_text = "Keep this unsaved edit visible"
+        with patch.object(prompt_store, "_supabase_backend", return_value=backend):
+            prompt_store.clear_prompt_cache()
+            with self.assertRaises(RuntimeError):
+                prompt_store.save_prompt(key, "Wall Only", editor_text, module=reels.SOCIAL_REELS_MODULE)
+
+        self.assertEqual(editor_text, "Keep this unsaved edit visible")
+        self.assertEqual(backend.records[key]["prompt_text"], "Existing saved prompt")
+
+    def test_custom_prompt_dynamic_placeholders_still_render(self):
+        key = reels.IMAGE_PROMPT_KEYS["wall-admire"]
+        records = {
+            key: {
+                "prompt_key": key,
+                "text": "Use [PRODUCT TITLE] for [SPORT]. Product [PRODUCT HANDLE]. Notes [PRODUCT ANGLE].",
+            }
+        }
+        prompt = reels.build_image_prompt(
+            reels.get_scene_by_slug("wall-admire"),
+            "Roger Federer Wall Art",
+            "Roger Federer",
+            "Tennis",
+            "Warm premium wall",
+            records,
+        )
+
+        self.assertEqual(
+            prompt,
+            "Use Roger Federer for Tennis. Product roger-federer-wall-art. Notes Warm premium wall.",
+        )
+        generic = reels.build_reels_hub_payload(
+            "",
+            "",
+            "",
+            "",
+            "wall-admire",
+            prompt_records=records,
+        )
+        self.assertIn("Product [PRODUCT HANDLE]", generic["image_prompt"])
+
+    def test_prompt_ui_is_editable_and_uses_explicit_save_restore_actions(self):
+        source = (ROOT / "social_media_reels_studio_page.py").read_text(encoding="utf-8")
+        helper = source[source.index("def _render_editable_prompt") : source.index("def render_page")]
+
+        self.assertIn("st.text_area", helper)
+        self.assertIn("disabled=not editing_enabled", helper)
+        self.assertIn('"Save Prompt"', helper)
+        self.assertIn('"Restore Default"', helper)
+        self.assertIn('"No changes to save"', helper)
+        self.assertIn('"Prompt saved"', helper)
+        self.assertIn('"Prompt restored to default"', helper)
+        self.assertIn('"Save failed — existing prompt remains unchanged"', helper)
 
     def test_reels_hub_scene_changes_image_and_video_prompts(self):
         holding = reels.build_reels_hub_payload("roger-federer", "Roger Federer", "Tennis", "", "collector-admire")
