@@ -258,7 +258,11 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
                 records,
             )
 
-        self.assertEqual(prompt, "Custom mockup for Roger Federer in Tennis. Direction: Warm room")
+        self.assertTrue(
+            prompt.startswith("Custom mockup for Roger Federer in Tennis. Direction: Warm room")
+        )
+        self.assertIn(reels.REAL_EVERYDAY_CUSTOMER_HUMAN_REALISM_LOCK, prompt)
+        self.assertIn("HUMAN ANATOMY LOCK:", prompt)
         self.assertEqual(backend.bulk_reads, 1)
         self.assertEqual(backend.writes, 0)
 
@@ -341,10 +345,12 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
             records,
         )
 
-        self.assertEqual(
-            prompt,
-            "Use Roger Federer for Tennis. Product roger-federer-wall-art. Notes Warm premium wall.",
+        self.assertTrue(
+            prompt.startswith(
+                "Use Roger Federer for Tennis. Product roger-federer-wall-art. Notes Warm premium wall."
+            )
         )
+        self.assertIn(reels.REAL_EVERYDAY_CUSTOMER_HUMAN_REALISM_LOCK, prompt)
         generic = reels.build_reels_hub_payload(
             "",
             "",
@@ -354,6 +360,140 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
             prompt_records=records,
         )
         self.assertIn("Product [PRODUCT HANDLE]", generic["image_prompt"])
+
+    def test_new_human_realism_lock_is_only_in_person_image_prompts(self):
+        prompts = reels.build_image_prompts("roger-federer", "Roger Federer", "Tennis", "")
+
+        for scene in reels.SCENES:
+            prompt = prompts[scene["slug"]]
+            if scene["has_person"]:
+                self.assertIn(reels.REAL_EVERYDAY_CUSTOMER_HUMAN_REALISM_LOCK, prompt)
+                self.assertEqual(
+                    prompt.count("REAL EVERYDAY CUSTOMER — HUMAN REALISM LOCK"),
+                    1,
+                )
+            else:
+                self.assertNotIn("REAL EVERYDAY CUSTOMER — HUMAN REALISM LOCK", prompt)
+
+    def test_person_video_prompts_get_human_anatomy_and_all_videos_get_freeze_lock(self):
+        prompts = reels.build_video_prompts("roger-federer", "Roger Federer", "Tennis")
+
+        for scene in reels.SCENES:
+            prompt = prompts[scene["slug"]]
+            self.assertIn(reels.SPORTS_CAVE_FRAME_ARTWORK_FREEZE_LOCK, prompt)
+            self.assertEqual(
+                prompt.count("SPORTS CAVE FRAME + ARTWORK FREEZE LOCK"),
+                1,
+            )
+            if scene["has_person"]:
+                self.assertIn(reels.REAL_EVERYDAY_CUSTOMER_HUMAN_REALISM_LOCK, prompt)
+                self.assertIn("HUMAN ANATOMY LOCK:", prompt)
+                self.assertIn("NEGATIVE HUMAN ANATOMY:", prompt)
+                self.assertEqual(
+                    prompt.count("REAL EVERYDAY CUSTOMER — HUMAN REALISM LOCK"),
+                    1,
+                )
+            else:
+                self.assertNotIn("REAL EVERYDAY CUSTOMER — HUMAN REALISM LOCK", prompt)
+                self.assertNotIn("HUMAN ANATOMY LOCK:", prompt)
+                self.assertNotIn("NEGATIVE HUMAN ANATOMY:", prompt)
+
+    def test_old_saved_prompt_keeps_scene_text_and_gets_required_blocks_without_write(self):
+        key = reels.VIDEO_PROMPT_KEYS["collector-admire"]
+        old_saved_text = "My saved customer scene for [PRODUCT TITLE]."
+        backend = FakePromptBackend(
+            {key: {"prompt_key": key, "prompt_text": old_saved_text}}
+        )
+        with patch.object(prompt_store, "_supabase_backend", return_value=backend):
+            prompt_store.clear_prompt_cache()
+            records = reels.load_social_reels_prompt_records()
+            prompt = reels.build_video_prompt(
+                reels.get_scene_by_slug("collector-admire"),
+                "roger-federer",
+                "Roger Federer",
+                "Tennis",
+                prompt_records=records,
+            )
+
+        self.assertTrue(prompt.startswith("My saved customer scene for Roger Federer."))
+        self.assertIn(reels.REAL_EVERYDAY_CUSTOMER_HUMAN_REALISM_LOCK, prompt)
+        self.assertIn(reels.SPORTS_CAVE_FRAME_ARTWORK_FREEZE_LOCK, prompt)
+        self.assertEqual(backend.writes, 0)
+
+    def test_prompt_composition_is_idempotent(self):
+        scene = reels.get_scene_by_slug("collector-admire")
+        first = reels._compose_social_reels_prompt(
+            "Saved scene text",
+            scene,
+            image_to_video=True,
+        )
+        second = reels._compose_social_reels_prompt(
+            first,
+            scene,
+            image_to_video=True,
+        )
+
+        self.assertEqual(second, first)
+        self.assertEqual(first.count("REAL EVERYDAY CUSTOMER — HUMAN REALISM LOCK"), 1)
+        self.assertEqual(first.count("SPORTS CAVE FRAME + ARTWORK FREEZE LOCK"), 1)
+        self.assertEqual(first.count("HUMAN ANATOMY LOCK:"), 1)
+
+    def test_explicit_save_persists_the_complete_effective_prompt(self):
+        key = reels.IMAGE_PROMPT_KEYS["wall-admire"]
+        old_saved_text = "Older saved scene text"
+        backend = FakePromptBackend(
+            {key: {"prompt_key": key, "prompt_text": old_saved_text}}
+        )
+        with patch.object(prompt_store, "_supabase_backend", return_value=backend):
+            prompt_store.clear_prompt_cache()
+            records = reels.load_social_reels_prompt_records()
+            effective_prompt = reels.build_image_prompt(
+                reels.get_scene_by_slug("wall-admire"),
+                "roger-federer",
+                "Roger Federer",
+                "Tennis",
+                "",
+                records,
+            )
+            self.assertTrue(
+                reels._prompt_has_unpersisted_composition(effective_prompt, records[key])
+            )
+            prompt_store.save_prompt(
+                key,
+                "Wall Admire",
+                effective_prompt,
+                module=reels.SOCIAL_REELS_MODULE,
+            )
+
+        self.assertEqual(backend.records[key]["prompt_text"], effective_prompt)
+        self.assertIn(reels.REAL_EVERYDAY_CUSTOMER_HUMAN_REALISM_LOCK, effective_prompt)
+        self.assertEqual(backend.writes, 1)
+
+    def test_restore_default_uses_updated_video_default(self):
+        key = reels.VIDEO_PROMPT_KEYS["wall-only"]
+        spec = next(item for item in reels.social_reels_prompt_specs() if item["prompt_key"] == key)
+        backend = FakePromptBackend(
+            {key: {"prompt_key": key, "prompt_text": "Old wall video prompt"}}
+        )
+        with patch.object(prompt_store, "_supabase_backend", return_value=backend):
+            prompt_store.clear_prompt_cache()
+            prompt_store.reset_prompt_to_default(
+                key,
+                spec["prompt_name"],
+                spec["default_text"],
+                module=reels.SOCIAL_REELS_MODULE,
+            )
+
+        restored = backend.records[key]["prompt_text"]
+        self.assertIn(reels.SPORTS_CAVE_FRAME_ARTWORK_FREEZE_LOCK, restored)
+        self.assertNotIn("REAL EVERYDAY CUSTOMER — HUMAN REALISM LOCK", restored)
+
+    def test_copy_uses_the_same_effective_text_shown_in_editor(self):
+        source = (ROOT / "social_media_reels_studio_page.py").read_text(encoding="utf-8")
+        helper = source[source.index("def _render_editable_prompt") : source.index("def render_page")]
+
+        self.assertIn("edited_text = st.text_area", helper)
+        self.assertIn("_copy_button(edited_text", helper)
 
     def test_prompt_ui_is_editable_and_uses_explicit_save_restore_actions(self):
         source = (ROOT / "social_media_reels_studio_page.py").read_text(encoding="utf-8")

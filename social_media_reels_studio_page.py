@@ -277,6 +277,129 @@ Do not create detached arms, floating hands, disconnected wrists, duplicate limb
 HUMAN_ANATOMY_QA_REJECT = """Reject and regenerate if any hand, wrist, forearm, elbow, upper arm, shoulder, leg, foot, head, or torso is detached, duplicated, warped, hidden in an impossible way, or not physically connected to the same person."""
 
 
+REAL_EVERYDAY_CUSTOMER_HUMAN_REALISM_LOCK = """REAL EVERYDAY CUSTOMER — HUMAN REALISM LOCK
+
+Use a realistic everyday adult person, not a fashion model or overly attractive commercial model.
+
+The person should look like a normal real customer:
+
+age-appropriate
+slightly imperfect
+natural facial features
+realistic skin texture
+visible pores
+slight natural blemishes or skin variation
+subtle under-eye texture
+natural lip texture
+realistic hair texture
+natural body proportions
+believable posture
+normal healthy appearance
+
+Skin must look like real human skin:
+
+natural pores
+subtle warmth and tonal variation
+mild unevenness
+realistic subsurface scattering
+no plastic skin
+no waxy skin
+no over-smoothed beauty retouching
+no glamour makeup look
+no hyper-defined model features
+
+The overall look should feel:
+
+authentic
+relatable
+premium but real
+masculine and believable
+like a genuine customer in a real home
+
+Avoid:
+
+model-like beauty
+influencer look
+perfect airbrushed skin
+overly symmetrical face
+exaggerated jawline
+unrealistically white teeth
+fashion-editorial pose
+gym-model body
+uncanny AI face
+glossy CGI skin"""
+
+
+SPORTS_CAVE_FRAME_ARTWORK_FREEZE_LOCK = """SPORTS CAVE FRAME + ARTWORK FREEZE LOCK
+
+Keep the framed Sports Cave artwork 100% unchanged for the entire video.
+
+The framed product is a real physical object being filmed in real life.
+
+Treat the artwork and frame as completely static and printed under glass.
+
+Do not animate, alter, regenerate, or reinterpret anything inside the frame.
+
+The artwork must remain perfectly still and unchanged:
+
+no moving image
+no moving person inside the artwork
+no moving background inside the artwork
+no moving road
+no moving trophy
+no moving smoke
+no moving text
+no shifting badge
+no changing signature
+no flicker
+no shimmer
+no morphing
+no redraw
+no reframing
+
+Keep the exact uploaded artwork locked:
+
+same athlete
+same team
+same colours
+same title
+same typography
+same number
+same edition badge
+same plaque
+same signature
+same composition
+same crop
+same proportions
+
+Keep the black frame fully locked:
+
+no bending
+no warping
+no wobble
+no stretching
+no changing shape
+no changing thickness
+no changing corners
+no rubbery movement
+no floating frame
+
+The frame and artwork must behave like a real rigid framed print with museum glass.
+
+Only allowed motion is outside the artwork itself:
+
+slight camera movement
+slight person movement
+slight hand adjustment
+subtle body breathing
+subtle room lighting shift
+soft realistic glass reflections moving across the surface
+
+The image inside the frame must remain completely static at all times.
+
+If any part of the artwork begins to animate, regenerate, drift, warp, shimmer, or move, reject that result and regenerate."""
+
+
 WALL_HANGING_SAFE_POSE = """A single customer stands centered in front of the frame, back or three-quarter back view, with full torso and both shoulders visible. Both arms are visible and naturally connected from shoulder to hand. The customer lightly holds the left and right outer edges of the frame with both hands while making a tiny final straightening adjustment. Elbows are slightly bent. Wrists and fingers are normal. The hands touch only the outer frame edges and do not cover important artwork details. The pose must be physically possible and natural."""
 
 
@@ -1695,6 +1818,46 @@ FINAL RESULT
 Photorealistic premium Sports Cave wall mockup showing the exact uploaded framed artwork mounted naturally in the selected room, with perfect black frame realism, museum glass, realistic shadows, believable wall mounting, premium lighting, and no people."""
 
 
+def _append_prompt_block_once(prompt_text: str, block: str, marker: str) -> str:
+    """Append a required block unless its stable heading is already present."""
+    prompt_text = str(prompt_text or "").strip()
+    block = str(block or "").strip()
+    marker = str(marker or "").strip()
+    if not block or (marker and marker.casefold() in prompt_text.casefold()):
+        return prompt_text
+    return f"{prompt_text}\n\n{block}" if prompt_text else block
+
+
+def _compose_social_reels_prompt(
+    prompt_text: str,
+    scene: dict,
+    *,
+    image_to_video: bool,
+) -> str:
+    """Apply mandatory scene safety blocks without mutating saved prompt rows."""
+    result = str(prompt_text or "").strip()
+    if bool(scene.get("has_person")):
+        result = _append_prompt_block_once(
+            result,
+            REAL_EVERYDAY_CUSTOMER_HUMAN_REALISM_LOCK,
+            "REAL EVERYDAY CUSTOMER — HUMAN REALISM LOCK",
+        )
+        result = _append_prompt_block_once(result, HUMAN_ANATOMY_LOCK, "HUMAN ANATOMY LOCK:")
+        result = _append_prompt_block_once(result, NEGATIVE_HUMAN_ANATOMY, "NEGATIVE HUMAN ANATOMY:")
+        result = _append_prompt_block_once(
+            result,
+            HUMAN_ANATOMY_QA_REJECT,
+            "Reject and regenerate if any hand, wrist, forearm",
+        )
+    if image_to_video:
+        result = _append_prompt_block_once(
+            result,
+            SPORTS_CAVE_FRAME_ARTWORK_FREEZE_LOCK,
+            "SPORTS CAVE FRAME + ARTWORK FREEZE LOCK",
+        )
+    return result
+
+
 SOCIAL_REELS_MODULE = "social_reels"
 BACKGROUND_FINDER_PROMPT_KEY = "social_reels.background_finder"
 IMAGE_PROMPT_KEYS = {
@@ -1717,12 +1880,24 @@ def _background_finder_default_template() -> str:
 
 
 def _image_default_template(scene: dict) -> str:
-    return _build_image_prompt_default(
+    return _compose_social_reels_prompt(
+        _build_image_prompt_default(
+            scene,
+            GENERIC_PRODUCT_HANDLE_PLACEHOLDER,
+            GENERIC_PRODUCT_TITLE_PLACEHOLDER,
+            GENERIC_SPORT_PLACEHOLDER,
+            GENERIC_PRODUCT_ANGLE_PLACEHOLDER,
+        ),
         scene,
-        GENERIC_PRODUCT_HANDLE_PLACEHOLDER,
-        GENERIC_PRODUCT_TITLE_PLACEHOLDER,
-        GENERIC_SPORT_PLACEHOLDER,
-        GENERIC_PRODUCT_ANGLE_PLACEHOLDER,
+        image_to_video=False,
+    )
+
+
+def _video_default_template(scene: dict) -> str:
+    return _compose_social_reels_prompt(
+        VIDEO_PROMPTS_BY_SCENE[scene["slug"]],
+        scene,
+        image_to_video=True,
     )
 
 
@@ -1752,7 +1927,7 @@ def social_reels_prompt_specs() -> tuple[dict, ...]:
                 "prompt_key": VIDEO_PROMPT_KEYS[scene["slug"]],
                 "prompt_name": f"Image-to-Video — {scene['name']}",
                 "module": SOCIAL_REELS_MODULE,
-                "default_text": VIDEO_PROMPTS_BY_SCENE[scene["slug"]],
+                "default_text": _video_default_template(scene),
             }
         )
     return tuple(specs)
@@ -1848,11 +2023,17 @@ def build_image_prompt(
     prompt_records: dict[str, dict] | None = None,
 ) -> str:
     slug = scene.get("slug") if scene.get("slug") in IMAGE_PROMPT_KEYS else "wall-only"
-    default_template = _image_default_template(scene if slug != "wall-only" else get_scene_by_slug("wall-only"))
+    resolved_scene = scene if slug != "wall-only" else get_scene_by_slug("wall-only")
+    default_template = _image_default_template(resolved_scene)
     template = _effective_prompt_template(
         IMAGE_PROMPT_KEYS[slug],
         default_template,
         prompt_records,
+    )
+    template = _compose_social_reels_prompt(
+        template,
+        resolved_scene,
+        image_to_video=False,
     )
     return _render_prompt_placeholders(
         template,
@@ -1873,11 +2054,17 @@ def build_video_prompt(
     prompt_records: dict[str, dict] | None = None,
 ) -> str:
     slug = scene.get("slug") if scene.get("slug") in VIDEO_PROMPTS_BY_SCENE else "wall-only"
-    default_template = VIDEO_PROMPTS_BY_SCENE[slug]
+    resolved_scene = scene if slug != "wall-only" else get_scene_by_slug("wall-only")
+    default_template = _video_default_template(resolved_scene)
     template = _effective_prompt_template(
         VIDEO_PROMPT_KEYS[slug],
         default_template,
         prompt_records,
+    )
+    template = _compose_social_reels_prompt(
+        template,
+        resolved_scene,
+        image_to_video=True,
     )
     return _render_prompt_placeholders(
         template,
@@ -2802,6 +2989,14 @@ def build_reels_hub_payload(
     }
 
 
+def _prompt_has_unpersisted_composition(prompt_text: str, source_record: dict | None) -> bool:
+    source_record = source_record or {}
+    if not source_record.get("persisted"):
+        return False
+    saved_text = source_record.get("prompt_text") or source_record.get("text") or ""
+    return str(saved_text).strip() != str(prompt_text or "").strip()
+
+
 def _render_editable_prompt(
     label: str,
     prompt_text: str,
@@ -2854,7 +3049,10 @@ def _render_editable_prompt(
     )
 
     if save_clicked:
-        if edited_text == prompt_text:
+        if edited_text == prompt_text and not _prompt_has_unpersisted_composition(
+            prompt_text,
+            source_record,
+        ):
             st.info("No changes to save")
         else:
             try:
