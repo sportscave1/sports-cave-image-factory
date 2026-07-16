@@ -1754,6 +1754,11 @@ def load_orders_snapshot():
         supabase_payload = None
     if supabase_payload is not None:
         return supabase_payload
+    return load_local_orders_snapshot()
+
+
+def load_local_orders_snapshot():
+    """Read only the saved display cache without attempting another backend call."""
     if not SNAPSHOT_PATH.exists():
         return {"version": SNAPSHOT_VERSION, "saved_at": "", "last_refreshed": "", "rows": []}
     try:

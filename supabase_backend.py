@@ -464,6 +464,13 @@ def _db_statement_timeout_ms(default=8000):
         return default
 
 
+def _db_read_deadline_seconds(default=6.0):
+    try:
+        return max(float(os.getenv("SUPABASE_READ_DEADLINE_SECONDS", str(default))), 0.5)
+    except (TypeError, ValueError):
+        return default
+
+
 def connect():
     try:
         import psycopg
@@ -512,7 +519,13 @@ def _is_stale_connection_error(error):
 
 def _database_error_category(error):
     sqlstate = _database_error_sqlstate(error)
-    if sqlstate == "57014" or isinstance(error, TimeoutError):
+    message = str(error or "").casefold()
+    if (
+        sqlstate == "57014"
+        or isinstance(error, TimeoutError)
+        or "echeckouttimeout" in message
+        or "unable to check out connection from the pool" in message
+    ):
         return "request_timeout"
     if _is_stale_connection_error(error):
         return "stale_connection"
@@ -554,15 +567,44 @@ def _close_read_connection(conn):
 
 
 def _run_read_operation(operation, read_callable):
-    """Run one read on one fresh connection, retrying one recognised stale failure."""
+    """Run one bounded read, retrying one recognised stale failure.
+
+    Supabase's transaction pool can accept the client connection and then wait up
+    to 60 seconds for a database checkout. PostgreSQL's statement_timeout does
+    not cover that pool-side wait, so a watchdog also cancels the client query.
+    """
     started = time.perf_counter()
     first_error_type = ""
     for attempt in range(2):
         conn = None
+        deadline_timer = None
+        deadline_fired = threading.Event()
         try:
             conn = connect()
+
+            def cancel_overdue_read():
+                deadline_fired.set()
+                safe_cancel = getattr(conn, "cancel_safe", None)
+                cancel = safe_cancel or getattr(conn, "cancel", None)
+                if not callable(cancel):
+                    return
+                try:
+                    if callable(safe_cancel):
+                        cancel(timeout=1.0)
+                    else:
+                        cancel()
+                except Exception:
+                    # The foreground read still has its own safe error path. A
+                    # failed cancellation must never create a second failure.
+                    pass
+
+            deadline_seconds = _db_read_deadline_seconds()
+            deadline_timer = threading.Timer(deadline_seconds, cancel_overdue_read)
+            deadline_timer.daemon = True
+            deadline_timer.start()
             with conn.cursor() as cur:
                 value = read_callable(cur)
+            deadline_timer.cancel()
             _rollback_read_connection(conn)
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             diagnostic = {
@@ -583,8 +625,10 @@ def _run_read_operation(operation, read_callable):
             )
             return value, diagnostic
         except Exception as error:
+            if deadline_timer is not None:
+                deadline_timer.cancel()
             _rollback_read_connection(conn)
-            category = _database_error_category(error)
+            category = "request_timeout" if deadline_fired.is_set() else _database_error_category(error)
             exception_class = error.__class__.__name__
             sqlstate = _database_error_sqlstate(error)
             elapsed_ms = int((time.perf_counter() - started) * 1000)
@@ -617,6 +661,8 @@ def _run_read_operation(operation, read_callable):
             )
             raise DatabaseReadError(_safe_database_read_message(category), diagnostic) from error
         finally:
+            if deadline_timer is not None:
+                deadline_timer.cancel()
             _close_read_connection(conn)
 
 
@@ -6783,29 +6829,31 @@ def list_prodigi_dispatch_rows(status=None, days=None, older_than_days=None, lim
         )
         params.append(f"%{search_value}%")
     where_sql = f"WHERE {' AND '.join(f'({clause})' for clause in where_clauses)}" if where_clauses else ""
-    with connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"""
-                SELECT
-                    row_id, shopify_order_id, shopify_order_name, shopify_order_number,
-                    shopify_line_item_id, customer_name, product_title, shopify_variant_title,
-                    edition_number, sports_cave_frame, sports_cave_size, prodigi_product_name,
-                    prodigi_product_code, prodigi_frame_colour, prodigi_status,
-                    date_sent_to_prodigi, submitted_at, qa_confirmed, qa_notes,
-                    notes, source, row_json, created_at, updated_at
-                FROM prodigi_dispatch_rows
-                {where_sql}
-                ORDER BY submitted_at DESC NULLS LAST,
-                         date_sent_to_prodigi DESC NULLS LAST,
-                         updated_at DESC NULLS LAST,
-                         created_at DESC NULLS LAST,
-                         shopify_order_name DESC NULLS LAST
-                LIMIT %s
-                """,
-                (*params, limit_value),
-            )
-            rows = cur.fetchall()
+    def load_rows(cur):
+        cur.execute(
+            f"""
+            SELECT
+                row_id, shopify_order_id, shopify_order_name, shopify_order_number,
+                shopify_line_item_id, customer_name, product_title, shopify_variant_title,
+                edition_number, sports_cave_frame, sports_cave_size, prodigi_product_name,
+                prodigi_product_code, prodigi_frame_colour, prodigi_status,
+                date_sent_to_prodigi, submitted_at, qa_confirmed, qa_notes,
+                notes, source, row_json, created_at, updated_at
+            FROM prodigi_dispatch_rows
+            {where_sql}
+            ORDER BY submitted_at DESC NULLS LAST,
+                     date_sent_to_prodigi DESC NULLS LAST,
+                     updated_at DESC NULLS LAST,
+                     created_at DESC NULLS LAST,
+                     shopify_order_name DESC NULLS LAST
+            LIMIT %s
+            """,
+            (*params, limit_value),
+        )
+        return cur.fetchall()
+
+    operation = "prodigi.dispatch.search" if search_value else "prodigi.dispatch.latest_50"
+    rows, _ = _run_read_operation(operation, load_rows)
     return [_prodigi_payload_from_db_row(row) for row in rows]
 
 
@@ -14306,6 +14354,12 @@ def list_hybrid_order_rows(limit=50, search=""):
         "orders.search.base" if raw_search else "orders.latest_50.base",
         load_base_rows,
     )
+    print(
+        "PERF Orders base query "
+        f"duration_ms={int(base_diagnostic.get('duration_ms') or 0)} rows={len(base_rows)} "
+        f"limit={limit_value} search={str(bool(raw_search)).lower()}",
+        flush=True,
+    )
 
     line_id_lookup_values = sorted({
         candidate
@@ -14364,6 +14418,12 @@ def list_hybrid_order_rows(limit=50, search=""):
         edition_rows, overlay_diagnostic = _run_read_operation(
             "orders.search.allocations" if raw_search else "orders.latest_50.allocations",
             load_edition_rows,
+        )
+        print(
+            "PERF Orders allocation query "
+            f"duration_ms={int(overlay_diagnostic.get('duration_ms') or 0)} rows={len(edition_rows)} "
+            f"order_ids={len(order_id_lookup_values)} line_ids={len(line_id_lookup_values)}",
+            flush=True,
         )
 
     merge_started = time.perf_counter()

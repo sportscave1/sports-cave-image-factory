@@ -49,8 +49,13 @@ SEARCH_KEY = "orders_search_text"
 LOADED_QUERY_KEY = "orders_loaded_query"
 SHOW_ALL_KEY = "orders_show_all_rows"
 LOAD_ERROR_KEY = "orders_load_error"
+LOAD_FUTURE_KEY = "orders_load_future"
+LOAD_REQUEST_KEY = "orders_load_request"
+LOAD_STARTED_KEY = "orders_load_started_at"
 DEFAULT_VISIBLE_ROW_LIMIT = 50
+ORDERS_PAGE_LOAD_TIMEOUT_SECONDS = 8
 HYBRID_FAST_ORDERS_ENABLED = True
+_ORDERS_LOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="orders-ledger-read")
 ALLOCATION_BLOCKER_STATUSES = {
     "Needs allocation",
     "Needs Review - Sold Out",
@@ -180,6 +185,9 @@ def _ensure_state():
     st.session_state.setdefault(LOADED_QUERY_KEY, "")
     st.session_state.setdefault(SHOW_ALL_KEY, False)
     st.session_state.setdefault(LOAD_ERROR_KEY, "")
+    st.session_state.setdefault(LOAD_FUTURE_KEY, None)
+    st.session_state.setdefault(LOAD_REQUEST_KEY, "")
+    st.session_state.setdefault(LOAD_STARTED_KEY, 0.0)
 
 
 def _configured_supabase_backend():
@@ -217,6 +225,99 @@ def _database_load_diagnostic(error):
     diagnostic.setdefault("exception_class", error.__class__.__name__)
     diagnostic.setdefault("duration_ms", 0)
     return diagnostic
+
+
+def _record_snapshot_load_error(error, query):
+    diagnostic = _database_load_diagnostic(error)
+    safe_error = str(error) or "Orders database read failed."
+    existing_rows = list(st.session_state.get(ROWS_KEY) or [])
+    existing_meta = dict(st.session_state.get(META_KEY) or {})
+    existing_meta.update(
+        {
+            "order_count": existing_meta.get("order_count") or 0,
+            "row_count": len(existing_rows),
+            "source": existing_meta.get("source") or "supabase_error",
+            "error": safe_error,
+            "database_read": diagnostic,
+            "search": query,
+        }
+    )
+    st.session_state[ROWS_KEY] = existing_rows
+    st.session_state[META_KEY] = existing_meta
+    st.session_state[LOAD_ERROR_KEY] = safe_error
+    st.session_state[LOADED_QUERY_KEY] = query
+    st.session_state[SNAPSHOT_LOADED_KEY] = True
+    print(
+        "ERROR Orders Supabase snapshot failed "
+        f"operation={diagnostic.get('operation')} category={diagnostic.get('category')} "
+        f"exception_class={diagnostic.get('exception_class')} "
+        f"duration_ms={diagnostic.get('duration_ms')}",
+        flush=True,
+    )
+
+
+def _start_snapshot_load(search="", *, force=False):
+    query = str(search or "").strip()
+    current = st.session_state.get(LOAD_FUTURE_KEY)
+    current_query = str(st.session_state.get(LOAD_REQUEST_KEY) or "")
+    if current is not None and not current.done() and current_query == query and not force:
+        print(f"PERF Orders cache hit query={bool(query)} state=pending", flush=True)
+        return current
+    if current is not None and not current.done():
+        current.cancel()
+    st.session_state[LOAD_ERROR_KEY] = ""
+    st.session_state[LOAD_REQUEST_KEY] = query
+    st.session_state[LOAD_STARTED_KEY] = time.monotonic()
+    future = _ORDERS_LOAD_EXECUTOR.submit(
+        _read_orders_snapshot,
+        search=query,
+        limit=DEFAULT_VISIBLE_ROW_LIMIT,
+    )
+    st.session_state[LOAD_FUTURE_KEY] = future
+    print(
+        "PERF Orders cache miss "
+        f"query={bool(query)} limit={DEFAULT_VISIBLE_ROW_LIMIT} source=supabase",
+        flush=True,
+    )
+    return future
+
+
+def _consume_snapshot_load():
+    future = st.session_state.get(LOAD_FUTURE_KEY)
+    if future is None:
+        return "idle"
+    query = str(st.session_state.get(LOAD_REQUEST_KEY) or "")
+    started = float(st.session_state.get(LOAD_STARTED_KEY) or time.monotonic())
+    elapsed = time.monotonic() - started
+    if not future.done():
+        if elapsed < ORDERS_PAGE_LOAD_TIMEOUT_SECONDS:
+            return "loading"
+        future.cancel()
+        timeout_error = TimeoutError("The database read timed out. Please retry.")
+        timeout_error.diagnostic = {
+            "operation": "orders.search" if query else "orders.latest_50",
+            "category": "request_timeout",
+            "exception_class": "TimeoutError",
+            "duration_ms": int(elapsed * 1000),
+        }
+        _record_snapshot_load_error(timeout_error, query)
+        st.session_state[LOAD_FUTURE_KEY] = None
+        _perf_log("load snapshot timeout", time.perf_counter() - elapsed)
+        return "error"
+    try:
+        payload = future.result()
+    except Exception as error:
+        _record_snapshot_load_error(error, query)
+        status = "error"
+    else:
+        st.session_state[LOAD_ERROR_KEY] = ""
+        _apply_snapshot_payload(payload)
+        st.session_state[LOADED_QUERY_KEY] = query
+        st.session_state[SNAPSHOT_LOADED_KEY] = True
+        _perf_log("load snapshot async", time.perf_counter() - elapsed, rows=len(st.session_state[ROWS_KEY]))
+        status = "ready"
+    st.session_state[LOAD_FUTURE_KEY] = None
+    return status
 
 
 def _ledger_status():
@@ -602,29 +703,7 @@ def _load_snapshot_once(search="", *, force=False):
     try:
         payload = _read_orders_snapshot(search=query, limit=DEFAULT_VISIBLE_ROW_LIMIT)
     except Exception as error:
-        diagnostic = _database_load_diagnostic(error)
-        safe_error = str(error) or "Orders database read failed."
-        st.session_state[ROWS_KEY] = []
-        st.session_state[META_KEY] = {
-            "last_refreshed": "",
-            "saved_at": "",
-            "last_synced": "",
-            "order_count": 0,
-            "row_count": 0,
-            "source": "supabase_error",
-            "error": safe_error,
-            "database_read": diagnostic,
-        }
-        st.session_state[LOAD_ERROR_KEY] = safe_error
-        st.session_state[LOADED_QUERY_KEY] = query
-        st.session_state[SNAPSHOT_LOADED_KEY] = True
-        print(
-            "ERROR Orders Supabase snapshot failed "
-            f"operation={diagnostic.get('operation')} category={diagnostic.get('category')} "
-            f"exception_class={diagnostic.get('exception_class')} "
-            f"duration_ms={diagnostic.get('duration_ms')}",
-            flush=True,
-        )
+        _record_snapshot_load_error(error, query)
         _perf_log("load snapshot failed", start)
         return
     st.session_state[LOAD_ERROR_KEY] = ""
@@ -2334,25 +2413,30 @@ def _render_orders_search_form():
     return str(query or "").strip(), False
 
 
-def render_page():
-    _ensure_state()
-    st.title("Orders")
-    st.caption("Orders sync automatically after payment.")
-    search_text, search_submitted = _render_orders_search_form()
-    if search_submitted:
-        _load_snapshot_once(search_text, force=True)
-    elif not st.session_state.get(SNAPSHOT_LOADED_KEY):
-        _load_snapshot_once("")
+def _async_orders_load_supported():
+    return callable(getattr(st, "fragment", None)) and bool(_configured_supabase_backend())
 
-    _render_orders_supabase_live_refresh()
+
+def _render_orders_load_failure(query):
+    st.error("Orders could not be loaded. Please retry.")
+    if st.button("Retry", key="orders-load-retry", use_container_width=False):
+        if _async_orders_load_supported():
+            _start_snapshot_load(query, force=True)
+        else:
+            _load_snapshot_once(query, force=True)
+        st.rerun()
+
+
+def _render_orders_data_area():
     prep_started = time.perf_counter()
     rows = _apply_latest_product_numbers(st.session_state.get(ROWS_KEY, []))
     st.session_state[ROWS_KEY] = rows
     _perf_log("table render prep", prep_started, rows=len(rows))
 
     meta = st.session_state.get(META_KEY) or {}
-    if meta.get("error"):
-        st.caption(f"Orders load warning: {meta.get('error')}")
+    load_error = st.session_state.get(LOAD_ERROR_KEY) or meta.get("error") or ""
+    if load_error:
+        _render_orders_load_failure(str(st.session_state.get(LOAD_REQUEST_KEY) or st.session_state.get(LOADED_QUERY_KEY) or ""))
     read_diagnostic = dict(meta.get("database_read") or {})
     if read_diagnostic.get("recovered"):
         st.info("A stale database connection was replaced automatically. These results are current.")
@@ -2365,19 +2449,16 @@ def render_page():
         _render_sync_diagnostics(st.session_state.get(SYNC_RESULT_KEY) or {})
 
     if not rows:
-        load_error = st.session_state.get(LOAD_ERROR_KEY) or (st.session_state.get(META_KEY) or {}).get("error") or ""
-        if load_error:
-            st.error("Orders could not be loaded. Please check Developer diagnostics.")
-            if _developer_mode():
-                st.caption(
-                    "Database diagnostic: "
-                    f"{read_diagnostic.get('category') or 'database_unavailable'}; "
-                    f"exception={read_diagnostic.get('exception_class') or 'Unknown'}; "
-                    f"operation={read_diagnostic.get('operation') or 'orders.load'}; "
-                    f"duration={int(read_diagnostic.get('duration_ms') or 0)} ms."
-                )
-        else:
+        if not load_error:
             st.info("No saved orders are available in the operational ledger yet.")
+        elif _developer_mode():
+            st.caption(
+                "Database diagnostic: "
+                f"{read_diagnostic.get('category') or 'database_unavailable'}; "
+                f"exception={read_diagnostic.get('exception_class') or 'Unknown'}; "
+                f"operation={read_diagnostic.get('operation') or 'orders.load'}; "
+                f"duration={int(read_diagnostic.get('duration_ms') or 0)} ms."
+            )
         return
 
     # The database is already bounded to 50 orders. Keep every fulfilment unit for
@@ -2392,3 +2473,44 @@ def render_page():
         st.caption(f"{len(visible_rows)} fulfilment row(s) shown from the latest 50 orders.")
 
     _render_orders_table(visible_rows)
+
+
+def _render_orders_loading_fragment():
+    fragment = getattr(st, "fragment")
+
+    @fragment(run_every="1s")
+    def _orders_loading_fragment():
+        status = _consume_snapshot_load()
+        if status == "loading":
+            with st.container(border=True):
+                st.info("Loading orders...")
+            return
+        st.rerun()
+
+    _orders_loading_fragment()
+
+
+def render_page():
+    page_started = time.perf_counter()
+    _ensure_state()
+    print("PERF Orders page entry", flush=True)
+    st.title("Orders")
+    st.caption("Orders sync automatically after payment.")
+    search_text, search_submitted = _render_orders_search_form()
+    if _async_orders_load_supported():
+        if search_submitted:
+            _start_snapshot_load(search_text, force=True)
+        elif not st.session_state.get(SNAPSHOT_LOADED_KEY) and st.session_state.get(LOAD_FUTURE_KEY) is None:
+            _start_snapshot_load("")
+        if st.session_state.get(LOAD_FUTURE_KEY) is not None:
+            _render_orders_loading_fragment()
+            _perf_log("page shell", page_started, state="loading")
+            return
+    else:
+        if search_submitted:
+            _load_snapshot_once(search_text, force=True)
+        elif not st.session_state.get(SNAPSHOT_LOADED_KEY):
+            _load_snapshot_once("")
+
+    _render_orders_data_area()
+    _perf_log("total page load", page_started, rows=len(st.session_state.get(ROWS_KEY) or []))

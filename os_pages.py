@@ -8,6 +8,7 @@ import os
 import re
 import textwrap
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -32,6 +33,15 @@ DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
 PRODIGI_CERTIFICATE_ACTION_LOADING_KEY = "prodigi_certificate_action_loading"
 PRODIGI_CERTIFICATE_ACTION_STATE_KEY = "prodigi_certificate_action_state"
 PRODIGI_CERTIFICATE_ACTION_STALE_SECONDS = 300
+PRODIGI_DISPATCH_FUTURE_KEY = "prodigi_dispatch_load_future"
+PRODIGI_DISPATCH_REQUEST_KEY = "prodigi_dispatch_load_request"
+PRODIGI_DISPATCH_STARTED_KEY = "prodigi_dispatch_load_started_at"
+PRODIGI_DISPATCH_ROWS_KEY = "prodigi_dispatch_loaded_rows"
+PRODIGI_DISPATCH_RESULT_KEY = "prodigi_dispatch_loaded_request"
+PRODIGI_DISPATCH_ERROR_KEY = "prodigi_dispatch_load_error"
+PRODIGI_DISPATCH_SEARCH_QUERY_KEY = "prodigi_dispatch_submitted_search"
+PRODIGI_PAGE_LOAD_TIMEOUT_SECONDS = 8
+_PRODIGI_LOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="prodigi-ledger-read")
 
 QUICK_LINKS = (
     ("shopify_admin_url", "Open Shopify Admin"),
@@ -3984,12 +3994,16 @@ def prodigi_load_dispatch_summary():
             _prodigi_log_timing("dispatch summary", started, f"rows={summary.get('rows_saved', 0)}")
             return summary
         except Exception as error:
-            supabase_backend.log_app_error("prodigi_dispatch_summary_failed", str(error), {"source": "prodigi_page"})
+            print(
+                "WARN Prodigi dispatch summary failed "
+                f"exception_class={error.__class__.__name__}",
+                flush=True,
+            )
     _prodigi_log_timing("dispatch summary", started, "source=unavailable rows=0")
     return {"rows_saved": 0, "last_saved_at": ""}
 
 
-def prodigi_load_dispatch_rows(tab_name="Last 7 Days", search_text="", limit=50):
+def prodigi_load_dispatch_rows(tab_name="Last 7 Days", search_text="", limit=50, *, raise_on_error=False):
     started = time.perf_counter()
     limit_value = max(min(int(limit or 50), 150), 1)
     if supabase_backend.is_configured():
@@ -4009,9 +4023,118 @@ def prodigi_load_dispatch_rows(tab_name="Last 7 Days", search_text="", limit=50)
             _prodigi_log_timing("dispatch rows", started, f"view={tab_name} rows={len(rows)}")
             return rows
         except Exception as error:
-            supabase_backend.log_app_error("prodigi_dispatch_rows_failed", str(error), {"source": "prodigi_page", "view": tab_name})
+            print(
+                "WARN Prodigi dispatch rows failed "
+                f"view={tab_name} exception_class={error.__class__.__name__}",
+                flush=True,
+            )
+            if raise_on_error:
+                raise
     _prodigi_log_timing("dispatch rows", started, f"view={tab_name} source=unavailable rows=0")
     return []
+
+
+def _prodigi_dispatch_request_id(tab_name, search_text, limit=50):
+    return (str(tab_name or "Last 7 Days"), _prodigi_clean(search_text), int(limit or 50))
+
+
+def _async_prodigi_load_supported():
+    return callable(getattr(st, "fragment", None)) and bool(supabase_backend.is_configured())
+
+
+def _start_prodigi_dispatch_load(tab_name, search_text="", limit=50, *, force=False):
+    request_id = _prodigi_dispatch_request_id(tab_name, search_text, limit)
+    current = st.session_state.get(PRODIGI_DISPATCH_FUTURE_KEY)
+    current_request = st.session_state.get(PRODIGI_DISPATCH_REQUEST_KEY)
+    if current is not None and not current.done() and current_request == request_id and not force:
+        print("PERF Prodigi cache hit state=pending", flush=True)
+        return current
+    if current is not None and not current.done():
+        current.cancel()
+    st.session_state[PRODIGI_DISPATCH_ERROR_KEY] = ""
+    st.session_state[PRODIGI_DISPATCH_REQUEST_KEY] = request_id
+    st.session_state[PRODIGI_DISPATCH_STARTED_KEY] = time.monotonic()
+    future = _PRODIGI_LOAD_EXECUTOR.submit(
+        prodigi_load_dispatch_rows,
+        tab_name,
+        search_text,
+        limit,
+        raise_on_error=True,
+    )
+    st.session_state[PRODIGI_DISPATCH_FUTURE_KEY] = future
+    print(
+        f"PERF Prodigi cache miss view={tab_name} search={str(bool(_prodigi_clean(search_text))).lower()} limit={int(limit or 50)}",
+        flush=True,
+    )
+    return future
+
+
+def _consume_prodigi_dispatch_load():
+    future = st.session_state.get(PRODIGI_DISPATCH_FUTURE_KEY)
+    if future is None:
+        return "idle"
+    started = float(st.session_state.get(PRODIGI_DISPATCH_STARTED_KEY) or time.monotonic())
+    elapsed = time.monotonic() - started
+    if not future.done():
+        if elapsed < PRODIGI_PAGE_LOAD_TIMEOUT_SECONDS:
+            return "loading"
+        future.cancel()
+        st.session_state[PRODIGI_DISPATCH_ERROR_KEY] = "The database read timed out. Please retry."
+        st.session_state[PRODIGI_DISPATCH_RESULT_KEY] = st.session_state.get(PRODIGI_DISPATCH_REQUEST_KEY)
+        st.session_state[PRODIGI_DISPATCH_FUTURE_KEY] = None
+        _prodigi_log_timing("dispatch rows timeout", time.perf_counter() - elapsed)
+        return "error"
+    try:
+        rows = future.result()
+    except Exception as error:
+        st.session_state[PRODIGI_DISPATCH_ERROR_KEY] = str(error) or "Prodigi dispatch read failed."
+        st.session_state[PRODIGI_DISPATCH_RESULT_KEY] = st.session_state.get(PRODIGI_DISPATCH_REQUEST_KEY)
+        status = "error"
+    else:
+        st.session_state[PRODIGI_DISPATCH_ROWS_KEY] = list(rows or [])
+        st.session_state[PRODIGI_DISPATCH_RESULT_KEY] = st.session_state.get(PRODIGI_DISPATCH_REQUEST_KEY)
+        st.session_state[PRODIGI_DISPATCH_ERROR_KEY] = ""
+        status = "ready"
+    st.session_state[PRODIGI_DISPATCH_FUTURE_KEY] = None
+    _prodigi_log_timing("dispatch rows async", time.perf_counter() - elapsed, f"status={status}")
+    return status
+
+
+def _render_prodigi_dispatch_result(table_rows):
+    records = prodigi_dispatch_table_records(table_rows)
+    latest_save = next(
+        (
+            row.get("updated_at") or row.get("submitted_at") or row.get("date_sent_to_prodigi")
+            for row in table_rows
+            if row.get("updated_at") or row.get("submitted_at") or row.get("date_sent_to_prodigi")
+        ),
+        "",
+    )
+    dispatch_summary = {"rows_saved": len(table_rows), "last_saved_at": latest_save}
+    st.caption(f"Dispatch rows saved: {dispatch_summary.get('rows_saved', 0)}")
+    st.caption(f"Last tracker save: {dispatch_summary.get('last_saved_at') or 'Not saved yet'}")
+    if records:
+        st.dataframe(records, hide_index=True, use_container_width=True)
+    elif dispatch_summary.get("rows_saved"):
+        st.info("No dispatch rows in this view.")
+    else:
+        st.info("No dispatch rows saved yet.")
+    return records
+
+
+def _render_prodigi_loading_fragment():
+    fragment = getattr(st, "fragment")
+
+    @fragment(run_every="1s")
+    def _prodigi_loading_fragment():
+        status = _consume_prodigi_dispatch_load()
+        if status == "loading":
+            with st.container(border=True):
+                st.info("Loading Prodigi orders...")
+            return
+        st.rerun()
+
+    _prodigi_loading_fragment()
 
 
 def prodigi_find_order_rows_from_cache(search_text):
@@ -4029,10 +4152,14 @@ def prodigi_find_order_rows_from_cache(search_text):
             _prodigi_log_timing("order lookup", started, f"source=supabase rows={len(matches)}")
             return matches, existing_rows
         except Exception as error:
-            supabase_backend.log_app_error("prodigi_order_lookup_failed", str(error), {"source": "prodigi_page", "query": query})
+            print(
+                "WARN Prodigi order lookup failed "
+                f"exception_class={error.__class__.__name__}",
+                flush=True,
+            )
 
     order_allocator = importlib.import_module("order_allocator")
-    orders_snapshot = order_allocator.load_orders_snapshot()
+    orders_snapshot = order_allocator.load_local_orders_snapshot()
     matches = prodigi_find_order_rows(orders_snapshot.get("rows") or [], query, [])
     _prodigi_log_timing("order lookup", started, f"source=local_snapshot rows={len(matches)}")
     return matches, []
@@ -4680,11 +4807,24 @@ def render_prodigi_page():
 
     st.divider()
     st.subheader("Submitted Dispatch Log")
-    log_search = st.text_input(
-        "Search dispatch log",
-        placeholder="Order, customer, product, edition, notes",
-        key="prodigi-dispatch-log-search",
-    )
+    st.session_state.setdefault(PRODIGI_DISPATCH_SEARCH_QUERY_KEY, "")
+    if hasattr(st, "form") and hasattr(st, "form_submit_button"):
+        with st.form("prodigi-dispatch-log-search-form", clear_on_submit=False):
+            log_search = st.text_input(
+                "Search dispatch log",
+                placeholder="Order, customer, product, edition, notes",
+                key="prodigi-dispatch-log-search",
+            )
+            log_search_submitted = st.form_submit_button("Search", use_container_width=False)
+    else:
+        log_search = st.text_input(
+            "Search dispatch log",
+            placeholder="Order, customer, product, edition, notes",
+            key="prodigi-dispatch-log-search",
+        )
+        log_search_submitted = False
+    if log_search_submitted:
+        st.session_state[PRODIGI_DISPATCH_SEARCH_QUERY_KEY] = _prodigi_clean(log_search)
     selected_log_view = st.radio(
         "Dispatch log view",
         ("Last 7 Days", "Needs Review", "Submitted", "History"),
@@ -4692,27 +4832,35 @@ def render_prodigi_page():
         key="prodigi_dispatch_log_view",
         label_visibility="collapsed",
     )
+    active_log_search = str(st.session_state.get(PRODIGI_DISPATCH_SEARCH_QUERY_KEY) or "")
     log_started = time.perf_counter()
-    table_rows = prodigi_load_dispatch_rows(selected_log_view, log_search, limit=50)
-    records = prodigi_dispatch_table_records(table_rows)
-    latest_save = next(
-        (
-            row.get("updated_at") or row.get("submitted_at") or row.get("date_sent_to_prodigi")
-            for row in table_rows
-            if row.get("updated_at") or row.get("submitted_at") or row.get("date_sent_to_prodigi")
-        ),
-        "",
-    )
-    dispatch_summary = {"rows_saved": len(table_rows), "last_saved_at": latest_save}
-    st.caption(f"Dispatch rows saved: {dispatch_summary.get('rows_saved', 0)}")
-    st.caption(f"Last tracker save: {dispatch_summary.get('last_saved_at') or 'Not saved yet'}")
-    _prodigi_log_timing("dispatch table render", log_started, f"view={selected_log_view} rows={len(records)}")
-    if records:
-        st.dataframe(records, hide_index=True, use_container_width=True)
-    elif dispatch_summary.get("rows_saved"):
-        st.info("No dispatch rows in this view.")
+    if _async_prodigi_load_supported():
+        request_id = _prodigi_dispatch_request_id(selected_log_view, active_log_search, 50)
+        current_future = st.session_state.get(PRODIGI_DISPATCH_FUTURE_KEY)
+        current_request = st.session_state.get(PRODIGI_DISPATCH_REQUEST_KEY)
+        loaded_request = st.session_state.get(PRODIGI_DISPATCH_RESULT_KEY)
+        if log_search_submitted or (loaded_request != request_id and (current_future is None or current_request != request_id)):
+            _start_prodigi_dispatch_load(selected_log_view, active_log_search, 50, force=bool(log_search_submitted))
+        if st.session_state.get(PRODIGI_DISPATCH_FUTURE_KEY) is not None:
+            _render_prodigi_loading_fragment()
+            _prodigi_log_timing("page shell", page_started, f"view={selected_log_view} state=loading")
+            return
+        table_rows = list(st.session_state.get(PRODIGI_DISPATCH_ROWS_KEY) or [])
+        load_error = str(st.session_state.get(PRODIGI_DISPATCH_ERROR_KEY) or "")
+        if load_error:
+            st.error("Prodigi orders could not be loaded. Please retry.")
+            if st.button("Retry", key="prodigi-dispatch-load-retry", use_container_width=False):
+                _start_prodigi_dispatch_load(selected_log_view, active_log_search, 50, force=True)
+                st.rerun()
+            if not table_rows:
+                _prodigi_log_timing("page render", page_started, f"view={selected_log_view} state=error")
+                return
     else:
-        st.info("No dispatch rows saved yet.")
+        # Lightweight compatibility path for tests and environments without
+        # Streamlit fragments. The backend read remains bounded to 50 rows.
+        table_rows = prodigi_load_dispatch_rows(selected_log_view, active_log_search, limit=50)
+    records = _render_prodigi_dispatch_result(table_rows)
+    _prodigi_log_timing("dispatch table render", log_started, f"view={selected_log_view} rows={len(records)}")
     _prodigi_log_timing("page render", page_started)
 
 

@@ -127,6 +127,7 @@ class EditionOpsUiTests(unittest.TestCase):
         prodigi_page = source[
             source.index("def render_prodigi_page():") : source.index("\n\ndef fetch_latest_shopify_products")
         ]
+        prodigi_page += inspect.getsource(os_pages._render_prodigi_dispatch_result)
 
         self.assertIn("Prodigi Dispatch Log", prodigi_page)
         self.assertIn("Search an order, confirm the Prodigi checks, then save it to the dispatch log.", prodigi_page)
@@ -2513,7 +2514,7 @@ class EditionOpsUiTests(unittest.TestCase):
         ), patch.object(orders_page.order_allocator, "load_orders_snapshot", return_value=None):
             orders_page._load_snapshot_once()
 
-        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [])
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [{"order": "#old"}])
         self.assertEqual(fake_st.session_state[orders_page.META_KEY]["source"], "supabase_error")
         self.assertIn("connection dropped", fake_st.session_state[orders_page.META_KEY]["error"])
         self.assertIn("connection dropped", fake_st.session_state[orders_page.LOAD_ERROR_KEY])
@@ -4208,7 +4209,7 @@ class OrdersDatabaseReadRepairTests(unittest.TestCase):
         ):
             orders_page._load_snapshot_once(force=True)
 
-        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [])
+        self.assertEqual(fake_st.session_state[orders_page.ROWS_KEY], [{"order": "#stale"}])
         diagnostic = fake_st.session_state[orders_page.META_KEY]["database_read"]
         self.assertEqual(diagnostic["exception_class"], "UndefinedColumn")
         self.assertEqual(diagnostic["operation"], "orders.latest_50.base")
