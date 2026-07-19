@@ -1,6 +1,11 @@
+import hashlib
+import html
+import json
 import re
+from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 CATEGORY_OPTIONS = [
@@ -32,6 +37,9 @@ CAMPAIGN_TYPE_OPTIONS = [
     "Instant Experience",
     "Single Image / Video",
 ]
+
+EDITION_OPS_SNAPSHOT_PATH = Path(__file__).resolve().parent / "output" / "_cache" / "edition_ops_products_snapshot.json"
+EDITION_OPS_ROWS_SESSION_KEY = "edition_ops_rows"
 
 CAROUSEL_CARD_MAX_CHARACTERS = 13
 CAROUSEL_CARD_COUNT = 5
@@ -216,6 +224,107 @@ def _clean_product_name(product_name):
 
 def _clean_product_url(product_url):
     return re.sub(r"[\x00-\x20\x7f]", "", product_url or "").strip()
+
+
+def _normalise_option_label(value):
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _product_name_from_edition_ops_row(row):
+    if not isinstance(row, dict):
+        return ""
+    return _normalise_option_label(
+        row.get("product_title")
+        or row.get("Product title")
+        or row.get("edition_name")
+        or row.get("product_name")
+        or row.get("title")
+        or row.get("name")
+    )
+
+
+def _edition_ops_rows_from_local_snapshot(snapshot_path=EDITION_OPS_SNAPSHOT_PATH):
+    snapshot_path = Path(snapshot_path)
+    if not snapshot_path.exists():
+        return []
+    try:
+        payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return []
+    rows = payload.get("rows") if isinstance(payload, dict) else []
+    return rows if isinstance(rows, list) else []
+
+
+def load_edition_ops_product_name_options(snapshot_path=EDITION_OPS_SNAPSHOT_PATH):
+    rows = []
+    session_rows = st.session_state.get(EDITION_OPS_ROWS_SESSION_KEY, [])
+    if isinstance(session_rows, list):
+        rows.extend(session_rows)
+    rows.extend(_edition_ops_rows_from_local_snapshot(snapshot_path))
+
+    options = []
+    seen = set()
+    for row in rows:
+        product_name = _product_name_from_edition_ops_row(row)
+        key = product_name.casefold()
+        if product_name and key not in seen:
+            options.append(product_name)
+            seen.add(key)
+    return options
+
+
+def render_prompt_copy_button(prompt_text, key, label="Copy Prompt"):
+    prompt_text_json = json.dumps(str(prompt_text or ""))
+    safe_label = html.escape(label)
+    button_id = f"ads-copy-prompt-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
+    components.html(
+        f"""
+        <div style="padding:2px 0;">
+          <button
+            id="{button_id}"
+            type="button"
+            style="width:100%;border:1px solid rgba(11,11,13,0.55);border-radius:14px;padding:12px 14px;background:#FFFFFF;color:#0B0B0D;font-weight:700;font-size:0.95rem;cursor:pointer;box-sizing:border-box;"
+          >
+            {safe_label}
+          </button>
+        </div>
+        <script>
+        (() => {{
+          const button = document.getElementById("{button_id}");
+          const promptText = {prompt_text_json};
+          const originalLabel = button.innerText;
+
+          async function copyPrompt(event) {{
+            event.preventDefault();
+            try {{
+              if (navigator.clipboard && window.isSecureContext) {{
+                await navigator.clipboard.writeText(promptText);
+              }} else {{
+                const textarea = document.createElement("textarea");
+                textarea.value = promptText;
+                textarea.style.position = "fixed";
+                textarea.style.opacity = "0";
+                document.body.appendChild(textarea);
+                textarea.focus();
+                textarea.select();
+                document.execCommand("copy");
+                document.body.removeChild(textarea);
+              }}
+              button.innerText = "Prompt copied";
+            }} catch (error) {{
+              button.innerText = "Copy failed";
+            }}
+            setTimeout(() => {{
+              button.innerText = originalLabel;
+            }}, 1400);
+          }}
+
+          button.addEventListener("click", copyPrompt);
+        }})();
+        </script>
+        """,
+        height=64,
+    )
 
 
 def validate_ads_inputs(product_name, category, country, campaign_type, product_url=""):
@@ -1460,10 +1569,27 @@ def render_meta_url_parameters_section(section_number):
     st.code(META_AD_URL_PARAMETERS, language="text")
 
 
+def render_product_name_input():
+    product_options = load_edition_ops_product_name_options()
+    if product_options:
+        return st.selectbox(
+            "Product name",
+            options=product_options,
+            index=None,
+            placeholder="Example: Six Laps Ahead",
+            accept_new_options=True,
+            filter_mode="fuzzy",
+        )
+    return st.text_input("Product name", placeholder="Example: Six Laps Ahead")
+
+
 def render_supported_result(product_name, category, country, campaign_type, product_url=""):
     if get_template_key(category, campaign_type) == "baseball_instant_experience":
         st.subheader("1. Copy this ChatGPT prompt")
-        st.code(build_ads_prompt(product_name, category, country, campaign_type, product_url=product_url), language="text")
+        render_prompt_copy_button(
+            build_ads_prompt(product_name, category, country, campaign_type, product_url=product_url),
+            f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
+        )
 
         st.subheader("2. Build it in Meta")
         st.caption("Follow the INSTANT EXPERIENCE SETUP section inside the generated prompt.")
@@ -1477,7 +1603,10 @@ def render_supported_result(product_name, category, country, campaign_type, prod
     st.caption("Upload them to Meta in this exact order before adding the carousel copy.")
 
     st.subheader("2. Copy this ChatGPT prompt")
-    st.code(build_ads_prompt(product_name, category, country, campaign_type, product_url=product_url), language="text")
+    render_prompt_copy_button(
+        build_ads_prompt(product_name, category, country, campaign_type, product_url=product_url),
+        f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
+    )
 
     st.subheader("3. Build it in Meta")
     for index, step in enumerate(META_BUILD_ORDER, start=1):
@@ -1507,7 +1636,7 @@ def render_page():
         )
 
     with st.form("ads-builder-form"):
-        product_name = st.text_input("Product name", placeholder="Example: Six Laps Ahead")
+        product_name = render_product_name_input()
         category_col, country_col, campaign_col = st.columns(3)
         with category_col:
             category = st.selectbox("Category", CATEGORY_OPTIONS)

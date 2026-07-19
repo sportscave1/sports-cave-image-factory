@@ -1,5 +1,7 @@
 import importlib
+import json
 from pathlib import Path
+import tempfile
 import unittest
 
 from streamlit.testing.v1 import AppTest
@@ -15,6 +17,31 @@ def run_ads_page():
     app_test.session_state["selected_page"] = "Ads"
     app_test.session_state["startup_shell_loaded"] = True
     return app_test.run(timeout=20)
+
+
+def set_product_name(app_test, value):
+    for text_input in app_test.text_input:
+        if text_input.label == "Product name":
+            text_input.set_value(value)
+            return
+    for selectbox in app_test.selectbox:
+        if selectbox.label == "Product name":
+            if getattr(selectbox, "options", None) and value not in selectbox.options:
+                selectbox.select(selectbox.options[0])
+            elif value in getattr(selectbox, "options", ()):
+                selectbox.select(value)
+            else:
+                selectbox.set_value(value)
+            return
+    raise AssertionError("Product name widget was not rendered.")
+
+
+def select_option(app_test, label, value):
+    for selectbox in app_test.selectbox:
+        if selectbox.label == label:
+            selectbox.select(value)
+            return
+    raise AssertionError(f"{label} selectbox was not rendered.")
 
 
 class AdsPageTests(unittest.TestCase):
@@ -626,12 +653,62 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("NEUTRAL INTERNATIONAL ENGLISH", guidance)
         self.assertIn("Do not silently treat unknown countries as American English", guidance)
 
+    def test_edition_ops_product_names_load_from_local_snapshot_without_sync(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "edition_ops_products_snapshot.json"
+            snapshot_path.write_text(
+                json.dumps(
+                    {
+                        "rows": [
+                            {"product_title": "Peter Brock Six Laps Ahead"},
+                            {"Product title": "Shohei Ohtani 50/50"},
+                            {"title": "Fallback Title"},
+                            {"product_title": "peter brock six laps ahead"},
+                            {"online_store_url": "https://example.com/products/no-title"},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            names = ads_page.load_edition_ops_product_name_options(snapshot_path)
+
+        self.assertEqual(
+            names,
+            [
+                "Peter Brock Six Laps Ahead",
+                "Shohei Ohtani 50/50",
+                "Fallback Title",
+            ],
+        )
+
+    def test_ads_product_name_input_uses_searchable_edition_ops_options_when_available(self):
+        source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
+
+        self.assertIn("def render_product_name_input", source)
+        self.assertIn("load_edition_ops_product_name_options()", source)
+        self.assertIn('st.selectbox(\n            "Product name"', source)
+        self.assertIn("accept_new_options=True", source)
+        self.assertIn('filter_mode="fuzzy"', source)
+        self.assertIn("EDITION_OPS_SNAPSHOT_PATH", source)
+        self.assertNotIn("import edition_ops", source)
+
+    def test_supported_prompt_uses_copy_button_instead_of_visible_prompt_code(self):
+        source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
+        supported_result_source = source[source.index("def render_supported_result") : source.index("def render_page")]
+
+        self.assertIn("def render_prompt_copy_button", source)
+        self.assertIn("components.html", source)
+        self.assertIn("navigator.clipboard.writeText(promptText)", source)
+        self.assertIn("render_prompt_copy_button(", supported_result_source)
+        self.assertNotIn("st.code(build_ads_prompt", supported_result_source)
+
     def test_submit_supported_result_renders_compact_sections_with_url_parameters(self):
         app_test = run_ads_page()
-        app_test.text_input[0].set_value("Six Laps Ahead")
-        app_test.selectbox[0].select("Motorsport")
-        app_test.selectbox[1].select("Canada")
-        app_test.selectbox[2].select("Carousel")
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Canada")
+        select_option(app_test, "Campaign type", "Carousel")
         app_test.button[0].click().run(timeout=20)
 
         self.assertEqual(
@@ -643,19 +720,18 @@ PRIMARY TEXT VARIATIONS
                 "4. URL parameters",
             ],
         )
-        self.assertEqual(len(app_test.code), 2)
-        self.assertIn("Product name: Six Laps Ahead", app_test.code[0].value)
-        self.assertIn("Market: Canada", app_test.code[0].value)
-        self.assertIn(ads_page.META_AD_URL_PARAMETERS, app_test.code[0].value)
-        self.assertEqual(app_test.code[1].value, ads_page.META_AD_URL_PARAMETERS)
+        self.assertEqual(len(app_test.code), 1)
+        self.assertEqual(app_test.code[0].value, ads_page.META_AD_URL_PARAMETERS)
+        self.assertFalse(any("Product name: Six Laps Ahead" in code.value for code in app_test.code))
+        self.assertFalse(any("Market: Canada" in code.value for code in app_test.code))
         self.assertEqual(len(app_test.exception), 0)
 
     def test_submit_unsupported_result_renders_insufficient_winner_data(self):
         app_test = run_ads_page()
-        app_test.text_input[0].set_value("Six Laps Ahead")
-        app_test.selectbox[0].select("Motorsport")
-        app_test.selectbox[1].select("Australia")
-        app_test.selectbox[2].select("Instant Experience")
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Instant Experience")
         app_test.button[0].click().run(timeout=20)
 
         self.assertIn("Insufficient winner data", [subheader.value for subheader in app_test.subheader])
