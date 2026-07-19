@@ -233,6 +233,14 @@ def get_prompt(prompt_id, default_text, **kwargs):
     return load_prompt(prompt_id, default_text, **kwargs).get("text") or ""
 
 
+def get_cached_prompt(prompt_id, default_text=""):
+    """Return a runtime-saved prompt or its default without external reads."""
+    runtime_record = _runtime_saved_record(prompt_id)
+    if runtime_record:
+        return runtime_record.get("text") or str(default_text or "")
+    return str(default_text or "")
+
+
 def get_prompt_source(prompt_id, default_text="", **kwargs):
     return load_prompt(prompt_id, default_text, **kwargs)
 

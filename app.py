@@ -3409,6 +3409,7 @@ def normalize_generation_result(result):
         "black_framed_jpg_path": None,
         "prompt_dir": None,
         "prompt_paths": [],
+        "final_prompt_items": [],
         "review_paths": [],
         "webp_paths": [],
         "jpg_paths": [],
@@ -4276,6 +4277,7 @@ def ensure_lifestyle_prompts(result):
         result["product_slug"],
         Path(result["run_dir"]),
         Path(result["black_framed_webp_path"]),
+        prompt_items=result.get("final_prompt_items") or None,
     )
     result["prompt_dir"] = str(prompt_dir)
     result["prompt_paths"] = [str(prompt_path) for prompt_path in prompt_paths]
@@ -4327,6 +4329,7 @@ def build_lifestyle_prompt_pack(result):
         result["product_slug"],
         run_dir,
         Path(result["black_framed_webp_path"]),
+        prompt_items=result.get("final_prompt_items") or None,
     )
 
     result["prompt_dir"] = prompt_dir
@@ -4886,6 +4889,27 @@ def render_sidebar():
             st.rerun()
 
 
+def build_mockup_final_prompt_items(product_name, sport_category):
+    return get_image_factory().build_lifestyle_prompt_items(
+        product_name,
+        sport_category,
+        labels_by_filename=PROMPT_LABELS,
+        local_only=True,
+    )
+
+
+def render_mockup_prompt_preview(final_prompt_items):
+    with st.expander("Preview All Image Prompts", expanded=False):
+        st.caption("These are the exact prompts that will be used for this generation.")
+        if not final_prompt_items:
+            st.caption("Upload artwork and complete the product name and sport category to preview all prompts.")
+            return
+
+        for prompt_item in final_prompt_items:
+            st.markdown(f"**{prompt_item['label']}**")
+            st.code(prompt_item["prompt"], language=None)
+
+
 def render_mockups_page():
     get_image_factory()
     log_app_memory("Page load: Mockups")
@@ -4955,7 +4979,18 @@ def render_mockups_page():
             placeholder="Example: Formula 1",
         )
 
+    sport_category = get_sport_category(sport_option, custom_sport)
+    final_prompt_items = []
+    if (
+        uploaded_file is not None
+        and not upload_validation_error
+        and product_name.strip()
+        and sport_category
+    ):
+        final_prompt_items = build_mockup_final_prompt_items(product_name, sport_category)
+
     st.subheader("2. Generate Core Shopify Images")
+    render_mockup_prompt_preview(final_prompt_items)
     generate_clicked = st.button("Generate Core Shopify Images", type="primary")
 
     if uploaded_file is not None:
@@ -4993,8 +5028,6 @@ def render_mockups_page():
                 st.caption("Lightweight preview unavailable until the upload is processed.")
 
     if generate_clicked:
-        sport_category = get_sport_category(sport_option, custom_sport)
-
         temp_artwork_path = None
         status_container = st.empty()
         progress_bar = st.progress(0)
@@ -5039,6 +5072,7 @@ def render_mockups_page():
                 artwork_file_path=temp_artwork_path,
                 base_dir=BASE_DIR,
                 status_callback=lambda msg, progress=None: update_status(msg, progress),
+                final_prompt_items=final_prompt_items,
             )
 
             update_status("Creating downloads...", 92)

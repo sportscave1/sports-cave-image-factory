@@ -1877,14 +1877,15 @@ def is_reels_prompt_filename(prompt_filename):
     return Path(prompt_filename).name in REELS_PROMPT_FILENAMES
 
 
-def get_lifestyle_prompt_text(prompt_filename, default_text):
+def get_lifestyle_prompt_text(prompt_filename, default_text, *, local_only=False):
     prompt_filename = Path(prompt_filename).name
     prompt_id = f"lifestyle::{prompt_key_from_prompt_filename(prompt_filename)}"
     legacy_prompt_id = f"lifestyle::{prompt_filename}"
-    prompt_text = prompt_store.get_prompt(prompt_id, "")
+    prompt_loader = prompt_store.get_cached_prompt if local_only else prompt_store.get_prompt
+    prompt_text = prompt_loader(prompt_id, "")
     if prompt_text.strip():
         return prompt_text
-    return prompt_store.get_prompt(legacy_prompt_id, default_text)
+    return prompt_loader(legacy_prompt_id, default_text)
 
 
 def get_prompt_group(prompt_filename):
@@ -1926,18 +1927,22 @@ def get_asset_zip_folder(file_path):
     return "WEBP"
 
 
-def generate_lifestyle_prompt_pack(product_name, sport_category, product_slug, run_dir, black_framed_webp_path):
-    prompt_dir = run_dir / PROMPTS_FOLDER_NAME
-    prompt_dir.mkdir(parents=True, exist_ok=True)
+def build_lifestyle_prompt_items(
+    product_name,
+    sport_category,
+    *,
+    labels_by_filename=None,
+    local_only=False,
+):
+    labels_by_filename = labels_by_filename or {}
+    prompt_items = []
 
-    reference_image_path = prompt_dir / LIFESTYLE_REFERENCE_FILE_NAME
-    shutil.copy2(black_framed_webp_path, reference_image_path)
-
-    prompt_paths = []
-
-    for filename, _, prompt_body in LIFESTYLE_PROMPT_SPECS:
-        prompt_path = prompt_dir / filename
-        prompt_body = get_lifestyle_prompt_text(filename, prompt_body)
+    for filename, title, prompt_body in LIFESTYLE_PROMPT_SPECS:
+        prompt_body = get_lifestyle_prompt_text(
+            filename,
+            prompt_body,
+            local_only=local_only,
+        )
         if is_reels_prompt_filename(filename):
             prompt_text = prompt_body.strip()
         else:
@@ -1955,6 +1960,43 @@ def generate_lifestyle_prompt_pack(product_name, sport_category, product_slug, r
             include_human=prompt_includes_human_scene(prompt_text),
             include_video=is_reels_prompt_filename(filename),
         )
+        prompt_items.append(
+            {
+                "key": prompt_key_from_prompt_filename(filename),
+                "filename": filename,
+                "label": labels_by_filename.get(filename, title),
+                "prompt": prompt_text,
+            }
+        )
+
+    return prompt_items
+
+
+def generate_lifestyle_prompt_pack(
+    product_name,
+    sport_category,
+    product_slug,
+    run_dir,
+    black_framed_webp_path,
+    prompt_items=None,
+):
+    prompt_dir = run_dir / PROMPTS_FOLDER_NAME
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+
+    reference_image_path = prompt_dir / LIFESTYLE_REFERENCE_FILE_NAME
+    shutil.copy2(black_framed_webp_path, reference_image_path)
+
+    prompt_paths = []
+    final_prompt_items = (
+        [dict(item) for item in prompt_items]
+        if prompt_items is not None
+        else build_lifestyle_prompt_items(product_name, sport_category)
+    )
+
+    for prompt_item in final_prompt_items:
+        filename = Path(prompt_item["filename"]).name
+        prompt_text = str(prompt_item["prompt"])
+        prompt_path = prompt_dir / filename
         prompt_path.write_text(prompt_text + "\n", encoding="utf-8")
         prompt_paths.append(prompt_path)
 
@@ -2110,7 +2152,14 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
 # MAIN BACKEND FUNCTION
 # -----------------------------------
 
-def generate_product_images(product_name, sport_category, artwork_file_path, base_dir=None, status_callback=None):
+def generate_product_images(
+    product_name,
+    sport_category,
+    artwork_file_path,
+    base_dir=None,
+    status_callback=None,
+    final_prompt_items=None,
+):
     def report(message, progress=None):
         if callable(status_callback):
             try:
@@ -2359,6 +2408,7 @@ def generate_product_images(product_name, sport_category, artwork_file_path, bas
         "prompt_dir": prompt_dir,
         "prompt_paths": prompt_paths,
         "prompt_zip_path": prompt_zip_path,
+        "final_prompt_items": [dict(item) for item in (final_prompt_items or [])],
         "assets": assets,
         "lifestyle_mockup_paths": {},
         "lifestyle_pack_error": lifestyle_pack_error,
