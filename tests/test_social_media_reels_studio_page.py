@@ -66,12 +66,13 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertIn("get_social_media_reels_studio_page().render_page(", source)
         self.assertIn("developer_password=DEVELOPER_PAGE_PASSWORD", source)
 
-    def test_marketing_factory_route_does_not_import_legacy_page_bundle(self):
+    def test_ads_route_does_not_import_legacy_marketing_factory_page_bundle(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         route_source = source[source.index("def render_selected_page") : source.index("def main")]
 
-        self.assertIn('elif current_page == "Marketing Factory":', route_source)
-        self.assertIn("get_marketing_factory_page().render_page()", route_source)
+        self.assertIn('elif current_page in {"Ads", "Marketing Factory"}:', route_source)
+        self.assertIn("get_ads_page().render_page()", route_source)
+        self.assertNotIn("get_marketing_factory_page().render_page()", route_source)
         self.assertNotIn("os_route_pages().render_marketing_factory_page()", route_source)
 
     def test_top_level_page_errors_keep_technical_details_developer_only(self):
