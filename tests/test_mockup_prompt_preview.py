@@ -659,10 +659,19 @@ class MockupPromptPreviewTests(unittest.TestCase):
     def test_image_factory_import_is_reloaded_when_prompt_specs_change(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         get_image_factory_source = source[source.index("def get_image_factory") : source.index("\n\ndef get_os_pages")]
+        import_branch_source = get_image_factory_source[
+            get_image_factory_source.index("if image_factory is None:") : get_image_factory_source.index("return image_factory")
+        ]
+        reload_branch_source = get_image_factory_source[
+            get_image_factory_source.index('if getattr(image_factory, "__sports_cave_loaded_mtime__", None)')
+            : get_image_factory_source.index("return image_factory")
+        ]
 
         self.assertIn("__sports_cave_loaded_mtime__", get_image_factory_source)
         self.assertIn("image_factory.py", get_image_factory_source)
         self.assertIn("importlib.reload(image_factory)", get_image_factory_source)
+        self.assertIn("importlib.import_module", import_branch_source)
+        self.assertIn("importlib.reload(image_factory)", reload_branch_source)
 
     def test_prompt_card_upload_auto_registers_for_zip_without_add_to_zip_click(self):
         with tempfile.TemporaryDirectory() as tmpdir:
