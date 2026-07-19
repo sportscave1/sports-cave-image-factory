@@ -272,58 +272,58 @@ GENERIC FILLER TO REJECT UNLESS CLEARLY MODIFIED BY PRODUCT-SPECIFIC IDENTITY
 
 
 def build_carousel_card_copy_rules():
-    return f"""Headline rules:
+    return """CAROUSEL MOBILE-SAFE LENGTH RULES
 
-- Maximum {CAROUSEL_CARD_MAX_CHARACTERS} characters including spaces.
-- Aim for one to three short words.
-- Must be clear on mobile.
-- Do not use commas.
-- Do not use full stops.
-- No emojis.
-- No all-capital shouting.
-- Do not repeat another card headline.
-- Do not repeat the product title on every card.
-- Do not repeat Limited Edition on every card.
-- Do not use generic filler.
+Each carousel headline and description must:
 
-Description rules:
+- Target 8 to 12 characters including spaces.
+- Have a hard maximum of 13 characters including spaces.
+- Use one to three short words.
+- Use complete words only.
+- Never cut or abbreviate a word merely to fit.
+- Never use an ellipsis.
+- Never depend on Meta automatically shortening the text.
+- Never contain a comma or full stop.
+- Remain readable beside the Meta Shop Now button on narrow mobile carousel cards.
 
-- Maximum {CAROUSEL_CARD_MAX_CHARACTERS} characters including spaces.
-- Aim for one to three short words.
-- Must support rather than repeat the headline.
-- Do not use commas.
-- Do not use full stops.
-- No emojis.
-- Do not repeat another card description.
-- Do not use generic filler."""
+A 13-character field is permitted when it is a strong essential product anchor such as:
+- Bathurst 1979
+- Bathurst Pride
+- Only 100 Made
+- No Second Run
+
+Do not exceed 13 characters under any circumstances.
+
+Before returning the result:
+
+1. Count every character including spaces.
+2. Reject and rewrite every field above 13 characters.
+3. Reject and rewrite every field containing an incomplete or shortened word.
+4. Prefer 12 characters or fewer whenever the meaning remains strong.
+5. Confirm that every field can appear as complete text without Meta truncating it."""
 
 
 def build_carousel_final_quality_check(include_primary_text_variations=False):
     primary_text_line = "- Exactly five primary-text variations where required."
     if include_primary_text_variations:
         primary_text_line = "- Exactly five primary-text variations."
-    return f"""Before answering count every headline and description including spaces. Rewrite any carousel field that exceeds {CAROUSEL_CARD_MAX_CHARACTERS} characters or contains a comma or full stop.
+    return """Before returning the result count every carousel headline and description including spaces. Reject and rewrite every field above 13 characters, every field with an incomplete or shortened word, and every field containing an ellipsis, comma or full stop.
 
 Final quality check before answering:
 
 - Exactly five carousel cards.
-{primary_text_line}
-- Every carousel headline is {CAROUSEL_CARD_MAX_CHARACTERS} characters or fewer including spaces.
-- Every carousel description is {CAROUSEL_CARD_MAX_CHARACTERS} characters or fewer including spaces.
-- No carousel headline contains a comma.
-- No carousel headline contains a full stop.
-- No carousel description contains a comma.
-- No carousel description contains a full stop.
+- Every headline is 13 characters or fewer including spaces.
+- Every description is 13 characters or fewer including spaces.
+- Target length is 8 to 12 characters.
+- No incomplete words.
+- No ellipses.
+- No commas.
+- No full stops.
 - No duplicate carousel headlines.
 - No duplicate carousel descriptions.
-- No generic filler.
 - At least four card pairs include a product-specific anchor.
-- Every card pair is specific enough that it cannot be copied unchanged onto unrelated sports artwork.
-- The cards flow as one connected story progression.
-- Card 5 uses real scarcity only.
-- The five primary texts use different selling angles.
-- No unsupported facts have been invented.
-- If any check fails, rewrite the invalid carousel fields before answering."""
+- Every card remains understandable when viewed by itself.
+- All five cards form one connected story."""
 
 
 def apply_campaign_copy_rule_blocks(prompt, campaign_type, include_primary_text_variations=False, category=None):
@@ -435,68 +435,264 @@ Position it for a man cave, collector wall, office, garage or home bar without m
 Card 5 — Scarcity
 Use the real numbered-edition fact: only 100 editions. Make the ending controlled, credible and premium.
 
-PRIMARY TEXT
+PRIMARY TEXT VARIATIONS
 
 Create exactly five genuinely different Meta primary-text variations.
 
-Do not create five minor rewrites of the same advertisement.
+The five variations must be equal in quality.
 
-Variation 1 — Short cinematic hook
+Do not use one strong advertisement followed by weaker filler variations.
+
+Silently develop several candidates for every angle. Score them for:
+
+- immediate stopping power
+- Australian motorsport nostalgia
+- product specificity
+- emotional recognition
+- collector desire
+- credible scarcity
+- natural human writing
+
+Only return variations that would score at least 9 out of 10 across those criteria.
+
+If one variation feels weaker than the others, rewrite it before returning the final output.
+
+CORE AUSTRALIAN MOTORSPORT EMOTION
+
+Write specifically for Australian motorsport fans who remember the people, machines, circuits and eras represented by the supplied product.
+
+The copy should feel written by someone who understands why Bathurst, the Mountain, the noise, the pressure, the rivalry and the old racing eras still matter.
+
+Only use those cues when supported by the supplied product name, artwork or visible text.
+
+Favour:
+
+- the Mountain
+- Bathurst memory
+- the roar and pressure of the race
+- the driver and machine
+- Australian racing identity
+- the era fans grew up watching
+- the feeling of remembering exactly what the title means
+- pride in displaying that memory
+- the finality of a numbered edition
+
+Avoid generic sports language that could be pasted onto another artwork.
+
+IMMEDIATE HOOK RULE
+
+The first sentence or fragment of every variation must immediately use a product-specific memory anchor.
+
+Suitable anchors include:
+
+- supplied driver name
+- artwork title
+- confirmed circuit
+- confirmed year
+- confirmed rivalry
+- confirmed vehicle or team identity
+- a phrase clearly tied to the supplied product
+
+Do not begin with generic statements such as:
+
+- Some walls carry decoration
+- This is for sports fans
+- History deserves a frame
+- A collector piece for your wall
+- This legend needs no introduction
+- This product does not need hype
+- Celebrate the passion
+- Own a piece of greatness
+
+The first line must make the correct motorsport fan stop before the Meta See More cut.
+
+REAL SCARCITY IN EVERY VARIATION
+
+All five primary-text variations must include the real scarcity naturally.
+
+For Sports Cave numbered releases, communicate:
+
+- only 100 numbered editions
+- no second run
+
+Do not repeat the exact same scarcity sentence five times.
+
+Vary the expression while keeping the fact unmistakable.
+
+Examples of acceptable approaches:
+
+- Limited to 100 numbered editions with no second run.
+- Once the 100 editions are claimed this release is finished.
+- One hundred numbers only and this series will not return.
+- The run ends at 100 with no second release.
+- Only 100 collectors will secure an edition.
+
+Do not use fake countdowns, false stock claims or unsupported urgency.
+
+The scarcity must feel controlled, final and collector-focused rather than cheap or desperate.
+
+PRODUCT-SPECIFICITY RULE
+
+Every variation must contain at least two different product-specific anchors.
+
+At least three variations must include a product-specific anchor within the first eight words.
+
+Do not repeatedly force the entire product title into every variation.
+
+Use different pieces of the supplied identity across the five versions.
+
+Every variation must fail this test:
+
+Could this copy be pasted unchanged onto unrelated football, cricket, basketball or boxing artwork?
+
+If yes, rewrite it.
+
+FIVE DISTINCT HIGH-STRENGTH ANGLES
+
+Variation 1 — Short Cinematic
+
 - Approximately 25 to 45 words.
-- Begin with a memorable, product-specific line.
-- Strong enough to work before “See more.”
-- Focus on nostalgia and the moment.
+- Open with the artwork title, driver, circuit or defining moment.
+- Recreate the memory in sharp cinematic fragments.
+- Focus on the instant emotional hit.
+- Finish with concise edition scarcity.
+- Every sentence must earn its place.
 
-Variation 2 — Fan identity
-- Approximately 60 to 100 words.
-- Speak directly to the correct supporter, driver fan, team fan, rivalry fan or motorsport generation.
-- Make the reader feel recognised.
+Variation 2 — Fan Recognition
 
-Variation 3 — Story and legacy
+- Approximately 60 to 95 words.
+- Speak directly to the Australian fan who remembers the era.
+- Make the reader feel recognised rather than marketed to.
+- Use specific motorsport atmosphere and identity.
+- Connect the memory to the framed collector artwork.
+- Finish with only 100 numbered editions and no second run.
+
+Variation 3 — Race Memory And Legacy
+
+- Approximately 70 to 105 words.
+- Build around the confirmed race, circuit, year, rivalry, driver or machine.
+- Use sensory race language without inventing historical details.
+- Explain why this exact moment or era still carries emotional weight.
+- Transition naturally into ownership.
+- Include controlled scarcity before the final sentence.
+
+Variation 4 — Collector Pride And Display
+
 - Approximately 70 to 110 words.
-- Explain why the subject, race, rivalry, car or era is still remembered.
-- Transition naturally into the framed collector piece.
+- Begin with the supplied driver, race, title or circuit rather than a generic statement about walls.
+- Sell identity and pride before mentioning the room.
+- Position the artwork as something that belongs in a serious collector’s office, garage, home bar, man cave or display wall.
+- Do not turn this into generic interior-decor copy.
+- Make the numbered plaque and edition limit part of the collector meaning.
+- Finish with a strong no-second-run line.
 
-Variation 4 — Collector and wall ownership
-- Approximately 80 to 120 words.
-- Position the artwork as the centrepiece of a man cave, office, garage, collector wall or home bar.
-- Include concise product proof only where confirmed.
+Variation 5 — Numbered Finality
 
-Variation 5 — Numbered scarcity
-- Approximately 60 to 100 words.
-- Lead with emotional relevance rather than fake urgency.
-- Close with only 100 numbered editions and no second run.
-- Keep the scarcity credible and controlled.
+- Approximately 60 to 95 words.
+- Lead with emotional relevance rather than marketing language.
+- Make the edition limit feel permanent and meaningful.
+- Clearly state that only 100 numbered editions exist and there is no second run.
+- End with a controlled collector CTA such as secure your number, claim your edition or choose your number while the run remains open.
+- Do not use desperate or bargain-store urgency.
 
-PRIMARY-TEXT RULES
+EQUAL-STRENGTH RULE
 
-Every variation must:
+Each variation must have:
 
-- Have a strong first one or two lines before the Meta “See more” cut.
-- Relate specifically to this product.
-- Sound like it was written by someone who understands the fan.
-- Use concrete motorsport language rather than generic hype.
-- Position the product as premium and wall-worthy.
-- Mention the numbered edition naturally where appropriate.
-- Avoid emojis.
-- Avoid hashtags.
-- Avoid fake quotations.
-- Avoid all-capital shouting.
-- Avoid “buy now before it is too late.”
-- Avoid “the ultimate collector’s item.”
-- Avoid generic AI phrases such as “celebrate the passion.”
-- Avoid unsupported claims.
-- Avoid describing the product as merely a poster.
-- Avoid using the same opening hook twice.
+- a product-specific opening
+- an emotional motorsport memory
+- a reason the artwork matters to a genuine fan
+- premium collector positioning
+- real edition scarcity
+- a clear final action or sense of finality
 
-Sports Cave tone:
+No variation may exist merely to fill an angle.
 
-- “Greatness doesn’t fade. It gets framed.”
-- “Legends never die.”
-- premium rather than cheap
-- emotional rather than exaggerated
-- scarcity based on a real edition of 100
-- written for collectors, not impulse décor shoppers
+Variation 4 must be as emotionally powerful as Variations 1 and 2.
+
+Variation 5 must still contain nostalgia and cannot consist only of scarcity language.
+
+STYLE RULES
+
+Write like an Australian motorsport fan speaking to another fan.
+
+The tone must be:
+
+- nostalgic
+- masculine
+- direct
+- premium
+- collector-driven
+- emotionally controlled
+- specific to the artwork
+
+Use short paragraphs and occasional fragments.
+
+Avoid long polished explanations.
+
+Avoid repeatedly using:
+
+- premium collector piece
+- displayed with pride
+- powerful composition
+- the weight it deserves
+- more than décor
+- defines the space
+- centrepiece
+- iconic
+- legendary
+
+These phrases may only appear when made unmistakably specific to the supplied product.
+
+Do not use:
+
+- emojis
+- hashtags
+- fake quotations
+- unsupported historical facts
+- fake stock counts
+- fake customer numbers
+- manufacturing claims
+- delivery promises
+- all-capital shouting
+- generic AI language
+- cheap urgency
+- buy now before it is too late
+- the ultimate collector’s item
+
+SPORTS CAVE BRAND FEEL
+
+The writing should carry the spirit of:
+
+- Greatness doesn’t fade. It gets framed.
+- Legends never die.
+- Only 100 editions.
+- No second run.
+
+Do not force those exact lines into every advertisement.
+
+Use their emotional direction while keeping each variation original.
+
+FINAL PRIMARY-TEXT QUALITY CHECK
+
+Before returning the result confirm:
+
+- Exactly five primary-text variations.
+- All five use different opening hooks.
+- All five use meaningfully different selling angles.
+- All five open with product-specific identity or memory.
+- All five contain at least two product-specific anchors.
+- All five include the real edition of 100.
+- All five communicate no second run.
+- All five trigger Australian motorsport nostalgia.
+- All five are equally strong.
+- No variation begins with generic wall-art language.
+- No variation becomes an interior-design advertisement.
+- No unsupported facts have been invented.
+- No two variations feel like minor rewrites of one another.
+
+Keep the current output format exactly unchanged.
+Do not add scoring notes or internal quality commentary to the generated customer-facing result.
 
 VERIFIED PRODUCT POSITIONING
 

@@ -82,9 +82,11 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Category: Motorsport", prompt)
         self.assertIn("Market: UK", prompt)
         self.assertIn("Campaign type: Carousel", prompt)
-        self.assertIn("Maximum 17 characters including spaces.", prompt)
-        self.assertIn("Every carousel headline is 17 characters or fewer including spaces.", prompt)
-        self.assertIn("Every carousel description is 17 characters or fewer including spaces.", prompt)
+        self.assertIn("Target 8 to 12 characters including spaces.", prompt)
+        self.assertIn("Have a hard maximum of 13 characters including spaces.", prompt)
+        self.assertIn("Every headline is 13 characters or fewer including spaces.", prompt)
+        self.assertIn("Every description is 13 characters or fewer including spaces.", prompt)
+        self.assertNotIn("17 characters", prompt)
         self.assertNotIn("Maximum 32 characters including spaces.", prompt)
         self.assertNotIn("Maximum 24 characters including spaces.", prompt)
         self.assertIn("Use the supplied product name as the source of identity.", prompt)
@@ -97,24 +99,18 @@ class AdsPageTests(unittest.TestCase):
     def test_carousel_card_rules_prohibit_commas_and_full_stops(self):
         prompt = ads_page.build_ads_prompt("Six Laps Ahead", "Motorsport", "UK", "Carousel")
 
-        headline_section = prompt[prompt.index("Headline rules:") : prompt.index("Description rules:")]
-        description_section = prompt[prompt.index("Description rules:") : prompt.index("Use this strategic role")]
+        mobile_section = prompt[
+            prompt.index("CAROUSEL MOBILE-SAFE LENGTH RULES") : prompt.index("Use this strategic role")
+        ]
 
-        self.assertIn("Do not use commas.", headline_section)
-        self.assertIn("Do not use full stops.", headline_section)
-        self.assertIn("Do not use commas.", description_section)
-        self.assertIn("Do not use full stops.", description_section)
-        self.assertIn("Do not repeat another card headline.", headline_section)
-        self.assertIn("Do not repeat another card description.", description_section)
-        self.assertIn("No carousel headline contains a comma.", prompt)
-        self.assertIn("No carousel headline contains a full stop.", prompt)
-        self.assertIn("No carousel description contains a comma.", prompt)
-        self.assertIn("No carousel description contains a full stop.", prompt)
+        self.assertIn("Never contain a comma or full stop.", mobile_section)
+        self.assertIn("No commas.", prompt)
+        self.assertIn("No full stops.", prompt)
         self.assertIn("No duplicate carousel headlines.", prompt)
         self.assertIn("No duplicate carousel descriptions.", prompt)
         self.assertIn(
-            "Before answering count every headline and description including spaces. "
-            "Rewrite any carousel field that exceeds 17 characters or contains a comma or full stop.",
+            "Before returning the result count every carousel headline and description including spaces. "
+            "Reject and rewrite every field above 13 characters",
             prompt,
         )
 
@@ -135,15 +131,20 @@ class AdsPageTests(unittest.TestCase):
         )
         self.assertIn("return apply_campaign_copy_rule_blocks(", source)
 
-    def test_primary_text_rules_are_not_restricted_to_17_characters(self):
+    def test_primary_text_rules_use_stronger_australian_motorsport_block(self):
         prompt = ads_page.build_ads_prompt("Six Laps Ahead", "Motorsport", "UK", "Carousel")
         primary_text_section = prompt[prompt.index("PRIMARY TEXT") : prompt.index("VERIFIED PRODUCT POSITIONING")]
 
         self.assertIn("Approximately 25 to 45 words.", primary_text_section)
-        self.assertIn("Approximately 60 to 100 words.", primary_text_section)
+        self.assertIn("Approximately 60 to 95 words.", primary_text_section)
+        self.assertIn("Approximately 70 to 105 words.", primary_text_section)
         self.assertIn("Approximately 70 to 110 words.", primary_text_section)
-        self.assertIn("Approximately 80 to 120 words.", primary_text_section)
-        self.assertNotIn("17 characters", primary_text_section)
+        self.assertIn("CORE AUSTRALIAN MOTORSPORT EMOTION", primary_text_section)
+        self.assertIn("The first sentence or fragment of every variation must immediately use a product-specific memory anchor.", primary_text_section)
+        self.assertIn("All five primary-text variations must include the real scarcity naturally.", primary_text_section)
+        self.assertIn("FINAL PRIMARY-TEXT QUALITY CHECK", primary_text_section)
+        self.assertNotIn("Approximately 60 to 100 words.", primary_text_section)
+        self.assertNotIn("PRIMARY-TEXT RULES", primary_text_section)
 
     def test_motorsport_prompt_pushes_product_specific_connected_cards(self):
         prompt = ads_page.build_ads_prompt("Peter Brock Six Laps Ahead", "Motorsport", "Australia", "Carousel")
