@@ -139,6 +139,11 @@ META_BUILD_ORDER = [
     "Add the five primary-text variations and allow Meta to test them.",
 ]
 
+META_AD_URL_PARAMETERS = (
+    "utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}"
+    "&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}"
+)
+
 COUNTRY_LANGUAGE_PROFILES = {
     "Australia": {
         "heading": "COUNTRY LANGUAGE AND LOCALISATION — AUSTRALIA",
@@ -288,6 +293,24 @@ def apply_country_language_guidance(prompt, country):
     if "COUNTRY LANGUAGE AND LOCALISATION RULES" in prompt:
         return prompt
     return f"{prompt.rstrip()}\n\n{guidance}"
+
+
+def build_meta_url_parameters_guidance():
+    return f"""META URL PARAMETERS
+
+For every Meta ad created from this prompt, paste this exact string into the Meta URL parameters field:
+
+{META_AD_URL_PARAMETERS}
+
+Do not rewrite, localise, encode, shorten, remove, or add to these URL parameters."""
+
+
+def apply_meta_url_parameters_guidance(prompt):
+    if not prompt:
+        return prompt
+    if "META URL PARAMETERS" in prompt:
+        return prompt
+    return f"{prompt.rstrip()}\n\n{build_meta_url_parameters_guidance()}"
 
 
 def mask_protected_terms(text, protected_terms=()):
@@ -607,7 +630,8 @@ def compose_final_ads_prompt(
         include_primary_text_variations=include_primary_text_variations,
         category=category,
     )
-    return apply_country_language_guidance(prompt, country)
+    prompt = apply_country_language_guidance(prompt, country)
+    return apply_meta_url_parameters_guidance(prompt)
 
 
 def build_motorsport_carousel_prompt(product_name, category, country, campaign_type):
@@ -1335,9 +1359,12 @@ Use this exact workflow in the generated setup section:
 11. Set the Fixed button destination to the exact selected product-page URL supplied in the campaign form:
     {product_url}
 
-12. Confirm the correct Baseball product catalogue/product set is attached.
+12. Under URL parameters, use:
+    {META_AD_URL_PARAMETERS}
 
-13. Preview the Instant Experience on both Facebook and Instagram before publishing.
+13. Confirm the correct Baseball product catalogue/product set is attached.
+
+14. Preview the Instant Experience on both Facebook and Instagram before publishing.
 
 Do not invent the destination URL.
 
@@ -1385,6 +1412,7 @@ Before returning the output, confirm:
 - Product headline is product.name.
 - Product description is Limited Edition.
 - The fixed-button destination uses the supplied product URL.
+- The URL parameters field uses the exact supplied Meta URL parameters.
 - The copy feels written for genuine baseball fans.
 - The product or rivalry identity is clear.
 - The opening is strong enough to stop attention.
@@ -1426,6 +1454,12 @@ def render_insufficient_winner_data():
     st.caption("Approved winner examples have not been added for this category and campaign type yet.")
 
 
+def render_meta_url_parameters_section(section_number):
+    st.subheader(f"{section_number}. URL parameters")
+    st.caption("Paste this into the Meta URL parameters field for every ad.")
+    st.code(META_AD_URL_PARAMETERS, language="text")
+
+
 def render_supported_result(product_name, category, country, campaign_type, product_url=""):
     if get_template_key(category, campaign_type) == "baseball_instant_experience":
         st.subheader("1. Copy this ChatGPT prompt")
@@ -1433,6 +1467,7 @@ def render_supported_result(product_name, category, country, campaign_type, prod
 
         st.subheader("2. Build it in Meta")
         st.caption("Follow the INSTANT EXPERIENCE SETUP section inside the generated prompt.")
+        render_meta_url_parameters_section(3)
         return
 
     st.subheader("1. Upload these five images")
@@ -1448,6 +1483,7 @@ def render_supported_result(product_name, category, country, campaign_type, prod
     for index, step in enumerate(META_BUILD_ORDER, start=1):
         st.markdown(f"{index}. {step}")
     st.caption("Review every fact before publishing. Remove anything that cannot be confirmed from the product or artwork.")
+    render_meta_url_parameters_section(4)
 
 
 def render_page():

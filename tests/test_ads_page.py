@@ -203,6 +203,8 @@ class AdsPageTests(unittest.TestCase):
         self.assertNotIn("CAROUSEL CARDS\n\nCard 1", prompt)
         self.assertNotIn("CAROUSEL CARD CHARACTER LIMIT", prompt)
         self.assertNotIn("13 characters", prompt)
+        self.assertIn("META URL PARAMETERS", prompt)
+        self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
 
     def test_baseball_instant_experience_uses_brand_opening_identity_and_ownership_rules(self):
         prompt = ads_page.build_ads_prompt(
@@ -264,8 +266,34 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Under Product headline, use:\n   product.name", prompt)
         self.assertIn("Under Product description, use:\n   Limited Edition", prompt)
         self.assertIn("Under Fixed button, set the label to:\n    Claim Your Edition", prompt)
+        self.assertIn("Under URL parameters, use:\n    " + ads_page.META_AD_URL_PARAMETERS, prompt)
         self.assertIn("https://sportscave.com.au/products/summer-98", prompt)
         self.assertIn("Do not invent the destination URL.", prompt)
+
+    def test_shared_meta_url_parameters_are_added_to_every_supported_ads_prompt(self):
+        motorsport_prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+        )
+        baseball_prompt = ads_page.build_ads_prompt(
+            "Shohei Ohtani 50/50 Season",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/ohtani-50-50",
+        )
+
+        self.assertIn("def build_meta_url_parameters_guidance", (ROOT / "ads_page.py").read_text(encoding="utf-8"))
+        self.assertIn("META URL PARAMETERS", motorsport_prompt)
+        self.assertIn("META URL PARAMETERS", baseball_prompt)
+        self.assertIn(ads_page.META_AD_URL_PARAMETERS, motorsport_prompt)
+        self.assertIn(ads_page.META_AD_URL_PARAMETERS, baseball_prompt)
+        self.assertEqual(
+            ads_page.META_AD_URL_PARAMETERS,
+            "utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}",
+        )
 
     def test_baseball_instant_experience_receives_country_localisation_without_changing_baseball_terms(self):
         countries = {
@@ -598,7 +626,7 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("NEUTRAL INTERNATIONAL ENGLISH", guidance)
         self.assertIn("Do not silently treat unknown countries as American English", guidance)
 
-    def test_submit_supported_result_renders_three_compact_sections(self):
+    def test_submit_supported_result_renders_compact_sections_with_url_parameters(self):
         app_test = run_ads_page()
         app_test.text_input[0].set_value("Six Laps Ahead")
         app_test.selectbox[0].select("Motorsport")
@@ -608,11 +636,18 @@ PRIMARY TEXT VARIATIONS
 
         self.assertEqual(
             [subheader.value for subheader in app_test.subheader],
-            ["1. Upload these five images", "2. Copy this ChatGPT prompt", "3. Build it in Meta"],
+            [
+                "1. Upload these five images",
+                "2. Copy this ChatGPT prompt",
+                "3. Build it in Meta",
+                "4. URL parameters",
+            ],
         )
-        self.assertEqual(len(app_test.code), 1)
+        self.assertEqual(len(app_test.code), 2)
         self.assertIn("Product name: Six Laps Ahead", app_test.code[0].value)
         self.assertIn("Market: Canada", app_test.code[0].value)
+        self.assertIn(ads_page.META_AD_URL_PARAMETERS, app_test.code[0].value)
+        self.assertEqual(app_test.code[1].value, ads_page.META_AD_URL_PARAMETERS)
         self.assertEqual(len(app_test.exception), 0)
 
     def test_submit_unsupported_result_renders_insufficient_winner_data(self):
