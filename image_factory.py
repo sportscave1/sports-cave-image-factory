@@ -219,12 +219,12 @@ LIFESTYLE_IMAGE_VARIANTS = {
     "07-home-sports-bar-prompt.txt": "home-sports-bar-lifestyle",
     "08-collector-display-room-prompt.txt": "collector-display-room-lifestyle",
     "09-luxury-entry-wall-prompt.txt": "luxury-entry-wall-lifestyle",
-    "10-premium-unboxing-prompt.txt": "premium-unboxing-lifestyle",
+    "10-private-club-lounge-prompt.txt": "private-club-lounge-lifestyle",
     "11-wall-upgrade-moment-prompt.txt": "wall-upgrade-moment-lifestyle",
     "12-fireplace-feature-wall-prompt.txt": "fireplace-feature-wall-lifestyle",
     "13-premium-bedroom-prompt.txt": "premium-bedroom-lifestyle",
     "14-home-gym-prompt.txt": "home-gym-lifestyle",
-    "15-premium-gift-reveal-prompt.txt": "premium-gift-reveal-lifestyle",
+    "15-architectural-loft-prompt.txt": "architectural-loft-statement-wall-lifestyle",
     "16-man-cave-reel-prompt.txt": "16-man-cave-reel",
     "17-living-room-reel-prompt.txt": "17-living-room-reel",
     "18-office-reel-prompt.txt": "18-office-reel",
@@ -799,13 +799,13 @@ LIFESTYLE_PROMPT_SPECS = [
 
 LIFESTYLE_PROMPT_SPECS.extend([
     (
-        "10-premium-unboxing-prompt.txt",
-        "Premium Unboxing / Collector Arrival",
+        "10-private-club-lounge-prompt.txt",
+        "Private Club Lounge / Collector Retreat",
         dedent(
             """
             Create a 1024 x 1024 ultra-realistic Meta ad mockup using the uploaded Sports Cave image as the exact reference for the framed artwork.
 
-            This image is for a paid Meta ad and must feel like the customer has just received a premium collector piece.
+            This image is for a paid Meta ad and must make the product feel like a premium collector piece inside a real, high-quality home.
 
             The artwork and frame must remain exactly the same as the uploaded image.
 
@@ -818,33 +818,46 @@ LIFESTYLE_PROMPT_SPECS.extend([
             Do not blur the artwork.
             Do not stretch, warp, bend, squash, or distort the frame or artwork.
 
-            Place the exact framed artwork in a premium unboxing scene.
+            Place the exact framed artwork inside a premium private club lounge or collector's retreat.
 
-            The frame should be resting carefully on a luxury timber, stone, or matte black surface, partly lifted from premium protective packaging.
+            The room must feel like a genuine room in a high-quality home owned by a discerning 30-50-year-old male sports collector.
+            It should feel timeless, masculine, calm, established, and expensive without looking like a commercial showroom.
 
-            Use tasteful packaging details:
+            Use the selected sport category and product title to subtly determine the wall colour, timber tone, upholstery character, architectural finishes, lighting warmth, modern-versus-heritage balance, and overall emotional mood.
 
-            black shipping box or kraft protective box
-            soft tissue paper
-            subtle black/gold wrapping detail
-            clean protective corners
-            a blank premium thank-you card with no readable text
+            Use refined real-world materials where appropriate:
+            authentic timber, textured plaster, natural stone, tailored leather or woven upholstery, restrained metal detailing, and believable architectural lighting.
 
-            The scene should feel expensive, real, and gift-worthy.
+            The product must remain the hero.
 
-            Do not add fake logos.
-            Do not add fake edition numbers.
-            Do not add fake certificates.
-            Do not add extra readable text.
-            Do not add people or faces.
-            Do not make it look cheap or messy.
+            Do not add sports balls.
+            Do not add bats.
+            Do not add helmets.
+            Do not add jerseys.
+            Do not add trophies.
+            Do not add figurines.
+            Do not add toy cars.
+            Do not add novelty signs.
+            Do not add fake memorabilia.
+            Do not add team-coloured clutter.
+            Do not add obvious themed decorations.
+            Do not add people.
+            Do not add text overlays.
+            Do not add watermarks.
+
+            The room must resonate with the sport through palette, materiality, mood, and interior character - not literal props.
+
+            For a heritage, nostalgic, legendary, classic, or iconic product title, lean toward warmer timber, deeper textures, and restrained classic character.
+            For a bold, intense, modern, dynasty, rivalry, or statement-driven product title, lean toward cleaner architecture, darker contemporary tones, and stronger controlled lighting.
+
+            Ensure believable room proportions, accurate artwork scale, physically realistic wall mounting, natural shadows behind and below the frame, premium black-frame depth, controlled real glass reflections, realistic furniture scale, natural camera perspective, subtle lived-in imperfection, no CGI or AI-showroom appearance, and no visual clutter competing with the artwork.
 
             The frame must look physically real with depth, sharp corners, timber texture, realistic glass reflections, and believable shadows.
 
-            Lighting should feel like premium product photography: soft natural light, gentle highlights on the glass, realistic shadow falloff, and clean contrast.
+            Lighting should feel like premium interior photography: soft natural light, gentle architectural highlights, realistic shadow falloff, and clean cinematic contrast.
 
             Final result:
-            A premium collector unboxing ad image that makes the product feel valuable, gift-worthy, and exciting to receive.
+            A photorealistic premium private club lounge or collector retreat mockup that makes the exact Sports Cave framed artwork feel established, valuable, masculine, and collector-worthy inside a real home.
             """
         ).strip(),
     ),
@@ -1039,13 +1052,13 @@ LIFESTYLE_PROMPT_SPECS.extend([
         ).strip(),
     ),
     (
-        "15-premium-gift-reveal-prompt.txt",
-        "Premium Gift Reveal Scene",
+        "15-architectural-loft-prompt.txt",
+        "Architectural Loft / Statement Wall",
         dedent(
             """
             Create a 1024 x 1024 ultra-realistic Meta ad mockup using the uploaded Sports Cave image as the exact reference for the framed artwork.
 
-            This image is for a paid Meta ad and must position the product as the perfect premium gift for a serious fan.
+            This image is for a paid Meta ad and must position the framed artwork as the hero piece on a premium architectural wall.
 
             The artwork and frame must remain exactly the same as the uploaded image.
 
@@ -1056,39 +1069,58 @@ LIFESTYLE_PROMPT_SPECS.extend([
             Do not change the badge.
             Do not crop, blur, stretch, warp, bend, squash, or distort the frame or artwork.
 
-            Create a premium gift reveal scene.
+            Place the exact framed artwork on the hero wall of a premium architectural loft, contemporary apartment, or sophisticated open-plan collector space.
 
-            The framed artwork should be leaning safely against a luxury wall or resting on a premium surface, surrounded by tasteful gift details.
+            The environment should feel like a real high-end home owned by a 30-50-year-old male sports fan.
+            The space must be architectural, masculine, refined, and believable - not an exaggerated warehouse, staged furniture catalogue, or artificial AI room.
 
-            Use:
+            Use the selected sport category and product title to determine the most appropriate subtle room direction.
 
-            black or gold wrapping paper
-            premium ribbon
-            clean gift box
-            blank gift card with no readable text
-            soft warm lighting
-            luxury home setting
+            Possible materials may include lightly textured concrete, refined brick, premium plaster, charcoal feature walls, warm oak or walnut, restrained black metal, natural fabrics, and subtle stone surfaces.
+            Do not use all materials at once.
+            Choose only the finishes that best suit the specific sport and product.
 
-            The mood should feel emotional, premium, and personal - like someone has just received a meaningful collector piece.
+            Examples of subtle adaptation:
+            Motorsport may use graphite, charcoal, black metal, and controlled industrial refinement.
+            NBA or basketball may use a sophisticated urban apartment mood with deep neutrals and clean contemporary forms.
+            Baseball may use warmer American loft character with timber, muted navy, charcoal, or cream.
+            Football or soccer may use understated European modern styling with clean architectural lines.
+            Cricket may use warmer textures and restrained heritage influence.
+            AFL may use grounded contemporary Australian styling with natural timber and muted neutrals.
+            Golf may use calm stone, oak, taupe, and restrained soft green undertones.
+            Tennis may use lighter refined neutrals and elegant contemporary styling.
+            Combat sports may use darker minimal styling with strong architectural light and no gym cliches.
 
+            These are direction examples, not fixed object lists.
+
+            Do not add sports equipment.
+            Do not add trophies.
+            Do not add helmets.
+            Do not add balls.
+            Do not add jerseys.
+            Do not add figurines.
+            Do not add novelty decor.
+            Do not add neon sports signs.
+            Do not add toy-like objects.
+            Do not add random shelves filled with meaningless clutter.
             Do not add people.
-            Do not add fake text.
-            Do not add fake logos.
-            Do not add fake edition certificates.
-            Do not add random sports branding.
+            Do not add text overlays.
             Do not add watermarks.
-            Do not make it look like Christmas unless specifically requested.
+
+            Create sport resonance through colour, light, materials, architectural character, and emotional tone only.
+
+            Ensure the framed artwork is the unmistakable hero, with physically believable artwork dimensions, realistic premium black timber frame, accurate frame depth and sharp corners, realistic museum-glass reflections, natural directional light, believable contact and wall shadows, restrained furniture placement, authentic camera perspective, real material texture, subtle room imperfections, premium editorial interior-photography quality, no fake showroom styling, and no obvious AI-generated room defects.
 
             The artwork must stay sharp, readable, and unchanged. The frame must show real depth, premium glass reflections, subtle glare, and believable shadows.
 
             Final result:
-            A premium gift-focused Meta ad image that makes the product feel meaningful, valuable, and easy to buy for someone who loves the sport.
+            A photorealistic premium architectural loft or statement-wall mockup that makes the exact Sports Cave framed artwork feel like the defining collector piece in a sophisticated real home.
             """
         ).strip(),
     ),
 ])
 
-LIFESTYLE_PROMPT_SPECS.extend([
+LEGACY_MOCKUPS_REEL_PROMPT_SPECS = [
     (
         "16-man-cave-reel-prompt.txt",
         "Man Cave Reel",
@@ -1363,7 +1395,7 @@ LIFESTYLE_PROMPT_SPECS.extend([
             """
         ).strip(),
     ),
-])
+]
 
 
 # -----------------------------------
@@ -1883,6 +1915,116 @@ ARTWORK_REFERENCE_PLACEHOLDER = "[ARTWORK REFERENCE]"
 LIFESTYLE_REFERENCE_PROMPT_TEXT = (
     "Upload the black framed WebP from this run into ChatGPT before using this prompt."
 )
+ROOM_STYLE_GUIDANCE_MARKER = "SPORTS CAVE ROOM STYLE GUIDANCE"
+ROOM_STYLE_GUIDANCE_PROMPT_FILENAMES = {
+    "01-man-cave-prompt.txt",
+    "02-office-prompt.txt",
+    "03-living-room-prompt.txt",
+    "06-instant-experience-cover-prompt.txt",
+    "07-home-sports-bar-prompt.txt",
+    "08-collector-display-room-prompt.txt",
+    "09-luxury-entry-wall-prompt.txt",
+    "10-private-club-lounge-prompt.txt",
+    "11-wall-upgrade-moment-prompt.txt",
+    "12-fireplace-feature-wall-prompt.txt",
+    "13-premium-bedroom-prompt.txt",
+    "14-home-gym-prompt.txt",
+    "15-architectural-loft-prompt.txt",
+}
+
+
+def build_room_style_guidance(product_name, sport_category):
+    product_value = str(product_name or "").strip() or PRODUCT_TITLE_PLACEHOLDER
+    sport_value = str(sport_category or "").strip() or SPORT_PLACEHOLDER
+    sport_text = sport_value.lower()
+    product_text = product_value.lower()
+
+    sport_profiles = [
+        (
+            ("motorsport", "formula", "f1", "racing", "race"),
+            "sleek graphite, charcoal, black metal, controlled industrial refinement, warm timber restraint, and precise architectural lighting",
+        ),
+        (
+            ("cricket",),
+            "warm timber, textured plaster, earthy masculine tones, restrained heritage character, and calm study-or-lounge lighting",
+        ),
+        (
+            ("afl", "australian rules"),
+            "grounded contemporary Australian styling, natural timber, charcoal, muted neutrals, matte plaster, and relaxed premium warmth",
+        ),
+        (
+            ("basketball", "nba"),
+            "urban sophistication, deeper neutrals, clean contemporary forms, moody apartment lighting, and refined media-room materiality",
+        ),
+        (
+            ("baseball",),
+            "understated American lounge character, leather and timber influence, muted navy, charcoal, cream, and classic masculine balance",
+        ),
+        (
+            ("soccer", "football"),
+            "refined European-inspired modern styling, elegant darker neutrals, clean architectural lines, and quiet lounge sophistication",
+        ),
+        (
+            ("golf",),
+            "calm stone, oak, taupe, soft green undertones, restrained luxury, and a composed premium study or lounge mood",
+        ),
+        (
+            ("tennis",),
+            "lighter refined neutrals, elegant contemporary styling, soft natural light, subtle plaster texture, and understated luxury",
+        ),
+        (
+            ("combat", "boxing", "ufc", "mma", "fight"),
+            "darker minimal styling, strong architectural light, matte finishes, clean powerful lines, and no gym cliches",
+        ),
+        (
+            ("nfl",),
+            "substantial masculine lounge character, deeper neutrals, tailored leather or woven upholstery, timber weight, and controlled media-room lighting",
+        ),
+        (
+            ("nrl", "rugby"),
+            "grounded masculine Australian lounge styling, warm timber, charcoal, muted stone, durable premium textures, and relaxed architectural lighting",
+        ),
+        (
+            ("hockey",),
+            "cooler charcoal, slate, timber, black metal restraint, crisp architectural detail, and controlled cinematic lighting",
+        ),
+    ]
+
+    sport_direction = (
+        "a refined masculine palette, real architectural materials, premium wall texture, believable furniture tone, and lighting suited to the selected sport"
+    )
+    for keywords, direction in sport_profiles:
+        if any(keyword in sport_text for keyword in keywords):
+            sport_direction = direction
+            break
+
+    heritage_keywords = ("legend", "legacy", "classic", "heritage", "iconic", "greatest", "immortal", "champion")
+    modern_keywords = ("bold", "intense", "modern", "dynasty", "rivalry", "statement", "attack", "unstoppable")
+    nostalgic_keywords = ("remember", "farewell", "last dance", "history", "vintage", "throwback", "miracle")
+    if any(keyword in product_text for keyword in heritage_keywords):
+        product_direction = "Because the product title feels legendary or classic, lean slightly warmer, more timeless, and more established."
+    elif any(keyword in product_text for keyword in modern_keywords):
+        product_direction = "Because the product title feels bold or modern, lean slightly darker, cleaner, more architectural, and more controlled in the lighting."
+    elif any(keyword in product_text for keyword in nostalgic_keywords):
+        product_direction = "Because the product title feels nostalgic or history-driven, lean slightly warmer, more textured, and more emotionally lived-in."
+    else:
+        product_direction = "Let the product title subtly influence whether the room feels more timeless, modern, nostalgic, intense, calm, or iconic."
+
+    return dedent(
+        f"""
+        {ROOM_STYLE_GUIDANCE_MARKER}:
+        Place the artwork in a real premium lived-in interior suited to a discerning 30-50 year old {sport_value} fan and collector of "{product_value}".
+        Use {sport_direction}.
+        Create the sport-specific feeling through colour, materiality, mood, lighting, architecture, wall finish, and furniture tone rather than literal sports objects.
+        {product_direction}
+        Keep the room believable, masculine, clean, collector-worthy, subtly imperfect, and premium, with realistic room proportions, natural wall shadows, real material texture, and no fake showroom or generic AI-room appearance.
+        Do not add sports balls, bats, helmets, jerseys, trophies, figurines, toy cars, novelty signs, fake memorabilia, team-coloured clutter, or obvious themed decorations.
+        """
+    ).strip()
+
+
+def is_room_style_guidance_prompt(prompt_filename):
+    return Path(prompt_filename).name in ROOM_STYLE_GUIDANCE_PROMPT_FILENAMES
 
 
 def get_lifestyle_prompt_text(prompt_filename, default_text, *, local_only=False):
@@ -1952,6 +2094,7 @@ def build_lifestyle_prompt_items(
         if artwork_reference_available
         else ARTWORK_REFERENCE_PLACEHOLDER
     )
+    room_style_guidance = build_room_style_guidance(product_prompt_value, sport_prompt_value)
 
     for filename, title, prompt_body in LIFESTYLE_PROMPT_SPECS:
         prompt_body = get_lifestyle_prompt_text(
@@ -1959,6 +2102,11 @@ def build_lifestyle_prompt_items(
             prompt_body,
             local_only=local_only,
         )
+        if (
+            is_room_style_guidance_prompt(filename)
+            and ROOM_STYLE_GUIDANCE_MARKER not in prompt_body
+        ):
+            prompt_body = f"{prompt_body}\n\n{room_style_guidance}"
         if is_reels_prompt_filename(filename):
             prompt_text = prompt_body.strip()
         else:

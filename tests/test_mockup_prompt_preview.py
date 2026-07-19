@@ -18,6 +18,23 @@ from sports_cave_prompt_blocks import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+EXPECTED_MOCKUP_PROMPT_FILENAMES = [
+    "01-man-cave-prompt.txt",
+    "02-office-prompt.txt",
+    "03-living-room-prompt.txt",
+    "04-close-up-wall-prompt.txt",
+    "05-limited-edition-detail-prompt.txt",
+    "06-instant-experience-cover-prompt.txt",
+    "07-home-sports-bar-prompt.txt",
+    "08-collector-display-room-prompt.txt",
+    "09-luxury-entry-wall-prompt.txt",
+    "10-private-club-lounge-prompt.txt",
+    "11-wall-upgrade-moment-prompt.txt",
+    "12-fireplace-feature-wall-prompt.txt",
+    "13-premium-bedroom-prompt.txt",
+    "14-home-gym-prompt.txt",
+    "15-architectural-loft-prompt.txt",
+]
 
 
 def load_app_prompt_labels():
@@ -52,11 +69,12 @@ class MockupPromptPreviewTests(unittest.TestCase):
         expected_filenames = [
             filename for filename, _, _ in image_factory.LIFESTYLE_PROMPT_SPECS
         ]
+        self.assertEqual(expected_filenames, EXPECTED_MOCKUP_PROMPT_FILENAMES)
         self.assertEqual(
             [item["filename"] for item in prompt_items],
             expected_filenames,
         )
-        self.assertEqual(len(prompt_items), len(image_factory.LIFESTYLE_PROMPT_SPECS))
+        self.assertEqual(len(prompt_items), 15)
         self.assertTrue(all(item["key"] and item["label"] and item["prompt"] for item in prompt_items))
         self.assertEqual(
             [item["key"] for item in prompt_items],
@@ -74,11 +92,13 @@ class MockupPromptPreviewTests(unittest.TestCase):
             artwork_reference_available=False,
         )
 
-        self.assertEqual(len(prompt_items), 20)
+        self.assertEqual(len(prompt_items), 15)
         first_prompt = prompt_items[0]["prompt"]
         self.assertIn("Product name: [PRODUCT TITLE]", first_prompt)
         self.assertIn("Sport category: AFL", first_prompt)
         self.assertIn("Reference image: [ARTWORK REFERENCE]", first_prompt)
+        self.assertIn(image_factory.ROOM_STYLE_GUIDANCE_MARKER, first_prompt)
+        self.assertIn("[PRODUCT TITLE]", first_prompt)
 
     def test_missing_custom_sport_uses_clear_placeholder(self):
         prompt_items = image_factory.build_lifestyle_prompt_items(
@@ -126,6 +146,85 @@ class MockupPromptPreviewTests(unittest.TestCase):
             self.assertEqual(prompt_text.count(SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK), 1)
             self.assertLessEqual(prompt_text.count(SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK), 1)
             self.assertLessEqual(prompt_text.count(SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK), 1)
+            self.assertLessEqual(prompt_text.count(image_factory.ROOM_STYLE_GUIDANCE_MARKER), 1)
+
+    def test_mockups_collection_replaces_gift_prompts_and_removes_reels(self):
+        prompt_items = image_factory.build_lifestyle_prompt_items(
+            "Senna Monaco Legacy",
+            "Motorsport",
+            local_only=True,
+        )
+        labels = [item["label"] for item in prompt_items]
+        filenames = [item["filename"] for item in prompt_items]
+
+        self.assertEqual(len(prompt_items), 15)
+        self.assertEqual(filenames, EXPECTED_MOCKUP_PROMPT_FILENAMES)
+        self.assertIn("Private Club Lounge / Collector Retreat", labels[9])
+        self.assertIn("Architectural Loft / Statement Wall", labels[14])
+        self.assertFalse(any("Reel" in label for label in labels))
+        self.assertNotIn("10-premium-unboxing-prompt.txt", filenames)
+        self.assertNotIn("15-premium-gift-reveal-prompt.txt", filenames)
+        self.assertFalse(any(filename.startswith(("16-", "17-", "18-", "19-", "20-")) for filename in filenames))
+
+        joined_labels = "\n".join(labels)
+        self.assertNotIn("Premium Unboxing / Collector Arrival", joined_labels)
+        self.assertNotIn("Premium Gift Reveal Scene", joined_labels)
+
+    def test_replacement_prompts_include_real_room_sport_and_product_guidance(self):
+        prompt_items = {
+            item["filename"]: item["prompt"]
+            for item in image_factory.build_lifestyle_prompt_items(
+                "Senna Monaco Legacy",
+                "Motorsport",
+                local_only=True,
+            )
+        }
+
+        prompt_10 = prompt_items["10-private-club-lounge-prompt.txt"]
+        prompt_15 = prompt_items["15-architectural-loft-prompt.txt"]
+        for prompt_text in (prompt_10, prompt_15):
+            self.assertIn("30-50-year-old male sports", prompt_text)
+            self.assertIn("selected sport category and product title", prompt_text)
+            self.assertIn(image_factory.ROOM_STYLE_GUIDANCE_MARKER, prompt_text)
+            self.assertIn("real premium lived-in interior", prompt_text)
+            self.assertIn("colour, materiality, mood", prompt_text)
+            self.assertIn("Do not add sports balls", prompt_text)
+            self.assertIn("Do not add jerseys", prompt_text)
+            self.assertNotIn("premium ribbon", prompt_text)
+            self.assertNotIn("shipping box", prompt_text)
+            self.assertNotIn("gift box", prompt_text)
+
+    def test_room_guidance_changes_with_sport_and_product_title(self):
+        motorsport_prompt = image_factory.build_lifestyle_prompt_items(
+            "Senna Monaco Legacy",
+            "Motorsport",
+            local_only=True,
+        )[0]["prompt"]
+        tennis_prompt = image_factory.build_lifestyle_prompt_items(
+            "Federer Modern Statement",
+            "Tennis",
+            local_only=True,
+        )[0]["prompt"]
+
+        self.assertIn("graphite, charcoal, black metal", motorsport_prompt)
+        self.assertIn("legendary or classic", motorsport_prompt)
+        self.assertIn("lighter refined neutrals", tennis_prompt)
+        self.assertIn("bold or modern", tennis_prompt)
+        self.assertNotEqual(motorsport_prompt, tennis_prompt)
+
+    def test_non_room_prompts_are_not_given_room_guidance(self):
+        prompt_items = {
+            item["filename"]: item["prompt"]
+            for item in image_factory.build_lifestyle_prompt_items(
+                "Roger Federer Legacy",
+                "Tennis",
+                local_only=True,
+            )
+        }
+
+        self.assertNotIn(image_factory.ROOM_STYLE_GUIDANCE_MARKER, prompt_items["04-close-up-wall-prompt.txt"])
+        self.assertNotIn(image_factory.ROOM_STYLE_GUIDANCE_MARKER, prompt_items["05-limited-edition-detail-prompt.txt"])
+        self.assertIn(image_factory.ROOM_STYLE_GUIDANCE_MARKER, prompt_items["03-living-room-prompt.txt"])
 
     def test_prompt_pack_writes_the_exact_supplied_prompt_collection(self):
         prompt_items = image_factory.build_lifestyle_prompt_items(
@@ -155,7 +254,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
 
             self.assertEqual(
                 [path.name for path in prompt_paths],
-                [item["filename"] for item in prompt_items],
+                EXPECTED_MOCKUP_PROMPT_FILENAMES,
             )
             for prompt_item, prompt_path in zip(prompt_items, prompt_paths):
                 self.assertEqual(

@@ -287,17 +287,12 @@ PROMPT_LABELS = {
     "07-home-sports-bar-prompt.txt": "07 - Premium Home Sports Bar (Social)",
     "08-collector-display-room-prompt.txt": "08 - Collector Display Room (Social)",
     "09-luxury-entry-wall-prompt.txt": "09 - Luxury Entry Statement Wall (Social)",
-    "10-premium-unboxing-prompt.txt": "10 - Premium Unboxing / Collector Arrival (Social)",
+    "10-private-club-lounge-prompt.txt": "10 - Private Club Lounge / Collector Retreat (Social)",
     "11-wall-upgrade-moment-prompt.txt": "11 - The Wall Upgrade Moment (Social)",
     "12-fireplace-feature-wall-prompt.txt": "12 - Luxury Fireplace Feature Wall (Social)",
     "13-premium-bedroom-prompt.txt": "13 - Premium Bedroom / Private Retreat (Social)",
     "14-home-gym-prompt.txt": "14 - Home Gym / Motivation Wall (Social)",
-    "15-premium-gift-reveal-prompt.txt": "15 - Premium Gift Reveal Scene (Social)",
-    "16-man-cave-reel-prompt.txt": "16 - Man Cave Reel",
-    "17-living-room-reel-prompt.txt": "17 - Living Room Reel",
-    "18-office-reel-prompt.txt": "18 - Office Reel",
-    "19-home-sports-bar-reel-prompt.txt": "19 - Home Sports Bar Reel",
-    "20-collector-display-room-reel-prompt.txt": "20 - Collector Display Room Reel",
+    "15-architectural-loft-prompt.txt": "15 - Architectural Loft / Statement Wall (Social)",
 }
 PRODUCT_PAGE_PROMPT_NAMES = {
     "01-man-cave-prompt.txt",
@@ -4817,7 +4812,6 @@ def render_generation_result(result):
             "Use the prompts below for ChatGPT lifestyle images, then upload the finished images back into the matching cards."
         )
         product_page_prompts = [path for path in prompt_paths if is_product_page_prompt(path)]
-        reels_prompts = [path for path in prompt_paths if is_reels_prompt(path)]
         social_prompts = [
             path
             for path in prompt_paths
@@ -4833,12 +4827,6 @@ def render_generation_result(result):
             result,
             social_prompts,
             "Social Lifestyle Mockups",
-        )
-        render_prompt_cards(
-            result,
-            reels_prompts,
-            "Reels",
-            "Vertical 9:16 lifestyle mockups for Meta, Facebook and Instagram Reels. Generate at 1080 × 1920, then upload the finished images back into the matching cards.",
         )
 
     render_final_zip_download(result)
