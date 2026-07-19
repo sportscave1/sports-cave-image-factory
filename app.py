@@ -317,8 +317,10 @@ PROMPT_LABELS = {
     "11-wall-upgrade-moment-prompt.txt": "11 - The Wall Upgrade Moment (Social)",
     "12-fireplace-feature-wall-prompt.txt": "12 - Luxury Fireplace Feature Wall (Social)",
     "13-premium-bedroom-prompt.txt": "13 - Premium Bedroom / Private Retreat (Social)",
-    "14-home-gym-prompt.txt": "14 - Home Gym / Motivation Wall (Social)",
-    "15-architectural-loft-prompt.txt": "15 - Architectural Loft / Statement Wall (Social)",
+    "14-premium-garage-prompt.txt": "14 - Premium Garage (Social)",
+    "15-premium-tool-shed-workshop-prompt.txt": "15 - Premium Tool Shed / Workshop (Social)",
+    "16-man-cave-with-pool-table-prompt.txt": "16 - Man Cave With Pool Table (Social)",
+    "17-architectural-loft-prompt.txt": "17 - Architectural Loft / Statement Wall (Social)",
 }
 PRODUCT_PAGE_PROMPT_NAMES = {
     "01-man-cave-prompt.txt",
@@ -4480,6 +4482,38 @@ def build_shopify_zip_package(result):
     return result
 
 
+def current_mockup_prompt_filenames():
+    factory = get_image_factory()
+    return [filename for filename, _, _ in factory.LIFESTYLE_PROMPT_SPECS]
+
+
+def prompt_paths_match_current_mockup_collection(prompt_paths):
+    current_filenames = current_mockup_prompt_filenames()
+    existing_names = [
+        Path(prompt_path).name
+        for prompt_path in prompt_paths or []
+        if Path(prompt_path).exists()
+    ]
+    return existing_names == current_filenames
+
+
+def prompt_items_match_current_mockup_collection(prompt_items):
+    current_filenames = current_mockup_prompt_filenames()
+    item_names = [str((item or {}).get("filename", "")) for item in prompt_items or []]
+    return item_names == current_filenames
+
+
+def build_current_mockup_prompt_items_for_result(result):
+    factory = get_image_factory()
+    return factory.build_lifestyle_prompt_items(
+        result.get("product_name"),
+        result.get("sport_category"),
+        labels_by_filename=PROMPT_LABELS,
+        local_only=True,
+        artwork_reference_available=bool(result.get("black_framed_webp_path")),
+    )
+
+
 def ensure_lifestyle_prompts(result):
     result = normalize_generation_result(result)
 
@@ -4488,12 +4522,18 @@ def ensure_lifestyle_prompts(result):
         for prompt_path in result.get("prompt_paths", [])
         if Path(prompt_path).exists()
     ]
-    if existing_prompt_paths:
+    if (
+        existing_prompt_paths
+        and prompt_paths_match_current_mockup_collection(existing_prompt_paths)
+        and prompt_items_match_current_mockup_collection(result.get("final_prompt_items"))
+    ):
         result["prompt_paths"] = existing_prompt_paths
         return result
 
     if not result["run_dir"] or not result["black_framed_webp_path"]:
         return result
+
+    result["final_prompt_items"] = build_current_mockup_prompt_items_for_result(result)
 
     prompt_dir, _, prompt_paths, _ = image_factory.generate_lifestyle_prompt_pack(
         result["product_name"],
@@ -4546,6 +4586,8 @@ def build_lifestyle_prompt_pack(result):
     run_dir = Path(result["run_dir"])
     zip_dir = Path(result["zip_dir"] or (run_dir / "zip"))
     zip_dir.mkdir(parents=True, exist_ok=True)
+    if not prompt_items_match_current_mockup_collection(result.get("final_prompt_items")):
+        result["final_prompt_items"] = build_current_mockup_prompt_items_for_result(result)
 
     prompt_dir, _, prompt_paths, _ = image_factory.generate_lifestyle_prompt_pack(
         result["product_name"],
