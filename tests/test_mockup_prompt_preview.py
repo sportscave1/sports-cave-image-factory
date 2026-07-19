@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
+import zipfile
 
 from PIL import Image
 from streamlit.testing.v1 import AppTest
@@ -61,6 +62,64 @@ def tiny_png_bytes(color=(212, 165, 76)):
     buffer = io.BytesIO()
     Image.new("RGB", (10, 10), color).save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def build_restored_generation_result(run_dir):
+    run_dir = Path(run_dir)
+    prompt_dir = run_dir / image_factory.PROMPTS_FOLDER_NAME
+    zip_dir = run_dir / "zip"
+    webp_dir = run_dir / image_factory.WEBP_CACHE_FOLDER_NAME
+    jpg_dir = run_dir / image_factory.JPG_CACHE_FOLDER_NAME
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    zip_dir.mkdir(parents=True, exist_ok=True)
+    webp_dir.mkdir(parents=True, exist_ok=True)
+    jpg_dir.mkdir(parents=True, exist_ok=True)
+
+    reference_path = run_dir / "reference.webp"
+    reference_path.write_bytes(b"reference")
+    _, _, prompt_paths, _ = image_factory.generate_lifestyle_prompt_pack(
+        "AppTest Product",
+        "AFL",
+        "apptest-product",
+        run_dir,
+        reference_path,
+    )
+
+    core_webp_path = webp_dir / "apptest-product-black-framed-afl-wall-art.webp"
+    core_jpg_path = jpg_dir / "apptest-product-black-framed-afl-wall-art.jpg"
+    core_webp_path.write_bytes(b"core-webp")
+    core_jpg_path.write_bytes(b"core-jpg")
+    existing_zip_path = zip_dir / "existing.zip"
+    existing_zip_path.write_bytes(b"existing")
+
+    return {
+        "product_name": "AppTest Product",
+        "sport_category": "AFL",
+        "created_at": "2026-07-19T00:00:00",
+        "product_slug": "apptest-product",
+        "sport_slug": "afl",
+        "run_dir": str(run_dir),
+        "zip_dir": str(zip_dir),
+        "webp_dir": str(webp_dir),
+        "jpg_dir": str(jpg_dir),
+        "zip_path": str(existing_zip_path),
+        "black_framed_webp_path": str(core_webp_path),
+        "black_framed_jpg_path": str(core_jpg_path),
+        "prompt_dir": str(prompt_dir),
+        "prompt_paths": [str(path) for path in prompt_paths],
+        "lifestyle_mockup_paths": {},
+        "assets": [
+            image_factory.build_asset_record(
+                key="black",
+                label="Black Framed",
+                webp_path=str(core_webp_path),
+                jpg_path=str(core_jpg_path),
+                asset_group="generated",
+                zip_group=image_factory.ASSET_CATEGORY_CORE,
+            )
+        ],
+        "status_text": "Core Sports Cave product images are ready.",
+    }
 
 
 class MockupPromptPreviewTests(unittest.TestCase):
@@ -493,6 +552,68 @@ class MockupPromptPreviewTests(unittest.TestCase):
         self.assertNotIn("render_lifestyle_cards=False", mockups_page)
         self.assertNotIn("render_zip=False", mockups_page)
 
+    def test_prompt_card_upload_auto_registers_for_zip_without_add_to_zip_click(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            run_dir = Path(tmpdir)
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["selected_page"] = "Mockups"
+            app_test.session_state["startup_shell_loaded"] = True
+            app_test.session_state["last_generation_result"] = build_restored_generation_result(run_dir)
+            app_test.run(timeout=20)
+
+            self.assertEqual(len(app_test.exception), 0)
+            self.assertEqual(len(app_test.file_uploader), 16)
+            self.assertNotIn("Add To ZIP", [button.label for button in app_test.button])
+
+            app_test.file_uploader[-1].set_value(
+                [("architectural-loft.png", tiny_png_bytes((20, 40, 80)), "image/png")]
+            )
+            app_test.run(timeout=30)
+
+            result = app_test.session_state["last_generation_result"]
+            prompt_name = "15-architectural-loft-prompt.txt"
+            self.assertIn(prompt_name, result["lifestyle_mockup_paths"])
+            social_assets = [
+                asset
+                for asset in result["assets"]
+                if asset.get("prompt_filename") == prompt_name
+                and asset.get("zip_group") == image_factory.ASSET_CATEGORY_SOCIAL
+            ]
+            self.assertEqual(len(social_assets), 1)
+            self.assertTrue(Path(social_assets[0]["webp_path"]).exists())
+            self.assertTrue(Path(social_assets[0]["jpg_path"]).exists())
+
+            core_checkbox = next(
+                checkbox
+                for checkbox in app_test.checkbox
+                if checkbox.label == "Core Images"
+            )
+            core_checkbox.uncheck()
+            app_test.run(timeout=30)
+
+            captions = [caption.value for caption in app_test.caption]
+            selected_count_captions = [
+                caption
+                for caption in captions
+                if "files selected for ZIP" in caption
+            ]
+            self.assertIn("2 files selected for ZIP", selected_count_captions)
+
+            zip_paths = sorted((run_dir / "zip").glob("apptest-product-selected-*.zip"), key=lambda path: path.stat().st_mtime)
+            self.assertTrue(zip_paths)
+            with zipfile.ZipFile(zip_paths[-1]) as archive:
+                names = set(archive.namelist())
+
+            self.assertEqual(
+                names,
+                {
+                    "WEBP/apptest-product-black-framed-afl-architectural-loft-statement-wall-lifestyle.webp",
+                    "jpg/apptest-product-black-framed-afl-architectural-loft-statement-wall-lifestyle.jpg",
+                },
+            )
+            self.assertNotIn("WEBP/apptest-product-black-framed-afl-wall-art.webp", names)
+            self.assertEqual(len(names), 2)
+
     def test_post_generation_prompt_cards_render_copy_prompt_upload_and_zip_controls(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         prompt_cards = source[
@@ -504,7 +625,9 @@ class MockupPromptPreviewTests(unittest.TestCase):
 
         self.assertIn("render_mockup_prompt_action_row", prompt_cards)
         self.assertIn("Upload image from ChatGPT", prompt_cards)
-        self.assertIn("Add To ZIP", prompt_cards)
+        self.assertNotIn("Add To ZIP", prompt_cards)
+        self.assertIn("auto_register_lifestyle_upload", prompt_cards)
+        self.assertIn("Saved — included when Social Mockups is selected.", prompt_cards)
         self.assertIn('st.markdown(f"**{prompt_title}**")', prompt_cards)
         self.assertIn("current_lifestyle_prompt_text", prompt_cards)
         self.assertIn("render_mockup_prompt_bar", mockup_actions)

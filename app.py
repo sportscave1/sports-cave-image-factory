@@ -4713,6 +4713,69 @@ def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
     return result
 
 
+def remove_uploaded_lifestyle_result(result, prompt_path):
+    result = normalize_generation_result(result)
+    prompt_filename = Path(prompt_path).name
+    saved_paths = result["lifestyle_mockup_paths"].pop(prompt_filename, None) or {}
+
+    for path_value in saved_paths.values():
+        if path_value:
+            with suppress(FileNotFoundError, PermissionError):
+                Path(path_value).unlink()
+
+    asset_key = get_lifestyle_asset_key(prompt_filename)
+    result["assets"] = [
+        asset
+        for asset in result["assets"]
+        if asset.get("key") != asset_key
+    ]
+    result["status_text"] = f"Removed lifestyle image for {get_prompt_label(prompt_path)}."
+    result = rebuild_result_artifacts(result)
+    return result
+
+
+def get_uploaded_lifestyle_signature(uploaded_file):
+    if uploaded_file is None:
+        return None
+
+    upload_bytes = uploaded_file.getvalue()
+    signature = hashlib.sha1(upload_bytes).hexdigest()[:16]
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
+
+    return "|".join(
+        [
+            str(getattr(uploaded_file, "name", "")),
+            str(getattr(uploaded_file, "size", len(upload_bytes))),
+            str(getattr(uploaded_file, "type", "")),
+            signature,
+        ]
+    )
+
+
+def auto_register_lifestyle_upload(result, prompt_path, uploaded_file):
+    prompt_name = Path(prompt_path).name
+    upload_signature_key = f"lifestyle-upload-signature::{result['run_dir']}::{prompt_name}"
+    saved_paths = result["lifestyle_mockup_paths"].get(prompt_name)
+
+    if uploaded_file is None:
+        if saved_paths and st.session_state.get(upload_signature_key):
+            updated_result = remove_uploaded_lifestyle_result(result, prompt_path)
+            st.session_state.pop(upload_signature_key, None)
+            st.session_state.last_generation_result = updated_result
+            st.rerun()
+        return result
+
+    upload_signature = get_uploaded_lifestyle_signature(uploaded_file)
+    if st.session_state.get(upload_signature_key) == upload_signature and saved_paths:
+        return result
+
+    updated_result = save_uploaded_lifestyle_result(result, prompt_path, uploaded_file)
+    st.session_state[upload_signature_key] = upload_signature
+    st.session_state.last_generation_result = updated_result
+    st.rerun()
+
+
 def render_asset_selection_controls(result):
     result = normalize_generation_result(result)
 
@@ -4951,46 +5014,50 @@ def render_prompt_cards(result, prompt_paths, heading, caption=None):
                 key=f"lifestyle-upload::{result['run_dir']}::{prompt_name}",
             )
 
-            if st.button(
-                "Add To ZIP",
-                key=f"save-lifestyle::{result['run_dir']}::{prompt_name}",
-                use_container_width=True,
-            ):
-                if uploaded_lifestyle_image is None:
-                    st.warning("Upload the generated lifestyle image first.")
+            try:
+                result = auto_register_lifestyle_upload(
+                    result,
+                    prompt_path,
+                    uploaded_lifestyle_image,
+                )
+            except Exception as error:
+                error_message = str(error)
+                clean_lifestyle_errors = {
+                    getattr(image_factory, "LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE", ""),
+                    getattr(image_factory, "LIFESTYLE_UPLOAD_INVALID_MESSAGE", ""),
+                }
+                is_clean_lifestyle_error = (
+                    isinstance(
+                        error,
+                        (
+                            ValueError,
+                            MemoryError,
+                            getattr(image_factory, "MemoryLimitExceededError", RuntimeError),
+                        ),
+                    )
+                    or error_message in clean_lifestyle_errors
+                    or "Memory limit reached" in error_message
+                )
+                if is_clean_lifestyle_error:
+                    st.error(error_message)
+                    gc.collect()
                 else:
-                    try:
-                        updated_result = save_uploaded_lifestyle_result(
-                            result,
-                            prompt_path,
-                            uploaded_lifestyle_image,
-                        )
-                        st.session_state.last_generation_result = updated_result
-                        st.rerun()
-                    except Exception as error:
-                        error_message = str(error)
-                        clean_lifestyle_errors = {
-                            getattr(image_factory, "LIFESTYLE_UPLOAD_TOO_LARGE_MESSAGE", ""),
-                            getattr(image_factory, "LIFESTYLE_UPLOAD_INVALID_MESSAGE", ""),
-                        }
-                        is_clean_lifestyle_error = (
-                            isinstance(
-                                error,
-                                (
-                                    ValueError,
-                                    MemoryError,
-                                    getattr(image_factory, "MemoryLimitExceededError", RuntimeError),
-                                ),
-                            )
-                            or error_message in clean_lifestyle_errors
-                            or "Memory limit reached" in error_message
-                        )
-                        if is_clean_lifestyle_error:
-                            st.error(error_message)
-                            gc.collect()
-                        else:
-                            st.error("Could not save the lifestyle image for this prompt.")
-                            st.exception(error)
+                    st.error("Could not save the lifestyle image for this prompt.")
+                    st.exception(error)
+
+            saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
+            saved_asset = next(
+                (
+                    asset
+                    for asset in ensure_lifestyle_assets_registered(result)["assets"]
+                    if asset.get("key") == get_lifestyle_asset_key(prompt_name)
+                    and asset.get("zip_group") == ASSET_CATEGORY_SOCIAL
+                    and asset_has_downloadable_file(asset)
+                ),
+                None,
+            )
+            if saved_lifestyle_paths and saved_asset:
+                st.caption("Saved — included when Social Mockups is selected.")
 
 
 def render_optional_package_controls(result):

@@ -1389,7 +1389,9 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn("render_mockup_prompt_action_row", prompt_cards)
         self.assertIn("Upload image from ChatGPT", prompt_cards)
-        self.assertIn("Add To ZIP", prompt_cards)
+        self.assertNotIn("Add To ZIP", prompt_cards)
+        self.assertIn("auto_register_lifestyle_upload", prompt_cards)
+        self.assertIn("Saved — included when Social Mockups is selected.", prompt_cards)
         self.assertNotIn("View Prompt", prompt_cards)
         self.assertNotIn("st.expander", prompt_cards)
         self.assertNotIn("render_copyable_prompt", prompt_cards)
