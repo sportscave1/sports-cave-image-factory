@@ -1877,6 +1877,14 @@ def is_reels_prompt_filename(prompt_filename):
     return Path(prompt_filename).name in REELS_PROMPT_FILENAMES
 
 
+PRODUCT_TITLE_PLACEHOLDER = "[PRODUCT TITLE]"
+SPORT_PLACEHOLDER = "[SPORT]"
+ARTWORK_REFERENCE_PLACEHOLDER = "[ARTWORK REFERENCE]"
+LIFESTYLE_REFERENCE_PROMPT_TEXT = (
+    "Upload the black framed WebP from this run into ChatGPT before using this prompt."
+)
+
+
 def get_lifestyle_prompt_text(prompt_filename, default_text, *, local_only=False):
     prompt_filename = Path(prompt_filename).name
     prompt_id = f"lifestyle::{prompt_key_from_prompt_filename(prompt_filename)}"
@@ -1933,9 +1941,17 @@ def build_lifestyle_prompt_items(
     *,
     labels_by_filename=None,
     local_only=False,
+    artwork_reference_available=True,
 ):
     labels_by_filename = labels_by_filename or {}
     prompt_items = []
+    product_prompt_value = str(product_name or "").strip() or PRODUCT_TITLE_PLACEHOLDER
+    sport_prompt_value = str(sport_category or "").strip() or SPORT_PLACEHOLDER
+    reference_prompt_value = (
+        LIFESTYLE_REFERENCE_PROMPT_TEXT
+        if artwork_reference_available
+        else ARTWORK_REFERENCE_PLACEHOLDER
+    )
 
     for filename, title, prompt_body in LIFESTYLE_PROMPT_SPECS:
         prompt_body = get_lifestyle_prompt_text(
@@ -1948,9 +1964,9 @@ def build_lifestyle_prompt_items(
         else:
             prompt_text = dedent(
                 f"""
-                Product name: {product_name}
-                Sport category: {sport_category}
-                Reference image: Upload the black framed WebP from this run into ChatGPT before using this prompt.
+                Product name: {product_prompt_value}
+                Sport category: {sport_prompt_value}
+                Reference image: {reference_prompt_value}
 
                 {prompt_body}
                 """

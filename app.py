@@ -4889,25 +4889,32 @@ def render_sidebar():
             st.rerun()
 
 
-def build_mockup_final_prompt_items(product_name, sport_category):
+def build_mockup_final_prompt_items(product_name, sport_category, *, artwork_reference_available=True):
     return get_image_factory().build_lifestyle_prompt_items(
         product_name,
         sport_category,
         labels_by_filename=PROMPT_LABELS,
         local_only=True,
+        artwork_reference_available=artwork_reference_available,
     )
 
 
 def render_mockup_prompt_preview(final_prompt_items):
-    with st.expander("Preview All Image Prompts", expanded=False):
-        st.caption("These are the exact prompts that will be used for this generation.")
-        if not final_prompt_items:
-            st.caption("Upload artwork and complete the product name and sport category to preview all prompts.")
-            return
-
-        for prompt_item in final_prompt_items:
-            st.markdown(f"**{prompt_item['label']}**")
-            st.code(prompt_item["prompt"], language=None)
+    st.markdown("### Image Generation Prompts")
+    st.caption(
+        "Review the prompts used for the lifestyle and reel image pack. "
+        "Product details are inserted automatically when provided."
+    )
+    for prompt_item in final_prompt_items:
+        st.markdown(f"**{prompt_item['label']}**")
+        st.text_area(
+            label=f"{prompt_item['label']} prompt",
+            value=prompt_item["prompt"],
+            height=180,
+            disabled=True,
+            key=f"mockup-prompt-preview::{prompt_item['key']}",
+            label_visibility="collapsed",
+        )
 
 
 def render_mockups_page():
@@ -4980,14 +4987,11 @@ def render_mockups_page():
         )
 
     sport_category = get_sport_category(sport_option, custom_sport)
-    final_prompt_items = []
-    if (
-        uploaded_file is not None
-        and not upload_validation_error
-        and product_name.strip()
-        and sport_category
-    ):
-        final_prompt_items = build_mockup_final_prompt_items(product_name, sport_category)
+    final_prompt_items = build_mockup_final_prompt_items(
+        product_name,
+        sport_category,
+        artwork_reference_available=uploaded_file is not None and not upload_validation_error,
+    )
 
     st.subheader("2. Generate Core Shopify Images")
     render_mockup_prompt_preview(final_prompt_items)
