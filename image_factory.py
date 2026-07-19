@@ -1,6 +1,8 @@
 from pathlib import Path
 from PIL import Image, ImageOps, ImageFile, UnidentifiedImageError
 import gc
+import hashlib
+import logging
 import os
 import zipfile
 import re
@@ -2054,12 +2056,6 @@ def get_lifestyle_prompt_text(prompt_filename, default_text, *, local_only=False
 
 
 def get_prompt_group(prompt_filename):
-    prompt_filename = Path(prompt_filename).name
-    if prompt_filename in PRODUCT_PAGE_PROMPT_FILENAMES:
-        return ASSET_CATEGORY_PRODUCT
-    if prompt_filename in REELS_PROMPT_FILENAMES:
-        return ASSET_CATEGORY_SOCIAL
-
     return ASSET_CATEGORY_SOCIAL
 
 
@@ -2084,9 +2080,6 @@ def get_asset_zip_folder(file_path):
 
     for prompt_filename, variant_slug in LIFESTYLE_IMAGE_VARIANTS.items():
         if variant_slug in file_name:
-            if get_prompt_group(prompt_filename) == "product_page":
-                return "WEBP"
-
             return "jpg"
 
     return "WEBP"
@@ -2203,6 +2196,64 @@ def unique_archive_name(archive_name, used_names, asset_key=""):
         index += 1
 
 
+def normalize_zip_groups(zip_groups):
+    if zip_groups is None:
+        return None
+    return {
+        ZIP_GROUP_ALIASES.get(str(group).strip(), str(group).strip())
+        for group in zip_groups
+    }
+
+
+def file_content_sha1(file_path):
+    digest = hashlib.sha1()
+    with Path(file_path).open("rb") as file_handle:
+        for chunk in iter(lambda: file_handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_asset_zip_manifest(assets, zip_groups=None, *, include_content_hash=True):
+    selected_groups = normalize_zip_groups(zip_groups)
+    used_names = set()
+    entries = []
+
+    for asset in sorted(assets or [], key=lambda item: item.get("label", item.get("key", "")).lower()):
+        if not asset.get("include_in_zip", True):
+            continue
+        asset_group = get_asset_zip_group(asset)
+        if selected_groups is not None and asset_group not in selected_groups:
+            continue
+
+        for path_key, archive_folder in (("webp_path", "WEBP"), ("jpg_path", "jpg")):
+            file_path = asset.get(path_key)
+            if not file_path:
+                continue
+            file_path = Path(file_path)
+            if not file_path.exists() or file_path.stat().st_size <= 0:
+                continue
+            archive_name = unique_archive_name(
+                f"{archive_folder}/{file_path.name}",
+                used_names,
+                asset.get("key"),
+            )
+            stat = file_path.stat()
+            entries.append(
+                {
+                    "asset_key": asset.get("key"),
+                    "asset_label": asset.get("label"),
+                    "category": asset_group,
+                    "path": file_path,
+                    "filename": file_path.name,
+                    "archive_name": archive_name,
+                    "byte_length": stat.st_size,
+                    "content_sha1": file_content_sha1(file_path) if include_content_hash else None,
+                }
+            )
+
+    return entries
+
+
 def create_complete_pack_zip(
     zip_dir,
     product_slug,
@@ -2214,40 +2265,36 @@ def create_complete_pack_zip(
     zip_filename=None,
 ):
     complete_zip_path = zip_dir / (zip_filename or f"{product_slug}-complete-package.zip")
-    selected_groups = {
-        ZIP_GROUP_ALIASES.get(str(group).strip(), str(group).strip())
-        for group in (zip_groups or [])
-    } if zip_groups is not None else None
+    selected_groups = normalize_zip_groups(zip_groups)
 
     ensure_memory_available("Before zip creation: Complete pack")
     used_names = set()
     written_count = 0
     with zipfile.ZipFile(complete_zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         if assets is not None:
-            for asset in sorted(assets, key=lambda item: item.get("label", item.get("key", "")).lower()):
-                if not asset.get("include_in_zip", True):
-                    continue
-                if selected_groups is not None and get_asset_zip_group(asset) not in selected_groups:
-                    continue
-
-                webp_path = asset.get("webp_path")
-                jpg_path = asset.get("jpg_path")
-
-                if webp_path and Path(webp_path).exists():
-                    webp_path = Path(webp_path)
-                    zipf.write(
-                        webp_path,
-                        arcname=unique_archive_name(f"WEBP/{webp_path.name}", used_names, asset.get("key")),
-                    )
-                    written_count += 1
-
-                if jpg_path and Path(jpg_path).exists():
-                    jpg_path = Path(jpg_path)
-                    zipf.write(
-                        jpg_path,
-                        arcname=unique_archive_name(f"jpg/{jpg_path.name}", used_names, asset.get("key")),
-                    )
-                    written_count += 1
+            manifest_entries = build_asset_zip_manifest(
+                assets,
+                selected_groups,
+                include_content_hash=False,
+            )
+            for entry in manifest_entries:
+                zipf.write(entry["path"], arcname=entry["archive_name"])
+                used_names.add(entry["archive_name"])
+                written_count += 1
+            logging.info(
+                "MOCKUPS_ZIP wrote assets=%s groups=%s files=%s names=%s",
+                len(assets or []),
+                sorted(selected_groups) if selected_groups is not None else "all",
+                written_count,
+                [
+                    {
+                        "category": entry["category"],
+                        "archive_name": entry["archive_name"],
+                        "byte_length": entry["byte_length"],
+                    }
+                    for entry in manifest_entries
+                ],
+            )
         else:
             if webp_dir is not None:
                 for webp_file in sorted(Path(webp_dir).glob("*.webp")):

@@ -277,6 +277,9 @@ ZIP_GROUP_ALIASES = {
     "social": ASSET_CATEGORY_SOCIAL,
     "social_mockups": ASSET_CATEGORY_SOCIAL,
     "lifestyle": ASSET_CATEGORY_SOCIAL,
+    "mockup": ASSET_CATEGORY_SOCIAL,
+    "mockups": ASSET_CATEGORY_SOCIAL,
+    "reels": ASSET_CATEGORY_SOCIAL,
     "product_page": ASSET_CATEGORY_PRODUCT,
     "product_images": ASSET_CATEGORY_PRODUCT,
     "product": ASSET_CATEGORY_PRODUCT,
@@ -3522,7 +3525,7 @@ def ensure_result_assets(result):
     assets = [normalize_asset(asset) for asset in result.get("assets", [])]
     if assets:
         result["assets"] = assets
-        return result
+        return ensure_lifestyle_assets_registered(result)
 
     review_paths = result.get("review_paths", [])
     webp_paths = result.get("webp_paths", [])
@@ -3549,6 +3552,68 @@ def ensure_result_assets(result):
         )
 
     result["assets"] = legacy_assets
+    return ensure_lifestyle_assets_registered(result)
+
+
+def build_lifestyle_asset_from_prompt_filename(prompt_filename, saved_paths):
+    prompt_filename = Path(prompt_filename).name
+    is_product_page_asset = image_factory.is_product_page_prompt_filename(prompt_filename)
+    return image_factory.build_asset_record(
+        key=get_lifestyle_asset_key(prompt_filename),
+        label=PROMPT_LABELS.get(prompt_filename, prompt_filename),
+        review_path=saved_paths.get("jpg_path") or saved_paths.get("webp_path"),
+        preview_path=saved_paths.get("preview_path"),
+        webp_path=saved_paths.get("webp_path"),
+        jpg_path=saved_paths.get("jpg_path"),
+        include_in_zip=True,
+        asset_group="lifestyle",
+        zip_group=ASSET_CATEGORY_SOCIAL,
+        prompt_filename=prompt_filename,
+        export_to_shopify=is_product_page_asset,
+        export_to_socials=True,
+    )
+
+
+def lifestyle_saved_paths_have_downloadable_file(saved_paths):
+    for path_key in ("webp_path", "jpg_path"):
+        file_path = (saved_paths or {}).get(path_key)
+        if file_path and Path(file_path).exists() and Path(file_path).stat().st_size > 0:
+            return True
+    return False
+
+
+def ensure_lifestyle_assets_registered(result):
+    lifestyle_mockup_paths = result.get("lifestyle_mockup_paths") or {}
+    if not lifestyle_mockup_paths:
+        return result
+
+    assets = [normalize_asset(asset) for asset in result.get("assets", [])]
+    assets_by_key = {asset.get("key"): asset for asset in assets if asset.get("key")}
+    merged_assets = list(assets)
+
+    for prompt_filename, saved_paths in sorted(lifestyle_mockup_paths.items()):
+        if not lifestyle_saved_paths_have_downloadable_file(saved_paths):
+            continue
+
+        asset_record = normalize_asset(
+            build_lifestyle_asset_from_prompt_filename(prompt_filename, saved_paths)
+        )
+        existing_asset = assets_by_key.get(asset_record["key"])
+        if existing_asset:
+            asset_record["include_in_zip"] = existing_asset.get(
+                "include_in_zip",
+                asset_record["include_in_zip"],
+            )
+            asset_record = normalize_asset({**existing_asset, **asset_record})
+            for index, asset in enumerate(merged_assets):
+                if asset.get("key") == asset_record["key"]:
+                    merged_assets[index] = asset_record
+                    break
+        else:
+            merged_assets.append(asset_record)
+        assets_by_key[asset_record["key"]] = asset_record
+
+    result["assets"] = merged_assets
     return result
 
 
@@ -3626,11 +3691,6 @@ def is_reels_prompt(prompt_path):
 
 
 def get_lifestyle_prompt_group(prompt_filename):
-    prompt_filename = Path(prompt_filename).name
-    if prompt_filename in PRODUCT_PAGE_PROMPT_NAMES:
-        return ASSET_CATEGORY_PRODUCT
-    if prompt_filename in REELS_PROMPT_NAMES:
-        return ASSET_CATEGORY_SOCIAL
     return ASSET_CATEGORY_SOCIAL
 
 
@@ -4542,11 +4602,28 @@ def build_filtered_download_zip(result, selected_groups):
     zip_path = zip_dir / zip_filename
     if zip_path.exists():
         return zip_path
+    manifest_entries = image_factory.build_asset_zip_manifest(selected_assets)
+    counts_by_category = {}
+    for entry in manifest_entries:
+        counts_by_category[entry["category"]] = counts_by_category.get(entry["category"], 0) + 1
+    logging.info(
+        "MOCKUPS_ZIP selected core=%s social=%s product=%s total=%s names=%s",
+        counts_by_category.get(ASSET_CATEGORY_CORE, 0),
+        counts_by_category.get(ASSET_CATEGORY_SOCIAL, 0),
+        counts_by_category.get(ASSET_CATEGORY_PRODUCT, 0),
+        len(manifest_entries),
+        [
+            {
+                "archive_name": entry["archive_name"],
+                "byte_length": entry["byte_length"],
+            }
+            for entry in manifest_entries
+        ],
+    )
     return image_factory.create_complete_pack_zip(
         zip_dir,
         result["product_slug"],
-        assets=result["assets"],
-        zip_groups=selected_groups,
+        assets=selected_assets,
         zip_filename=zip_filename,
     )
 
@@ -4587,32 +4664,24 @@ def get_selected_zip_assets(result, selected_groups):
 
 
 def get_zip_manifest_hash(assets, selected_groups):
-    manifest_items = []
-    for asset in sorted(assets, key=lambda item: str(item.get("key") or "")):
-        path_items = []
-        for file_path in get_asset_downloadable_paths(asset):
-            stat = file_path.stat()
-            path_items.append(
-                {
-                    "path": str(file_path),
-                    "size": stat.st_size,
-                    "mtime_ns": stat.st_mtime_ns,
-                }
-            )
-        manifest_items.append(
-            {
-                "key": asset.get("key"),
-                "zip_group": get_asset_zip_group(asset),
-                "paths": path_items,
-            }
-        )
+    manifest_entries = image_factory.build_asset_zip_manifest(assets)
     payload = json.dumps(
         {
             "groups": sorted(
                 ZIP_GROUP_ALIASES.get(str(group).strip(), str(group).strip())
                 for group in selected_groups
             ),
-            "assets": manifest_items,
+            "assets": [
+                {
+                    "asset_key": entry.get("asset_key"),
+                    "category": entry.get("category"),
+                    "archive_name": entry.get("archive_name"),
+                    "filename": entry.get("filename"),
+                    "byte_length": entry.get("byte_length"),
+                    "content_sha1": entry.get("content_sha1"),
+                }
+                for entry in manifest_entries
+            ],
         },
         sort_keys=True,
     )
@@ -4620,22 +4689,7 @@ def get_zip_manifest_hash(assets, selected_groups):
 
 
 def build_lifestyle_asset(prompt_path, saved_paths):
-    prompt_filename = Path(prompt_path).name
-    is_product_page_asset = image_factory.is_product_page_prompt_filename(prompt_filename)
-    return image_factory.build_asset_record(
-        key=get_lifestyle_asset_key(prompt_filename),
-        label=get_prompt_label(prompt_path),
-        review_path=saved_paths.get("jpg_path") or saved_paths.get("webp_path"),
-        preview_path=saved_paths.get("preview_path"),
-        webp_path=saved_paths.get("webp_path"),
-        jpg_path=saved_paths.get("jpg_path"),
-        include_in_zip=True,
-        asset_group="lifestyle",
-        zip_group=get_lifestyle_prompt_group(prompt_filename),
-        prompt_filename=prompt_filename,
-        export_to_shopify=is_product_page_asset,
-        export_to_socials=True,
-    )
+    return build_lifestyle_asset_from_prompt_filename(Path(prompt_path).name, saved_paths)
 
 
 def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
@@ -4830,7 +4884,8 @@ def render_final_zip_download(result):
         return
 
     selected_assets = get_selected_zip_assets(result, selected_groups)
-    selected_file_count = sum(len(get_asset_downloadable_paths(asset)) for asset in selected_assets)
+    selected_manifest = image_factory.build_asset_zip_manifest(selected_assets, include_content_hash=False)
+    selected_file_count = len(selected_manifest)
     st.caption(f"{selected_file_count} files selected for ZIP")
 
     if selected_file_count <= 0:
