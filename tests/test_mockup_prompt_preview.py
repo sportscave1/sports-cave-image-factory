@@ -405,13 +405,66 @@ class MockupPromptPreviewTests(unittest.TestCase):
         self.assertNotIn("generate_product_images", preview_helper)
         self.assertLess(
             mockups_page.index('st.button("Generate Core Shopify Images"'),
-            mockups_page.index("render_mockup_prompt_preview(final_prompt_items)"),
+            mockups_page.index("if generation_result is None and not generate_clicked:"),
         )
+        self.assertEqual(mockups_page.count("render_mockup_prompt_preview(final_prompt_items)"), 2)
+        self.assertIn("if generation_result is None and not generate_clicked:", mockups_page)
+        self.assertIn("prompt_preview_rendered = True", mockups_page)
+        self.assertIn("if not prompt_preview_rendered:", mockups_page)
         self.assertLess(
             mockups_page.index("final_prompt_items = build_mockup_final_prompt_items("),
             mockups_page.index('st.subheader("2. Generate Core Shopify Images")'),
         )
         self.assertIn("final_prompt_items=final_prompt_items", mockups_page)
+
+    def test_generated_previews_render_above_single_prompt_section_and_upload_cards(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        generation_result = source[
+            source.index("def render_generation_result") : source.index("\n\ndef render_recent_runs_sidebar")
+        ]
+        mockups_page = source[
+            source.index("def render_mockups_page") : source.index("\n\ndef render_product_uploads_page")
+        ]
+
+        self.assertIn("render_generated_previews(result)", generation_result)
+        self.assertIn("render_lifestyle_cards=False", mockups_page)
+        self.assertIn("render_zip=False", mockups_page)
+        self.assertLess(
+            mockups_page.index("render_generation_result(generation_result, render_lifestyle_cards=False, render_zip=False)"),
+            mockups_page.rindex("render_mockup_prompt_preview(final_prompt_items)"),
+        )
+        self.assertLess(
+            mockups_page.rindex("render_mockup_prompt_preview(final_prompt_items)"),
+            mockups_page.index("render_lifestyle_upload_cards(st.session_state.last_generation_result)"),
+        )
+        self.assertLess(
+            mockups_page.index("render_lifestyle_upload_cards(st.session_state.last_generation_result)"),
+            mockups_page.index("render_final_zip_download(st.session_state.last_generation_result)"),
+        )
+
+    def test_lifestyle_upload_cards_do_not_render_duplicate_copy_prompt_controls(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        prompt_cards = source[
+            source.index("def render_prompt_cards") : source.index("\n\ndef render_optional_package_controls")
+        ]
+        mockup_actions = source[
+            source.index("def render_mockup_prompt_action_row") : source.index("\n\ndef prime_asset_selection_state")
+        ]
+        upload_cards = source[
+            source.index("def render_lifestyle_upload_cards") : source.index("\n\ndef render_generation_result")
+        ]
+
+        self.assertIn("show_copy=False", prompt_cards)
+        self.assertIn("Upload image from ChatGPT", prompt_cards)
+        self.assertIn("Add To ZIP", prompt_cards)
+        self.assertIn('st.markdown(f"**{prompt_title}**")', prompt_cards)
+        self.assertIn("current_lifestyle_prompt_text", prompt_cards)
+        self.assertIn("render_mockup_prompt_bar", mockup_actions)
+        self.assertIn("if show_copy:", mockup_actions)
+        self.assertNotIn("render_mockup_prompt_bar", prompt_cards)
+        self.assertNotIn("Copy Prompt", prompt_cards)
+        self.assertIn("Product Page Lifestyle Mockups", upload_cards)
+        self.assertIn("Social Lifestyle Mockups", upload_cards)
 
 
 if __name__ == "__main__":

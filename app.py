@@ -4037,16 +4037,21 @@ def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
     )
 
 
-def render_mockup_prompt_action_row(title, prompt_text, key, prompt_id):
+def render_mockup_prompt_action_row(title, prompt_text, key, prompt_id, *, show_copy=True):
     default_prompt_text = prompt_text
     prompt_text = current_prompt_text(prompt_id, default_prompt_text).strip()
     notice = st.session_state.pop("mockup_prompt_notice", "")
     if notice:
         st.success(notice)
-    action_cols = st.columns([8, 1])
-    with action_cols[0]:
-        render_mockup_prompt_bar(prompt_text, f"mockup-copy::{key}", prompt_id, show_edit=False)
-    with action_cols[1]:
+    if show_copy:
+        action_cols = st.columns([8, 1])
+        with action_cols[0]:
+            render_mockup_prompt_bar(prompt_text, f"mockup-copy::{key}", prompt_id, show_edit=False)
+        with action_cols[1]:
+            if st.button("✎", key=f"mockup-prompt-edit-button::{prompt_id}", help="Edit prompt", use_container_width=True):
+                st.session_state[_mockup_prompt_edit_key(prompt_id)] = True
+                st.rerun()
+    else:
         if st.button("✎", key=f"mockup-prompt-edit-button::{prompt_id}", help="Edit prompt", use_container_width=True):
             st.session_state[_mockup_prompt_edit_key(prompt_id)] = True
             st.rerun()
@@ -4643,7 +4648,7 @@ def render_prompt_cards(result, prompt_paths, heading, caption=None):
             prompt_id = prompt_edit_id("lifestyle", prompt_key_from_prompt_filename(prompt_name))
             prompt_text = current_lifestyle_prompt_text(prompt_name, default_prompt_text)
             prompt_key = f"{result['run_dir']}::{prompt_name}"
-            render_mockup_prompt_action_row(prompt_title, prompt_text, prompt_key, prompt_id)
+            render_mockup_prompt_action_row(prompt_title, prompt_text, prompt_key, prompt_id, show_copy=False)
 
             saved_lifestyle_paths = result["lifestyle_mockup_paths"].get(prompt_name)
 
@@ -4765,7 +4770,41 @@ def render_optional_package_controls(result):
             )
 
 
-def render_generation_result(result):
+def render_lifestyle_upload_cards(result):
+    result = normalize_generation_result(result)
+
+    prompt_paths = [
+        Path(prompt_path)
+        for prompt_path in result["prompt_paths"]
+        if Path(prompt_path).exists()
+    ]
+
+    if not prompt_paths:
+        return
+
+    st.info(
+        "Use the prompts above for ChatGPT lifestyle images, then upload the finished images back into the matching cards."
+    )
+    product_page_prompts = [path for path in prompt_paths if is_product_page_prompt(path)]
+    social_prompts = [
+        path
+        for path in prompt_paths
+        if not is_product_page_prompt(path) and not is_reels_prompt(path)
+    ]
+
+    render_prompt_cards(
+        result,
+        product_page_prompts,
+        "Product Page Lifestyle Mockups",
+    )
+    render_prompt_cards(
+        result,
+        social_prompts,
+        "Social Lifestyle Mockups",
+    )
+
+
+def render_generation_result(result, *, render_lifestyle_cards=True, render_zip=True):
     result = normalize_generation_result(result)
     result = ensure_lifestyle_prompts(result)
     result = ensure_primary_download_zip(result)
@@ -4801,35 +4840,11 @@ def render_generation_result(result):
             f"{result['lifestyle_pack_error']}"
         )
 
-    prompt_paths = [
-        Path(prompt_path)
-        for prompt_path in result["prompt_paths"]
-        if Path(prompt_path).exists()
-    ]
+    if render_lifestyle_cards:
+        render_lifestyle_upload_cards(result)
 
-    if prompt_paths:
-        st.info(
-            "Use the prompts below for ChatGPT lifestyle images, then upload the finished images back into the matching cards."
-        )
-        product_page_prompts = [path for path in prompt_paths if is_product_page_prompt(path)]
-        social_prompts = [
-            path
-            for path in prompt_paths
-            if not is_product_page_prompt(path) and not is_reels_prompt(path)
-        ]
-
-        render_prompt_cards(
-            result,
-            product_page_prompts,
-            "Product Page Lifestyle Mockups",
-        )
-        render_prompt_cards(
-            result,
-            social_prompts,
-            "Social Lifestyle Mockups",
-        )
-
-    render_final_zip_download(result)
+    if render_zip:
+        render_final_zip_download(result)
 
 
 def render_recent_runs_sidebar():
@@ -4981,10 +4996,14 @@ def render_mockups_page():
         sport_category,
         artwork_reference_available=uploaded_file is not None and not upload_validation_error,
     )
+    generation_result = st.session_state.last_generation_result
 
     st.subheader("2. Generate Core Shopify Images")
     generate_clicked = st.button("Generate Core Shopify Images", type="primary")
-    render_mockup_prompt_preview(final_prompt_items)
+    prompt_preview_rendered = False
+    if generation_result is None and not generate_clicked:
+        render_mockup_prompt_preview(final_prompt_items)
+        prompt_preview_rendered = True
 
     if uploaded_file is not None:
         st.subheader("Uploaded Artwork")
@@ -5080,6 +5099,7 @@ def render_mockups_page():
             status_container.empty()
             progress_bar.empty()
             st.session_state.last_generation_result = result
+            generation_result = result
         except image_factory.MemoryLimitExceededError as error:
             logging.exception("Generation stopped by memory limit")
             status_container.error(str(error))
@@ -5094,8 +5114,15 @@ def render_mockups_page():
                 with suppress(FileNotFoundError, PermissionError):
                     temp_artwork_path.unlink()
 
+    if generation_result is not None:
+        render_generation_result(generation_result, render_lifestyle_cards=False, render_zip=False)
+
+    if not prompt_preview_rendered:
+        render_mockup_prompt_preview(final_prompt_items)
+
     if st.session_state.last_generation_result is not None:
-        render_generation_result(st.session_state.last_generation_result)
+        render_lifestyle_upload_cards(st.session_state.last_generation_result)
+        render_final_zip_download(st.session_state.last_generation_result)
 
 
 def render_product_uploads_page():
