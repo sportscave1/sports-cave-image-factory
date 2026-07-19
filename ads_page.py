@@ -33,8 +33,14 @@ CAMPAIGN_TYPE_OPTIONS = [
     "Single Image / Video",
 ]
 
+CAROUSEL_CARD_MAX_CHARACTERS = 17
+
 SUPPORTED_TEMPLATES = {
     ("Motorsport", "Carousel"): "motorsport_carousel",
+}
+
+TEMPLATES_WITH_PRIMARY_TEXT_VARIATIONS = {
+    "motorsport_carousel",
 }
 
 IMAGE_ORDER = [
@@ -69,8 +75,72 @@ def get_template_key(category, campaign_type):
     return SUPPORTED_TEMPLATES.get((category, campaign_type))
 
 
+def build_carousel_card_copy_rules():
+    return f"""Headline rules:
+
+- Maximum {CAROUSEL_CARD_MAX_CHARACTERS} characters including spaces.
+- Aim for one to three short words.
+- Must be clear on mobile.
+- Do not use commas.
+- Do not use full stops.
+- No emojis.
+- No all-capital shouting.
+- Do not repeat the product title on every card.
+- Do not repeat Limited Edition on every card.
+
+Description rules:
+
+- Maximum {CAROUSEL_CARD_MAX_CHARACTERS} characters including spaces.
+- Aim for one to three short words.
+- Must support rather than repeat the headline.
+- Do not use commas.
+- Do not use full stops.
+- No emojis.
+- No generic filler."""
+
+
+def build_carousel_final_quality_check(include_primary_text_variations=False):
+    primary_text_line = "- Exactly five primary-text variations where required."
+    if include_primary_text_variations:
+        primary_text_line = "- Exactly five primary-text variations."
+    return f"""Before answering count every headline and description including spaces. Rewrite any carousel field that exceeds {CAROUSEL_CARD_MAX_CHARACTERS} characters or contains a comma or full stop.
+
+Final quality check before answering:
+
+- Exactly five carousel cards.
+{primary_text_line}
+- Every carousel headline is {CAROUSEL_CARD_MAX_CHARACTERS} characters or fewer including spaces.
+- Every carousel description is {CAROUSEL_CARD_MAX_CHARACTERS} characters or fewer including spaces.
+- No carousel headline contains a comma.
+- No carousel headline contains a full stop.
+- No carousel description contains a comma.
+- No carousel description contains a full stop.
+- Copy is specific to the supplied product.
+- The cards flow as one connected story.
+- The five primary texts use different selling angles.
+- No facts have been invented.
+- No generic filler remains."""
+
+
+def apply_campaign_copy_rule_blocks(prompt, campaign_type, include_primary_text_variations=False):
+    if campaign_type != "Carousel" or not prompt:
+        return prompt
+
+    card_rules = build_carousel_card_copy_rules()
+    final_quality_check = build_carousel_final_quality_check(
+        include_primary_text_variations=include_primary_text_variations
+    )
+    if card_rules not in prompt:
+        prompt = f"{prompt.rstrip()}\n\nCAROUSEL COPY RULES\n\n{card_rules}"
+    if final_quality_check not in prompt:
+        prompt = f"{prompt.rstrip()}\n\n{final_quality_check}"
+    return prompt
+
+
 def build_motorsport_carousel_prompt(product_name, category, country, campaign_type):
     product_name = _clean_product_name(product_name)
+    carousel_card_copy_rules = build_carousel_card_copy_rules()
+    carousel_final_quality_check = build_carousel_final_quality_check(include_primary_text_variations=True)
     return f"""SPORTS CAVE MOTORSPORT CAROUSEL AD
 
 PRODUCT
@@ -136,25 +206,7 @@ Each card requires:
 Headline
 Description
 
-Headline rules:
-
-- Maximum 32 characters including spaces.
-- Ideally two to five words.
-- Clear when viewed quickly on mobile.
-- Title Case or natural sentence case.
-- No emojis.
-- No all-capital shouting.
-- No unnecessary punctuation.
-- Do not repeat the product title on every card.
-- Do not repeat “Limited Edition” on every card.
-
-Description rules:
-
-- Maximum 24 characters including spaces.
-- Ideally two to four words.
-- Must support rather than repeat the headline.
-- No full sentences unless extremely short.
-- No generic filler.
+{carousel_card_copy_rules}
 
 Use this strategic role for each card:
 
@@ -289,24 +341,21 @@ Variation 4 — Collector Ownership
 Variation 5 — Numbered Scarcity
 [copy]
 
-Final quality check before answering:
-
-- Exactly five carousel cards.
-- Exactly five primary-text variations.
-- Every headline is 32 characters or fewer.
-- Every description is 24 characters or fewer.
-- Copy is specific to the supplied product.
-- The five cards flow as one story.
-- The five primary texts use different selling angles.
-- No facts have been invented.
-- No generic filler remains."""
+{carousel_final_quality_check}
+"""
 
 
 def build_ads_prompt(product_name, category, country, campaign_type):
     template_key = get_template_key(category, campaign_type)
     if template_key == "motorsport_carousel":
-        return build_motorsport_carousel_prompt(product_name, category, country, campaign_type)
-    return ""
+        prompt = build_motorsport_carousel_prompt(product_name, category, country, campaign_type)
+    else:
+        prompt = ""
+    return apply_campaign_copy_rule_blocks(
+        prompt,
+        campaign_type,
+        include_primary_text_variations=template_key in TEMPLATES_WITH_PRIMARY_TEXT_VARIATIONS,
+    )
 
 
 def render_insufficient_winner_data():

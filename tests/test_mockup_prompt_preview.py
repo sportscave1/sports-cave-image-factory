@@ -1,4 +1,5 @@
 import ast
+import io
 import os
 from pathlib import Path
 import shutil
@@ -6,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from PIL import Image
 from streamlit.testing.v1 import AppTest
 
 import image_factory
@@ -53,6 +55,12 @@ def run_mockups_page():
     app_test.session_state["selected_page"] = "Mockups"
     app_test.session_state["startup_shell_loaded"] = True
     return app_test.run(timeout=20)
+
+
+def tiny_png_bytes(color=(212, 165, 76)):
+    buffer = io.BytesIO()
+    Image.new("RGB", (10, 10), color).save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 class MockupPromptPreviewTests(unittest.TestCase):
@@ -331,6 +339,67 @@ class MockupPromptPreviewTests(unittest.TestCase):
         self.assertNotIn("Copy Prompt", rendered_text)
         for label in expected_labels:
             self.assertNotIn(f"**{label}**", rendered_markdown)
+
+    def test_first_artwork_upload_preserves_mockups_route_and_uses_stable_widget_key(self):
+        app_test = run_mockups_page()
+
+        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
+        app_test.file_uploader[0].set_value(
+            [("first-upload.png", tiny_png_bytes(), "image/png")]
+        )
+        app_test.run(timeout=20)
+
+        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
+        self.assertEqual(len(app_test.exception), 0)
+        self.assertIn("Uploaded Artwork", [subheader.value for subheader in app_test.subheader])
+        self.assertIn("mockups_upload_processing_cache", app_test.session_state)
+
+    def test_upload_validation_error_stays_on_mockups_page(self):
+        app_test = run_mockups_page()
+
+        app_test.file_uploader[0].set_value(
+            [("bad-upload.png", b"not an image", "image/png")]
+        )
+        app_test.run(timeout=20)
+
+        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
+        self.assertTrue(
+            any("not a valid image" in error.value for error in app_test.error)
+        )
+
+    def test_mockups_upload_reruns_do_not_reset_selected_page_to_dashboard(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        init_source = source[source.index("def init_session_state") : source.index("\n\ndef log_app_memory")]
+        mockups_page = source[
+            source.index("def render_mockups_page") : source.index("\n\ndef render_product_uploads_page")
+        ]
+
+        self.assertNotIn('st.session_state.selected_page = "Dashboard"\n        st.session_state.startup_shell_loaded = True', init_source)
+        self.assertIn('key="mockups_artwork_upload"', mockups_page)
+        self.assertIn("process_uploaded_artwork_once(uploaded_file)", mockups_page)
+        self.assertNotIn("on_change", mockups_page)
+
+    def test_same_upload_is_processed_once_across_product_and_sport_reruns(self):
+        app_test = run_mockups_page()
+        upload_bytes = tiny_png_bytes()
+
+        app_test.file_uploader[0].set_value(
+            [("cached-upload.png", upload_bytes, "image/png")]
+        )
+        app_test.run(timeout=20)
+        first_cache = dict(app_test.session_state["mockups_upload_processing_cache"])
+
+        app_test.text_input[0].set_value("Cached Product Name")
+        app_test.run(timeout=20)
+        second_cache = dict(app_test.session_state["mockups_upload_processing_cache"])
+
+        app_test.selectbox[0].select("Motorsport")
+        app_test.run(timeout=20)
+        third_cache = dict(app_test.session_state["mockups_upload_processing_cache"])
+
+        self.assertEqual(first_cache, second_cache)
+        self.assertEqual(second_cache, third_cache)
+        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
 
     def test_mockups_page_does_not_render_old_expander_or_empty_state(self):
         app_test = run_mockups_page()

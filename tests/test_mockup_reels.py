@@ -72,7 +72,7 @@ class MockupReelsTests(unittest.TestCase):
             )
             self.assertTrue(prompt_dir.exists())
 
-    def test_complete_zip_includes_uploaded_reels_assets_for_existing_runs(self):
+    def test_complete_zip_includes_legacy_reel_assets_as_social_mockups_for_existing_runs(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_dir = Path(tmpdir) / "zip"
             zip_dir.mkdir()
@@ -88,10 +88,12 @@ class MockupReelsTests(unittest.TestCase):
                     {
                         "label": "16 - Man Cave Reel",
                         "include_in_zip": True,
+                        "zip_group": "reels",
                         "webp_path": str(webp_path),
                         "jpg_path": str(jpg_path),
                     }
                 ],
+                zip_groups={image_factory.ASSET_CATEGORY_SOCIAL},
             )
 
             with zipfile.ZipFile(zip_path) as archive:
@@ -105,7 +107,11 @@ class MockupReelsTests(unittest.TestCase):
             zip_dir = Path(tmpdir) / "zip"
             zip_dir.mkdir()
             asset_paths = {}
-            for group in ("core", "product_page", "social", "reels"):
+            for group in (
+                image_factory.ASSET_CATEGORY_CORE,
+                image_factory.ASSET_CATEGORY_PRODUCT,
+                image_factory.ASSET_CATEGORY_SOCIAL,
+            ):
                 asset_path = Path(tmpdir) / f"{group}.webp"
                 asset_path.write_bytes(group.encode("utf-8"))
                 asset_paths[group] = asset_path
@@ -122,13 +128,59 @@ class MockupReelsTests(unittest.TestCase):
                     }
                     for group, path in asset_paths.items()
                 ],
-                zip_groups={"core", "reels"},
+                zip_groups={image_factory.ASSET_CATEGORY_CORE, image_factory.ASSET_CATEGORY_SOCIAL},
             )
 
             with zipfile.ZipFile(zip_path) as archive:
                 names = set(archive.namelist())
 
-            self.assertEqual(names, {"WEBP/core.webp", "WEBP/reels.webp"})
+            self.assertEqual(
+                names,
+                {
+                    f"WEBP/{image_factory.ASSET_CATEGORY_CORE}.webp",
+                    f"WEBP/{image_factory.ASSET_CATEGORY_SOCIAL}.webp",
+                },
+            )
+
+    def test_complete_zip_uses_unique_archive_names_and_selected_count_matches_members(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            zip_dir = Path(tmpdir) / "zip"
+            zip_dir.mkdir()
+            first = Path(tmpdir) / "first" / "duplicate.webp"
+            second = Path(tmpdir) / "second" / "duplicate.webp"
+            first.parent.mkdir()
+            second.parent.mkdir()
+            first.write_bytes(b"first")
+            second.write_bytes(b"second")
+
+            zip_path = image_factory.create_complete_pack_zip(
+                zip_dir,
+                "test-product",
+                assets=[
+                    {
+                        "key": "social-one",
+                        "label": "Social One",
+                        "include_in_zip": True,
+                        "zip_group": image_factory.ASSET_CATEGORY_SOCIAL,
+                        "webp_path": str(first),
+                    },
+                    {
+                        "key": "social-two",
+                        "label": "Social Two",
+                        "include_in_zip": True,
+                        "zip_group": image_factory.ASSET_CATEGORY_SOCIAL,
+                        "webp_path": str(second),
+                    },
+                ],
+                zip_groups={image_factory.ASSET_CATEGORY_SOCIAL},
+            )
+
+            with zipfile.ZipFile(zip_path) as archive:
+                names = archive.namelist()
+
+            self.assertEqual(len(names), 2)
+            self.assertEqual(len(set(names)), 2)
+            self.assertTrue(all(name.startswith("WEBP/") for name in names))
 
     def test_prompt_override_lookup_for_legacy_reel_key_still_works(self):
         class FakeSupabaseBackend:
@@ -217,10 +269,12 @@ class MockupReelsTests(unittest.TestCase):
 
         self.assertIn('st.subheader("Download ZIP")', final_zip)
         self.assertIn("Choose which image groups to include, then download one ZIP.", final_zip)
-        for label in ("Core Images", "Product Page Mockups", "Social Mockups", "Reels"):
-            self.assertIn(label, final_zip)
+        for label in ("Core Images", "Social Mockups", "Product Images"):
+            self.assertIn(label, source)
+        self.assertIn("MOCKUPS_ZIP_GROUP_OPTIONS", final_zip)
+        self.assertNotIn('"Reels"', source)
+        self.assertIn("Select at least one image group to download.", final_zip)
         self.assertIn("value=True", final_zip)
-        self.assertIn("Select at least one image group before downloading the ZIP.", final_zip)
         self.assertIn("zip_groups=selected_groups", source)
 
 

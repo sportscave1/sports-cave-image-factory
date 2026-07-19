@@ -208,6 +208,21 @@ PROMPTS_FOLDER_NAME = "chatgpt-prompts"
 WEBP_CACHE_FOLDER_NAME = "_webp-cache"
 JPG_CACHE_FOLDER_NAME = "_jpg-cache"
 PREVIEW_FOLDER_NAME = "previews"
+ASSET_CATEGORY_CORE = "core_images"
+ASSET_CATEGORY_SOCIAL = "social_mockups"
+ASSET_CATEGORY_PRODUCT = "product_images"
+ZIP_GROUP_ALIASES = {
+    "core": ASSET_CATEGORY_CORE,
+    "core_images": ASSET_CATEGORY_CORE,
+    "generated": ASSET_CATEGORY_CORE,
+    "social": ASSET_CATEGORY_SOCIAL,
+    "social_mockups": ASSET_CATEGORY_SOCIAL,
+    "lifestyle": ASSET_CATEGORY_SOCIAL,
+    "product_page": ASSET_CATEGORY_PRODUCT,
+    "product_images": ASSET_CATEGORY_PRODUCT,
+    "product": ASSET_CATEGORY_PRODUCT,
+    "reels": ASSET_CATEGORY_SOCIAL,
+}
 
 LIFESTYLE_IMAGE_VARIANTS = {
     "01-man-cave-prompt.txt": "man-cave-lifestyle",
@@ -1571,7 +1586,7 @@ def build_asset_record(
     jpg_path=None,
     include_in_zip=True,
     asset_group="generated",
-    zip_group="core",
+    zip_group=ASSET_CATEGORY_CORE,
     prompt_filename=None,
     export_to_shopify=True,
     export_to_socials=True,
@@ -2041,26 +2056,26 @@ def get_lifestyle_prompt_text(prompt_filename, default_text, *, local_only=False
 def get_prompt_group(prompt_filename):
     prompt_filename = Path(prompt_filename).name
     if prompt_filename in PRODUCT_PAGE_PROMPT_FILENAMES:
-        return "product_page"
+        return ASSET_CATEGORY_PRODUCT
     if prompt_filename in REELS_PROMPT_FILENAMES:
-        return "reels"
+        return ASSET_CATEGORY_SOCIAL
 
-    return "social"
+    return ASSET_CATEGORY_SOCIAL
 
 
 def get_asset_zip_group(asset):
     zip_group = str((asset or {}).get("zip_group") or "").strip()
     if zip_group:
-        return zip_group
+        return ZIP_GROUP_ALIASES.get(zip_group, zip_group)
 
     prompt_filename = (asset or {}).get("prompt_filename")
     if prompt_filename:
         return get_prompt_group(prompt_filename)
 
     if (asset or {}).get("asset_group") == "lifestyle":
-        return "social"
+        return ASSET_CATEGORY_SOCIAL
 
-    return "core"
+    return ASSET_CATEGORY_CORE
 
 
 def get_asset_zip_folder(file_path):
@@ -2167,11 +2182,46 @@ def generate_lifestyle_prompt_pack(
     return prompt_dir, reference_image_path, prompt_paths, None
 
 
-def create_complete_pack_zip(zip_dir, product_slug, webp_dir=None, jpg_dir=None, prompt_dir=None, assets=None, zip_groups=None):
-    complete_zip_path = zip_dir / f"{product_slug}-complete-package.zip"
-    selected_groups = set(zip_groups or []) if zip_groups is not None else None
+def unique_archive_name(archive_name, used_names, asset_key=""):
+    archive_name = str(archive_name).replace("\\", "/")
+    if archive_name not in used_names:
+        used_names.add(archive_name)
+        return archive_name
+
+    archive_path = Path(archive_name)
+    folder = archive_path.parent.as_posix()
+    stem = archive_path.stem
+    suffix = archive_path.suffix
+    safe_key = slugify(asset_key or stem) or "asset"
+    index = 2
+    while True:
+        candidate_name = f"{stem}-{safe_key}-{index}{suffix}"
+        candidate = f"{folder}/{candidate_name}" if folder and folder != "." else candidate_name
+        if candidate not in used_names:
+            used_names.add(candidate)
+            return candidate
+        index += 1
+
+
+def create_complete_pack_zip(
+    zip_dir,
+    product_slug,
+    webp_dir=None,
+    jpg_dir=None,
+    prompt_dir=None,
+    assets=None,
+    zip_groups=None,
+    zip_filename=None,
+):
+    complete_zip_path = zip_dir / (zip_filename or f"{product_slug}-complete-package.zip")
+    selected_groups = {
+        ZIP_GROUP_ALIASES.get(str(group).strip(), str(group).strip())
+        for group in (zip_groups or [])
+    } if zip_groups is not None else None
 
     ensure_memory_available("Before zip creation: Complete pack")
+    used_names = set()
+    written_count = 0
     with zipfile.ZipFile(complete_zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         if assets is not None:
             for asset in sorted(assets, key=lambda item: item.get("label", item.get("key", "")).lower()):
@@ -2185,25 +2235,41 @@ def create_complete_pack_zip(zip_dir, product_slug, webp_dir=None, jpg_dir=None,
 
                 if webp_path and Path(webp_path).exists():
                     webp_path = Path(webp_path)
-                    zipf.write(webp_path, arcname=f"WEBP/{webp_path.name}")
+                    zipf.write(
+                        webp_path,
+                        arcname=unique_archive_name(f"WEBP/{webp_path.name}", used_names, asset.get("key")),
+                    )
+                    written_count += 1
 
                 if jpg_path and Path(jpg_path).exists():
                     jpg_path = Path(jpg_path)
-                    zipf.write(jpg_path, arcname=f"jpg/{jpg_path.name}")
+                    zipf.write(
+                        jpg_path,
+                        arcname=unique_archive_name(f"jpg/{jpg_path.name}", used_names, asset.get("key")),
+                    )
+                    written_count += 1
         else:
             if webp_dir is not None:
                 for webp_file in sorted(Path(webp_dir).glob("*.webp")):
-                    zipf.write(webp_file, arcname=f"WEBP/{webp_file.name}")
+                    zipf.write(webp_file, arcname=unique_archive_name(f"WEBP/{webp_file.name}", used_names))
+                    written_count += 1
 
             if jpg_dir is not None:
                 for jpg_file in sorted(Path(jpg_dir).glob("*.jpg")):
-                    zipf.write(jpg_file, arcname=f"jpg/{jpg_file.name}")
+                    zipf.write(jpg_file, arcname=unique_archive_name(f"jpg/{jpg_file.name}", used_names))
+                    written_count += 1
 
         if prompt_dir is not None:
             for prompt_file in sorted(Path(prompt_dir).glob("*")):
                 if prompt_file.is_file():
-                    zipf.write(prompt_file, arcname=f"{PROMPTS_FOLDER_NAME}/{prompt_file.name}")
+                    zipf.write(
+                        prompt_file,
+                        arcname=unique_archive_name(f"{PROMPTS_FOLDER_NAME}/{prompt_file.name}", used_names),
+                    )
+                    written_count += 1
 
+    if written_count != len(used_names):
+        raise RuntimeError("ZIP validation failed: duplicate archive names were detected.")
     ensure_memory_available("After zip creation: Complete pack")
     return complete_zip_path
 

@@ -267,6 +267,25 @@ LEGACY_BASE_ASSET_SPECS = [
     ("white", "White Framed"),
     ("unframed", "Unframed"),
 ]
+ASSET_CATEGORY_CORE = "core_images"
+ASSET_CATEGORY_SOCIAL = "social_mockups"
+ASSET_CATEGORY_PRODUCT = "product_images"
+ZIP_GROUP_ALIASES = {
+    "core": ASSET_CATEGORY_CORE,
+    "core_images": ASSET_CATEGORY_CORE,
+    "generated": ASSET_CATEGORY_CORE,
+    "social": ASSET_CATEGORY_SOCIAL,
+    "social_mockups": ASSET_CATEGORY_SOCIAL,
+    "lifestyle": ASSET_CATEGORY_SOCIAL,
+    "product_page": ASSET_CATEGORY_PRODUCT,
+    "product_images": ASSET_CATEGORY_PRODUCT,
+    "product": ASSET_CATEGORY_PRODUCT,
+}
+MOCKUPS_ZIP_GROUP_OPTIONS = [
+    (ASSET_CATEGORY_CORE, "Core Images"),
+    (ASSET_CATEGORY_SOCIAL, "Social Mockups"),
+    (ASSET_CATEGORY_PRODUCT, "Product Images"),
+]
 SPORT_OPTIONS = [
     "AFL",
     "Baseball",
@@ -2038,7 +2057,6 @@ def init_session_state():
         st.session_state.selected_page = "Dashboard"
 
     if "startup_shell_loaded" not in st.session_state:
-        st.session_state.selected_page = "Dashboard"
         st.session_state.startup_shell_loaded = True
 
     pending_page = st.session_state.pop("pending_page", None)
@@ -2080,6 +2098,9 @@ def init_session_state():
 
     if "uploaded_preview_path" not in st.session_state:
         st.session_state.uploaded_preview_path = None
+
+    if "mockups_upload_processing_cache" not in st.session_state:
+        st.session_state.mockups_upload_processing_cache = {}
 
 
 def log_app_memory(stage):
@@ -2973,6 +2994,141 @@ def get_uploaded_file_signature(uploaded_file):
     return hashlib.sha1(f"{name}|{size}".encode("utf-8")).hexdigest()[:16]
 
 
+def get_uploaded_file_provisional_signature(uploaded_file):
+    if uploaded_file is None:
+        return None
+
+    name = getattr(uploaded_file, "name", "")
+    size = getattr(uploaded_file, "size", 0)
+    mime_type = getattr(uploaded_file, "type", "")
+    return hashlib.sha1(f"{name}|{size}|{mime_type}".encode("utf-8")).hexdigest()[:16]
+
+
+def _mockups_upload_processing_cache():
+    if "mockups_upload_processing_cache" not in st.session_state:
+        st.session_state.mockups_upload_processing_cache = {}
+    return st.session_state.mockups_upload_processing_cache
+
+
+def process_uploaded_artwork_once(uploaded_file):
+    Image, ImageOps, UnidentifiedImageError = get_pillow_modules()
+    if uploaded_file is None:
+        return None
+
+    started = time.perf_counter()
+    provisional_signature = get_uploaded_file_provisional_signature(uploaded_file)
+    cache = _mockups_upload_processing_cache()
+    cached = cache.get(provisional_signature)
+    if cached:
+        preview_path = cached.get("preview_path")
+        if not preview_path or Path(preview_path).exists():
+            logging.info(
+                "MOCKUPS_UPLOAD cache_hit signature=%s elapsed_ms=%s",
+                cached.get("signature"),
+                int((time.perf_counter() - started) * 1000),
+            )
+            if hasattr(uploaded_file, "seek"):
+                uploaded_file.seek(0)
+            return dict(cached)
+
+    file_size = getattr(uploaded_file, "size", None)
+    if file_size is not None and file_size <= 0:
+        raise ValueError("Uploaded file is empty.")
+    if file_size is not None and file_size > image_factory.MAX_UPLOAD_SIZE_BYTES:
+        raise ValueError(
+            "Uploaded image is too large for the current Render instance. "
+            "Please upload a JPG or WebP under 20MB."
+        )
+
+    filename = getattr(uploaded_file, "name", "")
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+        raise ValueError("Unsupported file type. Upload JPG, JPEG, PNG, or WEBP.")
+
+    read_started = time.perf_counter()
+    upload_bytes = uploaded_file.getvalue()
+    signature = hashlib.sha1(upload_bytes).hexdigest()[:16]
+    logging.info(
+        "MOCKUPS_UPLOAD read_bytes signature=%s bytes=%s elapsed_ms=%s",
+        signature,
+        len(upload_bytes),
+        int((time.perf_counter() - read_started) * 1000),
+    )
+    if len(upload_bytes) <= 0:
+        raise ValueError("Uploaded file is empty.")
+    if len(upload_bytes) > image_factory.MAX_UPLOAD_SIZE_BYTES:
+        raise ValueError(
+            "Uploaded image is too large for the current Render instance. "
+            "Please upload a JPG or WebP under 20MB."
+        )
+
+    source_image = None
+    preview_image = None
+    preview_path = None
+    try:
+        pil_started = time.perf_counter()
+        source_image = Image.open(io.BytesIO(upload_bytes))
+        width, height = source_image.size
+        upload_details = {
+            "file_size": file_size if file_size is not None else len(upload_bytes),
+            "width": width,
+            "height": height,
+            "signature": signature,
+        }
+
+        if should_defer_uploaded_preview(upload_details):
+            source_image.verify()
+        else:
+            UPLOAD_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+            preview_path = UPLOAD_PREVIEW_DIR / f"{signature}.webp"
+            if not preview_path.exists():
+                preview_image = ImageOps.exif_transpose(source_image)
+                preview_image.thumbnail((image_factory.MAX_PREVIEW_EDGE, image_factory.MAX_PREVIEW_EDGE), Image.LANCZOS)
+                if preview_image.mode != "RGB":
+                    preview_image = preview_image.convert("RGB")
+                preview_image.save(
+                    preview_path,
+                    format="WEBP",
+                    quality=image_factory.PREVIEW_WEBP_QUALITY,
+                    method=image_factory.PREVIEW_WEBP_METHOD,
+                )
+            upload_details["preview_path"] = str(preview_path)
+
+        logging.info(
+            "MOCKUPS_UPLOAD pil_process signature=%s size=%sx%s preview=%s elapsed_ms=%s total_ms=%s",
+            signature,
+            width,
+            height,
+            bool(preview_path),
+            int((time.perf_counter() - pil_started) * 1000),
+            int((time.perf_counter() - started) * 1000),
+        )
+        cache[provisional_signature] = dict(upload_details)
+        cache[signature] = dict(upload_details)
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+        return upload_details
+    except UnidentifiedImageError as error:
+        raise ValueError(
+            "Uploaded file is not a valid image. Please upload a valid JPG, PNG, or WEBP file."
+        ) from error
+    except ValueError:
+        raise
+    except Exception as error:
+        raise RuntimeError("Unable to validate uploaded artwork file.") from error
+    finally:
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+        if preview_image is not None:
+            with suppress(Exception):
+                preview_image.close()
+        if source_image is not None:
+            with suppress(Exception):
+                source_image.close()
+        del preview_image, source_image
+        gc.collect()
+
+
 def create_uploaded_preview(uploaded_file):
     Image, ImageOps, _ = get_pillow_modules()
     preview_signature = get_uploaded_file_signature(uploaded_file)
@@ -3341,19 +3497,24 @@ def normalize_asset(asset):
     }
     normalized = defaults.copy()
     normalized.update(asset or {})
+    if normalized.get("zip_group"):
+        normalized["zip_group"] = ZIP_GROUP_ALIASES.get(
+            str(normalized["zip_group"]).strip(),
+            str(normalized["zip_group"]).strip(),
+        )
     if not normalized.get("zip_group"):
         prompt_filename = normalized.get("prompt_filename")
         if prompt_filename:
             if Path(prompt_filename).name in PRODUCT_PAGE_PROMPT_NAMES:
-                normalized["zip_group"] = "product_page"
+                normalized["zip_group"] = ASSET_CATEGORY_PRODUCT
             elif Path(prompt_filename).name in REELS_PROMPT_NAMES:
-                normalized["zip_group"] = "reels"
+                normalized["zip_group"] = ASSET_CATEGORY_SOCIAL
             else:
-                normalized["zip_group"] = "social"
+                normalized["zip_group"] = ASSET_CATEGORY_SOCIAL
         elif normalized.get("asset_group") == "lifestyle":
-            normalized["zip_group"] = "social"
+            normalized["zip_group"] = ASSET_CATEGORY_SOCIAL
         else:
-            normalized["zip_group"] = "core"
+            normalized["zip_group"] = ASSET_CATEGORY_CORE
     return normalized
 
 
@@ -3467,10 +3628,10 @@ def is_reels_prompt(prompt_path):
 def get_lifestyle_prompt_group(prompt_filename):
     prompt_filename = Path(prompt_filename).name
     if prompt_filename in PRODUCT_PAGE_PROMPT_NAMES:
-        return "product_page"
+        return ASSET_CATEGORY_PRODUCT
     if prompt_filename in REELS_PROMPT_NAMES:
-        return "reels"
-    return "social"
+        return ASSET_CATEGORY_SOCIAL
+    return ASSET_CATEGORY_SOCIAL
 
 
 def prompt_key_from_prompt_filename(prompt_filename):
@@ -4375,11 +4536,18 @@ def build_filtered_download_zip(result, selected_groups):
     result = normalize_generation_result(result)
     zip_dir = Path(result["zip_dir"] or (Path(result["run_dir"]) / "zip"))
     zip_dir.mkdir(parents=True, exist_ok=True)
+    selected_assets = get_selected_zip_assets(result, selected_groups)
+    manifest_hash = get_zip_manifest_hash(selected_assets, selected_groups)
+    zip_filename = f"{result['product_slug']}-selected-{manifest_hash}.zip"
+    zip_path = zip_dir / zip_filename
+    if zip_path.exists():
+        return zip_path
     return image_factory.create_complete_pack_zip(
         zip_dir,
         result["product_slug"],
         assets=result["assets"],
         zip_groups=selected_groups,
+        zip_filename=zip_filename,
     )
 
 
@@ -4389,6 +4557,66 @@ def asset_has_downloadable_file(asset):
         if file_path and Path(file_path).exists():
             return True
     return False
+
+
+def get_asset_zip_group(asset):
+    return ZIP_GROUP_ALIASES.get(str((asset or {}).get("zip_group") or "").strip(), (asset or {}).get("zip_group"))
+
+
+def get_asset_downloadable_paths(asset):
+    paths = []
+    for path_key in ("webp_path", "jpg_path"):
+        file_path = asset.get(path_key)
+        if file_path and Path(file_path).exists():
+            paths.append(Path(file_path))
+    return paths
+
+
+def get_selected_zip_assets(result, selected_groups):
+    selected_group_set = {
+        ZIP_GROUP_ALIASES.get(str(group).strip(), str(group).strip())
+        for group in selected_groups
+    }
+    return [
+        asset
+        for asset in normalize_generation_result(result)["assets"]
+        if asset.get("include_in_zip", True)
+        and get_asset_zip_group(asset) in selected_group_set
+        and get_asset_downloadable_paths(asset)
+    ]
+
+
+def get_zip_manifest_hash(assets, selected_groups):
+    manifest_items = []
+    for asset in sorted(assets, key=lambda item: str(item.get("key") or "")):
+        path_items = []
+        for file_path in get_asset_downloadable_paths(asset):
+            stat = file_path.stat()
+            path_items.append(
+                {
+                    "path": str(file_path),
+                    "size": stat.st_size,
+                    "mtime_ns": stat.st_mtime_ns,
+                }
+            )
+        manifest_items.append(
+            {
+                "key": asset.get("key"),
+                "zip_group": get_asset_zip_group(asset),
+                "paths": path_items,
+            }
+        )
+    payload = json.dumps(
+        {
+            "groups": sorted(
+                ZIP_GROUP_ALIASES.get(str(group).strip(), str(group).strip())
+                for group in selected_groups
+            ),
+            "assets": manifest_items,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]
 
 
 def build_lifestyle_asset(prompt_path, saved_paths):
@@ -4588,32 +4816,24 @@ def render_final_zip_download(result):
     st.subheader("Download ZIP")
     st.caption("Choose which image groups to include, then download one ZIP.")
 
-    filter_specs = [
-        ("core", "Core Images"),
-        ("product_page", "Product Page Mockups"),
-        ("social", "Social Mockups"),
-        ("reels", "Reels"),
-    ]
     selected_groups = []
-    filter_cols = st.columns(4)
-    for index, (group_key, label) in enumerate(filter_specs):
+    filter_cols = st.columns(len(MOCKUPS_ZIP_GROUP_OPTIONS))
+    for index, (group_key, label) in enumerate(MOCKUPS_ZIP_GROUP_OPTIONS):
         state_key = f"download-zip-filter::{result['run_dir']}::{group_key}"
         with filter_cols[index]:
             if st.checkbox(label, value=True, key=state_key):
                 selected_groups.append(group_key)
 
     if not selected_groups:
-        st.warning("Select at least one image group before downloading the ZIP.")
+        st.warning("Select at least one image group to download.")
         st.button("Download ZIP", key=f"download-filtered-zip-disabled::{result['run_dir']}", disabled=True, use_container_width=True)
         return
 
-    selected_group_set = set(selected_groups)
-    if not any(
-        asset.get("include_in_zip", True)
-        and asset.get("zip_group") in selected_group_set
-        and asset_has_downloadable_file(asset)
-        for asset in result["assets"]
-    ):
+    selected_assets = get_selected_zip_assets(result, selected_groups)
+    selected_file_count = sum(len(get_asset_downloadable_paths(asset)) for asset in selected_assets)
+    st.caption(f"{selected_file_count} files selected for ZIP")
+
+    if selected_file_count <= 0:
         st.warning("No files are available for the selected image groups yet.")
         st.button("Download ZIP", key=f"download-filtered-zip-empty::{result['run_dir']}", disabled=True, use_container_width=True)
         return
@@ -4908,6 +5128,7 @@ def render_mockups_page():
     uploaded_file = st.file_uploader(
         "Upload finished Sports Cave artwork",
         type=["jpg", "jpeg", "png", "webp"],
+        key="mockups_artwork_upload",
     )
 
     upload_details = None
@@ -4936,7 +5157,9 @@ def render_mockups_page():
 
     if uploaded_file is not None:
         try:
-            upload_details = validate_uploaded_artwork(uploaded_file)
+            logging.info("MOCKUPS_NAV upload_processing_start selected_page=%s", st.session_state.get("selected_page"))
+            upload_details = process_uploaded_artwork_once(uploaded_file)
+            logging.info("MOCKUPS_NAV upload_processing_done selected_page=%s", st.session_state.get("selected_page"))
         except ValueError as error:
             upload_validation_error = str(error)
             st.error(upload_validation_error)
@@ -4989,18 +5212,10 @@ def render_mockups_page():
             )
             st.caption(uploaded_file.name)
         else:
-            preview_signature = get_uploaded_file_signature(uploaded_file)
-            preview_path = st.session_state.uploaded_preview_path
-            preview_missing = not preview_path or not Path(preview_path).exists()
-            if preview_signature != st.session_state.uploaded_preview_signature or preview_missing:
-                try:
-                    preview_path = create_uploaded_preview(uploaded_file)
-                    st.session_state.uploaded_preview_signature = preview_signature
-                    st.session_state.uploaded_preview_path = str(preview_path) if preview_path else None
-                except Exception as error:
-                    st.warning(f"Could not create upload preview: {error}")
-                    st.session_state.uploaded_preview_signature = preview_signature
-                    st.session_state.uploaded_preview_path = None
+            preview_signature = (upload_details or {}).get("signature")
+            preview_path = (upload_details or {}).get("preview_path")
+            st.session_state.uploaded_preview_signature = preview_signature
+            st.session_state.uploaded_preview_path = preview_path
 
             preview_path = st.session_state.uploaded_preview_path
             if preview_path and Path(preview_path).exists():
