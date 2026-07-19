@@ -89,6 +89,10 @@ class AdsPageTests(unittest.TestCase):
         self.assertNotIn("Maximum 24 characters including spaces.", prompt)
         self.assertIn("Use the supplied product name as the source of identity.", prompt)
         self.assertIn("Do not invent race results", prompt)
+        self.assertIn("PRODUCT SPECIFICITY TEST", prompt)
+        self.assertIn("At least four of the five card pairs must include a product-specific anchor", prompt)
+        self.assertIn("Silently create multiple candidate options for each card.", prompt)
+        self.assertIn("could this card be copied unchanged onto an unrelated sports artwork?", prompt)
 
     def test_carousel_card_rules_prohibit_commas_and_full_stops(self):
         prompt = ads_page.build_ads_prompt("Six Laps Ahead", "Motorsport", "UK", "Carousel")
@@ -100,10 +104,14 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Do not use full stops.", headline_section)
         self.assertIn("Do not use commas.", description_section)
         self.assertIn("Do not use full stops.", description_section)
+        self.assertIn("Do not repeat another card headline.", headline_section)
+        self.assertIn("Do not repeat another card description.", description_section)
         self.assertIn("No carousel headline contains a comma.", prompt)
         self.assertIn("No carousel headline contains a full stop.", prompt)
         self.assertIn("No carousel description contains a comma.", prompt)
         self.assertIn("No carousel description contains a full stop.", prompt)
+        self.assertIn("No duplicate carousel headlines.", prompt)
+        self.assertIn("No duplicate carousel descriptions.", prompt)
         self.assertIn(
             "Before answering count every headline and description including spaces. "
             "Rewrite any carousel field that exceeds 17 characters or contains a comma or full stop.",
@@ -115,10 +123,12 @@ class AdsPageTests(unittest.TestCase):
 
         self.assertEqual(ads_page.CAROUSEL_CARD_MAX_CHARACTERS, 17)
         self.assertIn("def build_carousel_card_copy_rules", source)
+        self.assertIn("def build_carousel_story_and_specificity_rules", source)
         self.assertIn("def build_carousel_final_quality_check", source)
         self.assertIn("def apply_campaign_copy_rule_blocks", source)
         self.assertIn('campaign_type != "Carousel"', source)
         self.assertIn("carousel_card_copy_rules = build_carousel_card_copy_rules()", source)
+        self.assertIn("category=category", source)
         self.assertIn(
             "carousel_final_quality_check = build_carousel_final_quality_check(include_primary_text_variations=True)",
             source,
@@ -134,6 +144,130 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Approximately 70 to 110 words.", primary_text_section)
         self.assertIn("Approximately 80 to 120 words.", primary_text_section)
         self.assertNotIn("17 characters", primary_text_section)
+
+    def test_motorsport_prompt_pushes_product_specific_connected_cards(self):
+        prompt = ads_page.build_ads_prompt("Peter Brock Six Laps Ahead", "Motorsport", "Australia", "Carousel")
+
+        self.assertIn("Product name: Peter Brock Six Laps Ahead", prompt)
+        self.assertIn("Card 1 Hero Identity", prompt)
+        self.assertIn("Card 2 Memory Anchor", prompt)
+        self.assertIn("Card 3 Collector Meaning", prompt)
+        self.assertIn("Card 4 Ownership", prompt)
+        self.assertIn("Card 5 Real Scarcity", prompt)
+        self.assertIn("favour language drawn from circuit, machine, rivalry", prompt)
+        self.assertIn("Do not hardcode examples or famous names from another product.", prompt)
+        self.assertIn("Peter Brock", prompt)
+
+    def test_non_motorsport_category_uses_same_story_framework(self):
+        cricket_rules = ads_page.build_carousel_story_and_specificity_rules("Cricket")
+
+        self.assertIn("Card 1 Hero Identity", cricket_rules)
+        self.assertIn("Card 5 Real Scarcity", cricket_rules)
+        self.assertIn("crease, spell, innings, summer, Ashes", cricket_rules)
+        self.assertIn("could this card be copied unchanged onto an unrelated sports artwork?", cricket_rules)
+
+    def test_carousel_validator_accepts_exact_five_product_specific_cards(self):
+        cards = [
+            {"headline": "Peter Brock", "description": "Six Laps Ahead"},
+            {"headline": "Bathurst 1979", "description": "Mountain Roar"},
+            {"headline": "Era Framed", "description": "Brock Memory"},
+            {"headline": "Own The Era", "description": "Collector Wall"},
+            {"headline": "Only 100 Exist", "description": "No Second Run"},
+        ]
+
+        self.assertEqual(ads_page.validate_carousel_cards(cards, edition_info_supplied=True), [])
+
+    def test_carousel_validator_rejects_bad_card_structure_and_fields(self):
+        cards = [
+            {"headline": "History Framed", "description": "Those Who Know"},
+            {"headline": "Too Long For Meta Cards", "description": "Valid"},
+            {"headline": "Comma, Bad", "description": "Full. Stop"},
+            {"headline": "Repeat", "description": "Repeat"},
+            {"headline": "Repeat", "description": "Repeat"},
+        ]
+
+        errors = ads_page.validate_carousel_cards(cards, edition_info_supplied=True)
+
+        self.assertTrue(any("banned generic filler" in error for error in errors))
+        self.assertTrue(any("exceeds 17 characters" in error for error in errors))
+        self.assertTrue(any("contains a comma" in error for error in errors))
+        self.assertTrue(any("contains a full stop" in error for error in errors))
+        self.assertTrue(any("duplicates another headline" in error for error in errors))
+        self.assertTrue(any("duplicates another description" in error for error in errors))
+
+    def test_carousel_validator_rejects_missing_cards_and_blank_fields(self):
+        errors = ads_page.validate_carousel_cards(
+            [{"headline": "", "description": "Six Laps"}],
+            edition_info_supplied=True,
+        )
+
+        self.assertEqual(errors, ["Carousel output must contain exactly 5 cards."])
+
+        blank_errors = ads_page.validate_carousel_cards(
+            [
+                {"headline": "Brock", "description": "Six Laps"},
+                {"headline": "", "description": "Mountain"},
+                {"headline": "Era", "description": "Memory"},
+                {"headline": "Wall", "description": "Garage"},
+                {"headline": "Only 100", "description": "No Run"},
+            ],
+            edition_info_supplied=True,
+        )
+        self.assertIn("Card 2 headline is blank.", blank_errors)
+
+    def test_carousel_validator_rejects_scarcity_without_supplied_edition_info(self):
+        cards = [
+            {"headline": "Peter Brock", "description": "Six Laps"},
+            {"headline": "Bathurst", "description": "The Mountain"},
+            {"headline": "Era Framed", "description": "Brock Memory"},
+            {"headline": "Own The Era", "description": "Garage Wall"},
+            {"headline": "Only 100 Exist", "description": "No Second Run"},
+        ]
+
+        errors = ads_page.validate_carousel_cards(cards, edition_info_supplied=False)
+        self.assertIn("Card 5 uses scarcity without supplied edition information.", errors)
+        self.assertEqual(ads_page.validate_carousel_cards(cards, edition_info_supplied=True), [])
+
+    def test_repair_instruction_rewrites_invalid_fields_without_truncation(self):
+        errors = ["Card 1 headline exceeds 17 characters.", "Card 2 description contains a comma."]
+
+        instruction = ads_page.build_carousel_repair_instruction(errors)
+
+        self.assertIn("Rewrite only the invalid carousel-card fields", instruction)
+        self.assertIn("Do not silently truncate text.", instruction)
+        self.assertIn("- Card 1 headline exceeds 17 characters.", instruction)
+
+    def test_parse_carousel_cards_extracts_exact_output_shape(self):
+        output = """CAROUSEL CARDS
+
+Card 1
+Headline: Peter Brock
+Description: Six Laps Ahead
+
+Card 2
+Headline: Bathurst 1979
+Description: Mountain Roar
+
+Card 3
+Headline: Era Framed
+Description: Brock Memory
+
+Card 4
+Headline: Own The Era
+Description: Collector Wall
+
+Card 5
+Headline: Only 100 Exist
+Description: No Second Run
+
+PRIMARY TEXT VARIATIONS
+"""
+
+        cards = ads_page.parse_carousel_cards(output)
+
+        self.assertEqual(len(cards), 5)
+        self.assertEqual(cards[0]["headline"], "Peter Brock")
+        self.assertEqual(cards[-1]["description"], "No Second Run")
 
     def test_submit_supported_result_renders_three_compact_sections(self):
         app_test = run_ads_page()
