@@ -210,13 +210,18 @@ class MockupPromptPreviewTests(unittest.TestCase):
 
         self.assertEqual(len(prompt_items), len(image_factory.LIFESTYLE_PROMPT_SPECS))
 
-    def test_mockups_page_renders_all_prompts_without_upload_or_product(self):
+    def test_mockups_page_renders_all_prompt_copy_rows_without_upload_or_product(self):
         prompt_labels = load_app_prompt_labels()
         app_test = run_mockups_page()
+        expected_labels = [
+            prompt_labels[filename]
+            for filename, _, _ in image_factory.LIFESTYLE_PROMPT_SPECS
+        ]
+        rendered_markdown = [markdown.value for markdown in app_test.markdown]
 
         self.assertEqual(len(app_test.exception), 0)
         self.assertEqual(len(app_test.expander), 0)
-        self.assertEqual(len(app_test.text_area), 20)
+        self.assertEqual(len(app_test.text_area), 0)
         self.assertTrue(
             any(markdown.value == "### Image Generation Prompts" for markdown in app_test.markdown)
         )
@@ -227,24 +232,14 @@ class MockupPromptPreviewTests(unittest.TestCase):
                 for caption in app_test.caption
             )
         )
-        self.assertEqual(
-            [text_area.label for text_area in app_test.text_area],
-            [
-                f"{prompt_labels[filename]} prompt"
-                for filename, _, _ in image_factory.LIFESTYLE_PROMPT_SPECS
-            ],
-        )
-        self.assertTrue(all(text_area.disabled for text_area in app_test.text_area))
-        self.assertIn("Product name: [PRODUCT TITLE]", app_test.text_area[0].value)
-        self.assertIn("Sport category: AFL", app_test.text_area[0].value)
-        self.assertIn("Reference image: [ARTWORK REFERENCE]", app_test.text_area[0].value)
+        for label in expected_labels:
+            self.assertIn(f"**{label}**", rendered_markdown)
 
     def test_mockups_page_does_not_render_old_expander_or_empty_state(self):
         app_test = run_mockups_page()
         rendered_text = "\n".join(
             [markdown.value for markdown in app_test.markdown]
             + [caption.value for caption in app_test.caption]
-            + [text_area.label for text_area in app_test.text_area]
         )
 
         self.assertNotIn("Preview All Image Prompts", rendered_text)
@@ -269,7 +264,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
             app_test = run_mockups_page()
 
         self.assertEqual(len(app_test.exception), 0)
-        self.assertEqual(len(app_test.text_area), 20)
+        self.assertEqual(len(app_test.text_area), 0)
 
     def test_generation_still_requires_valid_artwork_before_generator_runs(self):
         app_test = run_mockups_page()
@@ -304,12 +299,14 @@ class MockupPromptPreviewTests(unittest.TestCase):
 
         self.assertNotIn("st.expander", preview_helper)
         self.assertIn('st.markdown("### Image Generation Prompts")', preview_helper)
-        self.assertIn("st.text_area", preview_helper)
-        self.assertIn("disabled=True", preview_helper)
+        self.assertIn("render_mockup_prompt_bar", preview_helper)
+        self.assertIn("show_edit=False", preview_helper)
+        self.assertIn("st.columns(3)", preview_helper)
+        self.assertNotIn("st.text_area", preview_helper)
         self.assertNotIn("generate_product_images", preview_helper)
         self.assertLess(
-            mockups_page.index("render_mockup_prompt_preview(final_prompt_items)"),
             mockups_page.index('st.button("Generate Core Shopify Images"'),
+            mockups_page.index("render_mockup_prompt_preview(final_prompt_items)"),
         )
         self.assertLess(
             mockups_page.index("final_prompt_items = build_mockup_final_prompt_items("),

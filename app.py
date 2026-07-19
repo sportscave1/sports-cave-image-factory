@@ -4905,16 +4905,17 @@ def render_mockup_prompt_preview(final_prompt_items):
         "Review the prompts used for the lifestyle and reel image pack. "
         "Product details are inserted automatically when provided."
     )
-    for prompt_item in final_prompt_items:
-        st.markdown(f"**{prompt_item['label']}**")
-        st.text_area(
-            label=f"{prompt_item['label']} prompt",
-            value=prompt_item["prompt"],
-            height=180,
-            disabled=True,
-            key=f"mockup-prompt-preview::{prompt_item['key']}",
-            label_visibility="collapsed",
-        )
+    cols = st.columns(3)
+    for index, prompt_item in enumerate(final_prompt_items):
+        with cols[index % 3]:
+            st.markdown(f"**{prompt_item['label']}**")
+            prompt_id = prompt_edit_id("lifestyle", prompt_item["key"])
+            render_mockup_prompt_bar(
+                prompt_item["prompt"],
+                f"mockup-prompt-preview::{prompt_item['key']}",
+                prompt_id,
+                show_edit=False,
+            )
 
 
 def render_mockups_page():
@@ -4994,8 +4995,8 @@ def render_mockups_page():
     )
 
     st.subheader("2. Generate Core Shopify Images")
-    render_mockup_prompt_preview(final_prompt_items)
     generate_clicked = st.button("Generate Core Shopify Images", type="primary")
+    render_mockup_prompt_preview(final_prompt_items)
 
     if uploaded_file is not None:
         st.subheader("Uploaded Artwork")
