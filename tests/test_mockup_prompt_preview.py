@@ -656,6 +656,14 @@ class MockupPromptPreviewTests(unittest.TestCase):
             self.assertIn("16 - Man Cave With Pool Table (Social)", rendered_text)
             self.assertIn("17 - Architectural Loft / Statement Wall (Social)", rendered_text)
 
+    def test_image_factory_import_is_reloaded_when_prompt_specs_change(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        get_image_factory_source = source[source.index("def get_image_factory") : source.index("\n\ndef get_os_pages")]
+
+        self.assertIn("__sports_cave_loaded_mtime__", get_image_factory_source)
+        self.assertIn("image_factory.py", get_image_factory_source)
+        self.assertIn("importlib.reload(image_factory)", get_image_factory_source)
+
     def test_prompt_card_upload_auto_registers_for_zip_without_add_to_zip_click(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)

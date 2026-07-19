@@ -94,6 +94,11 @@ def get_image_factory():
     if image_factory is None:
         log_startup_stage("IMAGE FACTORY IMPORT START")
         image_factory = importlib.import_module("image_factory")
+        image_factory_path = Path(__file__).resolve().parent / "image_factory.py"
+        image_factory_mtime = image_factory_path.stat().st_mtime if image_factory_path.exists() else None
+        if getattr(image_factory, "__sports_cave_loaded_mtime__", None) != image_factory_mtime:
+            image_factory = importlib.reload(image_factory)
+            image_factory.__sports_cave_loaded_mtime__ = image_factory_mtime
         log_startup_stage("IMAGE FACTORY IMPORT DONE")
     return image_factory
 
