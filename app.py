@@ -1,6 +1,6 @@
 from contextlib import suppress
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 import io
 from pathlib import Path
@@ -17,6 +17,7 @@ import tempfile
 import time
 import traceback
 from urllib.parse import parse_qs, quote, urlparse
+from zoneinfo import ZoneInfo
 
 APP_START_TIME = time.perf_counter()
 LAST_STARTUP_STAGE_TIME = APP_START_TIME
@@ -35,6 +36,8 @@ from dotenv import load_dotenv
 import streamlit as st
 
 import prompt_store
+import sc_auth
+import sports_cave_dashboard
 import sports_cave_pricing
 
 db = None
@@ -227,12 +230,13 @@ MENU_OPTIONS = [
     "Design Studio",
     "Ads",
     "VA Training",
-    "Developer",
 ]
 SIDEBAR_NAV_LABELS = {
     "Dashboard": "Home",
 }
 HIDDEN_PAGE_OPTIONS = [
+    "Developer",
+    "Settings",
     "Files",
     "Products",
     "Product Assets",
@@ -242,7 +246,7 @@ HIDDEN_PAGE_OPTIONS = [
     "Persistence Check",
 ]
 ALL_PAGE_OPTIONS = [*MENU_OPTIONS, *HIDDEN_PAGE_OPTIONS]
-APP_VERSION = "Sports Cave OS Edition Fields MVP - 2026-06-22"
+APP_VERSION = "Sports Cave Dashboard - 2026-07-21"
 DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
@@ -1216,7 +1220,7 @@ Return the product link and full validation results.
 
 
 st.set_page_config(
-    page_title="Sports Cave OS",
+    page_title="Sports Cave",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -2057,6 +2061,180 @@ def inject_styles():
             border: 1px solid var(--sc-border);
             border-radius: 18px;
             padding: 1rem 1.15rem;
+        }
+
+        .sc-login-wrap {
+            max-width: 440px;
+            margin: 12vh auto 0;
+            padding: 1.6rem 1.7rem;
+            background: #FFFFFF;
+            border: 1px solid #D9D3C4;
+            border-top: 4px solid var(--sc-gold);
+            border-radius: 12px;
+            box-shadow: 0 18px 50px rgba(11, 11, 13, 0.08);
+        }
+
+        .sc-login-kicker,
+        .sc-home-kicker {
+            color: #8A6828 !important;
+            font-size: 0.75rem;
+            font-weight: 760;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .sc-login-title {
+            margin: 0.2rem 0 0.15rem;
+            color: #0B0B0D;
+            font-size: 1.85rem;
+            font-weight: 820;
+            line-height: 1.05;
+        }
+
+        .sc-login-copy {
+            color: #58524A !important;
+            font-size: 0.92rem;
+            margin-bottom: 0.9rem;
+        }
+
+        .sc-home-header {
+            border-bottom: 1px solid #E6DFD1;
+            margin: 0 0 0.85rem;
+            padding-bottom: 0.75rem;
+        }
+
+        .sc-home-header h1 {
+            color: #0B0B0D;
+            font-size: clamp(2rem, 4vw, 3.2rem);
+            font-weight: 860;
+            letter-spacing: 0;
+            line-height: 1;
+            margin: 0.1rem 0 0;
+        }
+
+        .sc-section-title {
+            color: #0B0B0D;
+            font-size: 1.05rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            margin: 0.85rem 0 0.45rem;
+        }
+
+        .sc-alert-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 0.55rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .sc-alert-box {
+            background: #F8E6B8;
+            border: 1px solid #D4A54C;
+            border-radius: 8px;
+            color: #15120B;
+            font-size: 0.92rem;
+            font-weight: 760;
+            line-height: 1.25;
+            min-height: 3.1rem;
+            padding: 0.72rem 0.8rem;
+        }
+
+        .sc-empty-note {
+            background: #FFFFFF;
+            border: 1px solid #E6DFD1;
+            border-radius: 8px;
+            color: #5D574E !important;
+            font-size: 0.9rem;
+            padding: 0.75rem 0.85rem;
+        }
+
+        .sc-task-card {
+            background: #FFFFFF;
+            border: 1px solid #E3DDCF;
+            border-left: 3px solid var(--sc-gold);
+            border-radius: 8px;
+            margin: 0.35rem 0;
+            padding: 0.55rem 0.65rem;
+        }
+
+        .sc-task-card strong,
+        .sc-log-row strong,
+        .sc-calendar-row strong {
+            color: #0B0B0D;
+        }
+
+        .sc-small-meta {
+            color: #6C665D !important;
+            display: block;
+            font-size: 0.72rem;
+            line-height: 1.15;
+            margin-top: 0.22rem;
+        }
+
+        .sc-log-row,
+        .sc-calendar-row {
+            align-items: center;
+            background: #FFFFFF;
+            border: 1px solid #E5E0D4;
+            border-radius: 8px;
+            display: flex;
+            gap: 0.65rem;
+            justify-content: space-between;
+            margin: 0.32rem 0;
+            padding: 0.58rem 0.7rem;
+        }
+
+        .sc-log-row {
+            justify-content: flex-start;
+        }
+
+        .sc-calendar-row.sc-calendar-active {
+            background: #FFF4D8;
+            border-color: #D4A54C;
+        }
+
+        .sc-calendar-row.sc-calendar-upcoming {
+            border-left: 3px solid #D4A54C;
+        }
+
+        .sc-calendar-date {
+            color: #4E493F !important;
+            flex: 0 0 auto;
+            font-size: 0.78rem;
+            font-weight: 720;
+            text-align: right;
+        }
+
+        .sc-tag {
+            background: #141414;
+            border-radius: 999px;
+            color: #FFFFFF !important;
+            display: inline-block;
+            font-size: 0.68rem;
+            font-weight: 780;
+            letter-spacing: 0.02em;
+            line-height: 1;
+            margin-left: 0.35rem;
+            padding: 0.22rem 0.42rem;
+            text-transform: uppercase;
+            vertical-align: middle;
+        }
+
+        @media (max-width: 760px) {
+            .sc-login-wrap {
+                margin-top: 4vh;
+                padding: 1.15rem;
+            }
+
+            .sc-calendar-row {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: 0.25rem;
+            }
+
+            .sc-calendar-date {
+                text-align: left;
+            }
         }
         </style>
         """,
@@ -5244,9 +5422,8 @@ def render_sidebar():
     st.sidebar.markdown(
         f"""
         <div class="sc-sidebar-brand">
-            <div class="sc-sidebar-title">Sports Cave OS</div>
-            <div class="sc-sidebar-subtitle">Internal operations command centre</div>
-            <div class="sc-sidebar-version">{html.escape(APP_VERSION)}</div>
+            <div class="sc-sidebar-title">Sports Cave</div>
+            <div class="sc-sidebar-subtitle">Dashboard</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -5268,7 +5445,11 @@ def render_sidebar():
                 st.session_state.selected_page = page
                 st.rerun()
     if st.session_state.selected_page not in MENU_OPTIONS:
-        st.sidebar.caption(f"Internal page open: {st.session_state.selected_page}")
+        page_label = SIDEBAR_NAV_LABELS.get(
+            st.session_state.selected_page,
+            st.session_state.selected_page,
+        )
+        st.sidebar.caption(f"{page_label} open")
         if st.sidebar.button("Back to Home", use_container_width=True):
             st.session_state.selected_page = "Dashboard"
             st.rerun()
@@ -5279,6 +5460,10 @@ def render_sidebar():
         if st.sidebar.button("File Hub (Coming Soon)", use_container_width=True):
             st.session_state.selected_page = "Files"
             st.rerun()
+
+    st.sidebar.divider()
+    if st.sidebar.button("Logout", use_container_width=True):
+        logout_app()
 
 
 def build_mockup_final_prompt_items(product_name, sport_category, *, artwork_reference_available=True):
@@ -5584,11 +5769,132 @@ def render_google_drive_page():
 
 
 def get_password_protection_status():
-    for env_key in PASSWORD_ENV_KEYS:
-        if os.getenv(env_key):
-            return "Enabled"
+    return "Enabled"
 
-    return "Managed outside app or not detected"
+
+def get_app_password():
+    return sc_auth.DEFAULT_APP_PASSWORD
+
+
+def get_auth_extra_secret():
+    return os.getenv("SPORTS_CAVE_AUTH_SECRET", "").strip()
+
+
+def _auth_cookie_script(cookie_value="", *, max_age_seconds=None, clear=False):
+    cookie_name = sc_auth.AUTH_COOKIE_NAME
+    if clear:
+        attributes = "Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax"
+        value = ""
+    else:
+        attributes = "Path=/; SameSite=Lax"
+        if max_age_seconds is not None:
+            attributes += f"; Max-Age={int(max_age_seconds)}"
+        value = cookie_value
+
+    script = f"""
+    <script>
+    (function() {{
+        const cookieName = {json.dumps(cookie_name)};
+        const cookieValue = {json.dumps(value)};
+        const attributes = {json.dumps(attributes)};
+        const secure = window.parent.location.protocol === "https:" ? "; Secure" : "";
+        const cookie = cookieName + "=" + cookieValue + "; " + attributes + secure;
+        try {{
+            window.parent.document.cookie = cookie;
+        }} catch (error) {{
+            document.cookie = cookie;
+        }}
+        window.setTimeout(function() {{
+            window.parent.location.reload();
+        }}, 80);
+    }})();
+    </script>
+    """
+    get_components_module().html(script, height=0, width=0)
+
+
+def set_auth_cookie(token, *, remember):
+    max_age = sc_auth.auth_cookie_max_age() if remember else None
+    _auth_cookie_script(token, max_age_seconds=max_age)
+
+
+def clear_auth_cookie():
+    _auth_cookie_script(clear=True)
+
+
+def current_auth_cookie():
+    try:
+        return st.context.cookies.get(sc_auth.AUTH_COOKIE_NAME, "")
+    except Exception:
+        return ""
+
+
+def is_app_authenticated():
+    if st.session_state.get("sports_cave_authenticated"):
+        return True
+
+    valid, _reason = sc_auth.validate_auth_token(
+        current_auth_cookie(),
+        password=get_app_password(),
+        extra_secret=get_auth_extra_secret(),
+    )
+    if valid:
+        st.session_state["sports_cave_authenticated"] = True
+        return True
+    return False
+
+
+def render_login_gate():
+    _left, center, _right = st.columns([1, 1.1, 1])
+    with center:
+        st.markdown(
+            """
+            <div class="sc-login-wrap">
+                <div class="sc-login-kicker">Sports Cave</div>
+                <div class="sc-login-title">Welcome back</div>
+                <div class="sc-login-copy">Enter the password to open the dashboard.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        with st.form("sports-cave-login-form"):
+            password = st.text_input(
+                "Password",
+                type="password",
+                label_visibility="collapsed",
+                placeholder="Password",
+                key="sports-cave-login-password",
+            )
+            remember = st.checkbox(
+                "Stay signed in for 30 days",
+                value=True,
+                key="sports-cave-login-remember",
+            )
+            submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
+
+    if not submitted:
+        return False
+
+    if not sc_auth.password_matches(password, get_app_password()):
+        st.error("Password is incorrect.")
+        return False
+
+    token = sc_auth.create_auth_token(
+        password=get_app_password(),
+        extra_secret=get_auth_extra_secret(),
+    )
+    st.session_state["sports_cave_authenticated"] = True
+    sports_cave_dashboard.record_activity("Signed in")
+    set_auth_cookie(token, remember=remember)
+    return True
+
+
+def logout_app():
+    sports_cave_dashboard.record_activity("Signed out")
+    st.session_state["sports_cave_authenticated"] = False
+    st.session_state["selected_page"] = "Dashboard"
+    clear_auth_cookie()
+    st.stop()
 
 
 def _developer_unlocked():
@@ -6430,7 +6736,7 @@ def render_settings_page():
         st.write(f"**Deployment timestamp:** {os.getenv('RENDER_DEPLOY_CREATED_AT') or os.getenv('DEPLOYMENT_TIMESTAMP') or 'local'}")
         st.write(f"**Service role:** {os.getenv('SPORTS_CAVE_SERVICE_ROLE') or 'app'}")
         st.write(f"**App password protection:** {get_password_protection_status()}")
-        st.write(f"**Developer password env override:** {'Set' if os.getenv('DEVELOPER_PAGE_PASSWORD') else 'Using MVP default'}")
+        st.write(f"**Protected tools password:** {'Custom' if os.getenv('DEVELOPER_PAGE_PASSWORD') else 'Default'}")
         st.write(f"**Output folder path:** `{RUNS_DIR}`")
         st.write(f"**Python working directory:** `{Path.cwd()}`")
 
@@ -6993,31 +7299,208 @@ def render_placeholder_page(title, body):
     st.caption(body)
 
 
-def render_lightweight_dashboard_page():
-    started = time.perf_counter()
-    st.title("Sports Cave OS")
-    st.caption("Lightweight command screen for the Edition Ops MVP.")
-    with st.container(border=True):
-        st.markdown("**Today**")
-        st.caption(
-            "Open Edition Ops only when product edition fields need configuration."
+def get_browser_timezone():
+    try:
+        timezone_name = st.context.timezone
+        if timezone_name:
+            return ZoneInfo(timezone_name)
+    except Exception:
+        pass
+    try:
+        timezone_offset = st.context.timezone_offset
+        if timezone_offset is not None:
+            return timezone(-timedelta(minutes=int(timezone_offset)))
+    except Exception:
+        pass
+    return ZoneInfo("Australia/Sydney")
+
+
+def browser_local_now():
+    return datetime.now(timezone.utc).astimezone(get_browser_timezone())
+
+
+def format_dashboard_timestamp(value):
+    if not value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(get_browser_timezone()).strftime("%d %b, %I:%M %p").lstrip("0")
+
+
+def render_html_section_title(title):
+    st.markdown(
+        f'<div class="sc-section-title">{html.escape(title)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_active_alerts(events, today):
+    render_html_section_title("Active alerts")
+    alerts = sports_cave_dashboard.build_active_alerts(events, today, limit=4)
+    if not alerts:
+        st.markdown(
+            '<div class="sc-empty-note">No alerts right now.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    alert_markup = "".join(
+        f'<div class="sc-alert-box">{html.escape(alert["label"])}</div>'
+        for alert in alerts
+    )
+    st.markdown(
+        f'<div class="sc-alert-grid">{alert_markup}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_task_group(group, tasks):
+    st.markdown(f"**{html.escape(group)}**")
+    group_tasks = [task for task in tasks if task.get("category") == group]
+    if not group_tasks:
+        st.markdown(
+            '<div class="sc-empty-note">Nothing waiting.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    for task in group_tasks:
+        task_id = task.get("id") or ""
+        row = st.columns([5, 1.25])
+        with row[0]:
+            st.markdown(
+                f"""
+                <div class="sc-task-card">
+                    <strong>{html.escape(task.get("text") or "")}</strong>
+                    <span class="sc-small-meta">Added {html.escape(format_dashboard_timestamp(task.get("created_at")))}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with row[1]:
+            if st.button("Complete", key=f"dashboard-complete-task::{task_id}", use_container_width=True):
+                sports_cave_dashboard.complete_task(task_id)
+                st.rerun()
+
+
+def render_dashboard_tasks(state):
+    render_html_section_title("Tasks")
+    with st.form("dashboard-add-task", clear_on_submit=True):
+        columns = st.columns([2.8, 1.4, 0.9])
+        task_text = columns[0].text_input(
+            "Task",
+            placeholder="Add a task",
+            label_visibility="collapsed",
+        )
+        category = columns[1].selectbox(
+            "Group",
+            sports_cave_dashboard.TASK_GROUPS,
+            label_visibility="collapsed",
+        )
+        submitted = columns[2].form_submit_button("Add", use_container_width=True)
+
+    if submitted:
+        try:
+            sports_cave_dashboard.add_task(task_text, category)
+            st.rerun()
+        except ValueError:
+            st.warning("Add a task first.")
+
+    groups = st.columns(2)
+    for index, group in enumerate(sports_cave_dashboard.TASK_GROUPS):
+        with groups[index]:
+            render_task_group(group, state.get("tasks") or [])
+
+
+def render_activity_log(state):
+    render_html_section_title("Activity log")
+    entries = state.get("activity_log") or []
+    if not entries:
+        st.markdown(
+            '<div class="sc-empty-note">No activity yet.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    for entry in entries[:12]:
+        st.markdown(
+            f"""
+            <div class="sc-log-row">
+                <strong>{html.escape(entry.get("message") or "")}</strong>
+                <span class="sc-small-meta">{html.escape(format_dashboard_timestamp(entry.get("created_at")))}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
-    st.subheader("Today's Focus")
-    focus_columns = st.columns(3)
-    with focus_columns[0]:
-        st.info("Use Edition Ops to refresh active products only when you need to edit edition fields.")
-    with focus_columns[1]:
-        st.info("Orders use a saved snapshot first. Refresh only when you need current store data.")
-    with focus_columns[2]:
-        st.info("Use Mockups only when artwork is ready. Keep generated ZIPs saved in the right Drive folder.")
 
-    st.subheader("Edition Data")
-    st.write(
-        "Product edition fields are the source of truth for edition display data. This dashboard does not fetch store data, "
-        "Supabase, orders, certificates, Google Drive, CSV files, or product sync data."
+def render_sporting_calendar(events, today):
+    render_html_section_title("Sporting calendar")
+    filter_columns = st.columns([1, 1, 1])
+    regions = ["All", "Australia", "USA", "UK", "Canada", "New Zealand"]
+    sports = ["All", *sorted({event.get("sport") for event in events if event.get("sport")})]
+    statuses = ["Active/upcoming", "Active", "Upcoming", "All"]
+    region = filter_columns[0].selectbox("Region", regions, key="dashboard-calendar-region")
+    sport = filter_columns[1].selectbox("Sport", sports, key="dashboard-calendar-sport")
+    status = filter_columns[2].selectbox("Show", statuses, key="dashboard-calendar-status")
+    filtered_events = sports_cave_dashboard.filter_calendar_events(
+        events,
+        today,
+        region=region,
+        sport=sport,
+        status=status,
+        upcoming_days=90,
     )
-    st.caption("Advanced legacy tools stay separate from this MVP flow.")
+    if not filtered_events:
+        st.markdown(
+            '<div class="sc-empty-note">No matching events.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    for event in filtered_events[:18]:
+        current_status = sports_cave_dashboard.event_status(event, today)
+        status_class = f"sc-calendar-{current_status}"
+        status_label = ""
+        if current_status in {"active", "upcoming"}:
+            status_label = f'<span class="sc-tag">{html.escape(current_status)}</span>'
+        region_text = ", ".join(event.get("regions") or [])
+        st.markdown(
+            f"""
+            <div class="sc-calendar-row {status_class}">
+                <div>
+                    <strong>{html.escape(event.get("title") or "")}</strong>{status_label}
+                    <span class="sc-small-meta">{html.escape(event.get("sport") or "")} / {html.escape(region_text)}</span>
+                </div>
+                <div class="sc-calendar-date">{html.escape(sports_cave_dashboard.format_event_date_range(event))}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
+def render_lightweight_dashboard_page():
+    started = time.perf_counter()
+    local_now = browser_local_now()
+    today = local_now.date()
+    events = sports_cave_dashboard.load_calendar_events()
+    state = sports_cave_dashboard.load_dashboard_state()
+
+    st.markdown(
+        f"""
+        <div class="sc-home-header">
+            <div class="sc-home-kicker">Sports Cave</div>
+            <h1>{html.escape(sports_cave_dashboard.greeting_for_datetime(local_now))}</h1>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    render_active_alerts(events, today)
+    render_dashboard_tasks(state)
+    render_activity_log(sports_cave_dashboard.load_dashboard_state())
+    render_sporting_calendar(events, today)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 
@@ -7088,6 +7571,13 @@ def main():
     inject_styles()
     log_startup_stage("CSS LOADED")
 
+    if not is_app_authenticated():
+        log_startup_stage("LOGIN GATE START")
+        if not render_login_gate():
+            log_startup_stage("LOGIN GATE STOP")
+            return
+        log_startup_stage("LOGIN GATE DONE")
+
     log_startup_stage("SIDEBAR START")
     render_sidebar()
     log_startup_stage("SIDEBAR DONE")
@@ -7109,11 +7599,11 @@ def main():
         error_message = f"Page render failed for {current_page}: {error}"
         print(f"ERROR {error_message}", flush=True)
         logging.exception(error_message)
-        st.error("This page failed to load, but Sports Cave OS is still running.")
+        st.error("This page failed to load, but Sports Cave is still running.")
         if _developer_unlocked():
             st.exception(error)
         else:
-            st.caption("Open Developer diagnostics for the technical exception details.")
+            st.caption("Technical details are available in protected tools.")
     log_startup_stage("PAGE RENDER DONE", current_page)
     log_app_memory(f"Page load end: {current_page}")
 

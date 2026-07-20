@@ -9,6 +9,7 @@ output/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/dashboard_state.json
 __pycache__/
 *.pyc
 .streamlit/secrets.toml
