@@ -41,7 +41,7 @@ CAMPAIGN_TYPE_OPTIONS = [
 EDITION_OPS_SNAPSHOT_PATH = Path(__file__).resolve().parent / "output" / "_cache" / "edition_ops_products_snapshot.json"
 EDITION_OPS_ROWS_SESSION_KEY = "edition_ops_rows"
 
-CAROUSEL_CARD_MAX_CHARACTERS = 13
+CAROUSEL_CARD_MAX_CHARACTERS = 17
 CAROUSEL_CARD_COUNT = 5
 
 BANNED_GENERIC_CAROUSEL_PHRASES = (
@@ -117,6 +117,13 @@ CATEGORY_COPY_CUES = {
 SUPPORTED_TEMPLATES = {
     ("Motorsport", "Carousel"): "motorsport_carousel",
     ("Baseball", "Instant Experience"): "baseball_instant_experience",
+    ("Football", "Instant Experience"): "football_instant_experience",
+}
+
+GENERIC_CAMPAIGN_TEMPLATES = {
+    "Carousel": "generic_carousel",
+    "Instant Experience": "generic_instant_experience",
+    "Single Image / Video": "generic_single_image_video",
 }
 
 TEMPLATES_WITH_PRIMARY_TEXT_VARIATIONS = {
@@ -201,10 +208,12 @@ COUNTRY_LANGUAGE_PROFILES = {
 }
 
 COUNTRY_LANGUAGE_ALIASES = {
+    "AU": "Australia",
     "United States": "USA",
     "US": "USA",
     "United Kingdom": "UK",
     "Great Britain": "UK",
+    "NZ": "New Zealand",
 }
 
 COUNTRY_LANGUAGE_FALLBACK = {
@@ -332,13 +341,19 @@ def validate_ads_inputs(product_name, category, country, campaign_type, product_
         return "Enter a product name and choose a category, country and campaign type."
     if category == "Select category" or country == "Select country" or campaign_type == "Select campaign type":
         return "Enter a product name and choose a category, country and campaign type."
-    if get_template_key(category, campaign_type) == "baseball_instant_experience" and not _clean_product_url(product_url):
-        return "Enter the exact product page URL for this Baseball Instant Experience campaign."
     return ""
 
 
 def get_template_key(category, campaign_type):
     return SUPPORTED_TEMPLATES.get((category, campaign_type))
+
+
+def get_winner_pattern_key(category, campaign_type):
+    return get_template_key(category, campaign_type) or GENERIC_CAMPAIGN_TEMPLATES.get(campaign_type)
+
+
+def uses_generic_winner_pattern(category, campaign_type):
+    return not bool(get_template_key(category, campaign_type)) and bool(GENERIC_CAMPAIGN_TEMPLATES.get(campaign_type))
 
 
 def normalize_country_language_key(country):
@@ -518,6 +533,16 @@ def validate_carousel_cards(cards, *, edition_info_supplied=False):
     return errors
 
 
+def validate_carousel_card_length(cards, max_characters=17):
+    errors = []
+    for index, card in enumerate(cards or [], start=1):
+        for field_name in ("headline", "description"):
+            value = normalize_carousel_field(card.get(field_name, ""))
+            if len(value) > max_characters:
+                errors.append(f"Card {index} {field_name} exceeds {max_characters} characters.")
+    return errors
+
+
 def parse_carousel_cards(output_text):
     cards = []
     card_pattern = re.compile(
@@ -603,7 +628,7 @@ QUALITY SELECTION
 - Analyse the product name and attached artwork.
 - Identify the most recognisable verified product details.
 - Silently create several possible headline and description options for each strategic card role.
-- Reject anything generic, unclear or over 13 characters.
+- Reject anything generic, unclear or over 17 characters.
 - Select the strongest final combination.
 - Do not output rejected alternatives.
 - Do not display the internal candidate list or reasoning.
@@ -621,7 +646,7 @@ def build_carousel_card_copy_rules():
     generic_phrases = "\n".join(f"- {phrase}" for phrase in BANNED_GENERIC_CAROUSEL_PHRASES)
     return f"""CAROUSEL CARD CHARACTER LIMIT
 
-For all five Motorsport carousel cards:
+For all five carousel cards:
 
 Headline:
 - Maximum {CAROUSEL_CARD_MAX_CHARACTERS} characters including spaces and punctuation.
@@ -670,8 +695,8 @@ Do not force generic room language into a card when stronger product history or 
 def build_carousel_final_quality_check(include_primary_text_variations=False):
     checks = [
         "Exactly five carousel cards are present.",
-        "Every headline is 13 characters or fewer including spaces and punctuation.",
-        "Every description is 13 characters or fewer including spaces and punctuation.",
+        f"Every headline is {CAROUSEL_CARD_MAX_CHARACTERS} characters or fewer including spaces and punctuation.",
+        f"Every description is {CAROUSEL_CARD_MAX_CHARACTERS} characters or fewer including spaces and punctuation.",
         "Spaces and punctuation are included in the count.",
         "No words have been truncated.",
         "Card 1 identifies the product.",
@@ -702,7 +727,7 @@ Before returning the answer, verify:
 
 {check_lines}
 
-If any carousel field exceeds 13 characters, rewrite it before answering."""
+If any carousel field exceeds {CAROUSEL_CARD_MAX_CHARACTERS} characters, rewrite it before answering."""
 
 
 def apply_campaign_copy_rule_blocks(prompt, campaign_type, include_primary_text_variations=False, category=None):
@@ -1535,6 +1560,437 @@ Before returning the output, confirm:
 - No Carousel rules have been applied to the Instant Experience headline."""
 
 
+def build_product_url_instruction(product_url):
+    product_url = _clean_product_url(product_url)
+    if product_url:
+        return f"Use this selected product page URL where a destination URL is required: {product_url}"
+    return "Use the selected product's live product page URL where a destination URL is required. Do not invent a URL."
+
+
+def build_country_campaign_localisation_note(category, country):
+    country_key = normalize_country_language_key(country)
+    category_key = str(category or "").strip()
+    if category_key == "Football":
+        if country_key == "Australia":
+            return "AU football/soccer localisation: use football or soccer depending on the product context. Keep Claim Your Edition."
+        if country_key == "UK":
+            return "UK football localisation: use football, supporters, wall, home bar, collection and proper fans where natural."
+        if country_key == "USA":
+            return "USA soccer localisation: use soccer, fans, collector wall art, sports room and claim yours where natural."
+        if country_key in {"Canada", "New Zealand"}:
+            return "Canada/NZ football localisation: use football or soccer depending on the product context. Keep the tone natural and unforced."
+    return "Country localisation should adjust wording, spelling and audience language only. It must not decide whether output exists."
+
+
+def build_universal_sports_cave_rules(category):
+    cues = CATEGORY_COPY_CUES.get(
+        category,
+        "identity, memory, legacy, rivalry, pride, pressure and the defining moment",
+    )
+    return f"""UNIVERSAL SPORTS CAVE WINNER RULES
+
+- Make every customer-facing line emotional, nostalgic, urgent and collector-driven.
+- Connect the selected product to identity, memory, legacy, rivalry, pride or the moment.
+- Use category cues only when supported by the product title or artwork: {cues}.
+- Include authentic scarcity naturally when relevant: limited edition, only 100, numbered edition, once gone it is gone.
+- Keep copy short, human and direct. Do not over-explain.
+- Do not invent facts, teams, years, trophies, signatures, licensing, records, shipping claims, review counts or manufacturing claims not present in the product title/context.
+- Avoid these generic AI phrases: elevate your space; ultimate tribute; perfect addition; must-have; transform your room."""
+
+
+def build_generic_instant_experience_prompt(
+    product_name,
+    category,
+    country,
+    campaign_type,
+    product_url="",
+    *,
+    specific_pattern=False,
+):
+    product_name = _clean_product_name(product_name)
+    pattern_heading = (
+        "SPORTS CAVE FOOTBALL INSTANT EXPERIENCE WINNER PATTERN"
+        if specific_pattern and category == "Football"
+        else "SPORTS CAVE GENERIC INSTANT EXPERIENCE WINNER PATTERN"
+    )
+    fallback_note = (
+        ""
+        if specific_pattern
+        else "\nINTERNAL NOTE\nUsing generic Sports Cave winner pattern for this category. Do not include this note in customer-facing copy blocks.\n"
+    )
+    football_block = ""
+    if category == "Football":
+        football_block = f"""
+FOOTBALL INSTANT EXPERIENCE DIRECTION
+
+- Lead with {product_name} as the hero, framed as premium football collector wall art.
+- Adapt the copy to the selected product title, moment, player, team, rivalry, final, farewell or event.
+- If the product is about a country or team, use that as the emotional hook while keeping wider appeal around football legacy, World Cup nights, iconic moments and serious collectors.
+- Output must work for World Cup, national teams, Ronaldo, Messi, Mbappe, Beckham, Arsenal, rivalries, finals, farewells and iconic football moments without inventing facts.
+"""
+
+    return f"""{pattern_heading}
+
+PRODUCT
+Product name: {product_name}
+Category: {category}
+Market: {country}
+Campaign type: {campaign_type}
+Destination guidance: {build_product_url_instruction(product_url)}
+{fallback_note}
+I have attached the exact Sports Cave product image being advertised.
+
+Analyse the attached image and product title before writing.
+
+Use the supplied product name as the source of identity. Do not identify or guess a person, club, country, achievement, year, record, final, trophy or rivalry solely from the image.
+
+{build_country_campaign_localisation_note(category, country)}
+
+{build_universal_sports_cave_rules(category)}
+{football_block}
+OBJECTIVE
+
+Create a premium Meta Instant Experience ad package for the selected Sports Cave product.
+
+Generate exactly these sections:
+
+1. Primary Text
+2. Headline
+3. Description
+4. Instant Experience Cover Prompt
+5. CTA Guidance
+
+PRIMARY TEXT
+
+Create 5 strong variants.
+
+Rules:
+- Each variant must be short, emotional and collector-driven.
+- Use nostalgia, identity, scarcity and ownership.
+- Mention limited editions naturally.
+- Adapt each variant to the selected product title, moment, player, team, rivalry, event or visual identity.
+- Do not use generic AI phrases such as elevate your space, ultimate tribute or perfect addition.
+- Do not over-explain.
+
+HEADLINE
+
+Create 5 headline options.
+
+Rules:
+- 4 to 6 words max.
+- Urgent and specific to the selected category.
+- For Football, use football-specific urgency.
+- Strong style examples: Football Glory Framed; Only 100 Made; Claim Your Edition; For Real Football Fans; Legends Belong Framed.
+
+DESCRIPTION
+
+Create 5 short description lines.
+
+Rules:
+- Scarcity-driven and premium.
+- Examples of style: Limited collector wall art; Once gone it's gone; Built for real fans; Claim your numbered edition; Premium football wall art.
+
+INSTANT EXPERIENCE COVER PROMPT
+
+Create one image prompt for the selected product.
+
+The image prompt must instruct the image generator:
+- Create a square 1:1 premium Meta Instant Experience cover.
+- Use the uploaded image as the exact reference for the framed Sports Cave artwork.
+- Keep the exact framed artwork unchanged.
+- Do not change the artwork, colours, text, frame, badge, crop or layout.
+- Top 60-68% of the image: framed artwork hero in a premium collector room or wall setting.
+- For Football, use a premium football collector room, home bar, collection wall or sports room setting depending on country and product context.
+- Bottom 32-40% of the image: black/gold CTA panel.
+- Panel main text: LIMITED TO 100 WORLDWIDE
+- Panel subtext: Once it sells out, it's gone.
+- Panel CTA: Claim Your Edition
+- Style: cinematic, premium, masculine, collector-focused.
+- No people unless the selected product/ad specifically asks for UGC.
+- No fake logos, fake club logos, fake federation logos, fake edition numbers, extra branding, clutter or extra artwork competing with the product.
+
+CTA GUIDANCE
+
+Use:
+Claim Your Edition
+
+Catalogue/cards below the Instant Experience should feel like a connected collector range, not one isolated product.
+
+OUTPUT EXACTLY IN THIS FORMAT
+
+PRIMARY TEXT
+
+Variant 1:
+[copy]
+
+Variant 2:
+[copy]
+
+Variant 3:
+[copy]
+
+Variant 4:
+[copy]
+
+Variant 5:
+[copy]
+
+HEADLINE
+
+1. [headline]
+2. [headline]
+3. [headline]
+4. [headline]
+5. [headline]
+
+DESCRIPTION
+
+1. [description]
+2. [description]
+3. [description]
+4. [description]
+5. [description]
+
+INSTANT EXPERIENCE COVER PROMPT
+
+[one image prompt]
+
+CTA GUIDANCE
+
+Claim Your Edition
+
+FINAL QUALITY CHECK
+
+- Exactly 5 primary text variants are present.
+- Exactly 5 headline options are present.
+- Exactly 5 description lines are present.
+- Instant Experience Cover Prompt is present.
+- CTA guidance is present.
+- The cover prompt uses top 60-68% hero artwork and bottom 32-40% black/gold CTA panel.
+- The cover prompt includes LIMITED TO 100 WORLDWIDE, Once it sells out, it's gone, and Claim Your Edition.
+- Country wording is localised naturally.
+- No unsupported facts are invented."""
+
+
+def build_generic_carousel_prompt(product_name, category, country, campaign_type):
+    product_name = _clean_product_name(product_name)
+    return f"""SPORTS CAVE GENERIC CAROUSEL WINNER PATTERN
+
+PRODUCT
+Product name: {product_name}
+Category: {category}
+Market: {country}
+Campaign type: {campaign_type}
+
+INTERNAL NOTE
+Using generic Sports Cave winner pattern for this category. Do not include this note in customer-facing copy blocks.
+
+I have attached the exact Sports Cave product image being advertised.
+
+Analyse the attached image and product title before writing.
+
+Use the supplied product name as the source of identity. Do not guess unsupported people, teams, dates, trophies, records or achievements from the image.
+
+{build_country_campaign_localisation_note(category, country)}
+
+{build_universal_sports_cave_rules(category)}
+
+Create a Meta Carousel ad package.
+
+PRIMARY TEXT
+
+Create exactly 5 primary text variants.
+
+Rules:
+- Short, emotional, nostalgic and collector-driven.
+- Each variation must connect the product to identity, memory, legacy, rivalry, pride, ownership or the moment.
+- Mention limited editions naturally.
+- Do not over-explain.
+
+CAROUSEL CARDS
+
+Create exactly 5 carousel cards using these roles:
+
+1. Product Identity
+2. Moment / Legacy
+3. Emotional Hook
+4. Fan Ownership
+5. Scarcity
+
+Each card must include:
+- role
+- headline
+- description
+- creative direction
+
+Carousel headline and description rules:
+- Maximum {CAROUSEL_CARD_MAX_CHARACTERS} characters each.
+- No commas.
+- No full stops.
+- No duplicate headlines.
+- No duplicate descriptions.
+- Do not truncate words.
+- Count every character before returning the final output.
+
+OUTPUT EXACTLY IN THIS FORMAT
+
+CAROUSEL CARDS
+
+Card 1 - Product Identity
+Headline:
+Description:
+Creative direction:
+
+Card 2 - Moment / Legacy
+Headline:
+Description:
+Creative direction:
+
+Card 3 - Emotional Hook
+Headline:
+Description:
+Creative direction:
+
+Card 4 - Fan Ownership
+Headline:
+Description:
+Creative direction:
+
+Card 5 - Scarcity
+Headline:
+Description:
+Creative direction:
+
+PRIMARY TEXT VARIATIONS
+
+Variation 1:
+[copy]
+
+Variation 2:
+[copy]
+
+Variation 3:
+[copy]
+
+Variation 4:
+[copy]
+
+Variation 5:
+[copy]"""
+
+
+def build_generic_single_image_video_prompt(product_name, category, country, campaign_type):
+    product_name = _clean_product_name(product_name)
+    return f"""SPORTS CAVE GENERIC SINGLE IMAGE VIDEO WINNER PATTERN
+
+PRODUCT
+Product name: {product_name}
+Category: {category}
+Market: {country}
+Campaign type: {campaign_type}
+
+INTERNAL NOTE
+Using generic Sports Cave winner pattern for this category. Do not include this note in customer-facing copy blocks.
+
+I have attached the exact Sports Cave product image being advertised.
+
+Analyse the attached image and product title before writing.
+
+Use the supplied product name as the source of identity. Do not invent unsupported facts, teams, years, trophies, signatures, licensing, records or stock claims.
+
+{build_country_campaign_localisation_note(category, country)}
+
+{build_universal_sports_cave_rules(category)}
+
+Create a Meta Single Image/Video ad package.
+
+PRIMARY TEXT
+
+Create 5 strong primary text variants.
+
+Rules:
+- Short, human, emotional and collector-driven.
+- Use identity, nostalgia, scarcity and ownership.
+- Mention limited editions naturally.
+- Do not use generic AI phrases such as elevate your space, ultimate tribute or perfect addition.
+
+HEADLINE
+
+Create 5 headline options.
+
+Rules:
+- Short, urgent and category-specific.
+- Make them feel like Sports Cave collector advertising, not generic wall art.
+
+DESCRIPTION
+
+Create 5 short description lines.
+
+Rules:
+- Scarcity-driven and premium.
+- Keep each line compact and human.
+
+CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO
+
+Create one creative prompt for the selected product.
+
+The prompt must instruct the image/video generator:
+- Use the uploaded image as the exact reference for the framed Sports Cave artwork.
+- Keep the exact artwork, colours, text, frame, badge, crop and layout unchanged.
+- Make the selected framed product the hero.
+- Use a premium collector room, wall, sports room, home bar, office, man cave or category-relevant setting.
+- Style: cinematic, premium, masculine, collector-focused and believable.
+- No fake logos, fake team branding, clutter, extra artwork competing with the product or unsupported text overlays.
+
+CTA GUIDANCE
+
+Use:
+Claim Your Edition
+
+OUTPUT EXACTLY IN THIS FORMAT
+
+PRIMARY TEXT
+
+Variant 1:
+[copy]
+
+Variant 2:
+[copy]
+
+Variant 3:
+[copy]
+
+Variant 4:
+[copy]
+
+Variant 5:
+[copy]
+
+HEADLINE
+
+1. [headline]
+2. [headline]
+3. [headline]
+4. [headline]
+5. [headline]
+
+DESCRIPTION
+
+1. [description]
+2. [description]
+3. [description]
+4. [description]
+5. [description]
+
+CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO
+
+[one creative prompt]
+
+CTA GUIDANCE
+
+Claim Your Edition"""
+
+
 def build_ads_prompt(product_name, category, country, campaign_type, product_url=""):
     template_key = get_template_key(category, campaign_type)
     if template_key == "motorsport_carousel":
@@ -1547,6 +2003,27 @@ def build_ads_prompt(product_name, category, country, campaign_type, product_url
             campaign_type,
             product_url=product_url,
         )
+    elif template_key == "football_instant_experience":
+        prompt = build_generic_instant_experience_prompt(
+            product_name,
+            category,
+            country,
+            campaign_type,
+            product_url=product_url,
+            specific_pattern=True,
+        )
+    elif campaign_type == "Instant Experience":
+        prompt = build_generic_instant_experience_prompt(
+            product_name,
+            category,
+            country,
+            campaign_type,
+            product_url=product_url,
+        )
+    elif campaign_type == "Carousel":
+        prompt = build_generic_carousel_prompt(product_name, category, country, campaign_type)
+    elif campaign_type == "Single Image / Video":
+        prompt = build_generic_single_image_video_prompt(product_name, category, country, campaign_type)
     else:
         prompt = ""
     return compose_final_ads_prompt(
@@ -1554,13 +2031,18 @@ def build_ads_prompt(product_name, category, country, campaign_type, product_url
         category=category,
         country=country,
         campaign_type=campaign_type,
-        include_primary_text_variations=template_key in TEMPLATES_WITH_PRIMARY_TEXT_VARIATIONS,
+        include_primary_text_variations=campaign_type == "Carousel",
     )
 
 
 def render_insufficient_winner_data():
     st.subheader("Insufficient winner data")
     st.caption("Approved winner examples have not been added for this category and campaign type yet.")
+
+
+def render_generic_winner_pattern_note(category, campaign_type):
+    if uses_generic_winner_pattern(category, campaign_type):
+        st.caption("Using generic Sports Cave winner pattern for this category.")
 
 
 def render_meta_url_parameters_section(section_number):
@@ -1584,6 +2066,8 @@ def render_product_name_input():
 
 
 def render_supported_result(product_name, category, country, campaign_type, product_url=""):
+    render_generic_winner_pattern_note(category, campaign_type)
+
     if get_template_key(category, campaign_type) == "baseball_instant_experience":
         st.subheader("1. Copy this ChatGPT prompt")
         render_prompt_copy_button(
@@ -1593,6 +2077,30 @@ def render_supported_result(product_name, category, country, campaign_type, prod
 
         st.subheader("2. Build it in Meta")
         st.caption("Follow the INSTANT EXPERIENCE SETUP section inside the generated prompt.")
+        render_meta_url_parameters_section(3)
+        return
+
+    if campaign_type == "Instant Experience":
+        st.subheader("1. Copy this ChatGPT prompt")
+        render_prompt_copy_button(
+            build_ads_prompt(product_name, category, country, campaign_type, product_url=product_url),
+            f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
+        )
+
+        st.subheader("2. Build it in Meta")
+        st.caption("Use the Instant Experience cover prompt and CTA guidance inside the generated output.")
+        render_meta_url_parameters_section(3)
+        return
+
+    if campaign_type == "Single Image / Video":
+        st.subheader("1. Copy this ChatGPT prompt")
+        render_prompt_copy_button(
+            build_ads_prompt(product_name, category, country, campaign_type, product_url=product_url),
+            f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
+        )
+
+        st.subheader("2. Build it in Meta")
+        st.caption("Use the generated creative prompt, copy variants, headlines, descriptions and CTA guidance.")
         render_meta_url_parameters_section(3)
         return
 
@@ -1660,7 +2168,7 @@ def render_page():
         st.warning(validation_message)
         return
 
-    if not get_template_key(category, campaign_type):
+    if not get_winner_pattern_key(category, campaign_type):
         render_insufficient_winner_data()
         return
 

@@ -96,13 +96,17 @@ class AdsPageTests(unittest.TestCase):
                 self.assertIn("Create exactly five cards.", prompt)
                 self.assertIn("Create exactly five genuinely different Meta primary-text variations.", prompt)
 
-    def test_unsupported_combinations_have_no_generic_template(self):
+    def test_missing_exact_templates_use_generic_campaign_fallback(self):
         self.assertIsNone(ads_page.get_template_key("Motorsport", "Instant Experience"))
         self.assertIsNone(ads_page.get_template_key("Motorsport", "Single Image / Video"))
         self.assertIsNone(ads_page.get_template_key("Baseball", "Carousel"))
         self.assertIsNone(ads_page.get_template_key("Baseball", "Single Image / Video"))
         self.assertIsNone(ads_page.get_template_key("NBA", "Carousel"))
-        self.assertEqual(ads_page.build_ads_prompt("Test Product", "NBA", "Australia", "Carousel"), "")
+        self.assertEqual(ads_page.get_winner_pattern_key("NBA", "Carousel"), "generic_carousel")
+        self.assertIn(
+            "SPORTS CAVE GENERIC CAROUSEL WINNER PATTERN",
+            ads_page.build_ads_prompt("Test Product", "NBA", "Australia", "Carousel"),
+        )
 
     def test_baseball_instant_experience_is_supported_with_required_url(self):
         self.assertEqual(
@@ -117,7 +121,7 @@ class AdsPageTests(unittest.TestCase):
                 "Instant Experience",
                 product_url="",
             ),
-            "Enter the exact product page URL for this Baseball Instant Experience campaign.",
+            "",
         )
         self.assertEqual(
             ads_page.validate_ads_inputs(
@@ -137,10 +141,10 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Category: Motorsport", prompt)
         self.assertIn("Market: UK", prompt)
         self.assertIn("Campaign type: Carousel", prompt)
-        self.assertIn("Maximum 13 characters including spaces and punctuation.", prompt)
-        self.assertIn("Every headline is 13 characters or fewer including spaces and punctuation.", prompt)
-        self.assertIn("Every description is 13 characters or fewer including spaces and punctuation.", prompt)
-        self.assertNotIn("17 characters", prompt)
+        self.assertIn("Maximum 17 characters including spaces and punctuation.", prompt)
+        self.assertIn("Every headline is 17 characters or fewer including spaces and punctuation.", prompt)
+        self.assertIn("Every description is 17 characters or fewer including spaces and punctuation.", prompt)
+        self.assertNotIn("13 characters", prompt)
         self.assertNotIn("Maximum 32 characters including spaces.", prompt)
         self.assertNotIn("Maximum 24 characters including spaces.", prompt)
         self.assertIn("Use the supplied product name as the source of identity.", prompt)
@@ -158,19 +162,19 @@ class AdsPageTests(unittest.TestCase):
         ]
 
         self.assertIn("Never contain a comma or full stop.", mobile_section)
-        self.assertIn("Every headline is 13 characters or fewer including spaces and punctuation.", prompt)
-        self.assertIn("Every description is 13 characters or fewer including spaces and punctuation.", prompt)
+        self.assertIn("Every headline is 17 characters or fewer including spaces and punctuation.", prompt)
+        self.assertIn("Every description is 17 characters or fewer including spaces and punctuation.", prompt)
         self.assertIn("No duplicate headlines.", prompt)
         self.assertIn("No duplicate descriptions.", prompt)
         self.assertIn(
-            "If any carousel field exceeds 13 characters, rewrite it before answering.",
+            "If any carousel field exceeds 17 characters, rewrite it before answering.",
             prompt,
         )
 
     def test_carousel_card_rules_are_shared_for_carousel_templates(self):
         source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
 
-        self.assertEqual(ads_page.CAROUSEL_CARD_MAX_CHARACTERS, 13)
+        self.assertEqual(ads_page.CAROUSEL_CARD_MAX_CHARACTERS, 17)
         self.assertIn("def build_carousel_card_copy_rules", source)
         self.assertIn("def build_carousel_story_and_specificity_rules", source)
         self.assertIn("def build_carousel_final_quality_check", source)
@@ -322,6 +326,115 @@ class AdsPageTests(unittest.TestCase):
             "utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}",
         )
 
+    def test_football_instant_experience_works_for_every_supported_country(self):
+        expected_terms = {
+            "Australia": "football or soccer depending on the product context",
+            "UK": "use football, supporters, wall, home bar, collection",
+            "USA": "use soccer, fans, collector wall art, sports room",
+            "Canada": "use football or soccer depending on the product context",
+            "New Zealand": "use football or soccer depending on the product context",
+        }
+
+        for country in ads_page.COUNTRY_OPTIONS[1:]:
+            with self.subTest(country=country):
+                prompt = ads_page.build_ads_prompt(
+                    "Messi World Cup Night",
+                    "Football",
+                    country,
+                    "Instant Experience",
+                )
+                self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE WINNER PATTERN", prompt)
+                self.assertIn(f"Market: {country}", prompt)
+                self.assertIn(expected_terms[country], prompt)
+                self.assertIn("PRIMARY TEXT", prompt)
+                self.assertIn("Variant 5:", prompt)
+                self.assertIn("HEADLINE", prompt)
+                self.assertIn("DESCRIPTION", prompt)
+                self.assertIn("INSTANT EXPERIENCE COVER PROMPT", prompt)
+                self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
+                self.assertIn("Once it sells out, it's gone.", prompt)
+                self.assertIn("Claim Your Edition", prompt)
+                self.assertIn("top 60-68%", prompt)
+                self.assertIn("bottom 32-40%", prompt)
+                self.assertIn("META URL PARAMETERS", prompt)
+                self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
+                self.assertNotEqual(prompt, "")
+
+    def test_cricket_single_image_video_works_for_every_supported_country(self):
+        for country in ads_page.COUNTRY_OPTIONS[1:]:
+            with self.subTest(country=country):
+                prompt = ads_page.build_ads_prompt(
+                    "The Ashes Final Session",
+                    "Cricket",
+                    country,
+                    "Single Image / Video",
+                )
+                self.assertIn("SPORTS CAVE GENERIC SINGLE IMAGE VIDEO WINNER PATTERN", prompt)
+                self.assertIn(f"Market: {country}", prompt)
+                self.assertIn("PRIMARY TEXT", prompt)
+                self.assertIn("Variant 5:", prompt)
+                self.assertIn("HEADLINE", prompt)
+                self.assertIn("DESCRIPTION", prompt)
+                self.assertIn("CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO", prompt)
+                self.assertIn("CTA GUIDANCE", prompt)
+                self.assertIn("META URL PARAMETERS", prompt)
+
+    def test_category_without_specific_winner_data_still_returns_fallback_output(self):
+        prompt = ads_page.build_ads_prompt(
+            "Cup Day Final Straight",
+            "Horse Racing",
+            "Australia",
+            "Instant Experience",
+        )
+
+        self.assertIsNone(ads_page.get_template_key("Horse Racing", "Instant Experience"))
+        self.assertEqual(ads_page.get_winner_pattern_key("Horse Racing", "Instant Experience"), "generic_instant_experience")
+        self.assertIn("SPORTS CAVE GENERIC INSTANT EXPERIENCE WINNER PATTERN", prompt)
+        self.assertIn("Using generic Sports Cave winner pattern for this category.", prompt)
+        self.assertIn("Cup Day Final Straight", prompt)
+
+    def test_country_selection_changes_wording_only_not_output_availability(self):
+        uk_prompt = ads_page.build_ads_prompt("Arsenal Derby Night", "Football", "UK", "Instant Experience")
+        usa_prompt = ads_page.build_ads_prompt("Arsenal Derby Night", "Football", "USA", "Instant Experience")
+
+        self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE WINNER PATTERN", uk_prompt)
+        self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE WINNER PATTERN", usa_prompt)
+        self.assertIn("Selected country: UK", uk_prompt)
+        self.assertIn("Selected country: USA", usa_prompt)
+        self.assertIn("football, supporters", uk_prompt)
+        self.assertIn("soccer, fans", usa_prompt)
+        self.assertNotEqual(uk_prompt, "")
+        self.assertNotEqual(usa_prompt, "")
+
+    def test_generic_carousel_card_limit_is_17_characters(self):
+        prompt = ads_page.build_ads_prompt("Final Whistle Glory", "Football", "UK", "Carousel")
+        cards = [
+            {"headline": "Football Glory", "description": "Claim Edition"},
+            {"headline": "Final Whistle", "description": "Matchday Wall"},
+            {"headline": "Legacy Framed", "description": "Supporter Pride"},
+            {"headline": "Own The Night", "description": "Home Bar Wall"},
+            {"headline": "Only 100 Made", "description": "No Second Run"},
+        ]
+
+        self.assertIn("Maximum 17 characters", prompt)
+        self.assertIn("No commas", prompt)
+        self.assertIn("No full stops", prompt)
+        self.assertEqual(ads_page.validate_carousel_card_length(cards, max_characters=17), [])
+        self.assertEqual(
+            ads_page.validate_carousel_card_length(
+                [{"headline": "Collector Edition", "description": "Valid"}],
+                max_characters=17,
+            ),
+            [],
+        )
+        self.assertEqual(
+            ads_page.validate_carousel_card_length(
+                [{"headline": "Far Too Long For Cards", "description": "Valid"}],
+                max_characters=17,
+            ),
+            ["Card 1 headline exceeds 17 characters."],
+        )
+
     def test_baseball_instant_experience_receives_country_localisation_without_changing_baseball_terms(self):
         countries = {
             "USA": "American English",
@@ -349,7 +462,8 @@ class AdsPageTests(unittest.TestCase):
                 self.assertIn("They do not change player identity, baseball facts", prompt)
 
     def test_baseball_instant_experience_does_not_change_other_campaigns_or_sports(self):
-        self.assertEqual(
+        self.assertIn(
+            "SPORTS CAVE GENERIC CAROUSEL WINNER PATTERN",
             ads_page.build_ads_prompt(
                 "Baseball Product",
                 "Baseball",
@@ -357,9 +471,9 @@ class AdsPageTests(unittest.TestCase):
                 "Carousel",
                 product_url="https://sportscave.com.au/products/baseball-product",
             ),
-            "",
         )
-        self.assertEqual(
+        self.assertIn(
+            "SPORTS CAVE GENERIC SINGLE IMAGE VIDEO WINNER PATTERN",
             ads_page.build_ads_prompt(
                 "Baseball Product",
                 "Baseball",
@@ -367,11 +481,10 @@ class AdsPageTests(unittest.TestCase):
                 "Single Image / Video",
                 product_url="https://sportscave.com.au/products/baseball-product",
             ),
-            "",
         )
-        self.assertEqual(
+        self.assertIn(
+            "SPORTS CAVE GENERIC INSTANT EXPERIENCE WINNER PATTERN",
             ads_page.build_ads_prompt("Test Product", "NBA", "USA", "Instant Experience"),
-            "",
         )
 
     def test_motorsport_prompt_pushes_product_specific_connected_cards(self):
@@ -413,6 +526,7 @@ class AdsPageTests(unittest.TestCase):
         self.assertEqual(len("Bathurst 1979"), 13)
         self.assertEqual(len("Only 100 Made"), 13)
         self.assertEqual(len("No Second Run"), 13)
+        self.assertEqual(len("Claim Your Edition"), 18)
 
         valid_cards = [
             {"headline": "Six Laps", "description": "Peter Brock"},
@@ -424,7 +538,7 @@ class AdsPageTests(unittest.TestCase):
         self.assertEqual(ads_page.validate_carousel_cards(valid_cards, edition_info_supplied=True), [])
 
         invalid_cards = [
-            {"headline": "Six Laps Ahead", "description": "Peter Brock"},
+            {"headline": "Claim Your Edition", "description": "Peter Brock"},
             {"headline": "Mount Panorama Glory", "description": "Mt Panorama"},
             {"headline": "Brock Legacy", "description": "Still Roars"},
             {"headline": "Race Legend", "description": "Fan Pride"},
@@ -432,9 +546,9 @@ class AdsPageTests(unittest.TestCase):
         ]
         errors = ads_page.validate_carousel_cards(invalid_cards, edition_info_supplied=True)
 
-        self.assertTrue(any("Card 1 headline exceeds 13 characters." == error for error in errors))
-        self.assertTrue(any("Card 2 headline exceeds 13 characters." == error for error in errors))
-        self.assertTrue(any("Card 5 headline exceeds 13 characters." == error for error in errors))
+        self.assertTrue(any("Card 1 headline exceeds 17 characters." == error for error in errors))
+        self.assertTrue(any("Card 2 headline exceeds 17 characters." == error for error in errors))
+        self.assertTrue(any("Card 5 headline exceeds 17 characters." == error for error in errors))
         self.assertFalse(any("Six Laps" == error for error in errors))
 
     def test_carousel_validator_counts_punctuation_and_rejects_punctuation_rules(self):
@@ -463,7 +577,7 @@ class AdsPageTests(unittest.TestCase):
         errors = ads_page.validate_carousel_cards(cards, edition_info_supplied=True)
 
         self.assertTrue(any("banned generic filler" in error for error in errors))
-        self.assertTrue(any("exceeds 13 characters" in error for error in errors))
+        self.assertTrue(any("exceeds 17 characters" in error for error in errors))
         self.assertTrue(any("contains a comma" in error for error in errors))
         self.assertTrue(any("contains a full stop" in error for error in errors))
         self.assertTrue(any("duplicates another headline" in error for error in errors))
@@ -503,13 +617,13 @@ class AdsPageTests(unittest.TestCase):
         self.assertEqual(ads_page.validate_carousel_cards(cards, edition_info_supplied=True), [])
 
     def test_repair_instruction_rewrites_invalid_fields_without_truncation(self):
-        errors = ["Card 1 headline exceeds 13 characters.", "Card 2 description contains a comma."]
+        errors = ["Card 1 headline exceeds 17 characters.", "Card 2 description contains a comma."]
 
         instruction = ads_page.build_carousel_repair_instruction(errors)
 
         self.assertIn("Rewrite only the invalid carousel-card fields", instruction)
         self.assertIn("Do not silently truncate text.", instruction)
-        self.assertIn("- Card 1 headline exceeds 13 characters.", instruction)
+        self.assertIn("- Card 1 headline exceeds 17 characters.", instruction)
 
     def test_parse_carousel_cards_extracts_exact_output_shape(self):
         output = """CAROUSEL CARDS
@@ -726,7 +840,7 @@ PRIMARY TEXT VARIATIONS
         self.assertFalse(any("Market: Canada" in code.value for code in app_test.code))
         self.assertEqual(len(app_test.exception), 0)
 
-    def test_submit_unsupported_result_renders_insufficient_winner_data(self):
+    def test_submit_missing_exact_winner_renders_generic_fallback_output(self):
         app_test = run_ads_page()
         set_product_name(app_test, "Six Laps Ahead")
         select_option(app_test, "Category", "Motorsport")
@@ -734,14 +848,16 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Campaign type", "Instant Experience")
         app_test.button[0].click().run(timeout=20)
 
-        self.assertIn("Insufficient winner data", [subheader.value for subheader in app_test.subheader])
+        self.assertNotIn("Insufficient winner data", [subheader.value for subheader in app_test.subheader])
+        self.assertIn("1. Copy this ChatGPT prompt", [subheader.value for subheader in app_test.subheader])
         self.assertTrue(
             any(
-                caption.value == "Approved winner examples have not been added for this category and campaign type yet."
+                caption.value == "Using generic Sports Cave winner pattern for this category."
                 for caption in app_test.caption
             )
         )
-        self.assertEqual(len(app_test.code), 0)
+        self.assertEqual(len(app_test.code), 1)
+        self.assertEqual(app_test.code[0].value, ads_page.META_AD_URL_PARAMETERS)
         self.assertEqual(len(app_test.exception), 0)
 
     def test_ads_page_source_has_no_external_backend_execution_path(self):
