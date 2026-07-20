@@ -1,6 +1,7 @@
 from contextlib import suppress
+import calendar
 import csv
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 import io
 from pathlib import Path
@@ -2220,6 +2221,77 @@ def inject_styles():
             vertical-align: middle;
         }
 
+        .sc-month-grid {
+            background: #FFFFFF;
+            border: 1px solid #E5E0D4;
+            border-radius: 8px;
+            display: grid;
+            gap: 1px;
+            grid-template-columns: repeat(7, minmax(0, 1fr));
+            overflow: hidden;
+        }
+
+        .sc-month-weekday {
+            background: #151515;
+            color: #FFFFFF !important;
+            font-size: 0.68rem;
+            font-weight: 780;
+            padding: 0.42rem 0.35rem;
+            text-align: center;
+        }
+
+        .sc-month-day {
+            background: #FFFFFF;
+            min-height: 6rem;
+            padding: 0.38rem;
+        }
+
+        .sc-month-day.sc-month-muted {
+            background: #F7F5EF;
+        }
+
+        .sc-month-day.sc-month-today {
+            box-shadow: inset 0 0 0 2px #D4A54C;
+        }
+
+        .sc-month-number {
+            color: #141414 !important;
+            display: block;
+            font-size: 0.76rem;
+            font-weight: 780;
+            line-height: 1;
+            margin-bottom: 0.28rem;
+        }
+
+        .sc-month-muted .sc-month-number {
+            color: #8B8579 !important;
+        }
+
+        .sc-month-pill {
+            background: #FFF4D8;
+            border: 1px solid rgba(212, 165, 76, 0.55);
+            border-radius: 6px;
+            color: #15120B !important;
+            display: block;
+            font-size: 0.66rem;
+            font-weight: 720;
+            line-height: 1.15;
+            margin-top: 0.18rem;
+            overflow: hidden;
+            padding: 0.2rem 0.28rem;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sc-month-more {
+            color: #6C665D !important;
+            display: block;
+            font-size: 0.64rem;
+            font-weight: 700;
+            line-height: 1.1;
+            margin-top: 0.18rem;
+        }
+
         @media (max-width: 760px) {
             .sc-login-wrap {
                 margin-top: 4vh;
@@ -2234,6 +2306,15 @@ def inject_styles():
 
             .sc-calendar-date {
                 text-align: left;
+            }
+
+            .sc-month-day {
+                min-height: 4.4rem;
+                padding: 0.3rem;
+            }
+
+            .sc-month-pill {
+                font-size: 0.6rem;
             }
         }
         </style>
@@ -7481,12 +7562,160 @@ def render_sporting_calendar(events, today):
         )
 
 
+def events_for_calendar_day(events, calendar_day):
+    matching_events = []
+    for event in events:
+        try:
+            start = sports_cave_dashboard.parse_event_date(event["start_date"])
+            end = sports_cave_dashboard.parse_event_date(
+                event.get("end_date") or event["start_date"]
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+        if start <= calendar_day <= end:
+            matching_events.append(event)
+    return sorted(
+        matching_events,
+        key=lambda event: (
+            -int(event.get("importance") or 0),
+            sports_cave_dashboard.parse_event_date(event["start_date"]),
+            event.get("title") or "",
+        ),
+    )
+
+
+def render_month_calendar(events, today, year, month):
+    month_calendar = calendar.Calendar(firstweekday=0)
+    weekday_markup = "".join(
+        f'<div class="sc-month-weekday">{html.escape(day)}</div>'
+        for day in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    )
+    day_markup = []
+    for week in month_calendar.monthdatescalendar(year, month):
+        for calendar_day in week:
+            day_events = events_for_calendar_day(events, calendar_day)
+            classes = ["sc-month-day"]
+            if calendar_day.month != month:
+                classes.append("sc-month-muted")
+            if calendar_day == today:
+                classes.append("sc-month-today")
+
+            event_pills = "".join(
+                f'<span class="sc-month-pill">{html.escape(event.get("title") or "")}</span>'
+                for event in day_events[:2]
+            )
+            more_text = ""
+            if len(day_events) > 2:
+                more_text = f'<span class="sc-month-more">+{len(day_events) - 2} more</span>'
+            day_markup.append(
+                f"""
+                <div class="{' '.join(classes)}">
+                    <span class="sc-month-number">{calendar_day.day}</span>
+                    {event_pills}{more_text}
+                </div>
+                """
+            )
+    st.markdown(
+        f'<div class="sc-month-grid">{weekday_markup}{"".join(day_markup)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def render_custom_calendar_form(local_now):
+    with st.form("dashboard-add-calendar-event", clear_on_submit=True):
+        top_columns = st.columns([2.2, 1, 1])
+        event_title = top_columns[0].text_input(
+            "Event",
+            placeholder="Add an event",
+            label_visibility="collapsed",
+        )
+        event_sport = top_columns[1].selectbox(
+            "Category",
+            sports_cave_dashboard.CUSTOM_EVENT_SPORTS,
+            label_visibility="collapsed",
+        )
+        event_regions = top_columns[2].multiselect(
+            "Regions",
+            sports_cave_dashboard.REGIONS,
+            default=["Australia"],
+            label_visibility="collapsed",
+        )
+        date_columns = st.columns([1, 1, 2, 0.9])
+        start_date = date_columns[0].date_input(
+            "Starts",
+            value=local_now.date(),
+            key="dashboard-custom-event-start",
+        )
+        end_date = date_columns[1].date_input(
+            "Ends",
+            value=local_now.date(),
+            key="dashboard-custom-event-end",
+        )
+        event_notes = date_columns[2].text_input(
+            "Note",
+            placeholder="Optional note",
+            label_visibility="collapsed",
+        )
+        submitted = date_columns[3].form_submit_button("Add event", use_container_width=True)
+
+    if submitted:
+        try:
+            sports_cave_dashboard.add_custom_event(
+                event_title,
+                start_date,
+                end_date,
+                event_regions,
+                sport=event_sport,
+                notes=event_notes,
+            )
+            st.rerun()
+        except ValueError as error:
+            st.warning(str(error))
+
+
+def render_physical_calendar(events, local_now):
+    render_html_section_title("Calendar")
+    today = local_now.date()
+    years = sorted(
+        {
+            today.year,
+            today.year + 1,
+            *(
+                sports_cave_dashboard.parse_event_date(event["start_date"]).year
+                for event in events
+                if event.get("start_date")
+            ),
+        }
+    )
+    control_columns = st.columns([1, 1, 2])
+    selected_year = control_columns[0].selectbox(
+        "Year",
+        years,
+        index=years.index(today.year) if today.year in years else 0,
+        key="dashboard-physical-calendar-year",
+    )
+    selected_month = control_columns[1].selectbox(
+        "Month",
+        list(range(1, 13)),
+        index=today.month - 1 if selected_year == today.year else 0,
+        format_func=lambda value: calendar.month_name[value],
+        key="dashboard-physical-calendar-month",
+    )
+    control_columns[2].caption("Add store dates, promo windows, design drops, or reminders.")
+
+    render_custom_calendar_form(local_now)
+    render_month_calendar(events, today, selected_year, selected_month)
+
+
 def render_lightweight_dashboard_page():
     started = time.perf_counter()
     local_now = browser_local_now()
     today = local_now.date()
-    events = sports_cave_dashboard.load_calendar_events()
     state = sports_cave_dashboard.load_dashboard_state()
+    events = sports_cave_dashboard.calendar_events_with_custom(
+        sports_cave_dashboard.load_calendar_events(),
+        state,
+    )
 
     st.markdown(
         f"""
@@ -7501,6 +7730,7 @@ def render_lightweight_dashboard_page():
     render_dashboard_tasks(state)
     render_activity_log(sports_cave_dashboard.load_dashboard_state())
     render_sporting_calendar(events, today)
+    render_physical_calendar(events, local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 

@@ -34,7 +34,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             state_path = Path(temp_dir) / "dashboard_state.json"
             task = sports_cave_dashboard.add_task(
-                "Refresh AFL finals collection",
+                "Refresh NFL collection",
                 "Collections to update",
                 path=state_path,
                 created_at="2026-07-21T00:00:00+00:00",
@@ -42,7 +42,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
             created_state = sports_cave_dashboard.load_dashboard_state(state_path)
             self.assertEqual(len(created_state["tasks"]), 1)
-            self.assertEqual(created_state["activity_log"][0]["message"], "Added task: Refresh AFL finals collection")
+            self.assertEqual(created_state["activity_log"][0]["message"], "Added task: Refresh NFL collection")
 
             completed = sports_cave_dashboard.complete_task(
                 task["id"],
@@ -51,15 +51,39 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             )
 
             final_state = sports_cave_dashboard.load_dashboard_state(state_path)
-            self.assertEqual(completed["text"], "Refresh AFL finals collection")
+            self.assertEqual(completed["text"], "Refresh NFL collection")
             self.assertEqual(final_state["tasks"], [])
             self.assertEqual(
                 final_state["activity_log"][0]["message"],
-                "Completed task: Refresh AFL finals collection",
+                "Completed task: Refresh NFL collection",
             )
             self.assertEqual(
                 final_state["activity_log"][1]["message"],
-                "Added task: Refresh AFL finals collection",
+                "Added task: Refresh NFL collection",
+            )
+
+    def test_custom_calendar_event_is_saved_and_logged(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "dashboard_state.json"
+            event = sports_cave_dashboard.add_custom_event(
+                "Launch framed golf drop",
+                date(2027, 4, 5),
+                date(2027, 4, 11),
+                ["Australia", "USA"],
+                sport="Golf",
+                path=state_path,
+                created_at="2026-07-21T02:00:00+00:00",
+            )
+
+            state = sports_cave_dashboard.load_dashboard_state(state_path)
+            merged = sports_cave_dashboard.calendar_events_with_custom([], state)
+
+            self.assertEqual(event["title"], "Launch framed golf drop")
+            self.assertEqual(state["custom_events"][0]["regions"], ["Australia", "USA"])
+            self.assertEqual(merged[0]["id"], event["id"])
+            self.assertEqual(
+                state["activity_log"][0]["message"],
+                "Added calendar event: Launch framed golf drop",
             )
 
 
@@ -68,14 +92,14 @@ class SportsCaveCalendarTests(unittest.TestCase):
         today = date(2026, 7, 21)
         events = [
             {
-                "alert_label": "AFL season active",
+                "alert_label": "MLB season active",
                 "end_date": "2026-08-30",
-                "id": "afl",
+                "id": "mlb",
                 "importance": 5,
-                "regions": ["Australia"],
-                "sport": "AFL",
+                "regions": ["USA", "Canada"],
+                "sport": "MLB",
                 "start_date": "2026-03-05",
-                "title": "AFL Premiership season",
+                "title": "MLB season",
             },
             {
                 "alert_label": "Bathurst week soon",
@@ -102,10 +126,10 @@ class SportsCaveCalendarTests(unittest.TestCase):
         alerts = sports_cave_dashboard.build_active_alerts(events, today, upcoming_days=90)
         labels = [alert["label"] for alert in alerts]
 
-        self.assertIn("AFL season active", labels)
+        self.assertIn("MLB season active", labels)
         self.assertIn("Bathurst week soon", labels)
         self.assertNotIn("Old event", labels)
-        self.assertEqual(alerts[0]["label"], "AFL season active")
+        self.assertEqual(alerts[0]["label"], "MLB season active")
 
     def test_calendar_filter_returns_active_and_near_upcoming_only(self):
         today = date(2026, 7, 21)
@@ -114,10 +138,10 @@ class SportsCaveCalendarTests(unittest.TestCase):
                 "end_date": "2026-08-30",
                 "id": "active",
                 "importance": 4,
-                "regions": ["Australia"],
-                "sport": "AFL",
+                "regions": ["USA"],
+                "sport": "MLB",
                 "start_date": "2026-03-05",
-                "title": "AFL season",
+                "title": "MLB season",
             },
             {
                 "end_date": "2026-08-23",
@@ -146,6 +170,17 @@ class SportsCaveCalendarTests(unittest.TestCase):
             upcoming_days=60,
         )
         self.assertEqual([event["id"] for event in filtered], ["active", "soon"])
+
+    def test_calendar_data_excludes_afl_nrl_and_includes_sales_golf(self):
+        events = sports_cave_dashboard.load_calendar_events(ROOT / "data" / "sporting_calendar.json")
+        sports = {event.get("sport") for event in events}
+        titles = {event.get("title") for event in events}
+
+        self.assertNotIn("AFL", sports)
+        self.assertNotIn("NRL", sports)
+        self.assertIn("Golf", sports)
+        self.assertIn("Sales", sports)
+        self.assertIn("Black Friday and Cyber Monday 2027", titles)
 
 
 class DashboardRenderContractTests(unittest.TestCase):

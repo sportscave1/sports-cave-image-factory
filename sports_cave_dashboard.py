@@ -10,7 +10,29 @@ DATA_DIR = BASE_DIR / "data"
 DASHBOARD_STATE_PATH = DATA_DIR / "dashboard_state.json"
 SPORTING_CALENDAR_PATH = DATA_DIR / "sporting_calendar.json"
 TASK_GROUPS = ("Collections to update", "New designs to complete")
+CUSTOM_EVENT_SPORTS = (
+    "Sales",
+    "Custom",
+    "NBA",
+    "Basketball",
+    "MLB",
+    "Baseball",
+    "NHL",
+    "Ice Hockey",
+    "NFL",
+    "Football",
+    "Rugby Union",
+    "Cricket",
+    "Tennis",
+    "Golf",
+    "Motorsport",
+    "Horse Racing",
+    "Combat",
+    "Major event",
+)
+REGIONS = ("Australia", "USA", "UK", "Canada", "New Zealand")
 ACTIVITY_LOG_LIMIT = 200
+CUSTOM_EVENT_LIMIT = 300
 DEFAULT_UPCOMING_DAYS = 60
 
 
@@ -19,7 +41,7 @@ def utc_now_iso():
 
 
 def blank_dashboard_state():
-    return {"tasks": [], "activity_log": []}
+    return {"tasks": [], "activity_log": [], "custom_events": []}
 
 
 def _read_json(path, fallback):
@@ -50,13 +72,21 @@ def load_dashboard_state(path=DASHBOARD_STATE_PATH):
     activity_log = (
         state.get("activity_log") if isinstance(state.get("activity_log"), list) else []
     )
-    return {"tasks": tasks, "activity_log": activity_log[:ACTIVITY_LOG_LIMIT]}
+    custom_events = (
+        state.get("custom_events") if isinstance(state.get("custom_events"), list) else []
+    )
+    return {
+        "tasks": tasks,
+        "activity_log": activity_log[:ACTIVITY_LOG_LIMIT],
+        "custom_events": custom_events[:CUSTOM_EVENT_LIMIT],
+    }
 
 
 def save_dashboard_state(state, path=DASHBOARD_STATE_PATH):
     clean_state = {
         "tasks": list(state.get("tasks") or []),
         "activity_log": list(state.get("activity_log") or [])[:ACTIVITY_LOG_LIMIT],
+        "custom_events": list(state.get("custom_events") or [])[:CUSTOM_EVENT_LIMIT],
     }
     _write_json(path, clean_state)
     return clean_state
@@ -126,6 +156,61 @@ def complete_task(task_id, *, path=DASHBOARD_STATE_PATH, completed_at=None):
     return completed_task
 
 
+def normalize_event_regions(regions):
+    clean_regions = []
+    for region in regions or []:
+        if region in REGIONS and region not in clean_regions:
+            clean_regions.append(region)
+    return clean_regions or ["Australia"]
+
+
+def normalize_custom_event_sport(sport):
+    return sport if sport in CUSTOM_EVENT_SPORTS else "Custom"
+
+
+def add_custom_event(
+    title,
+    start_date,
+    end_date,
+    regions,
+    *,
+    sport="Custom",
+    notes="",
+    path=DASHBOARD_STATE_PATH,
+    created_at=None,
+):
+    event_title = str(title or "").strip()
+    if not event_title:
+        raise ValueError("Event title is required.")
+
+    start = parse_event_date(start_date)
+    end = parse_event_date(end_date or start)
+    if end < start:
+        raise ValueError("End date must be on or after the start date.")
+
+    state = load_dashboard_state(path)
+    event = {
+        "alert_label": "",
+        "created_at": created_at or utc_now_iso(),
+        "custom": True,
+        "end_date": end.isoformat(),
+        "id": f"custom-{uuid.uuid4().hex}",
+        "importance": 3,
+        "notes": str(notes or "").strip(),
+        "regions": normalize_event_regions(regions),
+        "source_url": "",
+        "sport": normalize_custom_event_sport(sport),
+        "start_date": start.isoformat(),
+        "title": event_title,
+        "type": "Custom",
+    }
+    custom_events = [event, *list(state.get("custom_events") or [])]
+    state["custom_events"] = custom_events[:CUSTOM_EVENT_LIMIT]
+    add_activity(state, f"Added calendar event: {event_title}", created_at=created_at)
+    save_dashboard_state(state, path)
+    return event
+
+
 def greeting_for_datetime(local_dt):
     hour = int(local_dt.hour)
     if 5 <= hour < 12:
@@ -139,6 +224,10 @@ def load_calendar_events(path=SPORTING_CALENDAR_PATH):
     data = _read_json(path, {"events": []})
     events = data.get("events") if isinstance(data.get("events"), list) else []
     return events
+
+
+def calendar_events_with_custom(events, state):
+    return [*list(events or []), *list((state or {}).get("custom_events") or [])]
 
 
 def parse_event_date(value):
