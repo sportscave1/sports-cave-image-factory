@@ -114,6 +114,102 @@ CATEGORY_COPY_CUES = {
     "Ice Hockey": "rink pressure, playoff moment, rivalry, captaincy, cold arena noise and legacy",
 }
 
+SUPPORTED_AD_CATEGORIES = tuple(CATEGORY_OPTIONS[1:])
+CATEGORY_SPECIFIC_CAMPAIGN_TYPES = ("Carousel", "Instant Experience")
+
+CATEGORY_WINNER_ANGLES = {
+    "Football": {
+        "audience": "real football supporters, soccer fans where the market expects that term, national-team fans, club-era collectors and serious football collectors",
+        "emotion": "football legacy, matchday memory, finals, rivalries, national pride, club eras, last dances, supporters and wall-worthy moments",
+        "carousel_flow": "product hero -> football moment or legacy -> supporter identity -> wall, cave or home bar ownership -> only-100 scarcity",
+        "ie_setting": "premium football collector room, home bar, collection wall or sports room",
+        "headline_examples": "Football Glory; Only 100 Made; For Real Fans; Claim Yours; Legends Framed",
+        "description_examples": "Limited Edition; Matchday Memory; Supporter Wall; Claim Edition; No Second Run",
+        "country_note": "UK must use football and supporters, not soccer. USA should use soccer when association football is intended. AU, Canada and NZ should use football or soccer according to product context.",
+    },
+    "NBA": {
+        "audience": "NBA fans, basketball collectors, era-debate fans and people who grew up watching basketball icons",
+        "emotion": "greatness, rivalry, mentality, icons, championship nights, clutch moments, legacy and era debates",
+        "carousel_flow": "icon -> moment -> mentality -> wall ownership -> only-100 scarcity",
+        "ie_setting": "premium sports room, office, collector lounge or man cave",
+        "headline_examples": "Hoops Legacy; Only 100 Made; Clutch Era; Claim Yours; Icons Framed",
+        "description_examples": "Court Memory; For NBA Fans; Numbered Art; Sports Room; No Second Run",
+        "country_note": "Keep basketball language natural for the selected market. Do not invent stats, rings, teams or records unless the product title confirms them.",
+    },
+    "Motorsport": {
+        "audience": "race fans, garage collectors, motorsport loyalists and fans who remember the sound, pressure and rivalry",
+        "emotion": "raw speed, Bathurst-style nostalgia where supported, roaring engines, race-day memory, legends, rivalry and garage pride",
+        "carousel_flow": "machine or driver identity -> race-day memory -> legacy -> garage, cave or home bar ownership -> only-100 scarcity",
+        "ie_setting": "premium garage, workshop, home bar or motorsport collector wall",
+        "headline_examples": "Race Legacy; Only 100 Made; Still Roars; Claim Yours; Garage Wall",
+        "description_examples": "Race Day Art; Engine Memory; Numbered Run; Cave Ready; No Second Run",
+        "country_note": "Use Bathurst, the Mountain or touring-car cues only when supported by the product title or artwork. Do not invent track, driver, year or result.",
+    },
+    "Cricket": {
+        "audience": "cricket fans, cricket tragics, collectors, Test-match obsessives and summer-sport loyalists",
+        "emotion": "summer sound, Test match memory, Ashes-style rivalry only when supported, innings, wickets, heroes and backyard-to-stadium nostalgia",
+        "carousel_flow": "product identity -> innings or match memory -> cricket identity -> study, home bar or sports-room ownership -> only-100 scarcity",
+        "ie_setting": "premium home bar, study, sports room or cricket collection wall",
+        "headline_examples": "Cricket Memory; Only 100 Made; Final Session; Claim Yours; Heroes Framed",
+        "description_examples": "For Cricket Fans; Summer Wall; Numbered Art; Home Bar Ready; No Second Run",
+        "country_note": "AU and UK can lean into serious cricket-fan language, but avoid forced slang and do not invent Ashes, innings, wickets or venues unless confirmed.",
+    },
+    "Horse Racing": {
+        "audience": "race-day fans, punters, racing collectors and people who remember the thunder down the straight",
+        "emotion": "race day, legendary finishes, cup-day emotion, silks, turf, winning post, punters and collectors",
+        "carousel_flow": "runner or race identity -> straight or finish memory -> racing emotion -> lounge, bar or collector-wall ownership -> only-100 scarcity",
+        "ie_setting": "premium lounge, bar, racing collection wall or timber and leather interior",
+        "headline_examples": "Race Day Framed; Only 100 Made; Final Straight; Claim Yours; Turf Memory",
+        "description_examples": "Racing Wall; Cup Day Feel; Numbered Art; Bar Ready; No Second Run",
+        "country_note": "Do not invent horse, race, jockey, trophy, odds or result. Use cup-day cues only when the product supports them.",
+    },
+    "Baseball": {
+        "audience": "baseball fans, collectors, rivalry fans and people who grew up with ballpark memory",
+        "emotion": "legends, rivalry, home runs, ballpark memory, generational icons, collectors and America's game",
+        "carousel_flow": "product identity -> ballpark or swing memory -> fan emotion -> sports-room or collector-wall ownership -> only-100 scarcity",
+        "ie_setting": "premium sports room, office, collector lounge, home bar or baseball wall",
+        "headline_examples": "Ballpark Memory; Only 100 Made; Baseball Glory; Claim Yours; Legends Framed",
+        "description_examples": "For Baseball Fans; Numbered Art; Sports Room; Wall Ready; No Second Run",
+        "country_note": "Keep baseball terms baseball-specific in every market. Do not invent stats, records, seasons or licensing claims.",
+    },
+    "Combat": {
+        "audience": "fight fans, combat-sport collectors and fans who remember the walkout, pressure and tension",
+        "emotion": "fight night, walkout, rivalry, pressure, legacy, warrior mentality and one-shot moments",
+        "carousel_flow": "fighter or event identity -> fight-night pressure -> fan tension -> fight room, gym or wall ownership -> only-100 scarcity",
+        "ie_setting": "dark premium gym, fight room, home bar or combat collector wall",
+        "headline_examples": "Fight Night Art; Only 100 Made; Walkout Ready; Claim Yours; Legacy Framed",
+        "description_examples": "For Fight Fans; Numbered Art; Fight Room; Wall Ready; No Second Run",
+        "country_note": "Use belts only if supported. Do not invent result, title, opponent, record or sanctioning body.",
+    },
+    "Ice Hockey": {
+        "audience": "hockey fans, loyal supporters, playoff-night obsessives and cold-arena collectors",
+        "emotion": "frozen arenas, overtime, rivalries, legends, team pride, playoff nights, cold-blooded moments and loyal fans",
+        "carousel_flow": "product identity -> rink or overtime memory -> fan loyalty -> basement bar, sports room or wall ownership -> only-100 scarcity",
+        "ie_setting": "premium sports room, basement bar, collector wall or hockey room",
+        "headline_examples": "Rink Legacy; Only 100 Made; Overtime Feel; Claim Yours; Hockey Wall",
+        "description_examples": "For Hockey Fans; Numbered Art; Sports Room; Wall Ready; No Second Run",
+        "country_note": "Do not invent cup wins, team names, scores or playoff facts unless the product title confirms them.",
+    },
+    "NFL": {
+        "audience": "NFL fans, game-day loyalists, gridiron collectors and fans who live for the season",
+        "emotion": "Sunday memory, gridiron legacy, game-day pride, rivalries, championship pressure and helmet-era nostalgia",
+        "carousel_flow": "product identity -> Sunday or game-day memory -> fan pride -> sports-room or home-theatre ownership -> only-100 scarcity",
+        "ie_setting": "premium sports room, home theatre, basement bar or NFL collector wall",
+        "headline_examples": "Sunday Legacy; Only 100 Made; Game Day Wall; Claim Yours; Gridiron Art",
+        "description_examples": "For NFL Fans; Numbered Art; Sports Room; Wall Ready; No Second Run",
+        "country_note": "Do not invent Super Bowl, stats, teams, scores or records unless the product title confirms them.",
+    },
+    "Tennis": {
+        "audience": "tennis fans, rivalry watchers, collectors and fans who remember match point pressure",
+        "emotion": "rivalries, match point, grace, pressure, eras, icons, farewell moments and collectors",
+        "carousel_flow": "product identity -> match-point or era memory -> tennis emotion -> office, lounge or study ownership -> only-100 scarcity",
+        "ie_setting": "premium office, lounge, gallery wall or collector study",
+        "headline_examples": "Match Point Art; Only 100 Made; Court Legacy; Claim Yours; Icons Framed",
+        "description_examples": "For Tennis Fans; Numbered Art; Study Wall; Gallery Ready; No Second Run",
+        "country_note": "Use Centre Court style for UK only when supported. Do not invent tournament, title, ranking or record.",
+    },
+}
+
 SUPPORTED_TEMPLATES = {
     ("Motorsport", "Carousel"): "motorsport_carousel",
     ("Baseball", "Instant Experience"): "baseball_instant_experience",
@@ -344,8 +440,21 @@ def validate_ads_inputs(product_name, category, country, campaign_type, product_
     return ""
 
 
+def _template_slug(value):
+    return re.sub(r"[^a-z0-9]+", "_", str(value or "").casefold()).strip("_")
+
+
+def get_category_specific_template_key(category, campaign_type):
+    if category in SUPPORTED_AD_CATEGORIES and campaign_type in CATEGORY_SPECIFIC_CAMPAIGN_TYPES:
+        return f"{_template_slug(category)}_{_template_slug(campaign_type)}"
+    return None
+
+
 def get_template_key(category, campaign_type):
-    return SUPPORTED_TEMPLATES.get((category, campaign_type))
+    return SUPPORTED_TEMPLATES.get((category, campaign_type)) or get_category_specific_template_key(
+        category,
+        campaign_type,
+    )
 
 
 def get_winner_pattern_key(category, campaign_type):
@@ -730,6 +839,13 @@ Before returning the answer, verify:
 If any carousel field exceeds {CAROUSEL_CARD_MAX_CHARACTERS} characters, rewrite it before answering."""
 
 
+def build_carousel_cta_guidance():
+    return """CTA GUIDANCE
+
+Use:
+Claim Your Edition"""
+
+
 def apply_campaign_copy_rule_blocks(prompt, campaign_type, include_primary_text_variations=False, category=None):
     if campaign_type != "Carousel" or not prompt:
         return prompt
@@ -739,10 +855,13 @@ def apply_campaign_copy_rule_blocks(prompt, campaign_type, include_primary_text_
     final_quality_check = build_carousel_final_quality_check(
         include_primary_text_variations=include_primary_text_variations
     )
+    cta_guidance = build_carousel_cta_guidance()
     if story_rules not in prompt:
         prompt = f"{prompt.rstrip()}\n\n{story_rules}"
     if card_rules not in prompt:
         prompt = f"{prompt.rstrip()}\n\nCAROUSEL COPY RULES\n\n{card_rules}"
+    if "CTA GUIDANCE" not in prompt:
+        prompt = f"{prompt.rstrip()}\n\n{cta_guidance}"
     if final_quality_check not in prompt:
         prompt = f"{prompt.rstrip()}\n\n{final_quality_check}"
     return prompt
@@ -1598,6 +1717,58 @@ def build_universal_sports_cave_rules(category):
 - Avoid these generic AI phrases: elevate your space; ultimate tribute; perfect addition; must-have; transform your room."""
 
 
+def get_category_winner_angle(category):
+    return CATEGORY_WINNER_ANGLES.get(category, {})
+
+
+def build_category_winner_angle_block(category, campaign_type, country):
+    angle = get_category_winner_angle(category)
+    if not angle:
+        return ""
+
+    category_label = str(category or "").upper()
+    if campaign_type == "Carousel":
+        strategy = f"""CATEGORY-SPECIFIC CAROUSEL WINNER ANGLE
+
+- Category decides the ad structure and emotional angle. Country only localises spelling, terminology and language flavour.
+- Audience: {angle["audience"]}.
+- Emotional territory: {angle["emotion"]}.
+- Carousel sequence: {angle["carousel_flow"]}.
+- Use the five required roles exactly: Product Identity, Moment / Legacy, Emotional Hook, Fan Ownership, Scarcity.
+- Card 1 must show the product clearly.
+- Card 2 must connect to the sport moment, memory or legacy.
+- Card 3 must trigger the fan identity.
+- Card 4 must show ownership on the wall, cave, home bar, office or sports room.
+- Card 5 must make scarcity feel final and collector-led.
+- Strong short-line examples for this category: {angle["headline_examples"]}.
+- Short description examples for this category: {angle["description_examples"]}.
+- {angle["country_note"]}"""
+    else:
+        strategy = f"""CATEGORY-SPECIFIC INSTANT EXPERIENCE WINNER ANGLE
+
+- Category decides the ad structure and emotional angle. Country only localises spelling, terminology and language flavour.
+- Lead with the selected product as the hero, framed as premium {category} collector wall art.
+- Audience: {angle["audience"]}.
+- Emotional territory: {angle["emotion"]}.
+- If the product is narrow to a team, player, rivalry, country or event, use that as the hook while keeping enough category-wide appeal for cold audiences.
+- Instant Experience setting: {angle["ie_setting"]}.
+- Catalogue/cards underneath should feel like a connected {category} collector range, not one isolated product.
+- Strong short-line examples for this category: {angle["headline_examples"]}.
+- Short description examples for this category: {angle["description_examples"]}.
+- {angle["country_note"]}"""
+
+    return f"""{category_label} WINNER PATTERN
+
+{strategy}"""
+
+
+def get_instant_experience_setting(category):
+    return get_category_winner_angle(category).get(
+        "ie_setting",
+        "premium collector room, wall, sports room, home bar, office or man cave",
+    )
+
+
 def build_generic_instant_experience_prompt(
     product_name,
     category,
@@ -1608,11 +1779,10 @@ def build_generic_instant_experience_prompt(
     specific_pattern=False,
 ):
     product_name = _clean_product_name(product_name)
-    pattern_heading = (
-        "SPORTS CAVE FOOTBALL INSTANT EXPERIENCE WINNER PATTERN"
-        if specific_pattern and category == "Football"
-        else "SPORTS CAVE GENERIC INSTANT EXPERIENCE WINNER PATTERN"
-    )
+    if specific_pattern:
+        pattern_heading = f"SPORTS CAVE {str(category or '').upper()} INSTANT EXPERIENCE WINNER PATTERN"
+    else:
+        pattern_heading = "SPORTS CAVE GENERIC INSTANT EXPERIENCE WINNER PATTERN"
     fallback_note = (
         ""
         if specific_pattern
@@ -1628,6 +1798,8 @@ FOOTBALL INSTANT EXPERIENCE DIRECTION
 - If the product is about a country or team, use that as the emotional hook while keeping wider appeal around football legacy, World Cup nights, iconic moments and serious collectors.
 - Output must work for World Cup, national teams, Ronaldo, Messi, Mbappe, Beckham, Arsenal, rivalries, finals, farewells and iconic football moments without inventing facts.
 """
+    category_block = build_category_winner_angle_block(category, campaign_type, country)
+    category_setting = get_instant_experience_setting(category)
 
     return f"""{pattern_heading}
 
@@ -1647,6 +1819,8 @@ Use the supplied product name as the source of identity. Do not identify or gues
 {build_country_campaign_localisation_note(category, country)}
 
 {build_universal_sports_cave_rules(category)}
+
+{category_block}
 {football_block}
 OBJECTIVE
 
@@ -1699,8 +1873,8 @@ The image prompt must instruct the image generator:
 - Use the uploaded image as the exact reference for the framed Sports Cave artwork.
 - Keep the exact framed artwork unchanged.
 - Do not change the artwork, colours, text, frame, badge, crop or layout.
-- Top 60-68% of the image: framed artwork hero in a premium collector room or wall setting.
-- For Football, use a premium football collector room, home bar, collection wall or sports room setting depending on country and product context.
+- Top 60-68% of the image: framed artwork hero in a premium category-relevant collector setting.
+- Category setting: {category_setting}.
 - Bottom 32-40% of the image: black/gold CTA panel.
 - Panel main text: LIMITED TO 100 WORLDWIDE
 - Panel subtext: Once it sells out, it's gone.
@@ -1772,18 +1946,27 @@ FINAL QUALITY CHECK
 - No unsupported facts are invented."""
 
 
-def build_generic_carousel_prompt(product_name, category, country, campaign_type):
+def build_generic_carousel_prompt(product_name, category, country, campaign_type, *, specific_pattern=False):
     product_name = _clean_product_name(product_name)
-    return f"""SPORTS CAVE GENERIC CAROUSEL WINNER PATTERN
+    pattern_heading = (
+        f"SPORTS CAVE {str(category or '').upper()} CAROUSEL WINNER PATTERN"
+        if specific_pattern
+        else "SPORTS CAVE GENERIC CAROUSEL WINNER PATTERN"
+    )
+    fallback_note = (
+        ""
+        if specific_pattern
+        else "\nINTERNAL NOTE\nUsing generic Sports Cave winner pattern for this category. Do not include this note in customer-facing copy blocks.\n"
+    )
+    category_block = build_category_winner_angle_block(category, campaign_type, country)
+    return f"""{pattern_heading}
 
 PRODUCT
 Product name: {product_name}
 Category: {category}
 Market: {country}
 Campaign type: {campaign_type}
-
-INTERNAL NOTE
-Using generic Sports Cave winner pattern for this category. Do not include this note in customer-facing copy blocks.
+{fallback_note}
 
 I have attached the exact Sports Cave product image being advertised.
 
@@ -1794,6 +1977,8 @@ Use the supplied product name as the source of identity. Do not guess unsupporte
 {build_country_campaign_localisation_note(category, country)}
 
 {build_universal_sports_cave_rules(category)}
+
+{category_block}
 
 Create a Meta Carousel ad package.
 
@@ -1827,10 +2012,27 @@ Carousel headline and description rules:
 - Maximum {CAROUSEL_CARD_MAX_CHARACTERS} characters each.
 - No commas.
 - No full stops.
+- Keep them punchy and readable on mobile.
+- Use fragments if needed.
 - No duplicate headlines.
 - No duplicate descriptions.
 - Do not truncate words.
 - Count every character before returning the final output.
+
+Creative rules:
+- Each card should feel like a sequence, not five random ads.
+- Card 1: show the selected framed product clearly.
+- Card 2: connect to the sport moment, memory or legacy.
+- Card 3: focus on emotional fan identity.
+- Card 4: show ownership on a wall, cave, home bar, office or sports room.
+- Card 5: make the limited edition feel final.
+- Always keep framed artwork unchanged in image prompts.
+- No fake logos, fake club marks, fake sponsors, extra text, clutter or competing artwork.
+
+CTA GUIDANCE
+
+Use:
+Claim Your Edition
 
 OUTPUT EXACTLY IN THIS FORMAT
 
@@ -1876,7 +2078,11 @@ Variation 4:
 [copy]
 
 Variation 5:
-[copy]"""
+[copy]
+
+CTA GUIDANCE
+
+Claim Your Edition"""
 
 
 def build_generic_single_image_video_prompt(product_name, category, country, campaign_type):
@@ -2019,9 +2225,16 @@ def build_ads_prompt(product_name, category, country, campaign_type, product_url
             country,
             campaign_type,
             product_url=product_url,
+            specific_pattern=bool(template_key),
         )
     elif campaign_type == "Carousel":
-        prompt = build_generic_carousel_prompt(product_name, category, country, campaign_type)
+        prompt = build_generic_carousel_prompt(
+            product_name,
+            category,
+            country,
+            campaign_type,
+            specific_pattern=bool(template_key),
+        )
     elif campaign_type == "Single Image / Video":
         prompt = build_generic_single_image_video_prompt(product_name, category, country, campaign_type)
     else:

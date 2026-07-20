@@ -96,16 +96,22 @@ class AdsPageTests(unittest.TestCase):
                 self.assertIn("Create exactly five cards.", prompt)
                 self.assertIn("Create exactly five genuinely different Meta primary-text variations.", prompt)
 
-    def test_missing_exact_templates_use_generic_campaign_fallback(self):
-        self.assertIsNone(ads_page.get_template_key("Motorsport", "Instant Experience"))
-        self.assertIsNone(ads_page.get_template_key("Motorsport", "Single Image / Video"))
-        self.assertIsNone(ads_page.get_template_key("Baseball", "Carousel"))
-        self.assertIsNone(ads_page.get_template_key("Baseball", "Single Image / Video"))
-        self.assertIsNone(ads_page.get_template_key("NBA", "Carousel"))
-        self.assertEqual(ads_page.get_winner_pattern_key("NBA", "Carousel"), "generic_carousel")
+    def test_category_specific_templates_cover_carousel_and_instant_experience_with_generic_fallback(self):
+        for category in ads_page.SUPPORTED_AD_CATEGORIES:
+            with self.subTest(category=category, campaign_type="Carousel"):
+                self.assertIsNotNone(ads_page.get_template_key(category, "Carousel"))
+                self.assertIsNotNone(ads_page.get_winner_pattern_key(category, "Carousel"))
+            with self.subTest(category=category, campaign_type="Instant Experience"):
+                self.assertIsNotNone(ads_page.get_template_key(category, "Instant Experience"))
+                self.assertIsNotNone(ads_page.get_winner_pattern_key(category, "Instant Experience"))
+
+        self.assertEqual(ads_page.get_template_key("Motorsport", "Carousel"), "motorsport_carousel")
+        self.assertEqual(ads_page.get_template_key("Baseball", "Instant Experience"), "baseball_instant_experience")
+        self.assertIsNone(ads_page.get_template_key("Rugby League", "Carousel"))
+        self.assertEqual(ads_page.get_winner_pattern_key("Rugby League", "Carousel"), "generic_carousel")
         self.assertIn(
             "SPORTS CAVE GENERIC CAROUSEL WINNER PATTERN",
-            ads_page.build_ads_prompt("Test Product", "NBA", "Australia", "Carousel"),
+            ads_page.build_ads_prompt("Test Product", "Rugby League", "Australia", "Carousel"),
         )
 
     def test_baseball_instant_experience_is_supported_with_required_url(self):
@@ -360,6 +366,105 @@ class AdsPageTests(unittest.TestCase):
                 self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
                 self.assertNotEqual(prompt, "")
 
+    def test_every_category_returns_carousel_output_for_every_supported_country(self):
+        required_roles = [
+            "Product Identity",
+            "Moment / Legacy",
+            "Emotional Hook",
+            "Fan Ownership",
+            "Scarcity",
+        ]
+
+        for category in ads_page.SUPPORTED_AD_CATEGORIES:
+            for country in ads_page.COUNTRY_OPTIONS[1:]:
+                with self.subTest(category=category, country=country):
+                    prompt = ads_page.build_ads_prompt(
+                        f"{category} Collector Moment",
+                        category,
+                        country,
+                        "Carousel",
+                    )
+                    self.assertNotEqual(prompt, "")
+                    self.assertNotIn("Insufficient winner data", prompt)
+                    self.assertIn(f"Market: {country}", prompt)
+                    self.assertIn("CAROUSEL CARDS", prompt)
+                    self.assertIn("PRIMARY TEXT", prompt)
+                    self.assertIn("CTA GUIDANCE", prompt)
+                    self.assertIn("Claim Your Edition", prompt)
+                    self.assertIn("META URL PARAMETERS", prompt)
+                    self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
+                    if category == "Motorsport":
+                        self.assertIn("SPORTS CAVE MOTORSPORT CAROUSEL AD", prompt)
+                        self.assertIn("Race Or Moment", prompt)
+                        self.assertIn("Legacy", prompt)
+                    else:
+                        self.assertIn(
+                            f"SPORTS CAVE {category.upper()} CAROUSEL WINNER PATTERN",
+                            prompt,
+                        )
+                        self.assertIn("CATEGORY-SPECIFIC CAROUSEL WINNER ANGLE", prompt)
+                        for role in required_roles:
+                            self.assertIn(role, prompt)
+
+    def test_every_category_returns_instant_experience_output_for_every_supported_country(self):
+        for category in ads_page.SUPPORTED_AD_CATEGORIES:
+            for country in ads_page.COUNTRY_OPTIONS[1:]:
+                with self.subTest(category=category, country=country):
+                    prompt = ads_page.build_ads_prompt(
+                        f"{category} Collector Moment",
+                        category,
+                        country,
+                        "Instant Experience",
+                    )
+                    self.assertNotEqual(prompt, "")
+                    self.assertNotIn("Insufficient winner data", prompt)
+                    self.assertIn(f"Market: {country}", prompt)
+                    self.assertIn("META URL PARAMETERS", prompt)
+                    self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
+                    if category == "Baseball":
+                        self.assertIn("SPORTS CAVE BASEBALL INSTANT EXPERIENCE AD", prompt)
+                        self.assertIn("INSTANT EXPERIENCE SETUP", prompt)
+                    else:
+                        self.assertIn(
+                            f"SPORTS CAVE {category.upper()} INSTANT EXPERIENCE WINNER PATTERN",
+                            prompt,
+                        )
+                        self.assertIn("CATEGORY-SPECIFIC INSTANT EXPERIENCE WINNER ANGLE", prompt)
+                        self.assertIn("Variant 5:", prompt)
+                        self.assertIn("INSTANT EXPERIENCE COVER PROMPT", prompt)
+                        self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
+                        self.assertIn("Once it sells out, it's gone.", prompt)
+                        self.assertIn("black/gold CTA panel", prompt)
+                        self.assertIn("Top 60-68%", prompt)
+                        self.assertIn("Bottom 32-40%", prompt)
+                        self.assertIn("Claim Your Edition", prompt)
+
+    def test_football_carousel_has_football_specific_winner_angle_and_five_cards(self):
+        prompt = ads_page.build_ads_prompt("Arsenal Derby Night", "Football", "UK", "Carousel")
+
+        self.assertIn("SPORTS CAVE FOOTBALL CAROUSEL WINNER PATTERN", prompt)
+        self.assertIn("football legacy, matchday memory, finals, rivalries", prompt)
+        self.assertIn("supporter identity", prompt)
+        self.assertIn("Card 1 - Product Identity", prompt)
+        self.assertIn("Card 2 - Moment / Legacy", prompt)
+        self.assertIn("Card 3 - Emotional Hook", prompt)
+        self.assertIn("Card 4 - Fan Ownership", prompt)
+        self.assertIn("Card 5 - Scarcity", prompt)
+        self.assertIn("Maximum 17 characters", prompt)
+        self.assertIn("No commas", prompt)
+        self.assertIn("No full stops", prompt)
+
+    def test_football_instant_experience_uses_black_gold_panel_and_collector_framing(self):
+        prompt = ads_page.build_ads_prompt("Messi World Cup Night", "Football", "USA", "Instant Experience")
+
+        self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE WINNER PATTERN", prompt)
+        self.assertIn("football collector wall art", prompt)
+        self.assertIn("World Cup nights", prompt)
+        self.assertIn("black/gold CTA panel", prompt)
+        self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
+        self.assertIn("Once it sells out, it's gone.", prompt)
+        self.assertIn("Claim Your Edition", prompt)
+
     def test_cricket_single_image_video_works_for_every_supported_country(self):
         for country in ads_page.COUNTRY_OPTIONS[1:]:
             with self.subTest(country=country):
@@ -382,13 +487,13 @@ class AdsPageTests(unittest.TestCase):
     def test_category_without_specific_winner_data_still_returns_fallback_output(self):
         prompt = ads_page.build_ads_prompt(
             "Cup Day Final Straight",
-            "Horse Racing",
+            "Rugby League",
             "Australia",
             "Instant Experience",
         )
 
-        self.assertIsNone(ads_page.get_template_key("Horse Racing", "Instant Experience"))
-        self.assertEqual(ads_page.get_winner_pattern_key("Horse Racing", "Instant Experience"), "generic_instant_experience")
+        self.assertIsNone(ads_page.get_template_key("Rugby League", "Instant Experience"))
+        self.assertEqual(ads_page.get_winner_pattern_key("Rugby League", "Instant Experience"), "generic_instant_experience")
         self.assertIn("SPORTS CAVE GENERIC INSTANT EXPERIENCE WINNER PATTERN", prompt)
         self.assertIn("Using generic Sports Cave winner pattern for this category.", prompt)
         self.assertIn("Cup Day Final Straight", prompt)
@@ -405,6 +510,17 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("soccer, fans", usa_prompt)
         self.assertNotEqual(uk_prompt, "")
         self.assertNotEqual(usa_prompt, "")
+
+    def test_uk_and_usa_football_localisation_use_expected_terms(self):
+        uk_prompt = ads_page.build_ads_prompt("Arsenal Derby Night", "Football", "UK", "Carousel")
+        usa_prompt = ads_page.build_ads_prompt("Arsenal Derby Night", "Football", "USA", "Carousel")
+
+        self.assertIn("UK must use football and supporters, not soccer.", uk_prompt)
+        self.assertIn("football and supporters", uk_prompt)
+        self.assertIn("USA should use soccer when association football is intended.", usa_prompt)
+        self.assertIn("soccer", usa_prompt)
+        self.assertIn("COUNTRY LANGUAGE AND LOCALISATION RULES", uk_prompt)
+        self.assertIn("COUNTRY LANGUAGE AND LOCALISATION RULES", usa_prompt)
 
     def test_generic_carousel_card_limit_is_17_characters(self):
         prompt = ads_page.build_ads_prompt("Final Whistle Glory", "Football", "UK", "Carousel")
@@ -463,7 +579,7 @@ class AdsPageTests(unittest.TestCase):
 
     def test_baseball_instant_experience_does_not_change_other_campaigns_or_sports(self):
         self.assertIn(
-            "SPORTS CAVE GENERIC CAROUSEL WINNER PATTERN",
+            "SPORTS CAVE BASEBALL CAROUSEL WINNER PATTERN",
             ads_page.build_ads_prompt(
                 "Baseball Product",
                 "Baseball",
@@ -483,7 +599,7 @@ class AdsPageTests(unittest.TestCase):
             ),
         )
         self.assertIn(
-            "SPORTS CAVE GENERIC INSTANT EXPERIENCE WINNER PATTERN",
+            "SPORTS CAVE NBA INSTANT EXPERIENCE WINNER PATTERN",
             ads_page.build_ads_prompt("Test Product", "NBA", "USA", "Instant Experience"),
         )
 
@@ -840,7 +956,7 @@ PRIMARY TEXT VARIATIONS
         self.assertFalse(any("Market: Canada" in code.value for code in app_test.code))
         self.assertEqual(len(app_test.exception), 0)
 
-    def test_submit_missing_exact_winner_renders_generic_fallback_output(self):
+    def test_submit_valid_category_campaign_renders_category_specific_output(self):
         app_test = run_ads_page()
         set_product_name(app_test, "Six Laps Ahead")
         select_option(app_test, "Category", "Motorsport")
@@ -850,15 +966,25 @@ PRIMARY TEXT VARIATIONS
 
         self.assertNotIn("Insufficient winner data", [subheader.value for subheader in app_test.subheader])
         self.assertIn("1. Copy this ChatGPT prompt", [subheader.value for subheader in app_test.subheader])
-        self.assertTrue(
-            any(
-                caption.value == "Using generic Sports Cave winner pattern for this category."
-                for caption in app_test.caption
-            )
-        )
+        self.assertFalse(any("Using generic Sports Cave winner pattern" in caption.value for caption in app_test.caption))
         self.assertEqual(len(app_test.code), 1)
         self.assertEqual(app_test.code[0].value, ads_page.META_AD_URL_PARAMETERS)
         self.assertEqual(len(app_test.exception), 0)
+
+    def test_valid_category_campaign_country_combinations_never_have_insufficient_winner_data(self):
+        for category in ads_page.SUPPORTED_AD_CATEGORIES:
+            for campaign_type in ("Carousel", "Instant Experience"):
+                for country in ads_page.COUNTRY_OPTIONS[1:]:
+                    with self.subTest(category=category, campaign_type=campaign_type, country=country):
+                        self.assertIsNotNone(ads_page.get_winner_pattern_key(category, campaign_type))
+                        prompt = ads_page.build_ads_prompt(
+                            f"{category} Collector Moment",
+                            category,
+                            country,
+                            campaign_type,
+                        )
+                        self.assertNotEqual(prompt, "")
+                        self.assertNotIn("Insufficient winner data", prompt)
 
     def test_ads_page_source_has_no_external_backend_execution_path(self):
         source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
