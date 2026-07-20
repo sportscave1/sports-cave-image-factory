@@ -1255,11 +1255,11 @@ def inject_styles():
         header[data-testid="stHeader"],
         header[data-testid="stHeader"] > div,
         [data-testid="stToolbar"] {
-            background: #000000 !important;
+            background: var(--sc-bg) !important;
         }
 
         header[data-testid="stHeader"] {
-            border-bottom: 1px solid #000000;
+            border-bottom: 1px solid var(--sc-border);
         }
 
         div[data-testid="stStatusWidget"] {
@@ -1293,14 +1293,8 @@ def inject_styles():
         header[data-testid="stHeader"] svg,
         [data-testid="stToolbar"] button,
         [data-testid="stToolbar"] svg {
-            color: #FFFFFF !important;
-            fill: #FFFFFF !important;
-            stroke: #FFFFFF !important;
-        }
-
-        header[data-testid="stHeader"] *,
-        [data-testid="stToolbar"] * {
-            color: #FFFFFF !important;
+            color: var(--sc-text) !important;
+            fill: var(--sc-text) !important;
         }
 
         [data-testid="stSidebar"] {
