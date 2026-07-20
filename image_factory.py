@@ -1,5 +1,6 @@
 from pathlib import Path
 from PIL import Image, ImageOps, ImageFile, UnidentifiedImageError
+from contextlib import suppress
 import gc
 import hashlib
 import logging
@@ -1868,7 +1869,7 @@ def build_asset_record(
 
 
 def is_product_page_prompt_filename(prompt_filename):
-    return prompt_filename in PRODUCT_PAGE_PROMPT_FILENAMES
+    return Path(prompt_filename).name in PRODUCT_PAGE_PROMPT_FILENAMES
 
 
 def should_export_asset_to_shopify(asset):
@@ -2316,6 +2317,8 @@ def get_lifestyle_prompt_text(prompt_filename, default_text, *, local_only=False
 
 
 def get_prompt_group(prompt_filename):
+    if is_product_page_prompt_filename(prompt_filename):
+        return ASSET_CATEGORY_PRODUCT
     return ASSET_CATEGORY_SOCIAL
 
 
@@ -2485,7 +2488,11 @@ def build_asset_zip_manifest(assets, zip_groups=None, *, include_content_hash=Tr
         if selected_groups is not None and asset_group not in selected_groups:
             continue
 
-        for path_key, archive_folder in (("webp_path", "WEBP"), ("jpg_path", "jpg")):
+        archive_paths = [("webp_path", "WEBP"), ("jpg_path", "jpg")]
+        if asset_group == ASSET_CATEGORY_SOCIAL:
+            archive_paths = [("jpg_path", "jpg")]
+
+        for path_key, archive_folder in archive_paths:
             file_path = asset.get(path_key)
             if not file_path:
                 continue
@@ -2591,6 +2598,7 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
     preview_dir.mkdir(parents=True, exist_ok=True)
 
     variant_slug = LIFESTYLE_IMAGE_VARIANTS[prompt_filename]
+    should_save_webp = is_product_page_prompt_filename(prompt_filename)
     webp_output_path = webp_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}.webp"
     jpg_output_path = jpg_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}.jpg"
     preview_output_path = preview_dir / f"{product_slug}-black-framed-{sport_slug}-{variant_slug}-preview.webp"
@@ -2645,13 +2653,17 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
             image_file.seek(0)
 
     try:
-        image_export.save(
-            webp_output_path,
-            format="WEBP",
-            quality=EXPORT_WEBP_QUALITY,
-            method=EXPORT_WEBP_METHOD,
-        )
-        collect_garbage(f"After lifestyle WEBP save: {prompt_filename}")
+        if should_save_webp:
+            image_export.save(
+                webp_output_path,
+                format="WEBP",
+                quality=EXPORT_WEBP_QUALITY,
+                method=EXPORT_WEBP_METHOD,
+            )
+            collect_garbage(f"After lifestyle WEBP save: {prompt_filename}")
+        else:
+            with suppress(FileNotFoundError, PermissionError):
+                webp_output_path.unlink()
 
         image_export.save(
             jpg_output_path,
@@ -2679,7 +2691,7 @@ def save_lifestyle_mockup(run_dir, product_slug, sport_slug, prompt_filename, im
         collect_garbage(f"After saving lifestyle mockup: {prompt_filename}")
 
     return {
-        "webp_path": webp_output_path,
+        "webp_path": webp_output_path if should_save_webp else None,
         "jpg_path": jpg_output_path,
         "preview_path": preview_output_path,
     }

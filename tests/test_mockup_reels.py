@@ -137,7 +137,7 @@ class MockupReelsTests(unittest.TestCase):
             with zipfile.ZipFile(zip_path) as archive:
                 names = set(archive.namelist())
 
-            self.assertIn("WEBP/test-black-framed-soccer-16-man-cave-reel.webp", names)
+            self.assertNotIn("WEBP/test-black-framed-soccer-16-man-cave-reel.webp", names)
             self.assertIn("jpg/test-black-framed-soccer-16-man-cave-reel.jpg", names)
 
     def test_complete_zip_filters_assets_by_group(self):
@@ -176,7 +176,6 @@ class MockupReelsTests(unittest.TestCase):
                 names,
                 {
                     f"WEBP/{image_factory.ASSET_CATEGORY_CORE}.webp",
-                    f"WEBP/{image_factory.ASSET_CATEGORY_SOCIAL}.webp",
                 },
             )
 
@@ -199,8 +198,8 @@ class MockupReelsTests(unittest.TestCase):
                     core_jpg,
                 ),
                 asset_record(
-                    "lifestyle::01-man-cave-prompt.txt",
-                    "01 - Man Cave (Product Page)",
+                    "lifestyle::07-home-sports-bar-prompt.txt",
+                    "07 - Premium Home Sports Bar (Social)",
                     image_factory.ASSET_CATEGORY_SOCIAL,
                     social_webp,
                     social_jpg,
@@ -226,9 +225,9 @@ class MockupReelsTests(unittest.TestCase):
             self.assertEqual(len(names), len(manifest))
             self.assertIn("WEBP/core-black-framed.webp", names)
             self.assertIn("jpg/core-black-framed.jpg", names)
-            self.assertIn("WEBP/test-product-black-framed-afl-man-cave-lifestyle.webp", names)
+            self.assertNotIn("WEBP/test-product-black-framed-afl-man-cave-lifestyle.webp", names)
             self.assertIn("jpg/test-product-black-framed-afl-man-cave-lifestyle.jpg", names)
-            self.assertEqual(len(names), 4)
+            self.assertEqual(len(names), 3)
 
     def test_multiple_prompt_card_social_uploads_are_all_included(self):
         prompt_stems = {
@@ -271,9 +270,9 @@ class MockupReelsTests(unittest.TestCase):
                 names = set(archive.namelist())
 
             self.assertEqual(names, {entry["archive_name"] for entry in manifest})
-            self.assertEqual(len(names), 14)
+            self.assertEqual(len(names), 7)
             for stem in prompt_stems.values():
-                self.assertIn(f"WEBP/{stem}.webp", names)
+                self.assertNotIn(f"WEBP/{stem}.webp", names)
                 self.assertIn(f"jpg/{stem}.jpg", names)
 
     def test_prompt_card_uploads_persist_when_later_cards_are_added(self):
@@ -315,9 +314,7 @@ class MockupReelsTests(unittest.TestCase):
             self.assertEqual(
                 names,
                 {
-                    "WEBP/card-01.webp",
                     "jpg/card-01.jpg",
-                    "WEBP/card-02.webp",
                     "jpg/card-02.jpg",
                 },
             )
@@ -343,7 +340,7 @@ class MockupReelsTests(unittest.TestCase):
                         image_factory.ASSET_CATEGORY_SOCIAL,
                         image_factory.ASSET_CATEGORY_PRODUCT,
                     },
-                    {"WEBP/core.webp", "jpg/core.jpg", "WEBP/social.webp", "jpg/social.jpg", "WEBP/product.webp", "jpg/product.jpg"},
+                    {"WEBP/core.webp", "jpg/core.jpg", "jpg/social.jpg", "WEBP/product.webp", "jpg/product.jpg"},
                 ),
                 (
                     "no-social",
@@ -353,17 +350,17 @@ class MockupReelsTests(unittest.TestCase):
                 (
                     "no-core",
                     {image_factory.ASSET_CATEGORY_SOCIAL, image_factory.ASSET_CATEGORY_PRODUCT},
-                    {"WEBP/social.webp", "jpg/social.jpg", "WEBP/product.webp", "jpg/product.jpg"},
+                    {"jpg/social.jpg", "WEBP/product.webp", "jpg/product.jpg"},
                 ),
                 (
                     "no-product",
                     {image_factory.ASSET_CATEGORY_CORE, image_factory.ASSET_CATEGORY_SOCIAL},
-                    {"WEBP/core.webp", "jpg/core.jpg", "WEBP/social.webp", "jpg/social.jpg"},
+                    {"WEBP/core.webp", "jpg/core.jpg", "jpg/social.jpg"},
                 ),
                 (
                     "only-social",
                     {image_factory.ASSET_CATEGORY_SOCIAL},
-                    {"WEBP/social.webp", "jpg/social.jpg"},
+                    {"jpg/social.jpg"},
                 ),
             ]
 
@@ -412,15 +409,15 @@ class MockupReelsTests(unittest.TestCase):
             )
 
             self.assertNotEqual(manifest_hash(first_manifest), manifest_hash(second_manifest))
-            self.assertEqual(len(first_manifest), 2)
-            self.assertEqual(len(second_manifest), 4)
+            self.assertEqual(len(first_manifest), 1)
+            self.assertEqual(len(second_manifest), 2)
 
     def test_complete_zip_uses_unique_archive_names_and_selected_count_matches_members(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_dir = Path(tmpdir) / "zip"
             zip_dir.mkdir()
-            first = Path(tmpdir) / "first" / "duplicate.webp"
-            second = Path(tmpdir) / "second" / "duplicate.webp"
+            first = Path(tmpdir) / "first" / "duplicate.jpg"
+            second = Path(tmpdir) / "second" / "duplicate.jpg"
             first.parent.mkdir()
             second.parent.mkdir()
             first.write_bytes(b"first")
@@ -435,14 +432,14 @@ class MockupReelsTests(unittest.TestCase):
                         "label": "Social One",
                         "include_in_zip": True,
                         "zip_group": image_factory.ASSET_CATEGORY_SOCIAL,
-                        "webp_path": str(first),
+                        "jpg_path": str(first),
                     },
                     {
                         "key": "social-two",
                         "label": "Social Two",
                         "include_in_zip": True,
                         "zip_group": image_factory.ASSET_CATEGORY_SOCIAL,
-                        "webp_path": str(second),
+                        "jpg_path": str(second),
                     },
                 ],
                 zip_groups={image_factory.ASSET_CATEGORY_SOCIAL},
@@ -458,14 +455,14 @@ class MockupReelsTests(unittest.TestCase):
                         "label": "Social One",
                         "include_in_zip": True,
                         "zip_group": image_factory.ASSET_CATEGORY_SOCIAL,
-                        "webp_path": str(first),
+                        "jpg_path": str(first),
                     },
                     {
                         "key": "social-two",
                         "label": "Social Two",
                         "include_in_zip": True,
                         "zip_group": image_factory.ASSET_CATEGORY_SOCIAL,
-                        "webp_path": str(second),
+                        "jpg_path": str(second),
                     },
                 ],
                 {image_factory.ASSET_CATEGORY_SOCIAL},
@@ -473,12 +470,12 @@ class MockupReelsTests(unittest.TestCase):
             self.assertEqual(len(names), 2)
             self.assertEqual(len(set(names)), 2)
             self.assertEqual(set(names), {entry["archive_name"] for entry in manifest})
-            self.assertTrue(all(name.startswith("WEBP/") for name in names))
+            self.assertTrue(all(name.startswith("jpg/") for name in names))
 
-    def test_prompt_card_uploads_are_classed_as_social_mockups(self):
+    def test_prompt_card_uploads_are_classed_by_export_group(self):
         self.assertEqual(
             image_factory.get_prompt_group("01-man-cave-prompt.txt"),
-            image_factory.ASSET_CATEGORY_SOCIAL,
+            image_factory.ASSET_CATEGORY_PRODUCT,
         )
         self.assertEqual(
             image_factory.get_prompt_group("17-architectural-loft-prompt.txt"),
@@ -498,7 +495,7 @@ class MockupReelsTests(unittest.TestCase):
         )
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         self.assertIn("def ensure_lifestyle_assets_registered", source)
-        self.assertIn("zip_group=ASSET_CATEGORY_SOCIAL", source)
+        self.assertIn("ASSET_CATEGORY_PRODUCT if is_product_page_asset else ASSET_CATEGORY_SOCIAL", source)
 
     def test_prompt_override_lookup_for_legacy_reel_key_still_works(self):
         class FakeSupabaseBackend:

@@ -3567,6 +3567,7 @@ def ensure_result_assets(result):
 def build_lifestyle_asset_from_prompt_filename(prompt_filename, saved_paths):
     prompt_filename = Path(prompt_filename).name
     is_product_page_asset = image_factory.is_product_page_prompt_filename(prompt_filename)
+    zip_group = ASSET_CATEGORY_PRODUCT if is_product_page_asset else ASSET_CATEGORY_SOCIAL
     return image_factory.build_asset_record(
         key=get_lifestyle_asset_key(prompt_filename),
         label=PROMPT_LABELS.get(prompt_filename, prompt_filename),
@@ -3576,7 +3577,7 @@ def build_lifestyle_asset_from_prompt_filename(prompt_filename, saved_paths):
         jpg_path=saved_paths.get("jpg_path"),
         include_in_zip=True,
         asset_group="lifestyle",
-        zip_group=ASSET_CATEGORY_SOCIAL,
+        zip_group=zip_group,
         prompt_filename=prompt_filename,
         export_to_shopify=is_product_page_asset,
         export_to_socials=True,
@@ -3700,7 +3701,7 @@ def is_reels_prompt(prompt_path):
 
 
 def get_lifestyle_prompt_group(prompt_filename):
-    return ASSET_CATEGORY_SOCIAL
+    return ASSET_CATEGORY_PRODUCT if is_product_page_prompt(prompt_filename) else ASSET_CATEGORY_SOCIAL
 
 
 def prompt_key_from_prompt_filename(prompt_filename):
@@ -5100,13 +5101,17 @@ def render_prompt_cards(result, prompt_paths, heading, caption=None):
                     asset
                     for asset in ensure_lifestyle_assets_registered(result)["assets"]
                     if asset.get("key") == get_lifestyle_asset_key(prompt_name)
-                    and asset.get("zip_group") == ASSET_CATEGORY_SOCIAL
                     and asset_has_downloadable_file(asset)
                 ),
                 None,
             )
             if saved_lifestyle_paths and saved_asset:
-                st.caption("Saved — included when Social Mockups is selected.")
+                group_label = (
+                    "Product Images"
+                    if saved_asset.get("zip_group") == ASSET_CATEGORY_PRODUCT
+                    else "Social Mockups"
+                )
+                st.caption(f"Saved - included when {group_label} is selected.")
 
 
 def render_optional_package_controls(result):

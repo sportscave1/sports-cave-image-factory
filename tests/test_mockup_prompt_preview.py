@@ -696,7 +696,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
                 and asset.get("zip_group") == image_factory.ASSET_CATEGORY_SOCIAL
             ]
             self.assertEqual(len(social_assets), 1)
-            self.assertTrue(Path(social_assets[0]["webp_path"]).exists())
+            self.assertIsNone(social_assets[0]["webp_path"])
             self.assertTrue(Path(social_assets[0]["jpg_path"]).exists())
 
             core_checkbox = next(
@@ -713,7 +713,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
                 for caption in captions
                 if "files selected for ZIP" in caption
             ]
-            self.assertIn("2 files selected for ZIP", selected_count_captions)
+            self.assertIn("1 files selected for ZIP", selected_count_captions)
 
             zip_paths = sorted((run_dir / "zip").glob("apptest-product-selected-*.zip"), key=lambda path: path.stat().st_mtime)
             self.assertTrue(zip_paths)
@@ -723,12 +723,11 @@ class MockupPromptPreviewTests(unittest.TestCase):
             self.assertEqual(
                 names,
                 {
-                    "WEBP/apptest-product-black-framed-afl-premium-tool-shed-workshop-lifestyle.webp",
                     "jpg/apptest-product-black-framed-afl-premium-tool-shed-workshop-lifestyle.jpg",
                 },
             )
             self.assertNotIn("WEBP/apptest-product-black-framed-afl-wall-art.webp", names)
-            self.assertEqual(len(names), 2)
+            self.assertEqual(len(names), 1)
 
     def test_post_generation_prompt_cards_render_copy_prompt_upload_and_zip_controls(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -743,7 +742,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
         self.assertIn("Upload image from ChatGPT", prompt_cards)
         self.assertNotIn("Add To ZIP", prompt_cards)
         self.assertIn("auto_register_lifestyle_upload", prompt_cards)
-        self.assertIn("Saved — included when Social Mockups is selected.", prompt_cards)
+        self.assertIn("Saved - included when {group_label} is selected.", prompt_cards)
         self.assertIn('st.markdown(f"**{prompt_title}**")', prompt_cards)
         self.assertIn("current_lifestyle_prompt_text", prompt_cards)
         self.assertIn("render_mockup_prompt_bar", mockup_actions)
