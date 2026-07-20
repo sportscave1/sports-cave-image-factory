@@ -324,7 +324,7 @@ PROMPT_LABELS = {
     "11-wall-upgrade-moment-prompt.txt": "11 - The Wall Upgrade Moment (Social)",
     "12-fireplace-feature-wall-prompt.txt": "12 - Luxury Fireplace Feature Wall (Social)",
     "13-premium-bedroom-prompt.txt": "13 - Premium Bedroom / Private Retreat (Social)",
-    "14-premium-garage-prompt.txt": "14 - Premium Garage (Social)",
+    "14-man-cave-pool-table-prompt.txt": "14 - Premium Man Cave With Pool Table (Social)",
     "15-premium-tool-shed-workshop-prompt.txt": "15 - Premium Tool Shed / Workshop (Social)",
     "16-man-cave-with-pool-table-prompt.txt": "16 - Man Cave With Pool Table (Social)",
     "17-architectural-loft-prompt.txt": "17 - Architectural Loft / Statement Wall (Social)",
@@ -1255,11 +1255,11 @@ def inject_styles():
         header[data-testid="stHeader"],
         header[data-testid="stHeader"] > div,
         [data-testid="stToolbar"] {
-            background: var(--sc-bg) !important;
+            background: #000000 !important;
         }
 
         header[data-testid="stHeader"] {
-            border-bottom: 1px solid var(--sc-border);
+            border-bottom: 1px solid #000000;
         }
 
         div[data-testid="stStatusWidget"] {
@@ -1293,8 +1293,14 @@ def inject_styles():
         header[data-testid="stHeader"] svg,
         [data-testid="stToolbar"] button,
         [data-testid="stToolbar"] svg {
-            color: var(--sc-text) !important;
-            fill: var(--sc-text) !important;
+            color: #FFFFFF !important;
+            fill: #FFFFFF !important;
+            stroke: #FFFFFF !important;
+        }
+
+        header[data-testid="stHeader"] *,
+        [data-testid="stToolbar"] * {
+            color: #FFFFFF !important;
         }
 
         [data-testid="stSidebar"] {

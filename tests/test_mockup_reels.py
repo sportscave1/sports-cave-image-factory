@@ -71,7 +71,7 @@ class MockupReelsTests(unittest.TestCase):
             "20-collector-display-room-reel-prompt.txt": "20-collector-display-room-reel",
         }
 
-        self.assertEqual(len(image_factory.LIFESTYLE_PROMPT_SPECS), 15)
+        self.assertEqual(len(image_factory.LIFESTYLE_PROMPT_SPECS), 17)
         for filename, safe_name in legacy_expected.items():
             self.assertNotIn(filename, specs_by_filename)
             self.assertIn(filename, legacy_specs_by_filename)
@@ -93,7 +93,7 @@ class MockupReelsTests(unittest.TestCase):
             )
 
             prompt_names = {path.name for path in prompt_paths}
-            self.assertEqual(len(prompt_paths), 15)
+            self.assertEqual(len(prompt_paths), 17)
             self.assertNotIn("16-man-cave-reel-prompt.txt", prompt_names)
             self.assertNotIn("20-collector-display-room-reel-prompt.txt", prompt_names)
 
@@ -235,7 +235,10 @@ class MockupReelsTests(unittest.TestCase):
             "01": "test-product-black-framed-afl-man-cave-lifestyle",
             "02": "test-product-black-framed-afl-office-lifestyle",
             "07": "test-product-black-framed-afl-home-sports-bar",
-            "15": "test-product-black-framed-afl-architectural-loft",
+            "14": "test-product-black-framed-afl-man-cave-pool-table",
+            "15": "test-product-black-framed-afl-premium-tool-shed-workshop",
+            "16": "test-product-black-framed-afl-man-cave-with-pool-table",
+            "17": "test-product-black-framed-afl-architectural-loft",
         }
         with tempfile.TemporaryDirectory() as tmpdir:
             zip_dir = Path(tmpdir) / "zip"
@@ -268,7 +271,7 @@ class MockupReelsTests(unittest.TestCase):
                 names = set(archive.namelist())
 
             self.assertEqual(names, {entry["archive_name"] for entry in manifest})
-            self.assertEqual(len(names), 8)
+            self.assertEqual(len(names), 14)
             for stem in prompt_stems.values():
                 self.assertIn(f"WEBP/{stem}.webp", names)
                 self.assertIn(f"jpg/{stem}.jpg", names)
@@ -478,7 +481,19 @@ class MockupReelsTests(unittest.TestCase):
             image_factory.ASSET_CATEGORY_SOCIAL,
         )
         self.assertEqual(
-            image_factory.get_prompt_group("15-architectural-loft-prompt.txt"),
+            image_factory.get_prompt_group("17-architectural-loft-prompt.txt"),
+            image_factory.ASSET_CATEGORY_SOCIAL,
+        )
+        self.assertEqual(
+            image_factory.get_prompt_group("14-man-cave-pool-table-prompt.txt"),
+            image_factory.ASSET_CATEGORY_SOCIAL,
+        )
+        self.assertEqual(
+            image_factory.get_prompt_group("15-premium-tool-shed-workshop-prompt.txt"),
+            image_factory.ASSET_CATEGORY_SOCIAL,
+        )
+        self.assertEqual(
+            image_factory.get_prompt_group("16-man-cave-with-pool-table-prompt.txt"),
             image_factory.ASSET_CATEGORY_SOCIAL,
         )
         source = (ROOT / "app.py").read_text(encoding="utf-8")

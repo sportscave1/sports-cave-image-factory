@@ -240,8 +240,10 @@ LIFESTYLE_IMAGE_VARIANTS = {
     "11-wall-upgrade-moment-prompt.txt": "wall-upgrade-moment-lifestyle",
     "12-fireplace-feature-wall-prompt.txt": "fireplace-feature-wall-lifestyle",
     "13-premium-bedroom-prompt.txt": "premium-bedroom-lifestyle",
-    "14-home-gym-prompt.txt": "home-gym-lifestyle",
-    "15-architectural-loft-prompt.txt": "architectural-loft-statement-wall-lifestyle",
+    "14-man-cave-pool-table-prompt.txt": "man-cave-pool-table-lifestyle",
+    "15-premium-tool-shed-workshop-prompt.txt": "premium-tool-shed-workshop-lifestyle",
+    "16-man-cave-with-pool-table-prompt.txt": "man-cave-with-pool-table-lifestyle",
+    "17-architectural-loft-prompt.txt": "architectural-loft-statement-wall-lifestyle",
     "16-man-cave-reel-prompt.txt": "16-man-cave-reel",
     "17-living-room-reel-prompt.txt": "17-living-room-reel",
     "18-office-reel-prompt.txt": "18-office-reel",
@@ -1021,13 +1023,13 @@ LIFESTYLE_PROMPT_SPECS.extend([
         ).strip(),
     ),
     (
-        "14-home-gym-prompt.txt",
-        "Home Gym / Motivation Wall",
+        "14-man-cave-pool-table-prompt.txt",
+        "Premium Man Cave With Pool Table",
         dedent(
             """
             Create a 1024 x 1024 ultra-realistic Meta ad mockup using the uploaded image as the exact reference for the framed Sports Cave artwork.
 
-            This image is for a high-attention Meta ad. It should connect the artwork with motivation, discipline, greatness, and daily identity.
+            This image is for a high-attention Meta ad. It should connect the artwork with sports passion, nostalgia, pride, achievement, and premium collector identity.
 
             The artwork and frame must remain exactly the same as the uploaded image.
 
@@ -1036,40 +1038,296 @@ LIFESTYLE_PROMPT_SPECS.extend([
             Do not change the layout.
             Do not change the text.
             Do not change the badge.
-            Do not crop, blur, stretch, warp, bend, squash, or distort the frame or artwork.
+            Do not crop the artwork.
+            Do not blur the artwork.
+            Do not stretch, warp, bend, squash, or distort the artwork or frame.
+            Do not recreate, repaint, reinterpret, or replace any part of the artwork.
+            The artwork inside the frame must remain sharp, readable, correctly proportioned, and visually identical to the uploaded reference.
 
-            Place the exact framed artwork on the wall of a premium private home gym or training space.
+            Place the exact framed artwork realistically inside a premium man cave with a pool table.
 
-            The room should feel high-end, clean, masculine, and aspirational.
+            The room must feel masculine, sophisticated, collector-driven, realistic, and commercially aspirational. It should look like a premium private sports retreat inside a real home, not a public bar, commercial venue, showroom, gaming arcade, or generic AI-generated room.
 
-            Use subtle gym details only:
+            Include one realistic premium pool table as an important part of the setting. The pool table should be clearly visible and help establish the man cave environment, but it must remain secondary to the framed Sports Cave artwork. It must not block, overlap, or visually overpower the frame.
 
-            matte black dumbbells
-            clean rubber flooring
-            timber or concrete wall texture
-            soft mirror reflection
-            premium bench or training equipment edge
-            controlled lighting
+            Use a restrained premium interior palette such as:
+            - charcoal
+            - matte black
+            - dark timber
+            - warm walnut
+            - deep brown
+            - soft concrete
+            - muted beige
+            - dark green pool-table felt
 
-            The gym should not look commercial, cheap, sweaty, or cluttered. It should feel like a private luxury training room.
+            The framed artwork should be mounted naturally on the main feature wall above or near the pool table. It must remain the visual hero of the image and should occupy approximately 45-60% of the composition.
 
-            Do not add people.
-            Do not add brand logos.
-            Do not add motivational text overlays.
-            Do not add extra posters.
-            Do not add watermarks.
+            Use a fresh, believable camera angle that shows both the framed artwork and enough of the pool table to immediately communicate "premium man cave." A slight three-quarter room angle is preferred over a flat straight-on view.
 
-            The framed artwork must be the hero. It should feel like the piece that sets the tone for the room.
+            Add subtle man cave details only where they improve realism, such as:
+            - premium pool cues in a restrained wall rack
+            - a small cue ball or neatly arranged billiard balls
+            - dark timber cabinetry
+            - leather seating
+            - understated shelving
+            - warm pendant lighting above the pool table
+            - subtle architectural wall texture
 
-            Add realistic glass reflections, premium glare, frame depth, and believable wall shadows.
+            Keep all supporting decor minimal and secondary.
 
-            Final result:
-            A scroll-stopping home gym ad creative that links the artwork with motivation, winning, discipline, and greatness.
+            Do not include:
+            - people
+            - visible faces
+            - hands
+            - televisions showing content
+            - neon signs
+            - fake sports logos
+            - team branding
+            - extra framed sports artwork
+            - duplicate versions of the uploaded artwork
+            - oversized trophies
+            - clutter
+            - cheap pub decor
+            - casino styling
+            - bright arcade lighting
+            - exaggerated luxury
+            - text added to the room
+            - watermarks
+
+            The frame must look physically real:
+            - premium black timber construction
+            - realistic depth
+            - sharp corners
+            - subtle material texture
+            - believable mounting
+            - accurate landscape proportions
+            - natural wall contact shadows
+
+            Add realistic glass over the artwork. The glass should have soft, controlled room reflections and subtle premium glare. Reflections must enhance realism without hiding the artwork, plaque, title, faces, or important details.
+
+            Use premium cinematic lighting:
+            - warm practical pendant light around the pool table
+            - soft controlled highlights on the frame
+            - natural falloff across the wall
+            - realistic shadows behind and below the frame
+            - restrained contrast
+            - no excessive orange colour cast
+            - no artificial glow around the artwork
+
+            The finished image must feel:
+            - ultra-realistic
+            - masculine
+            - premium
+            - cinematic
+            - collector-focused
+            - aspirational
+            - believable
+            - suitable for a high-performing Meta advertisement
+
+            The final reaction should be:
+            "I need that artwork in my man cave."
             """
         ).strip(),
     ),
     (
-        "15-architectural-loft-prompt.txt",
+        "15-premium-tool-shed-workshop-prompt.txt",
+        "Premium Tool Shed / Workshop",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic Meta ad carousel mockup using the uploaded image as the exact reference for the framed artwork.
+
+            This image is for a paid Meta ad carousel, not a standard product page image. It must instantly create desire, ownership, and premium collector value.
+
+            The artwork and frame must remain exactly the same as the uploaded image.
+
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text inside the artwork.
+            Do not change the badge.
+            Do not crop the artwork.
+            Do not blur the artwork.
+            Do not stretch, warp, bend, squash, or distort the frame or artwork.
+
+            Place the exact uploaded Sports Cave landscape frame realistically inside a premium private tool shed or refined home workshop.
+
+            The workshop must feel like a genuine personal retreat owned by a practical and successful 30-50-year-old sports fan.
+
+            The space should feel premium, masculine, warm, organised, functional, realistic, and quietly aspirational - not dirty, cluttered, unsafe, cheap, or gimmicky.
+
+            Use a refined home workshop environment:
+
+            warm timber wall panels
+            high-quality hardwood or plywood work surfaces
+            charcoal or muted neutral walls
+            matte black, dark green, or timber cabinetry
+            restrained pegboard or organised tool storage
+            brushed-metal details
+            sealed concrete or premium timber flooring
+            warm overhead task lighting
+            soft natural window light where appropriate
+
+            Use only a small number of realistic workshop tools.
+
+            Any tools must be clean, organised, physically believable, and secondary to the framed artwork.
+
+            Do not use neon signs.
+            Do not use random sports logos.
+            Do not use team branding.
+            Do not add piles of tools.
+            Do not add dirty floors.
+            Do not add broken equipment.
+            Do not add dangerous clutter.
+            Do not add excessive saws or blades.
+            Do not add trophies.
+            Do not add sports balls.
+            Do not add jerseys.
+            Do not add helmets.
+            Do not add toy vehicles.
+            Do not add novelty signs.
+            Do not add extra wall art.
+            Do not add people.
+            Do not add text overlays.
+            Do not add watermarks.
+
+            The framed artwork must be the hero of the image.
+
+            It should be mounted above a refined workbench, premium cabinetry, or a clean timber feature wall as the main statement piece.
+
+            Show believable scale, as if the customer can imagine it inside their own workshop or tool shed.
+
+            The frame must look physically real:
+
+            premium black timber frame, realistic depth, sharp corners, subtle texture, and believable wall mounting.
+
+            Add realistic glass over the frame.
+
+            The glass must show soft premium reflections and subtle natural glare from the workshop lighting.
+
+            The glare must feel believable and must not hide or ruin the artwork.
+
+            Lighting:
+
+            warm premium workshop lighting.
+            Controlled task lighting.
+            Soft natural highlights.
+            Believable shadows behind and below the frame.
+            Subtle reflections on the glass and work surfaces.
+            Premium contrast without making the room look dark or dirty.
+
+            Composition:
+
+            square 1024 x 1024 canvas.
+            The framed artwork should take up strong visual space, roughly 45-60% of the image.
+            Use a slight natural angle to make the scene feel real, but preserve the correct landscape proportions.
+
+            The image must stop the scroll and make the viewer think: "That belongs in my workshop."
+
+            Final result:
+
+            a photorealistic premium tool shed or home workshop ad mockup with the exact uploaded Sports Cave framed artwork, realistic glass, natural material texture, premium lighting, and strong collector appeal.
+            """
+        ).strip(),
+    ),
+    (
+        "16-man-cave-with-pool-table-prompt.txt",
+        "Man Cave With Pool Table",
+        dedent(
+            """
+            Create a 1024 x 1024 ultra-realistic Meta ad carousel mockup using the uploaded image as the exact reference for the framed artwork.
+
+            This image is for a paid Meta ad carousel, not a standard product page image. It must instantly create desire, ownership, and premium collector value.
+
+            The artwork and frame must remain exactly the same as the uploaded image.
+
+            Do not redesign the artwork.
+            Do not change the colours.
+            Do not change the layout.
+            Do not change the text inside the artwork.
+            Do not change the badge.
+            Do not crop the artwork.
+            Do not blur the artwork.
+            Do not stretch, warp, bend, squash, or distort the frame or artwork.
+
+            Place the exact uploaded Sports Cave landscape frame realistically inside a premium private man cave featuring a high-quality pool table.
+
+            The room must feel like the kind of real space a serious sports fan would use for finals, rivalries, race days, title fights, and relaxed nights with friends.
+
+            The space should feel premium, masculine, cinematic, relaxed, social, and collector-driven - not cheap, cluttered, childish, pub-like, or gimmicky.
+
+            Use a refined man cave environment:
+
+            charcoal or deep neutral walls
+            premium timber panelling
+            restrained stone or textured plaster finishes
+            a high-quality pool table with physically believable proportions
+            subtle pendant lighting above the pool table
+            tailored leather or woven seating
+            warm architectural lighting
+            clean cabinetry or a restrained bar detail where appropriate
+            minimal and neatly organised pool cues
+
+            The pool table must support the composition and must not block or compete with the framed artwork.
+
+            Do not use neon beer signs.
+            Do not use alcohol branding.
+            Do not use random sports logos.
+            Do not use team branding.
+            Do not add extra framed posters.
+            Do not add sports balls.
+            Do not add helmets.
+            Do not add jerseys.
+            Do not add trophies.
+            Do not add figurines.
+            Do not add toy cars.
+            Do not add novelty decorations.
+            Do not add excessive billiards accessories.
+            Do not add people.
+            Do not add text overlays.
+            Do not add watermarks.
+
+            The framed artwork must be the hero of the image.
+
+            It should be mounted on the main feature wall behind or beside the pool table as the primary statement piece.
+
+            Show believable scale, as if the customer can imagine it inside their own premium man cave.
+
+            The frame must look physically real:
+
+            premium black timber frame, realistic depth, sharp corners, subtle texture, and believable wall mounting.
+
+            Add realistic glass over the frame.
+
+            The glass must show soft premium reflections and subtle natural glare from the room and pool-table lighting.
+
+            The glare must feel believable and must not hide or ruin the artwork.
+
+            Lighting:
+
+            cinematic evening lighting.
+            Warm pendant lighting.
+            Controlled architectural highlights.
+            Soft shadows behind and below the frame.
+            Subtle reflections on the glass and polished room surfaces.
+            Premium contrast without making the artwork too dark.
+
+            Composition:
+
+            square 1024 x 1024 canvas.
+            The framed artwork should take up strong visual space, roughly 45-60% of the image.
+            Use a slight natural angle to make the scene feel real, but preserve the correct landscape proportions.
+            Keep the pool table physically accurate and naturally placed within the room.
+
+            The image must stop the scroll and make the viewer think: "That belongs in my man cave."
+
+            Final result:
+
+            a photorealistic premium man cave ad mockup with the exact uploaded Sports Cave framed artwork, a realistic high-quality pool table, premium shadows, cinematic lighting, and strong collector appeal.
+            """
+        ).strip(),
+    ),
+    (
+        "17-architectural-loft-prompt.txt",
         "Architectural Loft / Statement Wall",
         dedent(
             """
@@ -1945,8 +2203,10 @@ ROOM_STYLE_GUIDANCE_PROMPT_FILENAMES = {
     "11-wall-upgrade-moment-prompt.txt",
     "12-fireplace-feature-wall-prompt.txt",
     "13-premium-bedroom-prompt.txt",
-    "14-home-gym-prompt.txt",
-    "15-architectural-loft-prompt.txt",
+    "14-man-cave-pool-table-prompt.txt",
+    "15-premium-tool-shed-workshop-prompt.txt",
+    "16-man-cave-with-pool-table-prompt.txt",
+    "17-architectural-loft-prompt.txt",
 }
 
 
