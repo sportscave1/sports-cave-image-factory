@@ -11,11 +11,8 @@ SPORTING_CALENDAR_PATH = DATA_DIR / "sporting_calendar.json"
 TASK_GROUPS = (
     "Collections to update",
     "New designs to complete",
-    "Mockups for existing product",
-    "Product uploaded",
-    "Design updated",
-    "New design made",
-    "New product with mockups uploaded",
+    "New product uploaded — set to Draft",
+    "Existing product updated — variants working",
 )
 REGIONS = ("Australia", "USA", "UK", "Canada", "New Zealand")
 ACTIVITY_LOG_LIMIT = 200

@@ -210,10 +210,14 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual([entry["message"] for entry in month], ["Today", "Seven day edge", "This month"])
         self.assertEqual([entry["message"] for entry in all_time], ["Today", "Seven day edge", "This month", "Older"])
 
-    def test_new_task_categories_are_available(self):
-        expected = {
+    def test_manual_task_categories_are_daily_dashboard_only(self):
+        expected = (
             "Collections to update",
             "New designs to complete",
+            "New product uploaded — set to Draft",
+            "Existing product updated — variants working",
+        )
+        removed = {
             "Mockups for existing product",
             "Product uploaded",
             "Design updated",
@@ -221,10 +225,15 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             "New product with mockups uploaded",
         }
 
-        self.assertTrue(expected.issubset(set(sports_cave_dashboard.TASK_GROUPS)))
+        self.assertEqual(sports_cave_dashboard.TASK_GROUPS, expected)
+        self.assertTrue(removed.isdisjoint(set(sports_cave_dashboard.TASK_GROUPS)))
         self.assertEqual(
-            sports_cave_dashboard.normalize_task_category("New product with mockups uploaded"),
-            "New product with mockups uploaded",
+            sports_cave_dashboard.normalize_task_category("New product uploaded — set to Draft"),
+            "New product uploaded — set to Draft",
+        )
+        self.assertEqual(
+            sports_cave_dashboard.normalize_task_category("Mockups for existing product"),
+            "Collections to update",
         )
 
     def test_design_ideas_prompt_uses_calendar_and_existing_products(self):
