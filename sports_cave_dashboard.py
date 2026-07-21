@@ -186,11 +186,14 @@ def add_task(text, category, *, metadata=None):
         raise ValueError("Task text is required.")
     try:
         backend = get_supabase_backend()
+        from activity_log import get_activity_actor
+
         task = _normalise_task(
             backend.create_dashboard_task(
                 task_text,
                 normalize_task_category(category),
                 metadata=metadata or {},
+                actor=get_activity_actor(),
             )
         )
         clear_task_cache()
@@ -203,7 +206,14 @@ def add_task(text, category, *, metadata=None):
 def complete_task(task_id, *, metadata=None):
     try:
         backend = get_supabase_backend()
-        completed = backend.complete_dashboard_task(task_id, metadata=metadata or {})
+        from activity_log import get_activity_actor
+
+        completed = backend.complete_dashboard_task(
+            task_id,
+            metadata=metadata or {},
+            completed_by=get_activity_actor(),
+            actor=get_activity_actor(),
+        )
         clear_task_cache()
         clear_activity_cache()
         return _normalise_task(completed) if completed else None
@@ -284,6 +294,38 @@ _TECHNICAL_ACTIVITY_TERMS = (
     "payload",
     "mirror",
     "backend",
+)
+
+_HOME_SYSTEM_ACTIVITY_EVENT_TYPES = {
+    "edition_order_auto_allocation",
+    "edition_order_purchase_snapshot_allocation",
+    "shopify_order_details_backfill",
+    "shopify_product_metafield_mirror",
+}
+
+_HOME_SYSTEM_ACTIVITY_SOURCES = {
+    "shopify_backfill",
+    "supabase_ledger",
+    "webhook",
+}
+
+_HOME_SYSTEM_ACTIVITY_ACTORS = {
+    "sports_cave_os_sync",
+}
+
+_HOME_SYSTEM_ACTIVITY_PHRASES = (
+    "auto allocation",
+    "automatic fulfilment",
+    "automatic fulfillment",
+    "backend fulfilment",
+    "backend fulfillment",
+    "edition order auto allocation",
+    "metafield mirror",
+    "metafield updated",
+    "purchase-time shopify edition snapshot",
+    "shopify product metafield mirror",
+    "shopify product metafield updated",
+    "webhook",
 )
 
 _ACTIVITY_LABELS = {
@@ -412,6 +454,36 @@ def _message_has_technical_terms(message):
     return any(term in lowered for term in _TECHNICAL_ACTIVITY_TERMS)
 
 
+def home_activity_row_is_visible(row):
+    row = dict(row or {})
+    payload = _json_dict(row.get("new_value"))
+    metadata = _json_dict(row.get("activity_metadata") or payload.get("metadata"))
+    action_type = _compact_text(
+        row.get("activity_action_type") or payload.get("action_type") or row.get("event_type")
+    ).casefold()
+    source = _compact_text(row.get("source") or payload.get("source")).casefold()
+    actor = _compact_text(row.get("actor") or payload.get("actor")).casefold()
+    message = _compact_text(row.get("activity_message") or payload.get("message") or row.get("reason"))
+    page = _compact_text(row.get("activity_page") or payload.get("page")).casefold()
+
+    actor_type = _compact_text(metadata.get("actor_type") or payload.get("actor_type")).casefold()
+    if metadata.get("is_system") is True or payload.get("is_system") is True:
+        return False
+    if actor_type in {"system", "webhook", "background", "automatic"}:
+        return False
+    if action_type in _HOME_SYSTEM_ACTIVITY_EVENT_TYPES:
+        return False
+    if "webhook" in action_type or "metafield_mirror" in action_type:
+        return False
+    if "auto_allocation" in action_type and "manual" not in action_type:
+        return False
+    if source in _HOME_SYSTEM_ACTIVITY_SOURCES or actor in _HOME_SYSTEM_ACTIVITY_ACTORS:
+        return False
+
+    combined = " ".join(part for part in (action_type, source, actor, page, message.casefold()) if part)
+    return not any(phrase in combined for phrase in _HOME_SYSTEM_ACTIVITY_PHRASES)
+
+
 def clean_activity_message(action_type, message, *, metadata=None, entity_type="", entity_id=""):
     metadata = metadata or {}
     action = str(action_type or "").strip().casefold()
@@ -493,6 +565,7 @@ def activity_from_audit_row(row):
         "created_at": row.get("created_at"),
         "entity_type": row.get("entity_type") or "",
         "entity_id": row.get("entity_id") or "",
+        "actor": row.get("actor") or "",
         "metadata": metadata,
     }
 
@@ -624,7 +697,7 @@ def list_activity_entries(view=ACTIVITY_VIEW_TODAY, local_now=None, *, month_sta
     try:
         backend = get_supabase_backend()
         rows = backend.list_activity_logs(start_at=start, end_at=end, limit=safe_limit)
-        entries = [activity_from_audit_row(row) for row in rows]
+        entries = [activity_from_audit_row(row) for row in rows if home_activity_row_is_visible(row)]
         return _cache_set(_ACTIVITY_CACHE, cache_key, entries, ACTIVITY_CACHE_TTL_SECONDS)
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error

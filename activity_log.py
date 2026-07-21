@@ -1,8 +1,28 @@
+import contextvars
 import logging
 
 
 class ActivityLogError(RuntimeError):
     pass
+
+
+_ACTIVITY_ACTOR = contextvars.ContextVar(
+    "sports_cave_activity_actor",
+    default="sports_cave_os",
+)
+
+
+def set_activity_actor(actor):
+    clean_actor = str(actor or "").strip() or "sports_cave_os"
+    _ACTIVITY_ACTOR.set(clean_actor[:200])
+
+
+def clear_activity_actor():
+    _ACTIVITY_ACTOR.set("sports_cave_os")
+
+
+def get_activity_actor():
+    return _ACTIVITY_ACTOR.get()
 
 
 def record_activity_log(
@@ -14,6 +34,7 @@ def record_activity_log(
     entity_id="",
     metadata=None,
     event_key="",
+    actor="",
     raise_errors=False,
 ):
     try:
@@ -27,6 +48,7 @@ def record_activity_log(
             entity_id=entity_id,
             metadata=metadata or {},
             event_key=event_key,
+            actor=str(actor or "").strip() or _ACTIVITY_ACTOR.get(),
         )
         try:
             import sports_cave_dashboard

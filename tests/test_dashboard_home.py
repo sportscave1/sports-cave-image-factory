@@ -38,7 +38,7 @@ class FakeDashboardBackend:
         }
         self.activity_rows.insert(0, row)
 
-    def create_dashboard_task(self, title, section, *, metadata=None):
+    def create_dashboard_task(self, title, section, *, metadata=None, actor="sports_cave_os"):
         task = {
             "id": f"task-{len(self.tasks) + 1}",
             "title": title,
@@ -51,7 +51,14 @@ class FakeDashboardBackend:
         self._activity_row("task_added", f"Task added: {title}")
         return task
 
-    def complete_dashboard_task(self, task_id, *, completed_by="", metadata=None):
+    def complete_dashboard_task(
+        self,
+        task_id,
+        *,
+        completed_by="",
+        metadata=None,
+        actor="sports_cave_os",
+    ):
         for task in self.tasks:
             if task["id"] == task_id and task["status"] == "open":
                 task["status"] = "complete"
@@ -213,6 +220,94 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_LAST_7_DAYS, now)
 
         self.assertEqual(len(backend.activity_calls), 2)
+
+    def test_home_activity_log_excludes_automatic_backend_events(self):
+        backend = FakeDashboardBackend()
+        backend.activity_rows = [
+            {
+                "id": 1,
+                "event_type": "shopify_product_metafield_mirror",
+                "reason": "Edition Ops Shopify metafield mirror",
+                "source": "edition_ops",
+                "actor": "edition_ops",
+                "created_at": "2026-07-21T03:00:00+00:00",
+            },
+            {
+                "id": 2,
+                "event_type": "edition_order_auto_allocation",
+                "reason": "Auto allocation during Shopify order sync.",
+                "source": "supabase_ledger",
+                "actor": "sports_cave_os_sync",
+                "created_at": "2026-07-21T02:00:00+00:00",
+            },
+            {
+                "id": 3,
+                "event_type": "task_added",
+                "reason": "Task added: Create New NASCAR Design",
+                "source": "Dashboard",
+                "actor": "nathan",
+                "created_at": "2026-07-21T01:00:00+00:00",
+                "new_value": {
+                    "message": "Task added: Create New NASCAR Design",
+                    "page": "Dashboard",
+                    "action_type": "task_added",
+                    "metadata": {"title": "Create New NASCAR Design"},
+                },
+            },
+            {
+                "id": 4,
+                "event_type": "mockup_generated",
+                "reason": "Mockup made: Veery Elleegant 2021 Melbourne Cup",
+                "source": "Mockups",
+                "actor": "va",
+                "created_at": "2026-07-21T00:00:00+00:00",
+            },
+        ]
+        now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            entries = sports_cave_dashboard.list_activity_entries(
+                sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME,
+                now,
+            )
+
+        messages = [entry["message"] for entry in entries]
+        self.assertEqual(
+            messages,
+            [
+                "Task added: Create New NASCAR Design",
+                "Mockup made: Veery Elleegant 2021 Melbourne Cup",
+            ],
+        )
+        combined = " ".join(messages).casefold()
+        self.assertNotIn("metafield", combined)
+        self.assertNotIn("auto allocation", combined)
+        self.assertNotIn("webhook", combined)
+
+    def test_home_activity_log_hides_structured_system_rows(self):
+        self.assertFalse(
+            sports_cave_dashboard.home_activity_row_is_visible(
+                {
+                    "event_type": "product_updated",
+                    "reason": "Shopify product metafield updated",
+                    "source": "Edition Ops",
+                    "new_value": {
+                        "message": "Shopify product metafield updated",
+                        "metadata": {"is_system": True, "actor_type": "system"},
+                    },
+                }
+            )
+        )
+        self.assertTrue(
+            sports_cave_dashboard.home_activity_row_is_visible(
+                {
+                    "event_type": "edition_product_updated",
+                    "reason": "Edition updated: The Final Crown",
+                    "source": "Edition Ops",
+                    "actor": "va",
+                }
+            )
+        )
 
     def test_activity_log_filters_today_last_7_days_month_and_all_time(self):
         now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)

@@ -1235,6 +1235,51 @@ def _ensure_schema_uncached():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS os_users (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    username TEXT NOT NULL,
+                    email TEXT,
+                    display_name TEXT NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'worker'
+                        CHECK (role IN ('admin', 'worker')),
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    last_login_at TIMESTAMPTZ
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS os_user_page_permissions (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL REFERENCES os_users(id) ON DELETE CASCADE,
+                    page_key TEXT NOT NULL,
+                    can_access BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (user_id, page_key)
+                )
+                """
+            )
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_os_users_username_unique ON os_users (lower(username))"
+            )
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_os_users_email_unique ON os_users (lower(email)) "
+                "WHERE email IS NOT NULL AND email <> ''"
+            )
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_os_users_single_admin ON os_users (role) "
+                "WHERE role='admin'"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_os_user_permissions_user "
+                "ON os_user_page_permissions (user_id, can_access)"
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS webhook_events (
                     webhook_id TEXT PRIMARY KEY,
                     topic TEXT,
@@ -2722,6 +2767,42 @@ def _dashboard_query_timeout_ms(default=2500):
         return default
 
 
+_HOME_ACTIVITY_SYSTEM_EVENT_TYPES = (
+    "edition_order_auto_allocation",
+    "edition_order_purchase_snapshot_allocation",
+    "shopify_order_details_backfill",
+    "shopify_product_metafield_mirror",
+)
+
+_HOME_ACTIVITY_SYSTEM_SOURCES = (
+    "shopify_backfill",
+    "supabase_ledger",
+    "webhook",
+)
+
+_HOME_ACTIVITY_SYSTEM_ACTORS = (
+    "sports_cave_os_sync",
+)
+
+_HOME_ACTIVITY_SYSTEM_PATTERNS = tuple(
+    f"%{phrase}%"
+    for phrase in (
+        "auto allocation",
+        "automatic fulfilment",
+        "automatic fulfillment",
+        "backend fulfilment",
+        "backend fulfillment",
+        "edition order auto allocation",
+        "metafield mirror",
+        "metafield updated",
+        "purchase-time shopify edition snapshot",
+        "shopify product metafield mirror",
+        "shopify product metafield updated",
+        "webhook",
+    )
+)
+
+
 def list_activity_logs(*, start_at=None, end_at=None, limit=200):
     ensure_dashboard_schema()
     clauses = []
@@ -2732,6 +2813,33 @@ def list_activity_logs(*, start_at=None, end_at=None, limit=200):
     if end_at is not None:
         clauses.append("created_at < %s")
         params.append(end_at)
+    clauses.append(
+        """
+        NOT (
+            event_type = ANY(%s)
+            OR event_type ILIKE 'webhook%%'
+            OR event_type ILIKE '%%metafield_mirror%%'
+            OR (event_type ILIKE '%%auto_allocation%%' AND event_type NOT ILIKE '%%manual%%')
+            OR lower(COALESCE(source, '')) = ANY(%s)
+            OR lower(COALESCE(actor, '')) = ANY(%s)
+            OR COALESCE(reason, '') ILIKE ANY(%s)
+            OR COALESCE(new_value->>'message', '') ILIKE ANY(%s)
+            OR lower(COALESCE(new_value->>'actor_type', '')) IN ('system', 'webhook', 'background', 'automatic')
+            OR lower(COALESCE(new_value->'metadata'->>'actor_type', '')) IN ('system', 'webhook', 'background', 'automatic')
+            OR lower(COALESCE(new_value->>'is_system', '')) IN ('1', 'true', 'yes')
+            OR lower(COALESCE(new_value->'metadata'->>'is_system', '')) IN ('1', 'true', 'yes')
+        )
+        """
+    )
+    params.extend(
+        [
+            list(_HOME_ACTIVITY_SYSTEM_EVENT_TYPES),
+            list(_HOME_ACTIVITY_SYSTEM_SOURCES),
+            list(_HOME_ACTIVITY_SYSTEM_ACTORS),
+            list(_HOME_ACTIVITY_SYSTEM_PATTERNS),
+            list(_HOME_ACTIVITY_SYSTEM_PATTERNS),
+        ]
+    )
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     try:
         safe_limit = min(max(int(limit or 200), 1), 500)
@@ -2743,7 +2851,7 @@ def list_activity_logs(*, start_at=None, end_at=None, limit=200):
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
             cur.execute(
                 f"""
-                SELECT id, event_type, entity_type, entity_id, reason, source, created_at,
+                SELECT id, event_type, entity_type, entity_id, reason, actor, source, created_at,
                        COALESCE(new_value->>'message', '') AS activity_message,
                        COALESCE(new_value->>'page', '') AS activity_page,
                        COALESCE(new_value->>'action_type', '') AS activity_action_type,
@@ -2861,7 +2969,7 @@ def list_dashboard_edition_products(*, limit=1000):
             return rows
 
 
-def create_dashboard_task(title, section, *, metadata=None):
+def create_dashboard_task(title, section, *, metadata=None, actor="sports_cave_os"):
     clean_title = str(title or "").strip()
     clean_section = str(section or "").strip()
     if not clean_title:
@@ -2895,13 +3003,20 @@ def create_dashboard_task(title, section, *, metadata=None):
                     "metadata": metadata or {},
                 },
                 reason=f"Task added: {clean_title}",
+                actor=str(actor or "").strip() or "sports_cave_os",
                 source="Dashboard",
             )
         conn.commit()
     return task
 
 
-def complete_dashboard_task(task_id, *, completed_by="", metadata=None):
+def complete_dashboard_task(
+    task_id,
+    *,
+    completed_by="",
+    metadata=None,
+    actor="sports_cave_os",
+):
     clean_task_id = str(task_id or "").strip()
     if not clean_task_id:
         return None
@@ -2944,6 +3059,7 @@ def complete_dashboard_task(task_id, *, completed_by="", metadata=None):
                     "metadata": metadata or {},
                 },
                 reason=f"Task completed: {task_title}",
+                actor=str(actor or "").strip() or "sports_cave_os",
                 source="Dashboard",
             )
         conn.commit()

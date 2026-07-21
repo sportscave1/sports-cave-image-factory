@@ -36,7 +36,8 @@ safe_startup_print("STARTUP APP START total=0.000s stage=0.000s")
 from dotenv import load_dotenv
 import streamlit as st
 
-from activity_log import record_activity_log
+from activity_log import clear_activity_actor, record_activity_log, set_activity_actor
+import os_accounts
 import prompt_store
 import sc_auth
 import sports_cave_dashboard
@@ -222,31 +223,14 @@ ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
     "https://drive.google.com/drive/folders/1FfXmTVuVGkD7PFhRjAtvPDZOn7Gpk3q_",
 ).strip()
 # File Hub hidden until PSD/Drive asset workflow is active.
-MENU_OPTIONS = [
-    "Dashboard",
-    "Orders",
-    "Prodigi",
-    "Edition Ops",
-    "Mockups",
-    "Social Media Reels Studio",
-    "Product Uploads",
-    "Design Studio",
-    "Ads",
-    "VA Training",
-]
+MENU_OPTIONS = [page["route"] for page in os_accounts.worker_assignable_pages()]
 SIDEBAR_NAV_LABELS = {
-    "Dashboard": "Home",
+    page["route"]: page["label"] for page in os_accounts.PAGE_REGISTRY
 }
 HIDDEN_PAGE_OPTIONS = [
-    "Developer",
-    "Settings",
-    "Files",
-    "Products",
-    "Product Assets",
-    "Webhook Events",
-    "Sync Runs",
-    "App Errors",
-    "Persistence Check",
+    page["route"]
+    for page in os_accounts.PAGE_REGISTRY
+    if not page["worker_assignable"]
 ]
 ALL_PAGE_OPTIONS = [*MENU_OPTIONS, *HIDDEN_PAGE_OPTIONS]
 APP_VERSION = "Sports Cave Dashboard - 2026-07-21"
@@ -5668,6 +5652,7 @@ def render_recent_runs_sidebar():
 
 
 def render_sidebar():
+    user = current_os_user()
     st.sidebar.markdown(
         f"""
         <div class="sc-sidebar-brand">
@@ -5677,12 +5662,15 @@ def render_sidebar():
         """,
         unsafe_allow_html=True,
     )
+    allowed_menu_options = [
+        page for page in MENU_OPTIONS if os_accounts.can_access_page(user, page)
+    ]
     visible_page = (
         st.session_state.selected_page
-        if st.session_state.selected_page in MENU_OPTIONS
-        else "Dashboard"
+        if st.session_state.selected_page in allowed_menu_options
+        else ""
     )
-    for page in MENU_OPTIONS:
+    for page in allowed_menu_options:
         button_label = SIDEBAR_NAV_LABELS.get(page, page)
         if st.sidebar.button(
             button_label,
@@ -5693,7 +5681,11 @@ def render_sidebar():
             if page != visible_page:
                 st.session_state.selected_page = page
                 st.rerun()
-    if st.session_state.selected_page not in MENU_OPTIONS:
+    if (
+        st.session_state.selected_page not in MENU_OPTIONS
+        and st.session_state.selected_page != "Accounts & Access"
+        and os_accounts.is_admin(user)
+    ):
         page_label = SIDEBAR_NAV_LABELS.get(
             st.session_state.selected_page,
             st.session_state.selected_page,
@@ -5703,14 +5695,28 @@ def render_sidebar():
             st.session_state.selected_page = "Dashboard"
             st.rerun()
 
-    if st.session_state.selected_page == "Developer":
+    if st.session_state.selected_page == "Developer" and os_accounts.is_admin(user):
         st.sidebar.divider()
         st.sidebar.caption("File Hub hidden until PSD/Drive asset workflow is active.")
         if st.sidebar.button("File Hub (Coming Soon)", use_container_width=True):
             st.session_state.selected_page = "Files"
             st.rerun()
 
+    if os_accounts.is_admin(user):
+        st.sidebar.divider()
+        if st.sidebar.button(
+            "Accounts & Access",
+            key="sidebar-nav::Accounts & Access",
+            use_container_width=True,
+            type="primary" if st.session_state.selected_page == "Accounts & Access" else "secondary",
+        ):
+            st.session_state.selected_page = "Accounts & Access"
+            st.rerun()
+
     st.sidebar.divider()
+    display_name = str(user.get("display_name") or user.get("username") or "").strip()
+    if display_name:
+        st.sidebar.caption(display_name)
     if st.sidebar.button("Logout", use_container_width=True):
         logout_app()
 
@@ -6040,6 +6046,91 @@ def get_auth_extra_secret():
     return os.getenv("SPORTS_CAVE_AUTH_SECRET", "").strip()
 
 
+def _public_account(user):
+    user = dict(user or {})
+    user.pop("password_hash", None)
+    return user
+
+
+def _legacy_admin_account():
+    return {
+        "id": "legacy-master-admin",
+        "username": "admin",
+        "email": "",
+        "display_name": "Sports Cave Admin",
+        "role": os_accounts.ROLE_ADMIN,
+        "is_active": True,
+        "page_permissions": [],
+        "legacy": True,
+    }
+
+
+def current_os_user():
+    user = st.session_state.get("sports_cave_current_user")
+    if user:
+        return _public_account(user)
+    if st.session_state.get("sports_cave_authenticated"):
+        return _legacy_admin_account()
+    return {}
+
+
+def _activity_actor_for_user(user):
+    return (
+        str((user or {}).get("display_name") or "").strip()
+        or str((user or {}).get("username") or "").strip()
+        or "sports_cave_os"
+    )
+
+
+def _set_authenticated_user(user, *, legacy=False):
+    clean_user = _public_account(user or _legacy_admin_account())
+    if legacy:
+        clean_user["legacy"] = True
+    st.session_state["sports_cave_authenticated"] = True
+    st.session_state["sports_cave_current_user"] = clean_user
+    st.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+    set_activity_actor(_activity_actor_for_user(clean_user))
+    current_page = st.session_state.get("selected_page") or "Dashboard"
+    if not os_accounts.can_access_page(clean_user, current_page):
+        allowed_routes = os_accounts.allowed_navigation_routes(clean_user)
+        if allowed_routes:
+            st.session_state["selected_page"] = allowed_routes[0]
+
+
+def _account_system_status():
+    try:
+        status = dict(os_accounts.prepare_account_system())
+        status["admin"] = _public_account(status.get("admin"))
+        st.session_state["sports_cave_account_status"] = status
+        return status
+    except Exception:
+        status = {"available": False, "admin": {}, "reason": "unavailable"}
+        st.session_state["sports_cave_account_status"] = status
+        return status
+
+
+def _refresh_session_account_if_due(user, *, max_age_seconds=30):
+    if not user or user.get("legacy"):
+        return user
+    checked_at = float(st.session_state.get("sports_cave_auth_checked_at") or 0)
+    if time.monotonic() - checked_at < max_age_seconds:
+        return user
+    try:
+        refreshed = os_accounts.DEFAULT_STORE.get_user(user.get("id"))
+    except Exception:
+        return user
+    st.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+    if not refreshed or not refreshed.get("is_active"):
+        st.session_state["sports_cave_authenticated"] = False
+        st.session_state.pop("sports_cave_current_user", None)
+        clear_activity_actor()
+        return {}
+    refreshed = _public_account(refreshed)
+    st.session_state["sports_cave_current_user"] = refreshed
+    set_activity_actor(_activity_actor_for_user(refreshed))
+    return refreshed
+
+
 def _auth_cookie_script(cookie_value="", *, max_age_seconds=None, clear=False):
     cookie_name = sc_auth.AUTH_COOKIE_NAME
     if clear:
@@ -6091,15 +6182,40 @@ def current_auth_cookie():
 
 def is_app_authenticated():
     if st.session_state.get("sports_cave_authenticated"):
-        return True
+        user = _refresh_session_account_if_due(current_os_user())
+        if user:
+            set_activity_actor(_activity_actor_for_user(user))
+            return True
 
-    valid, _reason = sc_auth.validate_auth_token(
-        current_auth_cookie(),
+    token = current_auth_cookie()
+    status = _account_system_status()
+    valid, _reason, payload = sc_auth.validate_user_auth_token(
+        token,
         password=get_app_password(),
         extra_secret=get_auth_extra_secret(),
     )
     if valid:
-        st.session_state["sports_cave_authenticated"] = True
+        try:
+            user = os_accounts.DEFAULT_STORE.get_user(payload.get("sub"))
+        except Exception:
+            user = {}
+        if user and user.get("is_active"):
+            _set_authenticated_user(user)
+            return True
+
+    legacy_valid, _legacy_reason = sc_auth.validate_auth_token(
+        token,
+        password=get_app_password(),
+        extra_secret=get_auth_extra_secret(),
+    )
+    if legacy_valid:
+        admin = status.get("admin") or {}
+        if admin and admin.get("is_active"):
+            _set_authenticated_user(admin)
+        else:
+            _set_authenticated_user(_legacy_admin_account(), legacy=True)
+            if status.get("available"):
+                st.session_state["sports_cave_admin_setup_required"] = True
         return True
     return False
 
@@ -6112,12 +6228,18 @@ def render_login_gate():
             <div class="sc-login-wrap">
                 <div class="sc-login-kicker">Sports Cave</div>
                 <div class="sc-login-title">Welcome back</div>
-                <div class="sc-login-copy">Enter the password to open the dashboard.</div>
+                <div class="sc-login-copy">Sign in to open Sports Cave.</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
         with st.form("sports-cave-login-form"):
+            login = st.text_input(
+                "Username or email",
+                label_visibility="collapsed",
+                placeholder="Username or email",
+                key="sports-cave-login-username",
+            )
             password = st.text_input(
                 "Password",
                 type="password",
@@ -6135,17 +6257,102 @@ def render_login_gate():
     if not submitted:
         return False
 
-    if not sc_auth.password_matches(password, get_app_password()):
-        st.error("Password is incorrect.")
-        return False
+    status = _account_system_status()
+    admin = status.get("admin") or {}
+    if status.get("available") and admin:
+        try:
+            user, reason = os_accounts.authenticate_user(login, password)
+        except Exception:
+            st.warning("Sign in is temporarily unavailable. Please try again shortly.")
+            return False
+        if not user:
+            st.error("This account is inactive." if reason == "inactive" else "Username or password is incorrect.")
+            return False
+        _set_authenticated_user(user)
+        token = sc_auth.create_user_auth_token(
+            user["id"],
+            password=get_app_password(),
+            extra_secret=get_auth_extra_secret(),
+        )
+        record_activity_log(
+            "login",
+            "Dashboard",
+            "Signed in",
+            entity_type="os_user",
+            entity_id=user.get("id") or "",
+            metadata={"username": user.get("username") or "", "role": user.get("role") or ""},
+        )
+        set_auth_cookie(token, remember=remember)
+        return True
 
-    token = sc_auth.create_auth_token(
+    if sc_auth.password_matches(password, get_app_password()):
+        _set_authenticated_user(_legacy_admin_account(), legacy=True)
+        st.session_state["sports_cave_login_remember"] = bool(remember)
+        if status.get("available"):
+            st.session_state["sports_cave_admin_setup_required"] = True
+        else:
+            token = sc_auth.create_auth_token(
+                password=get_app_password(),
+                extra_secret=get_auth_extra_secret(),
+            )
+            record_activity_log("login", "Dashboard", "Signed in", entity_type="session")
+            set_auth_cookie(token, remember=remember)
+        return True
+
+    st.error("Username or password is incorrect.")
+    return False
+
+
+def render_admin_account_setup():
+    _left, center, _right = st.columns([1, 1.2, 1])
+    with center:
+        st.markdown("### Set up your admin account")
+        st.caption("Create the master account used to manage Sports Cave access.")
+        with st.form("sports-cave-admin-setup"):
+            display_name = st.text_input("Display name", value="Sports Cave Admin")
+            username = st.text_input("Email or username")
+            password = st.text_input("New password", type="password")
+            confirm_password = st.text_input("Confirm password", type="password")
+            submitted = st.form_submit_button("Create admin account", type="primary", use_container_width=True)
+    if not submitted:
+        return False
+    if not username.strip() or not display_name.strip():
+        st.error("Add a display name and email or username.")
+        return False
+    if not password or password != confirm_password:
+        st.error("Passwords must match.")
+        return False
+    try:
+        user = os_accounts.bootstrap_first_admin(
+            username,
+            password,
+            display_name=display_name,
+        )
+    except Exception:
+        st.error("The admin account could not be created right now. Please try again.")
+        return False
+    if not user:
+        st.error("The admin account could not be created right now. Please try again.")
+        return False
+    if not os_accounts.verify_password(password, user.get("password_hash")):
+        st.error("The admin account is already set up. Sign in with that account.")
+        return False
+    _set_authenticated_user(user)
+    st.session_state.pop("sports_cave_admin_setup_required", None)
+    token = sc_auth.create_user_auth_token(
+        user["id"],
         password=get_app_password(),
         extra_secret=get_auth_extra_secret(),
     )
-    st.session_state["sports_cave_authenticated"] = True
-    record_activity_log("login", "Dashboard", "Signed in", entity_type="session")
-    set_auth_cookie(token, remember=remember)
+    record_activity_log(
+        "account_created",
+        "Accounts & Access",
+        f"Account created: {user.get('display_name') or user.get('username')}",
+        entity_type="os_user",
+        entity_id=user.get("id") or "",
+        metadata={"username": user.get("username") or "", "role": os_accounts.ROLE_ADMIN},
+    )
+    set_auth_cookie(token, remember=bool(st.session_state.get("sports_cave_login_remember", True)))
     return True
 
 
@@ -6153,6 +6360,9 @@ def logout_app():
     record_activity_log("logout", "Dashboard", "Signed out", entity_type="session")
     st.session_state["sports_cave_authenticated"] = False
     st.session_state["selected_page"] = "Dashboard"
+    st.session_state.pop("sports_cave_current_user", None)
+    st.session_state.pop("sports_cave_admin_setup_required", None)
+    clear_activity_actor()
     clear_auth_cookie()
     st.stop()
 
@@ -6977,18 +7187,198 @@ def _customer_certificate_vault_config_status():
     }
 
 
+def _account_permission_fields(prefix, selected=()):
+    selected = set(selected or ())
+    chosen = []
+    columns = st.columns(2)
+    for index, page in enumerate(os_accounts.worker_assignable_pages()):
+        with columns[index % 2]:
+            if st.checkbox(
+                page["label"],
+                value=page["key"] in selected,
+                key=f"{prefix}::{page['key']}",
+            ):
+                chosen.append(page["key"])
+    return chosen
+
+
+def render_accounts_access_page():
+    user = current_os_user()
+    if not os_accounts.is_admin(user):
+        st.title("Access not approved")
+        st.caption("This page is not available for your account.")
+        return
+
+    st.title("Accounts & Access")
+    try:
+        users = os_accounts.DEFAULT_STORE.list_users()
+    except Exception:
+        st.warning("Accounts could not load right now. Please try again shortly.")
+        return
+
+    account_rows = []
+    for account in users:
+        account_rows.append(
+            {
+                "Name": account.get("display_name") or "",
+                "Username": account.get("username") or "",
+                "Email": account.get("email") or "",
+                "Role": str(account.get("role") or "").title(),
+                "Status": "Active" if account.get("is_active") else "Inactive",
+                "Last login": format_dashboard_timestamp(account.get("last_login_at"))
+                if account.get("last_login_at")
+                else "Never",
+            }
+        )
+    st.dataframe(account_rows, use_container_width=True, hide_index=True)
+
+    with st.expander(
+        "Create worker account",
+        expanded=not any(row.get("role") == os_accounts.ROLE_WORKER for row in users),
+    ):
+        with st.form("create-worker-account", clear_on_submit=True):
+            fields = st.columns(2)
+            worker_name = fields[0].text_input("Display name")
+            worker_username = fields[1].text_input("Username")
+            worker_email = fields[0].text_input("Email (optional)")
+            worker_password = fields[1].text_input("Temporary password", type="password")
+            st.markdown("**Page access**")
+            create_permissions = _account_permission_fields("create-worker-permission")
+            create_submitted = st.form_submit_button(
+                "Create account",
+                type="primary",
+                use_container_width=True,
+            )
+        if create_submitted:
+            try:
+                created = os_accounts.create_worker_account(
+                    username=worker_username,
+                    email=worker_email,
+                    display_name=worker_name,
+                    password=worker_password,
+                    page_keys=create_permissions,
+                )
+            except ValueError as error:
+                st.warning(str(error))
+            except Exception:
+                st.warning("The account could not be saved right now. Please try again.")
+            else:
+                record_activity_log(
+                    "account_created",
+                    "Accounts & Access",
+                    f"Account created: {created.get('display_name') or created.get('username')}",
+                    entity_type="os_user",
+                    entity_id=created.get("id") or "",
+                    metadata={"username": created.get("username") or "", "role": os_accounts.ROLE_WORKER},
+                )
+                st.success("Worker account created.")
+                st.rerun()
+
+    workers = [account for account in users if account.get("role") == os_accounts.ROLE_WORKER]
+    if not workers:
+        return
+
+    st.markdown("### Edit worker access")
+    worker_by_id = {worker["id"]: worker for worker in workers}
+    selected_worker_id = st.selectbox(
+        "Worker",
+        tuple(worker_by_id),
+        format_func=lambda worker_id: worker_by_id[worker_id].get("display_name")
+        or worker_by_id[worker_id].get("username")
+        or "Worker",
+        key="accounts-edit-worker",
+    )
+    selected_worker = worker_by_id[selected_worker_id]
+    with st.form(f"edit-worker-account::{selected_worker_id}"):
+        fields = st.columns(2)
+        edit_name = fields[0].text_input(
+            "Display name",
+            value=selected_worker.get("display_name") or "",
+            key=f"edit-worker-name::{selected_worker_id}",
+        )
+        edit_username = fields[1].text_input(
+            "Username",
+            value=selected_worker.get("username") or "",
+            key=f"edit-worker-username::{selected_worker_id}",
+        )
+        edit_email = fields[0].text_input(
+            "Email (optional)",
+            value=selected_worker.get("email") or "",
+            key=f"edit-worker-email::{selected_worker_id}",
+        )
+        edit_password = fields[1].text_input(
+            "New password (leave blank to keep current)",
+            type="password",
+            key=f"edit-worker-password::{selected_worker_id}",
+        )
+        edit_active = st.checkbox(
+            "Account active",
+            value=bool(selected_worker.get("is_active")),
+            key=f"edit-worker-active::{selected_worker_id}",
+        )
+        st.markdown("**Page access**")
+        edit_permissions = _account_permission_fields(
+            f"edit-worker-permission::{selected_worker_id}",
+            selected_worker.get("page_permissions") or (),
+        )
+        edit_submitted = st.form_submit_button(
+            "Save account",
+            type="primary",
+            use_container_width=True,
+        )
+    if not edit_submitted:
+        return
+    try:
+        updated = os_accounts.update_worker_account(
+            selected_worker_id,
+            username=edit_username,
+            email=edit_email,
+            display_name=edit_name,
+            is_active=edit_active,
+            page_keys=edit_permissions,
+            new_password=edit_password,
+        )
+    except ValueError as error:
+        st.warning(str(error))
+        return
+    except Exception:
+        st.warning("The account could not be saved right now. Please try again.")
+        return
+    label = updated.get("display_name") or updated.get("username") or "Worker"
+    record_activity_log(
+        "account_updated",
+        "Accounts & Access",
+        f"Account updated: {label}",
+        entity_type="os_user",
+        entity_id=updated.get("id") or "",
+        metadata={"username": updated.get("username") or "", "active": updated.get("is_active")},
+    )
+    record_activity_log(
+        "permissions_changed",
+        "Accounts & Access",
+        f"Page access updated: {label}",
+        entity_type="os_user",
+        entity_id=updated.get("id") or "",
+        metadata={"page_keys": updated.get("page_permissions") or []},
+    )
+    st.success("Account access saved.")
+    st.rerun()
+
+
 def render_settings_page():
-    if not _developer_unlocked():
+    admin_account = os_accounts.is_admin(current_os_user())
+    if not admin_account and not _developer_unlocked():
         _render_developer_password_gate()
         return
 
     st.title("Developer")
     st.caption("Protected setup tools. Diagnostics run only when you click a button.")
-    lock_cols = st.columns([1, 3])
-    if lock_cols[0].button("Lock Developer", use_container_width=True):
-        st.session_state.developer_unlocked = False
-        st.rerun()
-    lock_cols[1].caption("No store, database, Drive, or storage calls run just by opening this page.")
+    if not admin_account:
+        lock_cols = st.columns([1, 3])
+        if lock_cols[0].button("Lock Developer", use_container_width=True):
+            st.session_state.developer_unlocked = False
+            st.rerun()
+        lock_cols[1].caption("No store, database, Drive, or storage calls run just by opening this page.")
 
     with st.expander("Basic App Info", expanded=True):
         st.write(f"**App version:** {APP_VERSION}")
@@ -7841,6 +8231,20 @@ def render_activity_log(local_now):
         st.warning("Activity could not load right now. Please try again shortly.")
         return
 
+    if not os_accounts.is_admin(current_os_user()):
+        admin_activity_types = {
+            "account_created",
+            "account_updated",
+            "permissions_changed",
+            "access_blocked",
+        }
+        entries = [
+            entry
+            for entry in entries
+            if str(entry.get("action_type") or "").strip().casefold()
+            not in admin_activity_types
+        ]
+
     if not entries:
         st.markdown(
             '<div class="sc-empty-note">No activity yet.</div>',
@@ -7986,6 +8390,15 @@ def page_uses_local_database(current_page):
     return False
 
 
+def ensure_current_page_access(current_page):
+    user = current_os_user()
+    if os_accounts.can_access_page(user, current_page):
+        return True
+    st.title("Access not approved")
+    st.caption("This page is not available for your account.")
+    return False
+
+
 def render_selected_page(current_page):
     def os_route_pages():
         import_started = time.perf_counter()
@@ -7997,6 +8410,8 @@ def render_selected_page(current_page):
 
     if current_page == "Dashboard":
         render_lightweight_dashboard_page()
+    elif current_page == "Accounts & Access":
+        render_accounts_access_page()
     elif current_page == "Products":
         render_placeholder_page("Products", "Full product sync is paused. Use Edition Ops for product edition fields.")
     elif current_page == "Mockups":
@@ -8047,6 +8462,14 @@ def main():
             return
         log_startup_stage("LOGIN GATE DONE")
 
+    if st.session_state.get("sports_cave_admin_setup_required"):
+        log_startup_stage("ADMIN SETUP START")
+        render_admin_account_setup()
+        log_startup_stage("ADMIN SETUP STOP")
+        return
+
+    set_activity_actor(_activity_actor_for_user(current_os_user()))
+
     log_startup_stage("SIDEBAR START")
     render_sidebar()
     log_startup_stage("SIDEBAR DONE")
@@ -8055,6 +8478,10 @@ def main():
     current_page = st.session_state.selected_page
     log_startup_stage(f"PAGE SELECTED: {current_page}")
     log_app_memory(f"Page load start: {current_page}")
+
+    if not ensure_current_page_access(current_page):
+        log_startup_stage("PAGE ACCESS BLOCKED", current_page)
+        return
 
     if page_uses_local_database(current_page):
         log_startup_stage("LOCAL DB INIT START")
