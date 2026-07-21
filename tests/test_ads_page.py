@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def run_ads_page():
     app_test = AppTest.from_file(str(ROOT / "app.py"))
+    app_test.session_state["sports_cave_authenticated"] = True
     app_test.session_state["selected_page"] = "Ads"
     app_test.session_state["startup_shell_loaded"] = True
     return app_test.run(timeout=20)
@@ -63,12 +64,15 @@ class AdsPageTests(unittest.TestCase):
                 "Motorsport",
                 "Football",
                 "Cricket",
+                "Golf",
                 "Horse Racing",
                 "Baseball",
                 "Combat",
                 "Ice Hockey",
                 "NFL",
+                "Rugby Union",
                 "Tennis",
+                "Other",
             ],
         )
         self.assertEqual(
@@ -104,6 +108,9 @@ class AdsPageTests(unittest.TestCase):
             with self.subTest(category=category, campaign_type="Instant Experience"):
                 self.assertIsNotNone(ads_page.get_template_key(category, "Instant Experience"))
                 self.assertIsNotNone(ads_page.get_winner_pattern_key(category, "Instant Experience"))
+            with self.subTest(category=category, campaign_type="Single Image / Video"):
+                self.assertIsNotNone(ads_page.get_template_key(category, "Single Image / Video"))
+                self.assertIsNotNone(ads_page.get_winner_pattern_key(category, "Single Image / Video"))
 
         self.assertEqual(ads_page.get_template_key("Motorsport", "Carousel"), "motorsport_carousel")
         self.assertEqual(ads_page.get_template_key("Baseball", "Instant Experience"), "baseball_instant_experience")
@@ -113,6 +120,22 @@ class AdsPageTests(unittest.TestCase):
             "SPORTS CAVE GENERIC CAROUSEL WINNER PATTERN",
             ads_page.build_ads_prompt("Test Product", "Rugby League", "Australia", "Carousel"),
         )
+
+    def test_supported_categories_have_complete_ad_category_profiles(self):
+        required_fields = {
+            "audience",
+            "emotion",
+            "carousel_flow",
+            "ie_setting",
+            "headline_examples",
+            "description_examples",
+            "country_note",
+        }
+
+        for category in ads_page.SUPPORTED_AD_CATEGORIES:
+            with self.subTest(category=category):
+                self.assertIn(category, ads_page.CATEGORY_COPY_CUES)
+                self.assertTrue(required_fields.issubset(ads_page.CATEGORY_WINNER_ANGLES[category]))
 
     def test_baseball_instant_experience_is_supported_with_required_url(self):
         self.assertEqual(
@@ -465,6 +488,28 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Once it sells out, it's gone.", prompt)
         self.assertIn("Claim Your Edition", prompt)
 
+    def test_added_categories_have_specific_outputs_for_all_campaign_sections(self):
+        expected_terms = {
+            "Golf": ("major pressure", "clubhouse"),
+            "Rugby Union": ("test-match pressure", "rugby union"),
+            "Other": ("verified moment", "defining moment"),
+        }
+
+        for category, terms in expected_terms.items():
+            for campaign_type in ("Carousel", "Instant Experience", "Single Image / Video"):
+                with self.subTest(category=category, campaign_type=campaign_type):
+                    prompt = ads_page.build_ads_prompt(
+                        f"{category} Collector Moment",
+                        category,
+                        "Australia",
+                        campaign_type,
+                    )
+                    self.assertNotIn("Insufficient winner data", prompt)
+                    self.assertNotIn("Using generic Sports Cave winner pattern", prompt)
+                    self.assertIn(f"SPORTS CAVE {category.upper()} ", prompt)
+                    for term in terms:
+                        self.assertIn(term, prompt)
+
     def test_cricket_single_image_video_works_for_every_supported_country(self):
         for country in ads_page.COUNTRY_OPTIONS[1:]:
             with self.subTest(country=country):
@@ -474,7 +519,8 @@ class AdsPageTests(unittest.TestCase):
                     country,
                     "Single Image / Video",
                 )
-                self.assertIn("SPORTS CAVE GENERIC SINGLE IMAGE VIDEO WINNER PATTERN", prompt)
+                self.assertIn("SPORTS CAVE CRICKET SINGLE IMAGE VIDEO WINNER PATTERN", prompt)
+                self.assertIn("CATEGORY-SPECIFIC SINGLE IMAGE / VIDEO WINNER ANGLE", prompt)
                 self.assertIn(f"Market: {country}", prompt)
                 self.assertIn("PRIMARY TEXT", prompt)
                 self.assertIn("Variant 5:", prompt)
@@ -589,7 +635,7 @@ class AdsPageTests(unittest.TestCase):
             ),
         )
         self.assertIn(
-            "SPORTS CAVE GENERIC SINGLE IMAGE VIDEO WINNER PATTERN",
+            "SPORTS CAVE BASEBALL SINGLE IMAGE VIDEO WINNER PATTERN",
             ads_page.build_ads_prompt(
                 "Baseball Product",
                 "Baseball",
@@ -912,6 +958,33 @@ PRIMARY TEXT VARIATIONS
             ],
         )
 
+    def test_edition_ops_product_dropdown_preserves_duplicate_titles_with_handles(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "edition_ops_products_snapshot.json"
+            snapshot_path.write_text(
+                json.dumps(
+                    {
+                        "rows": [
+                            {"product_title": "Untitled Product", "shopify_handle": "legends-never-die"},
+                            {"product_title": "Untitled Product", "shopify_handle": "goat-debate-wall-art"},
+                            {"product_title": "Peter Brock Six Laps Ahead", "shopify_handle": "six-laps-ahead"},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            names = ads_page.load_edition_ops_product_name_options(snapshot_path)
+
+        self.assertEqual(
+            names,
+            [
+                "Untitled Product (legends-never-die)",
+                "Untitled Product (goat-debate-wall-art)",
+                "Peter Brock Six Laps Ahead",
+            ],
+        )
+
     def test_ads_product_name_input_uses_searchable_edition_ops_options_when_available(self):
         source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
 
@@ -973,7 +1046,7 @@ PRIMARY TEXT VARIATIONS
 
     def test_valid_category_campaign_country_combinations_never_have_insufficient_winner_data(self):
         for category in ads_page.SUPPORTED_AD_CATEGORIES:
-            for campaign_type in ("Carousel", "Instant Experience"):
+            for campaign_type in ("Carousel", "Instant Experience", "Single Image / Video"):
                 for country in ads_page.COUNTRY_OPTIONS[1:]:
                     with self.subTest(category=category, campaign_type=campaign_type, country=country):
                         self.assertIsNotNone(ads_page.get_winner_pattern_key(category, campaign_type))

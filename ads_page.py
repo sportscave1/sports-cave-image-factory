@@ -14,12 +14,15 @@ CATEGORY_OPTIONS = [
     "Motorsport",
     "Football",
     "Cricket",
+    "Golf",
     "Horse Racing",
     "Baseball",
     "Combat",
     "Ice Hockey",
     "NFL",
+    "Rugby Union",
     "Tennis",
+    "Other",
 ]
 
 COUNTRY_OPTIONS = [
@@ -100,22 +103,23 @@ SCARCITY_TERMS = (
 )
 
 CATEGORY_COPY_CUES = {
-    "Motorsport": "circuit, machine, rivalry, pressure, noise, era, mountain and race memory",
-    "AFL": "club era, captaincy, rivalry, finals pressure, jumper pride and matchday memory",
+    "NBA": "mentality, rivalry, dynasty, final shot, court presence, championship nights and legacy",
+    "Motorsport": "circuit, machine, rivalry, pressure, noise, era, mountain and race memory, F1, V8 Supercars, MotoGP and NASCAR only when supported",
+    "Football": "matchday, captain, final, club era, rivalry, last dance, national pride and terrace memory",
     "Cricket": "crease, spell, innings, summer, Ashes, ground, session pressure and era",
-    "NBA": "mentality, rivalry, dynasty, final shot, court presence and legacy",
-    "Baseball": "diamond, home run, October, rivalry, ballpark memory and legacy",
-    "NFL": "Sunday pressure, franchise era, rivalry, quarterback moment, gridiron memory and legacy",
-    "Football": "matchday, captain, final, club era, rivalry, last dance and terrace memory",
-    "Golf": "major pressure, Sunday calm, fairway memory, champion rhythm and clubhouse legacy",
-    "Tennis": "court pressure, final set, rivalry, grass or hardcourt era and champion poise",
-    "Combat": "walkout, fight night, rivalry, discipline, pressure, legacy and champion mentality",
+    "Golf": "major pressure, Sunday calm, fairway memory, final putt, champion rhythm and clubhouse legacy",
     "Horse Racing": "track, cup day, final straight, stable pride, racing era and winning memory",
+    "Baseball": "diamond, home run, October, rivalry, ballpark memory and legacy",
+    "Combat": "walkout, fight night, boxing, UFC, rivalry, discipline, pressure, legacy and champion mentality",
     "Ice Hockey": "rink pressure, playoff moment, rivalry, captaincy, cold arena noise and legacy",
+    "NFL": "Sunday pressure, franchise era, rivalry, quarterback moment, gridiron memory and legacy",
+    "Rugby Union": "test match pressure, national pride, tours, rivalry, jersey pride, final whistle and rugby legacy",
+    "Tennis": "court pressure, final set, rivalry, grass or hardcourt era and champion poise",
+    "Other": "identity, memory, era, rivalry, pressure, fan pride, collector ownership and the defining moment",
 }
 
 SUPPORTED_AD_CATEGORIES = tuple(CATEGORY_OPTIONS[1:])
-CATEGORY_SPECIFIC_CAMPAIGN_TYPES = ("Carousel", "Instant Experience")
+CATEGORY_SPECIFIC_CAMPAIGN_TYPES = ("Carousel", "Instant Experience", "Single Image / Video")
 
 CATEGORY_WINNER_ANGLES = {
     "Football": {
@@ -137,13 +141,13 @@ CATEGORY_WINNER_ANGLES = {
         "country_note": "Keep basketball language natural for the selected market. Do not invent stats, rings, teams or records unless the product title confirms them.",
     },
     "Motorsport": {
-        "audience": "race fans, garage collectors, motorsport loyalists and fans who remember the sound, pressure and rivalry",
-        "emotion": "raw speed, Bathurst-style nostalgia where supported, roaring engines, race-day memory, legends, rivalry and garage pride",
+        "audience": "race fans, garage collectors, motorsport loyalists and fans who remember the sound, pressure, machine and rivalry",
+        "emotion": "raw speed, Bathurst-style nostalgia where supported, F1 precision, V8 Supercars, MotoGP aggression, NASCAR intensity, race-day memory, legends, rivalry and garage pride",
         "carousel_flow": "machine or driver identity -> race-day memory -> legacy -> garage, cave or home bar ownership -> only-100 scarcity",
         "ie_setting": "premium garage, workshop, home bar or motorsport collector wall",
         "headline_examples": "Race Legacy; Only 100 Made; Still Roars; Claim Yours; Garage Wall",
         "description_examples": "Race Day Art; Engine Memory; Numbered Run; Cave Ready; No Second Run",
-        "country_note": "Use Bathurst, the Mountain or touring-car cues only when supported by the product title or artwork. Do not invent track, driver, year or result.",
+        "country_note": "Use Bathurst, the Mountain, F1, V8 Supercars, MotoGP, NASCAR, track, driver, year or result only when supported by the product title or artwork.",
     },
     "Cricket": {
         "audience": "cricket fans, cricket tragics, collectors, Test-match obsessives and summer-sport loyalists",
@@ -153,6 +157,15 @@ CATEGORY_WINNER_ANGLES = {
         "headline_examples": "Cricket Memory; Only 100 Made; Final Session; Claim Yours; Heroes Framed",
         "description_examples": "For Cricket Fans; Summer Wall; Numbered Art; Home Bar Ready; No Second Run",
         "country_note": "AU and UK can lean into serious cricket-fan language, but avoid forced slang and do not invent Ashes, innings, wickets or venues unless confirmed.",
+    },
+    "Golf": {
+        "audience": "golf fans, major-week watchers, Sunday-pressure fans, clubhouse collectors and people who love the calm before the final putt",
+        "emotion": "major pressure, Sunday calm, final putts, fairway memory, rivalries, eras, course atmosphere and clubhouse pride",
+        "carousel_flow": "product identity -> major, round or final-putt memory -> golf identity -> office, study or clubhouse wall ownership -> only-100 scarcity",
+        "ie_setting": "premium study, clubhouse lounge, office, bar or golf collector wall",
+        "headline_examples": "Major Week; Only 100 Made; Sunday Calm; Claim Yours; Final Putt",
+        "description_examples": "For Golf Fans; Numbered Art; Study Wall; Clubhouse Ready; No Second Run",
+        "country_note": "Do not invent tournament, course, score, ranking, major title, trophy or champion status unless the product title confirms it.",
     },
     "Horse Racing": {
         "audience": "race-day fans, punters, racing collectors and people who remember the thunder down the straight",
@@ -173,13 +186,13 @@ CATEGORY_WINNER_ANGLES = {
         "country_note": "Keep baseball terms baseball-specific in every market. Do not invent stats, records, seasons or licensing claims.",
     },
     "Combat": {
-        "audience": "fight fans, combat-sport collectors and fans who remember the walkout, pressure and tension",
-        "emotion": "fight night, walkout, rivalry, pressure, legacy, warrior mentality and one-shot moments",
+        "audience": "boxing fans, UFC fans, combat-sport collectors and fans who remember the walkout, pressure and tension",
+        "emotion": "fight night, walkout, boxing pressure, UFC intensity, rivalry, legacy, warrior mentality and one-shot moments",
         "carousel_flow": "fighter or event identity -> fight-night pressure -> fan tension -> fight room, gym or wall ownership -> only-100 scarcity",
         "ie_setting": "dark premium gym, fight room, home bar or combat collector wall",
         "headline_examples": "Fight Night Art; Only 100 Made; Walkout Ready; Claim Yours; Legacy Framed",
         "description_examples": "For Fight Fans; Numbered Art; Fight Room; Wall Ready; No Second Run",
-        "country_note": "Use belts only if supported. Do not invent result, title, opponent, record or sanctioning body.",
+        "country_note": "Use boxing, UFC, belts, opponent, result, title, record or sanctioning body only when supported by the product title or artwork.",
     },
     "Ice Hockey": {
         "audience": "hockey fans, loyal supporters, playoff-night obsessives and cold-arena collectors",
@@ -199,6 +212,15 @@ CATEGORY_WINNER_ANGLES = {
         "description_examples": "For NFL Fans; Numbered Art; Sports Room; Wall Ready; No Second Run",
         "country_note": "Do not invent Super Bowl, stats, teams, scores or records unless the product title confirms them.",
     },
+    "Rugby Union": {
+        "audience": "rugby supporters, national-team loyalists, tour watchers, test-match fans and collectors who understand the pressure of the jersey",
+        "emotion": "test-match pressure, national pride, tours, rivalry, final whistle, jersey pride, tradition and rugby legacy",
+        "carousel_flow": "product identity -> test, tour or rivalry memory -> rugby identity -> clubroom, sports-room or home-bar ownership -> only-100 scarcity",
+        "ie_setting": "premium clubroom, home bar, sports room, study or rugby collector wall",
+        "headline_examples": "Test Match Art; Only 100 Made; Jersey Pride; Claim Yours; Rugby Legacy",
+        "description_examples": "For Rugby Fans; Numbered Art; Clubroom Wall; Supporter Ready; No Second Run",
+        "country_note": "Keep rugby union language distinct from rugby league. Do not invent caps, tries, scores, tours, trophies, teams or World Cup claims unless confirmed.",
+    },
     "Tennis": {
         "audience": "tennis fans, rivalry watchers, collectors and fans who remember match point pressure",
         "emotion": "rivalries, match point, grace, pressure, eras, icons, farewell moments and collectors",
@@ -207,6 +229,15 @@ CATEGORY_WINNER_ANGLES = {
         "headline_examples": "Match Point Art; Only 100 Made; Court Legacy; Claim Yours; Icons Framed",
         "description_examples": "For Tennis Fans; Numbered Art; Study Wall; Gallery Ready; No Second Run",
         "country_note": "Use Centre Court style for UK only when supported. Do not invent tournament, title, ranking or record.",
+    },
+    "Other": {
+        "audience": "sports fans, collectors and buyers who recognise the selected subject, era, rivalry, person, venue or defining moment",
+        "emotion": "identity, memory, legacy, rivalry, pressure, pride, nostalgia, a verified moment, collector ownership and the feeling that the moment deserves the wall",
+        "carousel_flow": "product identity -> verified moment or subject memory -> fan identity -> wall, cave, home bar or office ownership -> only-100 scarcity",
+        "ie_setting": "premium collector room, sports room, home bar, office, study or gallery wall",
+        "headline_examples": "Moment Framed; Only 100 Made; Claim Yours; Fan Memory; Wall Ready",
+        "description_examples": "Numbered Art; Collector Wall; Limited Run; Cave Ready; No Second Run",
+        "country_note": "Use only facts confirmed by the product title, artwork or supplied notes. Do not borrow terminology from another sport just to sound specific.",
     },
 }
 
@@ -261,7 +292,7 @@ COUNTRY_LANGUAGE_PROFILES = {
         "english_variant": "natural Australian English",
         "spellings": "colour, favourite, organise, personalised, centre, licence as a noun, licensed as a verb or adjective, travelled, travelling",
         "terminology": "delivery, free delivery, add to cart, shop, order, collector, limited edition, framed artwork, race day, and footy only when the selected sport and context make it genuinely appropriate",
-        "sports": "For Australian motorsport, cricket, AFL and other categories, use terminology Australian fans naturally expect. Motorsport may reference Bathurst, the Mountain, race day, touring-car heritage or Australian motorsport history only when supported by the selected product. AFL may use footy where natural. Cricket language should sound Australian rather than American. Association football should normally be called football or soccer according to the specific Australian audience and existing category naming.",
+        "sports": "For Australian motorsport, cricket, basketball, combat, golf, tennis, horse racing and other categories, use terminology Australian fans naturally expect. Motorsport may reference Bathurst, the Mountain, race day, touring-car heritage, Supercars, F1, MotoGP or NASCAR only when supported by the selected product. Cricket language should sound Australian rather than American. Association football should normally be called football or soccer according to the specific Australian audience and existing category naming.",
         "avoid": "Do not force words such as mate, Aussie, bloody, legend or reckon. Do not use American spelling such as color, favorite, center, personalize, organize or license as a noun when licence is required. Do not use American retail terminology where it would feel unnatural.",
         "quality": "Australian spelling throughout. No accidental American spelling.",
     },
@@ -348,6 +379,27 @@ def _product_name_from_edition_ops_row(row):
     )
 
 
+def _edition_ops_product_handle_from_row(row):
+    if not isinstance(row, dict):
+        return ""
+    return _normalise_option_label(
+        row.get("shopify_handle")
+        or row.get("Shopify handle")
+        or row.get("product_handle")
+        or row.get("handle")
+        or row.get("Handle")
+    )
+
+
+def _edition_ops_product_option_label(row, duplicate_titles=None):
+    product_name = _product_name_from_edition_ops_row(row)
+    handle = _edition_ops_product_handle_from_row(row)
+    duplicate_titles = duplicate_titles or set()
+    if product_name and handle and product_name.casefold() in duplicate_titles:
+        return f"{product_name} ({handle})"
+    return product_name or handle
+
+
 def _edition_ops_rows_from_local_snapshot(snapshot_path=EDITION_OPS_SNAPSHOT_PATH):
     snapshot_path = Path(snapshot_path)
     if not snapshot_path.exists():
@@ -369,11 +421,19 @@ def load_edition_ops_product_name_options(snapshot_path=EDITION_OPS_SNAPSHOT_PAT
 
     options = []
     seen = set()
+    title_counts = {}
     for row in rows:
         product_name = _product_name_from_edition_ops_row(row)
-        key = product_name.casefold()
-        if product_name and key not in seen:
-            options.append(product_name)
+        if product_name:
+            key = product_name.casefold()
+            title_counts[key] = title_counts.get(key, 0) + 1
+    duplicate_titles = {key for key, count in title_counts.items() if count > 1}
+
+    for row in rows:
+        option_label = _edition_ops_product_option_label(row, duplicate_titles)
+        key = option_label.casefold()
+        if option_label and key not in seen:
+            options.append(option_label)
             seen.add(key)
     return options
 
@@ -1743,7 +1803,7 @@ def build_category_winner_angle_block(category, campaign_type, country):
 - Strong short-line examples for this category: {angle["headline_examples"]}.
 - Short description examples for this category: {angle["description_examples"]}.
 - {angle["country_note"]}"""
-    else:
+    elif campaign_type == "Instant Experience":
         strategy = f"""CATEGORY-SPECIFIC INSTANT EXPERIENCE WINNER ANGLE
 
 - Category decides the ad structure and emotional angle. Country only localises spelling, terminology and language flavour.
@@ -1753,6 +1813,19 @@ def build_category_winner_angle_block(category, campaign_type, country):
 - If the product is narrow to a team, player, rivalry, country or event, use that as the hook while keeping enough category-wide appeal for cold audiences.
 - Instant Experience setting: {angle["ie_setting"]}.
 - Catalogue/cards underneath should feel like a connected {category} collector range, not one isolated product.
+- Strong short-line examples for this category: {angle["headline_examples"]}.
+- Short description examples for this category: {angle["description_examples"]}.
+- {angle["country_note"]}"""
+    else:
+        strategy = f"""CATEGORY-SPECIFIC SINGLE IMAGE / VIDEO WINNER ANGLE
+
+- Category decides the emotional angle. Country only localises spelling, terminology and language flavour.
+- Lead with the selected product as the hero, framed as premium {category} collector wall art.
+- Audience: {angle["audience"]}.
+- Emotional territory: {angle["emotion"]}.
+- Creative setting: {angle["ie_setting"]}.
+- Primary text should connect the exact product to identity, memory, ownership and limited-edition scarcity.
+- Headlines should be short, product-specific and sharper than generic wall-art labels.
 - Strong short-line examples for this category: {angle["headline_examples"]}.
 - Short description examples for this category: {angle["description_examples"]}.
 - {angle["country_note"]}"""
@@ -2087,16 +2160,27 @@ Claim Your Edition"""
 
 def build_generic_single_image_video_prompt(product_name, category, country, campaign_type):
     product_name = _clean_product_name(product_name)
-    return f"""SPORTS CAVE GENERIC SINGLE IMAGE VIDEO WINNER PATTERN
+    specific_pattern = bool(get_category_winner_angle(category))
+    pattern_heading = (
+        f"SPORTS CAVE {str(category or '').upper()} SINGLE IMAGE VIDEO WINNER PATTERN"
+        if specific_pattern
+        else "SPORTS CAVE GENERIC SINGLE IMAGE VIDEO WINNER PATTERN"
+    )
+    fallback_note = (
+        ""
+        if specific_pattern
+        else "\nINTERNAL NOTE\nUsing generic Sports Cave winner pattern for this category. Do not include this note in customer-facing copy blocks.\n"
+    )
+    category_block = build_category_winner_angle_block(category, campaign_type, country)
+    category_setting = get_instant_experience_setting(category)
+    return f"""{pattern_heading}
 
 PRODUCT
 Product name: {product_name}
 Category: {category}
 Market: {country}
 Campaign type: {campaign_type}
-
-INTERNAL NOTE
-Using generic Sports Cave winner pattern for this category. Do not include this note in customer-facing copy blocks.
+{fallback_note}
 
 I have attached the exact Sports Cave product image being advertised.
 
@@ -2107,6 +2191,8 @@ Use the supplied product name as the source of identity. Do not invent unsupport
 {build_country_campaign_localisation_note(category, country)}
 
 {build_universal_sports_cave_rules(category)}
+
+{category_block}
 
 Create a Meta Single Image/Video ad package.
 
@@ -2144,7 +2230,7 @@ The prompt must instruct the image/video generator:
 - Use the uploaded image as the exact reference for the framed Sports Cave artwork.
 - Keep the exact artwork, colours, text, frame, badge, crop and layout unchanged.
 - Make the selected framed product the hero.
-- Use a premium collector room, wall, sports room, home bar, office, man cave or category-relevant setting.
+- Use this category-relevant setting: {category_setting}.
 - Style: cinematic, premium, masculine, collector-focused and believable.
 - No fake logos, fake team branding, clutter, extra artwork competing with the product or unsupported text overlays.
 
