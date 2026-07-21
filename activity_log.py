@@ -13,6 +13,7 @@ def record_activity_log(
     entity_type="",
     entity_id="",
     metadata=None,
+    event_key="",
     raise_errors=False,
 ):
     try:
@@ -25,6 +26,7 @@ def record_activity_log(
             entity_type=entity_type,
             entity_id=entity_id,
             metadata=metadata or {},
+            event_key=event_key,
         )
         try:
             import sports_cave_dashboard

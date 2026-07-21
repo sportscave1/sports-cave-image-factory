@@ -2086,6 +2086,12 @@ def ensure_dashboard_schema():
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type_created ON audit_logs(event_type, created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_source_created ON audit_logs(source, created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id)")
+                _safe_create_index(
+                    cur,
+                    "CREATE INDEX IF NOT EXISTS idx_audit_logs_activity_event_key ON audit_logs ((new_value->'metadata'->>'event_key')) WHERE new_value ? 'metadata'",
+                    "idx_audit_logs_activity_event_key",
+                )
             conn.commit()
         _DASHBOARD_SCHEMA_READY = True
 
@@ -2645,20 +2651,46 @@ def record_activity_log(
     entity_type="",
     entity_id="",
     metadata=None,
+    event_key="",
     actor="sports_cave_os",
 ):
     ensure_dashboard_schema()
     clean_message = str(message or "").strip()
     clean_page = str(page or "").strip() or "Sports Cave"
     clean_action = str(action_type or "").strip() or "activity"
+    clean_entity_type = str(entity_type or "").strip()
+    clean_entity_id = str(entity_id or "").strip()
+    clean_event_key = str(event_key or "").strip()
+    clean_metadata = dict(metadata or {})
+    if clean_event_key:
+        clean_metadata["event_key"] = clean_event_key
     payload = {
         "message": clean_message,
         "page": clean_page,
         "action_type": clean_action,
-        "metadata": metadata or {},
+        "metadata": clean_metadata,
     }
     with connect() as conn:
         with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            if clean_event_key:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM audit_logs
+                    WHERE event_type=%s
+                      AND entity_type=%s
+                      AND entity_id=%s
+                      AND new_value->'metadata'->>'event_key'=%s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (clean_action, clean_entity_type, clean_entity_id, clean_event_key),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    conn.commit()
+                    return existing
             cur.execute(
                 """
                 INSERT INTO audit_logs(
@@ -2670,8 +2702,8 @@ def record_activity_log(
                 """,
                 (
                     clean_action,
-                    str(entity_type or "").strip(),
-                    str(entity_id or "").strip(),
+                    clean_entity_type,
+                    clean_entity_id,
                     json_dumps(payload),
                     clean_message,
                     str(actor or "").strip() or "sports_cave_os",
@@ -2755,6 +2787,80 @@ def list_dashboard_tasks(status="open", *, limit=200):
             return [_dashboard_task_from_row(row) for row in cur.fetchall()]
 
 
+def list_dashboard_edition_products(*, limit=1000):
+    if not is_configured():
+        raise SupabaseNotConfigured(
+            "No Supabase/Postgres database URL is configured. Set DATABASE_URL, "
+            "SUPABASE_DATABASE_URL, or POSTGRES_URL in Render."
+        )
+    try:
+        safe_limit = min(max(int(limit or 1000), 1), 1500)
+    except (TypeError, ValueError):
+        safe_limit = 1000
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms(1500)}")
+            if not table_exists(cur, "edition_products"):
+                return []
+            has_shopify_products = table_exists(cur, "shopify_products")
+            has_active = column_exists(cur, "edition_products", "active")
+            has_sold_out = column_exists(cur, "edition_products", "sold_out")
+            has_edition_name = column_exists(cur, "edition_products", "edition_name")
+            has_updated_at = column_exists(cur, "edition_products", "updated_at")
+            has_product_type = has_shopify_products and column_exists(cur, "shopify_products", "product_type")
+            has_vendor = has_shopify_products and column_exists(cur, "shopify_products", "vendor")
+
+            select_parts = [
+                "ep.product_title AS product_title",
+                "ep.shopify_handle AS shopify_handle",
+                "ep.active AS active" if has_active else "TRUE AS active",
+                "ep.sold_out AS sold_out" if has_sold_out else "FALSE AS sold_out",
+                "ep.edition_name AS edition_name" if has_edition_name else "'' AS edition_name",
+                "ep.updated_at AS updated_at" if has_updated_at else "NULL AS updated_at",
+            ]
+            if has_shopify_products:
+                select_parts.extend(
+                    [
+                        "sp.product_type AS product_type" if has_product_type else "'' AS product_type",
+                        "sp.vendor AS vendor" if has_vendor else "'' AS vendor",
+                    ]
+                )
+                join_sql = "LEFT JOIN shopify_products sp ON sp.handle = ep.shopify_handle"
+            else:
+                select_parts.extend(["'' AS product_type", "'' AS vendor"])
+                join_sql = ""
+
+            where_parts = ["COALESCE(NULLIF(ep.product_title, ''), NULLIF(ep.shopify_handle, '')) IS NOT NULL"]
+            if has_active:
+                where_parts.append("COALESCE(ep.active, TRUE) IS TRUE")
+            where_sql = " AND ".join(where_parts)
+            cur.execute(
+                f"""
+                SELECT {', '.join(select_parts)}
+                FROM edition_products ep
+                {join_sql}
+                WHERE {where_sql}
+                ORDER BY ep.product_title NULLS LAST, ep.shopify_handle
+                LIMIT %s
+                """,
+                (safe_limit,),
+            )
+            rows = []
+            for row in cur.fetchall():
+                status = "Sold out" if row.get("sold_out") else "Active"
+                rows.append(
+                    {
+                        "title": row.get("product_title") or row.get("shopify_handle") or "",
+                        "handle": row.get("shopify_handle") or "",
+                        "category": row.get("product_type") or row.get("vendor") or "",
+                        "status": status,
+                        "edition_name": row.get("edition_name") or "",
+                        "updated_at": row.get("updated_at"),
+                    }
+                )
+            return rows
+
+
 def create_dashboard_task(title, section, *, metadata=None):
     clean_title = str(title or "").strip()
     clean_section = str(section or "").strip()
@@ -2781,14 +2887,14 @@ def create_dashboard_task(title, section, *, metadata=None):
                 entity_type="dashboard_task",
                 entity_id=task.get("id") or "",
                 new_value={
-                    "message": f"Added task: {clean_title}",
+                    "message": f"Task added: {clean_title}",
                     "page": "Dashboard",
                     "action_type": "task_added",
                     "title": clean_title,
                     "section": clean_section,
                     "metadata": metadata or {},
                 },
-                reason=f"Added task: {clean_title}",
+                reason=f"Task added: {clean_title}",
                 source="Dashboard",
             )
         conn.commit()
@@ -2830,14 +2936,14 @@ def complete_dashboard_task(task_id, *, completed_by="", metadata=None):
                 entity_type="dashboard_task",
                 entity_id=task.get("id") or "",
                 new_value={
-                    "message": f"Completed task: {task_title}",
+                    "message": f"Task completed: {task_title}",
                     "page": "Dashboard",
                     "action_type": "task_completed",
                     "title": task_title,
                     "section": task.get("section") or "",
                     "metadata": metadata or {},
                 },
-                reason=f"Completed task: {task_title}",
+                reason=f"Task completed: {task_title}",
                 source="Dashboard",
             )
         conn.commit()

@@ -44,3 +44,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_source_created
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity
     ON audit_logs(entity_type, entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_activity_event_key
+    ON audit_logs ((new_value->'metadata'->>'event_key'))
+    WHERE new_value ? 'metadata';

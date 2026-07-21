@@ -2222,6 +2222,22 @@ def inject_styles():
             vertical-align: middle;
         }
 
+        .sc-design-ideas-box {
+            background: #FFFFFF;
+            border: 1px solid #E5E0D4;
+            border-left: 3px solid #D4A54C;
+            border-radius: 8px;
+            margin-bottom: 0.55rem;
+            padding: 0.6rem 0.72rem;
+        }
+
+        .sc-design-ideas-copy {
+            color: #4E493F !important;
+            font-size: 0.86rem;
+            line-height: 1.3;
+            margin: 0;
+        }
+
         .sc-month-grid {
             background: #FFFFFF;
             border: 1px solid #E5E0D4;
@@ -7483,6 +7499,49 @@ def render_active_alerts(events, today):
     )
 
 
+def render_todays_design_ideas(local_now, events):
+    render_html_section_title("Today’s Design Ideas")
+    loaded_key = "dashboard_design_ideas_prompt_loaded"
+    with st.container():
+        summary_columns = st.columns([4.5, 1])
+        with summary_columns[0]:
+            st.markdown(
+                """
+                <div class="sc-design-ideas-box">
+                    <p class="sc-design-ideas-copy">Daily ChatGPT brief for 5 fresh product angles using the calendar and current products.</p>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with summary_columns[1]:
+            if st.button("Prepare prompt", key="dashboard-design-ideas-prepare", use_container_width=True):
+                st.session_state[loaded_key] = True
+
+    if not st.session_state.get(loaded_key):
+        return
+
+    prompt_text = sports_cave_dashboard.build_todays_design_ideas_prompt(local_now, events)
+    action_columns = st.columns([1.15, 4])
+    with action_columns[0]:
+        render_copy_prompt_button(
+            prompt_text,
+            "dashboard-design-ideas",
+            label="Copy prompt",
+            background="#D4A54C",
+            text_color="#15120B",
+            border_color="#D4A54C",
+        )
+    with action_columns[1]:
+        with st.expander("View prompt", expanded=False):
+            st.text_area(
+                "Today’s Design Ideas prompt",
+                value=prompt_text,
+                height=160,
+                label_visibility="collapsed",
+                key="dashboard-design-ideas-prompt-text",
+            )
+
+
 def render_task_group(group, tasks):
     st.markdown(f"**{html.escape(group)}**")
     group_tasks = [task for task in tasks if task.get("category") == group]
@@ -7548,7 +7607,7 @@ def render_dashboard_tasks(state):
 
     groups = st.columns(2)
     for index, group in enumerate(sports_cave_dashboard.TASK_GROUPS):
-        with groups[index]:
+        with groups[index % len(groups)]:
             render_task_group(group, state.get("tasks") or [])
 
 
@@ -7679,6 +7738,7 @@ def render_lightweight_dashboard_page():
         unsafe_allow_html=True,
     )
     render_active_alerts(events, today)
+    render_todays_design_ideas(local_now, events)
     render_dashboard_tasks(state)
     render_sporting_calendar(events, today)
     render_activity_log(local_now)

@@ -4166,6 +4166,44 @@ def prodigi_find_order_rows_from_cache(search_text):
     return matches, []
 
 
+def _prodigi_activity_order_ref(row):
+    raw = (
+        row.get("shopify_order_name")
+        or row.get("order")
+        or row.get("shopify_order_number")
+        or row.get("order_name")
+        or ""
+    )
+    text = _prodigi_clean(raw)
+    if not text:
+        return ""
+    if not text.startswith("#"):
+        text = f"#{text}"
+    return text
+
+
+def _prodigi_activity_event_key(action_type, row):
+    stable_id = (
+        row.get("row_id")
+        or row.get("edition_order_id")
+        or row.get("shopify_line_item_id")
+        or row.get("shopify_order_id")
+        or _prodigi_activity_order_ref(row)
+    )
+    if not stable_id:
+        return ""
+    return f"{action_type}:{stable_id}"
+
+
+def _prodigi_dispatch_has_certificate(row):
+    return bool(
+        _prodigi_clean(row.get("certificate_pdf_url"))
+        or _prodigi_clean(row.get("shopify_file_url"))
+        or _prodigi_clean(row.get("certificate_shopify_file_id"))
+        or _prodigi_clean(row.get("certificate_file_url"))
+    )
+
+
 def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None, ensure_schema_first=True):
     _, saved = prodigi_upsert_dispatch_row([], base_row, status=status, notes=notes, qa_answers=qa_answers)
     if not supabase_backend.is_configured():
@@ -4176,21 +4214,40 @@ def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None, en
     st.session_state["orders_allocation_snapshot_loaded"] = False
     st.session_state["orders-ledger-cache-version"] = int(st.session_state.get("orders-ledger-cache-version", 0)) + 1
     _prodigi_log_timing("dispatch save", started, f"status={status} row_id={saved.get('row_id') or ''}")
-    order_label = saved.get("shopify_order_number") or saved.get("shopify_order_name") or saved.get("order") or "order"
+    order_ref = _prodigi_activity_order_ref(saved)
     product_label = saved.get("product_title") or saved.get("product") or saved.get("prodigi_product_name") or ""
-    action_type = "order_fulfilled" if status in {"Complete", "Fulfilled in Shopify"} else "prodigi_status_updated"
-    status_label = "fulfilled" if action_type == "order_fulfilled" else f"moved to {status}"
+    completed_status = status in {"Complete", "Fulfilled in Shopify"}
+    certificate_done = completed_status and _prodigi_dispatch_has_certificate(saved)
+    if certificate_done:
+        action_type = "order_fulfilled_certificate_generated"
+        message = (
+            f"Order {order_ref} fulfilled + certificate generated"
+            if order_ref
+            else "Order fulfilled + certificate generated"
+        )
+    else:
+        action_type = "order_fulfilled" if completed_status else "prodigi_status_updated"
+        if action_type == "order_fulfilled":
+            message = f"Order {order_ref} fulfilled" if order_ref else "Order fulfilled"
+        elif order_ref:
+            message = f"Order {order_ref} moved to {status}"
+        else:
+            message = f"Order moved to {status}"
+    event_key = _prodigi_activity_event_key(action_type, saved) if completed_status else ""
     record_activity_log(
         action_type,
         "Prodigi",
-        f"{order_label} {status_label}",
+        message,
         entity_type="order",
         entity_id=saved.get("row_id") or "",
         metadata={
+            "order": order_ref,
             "status": status,
             "product": product_label,
             "qa_confirmed": saved.get("qa_confirmed"),
+            "certificate_generated": certificate_done,
         },
+        event_key=event_key,
     )
     return saved
 

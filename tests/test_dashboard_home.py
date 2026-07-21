@@ -16,6 +16,8 @@ class FakeDashboardBackend:
         self.activity_rows = []
         self.activity_calls = []
         self.task_status_calls = []
+        self.edition_products = []
+        self.edition_product_calls = []
 
     def _activity_row(self, event_type, message):
         row = {
@@ -45,7 +47,7 @@ class FakeDashboardBackend:
             "metadata": metadata or {},
         }
         self.tasks.append(task)
-        self._activity_row("task_added", f"Added task: {title}")
+        self._activity_row("task_added", f"Task added: {title}")
         return task
 
     def complete_dashboard_task(self, task_id, *, completed_by="", metadata=None):
@@ -53,7 +55,7 @@ class FakeDashboardBackend:
             if task["id"] == task_id and task["status"] == "open":
                 task["status"] = "complete"
                 task["completed_at"] = "2026-07-21T01:00:00+00:00"
-                self._activity_row("task_completed", f"Completed task: {task['title']}")
+                self._activity_row("task_completed", f"Task completed: {task['title']}")
                 return task
         return None
 
@@ -66,6 +68,10 @@ class FakeDashboardBackend:
     def list_activity_logs(self, *, start_at=None, end_at=None, limit=200):
         self.activity_calls.append({"start_at": start_at, "end_at": end_at, "limit": limit})
         return self.activity_rows[:limit]
+
+    def list_dashboard_edition_products(self, *, limit=1000):
+        self.edition_product_calls.append(limit)
+        return self.edition_products[:limit]
 
 
 class SportsCaveAuthTests(unittest.TestCase):
@@ -105,7 +111,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertEqual(task["text"], "Refresh NFL collection")
         self.assertEqual(state["tasks"][0]["text"], "Refresh NFL collection")
-        self.assertEqual(backend.activity_rows[0]["reason"], "Added task: Refresh NFL collection")
+        self.assertEqual(backend.activity_rows[0]["reason"], "Task added: Refresh NFL collection")
 
     def test_dashboard_task_list_loads_open_tasks_only(self):
         backend = FakeDashboardBackend()
@@ -134,8 +140,8 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertEqual(completed["status"], "complete")
         self.assertEqual(state["tasks"], [])
-        self.assertEqual(state["activity_log"][0]["message"], "Completed task: Refresh NFL collection")
-        self.assertEqual(state["activity_log"][1]["message"], "Added task: Refresh NFL collection")
+        self.assertEqual(state["activity_log"][0]["message"], "Task completed: Refresh NFL collection")
+        self.assertEqual(state["activity_log"][1]["message"], "Task added: Refresh NFL collection")
 
     def test_task_cache_is_cleared_after_add_and_complete(self):
         backend = FakeDashboardBackend()
@@ -203,6 +209,110 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual([entry["message"] for entry in last_7_days], ["Today", "Seven day edge"])
         self.assertEqual([entry["message"] for entry in month], ["Today", "Seven day edge", "This month"])
         self.assertEqual([entry["message"] for entry in all_time], ["Today", "Seven day edge", "This month", "Older"])
+
+    def test_new_task_categories_are_available(self):
+        expected = {
+            "Collections to update",
+            "New designs to complete",
+            "Mockups for existing product",
+            "Product uploaded",
+            "Design updated",
+            "New design made",
+            "New product with mockups uploaded",
+        }
+
+        self.assertTrue(expected.issubset(set(sports_cave_dashboard.TASK_GROUPS)))
+        self.assertEqual(
+            sports_cave_dashboard.normalize_task_category("New product with mockups uploaded"),
+            "New product with mockups uploaded",
+        )
+
+    def test_design_ideas_prompt_uses_calendar_and_existing_products(self):
+        now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
+        events = [
+            {
+                "end_date": "2026-07-26",
+                "id": "f1-hungary",
+                "importance": 5,
+                "regions": ["Australia", "UK", "USA"],
+                "sport": "Motorsport",
+                "start_date": "2026-07-24",
+                "title": "Formula 1 Hungarian Grand Prix 2026",
+            }
+        ]
+        products = [
+            {
+                "title": "Six Laps Ahead",
+                "handle": "six-laps-ahead",
+                "category": "Motorsport",
+                "status": "Active",
+            }
+        ]
+
+        prompt = sports_cave_dashboard.build_design_ideas_prompt(now, events, products)
+
+        self.assertIn("Formula 1 Hungarian Grand Prix 2026", prompt)
+        self.assertIn("Six Laps Ahead", prompt)
+        self.assertIn("six-laps-ahead", prompt)
+        self.assertIn("do-not-duplicate", prompt)
+        self.assertIn("Do not recommend an existing product", prompt)
+        self.assertIn("Recommend exactly 5 ideas", prompt)
+        self.assertIn("Golf", prompt)
+        self.assertIn("Suggested task wording", prompt)
+
+    def test_design_ideas_prompt_fetches_lightweight_edition_products(self):
+        backend = FakeDashboardBackend()
+        backend.edition_products = [
+            {"title": "The Final Lap", "handle": "the-final-lap", "category": "Motorsport", "status": "Active"}
+        ]
+        now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            prompt = sports_cave_dashboard.build_todays_design_ideas_prompt(now, events=[])
+
+        self.assertEqual(backend.edition_product_calls, [1000])
+        self.assertIn("The Final Lap", prompt)
+        self.assertIn("the-final-lap", prompt)
+
+    def test_activity_log_display_hides_developer_wording(self):
+        rows = [
+            {
+                "event_type": "edition_product_updated",
+                "reason": "Edition Ops Shopify metafield mirror",
+                "source": "Edition ops",
+                "created_at": "2026-07-21T00:00:00+00:00",
+            },
+            {
+                "event_type": "order_allocated",
+                "reason": "Auto allocation during Shopify order sync.",
+                "source": "Orders",
+                "created_at": "2026-07-21T00:00:00+00:00",
+            },
+        ]
+
+        messages = [sports_cave_dashboard.activity_from_audit_row(row)["message"] for row in rows]
+        combined = " ".join(messages).casefold()
+
+        self.assertEqual(messages, ["Edition updated", "Order updated"])
+        for term in ("metafield", "sync", "allocation", "supabase", "backend", "payload", "mirror"):
+            self.assertNotIn(term, combined)
+
+    def test_fulfilled_order_certificate_activity_display(self):
+        entry = sports_cave_dashboard.activity_from_audit_row(
+            {
+                "event_type": "order_fulfilled_certificate_generated",
+                "new_value": {
+                    "message": "Order #SC1234 fulfilled + certificate generated",
+                    "page": "Prodigi",
+                    "action_type": "order_fulfilled_certificate_generated",
+                    "metadata": {"order": "#SC1234"},
+                },
+                "source": "Prodigi",
+                "created_at": "2026-07-21T00:00:00+00:00",
+            }
+        )
+
+        self.assertEqual(entry["message"], "Order #SC1234 fulfilled + certificate generated")
 
 
 class SportsCaveCalendarTests(unittest.TestCase):
@@ -316,10 +426,20 @@ class DashboardRenderContractTests(unittest.TestCase):
             "get_edition_ops(",
             "get_os_pages(",
             "get_ads_page(",
+            "ensure_schema(",
         ]
         for text in forbidden:
             with self.subTest(text=text):
                 self.assertNotIn(text, dashboard_source)
+
+    def test_home_product_prompt_helper_does_not_run_full_schema(self):
+        source = (ROOT / "supabase_backend.py").read_text(encoding="utf-8")
+        helper_source = source[
+            source.index("def list_dashboard_edition_products") : source.index("\n\ndef create_dashboard_task")
+        ]
+
+        self.assertNotIn("ensure_schema(", helper_source)
+        self.assertIn("SET LOCAL statement_timeout", helper_source)
 
     def test_dashboard_no_longer_renders_manual_custom_calendar_ui(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")

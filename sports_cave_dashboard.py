@@ -1,18 +1,28 @@
 from datetime import date, datetime, time, timedelta, timezone
 import json
 from pathlib import Path
+import re
 from time import monotonic
 
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 SPORTING_CALENDAR_PATH = DATA_DIR / "sporting_calendar.json"
-TASK_GROUPS = ("Collections to update", "New designs to complete")
+TASK_GROUPS = (
+    "Collections to update",
+    "New designs to complete",
+    "Mockups for existing product",
+    "Product uploaded",
+    "Design updated",
+    "New design made",
+    "New product with mockups uploaded",
+)
 REGIONS = ("Australia", "USA", "UK", "Canada", "New Zealand")
 ACTIVITY_LOG_LIMIT = 200
 TASK_CACHE_TTL_SECONDS = 15
 ACTIVITY_CACHE_TTL_SECONDS = 20
 CALENDAR_CACHE_TTL_SECONDS = 300
+EDITION_PRODUCT_CACHE_TTL_SECONDS = 300
 DEFAULT_UPCOMING_DAYS = 60
 ACTIVITY_VIEW_TODAY = "Today"
 ACTIVITY_VIEW_LAST_7_DAYS = "Last 7 days"
@@ -33,6 +43,7 @@ ACTIVITY_VIEW_LIMITS = {
 _TASK_CACHE = {}
 _ACTIVITY_CACHE = {}
 _CALENDAR_CACHE = {}
+_EDITION_PRODUCT_CACHE = {}
 
 
 class DashboardStorageError(RuntimeError):
@@ -86,9 +97,14 @@ def clear_calendar_cache():
     _CALENDAR_CACHE.clear()
 
 
+def clear_edition_product_cache():
+    _EDITION_PRODUCT_CACHE.clear()
+
+
 def clear_dashboard_caches():
     clear_task_cache()
     clear_activity_cache()
+    clear_edition_product_cache()
 
 
 def get_supabase_backend():
@@ -191,12 +207,175 @@ def clean_activity_source(value):
     if not source:
         return "Sports Cave"
     known = {
+        "ads": "Ads",
+        "dashboard": "Dashboard",
+        "edition ops": "Edition Ops",
         "sports cave os": "Sports Cave",
         "manual app": "Edition Ops",
+        "orders": "Orders",
+        "prodigi": "Prodigi",
+        "social media reels studio": "Social Media Reels Studio",
         "supabase ledger": "Orders",
         "sports cave os manual override": "Edition Ops",
     }
     return known.get(source.casefold(), source[:1].upper() + source[1:])
+
+
+_TECHNICAL_ACTIVITY_TERMS = (
+    "metafield",
+    "sync",
+    "allocation",
+    "schema",
+    "api",
+    "database",
+    "supabase",
+    "audit",
+    "webhook",
+    "payload",
+    "mirror",
+    "backend",
+)
+
+
+def _compact_text(value):
+    return re.sub(r"\s+", " ", str(value or "").strip())
+
+
+def _metadata_text(metadata, *keys):
+    metadata = metadata or {}
+    for key in keys:
+        value = metadata.get(key)
+        if value not in (None, ""):
+            return _compact_text(value)
+    return ""
+
+
+def _text_after_prefix(message, prefixes):
+    lower_message = str(message or "").casefold()
+    for prefix in prefixes:
+        lower_prefix = prefix.casefold()
+        if lower_message.startswith(lower_prefix):
+            return _compact_text(str(message)[len(prefix) :].strip(" :-"))
+    if ":" in str(message or ""):
+        return _compact_text(str(message).split(":", 1)[1])
+    return ""
+
+
+def _format_order_ref(value):
+    text = _compact_text(value)
+    if not text:
+        return ""
+    if text.casefold().startswith("order "):
+        text = text[6:].strip()
+    if text and not text.startswith("#"):
+        text = f"#{text}"
+    return text
+
+
+def _order_ref_from_activity(message, metadata):
+    direct = _metadata_text(
+        metadata,
+        "order",
+        "order_name",
+        "shopify_order_name",
+        "shopify_order_number",
+        "order_number",
+    )
+    if direct:
+        return _format_order_ref(direct)
+    match = re.search(r"(#[A-Z]{0,8}\d[\w-]*|\bSC\d[\w-]*\b|\b\d{3,}\b)", str(message or ""), re.IGNORECASE)
+    if match:
+        return _format_order_ref(match.group(1))
+    return ""
+
+
+def _product_label_from_activity(message, metadata):
+    label = _metadata_text(
+        metadata,
+        "product",
+        "product_title",
+        "product_name",
+        "title",
+        "prompt_name",
+        "handle",
+        "shopify_handle",
+        "filename",
+    )
+    if label:
+        return label
+    return _text_after_prefix(
+        message,
+        (
+            "Generated ad prompt",
+            "Saved design prompt",
+            "Saved reel prompt",
+            "Uploaded reel video",
+            "Generated mockup",
+            "Created mockup",
+            "Exported mockup pack",
+            "Updated edition settings",
+            "Generated certificate",
+            "Uploaded certificate",
+        ),
+    )
+
+
+def _task_label_from_activity(message, metadata):
+    return _metadata_text(metadata, "title", "task", "task_title") or _text_after_prefix(
+        message,
+        ("Added task", "Task added", "Completed task", "Task completed"),
+    )
+
+
+def _message_has_technical_terms(message):
+    lowered = str(message or "").casefold()
+    return any(term in lowered for term in _TECHNICAL_ACTIVITY_TERMS)
+
+
+def clean_activity_message(action_type, message, *, metadata=None, entity_type="", entity_id=""):
+    metadata = metadata or {}
+    action = str(action_type or "").strip().casefold()
+    clean_message = _compact_text(message)
+    product_label = _product_label_from_activity(clean_message, metadata)
+    order_ref = _order_ref_from_activity(clean_message, metadata)
+
+    if action == "order_fulfilled_certificate_generated" or "fulfilled + certificate generated" in clean_message.casefold():
+        return f"Order {order_ref} fulfilled + certificate generated" if order_ref else "Order fulfilled + certificate generated"
+    if action in {"task_added", "dashboard_task_added"}:
+        task_label = _task_label_from_activity(clean_message, metadata)
+        return f"Task added: {task_label}" if task_label else "Task added"
+    if action in {"task_completed", "dashboard_task_completed"}:
+        task_label = _task_label_from_activity(clean_message, metadata)
+        return f"Task completed: {task_label}" if task_label else "Task completed"
+    if action in {"certificate_generated", "certificate_uploaded"}:
+        if order_ref:
+            return f"Certificate generated for Order {order_ref}"
+        if product_label:
+            return f"Certificate generated: {product_label}"
+        return "Certificate generated"
+    if action == "order_fulfilled":
+        return f"Order {order_ref} fulfilled" if order_ref else "Order fulfilled"
+    if action in {"product_edition_updated", "edition_product_updated", "edition_updated"} or (
+        "edition ops shopify" in clean_message.casefold() or "metafield" in clean_message.casefold()
+    ):
+        return f"Edition updated: {product_label}" if product_label and not _message_has_technical_terms(product_label) else "Edition updated"
+    if action in {"mockup_generated", "mockup_made"}:
+        return f"Mockup made: {product_label}" if product_label else "Mockup made"
+    if action in {"mockup_zip_exported", "mockup_pack_exported", "prompt_pack_exported", "mockup_exported"}:
+        return f"Mockup pack exported: {product_label}" if product_label else "Mockup pack exported"
+    if action == "product_uploaded":
+        return f"Product uploaded: {product_label}" if product_label else "Product uploaded"
+    if action == "ad_prompt_generated":
+        return f"Ad prompt made: {product_label}" if product_label else "Ad prompt made"
+    if action == "design_prompt_saved":
+        return f"Design prompt saved: {product_label}" if product_label else "Design prompt saved"
+    if action in {"reel_prompt_saved", "reel_video_uploaded", "reel_saved"}:
+        return f"Reel saved: {product_label}" if product_label else "Reel saved"
+    if "auto allocation" in clean_message.casefold():
+        return f"Order updated: {order_ref}" if order_ref else "Order updated"
+    if not clean_message or _message_has_technical_terms(clean_message):
+        return humanise_event_type(action)
+    return clean_message
 
 
 def activity_from_audit_row(row):
@@ -217,6 +396,13 @@ def activity_from_audit_row(row):
     action_type = (
         str(row.get("activity_action_type") or "").strip()
         or str(payload.get("action_type") or row.get("event_type") or "").strip()
+    )
+    message = clean_activity_message(
+        action_type,
+        message,
+        metadata=metadata,
+        entity_type=row.get("entity_type") or "",
+        entity_id=row.get("entity_id") or "",
     )
     return {
         "id": str(row.get("id") or ""),
@@ -352,6 +538,39 @@ def load_dashboard_state(
     except DashboardStorageError as error:
         state["activity_error"] = str(error)
     return state
+
+
+def list_existing_edition_products(limit=1000):
+    try:
+        safe_limit = max(min(int(limit or 1000), 1500), 1)
+    except (TypeError, ValueError):
+        safe_limit = 1000
+    cache_key = ("edition_products", safe_limit)
+    cached = _cache_get(_EDITION_PRODUCT_CACHE, cache_key)
+    if cached is not None:
+        return cached
+    try:
+        backend = get_supabase_backend()
+        if not hasattr(backend, "list_dashboard_edition_products"):
+            raise DashboardStorageError("Product list is unavailable right now.")
+        products = backend.list_dashboard_edition_products(limit=safe_limit)
+        normalised = []
+        for product in products or []:
+            title = _compact_text(product.get("title") or product.get("product_title") or "")
+            handle = _compact_text(product.get("handle") or product.get("shopify_handle") or "")
+            if not title and not handle:
+                continue
+            normalised.append(
+                {
+                    "title": title or handle,
+                    "handle": handle,
+                    "category": _compact_text(product.get("category") or product.get("sport") or product.get("product_type") or ""),
+                    "status": _compact_text(product.get("status") or ""),
+                }
+            )
+        return _cache_set(_EDITION_PRODUCT_CACHE, cache_key, normalised, EDITION_PRODUCT_CACHE_TTL_SECONDS)
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
 
 
 def greeting_for_datetime(local_dt):
@@ -519,3 +738,101 @@ def format_event_date_range(event):
             return f"{start.strftime('%d')} - {end.strftime('%d %b %Y')}"
         return f"{start.strftime('%d %b')} - {end.strftime('%d %b %Y')}"
     return f"{start.strftime('%d %b %Y')} - {end.strftime('%d %b %Y')}"
+
+
+def sporting_calendar_prompt_summary(events, today, *, limit=28, upcoming_days=180):
+    selected = filter_calendar_events(
+        events or [],
+        today,
+        status="Active/upcoming",
+        upcoming_days=upcoming_days,
+    )
+    if not selected:
+        return "- No active or upcoming Sports Cave calendar moments loaded."
+    lines = []
+    for event in selected[:limit]:
+        status = event_status(event, today)
+        region_text = ", ".join(event.get("regions") or [])
+        lines.append(
+            f"- {event.get('title') or 'Sports moment'} ({event.get('sport') or 'Sport'}, "
+            f"{region_text}; {format_event_date_range(event)}; {status})"
+        )
+    if len(selected) > limit:
+        lines.append(f"- Plus {len(selected) - limit} more calendar moments in the Sports Cave calendar.")
+    return "\n".join(lines)
+
+
+def edition_products_prompt_summary(products, *, warning=""):
+    if warning:
+        return warning
+    lines = []
+    for product in products or []:
+        title = _compact_text(product.get("title") or product.get("product_title") or "")
+        handle = _compact_text(product.get("handle") or product.get("shopify_handle") or "")
+        category = _compact_text(product.get("category") or product.get("sport") or product.get("product_type") or "")
+        status = _compact_text(product.get("status") or "")
+        if not title and not handle:
+            continue
+        detail_parts = [part for part in (handle, category, status) if part]
+        detail = f" ({'; '.join(detail_parts)})" if detail_parts else ""
+        lines.append(f"- {title or handle}{detail}")
+    if not lines:
+        return "- No existing Edition Ops products were loaded."
+    return "\n".join(lines)
+
+
+def build_design_ideas_prompt(local_now, events, products, *, product_warning=""):
+    local_now = local_now or datetime.now(timezone.utc)
+    today = local_now.date()
+    calendar_summary = sporting_calendar_prompt_summary(events or [], today)
+    product_summary = edition_products_prompt_summary(products or [], warning=product_warning)
+    today_label = today.strftime("%d %B %Y")
+    return f"""Act as Sports Cave's live product research strategist.
+
+Today is {today_label}.
+
+Use live web research to study today's current sports news, trends, major events, anniversaries, finals, rivalries, injuries, returns, retirements, title races, championship moments, awards, transfer/signing stories, and upcoming calendar moments across AU, USA, UK, Canada, and NZ.
+
+Use this Sports Cave sporting calendar context:
+{calendar_summary}
+
+Use this existing Edition Ops product list as do-not-duplicate context:
+{product_summary}
+
+Sports Cave sells premium framed limited-edition sports collector artwork. Each idea must feel wall-worthy, emotional, nostalgic or culturally relevant, and strong enough to become a best seller.
+
+Do not recommend an existing product unless you label it as REWORK EXISTING PRODUCT and explain the refresh angle.
+
+Recommend exactly 5 ideas.
+
+Cover Sports Cave categories such as Motorsport, NBA, Football/Soccer, Cricket, Tennis, Golf, Rugby Union, Baseball, NFL, Combat, Ice Hockey, Horse Racing, and Other.
+
+Prefer ideas that could become premium limited-edition framed collector pieces. Include classics, legends, rivalries, current trending stars, emotional moments, and country-specific demand.
+
+For each idea, provide:
+1. Product title
+2. Sport/category
+3. Country priority
+4. Why this has demand right now
+5. Fan emotion
+6. Visual direction
+7. Best mockup angle
+8. Ad hook
+9. Suggested task wording to add to the dashboard
+
+Be commercially honest. Prioritise ideas most likely to sell."""
+
+
+def build_todays_design_ideas_prompt(local_now, events=None):
+    product_warning = ""
+    products = []
+    try:
+        products = list_existing_edition_products()
+    except DashboardStorageError:
+        product_warning = "- Existing Edition Ops product list could not be loaded."
+    return build_design_ideas_prompt(
+        local_now or datetime.now(timezone.utc),
+        events if events is not None else load_calendar_events(),
+        products,
+        product_warning=product_warning,
+    )
