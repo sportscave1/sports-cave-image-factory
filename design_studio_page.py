@@ -17,6 +17,8 @@ BASE_DIR = Path(__file__).resolve().parent
 EXPIRED_EDITION_NEXT_CHAPTER_PROMPT_PATH = (
     BASE_DIR / "design_studio_prompts" / "expired_edition_next_chapter_prompt.txt"
 )
+NEW_DESIGN_TASK_CATEGORY = "New designs to complete"
+MANUAL_NEW_DESIGN_TASK_OPTION = "Enter task manually"
 
 
 UPGRADE_EXISTING_DESIGN_VIDEO_URL = (
@@ -561,23 +563,106 @@ Only find and display the images in this chat.
 """
 
 
-DESIGN_REALISM_ACCURACY_LOCK = """
-REALISM + IMAGE ACCURACY LOCK - MANDATORY
+DESIGN_GENERATION_PROMPT_TEMPLATE = """
+From the research and images above, create a premium Sports Cave limited-edition collector artwork for this task:
 
-Use the selected images above as strict visual references. Keep the subject realistic and faithful to the supplied images.
+TASK:
+[PASTED TASK]
 
-Preserve the exact facial features, expression, age, skin tone, hair, body shape, pose, uniform, kit, jersey number, badges, sponsor marks, logos, colours, car livery, helmet, equipment, trophy shape, stadium/track details and era shown in the reference images.
+Use the selected hero image as the main subject reference.
+Use the selected background/support image as the atmosphere and story reference.
+Use the selected detail references only where they improve realism, nostalgia, or collector value.
+Use the Sports Cave limited-edition plaque attached to this project and integrate it naturally.
 
-Do not redesign the athlete, driver, car, uniform, logos, team colours or facial identity.
-Do not make the subject look AI-generated, plastic, cartoon, generic, over-smoothed or fake.
-Do not warp faces, hands, limbs, bodies, wheels, cars, numbers, text, logos or uniforms.
-Do not mirror images if it reverses numbers, logos or sponsor text.
-Do not mix different eras, teams, uniforms, liveries, trophies or incorrect background details.
-Keep all anatomy, proportions, contact shadows, lighting direction and perspective natural and believable.
+Create the artwork in landscape 4:3 ratio.
 
-The Sports Cave upgrade should come from premium cinematic composition, atmosphere, lighting, depth, title treatment and collector plaque integration - not from changing the real identity or accurate details of the reference images.
+This must feel like premium limited-edition sports wall art for fans who collect moments, not posters.
 
-Keep the final artwork realistic, print-ready, collector-worthy and wall-worthy.
+The artwork must feel:
+Premium
+Cinematic
+Realistic
+Nostalgic
+Emotional
+Collector-focused
+Masculine
+Limited edition
+Framed-first
+Wall-worthy
+Timeless
+Print-ready
+
+The final reaction should be:
+"I need that on my wall."
+
+Core emotional hook:
+Build the design around legend + moment + nostalgia + darkness + subtle gold + framed collector energy.
+The design must instantly answer:
+Why does this moment matter?
+What memory does it unlock?
+Why would a real fan proudly hang this?
+
+Realism and reference accuracy lock:
+Use the selected images as strict visual references.
+Preserve accurate facial features, age, expression, body shape, pose, kit, jersey, car body, livery, colours, trophy shape, equipment, stadium, track, era, and lighting direction.
+Do not redesign the athlete, driver, car, uniform, trophy, venue, or moment.
+Do not make the subject look AI-generated, plastic, cartoon, generic, over-smoothed, or fake.
+Do not warp faces, hands, limbs, bodies, wheels, cars, numbers, text, plaques, logos, or uniforms.
+Do not mirror images if it reverses numbers, logos, sponsor text, or kit details.
+Do not mix different eras, teams, cars, trophies, uniforms, liveries, or venues.
+Subjects must feel physically present with correct shadows, contact, perspective, texture, and depth.
+
+Sports Cave collector style:
+Use a dark cinematic foundation:
+deep black, charcoal, smoke, stadium shadows, arena darkness, garage shadows, vintage grit, track dust, or warm spotlight atmosphere.
+
+Use gold sparingly only for premium emphasis:
+title accents, thin dividers, plaque detail, edition number, small collector details, subtle highlights.
+
+Do not flood the design with gold.
+
+Composition:
+The subject must be the hero.
+Use strong negative space.
+Keep the layout clean and intentional.
+Make it readable as a Shopify thumbnail.
+Make it look powerful inside a black frame.
+Avoid clutter, giant logos, excessive text, fake badges, random effects, fireworks, cheap glows, or social media graphic energy.
+
+Title:
+Use a short, powerful, cinematic collector title based on the research.
+The title should feel like a movie title or legendary chapter, not a product name.
+Use elegant serif or cinematic uppercase typography.
+Keep text minimal and premium.
+Do not make it look like an ad.
+
+Limited-edition plaque:
+Use the attached Sports Cave plaque as a real collector plate.
+Place it where it improves the artwork most: bottom left, bottom centre, bottom right, near the title, or in darker negative space.
+It must be readable, sharp, subtle, premium, properly lit, and integrated naturally.
+It must never overpower the subject.
+
+Sport-specific atmosphere:
+If NBA: dark arena, court glow, crowd energy, championship spotlight.
+If football/soccer: stadium lights, pitch glow, trophy atmosphere, national or club pride.
+If AFL/NRL: floodlights, turf texture, rivalry tension, old-school stadium emotion.
+If cricket: MCG-style atmosphere, pitch texture, sunset, test-match nostalgia.
+If motorsport: realistic race cars, track banking, pit lane, garage shadows, sparks, smoke, asphalt texture, golden-hour or night-race pressure.
+If boxing/UFC: ring lighting, harsh shadows, sweat, black-and-white grit, dramatic spotlights.
+If horse racing: track dust, grandstand atmosphere, prestige, championship heritage.
+If tennis/golf: clean luxury, championship heritage, controlled lighting, premium club atmosphere.
+
+Final output standard:
+A premium 4:3 landscape Sports Cave limited-edition collector artwork.
+It should feel like:
+A framed collector piece
+A tribute to sporting greatness
+A limited-edition drop
+A man cave centrepiece
+A piece of sporting history
+
+Do not stop at "good enough."
+Refine toward realism, emotion, collectibility, and wall-worthy bestseller potential.
 """
 
 
@@ -1282,6 +1367,36 @@ def _task_or_placeholder(task_text: str) -> str:
     return task if task else "[PASTED TASK]"
 
 
+def list_new_design_task_titles(list_tasks_func=None) -> list[str]:
+    if list_tasks_func is None:
+        try:
+            from sports_cave_dashboard import list_tasks as list_tasks_func
+        except Exception:
+            return []
+    try:
+        tasks = list_tasks_func(status="open")
+    except TypeError:
+        tasks = list_tasks_func("open")
+    except Exception:
+        return []
+
+    titles = []
+    seen = set()
+    for task in tasks or []:
+        section = str(task.get("section") or task.get("category") or "").strip()
+        if section != NEW_DESIGN_TASK_CATEGORY:
+            continue
+        title = str(task.get("title") or task.get("text") or "").strip()
+        if not title:
+            continue
+        normalised_title = title.casefold()
+        if normalised_title in seen:
+            continue
+        seen.add(normalised_title)
+        titles.append(title)
+    return titles
+
+
 def build_design_research_prompt(task_text: str) -> str:
     return _clean_prompt(DESIGN_RESEARCH_PROMPT_TEMPLATE).replace(
         "[PASTED TASK]",
@@ -1294,21 +1409,10 @@ def build_design_image_carousel_prompt(task_text: str, research_answer: str) -> 
 
 
 def build_design_generation_prompt(task_text: str) -> str:
-    task = _task_or_placeholder(task_text)
-    intro = f"""
-From the research and images above you found, create me a premium Sports Cave limited-edition collector artwork for this task:
-
-TASK
-
-{task}
-
-Use the selected hero image, background/support image, detail references and creative direction from the research above.
-
-{_clean_prompt(DESIGN_REALISM_ACCURACY_LOCK)}
-
-Continue with this Sports Cave design system:
-"""
-    return f"{_clean_prompt(intro)}\n\n{_clean_prompt(SPORTS_CAVE_MASTER_DESIGN_SYSTEM_PROMPT)}"
+    return _clean_prompt(DESIGN_GENERATION_PROMPT_TEMPLATE).replace(
+        "[PASTED TASK]",
+        _task_or_placeholder(task_text),
+    )
 
 
 def _design_studio_prompt_id(key: str) -> str:
@@ -1561,11 +1665,28 @@ def render_new_design_tab():
         "3. Once the image carousel is shown, run the Design Generation Prompt in the same chat."
     )
     st.markdown("### Step 1 - Research")
+    task_options = list_new_design_task_titles()
+    if task_options:
+        selected_task = st.selectbox(
+            "Choose design task",
+            [MANUAL_NEW_DESIGN_TASK_OPTION, *task_options],
+            key="design-studio-new-design-task-select",
+        )
+        selected_task_text = "" if selected_task == MANUAL_NEW_DESIGN_TASK_OPTION else selected_task
+    else:
+        selected_task_text = ""
+        st.selectbox(
+            "Choose design task",
+            ["No new design tasks waiting"],
+            disabled=True,
+            key="design-studio-new-design-task-select-empty",
+        )
     task_text = st.text_area(
         "Paste design task",
+        value=selected_task_text,
         placeholder='Paste a task from "New designs to complete" here...',
         height=110,
-        key="design-studio-task-research-input",
+        key=f"design-studio-task-research-input::{hashlib.sha1(selected_task_text.encode('utf-8')).hexdigest()[:10]}",
     )
     research_prompt = build_design_research_prompt(task_text)
     render_generated_prompt_box(

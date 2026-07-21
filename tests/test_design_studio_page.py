@@ -42,26 +42,51 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
     def test_design_generation_prompt_uses_research_context_and_design_system(self):
         prompt = design_studio_page.build_design_generation_prompt("Bathurst Brock tribute")
 
-        self.assertIn("From the research and images above you found", prompt)
+        self.assertIn(
+            "From the research and images above, create a premium Sports Cave limited-edition collector artwork",
+            prompt,
+        )
+        self.assertIn("TASK:\nBathurst Brock tribute", prompt)
         self.assertIn("Bathurst Brock tribute", prompt)
-        self.assertIn("REALISM + IMAGE ACCURACY LOCK - MANDATORY", prompt)
-        self.assertIn("Use the selected images above as strict visual references.", prompt)
-        self.assertIn("Do not redesign the athlete, driver, car, uniform", prompt)
-        self.assertIn("Do not mirror images if it reverses numbers, logos or sponsor text.", prompt)
-        self.assertIn("Sports Cave Master Design System Prompt", prompt)
-        self.assertIn("legend + moment + nostalgia + darkness + gold + framed collector energy", prompt)
-        self.assertIn("Built for Sports Cave best seller potential.", prompt)
-        self.assertLess(
-            prompt.index(
-                "Use the selected hero image, background/support image, detail references "
-                "and creative direction from the research above."
-            ),
-            prompt.index("REALISM + IMAGE ACCURACY LOCK - MANDATORY"),
+        self.assertIn("Use the selected hero image as the main subject reference.", prompt)
+        self.assertIn("Use the Sports Cave limited-edition plaque attached to this project", prompt)
+        self.assertIn("This must feel like premium limited-edition sports wall art", prompt)
+        self.assertIn("Realism and reference accuracy lock:", prompt)
+        self.assertIn("Use the selected images as strict visual references.", prompt)
+        self.assertIn("Do not redesign the athlete, driver, car, uniform, trophy, venue, or moment.", prompt)
+        self.assertIn("Do not mirror images if it reverses numbers, logos, sponsor text, or kit details.", prompt)
+        self.assertIn("legend + moment + nostalgia + darkness + subtle gold + framed collector energy", prompt)
+        self.assertIn("Use a dark cinematic foundation:", prompt)
+        self.assertIn("Use gold sparingly only for premium emphasis:", prompt)
+        self.assertIn("It must never overpower the subject.", prompt)
+        self.assertIn("If motorsport: realistic race cars", prompt)
+        self.assertIn("Refine toward realism, emotion, collectibility, and wall-worthy bestseller potential.", prompt)
+        self.assertNotIn("Continue with this Sports Cave design system:", prompt)
+        self.assertNotIn("Sports Cave Master Design System Prompt", prompt)
+
+    def test_new_design_task_titles_use_open_new_design_tasks_only(self):
+        tasks = [
+            {"title": "Create New NASCAR Design", "section": "New designs to complete"},
+            {"title": "Refresh NFL collection", "section": "Collections to update"},
+            {"text": "Create New Golf Design", "category": "New designs to complete"},
+            {"title": "Create New NASCAR Design", "section": "New designs to complete"},
+            {"title": "", "section": "New designs to complete"},
+        ]
+
+        def fake_list_tasks(status="open"):
+            self.assertEqual(status, "open")
+            return tasks
+
+        self.assertEqual(
+            design_studio_page.list_new_design_task_titles(fake_list_tasks),
+            ["Create New NASCAR Design", "Create New Golf Design"],
         )
-        self.assertLess(
-            prompt.index("REALISM + IMAGE ACCURACY LOCK - MANDATORY"),
-            prompt.index("Continue with this Sports Cave design system:"),
-        )
+
+    def test_new_design_task_titles_fall_back_to_empty_list(self):
+        def failing_list_tasks(status="open"):
+            raise RuntimeError("saving unavailable")
+
+        self.assertEqual(design_studio_page.list_new_design_task_titles(failing_list_tasks), [])
 
     def test_new_design_tab_is_second_after_upgrade_existing_design(self):
         source = (ROOT / "design_studio_page.py").read_text(encoding="utf-8")
@@ -86,6 +111,8 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
 
         self.assertLess(renderer.index("Step 1 - Research"), renderer.index("Step 2 - Find Images"))
         self.assertLess(renderer.index("Step 2 - Find Images"), renderer.index("Step 3 - Generate Design"))
+        self.assertIn("Choose design task", renderer)
+        self.assertIn("No new design tasks waiting", renderer)
         self.assertNotIn("Paste research answer", renderer)
         self.assertIn("Copy Find Images Prompt", renderer)
 
