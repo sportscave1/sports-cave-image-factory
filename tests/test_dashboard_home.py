@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import sc_auth
 import sports_cave_dashboard
+import sports_sales_calendar
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -408,16 +409,134 @@ class SportsCaveCalendarTests(unittest.TestCase):
         )
         self.assertEqual([event["id"] for event in filtered], ["active", "soon"])
 
-    def test_calendar_data_excludes_afl_nrl_and_includes_sales_golf(self):
+    def test_calendar_data_includes_requested_sports_and_sales(self):
         events = sports_cave_dashboard.load_calendar_events(ROOT / "data" / "sporting_calendar.json")
         sports = {event.get("sport") for event in events}
         titles = {event.get("title") for event in events}
 
-        self.assertNotIn("AFL", sports)
-        self.assertNotIn("NRL", sports)
+        self.assertIn("AFL", sports)
+        self.assertIn("NRL", sports)
         self.assertIn("Golf", sports)
         self.assertIn("Sales", sports)
         self.assertIn("Black Friday and Cyber Monday 2027", titles)
+
+    def test_calendar_range_and_month_selector_options(self):
+        options = sports_sales_calendar.month_options()
+
+        self.assertEqual(sports_sales_calendar.CALENDAR_START, date(2026, 7, 21))
+        self.assertEqual(sports_sales_calendar.CALENDAR_END, date(2027, 12, 31))
+        self.assertEqual(options[0], date(2026, 7, 1))
+        self.assertEqual(options[-1], date(2027, 12, 1))
+        self.assertEqual(len(options), 18)
+        self.assertEqual(
+            [sports_sales_calendar.month_label(month) for month in options],
+            [
+                "July 2026", "August 2026", "September 2026", "October 2026",
+                "November 2026", "December 2026", "January 2027", "February 2027",
+                "March 2027", "April 2027", "May 2027", "June 2027", "July 2027",
+                "August 2027", "September 2027", "October 2027", "November 2027",
+                "December 2027",
+            ],
+        )
+
+    def test_calendar_market_codes_and_event_kinds_are_valid(self):
+        events = sports_cave_dashboard.load_calendar_events(ROOT / "data" / "sporting_calendar.json")
+
+        errors = {
+            event.get("id"): sports_sales_calendar.validate_event(event)
+            for event in events
+            if sports_sales_calendar.validate_event(event)
+        }
+
+        self.assertEqual(errors, {})
+
+    def test_confirmed_events_sort_before_tbc_events(self):
+        events = [
+            {
+                "id": "later",
+                "markets": ["AU"],
+                "sport": "AFL",
+                "start_date": "2026-08-20",
+                "end_date": "2026-08-20",
+                "title": "Later confirmed",
+            },
+            {
+                "id": "tbc",
+                "markets": ["AU"],
+                "sport": "AFL",
+                "date_precision": "month",
+                "start_month": "2026-08",
+                "title": "August TBC",
+            },
+            {
+                "id": "earlier",
+                "markets": ["US"],
+                "sport": "NFL",
+                "start_date": "2026-08-10",
+                "end_date": "2026-08-10",
+                "title": "Earlier confirmed",
+            },
+        ]
+
+        ordered = sports_sales_calendar.sorted_calendar_events(events)
+
+        self.assertEqual([event["id"] for event in ordered], ["earlier", "later", "tbc"])
+
+    def test_tbc_events_never_enter_exact_upcoming_or_alert_logic(self):
+        today = date(2027, 5, 1)
+        tbc_event = {
+            "alert_label": "Final soon",
+            "date_precision": "month",
+            "id": "tbc-final",
+            "importance": 5,
+            "markets": ["AU"],
+            "regions": ["Australia"],
+            "sport": "AFL",
+            "start_month": "2027-05",
+            "title": "Final - date TBC",
+        }
+
+        self.assertEqual(sports_cave_dashboard.event_status(tbc_event, today), "tbc")
+        self.assertIsNone(sports_cave_dashboard.days_until_event(tbc_event, today))
+        self.assertEqual(sports_cave_dashboard.build_active_alerts([tbc_event], today), [])
+        self.assertEqual(sports_sales_calendar.confirmed_upcoming_events([tbc_event], today), [])
+
+    def test_current_calendar_month_uses_australia_sydney_time(self):
+        utc_now = datetime(2026, 7, 31, 14, 30, tzinfo=timezone.utc)
+
+        self.assertEqual(sports_sales_calendar.default_month(utc_now), date(2026, 8, 1))
+
+    def test_calendar_selection_is_pure_and_makes_no_backend_query(self):
+        events = sports_cave_dashboard.load_calendar_events(ROOT / "data" / "sporting_calendar.json")
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend") as backend:
+            exact, tbc = sports_sales_calendar.events_for_month(events, date(2027, 10, 1))
+
+        backend.assert_not_called()
+        self.assertTrue(exact)
+        self.assertTrue(tbc)
+
+    def test_activity_table_split_uses_only_first_recognised_colon(self):
+        activity, details = sports_cave_dashboard.split_activity_message(
+            {
+                "action_type": "task_added",
+                "message": "Task added: Create NASCAR design: Bathurst era",
+            }
+        )
+
+        self.assertEqual(activity, "Task added")
+        self.assertEqual(details, "Create NASCAR design: Bathurst era")
+
+    def test_unknown_activity_type_keeps_full_original_message(self):
+        activity, details = sports_cave_dashboard.split_activity_message(
+            {
+                "action_type": "custom_moment",
+                "message": "Unmapped event: keep this: complete",
+            }
+        )
+
+        self.assertEqual(activity, "Custom moment")
+        self.assertEqual(details, "Unmapped event: keep this: complete")
 
 
 class DashboardRenderContractTests(unittest.TestCase):
@@ -463,9 +582,46 @@ class DashboardRenderContractTests(unittest.TestCase):
             dashboard_source.index("def render_lightweight_dashboard_page") :
         ]
         self.assertLess(
-            render_body.index("render_sporting_calendar(events, today)"),
+            render_body.index("render_sports_sales_calendar(events, local_now)"),
             render_body.index("render_activity_log(local_now)"),
         )
+
+    def test_calendar_helper_has_no_backend_or_network_imports(self):
+        source = (ROOT / "sports_sales_calendar.py").read_text(encoding="utf-8")
+
+        for forbidden in ("supabase", "shopify", "requests", "urllib", "streamlit"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, source.casefold())
+
+    def test_calendar_month_widget_reruns_only_its_fragment(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        calendar_source = source[
+            source.index("@st.fragment\ndef render_sports_sales_calendar") :
+            source.index("\n\ndef render_lightweight_dashboard_page")
+        ]
+
+        self.assertIn("dashboard-sports-sales-calendar-month", calendar_source)
+        for forbidden in (
+            "list_activity_entries",
+            "load_dashboard_state",
+            "get_supabase_backend",
+            "shopify",
+            "prodigi",
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, calendar_source.casefold())
+
+    def test_activity_log_uses_compact_table_columns_not_cards(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        table_source = source[
+            source.index("def _activity_table_html") :
+            source.index("\n\ndef _calendar_event_pill")
+        ]
+
+        for heading in ("Date", "Time", "Activity", "Details", "Area"):
+            self.assertIn(f"<th>{heading}</th>", table_source)
+        self.assertIn("activity_table_record", table_source)
+        self.assertNotIn('<div class="sc-log-row">', table_source)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ from pathlib import Path
 import re
 from time import monotonic
 
+import sports_sales_calendar
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
@@ -233,6 +235,36 @@ _TECHNICAL_ACTIVITY_TERMS = (
     "backend",
 )
 
+_ACTIVITY_LABELS = {
+    "ad_prompt_generated": "Ad prompt made",
+    "certificate_generated": "Certificate generated",
+    "certificate_uploaded": "Certificate generated",
+    "dashboard_task_added": "Task added",
+    "dashboard_task_completed": "Task completed",
+    "design_prompt_saved": "Design prompt saved",
+    "edition_product_updated": "Edition updated",
+    "edition_updated": "Edition updated",
+    "mockup_exported": "Mockup pack exported",
+    "mockup_generated": "Mockup made",
+    "mockup_made": "Mockup made",
+    "mockup_pack_exported": "Mockup pack exported",
+    "mockup_zip_exported": "Mockup pack exported",
+    "order_fulfilled": "Order fulfilled",
+    "order_fulfilled_certificate_generated": "Order fulfilled",
+    "product_edition_updated": "Edition updated",
+    "product_uploaded": "Product uploaded",
+    "prompt_pack_exported": "Mockup pack exported",
+    "reel_prompt_saved": "Reel saved",
+    "reel_saved": "Reel saved",
+    "reel_video_uploaded": "Reel saved",
+    "task_added": "Task added",
+    "task_completed": "Task completed",
+}
+
+_RECOGNISED_ACTIVITY_PREFIXES = tuple(dict.fromkeys(_ACTIVITY_LABELS.values())) + (
+    "Order updated",
+)
+
 
 def _compact_text(value):
     return re.sub(r"\s+", " ", str(value or "").strip())
@@ -411,6 +443,41 @@ def activity_from_audit_row(row):
         "entity_type": row.get("entity_type") or "",
         "entity_id": row.get("entity_id") or "",
         "metadata": metadata,
+    }
+
+
+def split_activity_message(entry):
+    entry = dict(entry or {})
+    message = str(entry.get("message") or "").strip()
+    action_type = str(entry.get("action_type") or "").strip().casefold()
+    activity = _ACTIVITY_LABELS.get(action_type)
+
+    for prefix in _RECOGNISED_ACTIVITY_PREFIXES:
+        separator = f"{prefix}:"
+        if message.casefold().startswith(separator.casefold()):
+            return prefix, message[len(separator) :].lstrip()
+
+    if activity:
+        return activity, message
+    return humanise_event_type(action_type) if action_type else "Activity", message
+
+
+def activity_table_record(entry, tzinfo=timezone.utc):
+    activity, details = split_activity_message(entry)
+    created_at = _as_aware_datetime(entry.get("created_at"), timezone.utc)
+    if created_at is not None:
+        local_created_at = created_at.astimezone(tzinfo or timezone.utc)
+        date_text = local_created_at.strftime("%d %b %Y").lstrip("0")
+        time_text = local_created_at.strftime("%I:%M %p").lstrip("0")
+    else:
+        date_text = ""
+        time_text = ""
+    return {
+        "Date": date_text,
+        "Time": time_text,
+        "Activity": activity,
+        "Details": details,
+        "Area": clean_activity_source(entry.get("page") or entry.get("source")),
     }
 
 
@@ -600,8 +667,10 @@ def parse_event_date(value):
 
 
 def event_status(event, today):
-    start = parse_event_date(event["start_date"])
-    end = parse_event_date(event.get("end_date") or event["start_date"])
+    dates = sports_sales_calendar.confirmed_event_dates(event)
+    if not dates:
+        return "tbc"
+    start, end = dates
     if start <= today <= end:
         return "active"
     if today < start:
@@ -610,7 +679,8 @@ def event_status(event, today):
 
 
 def days_until_event(event, today):
-    return (parse_event_date(event["start_date"]) - today).days
+    dates = sports_sales_calendar.confirmed_event_dates(event)
+    return (dates[0] - today).days if dates else None
 
 
 def _event_matches_region(event, region):
@@ -640,6 +710,11 @@ def filter_calendar_events(
             continue
         current_status = event_status(event, today)
         days_until = days_until_event(event, today)
+        if current_status == "tbc" or days_until is None:
+            if status != "All":
+                continue
+            filtered.append(event)
+            continue
         if status == "Active" and current_status != "active":
             continue
         if status == "Upcoming" and not (current_status == "upcoming" and days_until <= upcoming_days):
@@ -654,8 +729,9 @@ def filter_calendar_events(
     return sorted(
         filtered,
         key=lambda event: (
+            event_status(event, today) == "tbc",
             event_status(event, today) != "active",
-            abs(days_until_event(event, today)),
+            abs(days_until_event(event, today) or 0),
             -int(event.get("importance") or 0),
             event.get("title") or "",
         ),
@@ -677,6 +753,8 @@ def build_active_alerts(
             continue
         status = event_status(event, today)
         days_until = days_until_event(event, today)
+        if status == "tbc" or days_until is None:
+            continue
         if status == "active":
             score = 1000 + (importance * 20)
             active_items.append((score, event))
@@ -726,8 +804,12 @@ def build_active_alerts(
 
 
 def format_event_date_range(event):
-    start = parse_event_date(event["start_date"])
-    end = parse_event_date(event.get("end_date") or event["start_date"])
+    if sports_sales_calendar.event_is_tbc(event):
+        return sports_sales_calendar.format_event_date(event)
+    dates = sports_sales_calendar.confirmed_event_dates(event)
+    if not dates:
+        return "Date TBC"
+    start, end = dates
     if start == end:
         return start.strftime("%d %b %Y")
     if start.year == end.year:

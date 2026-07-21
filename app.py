@@ -41,6 +41,7 @@ import prompt_store
 import sc_auth
 import sports_cave_dashboard
 import sports_cave_pricing
+import sports_sales_calendar
 
 db = None
 image_factory = None
@@ -2244,6 +2245,7 @@ def inject_styles():
             border-radius: 8px;
             display: grid;
             gap: 1px;
+            grid-auto-rows: minmax(4.8rem, auto);
             grid-template-columns: repeat(7, minmax(0, 1fr));
             overflow: hidden;
         }
@@ -2259,12 +2261,17 @@ def inject_styles():
 
         .sc-month-day {
             background: #FFFFFF;
-            min-height: 6rem;
+            min-height: 4.8rem;
             padding: 0.38rem;
         }
 
         .sc-month-day.sc-month-muted {
             background: #F7F5EF;
+        }
+
+        .sc-month-day.sc-month-past {
+            background: #FAF9F6;
+            opacity: 0.58;
         }
 
         .sc-month-day.sc-month-today {
@@ -2290,23 +2297,134 @@ def inject_styles():
             border-radius: 6px;
             color: #15120B !important;
             display: block;
-            font-size: 0.66rem;
+            font-size: 0.64rem;
             font-weight: 720;
             line-height: 1.15;
             margin-top: 0.18rem;
             overflow: hidden;
             padding: 0.2rem 0.28rem;
             text-overflow: ellipsis;
+        }
+
+        .sc-month-pill.sc-event-sale {
+            background: #FFF1EE;
+            border-color: rgba(173, 62, 47, 0.42);
+        }
+
+        .sc-month-pill-title {
+            display: block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sc-month-pill-meta {
+            color: #625B50 !important;
+            display: block;
+            font-size: 0.56rem;
+            font-weight: 650;
+            margin-top: 0.12rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
             white-space: nowrap;
         }
 
         .sc-month-more {
             color: #6C665D !important;
-            display: block;
             font-size: 0.64rem;
             font-weight: 700;
             line-height: 1.1;
             margin-top: 0.18rem;
+        }
+
+        .sc-month-more summary {
+            cursor: pointer;
+        }
+
+        .sc-month-more-list {
+            color: #39352F !important;
+            font-size: 0.6rem;
+            line-height: 1.2;
+            margin-top: 0.18rem;
+        }
+
+        .sc-calendar-tbc {
+            align-items: center;
+            background: #FFFFFF;
+            border: 1px solid #E5E0D4;
+            border-radius: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.35rem;
+            margin-bottom: 0.45rem;
+            padding: 0.42rem 0.52rem;
+        }
+
+        .sc-calendar-tbc-label {
+            color: #5D574E !important;
+            font-size: 0.68rem;
+            font-weight: 780;
+            margin-right: 0.12rem;
+            text-transform: uppercase;
+        }
+
+        .sc-calendar-tbc .sc-month-pill {
+            display: inline-block;
+            margin: 0;
+            max-width: 18rem;
+        }
+
+        .sc-activity-table-wrap {
+            background: #FFFFFF;
+            border: 1px solid #DDD7CB;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+
+        table.sc-activity-table {
+            border-collapse: collapse;
+            table-layout: fixed;
+            width: 100%;
+        }
+
+        table.sc-activity-table th {
+            background: #F4F1EA;
+            border-bottom: 1px solid #D8D1C4;
+            color: #29251F !important;
+            font-size: 0.7rem;
+            font-weight: 780;
+            padding: 0.44rem 0.52rem;
+            text-align: left;
+            text-transform: uppercase;
+        }
+
+        table.sc-activity-table td {
+            border-bottom: 1px solid #ECE7DE;
+            color: #171717 !important;
+            font-size: 0.78rem;
+            line-height: 1.25;
+            padding: 0.45rem 0.52rem;
+            vertical-align: top;
+        }
+
+        table.sc-activity-table tbody tr:last-child td {
+            border-bottom: 0;
+        }
+
+        table.sc-activity-table tbody tr:hover td {
+            background: #FFF9EA;
+        }
+
+        .sc-activity-date,
+        .sc-activity-time,
+        .sc-activity-name,
+        .sc-activity-area {
+            white-space: nowrap;
+        }
+
+        .sc-activity-details {
+            overflow-wrap: anywhere;
+            white-space: normal;
         }
 
         @media (max-width: 760px) {
@@ -7625,6 +7743,30 @@ def dashboard_activity_month_options(local_now, count=12):
     return months
 
 
+ACTIVITY_TABLE_PAGE_SIZE = 25
+
+
+def _activity_table_html(records):
+    rows = []
+    for record in records:
+        rows.append(
+            "<tr>"
+            f'<td class="sc-activity-date">{html.escape(record.get("Date") or "")}</td>'
+            f'<td class="sc-activity-time">{html.escape(record.get("Time") or "")}</td>'
+            f'<td class="sc-activity-name"><strong>{html.escape(record.get("Activity") or "Activity")}</strong></td>'
+            f'<td class="sc-activity-details">{html.escape(record.get("Details") or "")}</td>'
+            f'<td class="sc-activity-area">{html.escape(record.get("Area") or "Sports Cave")}</td>'
+            "</tr>"
+        )
+    return (
+        '<div class="sc-activity-table-wrap"><table class="sc-activity-table">'
+        '<colgroup><col style="width: 8.2rem;"><col style="width: 6.8rem;">'
+        '<col style="width: 10.5rem;"><col><col style="width: 8.5rem;"></colgroup>'
+        '<thead><tr><th>Date</th><th>Time</th><th>Activity</th><th>Details</th><th>Area</th></tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table></div>'
+    )
+
+
 def render_activity_log(local_now):
     render_html_section_title("Activity log")
     control_columns = st.columns([1.2, 1])
@@ -7664,61 +7806,106 @@ def render_activity_log(local_now):
             unsafe_allow_html=True,
         )
         return
-    for entry in entries[:12]:
-        st.markdown(
-            f"""
-            <div class="sc-log-row">
-                <strong>{html.escape(entry.get("message") or "")}</strong>
-                <span class="sc-small-meta">{html.escape(format_dashboard_timestamp(entry.get("created_at")))} / {html.escape(entry.get("page") or entry.get("source") or "Sports Cave")}</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    records = [
+        sports_cave_dashboard.activity_table_record(entry, get_browser_timezone())
+        for entry in entries
+    ]
+    page_count = max((len(records) + ACTIVITY_TABLE_PAGE_SIZE - 1) // ACTIVITY_TABLE_PAGE_SIZE, 1)
+    page_number = 1
+    if page_count > 1:
+        month_key = month_start.isoformat() if month_start else "current"
+        page_number = st.selectbox(
+            "Activity page",
+            range(1, page_count + 1),
+            format_func=lambda page: f"Page {page} of {page_count}",
+            key=f"dashboard-activity-page-{view}-{month_key}",
+            label_visibility="collapsed",
         )
+    first_row = (page_number - 1) * ACTIVITY_TABLE_PAGE_SIZE
+    page_records = records[first_row : first_row + ACTIVITY_TABLE_PAGE_SIZE]
+    st.markdown(_activity_table_html(page_records), unsafe_allow_html=True)
 
 
-def render_sporting_calendar(events, today):
-    render_html_section_title("Sporting calendar")
-    filter_columns = st.columns([1, 1, 1])
-    regions = ["All", "Australia", "USA", "UK", "Canada", "New Zealand"]
-    sports = ["All", *sorted({event.get("sport") for event in events if event.get("sport")})]
-    statuses = ["Active/upcoming", "Active", "Upcoming", "All"]
-    region = filter_columns[0].selectbox("Region", regions, key="dashboard-calendar-region")
-    sport = filter_columns[1].selectbox("Sport", sports, key="dashboard-calendar-sport")
-    status = filter_columns[2].selectbox("Show", statuses, key="dashboard-calendar-status")
-    filtered_events = sports_cave_dashboard.filter_calendar_events(
-        events,
-        today,
-        region=region,
-        sport=sport,
-        status=status,
-        upcoming_days=90,
+def _calendar_event_pill(event):
+    title = str(event.get("title") or "Sports Cave event").strip()
+    date_label = sports_sales_calendar.format_event_date(event)
+    markets = "/".join(sports_sales_calendar.market_codes(event)) or "ALL"
+    kind = sports_sales_calendar.event_kind(event)
+    kind_label = "Sale / retail moment" if kind == "sale" else "Sporting event"
+    tooltip = f"{title} | {kind_label} | {date_label} | {markets}"
+    return (
+        f'<span class="sc-month-pill sc-event-{kind}" title="{html.escape(tooltip, quote=True)}">'
+        f'<span class="sc-month-pill-title">{html.escape(title)}</span>'
+        f'<span class="sc-month-pill-meta">{html.escape(date_label)} &middot; {html.escape(markets)}</span>'
+        "</span>"
     )
-    if not filtered_events:
-        st.markdown(
-            '<div class="sc-empty-note">No matching events.</div>',
-            unsafe_allow_html=True,
-        )
-        return
 
-    for event in filtered_events[:18]:
-        current_status = sports_cave_dashboard.event_status(event, today)
-        status_class = f"sc-calendar-{current_status}"
-        status_label = ""
-        if current_status in {"active", "upcoming"}:
-            status_label = f'<span class="sc-tag">{html.escape(current_status)}</span>'
-        region_text = ", ".join(event.get("regions") or [])
-        st.markdown(
-            f"""
-            <div class="sc-calendar-row {status_class}">
-                <div>
-                    <strong>{html.escape(event.get("title") or "")}</strong>{status_label}
-                    <span class="sc-small-meta">{html.escape(event.get("sport") or "")} / {html.escape(region_text)}</span>
-                </div>
-                <div class="sc-calendar-date">{html.escape(sports_cave_dashboard.format_event_date_range(event))}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+
+def _sports_sales_calendar_html(events, selected_month, today):
+    buckets, tbc_events = sports_sales_calendar.month_event_buckets(events, selected_month)
+    tbc_html = ""
+    if tbc_events:
+        tbc_html = (
+            '<div class="sc-calendar-tbc">'
+            '<span class="sc-calendar-tbc-label">Date TBC</span>'
+            f'{"".join(_calendar_event_pill(event) for event in tbc_events)}'
+            "</div>"
         )
+
+    cells = []
+    weekdays = "".join(
+        f'<div class="sc-month-weekday">{weekday}</div>'
+        for weekday in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    )
+    for week in sports_sales_calendar.month_weeks(selected_month):
+        for day in week:
+            classes = ["sc-month-day"]
+            if day.month != selected_month.month or day < sports_sales_calendar.CALENDAR_START or day > sports_sales_calendar.CALENDAR_END:
+                classes.append("sc-month-muted")
+            if selected_month.year == today.year and selected_month.month == today.month and day < today:
+                classes.append("sc-month-past")
+            if day == today:
+                classes.append("sc-month-today")
+
+            day_events = buckets.get(day, []) if day.month == selected_month.month else []
+            visible_events = day_events[:2]
+            event_html = "".join(_calendar_event_pill(event) for event in visible_events)
+            more_html = ""
+            if len(day_events) > 2:
+                remaining = day_events[2:]
+                remaining_names = "<br>".join(html.escape(str(event.get("title") or "Event")) for event in remaining)
+                more_html = (
+                    '<details class="sc-month-more">'
+                    f"<summary>+{len(remaining)} more</summary>"
+                    f'<div class="sc-month-more-list">{remaining_names}</div>'
+                    "</details>"
+                )
+            cells.append(
+                f'<div class="{" ".join(classes)}">'
+                f'<span class="sc-month-number">{day.day}</span>'
+                f"{event_html}{more_html}</div>"
+            )
+    return f"{tbc_html}<div class=\"sc-month-grid\">{weekdays}{''.join(cells)}</div>"
+
+
+@st.fragment
+def render_sports_sales_calendar(events, local_now):
+    render_html_section_title("Sports & Sales Calendar")
+    options = sports_sales_calendar.month_options()
+    default = sports_sales_calendar.default_month(local_now)
+    selected_month = st.selectbox(
+        "Calendar month",
+        options,
+        index=options.index(default),
+        format_func=sports_sales_calendar.month_label,
+        key="dashboard-sports-sales-calendar-month",
+        label_visibility="collapsed",
+    )
+    today = sports_sales_calendar.sydney_date(local_now)
+    st.markdown(
+        _sports_sales_calendar_html(events, selected_month, today),
+        unsafe_allow_html=True,
+    )
 
 
 def render_lightweight_dashboard_page():
@@ -7740,7 +7927,7 @@ def render_lightweight_dashboard_page():
     render_active_alerts(events, today)
     render_todays_design_ideas(local_now, events)
     render_dashboard_tasks(state)
-    render_sporting_calendar(events, today)
+    render_sports_sales_calendar(events, local_now)
     render_activity_log(local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
