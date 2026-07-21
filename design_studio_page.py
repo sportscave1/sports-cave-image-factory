@@ -553,47 +553,11 @@ Stop after completing the research brief.
 
 
 DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE = """
-TASK
+Based on everything above, find me the strongest and most accurate images for this design and display them directly in this chat as an image carousel.
 
-[PASTED TASK]
-
-RESEARCH ANSWER
-
-[PASTED RESEARCH ANSWER]
-
-Use the task and completed research above only to find the strongest, most accurate visual references for this Sports Cave design.
-
-Search the web and display approximately 10-12 strong images directly in this ChatGPT conversation as an image carousel.
-
-Do not give me a text-only list of links.
-Do not provide a new research report or creative direction.
-Do not analyse, rank or recommend the images.
-Do not generate the final artwork.
-
-The carousel must include:
-
-- 3-4 potential hero-subject images
-- 2-3 action or emotional-moment images
-- 2-3 venue, track, stadium or atmospheric background images
-- 1-2 important supporting details such as a trophy, car, equipment or historical scene
-
-Only show images that are:
-
-- Highly relevant to the exact task and research
-- Visually powerful
-- Realistic and historically accurate
-- Clear enough to guide a premium artwork
-- Useful for a landscape 4:3 composition
-- Strong enough to support a Sports Cave bestseller
-- Free from obvious AI errors or factual inaccuracies
-
-Do not introduce athletes, vehicles, clothing, trophies, locations or details belonging to a different product.
-
-Under each image, add only a short label identifying its purpose, such as Hero, Action, Background or Detail.
-
-This step is only for finding and displaying images.
-
-Stop after the image carousel.
+Do not copy and paste or repeat the research.
+Do not provide more research, analysis, recommendations or creative direction.
+Only find and display the images in this chat.
 """
 
 
@@ -1306,12 +1270,7 @@ def build_design_research_prompt(task_text: str) -> str:
 
 
 def build_design_image_carousel_prompt(task_text: str, research_answer: str) -> str:
-    research = str(research_answer or "").strip() or "[PASTED RESEARCH ANSWER]"
-    return (
-        _clean_prompt(DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE)
-        .replace("[PASTED TASK]", _task_or_placeholder(task_text))
-        .replace("[PASTED RESEARCH ANSWER]", research)
-    )
+    return _clean_prompt(DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE)
 
 
 def build_design_generation_prompt(task_text: str) -> str:
@@ -1574,7 +1533,7 @@ def render_new_design_tab():
     st.subheader("New Design")
     st.markdown(
         "1. Paste the Home design task below and run the Research Prompt in the Sports Cave Designs chat.\n"
-        "2. Paste the research answer into Step 2, then run the Find Images Prompt in the same chat.\n"
+        "2. After the research answer appears, run the Find Images Prompt underneath it in the same chat.\n"
         "3. Once the image carousel is shown, run the Design Generation Prompt in the same chat."
     )
     st.markdown("### Step 1 - Research")
@@ -1595,13 +1554,7 @@ def render_new_design_tab():
     st.divider()
 
     st.markdown("### Step 2 - Find Images")
-    research_answer = st.text_area(
-        "Paste research answer",
-        placeholder="Paste the complete research answer from ChatGPT here...",
-        height=150,
-        key="design-studio-research-answer-input",
-    )
-    image_prompt = build_design_image_carousel_prompt(task_text, research_answer)
+    image_prompt = build_design_image_carousel_prompt(task_text, "")
     render_generated_prompt_box(
         "Find Images Prompt",
         image_prompt,

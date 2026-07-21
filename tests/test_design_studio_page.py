@@ -18,20 +18,25 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         self.assertNotIn("display approximately 10-12 strong images", prompt)
         self.assertIn("Do not generate the final artwork yet.", prompt)
 
-    def test_image_prompt_uses_research_answer_and_only_requests_carousel(self):
+    def test_image_prompt_only_requests_image_carousel(self):
         prompt = design_studio_page.build_design_image_carousel_prompt(
             "Michael Jordan final shot collector piece",
             "The strongest angle is the final shot and Chicago nostalgia.",
         )
 
-        self.assertIn("Michael Jordan final shot collector piece", prompt)
-        self.assertIn("The strongest angle is the final shot", prompt)
-        self.assertIn("display approximately 10-12 strong images", prompt)
-        self.assertIn("as an image carousel", prompt)
-        self.assertIn("This step is only for finding and displaying images.", prompt)
-        self.assertIn("Do not analyse, rank or recommend the images.", prompt)
-        self.assertIn("Stop after the image carousel.", prompt)
-        self.assertIn("Do not generate the final artwork.", prompt)
+        self.assertEqual(
+            prompt,
+            (
+                "Based on everything above, find me the strongest and most accurate images "
+                "for this design and display them directly in this chat as an image carousel.\n\n"
+                "Do not copy and paste or repeat the research.\n"
+                "Do not provide more research, analysis, recommendations or creative direction.\n"
+                "Only find and display the images in this chat."
+            ),
+        )
+        self.assertNotIn("Michael Jordan final shot collector piece", prompt)
+        self.assertNotIn("The strongest angle is the final shot", prompt)
+        self.assertNotIn("display approximately 10-12 strong images", prompt)
         self.assertNotIn("Limited-edition plaque position", prompt)
 
     def test_design_generation_prompt_uses_research_context_and_design_system(self):
@@ -66,7 +71,7 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
 
         self.assertLess(renderer.index("Step 1 - Research"), renderer.index("Step 2 - Find Images"))
         self.assertLess(renderer.index("Step 2 - Find Images"), renderer.index("Step 3 - Generate Design"))
-        self.assertIn("Paste research answer", renderer)
+        self.assertNotIn("Paste research answer", renderer)
         self.assertIn("Copy Find Images Prompt", renderer)
 
 
