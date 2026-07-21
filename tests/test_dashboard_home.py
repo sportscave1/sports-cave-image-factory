@@ -144,6 +144,28 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(state["activity_log"][0]["message"], "Task completed: Refresh NFL collection")
         self.assertEqual(state["activity_log"][1]["message"], "Task added: Refresh NFL collection")
 
+    def test_new_design_completion_creates_upload_task_with_mockup_choice(self):
+        backend = FakeDashboardBackend()
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            task = sports_cave_dashboard.add_task(
+                "Create New Supercars Design",
+                sports_cave_dashboard.DESIGN_TASK_GROUP,
+            )
+            result = sports_cave_dashboard.complete_design_task_for_upload(
+                task["id"],
+                task["text"],
+                "All mockups",
+            )
+            state = sports_cave_dashboard.load_dashboard_state(include_activity=False)
+
+        self.assertEqual(result["completed"]["status"], "complete")
+        self.assertEqual(result["upload_task"]["section"], sports_cave_dashboard.UPLOAD_TASK_GROUP)
+        self.assertEqual(result["upload_task"]["text"], "Create New Supercars Design (all mockups)")
+        self.assertEqual([task["text"] for task in state["tasks"]], ["Create New Supercars Design (all mockups)"])
+        self.assertEqual([task["section"] for task in state["tasks"]], [sports_cave_dashboard.UPLOAD_TASK_GROUP])
+        self.assertEqual(backend.activity_rows[1]["reason"], "Task completed: Create New Supercars Design")
+
     def test_task_cache_is_cleared_after_add_and_complete(self):
         backend = FakeDashboardBackend()
 
@@ -215,7 +237,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         expected = (
             "Collections to update",
             "New designs to complete",
-            "New product uploaded — set to Draft",
+            "New products to be uploaded (in designs offline not uploaded folder)",
             "Existing product updated — variants working",
         )
         removed = {
@@ -230,7 +252,11 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertTrue(removed.isdisjoint(set(sports_cave_dashboard.TASK_GROUPS)))
         self.assertEqual(
             sports_cave_dashboard.normalize_task_category("New product uploaded — set to Draft"),
-            "New product uploaded — set to Draft",
+            "New products to be uploaded (in designs offline not uploaded folder)",
+        )
+        self.assertEqual(
+            sports_cave_dashboard.normalize_task_category("New products to be uploaded (in designs offline not uploaded folder)"),
+            "New products to be uploaded (in designs offline not uploaded folder)",
         )
         self.assertEqual(
             sports_cave_dashboard.normalize_task_category("Mockups for existing product"),

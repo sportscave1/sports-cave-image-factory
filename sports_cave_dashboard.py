@@ -10,11 +10,19 @@ import sports_sales_calendar
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 SPORTING_CALENDAR_PATH = DATA_DIR / "sporting_calendar.json"
+COLLECTIONS_TASK_GROUP = "Collections to update"
+DESIGN_TASK_GROUP = "New designs to complete"
+UPLOAD_TASK_GROUP = "New products to be uploaded (in designs offline not uploaded folder)"
+VARIANTS_TASK_GROUP = "Existing product updated — variants working"
+LEGACY_UPLOAD_TASK_GROUPS = ("New product uploaded — set to Draft",)
+MOCKUP_SCOPE_WEBSITE = "website mockups"
+MOCKUP_SCOPE_ALL = "all mockups"
+MOCKUP_SCOPE_OPTIONS = (MOCKUP_SCOPE_WEBSITE, MOCKUP_SCOPE_ALL)
 TASK_GROUPS = (
-    "Collections to update",
-    "New designs to complete",
-    "New product uploaded — set to Draft",
-    "Existing product updated — variants working",
+    COLLECTIONS_TASK_GROUP,
+    DESIGN_TASK_GROUP,
+    UPLOAD_TASK_GROUP,
+    VARIANTS_TASK_GROUP,
 )
 REGIONS = ("Australia", "USA", "UK", "Canada", "New Zealand")
 ACTIVITY_LOG_LIMIT = 200
@@ -137,7 +145,26 @@ def _normalise_task(task):
 
 
 def normalize_task_category(category):
+    category = str(category or "").strip()
+    if category in LEGACY_UPLOAD_TASK_GROUPS:
+        return UPLOAD_TASK_GROUP
     return category if category in TASK_GROUPS else TASK_GROUPS[0]
+
+
+def normalize_mockup_scope(value):
+    text = str(value or "").replace("_", " ").strip().casefold()
+    if text in {"all", "all mockup", "all mockups"}:
+        return MOCKUP_SCOPE_ALL
+    if text in {"website", "web", "website mockup", "website mockups", "just website mockups"}:
+        return MOCKUP_SCOPE_WEBSITE
+    return MOCKUP_SCOPE_WEBSITE
+
+
+def upload_task_title_for_design(task_text, mockup_scope):
+    title = " ".join(str(task_text or "").split()).strip()
+    if not title:
+        title = "New design"
+    return f"{title} ({normalize_mockup_scope(mockup_scope)})"
 
 
 def list_tasks(status="open"):
@@ -182,6 +209,30 @@ def complete_task(task_id, *, metadata=None):
         return _normalise_task(completed) if completed else None
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
+
+
+def complete_design_task_for_upload(task_id, task_text, mockup_scope, *, metadata=None):
+    scope = normalize_mockup_scope(mockup_scope)
+    completed = complete_task(
+        task_id,
+        metadata={
+            **(metadata or {}),
+            "next_task_section": UPLOAD_TASK_GROUP,
+            "mockup_scope": scope,
+        },
+    )
+    if completed is None:
+        return None
+    upload_task = add_task(
+        upload_task_title_for_design(task_text or completed.get("text") or completed.get("title"), scope),
+        UPLOAD_TASK_GROUP,
+        metadata={
+            "source_task_id": str(task_id or ""),
+            "source_task_section": DESIGN_TASK_GROUP,
+            "mockup_scope": scope,
+        },
+    )
+    return {"completed": completed, "upload_task": upload_task}
 
 
 def _json_dict(value):

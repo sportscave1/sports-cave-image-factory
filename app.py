@@ -7672,12 +7672,13 @@ def render_task_group(group, tasks):
 
     for task in group_tasks:
         task_id = task.get("id") or ""
+        task_text = task.get("text") or ""
         row = st.columns([5, 1.25])
         with row[0]:
             st.markdown(
                 f"""
                 <div class="sc-task-card">
-                    <strong>{html.escape(task.get("text") or "")}</strong>
+                    <strong>{html.escape(task_text)}</strong>
                     <span class="sc-small-meta">Added {html.escape(format_dashboard_timestamp(task.get("created_at")))}</span>
                 </div>
                 """,
@@ -7685,6 +7686,11 @@ def render_task_group(group, tasks):
             )
         with row[1]:
             if st.button("Complete", key=f"dashboard-complete-task::{task_id}", use_container_width=True):
+                if group == sports_cave_dashboard.DESIGN_TASK_GROUP:
+                    st.session_state["dashboard_pending_design_complete_task_id"] = task_id
+                    st.session_state["dashboard_pending_design_complete_task_text"] = task_text
+                    st.rerun()
+                    return
                 try:
                     completed = sports_cave_dashboard.complete_task(task_id)
                 except sports_cave_dashboard.DashboardStorageError:
@@ -7694,6 +7700,41 @@ def render_task_group(group, tasks):
                     st.warning("That task is no longer open.")
                     return
                 st.rerun()
+
+        if (
+            group == sports_cave_dashboard.DESIGN_TASK_GROUP
+            and st.session_state.get("dashboard_pending_design_complete_task_id") == task_id
+        ):
+            choice_columns = st.columns([2.2, 0.9, 0.9])
+            with choice_columns[0]:
+                mockup_label = st.radio(
+                    "Mockups needed?",
+                    ("Website mockups", "All mockups"),
+                    horizontal=True,
+                    key=f"dashboard-design-mockup-scope::{task_id}",
+                )
+            with choice_columns[1]:
+                if st.button("Move to upload", key=f"dashboard-design-move-upload::{task_id}", use_container_width=True):
+                    try:
+                        result = sports_cave_dashboard.complete_design_task_for_upload(
+                            task_id,
+                            task_text,
+                            mockup_label,
+                        )
+                    except sports_cave_dashboard.DashboardStorageError:
+                        st.warning("Could not move the task right now. Please try again.")
+                        return
+                    if result is None:
+                        st.warning("That task is no longer open.")
+                        return
+                    st.session_state.pop("dashboard_pending_design_complete_task_id", None)
+                    st.session_state.pop("dashboard_pending_design_complete_task_text", None)
+                    st.rerun()
+            with choice_columns[2]:
+                if st.button("Cancel", key=f"dashboard-design-cancel-move::{task_id}", use_container_width=True):
+                    st.session_state.pop("dashboard_pending_design_complete_task_id", None)
+                    st.session_state.pop("dashboard_pending_design_complete_task_text", None)
+                    st.rerun()
 
 
 def render_dashboard_tasks(state):
