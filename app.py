@@ -36,6 +36,7 @@ safe_startup_print("STARTUP APP START total=0.000s stage=0.000s")
 from dotenv import load_dotenv
 import streamlit as st
 
+from activity_log import record_activity_log
 import prompt_store
 import sc_auth
 import sports_cave_dashboard
@@ -5019,6 +5020,17 @@ def save_uploaded_lifestyle_result(result, prompt_path, uploaded_file):
     result["lifestyle_pack_error"] = None
     result["status_text"] = f"Saved lifestyle image for {get_prompt_label(prompt_path)}."
     result = rebuild_result_artifacts(result)
+    record_activity_log(
+        "mockup_uploaded",
+        "Mockups",
+        f"Added mockup: {get_prompt_label(prompt_path)}",
+        entity_type="mockup_run",
+        entity_id=str(result.get("run_dir") or ""),
+        metadata={
+            "product_name": result.get("product_name") or "",
+            "prompt": Path(prompt_path).name,
+        },
+    )
     return result
 
 
@@ -5201,6 +5213,17 @@ def render_primary_zip_download(result, section_key):
                 result["zip_drive_folder_url"] = ZIP_SAVE_DRIVE_FOLDER_URL or result.get("zip_drive_folder_url")
                 result["zip_drive_message"] = "ZIP saved to the Google Drive folder."
                 result["zip_drive_error"] = None
+                record_activity_log(
+                    "mockup_zip_saved",
+                    "Mockups",
+                    f"Saved ZIP: {result.get('product_name') or Path(result['zip_path']).stem}",
+                    entity_type="mockup_run",
+                    entity_id=str(result.get("run_dir") or ""),
+                    metadata={
+                        "zip_path": str(result.get("zip_path") or ""),
+                        "drive_link": upload_info.get("drive_link"),
+                    },
+                )
                 st.session_state.last_generation_result = result
                 st.rerun()
             except Exception as error:
@@ -5414,6 +5437,17 @@ def render_optional_package_controls(result):
             ):
                 try:
                     updated_result = package_spec["builder"](result)
+                    record_activity_log(
+                        "mockup_pack_exported",
+                        "Mockups",
+                        f"{package_spec['download_label']} ready: {updated_result.get('product_name') or updated_result.get('product_slug')}",
+                        entity_type="mockup_run",
+                        entity_id=str(updated_result.get("run_dir") or ""),
+                        metadata={
+                            "path_key": package_spec["path_key"],
+                            "file_path": str(updated_result.get(package_spec["path_key"]) or ""),
+                        },
+                    )
                     st.session_state.last_generation_result = updated_result
                     st.rerun()
                 except Exception as error:
@@ -5724,6 +5758,17 @@ def render_mockups_page():
             image_factory.log_memory("Completion")
             status_container.empty()
             progress_bar.empty()
+            record_activity_log(
+                "mockup_generated",
+                "Mockups",
+                f"Generated mockups: {product_name.strip()}",
+                entity_type="mockup_run",
+                entity_id=str(result.get("run_dir") or ""),
+                metadata={
+                    "product_name": product_name.strip(),
+                    "sport_category": sport_category,
+                },
+            )
             st.session_state.last_generation_result = result
         except image_factory.MemoryLimitExceededError as error:
             logging.exception("Generation stopped by memory limit")
@@ -5965,13 +6010,13 @@ def render_login_gate():
         extra_secret=get_auth_extra_secret(),
     )
     st.session_state["sports_cave_authenticated"] = True
-    sports_cave_dashboard.record_activity("Signed in")
+    record_activity_log("login", "Dashboard", "Signed in", entity_type="session")
     set_auth_cookie(token, remember=remember)
     return True
 
 
 def logout_app():
-    sports_cave_dashboard.record_activity("Signed out")
+    record_activity_log("logout", "Dashboard", "Signed out", entity_type="session")
     st.session_state["sports_cave_authenticated"] = False
     st.session_state["selected_page"] = "Dashboard"
     clear_auth_cookie()
@@ -7463,12 +7508,21 @@ def render_task_group(group, tasks):
             )
         with row[1]:
             if st.button("Complete", key=f"dashboard-complete-task::{task_id}", use_container_width=True):
-                sports_cave_dashboard.complete_task(task_id)
+                try:
+                    completed = sports_cave_dashboard.complete_task(task_id)
+                except sports_cave_dashboard.DashboardStorageError:
+                    st.warning("Could not update the task right now. Please try again.")
+                    return
+                if completed is None:
+                    st.warning("That task is no longer open.")
+                    return
                 st.rerun()
 
 
 def render_dashboard_tasks(state):
     render_html_section_title("Tasks")
+    if state.get("task_error"):
+        st.warning("Tasks could not load right now. Please try again shortly.")
     with st.form("dashboard-add-task", clear_on_submit=True):
         columns = st.columns([2.8, 1.4, 0.9])
         task_text = columns[0].text_input(
@@ -7489,6 +7543,8 @@ def render_dashboard_tasks(state):
             st.rerun()
         except ValueError:
             st.warning("Add a task first.")
+        except sports_cave_dashboard.DashboardStorageError:
+            st.warning("Could not save the task right now. Please try again.")
 
     groups = st.columns(2)
     for index, group in enumerate(sports_cave_dashboard.TASK_GROUPS):
@@ -7496,9 +7552,53 @@ def render_dashboard_tasks(state):
             render_task_group(group, state.get("tasks") or [])
 
 
-def render_activity_log(state):
+def dashboard_activity_month_options(local_now, count=12):
+    first = local_now.date().replace(day=1)
+    months = []
+    year = first.year
+    month = first.month
+    for _ in range(count):
+        months.append(date(year, month, 1))
+        month -= 1
+        if month <= 0:
+            month = 12
+            year -= 1
+    return months
+
+
+def render_activity_log(local_now):
     render_html_section_title("Activity log")
-    entries = state.get("activity_log") or []
+    control_columns = st.columns([1.2, 1])
+    view = control_columns[0].radio(
+        "View",
+        sports_cave_dashboard.ACTIVITY_VIEWS,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="dashboard-activity-view",
+    )
+    month_start = None
+    if view == sports_cave_dashboard.ACTIVITY_VIEW_MONTH:
+        month_options = dashboard_activity_month_options(local_now)
+        month_start = control_columns[1].selectbox(
+            "Month",
+            month_options,
+            format_func=lambda value: f"{calendar.month_name[value.month]} {value.year}",
+            key="dashboard-activity-month",
+            label_visibility="collapsed",
+        )
+    else:
+        control_columns[1].empty()
+
+    try:
+        entries = sports_cave_dashboard.list_activity_entries(
+            view,
+            local_now,
+            month_start=month_start,
+        )
+    except sports_cave_dashboard.DashboardStorageError:
+        st.warning("Activity could not load right now. Please try again shortly.")
+        return
+
     if not entries:
         st.markdown(
             '<div class="sc-empty-note">No activity yet.</div>',
@@ -7510,7 +7610,7 @@ def render_activity_log(state):
             f"""
             <div class="sc-log-row">
                 <strong>{html.escape(entry.get("message") or "")}</strong>
-                <span class="sc-small-meta">{html.escape(format_dashboard_timestamp(entry.get("created_at")))}</span>
+                <span class="sc-small-meta">{html.escape(format_dashboard_timestamp(entry.get("created_at")))} / {html.escape(entry.get("page") or entry.get("source") or "Sports Cave")}</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -7562,160 +7662,12 @@ def render_sporting_calendar(events, today):
         )
 
 
-def events_for_calendar_day(events, calendar_day):
-    matching_events = []
-    for event in events:
-        try:
-            start = sports_cave_dashboard.parse_event_date(event["start_date"])
-            end = sports_cave_dashboard.parse_event_date(
-                event.get("end_date") or event["start_date"]
-            )
-        except (KeyError, TypeError, ValueError):
-            continue
-        if start <= calendar_day <= end:
-            matching_events.append(event)
-    return sorted(
-        matching_events,
-        key=lambda event: (
-            -int(event.get("importance") or 0),
-            sports_cave_dashboard.parse_event_date(event["start_date"]),
-            event.get("title") or "",
-        ),
-    )
-
-
-def render_month_calendar(events, today, year, month):
-    month_calendar = calendar.Calendar(firstweekday=0)
-    weekday_markup = "".join(
-        f'<div class="sc-month-weekday">{html.escape(day)}</div>'
-        for day in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-    )
-    day_markup = []
-    for week in month_calendar.monthdatescalendar(year, month):
-        for calendar_day in week:
-            day_events = events_for_calendar_day(events, calendar_day)
-            classes = ["sc-month-day"]
-            if calendar_day.month != month:
-                classes.append("sc-month-muted")
-            if calendar_day == today:
-                classes.append("sc-month-today")
-
-            event_pills = "".join(
-                f'<span class="sc-month-pill">{html.escape(event.get("title") or "")}</span>'
-                for event in day_events[:2]
-            )
-            more_text = ""
-            if len(day_events) > 2:
-                more_text = f'<span class="sc-month-more">+{len(day_events) - 2} more</span>'
-            day_markup.append(
-                f"""
-                <div class="{' '.join(classes)}">
-                    <span class="sc-month-number">{calendar_day.day}</span>
-                    {event_pills}{more_text}
-                </div>
-                """
-            )
-    st.markdown(
-        f'<div class="sc-month-grid">{weekday_markup}{"".join(day_markup)}</div>',
-        unsafe_allow_html=True,
-    )
-
-
-def render_custom_calendar_form(local_now):
-    with st.form("dashboard-add-calendar-event", clear_on_submit=True):
-        top_columns = st.columns([2.2, 1, 1])
-        event_title = top_columns[0].text_input(
-            "Event",
-            placeholder="Add an event",
-            label_visibility="collapsed",
-        )
-        event_sport = top_columns[1].selectbox(
-            "Category",
-            sports_cave_dashboard.CUSTOM_EVENT_SPORTS,
-            label_visibility="collapsed",
-        )
-        event_regions = top_columns[2].multiselect(
-            "Regions",
-            sports_cave_dashboard.REGIONS,
-            default=["Australia"],
-            label_visibility="collapsed",
-        )
-        date_columns = st.columns([1, 1, 2, 0.9])
-        start_date = date_columns[0].date_input(
-            "Starts",
-            value=local_now.date(),
-            key="dashboard-custom-event-start",
-        )
-        end_date = date_columns[1].date_input(
-            "Ends",
-            value=local_now.date(),
-            key="dashboard-custom-event-end",
-        )
-        event_notes = date_columns[2].text_input(
-            "Note",
-            placeholder="Optional note",
-            label_visibility="collapsed",
-        )
-        submitted = date_columns[3].form_submit_button("Add event", use_container_width=True)
-
-    if submitted:
-        try:
-            sports_cave_dashboard.add_custom_event(
-                event_title,
-                start_date,
-                end_date,
-                event_regions,
-                sport=event_sport,
-                notes=event_notes,
-            )
-            st.rerun()
-        except ValueError as error:
-            st.warning(str(error))
-
-
-def render_physical_calendar(events, local_now):
-    render_html_section_title("Calendar")
-    today = local_now.date()
-    years = sorted(
-        {
-            today.year,
-            today.year + 1,
-            *(
-                sports_cave_dashboard.parse_event_date(event["start_date"]).year
-                for event in events
-                if event.get("start_date")
-            ),
-        }
-    )
-    control_columns = st.columns([1, 1, 2])
-    selected_year = control_columns[0].selectbox(
-        "Year",
-        years,
-        index=years.index(today.year) if today.year in years else 0,
-        key="dashboard-physical-calendar-year",
-    )
-    selected_month = control_columns[1].selectbox(
-        "Month",
-        list(range(1, 13)),
-        index=today.month - 1 if selected_year == today.year else 0,
-        format_func=lambda value: calendar.month_name[value],
-        key="dashboard-physical-calendar-month",
-    )
-    control_columns[2].caption("Add store dates, promo windows, design drops, or reminders.")
-
-    render_custom_calendar_form(local_now)
-    render_month_calendar(events, today, selected_year, selected_month)
-
-
 def render_lightweight_dashboard_page():
     started = time.perf_counter()
     local_now = browser_local_now()
     today = local_now.date()
-    state = sports_cave_dashboard.load_dashboard_state()
-    events = sports_cave_dashboard.calendar_events_with_custom(
-        sports_cave_dashboard.load_calendar_events(),
-        state,
-    )
+    state = sports_cave_dashboard.load_dashboard_state(include_activity=False)
+    events = sports_cave_dashboard.load_calendar_events()
 
     st.markdown(
         f"""
@@ -7728,9 +7680,8 @@ def render_lightweight_dashboard_page():
     )
     render_active_alerts(events, today)
     render_dashboard_tasks(state)
-    render_activity_log(sports_cave_dashboard.load_dashboard_state())
     render_sporting_calendar(events, today)
-    render_physical_calendar(events, local_now)
+    render_activity_log(local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 

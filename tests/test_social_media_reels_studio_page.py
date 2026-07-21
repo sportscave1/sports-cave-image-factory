@@ -75,13 +75,13 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertNotIn("get_marketing_factory_page().render_page()", route_source)
         self.assertNotIn("os_route_pages().render_marketing_factory_page()", route_source)
 
-    def test_top_level_page_errors_keep_technical_details_developer_only(self):
+    def test_top_level_page_errors_keep_technical_details_protected(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         main_source = source[source.index("def main") :]
 
         self.assertIn("if _developer_unlocked():", main_source)
         self.assertIn("st.exception(error)", main_source)
-        self.assertIn("Open Developer diagnostics for the technical exception details.", main_source)
+        self.assertIn("Technical details are available in protected tools.", main_source)
 
     def test_video_filename_generator_for_required_handles(self):
         handles = [

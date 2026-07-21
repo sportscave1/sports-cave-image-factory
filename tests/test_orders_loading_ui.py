@@ -92,9 +92,10 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn('"Allocation Repair Tools"', source)
         self.assertIn("View allocation settings", source)
         self.assertIn("Re-capture product baselines", source)
-        self.assertIn("Allocate Missing Recent Paid Orders", source)
+        self.assertIn("Manual sync confirmation", source)
+        self.assertIn("Run Manual Order Sync", source)
         self.assertIn("Historical Backfill Selected Orders", source)
-        self.assertIn("process_shopify_orders_for_editions", source)
+        self.assertIn("sync_latest_paid_orders_to_supabase", source)
         self.assertIn("historical_backfill_order_rows", source)
 
     def test_developer_lazy_loaders_do_not_reuse_widget_keys_as_state(self):
@@ -1472,23 +1473,23 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Search orders", inspect.getsource(orders_page._render_orders_search_form))
         self.assertNotIn("Show all rows", render_page)
         self.assertNotIn("_render_admin_panel", render_page)
-        self.assertIn("Check New Paid Orders", top_actions)
-        self.assertIn("Backfill Latest Paid", top_actions)
-        self.assertIn("Backfill latest paid orders", top_actions)
         self.assertIn("Preview Certificate", top_actions)
         self.assertIn("Generate + Upload Certificate", top_actions)
         self.assertIn("Reupload Certificate", top_actions)
         self.assertIn("Open Certificate", top_actions)
         self.assertIn("Start Prodigi QA", top_actions)
+        self.assertNotIn("Check New Paid Orders", top_actions)
+        self.assertNotIn("Backfill Latest Paid", top_actions)
+        self.assertNotIn("Backfill latest paid orders", top_actions)
         self.assertNotIn("Start Prodigi Dispatch", top_actions)
         self.assertNotIn("Open Shopify Admin", top_actions)
         self.assertNotIn("customer_email", orders_page.VISIBLE_COLUMNS)
         self.assertNotIn("edition_total", orders_page.VISIBLE_COLUMNS)
-        self.assertIn("Select an order, complete QA, then generate and upload the certificate.", render_page)
+        self.assertIn("Orders sync automatically after payment.", render_page)
         self.assertIn("Assign edition number before certificate generation.", top_actions)
-        self.assertIn("Source: Shopify mirror + Supabase edition ledger", render_page)
-        self.assertIn("Edition source: Supabase", render_page)
-        self.assertIn("Shopify mirror last synced:", render_page)
+        self.assertNotIn("Source: Shopify mirror + Supabase edition ledger", render_page)
+        self.assertNotIn("Edition source: Supabase", render_page)
+        self.assertNotIn("Shopify mirror last synced:", render_page)
         self.assertNotIn("li.shopify_variant_id", list_orders)
         self.assertIn("li.raw_json->>'variant_id'", list_orders)
         self.assertIn("column_exists(cur, \"shopify_order_lines\", \"shopify_variant_id\")", upsert_order_lines)
@@ -1575,8 +1576,6 @@ class EditionOpsUiTests(unittest.TestCase):
         top_actions = inspect.getsource(orders_page._render_top_actions)
 
         for label in (
-            "Check New Paid Orders",
-            "Backfill Latest Paid",
             "Preview Certificate",
             "Generate + Upload Certificate",
             "Reupload Certificate",
@@ -1586,6 +1585,8 @@ class EditionOpsUiTests(unittest.TestCase):
             self.assertIn(label, top_actions)
 
         for label in (
+            "Check New Paid Orders",
+            "Backfill Latest Paid",
             "Open Shopify Admin",
             "Show all rows",
         ):

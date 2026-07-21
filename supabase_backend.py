@@ -1220,6 +1220,20 @@ def _ensure_schema_uncached():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS dashboard_tasks (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    title TEXT NOT NULL,
+                    section TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'open',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    completed_at TIMESTAMPTZ,
+                    completed_by TEXT,
+                    metadata JSONB DEFAULT '{}'::jsonb
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS webhook_events (
                     webhook_id TEXT PRIMARY KEY,
                     topic TEXT,
@@ -1913,6 +1927,8 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_order_line ON audit_logs(shopify_order_id, shopify_line_item_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_handle ON audit_logs(shopify_handle)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_status_created ON dashboard_tasks(status, created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_section_status ON dashboard_tasks(section, status)")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_id_unique ON webhook_events(webhook_id)", "idx_webhook_events_id_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_title ON shopify_products(title)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_updated_at ON shopify_products(updated_at DESC)")
@@ -2542,6 +2558,211 @@ def _insert_audit_log(
             str(source or "").strip() or "sports_cave_os",
         ),
     )
+
+
+def _dashboard_task_from_row(row):
+    if not row:
+        return {}
+    return {
+        "id": str(row.get("id") or ""),
+        "text": str(row.get("title") or ""),
+        "title": str(row.get("title") or ""),
+        "category": str(row.get("section") or ""),
+        "section": str(row.get("section") or ""),
+        "status": str(row.get("status") or ""),
+        "created_at": row.get("created_at"),
+        "completed_at": row.get("completed_at"),
+        "completed_by": row.get("completed_by") or "",
+        "metadata": row.get("metadata") or {},
+    }
+
+
+def record_activity_log(
+    *,
+    action_type,
+    page,
+    message,
+    entity_type="",
+    entity_id="",
+    metadata=None,
+    actor="sports_cave_os",
+):
+    ensure_schema()
+    clean_message = str(message or "").strip()
+    clean_page = str(page or "").strip() or "Sports Cave"
+    clean_action = str(action_type or "").strip() or "activity"
+    payload = {
+        "message": clean_message,
+        "page": clean_page,
+        "action_type": clean_action,
+        "metadata": metadata or {},
+    }
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO audit_logs(
+                    event_type, entity_type, entity_id,
+                    old_value, new_value, reason, actor, source
+                )
+                VALUES (%s, %s, %s, '{}'::jsonb, %s::jsonb, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    clean_action,
+                    str(entity_type or "").strip(),
+                    str(entity_id or "").strip(),
+                    json_dumps(payload),
+                    clean_message,
+                    str(actor or "").strip() or "sports_cave_os",
+                    clean_page,
+                ),
+            )
+            row = cur.fetchone() or {}
+        conn.commit()
+    return row
+
+
+def list_activity_logs(*, start_at=None, end_at=None, limit=200):
+    ensure_schema()
+    clauses = []
+    params = []
+    if start_at is not None:
+        clauses.append("created_at >= %s")
+        params.append(start_at)
+    if end_at is not None:
+        clauses.append("created_at < %s")
+        params.append(end_at)
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    try:
+        safe_limit = min(max(int(limit or 200), 1), 500)
+    except (TypeError, ValueError):
+        safe_limit = 200
+    params.append(safe_limit)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT *
+                FROM audit_logs
+                {where_sql}
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                params,
+            )
+            return cur.fetchall()
+
+
+def list_dashboard_tasks(status="open"):
+    ensure_schema()
+    clean_status = str(status or "open").strip().casefold()
+    params = []
+    where_sql = ""
+    if clean_status and clean_status != "all":
+        where_sql = "WHERE status = %s"
+        params.append(clean_status)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                SELECT *
+                FROM dashboard_tasks
+                {where_sql}
+                ORDER BY created_at DESC
+                """,
+                params,
+            )
+            return [_dashboard_task_from_row(row) for row in cur.fetchall()]
+
+
+def create_dashboard_task(title, section, *, metadata=None):
+    clean_title = str(title or "").strip()
+    clean_section = str(section or "").strip()
+    if not clean_title:
+        raise ValueError("Task title is required.")
+    if not clean_section:
+        raise ValueError("Task section is required.")
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO dashboard_tasks(title, section, metadata)
+                VALUES (%s, %s, %s::jsonb)
+                RETURNING *
+                """,
+                (clean_title, clean_section, json_dumps(metadata or {})),
+            )
+            row = cur.fetchone() or {}
+            task = _dashboard_task_from_row(row)
+            _insert_audit_log(
+                cur,
+                event_type="task_added",
+                entity_type="dashboard_task",
+                entity_id=task.get("id") or "",
+                new_value={
+                    "message": f"Added task: {clean_title}",
+                    "page": "Dashboard",
+                    "action_type": "task_added",
+                    "title": clean_title,
+                    "section": clean_section,
+                    "metadata": metadata or {},
+                },
+                reason=f"Added task: {clean_title}",
+                source="Dashboard",
+            )
+        conn.commit()
+    return task
+
+
+def complete_dashboard_task(task_id, *, completed_by="", metadata=None):
+    clean_task_id = str(task_id or "").strip()
+    if not clean_task_id:
+        return None
+    ensure_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE dashboard_tasks
+                SET status='complete',
+                    completed_at=now(),
+                    completed_by=%s,
+                    metadata=COALESCE(metadata, '{}'::jsonb) || %s::jsonb
+                WHERE id=%s AND status='open'
+                RETURNING *
+                """,
+                (
+                    str(completed_by or "").strip() or None,
+                    json_dumps(metadata or {}),
+                    clean_task_id,
+                ),
+            )
+            row = cur.fetchone()
+            if not row:
+                conn.commit()
+                return None
+            task = _dashboard_task_from_row(row)
+            task_title = task.get("title") or task.get("text") or "Task"
+            _insert_audit_log(
+                cur,
+                event_type="task_completed",
+                entity_type="dashboard_task",
+                entity_id=task.get("id") or "",
+                new_value={
+                    "message": f"Completed task: {task_title}",
+                    "page": "Dashboard",
+                    "action_type": "task_completed",
+                    "title": task_title,
+                    "section": task.get("section") or "",
+                    "metadata": metadata or {},
+                },
+                reason=f"Completed task: {task_title}",
+                source="Dashboard",
+            )
+        conn.commit()
+    return task
 
 
 def start_sync_run(sync_type, *, ensure_schema_first=True):

@@ -1,13 +1,67 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
-import tempfile
 import unittest
+from unittest.mock import patch
 
 import sc_auth
 import sports_cave_dashboard
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class FakeDashboardBackend:
+    def __init__(self):
+        self.tasks = []
+        self.activity_rows = []
+
+    def _activity_row(self, event_type, message):
+        row = {
+            "id": len(self.activity_rows) + 1,
+            "event_type": event_type,
+            "entity_type": "dashboard_task",
+            "entity_id": self.tasks[-1]["id"] if self.tasks else "",
+            "new_value": {
+                "message": message,
+                "page": "Dashboard",
+                "action_type": event_type,
+                "metadata": {},
+            },
+            "reason": message,
+            "source": "Dashboard",
+            "created_at": f"2026-07-21T0{len(self.activity_rows)}:00:00+00:00",
+        }
+        self.activity_rows.insert(0, row)
+
+    def create_dashboard_task(self, title, section, *, metadata=None):
+        task = {
+            "id": f"task-{len(self.tasks) + 1}",
+            "title": title,
+            "section": section,
+            "status": "open",
+            "created_at": "2026-07-21T00:00:00+00:00",
+            "metadata": metadata or {},
+        }
+        self.tasks.append(task)
+        self._activity_row("task_added", f"Added task: {title}")
+        return task
+
+    def complete_dashboard_task(self, task_id, *, completed_by="", metadata=None):
+        for task in self.tasks:
+            if task["id"] == task_id and task["status"] == "open":
+                task["status"] = "complete"
+                task["completed_at"] = "2026-07-21T01:00:00+00:00"
+                self._activity_row("task_completed", f"Completed task: {task['title']}")
+                return task
+        return None
+
+    def list_dashboard_tasks(self, status="open"):
+        if status == "all":
+            return list(self.tasks)
+        return [task for task in self.tasks if task.get("status") == status]
+
+    def list_activity_logs(self, *, start_at=None, end_at=None, limit=200):
+        return self.activity_rows[:limit]
 
 
 class SportsCaveAuthTests(unittest.TestCase):
@@ -30,61 +84,51 @@ class SportsCaveAuthTests(unittest.TestCase):
 
 
 class SportsCaveDashboardStateTests(unittest.TestCase):
-    def test_task_complete_removes_active_task_and_adds_log_entry(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            state_path = Path(temp_dir) / "dashboard_state.json"
-            task = sports_cave_dashboard.add_task(
-                "Refresh NFL collection",
-                "Collections to update",
-                path=state_path,
-                created_at="2026-07-21T00:00:00+00:00",
+    def test_task_add_persists_to_supabase_backend(self):
+        backend = FakeDashboardBackend()
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            task = sports_cave_dashboard.add_task("Refresh NFL collection", "Collections to update")
+            state = sports_cave_dashboard.load_dashboard_state(include_activity=False)
+
+        self.assertEqual(task["text"], "Refresh NFL collection")
+        self.assertEqual(state["tasks"][0]["text"], "Refresh NFL collection")
+        self.assertEqual(backend.activity_rows[0]["reason"], "Added task: Refresh NFL collection")
+
+    def test_task_complete_marks_complete_and_writes_activity_log(self):
+        backend = FakeDashboardBackend()
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            task = sports_cave_dashboard.add_task("Refresh NFL collection", "Collections to update")
+            completed = sports_cave_dashboard.complete_task(task["id"])
+            state = sports_cave_dashboard.load_dashboard_state(
+                sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME,
+                datetime(2026, 7, 21, tzinfo=timezone.utc),
             )
 
-            created_state = sports_cave_dashboard.load_dashboard_state(state_path)
-            self.assertEqual(len(created_state["tasks"]), 1)
-            self.assertEqual(created_state["activity_log"][0]["message"], "Added task: Refresh NFL collection")
+        self.assertEqual(completed["status"], "complete")
+        self.assertEqual(state["tasks"], [])
+        self.assertEqual(state["activity_log"][0]["message"], "Completed task: Refresh NFL collection")
+        self.assertEqual(state["activity_log"][1]["message"], "Added task: Refresh NFL collection")
 
-            completed = sports_cave_dashboard.complete_task(
-                task["id"],
-                path=state_path,
-                completed_at="2026-07-21T01:00:00+00:00",
-            )
+    def test_activity_log_filters_today_last_7_days_month_and_all_time(self):
+        now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
+        entries = [
+            {"message": "Today", "created_at": "2026-07-21T00:05:00+00:00"},
+            {"message": "Seven day edge", "created_at": "2026-07-15T12:00:00+00:00"},
+            {"message": "This month", "created_at": "2026-07-01T12:00:00+00:00"},
+            {"message": "Older", "created_at": "2026-06-30T23:59:00+00:00"},
+        ]
 
-            final_state = sports_cave_dashboard.load_dashboard_state(state_path)
-            self.assertEqual(completed["text"], "Refresh NFL collection")
-            self.assertEqual(final_state["tasks"], [])
-            self.assertEqual(
-                final_state["activity_log"][0]["message"],
-                "Completed task: Refresh NFL collection",
-            )
-            self.assertEqual(
-                final_state["activity_log"][1]["message"],
-                "Added task: Refresh NFL collection",
-            )
+        today = sports_cave_dashboard.filter_activity_entries(entries, sports_cave_dashboard.ACTIVITY_VIEW_TODAY, now)
+        last_7_days = sports_cave_dashboard.filter_activity_entries(entries, sports_cave_dashboard.ACTIVITY_VIEW_LAST_7_DAYS, now)
+        month = sports_cave_dashboard.filter_activity_entries(entries, sports_cave_dashboard.ACTIVITY_VIEW_MONTH, now)
+        all_time = sports_cave_dashboard.filter_activity_entries(entries, sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME, now)
 
-    def test_custom_calendar_event_is_saved_and_logged(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            state_path = Path(temp_dir) / "dashboard_state.json"
-            event = sports_cave_dashboard.add_custom_event(
-                "Launch framed golf drop",
-                date(2027, 4, 5),
-                date(2027, 4, 11),
-                ["Australia", "USA"],
-                sport="Golf",
-                path=state_path,
-                created_at="2026-07-21T02:00:00+00:00",
-            )
-
-            state = sports_cave_dashboard.load_dashboard_state(state_path)
-            merged = sports_cave_dashboard.calendar_events_with_custom([], state)
-
-            self.assertEqual(event["title"], "Launch framed golf drop")
-            self.assertEqual(state["custom_events"][0]["regions"], ["Australia", "USA"])
-            self.assertEqual(merged[0]["id"], event["id"])
-            self.assertEqual(
-                state["activity_log"][0]["message"],
-                "Added calendar event: Launch framed golf drop",
-            )
+        self.assertEqual([entry["message"] for entry in today], ["Today"])
+        self.assertEqual([entry["message"] for entry in last_7_days], ["Today", "Seven day edge"])
+        self.assertEqual([entry["message"] for entry in month], ["Today", "Seven day edge", "This month"])
+        self.assertEqual([entry["message"] for entry in all_time], ["Today", "Seven day edge", "This month", "Older"])
 
 
 class SportsCaveCalendarTests(unittest.TestCase):
@@ -184,7 +228,7 @@ class SportsCaveCalendarTests(unittest.TestCase):
 
 
 class DashboardRenderContractTests(unittest.TestCase):
-    def test_dashboard_render_path_has_no_supabase_or_shopify_fetch(self):
+    def test_dashboard_render_path_avoids_heavy_page_imports(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         dashboard_source = source[
             source.index("def get_browser_timezone") : source.index("\n\ndef page_uses_local_database")
@@ -202,6 +246,23 @@ class DashboardRenderContractTests(unittest.TestCase):
         for text in forbidden:
             with self.subTest(text=text):
                 self.assertNotIn(text, dashboard_source)
+
+    def test_dashboard_no_longer_renders_manual_custom_calendar_ui(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        dashboard_source = source[
+            source.index("def get_browser_timezone") : source.index("\n\ndef page_uses_local_database")
+        ]
+
+        self.assertNotIn("render_custom_calendar_form", dashboard_source)
+        self.assertNotIn("dashboard-add-calendar-event", dashboard_source)
+        self.assertNotIn("render_physical_calendar", dashboard_source)
+        render_body = dashboard_source[
+            dashboard_source.index("def render_lightweight_dashboard_page") :
+        ]
+        self.assertLess(
+            render_body.index("render_sporting_calendar(events, today)"),
+            render_body.index("render_activity_log(local_now)"),
+        )
 
 
 if __name__ == "__main__":

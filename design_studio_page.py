@@ -8,6 +8,7 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
+from activity_log import record_activity_log
 import prompt_store
 
 
@@ -878,6 +879,14 @@ def _render_prompt_editor(label: str, prompt_id: str, prompt_text: str, key: str
                     st.error(str(error))
                 else:
                     st.session_state[editor_key] = False
+                    record_activity_log(
+                        "design_prompt_saved",
+                        "Design Studio",
+                        f"Saved design prompt: {label}",
+                        entity_type="design_prompt",
+                        entity_id=prompt_id,
+                        metadata={"prompt_label": label},
+                    )
                     if saved.get("persisted"):
                         st.success(saved.get("source_label") or "Source: Supabase saved")
                     else:

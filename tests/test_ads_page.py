@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
@@ -509,6 +510,21 @@ class AdsPageTests(unittest.TestCase):
                     self.assertIn(f"SPORTS CAVE {category.upper()} ", prompt)
                     for term in terms:
                         self.assertIn(term, prompt)
+
+    def test_ad_prompt_generation_records_activity_log(self):
+        with patch("ads_page.record_activity_log") as record_activity:
+            ads_page.record_ad_prompt_generated(
+                "Six Laps Ahead",
+                "Motorsport",
+                "Australia",
+                "Carousel",
+            )
+
+        record_activity.assert_called_once()
+        args, kwargs = record_activity.call_args
+        self.assertEqual(args[:3], ("ad_prompt_generated", "Ads", "Generated ad prompt: Six Laps Ahead"))
+        self.assertEqual(kwargs["entity_type"], "ad_prompt")
+        self.assertEqual(kwargs["metadata"]["campaign_type"], "Carousel")
 
     def test_cricket_single_image_video_works_for_every_supported_country(self):
         for country in ads_page.COUNTRY_OPTIONS[1:]:

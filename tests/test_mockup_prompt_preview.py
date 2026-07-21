@@ -55,6 +55,7 @@ def load_app_prompt_labels():
 
 def run_mockups_page():
     app_test = AppTest.from_file(str(ROOT / "app.py"))
+    app_test.session_state["sports_cave_authenticated"] = True
     app_test.session_state["selected_page"] = "Mockups"
     app_test.session_state["startup_shell_loaded"] = True
     return app_test.run(timeout=20)
@@ -626,6 +627,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
             app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
             app_test.session_state["selected_page"] = "Mockups"
             app_test.session_state["startup_shell_loaded"] = True
             app_test.session_state["last_generation_result"] = build_stale_legacy_prompt_generation_result(run_dir)
@@ -672,6 +674,7 @@ class MockupPromptPreviewTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
             app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
             app_test.session_state["selected_page"] = "Mockups"
             app_test.session_state["startup_shell_loaded"] = True
             app_test.session_state["last_generation_result"] = build_restored_generation_result(run_dir)

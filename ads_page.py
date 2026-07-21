@@ -7,6 +7,8 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
+from activity_log import record_activity_log
+
 
 CATEGORY_OPTIONS = [
     "Select category",
@@ -2364,6 +2366,20 @@ def render_product_name_input():
     return st.text_input("Product name", placeholder="Example: Six Laps Ahead")
 
 
+def record_ad_prompt_generated(product_name, category, country, campaign_type):
+    record_activity_log(
+        "ad_prompt_generated",
+        "Ads",
+        f"Generated ad prompt: {product_name}",
+        entity_type="ad_prompt",
+        metadata={
+            "category": category,
+            "country": country,
+            "campaign_type": campaign_type,
+        },
+    )
+
+
 def render_supported_result(product_name, category, country, campaign_type, product_url=""):
     render_generic_winner_pattern_note(category, campaign_type)
 
@@ -2471,6 +2487,7 @@ def render_page():
         render_insufficient_winner_data()
         return
 
+    record_ad_prompt_generated(product_name, category, country, campaign_type)
     render_supported_result(product_name, category, country, campaign_type, product_url=product_url)
 
 

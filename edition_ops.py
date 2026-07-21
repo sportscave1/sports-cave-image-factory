@@ -11,6 +11,7 @@ import time
 
 import streamlit as st
 
+from activity_log import record_activity_log
 import shopify_sync
 
 
@@ -1586,6 +1587,18 @@ def _save_changed_rows(edited_rows=None, source_rows=None):
         shopify_errors,
         mirror_success_keys,
     )
+    if supabase_saved_keys:
+        record_activity_log(
+            "edition_product_updated",
+            "Edition Ops",
+            f"Updated {len(supabase_saved_keys)} product edition field(s).",
+            entity_type="edition_product",
+            metadata={
+                "saved_keys": sorted(supabase_saved_keys),
+                "shopify_errors": len(shopify_errors),
+                "supabase_errors": len(supabase_errors),
+            },
+        )
     if supabase_errors:
         saved_count = max(len(dirty_keys) - len(supabase_errors), 0)
         st.session_state[NOTICE_KEY] = f"Saved {saved_count} Edition Ops change(s). {len(supabase_errors)} product(s) could not be saved."

@@ -15,6 +15,7 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
+from activity_log import record_activity_log
 import certificate_job
 import db
 import prompt_store
@@ -4175,6 +4176,22 @@ def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None, en
     st.session_state["orders_allocation_snapshot_loaded"] = False
     st.session_state["orders-ledger-cache-version"] = int(st.session_state.get("orders-ledger-cache-version", 0)) + 1
     _prodigi_log_timing("dispatch save", started, f"status={status} row_id={saved.get('row_id') or ''}")
+    order_label = saved.get("shopify_order_number") or saved.get("shopify_order_name") or saved.get("order") or "order"
+    product_label = saved.get("product_title") or saved.get("product") or saved.get("prodigi_product_name") or ""
+    action_type = "order_fulfilled" if status in {"Complete", "Fulfilled in Shopify"} else "prodigi_status_updated"
+    status_label = "fulfilled" if action_type == "order_fulfilled" else f"moved to {status}"
+    record_activity_log(
+        action_type,
+        "Prodigi",
+        f"{order_label} {status_label}",
+        entity_type="order",
+        entity_id=saved.get("row_id") or "",
+        metadata={
+            "status": status,
+            "product": product_label,
+            "qa_confirmed": saved.get("qa_confirmed"),
+        },
+    )
     return saved
 
 
@@ -5516,6 +5533,20 @@ def render_supabase_limited_editions_page():
                         is_primary=True,
                     )
                 bump_supabase_cache_version("limited")
+                record_activity_log(
+                    "product_edition_updated",
+                    "Edition Ops",
+                    f"Updated edition settings: {product.get('product_title') or product_handle}",
+                    entity_type="product",
+                    entity_id=product_handle,
+                    metadata={
+                        "edition_total": int(total_value),
+                        "next_edition_number": final_next,
+                        "status": selected_status,
+                        "psd_link_added": bool(psd_value.strip()),
+                        "prodigi_link_added": bool(prodigi_value.strip()),
+                    },
+                )
                 st.session_state.supabase_limited_notice = (
                     f"Saved edition settings for {product.get('product_title') or product_handle}.{sync_warning}"
                 )
@@ -6762,6 +6793,14 @@ def _render_certificate_popover(order_summary, key_prefix):
                     else:
                         generate_certificate_pdf(edition_order_id)
                         st.session_state.orders_notice = f"Certificate generated for {edition_label}."
+                    record_activity_log(
+                        "certificate_generated",
+                        "Orders",
+                        f"Generated certificate: {edition_label}",
+                        entity_type="certificate",
+                        entity_id=str(edition_order_id or ""),
+                        metadata={"product": product_label},
+                    )
                     st.rerun()
                 except Exception as error:
                     st.error("Could not generate certificate.")
@@ -7157,6 +7196,13 @@ def _render_certificate_action_cell(order_summary, key_prefix):
                 )
                 generated_count += 1
             if generated_count:
+                record_activity_log(
+                    "certificate_generated",
+                    "Orders",
+                    f"Generated {generated_count} certificate PDF{'s' if generated_count != 1 else ''}.",
+                    entity_type="certificate",
+                    metadata={"count": generated_count},
+                )
                 st.session_state.supabase_orders_notice = (
                     f"Generated {generated_count} certificate PDF"
                     f"{'s' if generated_count != 1 else ''}."
@@ -8154,6 +8200,13 @@ def render_certificate_actions(assignments, key_prefix):
             try:
                 for assignment in missing:
                     generate_certificate_pdf(assignment["id"])
+                record_activity_log(
+                    "certificate_generated",
+                    "Orders",
+                    f"Generated {len(missing)} certificate PDF{'s' if len(missing) != 1 else ''}.",
+                    entity_type="certificate",
+                    metadata={"count": len(missing)},
+                )
                 st.session_state.orders_notice = (
                     f"Generated {len(missing)} certificate PDF"
                     f"{'s' if len(missing) != 1 else ''}."
@@ -8881,6 +8934,13 @@ def render_edition_orders_page():
             if columns[5].button("Generate", key=f"edition-order-generate-{row['id']}", use_container_width=True):
                 try:
                     supabase_backend.generate_certificate_for_edition_order(row["id"])
+                    record_activity_log(
+                        "certificate_generated",
+                        "Certificates",
+                        f"Generated certificate: {row.get('product_title') or row.get('shopify_handle') or row['id']}",
+                        entity_type="certificate",
+                        entity_id=str(row["id"]),
+                    )
                     st.rerun()
                 except Exception as error:
                     st.error("Could not generate certificate.")

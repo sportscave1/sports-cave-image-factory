@@ -19,6 +19,7 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
+from activity_log import record_activity_log
 import prompt_store
 from sports_cave_prompt_blocks import SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK
 
@@ -3066,6 +3067,14 @@ def _render_editable_prompt(
                 logging.exception("Social Reels prompt save failed key=%s", prompt_key)
                 st.error("Save failed — existing prompt remains unchanged")
             else:
+                record_activity_log(
+                    "reel_prompt_saved",
+                    "Social Media Reels Studio",
+                    f"Saved reel prompt: {prompt_name}",
+                    entity_type="reel_prompt",
+                    entity_id=prompt_key,
+                    metadata={"prompt_name": prompt_name},
+                )
                 st.session_state[notice_key] = "Prompt saved"
                 st.rerun()
 
@@ -3317,6 +3326,18 @@ Optional final archive location:
             record = _store_video_upload(state, uploaded_video, final_product_handle, payload["scene_slug"], payload["version"], payload["status"])
             if record:
                 st.success(f"Saved as {record['filename']}")
+                record_activity_log(
+                    "reel_video_uploaded",
+                    "Social Media Reels Studio",
+                    f"Uploaded reel video: {record['filename']}",
+                    entity_type="reel_video",
+                    entity_id=record.get("filename") or "",
+                    metadata={
+                        "product_handle": final_product_handle,
+                        "scene": payload["scene_slug"],
+                        "version": record.get("version") or "",
+                    },
+                )
                 if record.get("version") != payload["version"]:
                     st.info(f"Filename already existed, so this upload was saved as {record['version']}.")
 

@@ -18,6 +18,7 @@ import certificate_engine
 import certificate_job
 import order_allocator
 import shopify_sync
+from activity_log import record_activity_log
 from certificate_logging import certificate_stage_log
 
 
@@ -109,6 +110,23 @@ def _certificate_action_log(event, *, row=None, source="Orders", **extra):
     }
     safe_details = " ".join(f"{key}={value}" for key, value in details.items() if value not in (None, ""))
     print(f"CERTIFICATE ACTION: {event} {safe_details}", flush=True)
+
+
+def _record_order_activity(action_type, message, *, row=None, metadata=None):
+    normalised = _normalise_row(row or {}) if row else {}
+    record_activity_log(
+        action_type,
+        "Orders",
+        message,
+        entity_type="order",
+        entity_id=str(normalised.get("edition_order_id") or normalised.get("shopify_order_id") or ""),
+        metadata={
+            "order": normalised.get("order") or normalised.get("order_name") or "",
+            "product": normalised.get("product") or normalised.get("product_title") or "",
+            "edition": normalised.get("edition") or normalised.get("edition_number") or "",
+            **(metadata or {}),
+        },
+    )
 
 
 def _certificate_action_key(row):
@@ -1435,6 +1453,12 @@ def _generate_certificate_for_row(row, *, raise_errors=False):
             st.session_state[NOTICE_KEY] = (
                 f"Generated certificate for {refreshed.get('order')} {refreshed.get('edition')}."
             )
+            _record_order_activity(
+                "certificate_generated",
+                f"Generated certificate: {refreshed.get('order')} {refreshed.get('edition')}",
+                row=refreshed,
+                metadata={"path": generated_path},
+            )
             return True
         if not config.get("configured"):
             message = "Store connection is not configured yet. Ask a developer before generating certificates."
@@ -1455,6 +1479,12 @@ def _generate_certificate_for_row(row, *, raise_errors=False):
         _update_row_from_certificate(row, generated)
         if generated.get("status") == "Generated":
             st.session_state[NOTICE_KEY] = f"Generated certificate for {row.get('order')} {row.get('edition')}."
+            _record_order_activity(
+                "certificate_generated",
+                f"Generated certificate: {row.get('order')} {row.get('edition')}",
+                row=row,
+                metadata={"path": generated.get("local_pdf_path") or ""},
+            )
             return True
         else:
             message = generated.get("sync_error") or "Certificate generation needs review."
@@ -1520,6 +1550,12 @@ def _upload_certificate_for_row(row, *, raise_errors=False):
             )
         else:
             st.session_state[NOTICE_KEY] = f"Uploaded certificate for {row.get('order')} {row.get('edition')}."
+        _record_order_activity(
+            "certificate_uploaded",
+            f"Uploaded certificate: {row.get('order')} {row.get('edition')}",
+            row=row,
+            metadata={"metafields_synced": saved.get("metafields_synced")},
+        )
         return True
     except Exception as error:
         _update_matching_row(row, {"certificate_status": "Upload failed", "certificate_error": str(error), "certificate": "Upload failed"})
@@ -1686,6 +1722,12 @@ def _generate_upload_selected_certificates(rows):
             )
             _certificate_action_log("row refresh finished", row=refreshed_row, source="Orders")
             _certificate_action_log("certificate action finished", row=row, source="Orders")
+            _record_order_activity(
+                "certificate_uploaded",
+                f"Generated and uploaded certificate: {refreshed_row.get('order')} {refreshed_row.get('edition')}",
+                row=refreshed_row,
+                metadata={"job": "generate_upload"},
+            )
             completed += 1
         _perf_log("generate selected certificates", start, rows=len(rows), mode="generate_upload")
         _perf_log("upload selected certificates", start, rows=len(rows), mode="generate_upload")

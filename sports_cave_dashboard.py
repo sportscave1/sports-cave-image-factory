@@ -1,214 +1,264 @@
-from copy import deepcopy
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import json
 from pathlib import Path
-import uuid
 
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
-DASHBOARD_STATE_PATH = DATA_DIR / "dashboard_state.json"
 SPORTING_CALENDAR_PATH = DATA_DIR / "sporting_calendar.json"
 TASK_GROUPS = ("Collections to update", "New designs to complete")
-CUSTOM_EVENT_SPORTS = (
-    "Sales",
-    "Custom",
-    "NBA",
-    "Basketball",
-    "MLB",
-    "Baseball",
-    "NHL",
-    "Ice Hockey",
-    "NFL",
-    "Football",
-    "Rugby Union",
-    "Cricket",
-    "Tennis",
-    "Golf",
-    "Motorsport",
-    "Horse Racing",
-    "Combat",
-    "Major event",
-)
 REGIONS = ("Australia", "USA", "UK", "Canada", "New Zealand")
 ACTIVITY_LOG_LIMIT = 200
-CUSTOM_EVENT_LIMIT = 300
 DEFAULT_UPCOMING_DAYS = 60
+ACTIVITY_VIEW_TODAY = "Today"
+ACTIVITY_VIEW_LAST_7_DAYS = "Last 7 days"
+ACTIVITY_VIEW_MONTH = "Month"
+ACTIVITY_VIEW_ALL_TIME = "All time"
+ACTIVITY_VIEWS = (
+    ACTIVITY_VIEW_TODAY,
+    ACTIVITY_VIEW_LAST_7_DAYS,
+    ACTIVITY_VIEW_MONTH,
+    ACTIVITY_VIEW_ALL_TIME,
+)
+
+
+class DashboardStorageError(RuntimeError):
+    pass
 
 
 def utc_now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
-def blank_dashboard_state():
-    return {"tasks": [], "activity_log": [], "custom_events": []}
-
-
 def _read_json(path, fallback):
     path = Path(path)
     if not path.exists():
-        return deepcopy(fallback)
+        return dict(fallback)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return deepcopy(fallback)
-    return data if isinstance(data, dict) else deepcopy(fallback)
+        return dict(fallback)
+    return data if isinstance(data, dict) else dict(fallback)
 
 
-def _write_json(path, data):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
-    temp_path.write_text(
-        json.dumps(data, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    temp_path.replace(path)
+def get_supabase_backend():
+    try:
+        import supabase_backend
+    except Exception as error:
+        raise DashboardStorageError("Dashboard saving is unavailable right now.") from error
+    if not supabase_backend.is_configured():
+        raise DashboardStorageError("Dashboard saving is not connected right now.")
+    return supabase_backend
 
 
-def load_dashboard_state(path=DASHBOARD_STATE_PATH):
-    state = _read_json(path, blank_dashboard_state())
-    tasks = state.get("tasks") if isinstance(state.get("tasks"), list) else []
-    activity_log = (
-        state.get("activity_log") if isinstance(state.get("activity_log"), list) else []
-    )
-    custom_events = (
-        state.get("custom_events") if isinstance(state.get("custom_events"), list) else []
-    )
+def _storage_error(error):
+    if isinstance(error, DashboardStorageError):
+        return str(error)
+    return "Dashboard saving is unavailable right now."
+
+
+def _normalise_task(task):
+    task = dict(task or {})
+    title = str(task.get("title") or task.get("text") or "").strip()
+    section = normalize_task_category(task.get("section") or task.get("category"))
     return {
-        "tasks": tasks,
-        "activity_log": activity_log[:ACTIVITY_LOG_LIMIT],
-        "custom_events": custom_events[:CUSTOM_EVENT_LIMIT],
+        **task,
+        "id": str(task.get("id") or ""),
+        "text": title,
+        "title": title,
+        "category": section,
+        "section": section,
     }
-
-
-def save_dashboard_state(state, path=DASHBOARD_STATE_PATH):
-    clean_state = {
-        "tasks": list(state.get("tasks") or []),
-        "activity_log": list(state.get("activity_log") or [])[:ACTIVITY_LOG_LIMIT],
-        "custom_events": list(state.get("custom_events") or [])[:CUSTOM_EVENT_LIMIT],
-    }
-    _write_json(path, clean_state)
-    return clean_state
-
-
-def add_activity(state, message, *, created_at=None):
-    entry = {
-        "id": uuid.uuid4().hex,
-        "message": str(message or "").strip(),
-        "created_at": created_at or utc_now_iso(),
-    }
-    if not entry["message"]:
-        return None
-    log_entries = [entry, *list(state.get("activity_log") or [])]
-    state["activity_log"] = log_entries[:ACTIVITY_LOG_LIMIT]
-    return entry
-
-
-def record_activity(message, *, path=DASHBOARD_STATE_PATH, created_at=None):
-    state = load_dashboard_state(path)
-    entry = add_activity(state, message, created_at=created_at)
-    save_dashboard_state(state, path)
-    return entry
 
 
 def normalize_task_category(category):
     return category if category in TASK_GROUPS else TASK_GROUPS[0]
 
 
-def add_task(text, category, *, path=DASHBOARD_STATE_PATH, created_at=None):
+def list_tasks(status="open"):
+    try:
+        backend = get_supabase_backend()
+        return [_normalise_task(task) for task in backend.list_dashboard_tasks(status=status)]
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def add_task(text, category, *, metadata=None):
     task_text = str(text or "").strip()
     if not task_text:
         raise ValueError("Task text is required.")
-    state = load_dashboard_state(path)
-    task = {
-        "id": uuid.uuid4().hex,
-        "text": task_text,
-        "category": normalize_task_category(category),
-        "created_at": created_at or utc_now_iso(),
+    try:
+        backend = get_supabase_backend()
+        return _normalise_task(
+            backend.create_dashboard_task(
+                task_text,
+                normalize_task_category(category),
+                metadata=metadata or {},
+            )
+        )
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def complete_task(task_id, *, metadata=None):
+    try:
+        backend = get_supabase_backend()
+        completed = backend.complete_dashboard_task(task_id, metadata=metadata or {})
+        return _normalise_task(completed) if completed else None
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def _json_dict(value):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def humanise_event_type(value):
+    text = str(value or "activity").replace("_", " ").strip()
+    return text[:1].upper() + text[1:] if text else "Activity"
+
+
+def clean_activity_source(value):
+    source = str(value or "").replace("_", " ").strip()
+    if not source:
+        return "Sports Cave"
+    known = {
+        "sports cave os": "Sports Cave",
+        "manual app": "Edition Ops",
+        "supabase ledger": "Orders",
+        "sports cave os manual override": "Edition Ops",
     }
-    state["tasks"].append(task)
-    add_activity(state, f"Added task: {task_text}", created_at=created_at)
-    save_dashboard_state(state, path)
-    return task
+    return known.get(source.casefold(), source[:1].upper() + source[1:])
 
 
-def complete_task(task_id, *, path=DASHBOARD_STATE_PATH, completed_at=None):
-    state = load_dashboard_state(path)
-    remaining_tasks = []
-    completed_task = None
-    for task in state.get("tasks") or []:
-        if task.get("id") == task_id and completed_task is None:
-            completed_task = task
-        else:
-            remaining_tasks.append(task)
-
-    if completed_task is None:
-        return None
-
-    state["tasks"] = remaining_tasks
-    add_activity(
-        state,
-        f"Completed task: {completed_task.get('text', '').strip()}",
-        created_at=completed_at,
+def activity_from_audit_row(row):
+    row = dict(row or {})
+    payload = _json_dict(row.get("new_value"))
+    metadata = _json_dict(payload.get("metadata"))
+    message = (
+        str(payload.get("message") or "").strip()
+        or str(row.get("reason") or "").strip()
+        or humanise_event_type(row.get("event_type"))
     )
-    save_dashboard_state(state, path)
-    return completed_task
-
-
-def normalize_event_regions(regions):
-    clean_regions = []
-    for region in regions or []:
-        if region in REGIONS and region not in clean_regions:
-            clean_regions.append(region)
-    return clean_regions or ["Australia"]
-
-
-def normalize_custom_event_sport(sport):
-    return sport if sport in CUSTOM_EVENT_SPORTS else "Custom"
-
-
-def add_custom_event(
-    title,
-    start_date,
-    end_date,
-    regions,
-    *,
-    sport="Custom",
-    notes="",
-    path=DASHBOARD_STATE_PATH,
-    created_at=None,
-):
-    event_title = str(title or "").strip()
-    if not event_title:
-        raise ValueError("Event title is required.")
-
-    start = parse_event_date(start_date)
-    end = parse_event_date(end_date or start)
-    if end < start:
-        raise ValueError("End date must be on or after the start date.")
-
-    state = load_dashboard_state(path)
-    event = {
-        "alert_label": "",
-        "created_at": created_at or utc_now_iso(),
-        "custom": True,
-        "end_date": end.isoformat(),
-        "id": f"custom-{uuid.uuid4().hex}",
-        "importance": 3,
-        "notes": str(notes or "").strip(),
-        "regions": normalize_event_regions(regions),
-        "source_url": "",
-        "sport": normalize_custom_event_sport(sport),
-        "start_date": start.isoformat(),
-        "title": event_title,
-        "type": "Custom",
+    page = str(payload.get("page") or "").strip() or clean_activity_source(row.get("source"))
+    return {
+        "id": str(row.get("id") or ""),
+        "action_type": str(payload.get("action_type") or row.get("event_type") or "").strip(),
+        "message": message,
+        "page": page,
+        "source": page,
+        "created_at": row.get("created_at"),
+        "entity_type": row.get("entity_type") or "",
+        "entity_id": row.get("entity_id") or "",
+        "metadata": metadata,
     }
-    custom_events = [event, *list(state.get("custom_events") or [])]
-    state["custom_events"] = custom_events[:CUSTOM_EVENT_LIMIT]
-    add_activity(state, f"Added calendar event: {event_title}", created_at=created_at)
-    save_dashboard_state(state, path)
-    return event
+
+
+def _as_aware_datetime(value, fallback_tz=timezone.utc):
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=fallback_tz)
+    return parsed
+
+
+def activity_log_bounds(view, local_now, *, month_start=None):
+    view = view if view in ACTIVITY_VIEWS else ACTIVITY_VIEW_TODAY
+    if view == ACTIVITY_VIEW_ALL_TIME:
+        return None, None
+
+    local_now = local_now or datetime.now(timezone.utc)
+    tzinfo = local_now.tzinfo or timezone.utc
+    today = local_now.date()
+    if view == ACTIVITY_VIEW_LAST_7_DAYS:
+        start_day = today - timedelta(days=6)
+        start = datetime.combine(start_day, time.min, tzinfo)
+        end = datetime.combine(today + timedelta(days=1), time.min, tzinfo)
+        return start, end
+    if view == ACTIVITY_VIEW_MONTH:
+        if isinstance(month_start, datetime):
+            month_day = month_start.date()
+        elif isinstance(month_start, date):
+            month_day = month_start
+        else:
+            month_day = today.replace(day=1)
+        start = datetime.combine(month_day.replace(day=1), time.min, tzinfo)
+        if start.month == 12:
+            next_month = date(start.year + 1, 1, 1)
+        else:
+            next_month = date(start.year, start.month + 1, 1)
+        end = datetime.combine(next_month, time.min, tzinfo)
+        return start, end
+
+    start = datetime.combine(today, time.min, tzinfo)
+    end = datetime.combine(today + timedelta(days=1), time.min, tzinfo)
+    return start, end
+
+
+def filter_activity_entries(entries, view, local_now, *, month_start=None):
+    start, end = activity_log_bounds(view, local_now, month_start=month_start)
+    if start is None and end is None:
+        return list(entries or [])
+    filtered = []
+    for entry in entries or []:
+        created_at = _as_aware_datetime(entry.get("created_at"), start.tzinfo if start else timezone.utc)
+        if created_at is None:
+            continue
+        if start and created_at < start:
+            continue
+        if end and created_at >= end:
+            continue
+        filtered.append(entry)
+    return filtered
+
+
+def list_activity_entries(view=ACTIVITY_VIEW_TODAY, local_now=None, *, month_start=None, limit=ACTIVITY_LOG_LIMIT):
+    local_now = local_now or datetime.now(timezone.utc)
+    start, end = activity_log_bounds(view, local_now, month_start=month_start)
+    try:
+        backend = get_supabase_backend()
+        rows = backend.list_activity_logs(start_at=start, end_at=end, limit=limit)
+        return [activity_from_audit_row(row) for row in rows]
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def load_dashboard_state(
+    activity_view=ACTIVITY_VIEW_TODAY,
+    local_now=None,
+    *,
+    month_start=None,
+    include_activity=True,
+):
+    state = {"tasks": [], "activity_log": [], "task_error": "", "activity_error": ""}
+    try:
+        state["tasks"] = list_tasks(status="open")
+    except DashboardStorageError as error:
+        state["task_error"] = str(error)
+    if not include_activity:
+        return state
+    try:
+        state["activity_log"] = list_activity_entries(
+            activity_view,
+            local_now or datetime.now(timezone.utc),
+            month_start=month_start,
+        )
+    except DashboardStorageError as error:
+        state["activity_error"] = str(error)
+    return state
 
 
 def greeting_for_datetime(local_dt):
@@ -224,10 +274,6 @@ def load_calendar_events(path=SPORTING_CALENDAR_PATH):
     data = _read_json(path, {"events": []})
     events = data.get("events") if isinstance(data.get("events"), list) else []
     return events
-
-
-def calendar_events_with_custom(events, state):
-    return [*list(events or []), *list((state or {}).get("custom_events") or [])]
 
 
 def parse_event_date(value):
