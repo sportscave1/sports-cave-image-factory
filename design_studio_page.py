@@ -493,7 +493,7 @@ You are the dedicated Sports Cave sports-product researcher and premium collecto
 
 Analyse the task above deeply and conduct current web research before recommending any creative direction.
 
-Your job is to find the strongest, most accurate visual references needed to turn this task into a realistic, premium, bestselling Sports Cave limited-edition collector artwork.
+Your job is to verify the subject, identify the strongest commercial angle, and build a clear research brief for a realistic, premium, bestselling Sports Cave limited-edition collector artwork.
 
 RESEARCH THE SUBJECT
 
@@ -510,62 +510,23 @@ Identify and verify:
 - Any current event or calendar reason the design is commercially relevant now
 - Whether the proposed title and concept are strong enough to sell
 
-IMAGE RESEARCH
+RESEARCH OUTPUT
 
-Search the web and display the best visual references directly in this ChatGPT conversation as an image carousel.
-
-Do not give me a text-only list of links.
-
-Show approximately 10-12 strong images, including:
-
-- 3-4 potential hero-subject images
-- 2-3 action or emotional-moment images
-- 2-3 venue, track, stadium or atmospheric background images
-- 1-2 important supporting details such as a trophy, car, equipment or historical scene
-
-Only choose images that are:
-
-- Highly relevant to the exact task
-- Visually powerful
-- Realistic and historically accurate
-- Clear enough to guide a premium artwork
-- Useful for a landscape 4:3 composition
-- Strong enough to support a Sports Cave bestseller
-- Free from obvious AI errors or factual inaccuracies
-
-Use previous Sports Cave bestsellers only for structural design intelligence.
-
-Do not introduce athletes, vehicles, clothing, trophies, locations or details belonging to a different product.
-
-IMAGE SELECTION
-
-After displaying the carousel:
-
-1. Select the strongest hero image
-2. Select the strongest background or supporting image
-3. Identify any additional detail image worth using
-4. Explain briefly why each selected image is the best choice
-5. Identify any historical, visual or copyright risks
-6. Explain what must not be copied or inaccurately recreated
-
-CREATIVE DIRECTION
-
-Then provide:
+Provide:
 
 - Recommended collector title
 - Core fan emotion
-- Main hero composition
-- Background story and atmosphere
-- Subject placement
-- Negative-space plan
-- Lighting direction
-- Authentic colour palette
-- Typography placement
-- Limited-edition plaque position
-- Best Sports Cave bestseller structure to use
-- What to remove to keep the artwork simple and powerful
-- Best mockup environment
-- One high-converting ad hook
+- Verified subject, era, event and location
+- Why the concept matters to fans
+- Why it is commercially relevant now
+- Strongest country markets
+- Accurate visual details that must appear
+- Historical details that must not be shown incorrectly
+- Best hero-subject direction
+- Best venue, track, stadium or background direction
+- Important supporting details such as a trophy, car or equipment
+- Any factual, historical or copyright risks
+- A concise image-search brief for the next step
 
 The final direction must feel:
 
@@ -583,11 +544,56 @@ Be commercially honest.
 
 If the task is weak, historically inaccurate or unlikely to sell, say so and recommend a stronger angle.
 
-Use current web research and display the strongest images inside this chat now.
+Use current web research, but do not find or display images yet.
 
 Do not generate the final artwork yet.
 
-Stop after completing the research, image carousel, image selection and creative direction.
+Stop after completing the research brief.
+"""
+
+
+DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE = """
+TASK
+
+[PASTED TASK]
+
+RESEARCH ANSWER
+
+[PASTED RESEARCH ANSWER]
+
+Use the task and completed research above only to find the strongest, most accurate visual references for this Sports Cave design.
+
+Search the web and display approximately 10-12 strong images directly in this ChatGPT conversation as an image carousel.
+
+Do not give me a text-only list of links.
+Do not provide a new research report or creative direction.
+Do not analyse, rank or recommend the images.
+Do not generate the final artwork.
+
+The carousel must include:
+
+- 3-4 potential hero-subject images
+- 2-3 action or emotional-moment images
+- 2-3 venue, track, stadium or atmospheric background images
+- 1-2 important supporting details such as a trophy, car, equipment or historical scene
+
+Only show images that are:
+
+- Highly relevant to the exact task and research
+- Visually powerful
+- Realistic and historically accurate
+- Clear enough to guide a premium artwork
+- Useful for a landscape 4:3 composition
+- Strong enough to support a Sports Cave bestseller
+- Free from obvious AI errors or factual inaccuracies
+
+Do not introduce athletes, vehicles, clothing, trophies, locations or details belonging to a different product.
+
+Under each image, add only a short label identifying its purpose, such as Hero, Action, Background or Detail.
+
+This step is only for finding and displaying images.
+
+Stop after the image carousel.
 """
 
 
@@ -1299,6 +1305,15 @@ def build_design_research_prompt(task_text: str) -> str:
     )
 
 
+def build_design_image_carousel_prompt(task_text: str, research_answer: str) -> str:
+    research = str(research_answer or "").strip() or "[PASTED RESEARCH ANSWER]"
+    return (
+        _clean_prompt(DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE)
+        .replace("[PASTED TASK]", _task_or_placeholder(task_text))
+        .replace("[PASTED RESEARCH ANSWER]", research)
+    )
+
+
 def build_design_generation_prompt(task_text: str) -> str:
     task = _task_or_placeholder(task_text)
     intro = f"""
@@ -1555,14 +1570,14 @@ def render_generated_prompt_box(
     _render_copy_button(effective_prompt, key, label=copy_label)
 
 
-def render_design_research_tab():
-    st.subheader("Design Research")
+def render_new_design_tab():
+    st.subheader("New Design")
     st.markdown(
-        "1. Copy the task from the Home page design task.\n"
-        "2. Paste it into ChatGPT in the Sports Cave Designs folder.\n"
-        "3. Before submitting, paste the Research and Find Images prompt underneath the task.\n"
-        "4. When the images are selected, use the Design Generation prompt."
+        "1. Paste the Home design task below and run the Research Prompt in the Sports Cave Designs chat.\n"
+        "2. Paste the research answer into Step 2, then run the Find Images Prompt in the same chat.\n"
+        "3. Once the image carousel is shown, run the Design Generation Prompt in the same chat."
     )
+    st.markdown("### Step 1 - Research")
     task_text = st.text_area(
         "Paste design task",
         placeholder='Paste a task from "New designs to complete" here...',
@@ -1570,15 +1585,34 @@ def render_design_research_tab():
         key="design-studio-task-research-input",
     )
     research_prompt = build_design_research_prompt(task_text)
-    design_prompt = build_design_generation_prompt(task_text)
     render_generated_prompt_box(
-        "Research and Find Images Prompt",
+        "Research Prompt",
         research_prompt,
-        "design-research-images",
+        "design-research",
         "Copy Research Prompt",
-        height=380,
+        height=340,
     )
     st.divider()
+
+    st.markdown("### Step 2 - Find Images")
+    research_answer = st.text_area(
+        "Paste research answer",
+        placeholder="Paste the complete research answer from ChatGPT here...",
+        height=150,
+        key="design-studio-research-answer-input",
+    )
+    image_prompt = build_design_image_carousel_prompt(task_text, research_answer)
+    render_generated_prompt_box(
+        "Find Images Prompt",
+        image_prompt,
+        "design-image-carousel",
+        "Copy Find Images Prompt",
+        height=340,
+    )
+    st.divider()
+
+    st.markdown("### Step 3 - Generate Design")
+    design_prompt = build_design_generation_prompt(task_text)
     render_generated_prompt_box(
         "Design Generation Prompt",
         design_prompt,
@@ -1599,7 +1633,7 @@ def render_design_studio_page(developer_password: str | None = None):
     upgrade_tab, research_tab, expired_tab, create_tab, review_tab = st.tabs(
         [
             "Upgrade Existing Design",
-            "Design Research",
+            "New Design",
             "Update Expired Edition",
             "Create New Ultimate Moment",
             "Harsh Review Checklist",
@@ -1630,7 +1664,7 @@ def render_design_studio_page(developer_password: str | None = None):
         )
 
     with research_tab:
-        render_design_research_tab()
+        render_new_design_tab()
 
     with expired_tab:
         st.subheader("Update Expired Edition")
