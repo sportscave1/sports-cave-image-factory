@@ -561,6 +561,26 @@ Only find and display the images in this chat.
 """
 
 
+DESIGN_REALISM_ACCURACY_LOCK = """
+REALISM + IMAGE ACCURACY LOCK - MANDATORY
+
+Use the selected images above as strict visual references. Keep the subject realistic and faithful to the supplied images.
+
+Preserve the exact facial features, expression, age, skin tone, hair, body shape, pose, uniform, kit, jersey number, badges, sponsor marks, logos, colours, car livery, helmet, equipment, trophy shape, stadium/track details and era shown in the reference images.
+
+Do not redesign the athlete, driver, car, uniform, logos, team colours or facial identity.
+Do not make the subject look AI-generated, plastic, cartoon, generic, over-smoothed or fake.
+Do not warp faces, hands, limbs, bodies, wheels, cars, numbers, text, logos or uniforms.
+Do not mirror images if it reverses numbers, logos or sponsor text.
+Do not mix different eras, teams, uniforms, liveries, trophies or incorrect background details.
+Keep all anatomy, proportions, contact shadows, lighting direction and perspective natural and believable.
+
+The Sports Cave upgrade should come from premium cinematic composition, atmosphere, lighting, depth, title treatment and collector plaque integration - not from changing the real identity or accurate details of the reference images.
+
+Keep the final artwork realistic, print-ready, collector-worthy and wall-worthy.
+"""
+
+
 SPORTS_CAVE_MASTER_DESIGN_SYSTEM_PROMPT = """
 Your best sellers are not your cleanest designs.
 
@@ -1282,7 +1302,11 @@ TASK
 
 {task}
 
-Use the selected hero image, background/support image, detail references and creative direction from the research above. Continue with this Sports Cave design system:
+Use the selected hero image, background/support image, detail references and creative direction from the research above.
+
+{_clean_prompt(DESIGN_REALISM_ACCURACY_LOCK)}
+
+Continue with this Sports Cave design system:
 """
     return f"{_clean_prompt(intro)}\n\n{_clean_prompt(SPORTS_CAVE_MASTER_DESIGN_SYSTEM_PROMPT)}"
 

@@ -44,9 +44,24 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
 
         self.assertIn("From the research and images above you found", prompt)
         self.assertIn("Bathurst Brock tribute", prompt)
+        self.assertIn("REALISM + IMAGE ACCURACY LOCK - MANDATORY", prompt)
+        self.assertIn("Use the selected images above as strict visual references.", prompt)
+        self.assertIn("Do not redesign the athlete, driver, car, uniform", prompt)
+        self.assertIn("Do not mirror images if it reverses numbers, logos or sponsor text.", prompt)
         self.assertIn("Sports Cave Master Design System Prompt", prompt)
         self.assertIn("legend + moment + nostalgia + darkness + gold + framed collector energy", prompt)
         self.assertIn("Built for Sports Cave best seller potential.", prompt)
+        self.assertLess(
+            prompt.index(
+                "Use the selected hero image, background/support image, detail references "
+                "and creative direction from the research above."
+            ),
+            prompt.index("REALISM + IMAGE ACCURACY LOCK - MANDATORY"),
+        )
+        self.assertLess(
+            prompt.index("REALISM + IMAGE ACCURACY LOCK - MANDATORY"),
+            prompt.index("Continue with this Sports Cave design system:"),
+        )
 
     def test_new_design_tab_is_second_after_upgrade_existing_design(self):
         source = (ROOT / "design_studio_page.py").read_text(encoding="utf-8")
