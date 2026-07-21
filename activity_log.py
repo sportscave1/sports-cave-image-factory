@@ -18,7 +18,7 @@ def record_activity_log(
     try:
         import supabase_backend
 
-        return supabase_backend.record_activity_log(
+        row = supabase_backend.record_activity_log(
             action_type=action_type,
             page=page,
             message=message,
@@ -26,6 +26,13 @@ def record_activity_log(
             entity_id=entity_id,
             metadata=metadata or {},
         )
+        try:
+            import sports_cave_dashboard
+
+            sports_cave_dashboard.clear_activity_cache()
+        except Exception:
+            pass
+        return row
     except Exception as error:
         logging.info("Activity log write skipped: %s", error)
         if raise_errors:

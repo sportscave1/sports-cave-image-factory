@@ -36,5 +36,11 @@ CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_section_status
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
     ON audit_logs(created_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type_created
+    ON audit_logs(event_type, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_source_created
+    ON audit_logs(source, created_at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity
     ON audit_logs(entity_type, entity_id);

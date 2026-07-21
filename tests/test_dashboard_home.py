@@ -14,6 +14,8 @@ class FakeDashboardBackend:
     def __init__(self):
         self.tasks = []
         self.activity_rows = []
+        self.activity_calls = []
+        self.task_status_calls = []
 
     def _activity_row(self, event_type, message):
         row = {
@@ -56,11 +58,13 @@ class FakeDashboardBackend:
         return None
 
     def list_dashboard_tasks(self, status="open"):
+        self.task_status_calls.append(status)
         if status == "all":
             return list(self.tasks)
         return [task for task in self.tasks if task.get("status") == status]
 
     def list_activity_logs(self, *, start_at=None, end_at=None, limit=200):
+        self.activity_calls.append({"start_at": start_at, "end_at": end_at, "limit": limit})
         return self.activity_rows[:limit]
 
 
@@ -84,6 +88,14 @@ class SportsCaveAuthTests(unittest.TestCase):
 
 
 class SportsCaveDashboardStateTests(unittest.TestCase):
+    def setUp(self):
+        sports_cave_dashboard.clear_dashboard_caches()
+        sports_cave_dashboard.clear_calendar_cache()
+
+    def tearDown(self):
+        sports_cave_dashboard.clear_dashboard_caches()
+        sports_cave_dashboard.clear_calendar_cache()
+
     def test_task_add_persists_to_supabase_backend(self):
         backend = FakeDashboardBackend()
 
@@ -94,6 +106,20 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(task["text"], "Refresh NFL collection")
         self.assertEqual(state["tasks"][0]["text"], "Refresh NFL collection")
         self.assertEqual(backend.activity_rows[0]["reason"], "Added task: Refresh NFL collection")
+
+    def test_dashboard_task_list_loads_open_tasks_only(self):
+        backend = FakeDashboardBackend()
+        backend.tasks = [
+            {"id": "open-1", "title": "Open task", "section": "Collections to update", "status": "open"},
+            {"id": "done-1", "title": "Done task", "section": "Collections to update", "status": "complete"},
+        ]
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            state = sports_cave_dashboard.load_dashboard_state(include_activity=False)
+
+        self.assertEqual([task["text"] for task in state["tasks"]], ["Open task"])
+        self.assertEqual(backend.task_status_calls, ["open"])
+        self.assertEqual(backend.activity_calls, [])
 
     def test_task_complete_marks_complete_and_writes_activity_log(self):
         backend = FakeDashboardBackend()
@@ -110,6 +136,54 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(state["tasks"], [])
         self.assertEqual(state["activity_log"][0]["message"], "Completed task: Refresh NFL collection")
         self.assertEqual(state["activity_log"][1]["message"], "Added task: Refresh NFL collection")
+
+    def test_task_cache_is_cleared_after_add_and_complete(self):
+        backend = FakeDashboardBackend()
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            self.assertEqual(sports_cave_dashboard.list_tasks(), [])
+            self.assertEqual(sports_cave_dashboard.list_tasks(), [])
+            task = sports_cave_dashboard.add_task("Refresh NFL collection", "Collections to update")
+            self.assertEqual([item["text"] for item in sports_cave_dashboard.list_tasks()], ["Refresh NFL collection"])
+            sports_cave_dashboard.complete_task(task["id"])
+            self.assertEqual(sports_cave_dashboard.list_tasks(), [])
+
+        self.assertEqual(len(backend.task_status_calls), 3)
+
+    def test_activity_log_queries_use_view_date_bounds_and_limits(self):
+        backend = FakeDashboardBackend()
+        now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_TODAY, now)
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_LAST_7_DAYS, now)
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_MONTH, now)
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME, now)
+
+        today_call, week_call, month_call, all_time_call = backend.activity_calls
+        self.assertEqual(today_call["limit"], 50)
+        self.assertEqual(week_call["limit"], 100)
+        self.assertEqual(month_call["limit"], 150)
+        self.assertEqual(all_time_call["limit"], 200)
+        self.assertEqual(today_call["start_at"], datetime(2026, 7, 21, tzinfo=timezone.utc))
+        self.assertEqual(today_call["end_at"], datetime(2026, 7, 22, tzinfo=timezone.utc))
+        self.assertEqual(week_call["start_at"], datetime(2026, 7, 15, tzinfo=timezone.utc))
+        self.assertEqual(week_call["end_at"], datetime(2026, 7, 22, tzinfo=timezone.utc))
+        self.assertEqual(month_call["start_at"], datetime(2026, 7, 1, tzinfo=timezone.utc))
+        self.assertEqual(month_call["end_at"], datetime(2026, 8, 1, tzinfo=timezone.utc))
+        self.assertIsNone(all_time_call["start_at"])
+        self.assertIsNone(all_time_call["end_at"])
+
+    def test_activity_log_cache_is_keyed_by_filter(self):
+        backend = FakeDashboardBackend()
+        now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_TODAY, now)
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_TODAY, now)
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_LAST_7_DAYS, now)
+
+        self.assertEqual(len(backend.activity_calls), 2)
 
     def test_activity_log_filters_today_last_7_days_month_and_all_time(self):
         now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)

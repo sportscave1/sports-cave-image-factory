@@ -1,6 +1,7 @@
 from datetime import date, datetime, time, timedelta, timezone
 import json
 from pathlib import Path
+from time import monotonic
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -9,6 +10,9 @@ SPORTING_CALENDAR_PATH = DATA_DIR / "sporting_calendar.json"
 TASK_GROUPS = ("Collections to update", "New designs to complete")
 REGIONS = ("Australia", "USA", "UK", "Canada", "New Zealand")
 ACTIVITY_LOG_LIMIT = 200
+TASK_CACHE_TTL_SECONDS = 15
+ACTIVITY_CACHE_TTL_SECONDS = 20
+CALENDAR_CACHE_TTL_SECONDS = 300
 DEFAULT_UPCOMING_DAYS = 60
 ACTIVITY_VIEW_TODAY = "Today"
 ACTIVITY_VIEW_LAST_7_DAYS = "Last 7 days"
@@ -20,6 +24,15 @@ ACTIVITY_VIEWS = (
     ACTIVITY_VIEW_MONTH,
     ACTIVITY_VIEW_ALL_TIME,
 )
+ACTIVITY_VIEW_LIMITS = {
+    ACTIVITY_VIEW_TODAY: 50,
+    ACTIVITY_VIEW_LAST_7_DAYS: 100,
+    ACTIVITY_VIEW_MONTH: 150,
+    ACTIVITY_VIEW_ALL_TIME: 200,
+}
+_TASK_CACHE = {}
+_ACTIVITY_CACHE = {}
+_CALENDAR_CACHE = {}
 
 
 class DashboardStorageError(RuntimeError):
@@ -39,6 +52,43 @@ def _read_json(path, fallback):
     except (OSError, json.JSONDecodeError):
         return dict(fallback)
     return data if isinstance(data, dict) else dict(fallback)
+
+
+def _copy_rows(rows):
+    return [dict(row) for row in rows or []]
+
+
+def _cache_get(cache, key):
+    cached = cache.get(key)
+    if not cached:
+        return None
+    expires_at, value = cached
+    if expires_at < monotonic():
+        cache.pop(key, None)
+        return None
+    return _copy_rows(value)
+
+
+def _cache_set(cache, key, value, ttl_seconds):
+    cache[key] = (monotonic() + ttl_seconds, _copy_rows(value))
+    return _copy_rows(value)
+
+
+def clear_task_cache():
+    _TASK_CACHE.clear()
+
+
+def clear_activity_cache():
+    _ACTIVITY_CACHE.clear()
+
+
+def clear_calendar_cache():
+    _CALENDAR_CACHE.clear()
+
+
+def clear_dashboard_caches():
+    clear_task_cache()
+    clear_activity_cache()
 
 
 def get_supabase_backend():
@@ -76,9 +126,14 @@ def normalize_task_category(category):
 
 
 def list_tasks(status="open"):
+    cache_key = ("tasks", str(status or "open").strip().casefold())
+    cached = _cache_get(_TASK_CACHE, cache_key)
+    if cached is not None:
+        return [_normalise_task(task) for task in cached]
     try:
         backend = get_supabase_backend()
-        return [_normalise_task(task) for task in backend.list_dashboard_tasks(status=status)]
+        tasks = [_normalise_task(task) for task in backend.list_dashboard_tasks(status=status)]
+        return _cache_set(_TASK_CACHE, cache_key, tasks, TASK_CACHE_TTL_SECONDS)
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 
@@ -89,13 +144,16 @@ def add_task(text, category, *, metadata=None):
         raise ValueError("Task text is required.")
     try:
         backend = get_supabase_backend()
-        return _normalise_task(
+        task = _normalise_task(
             backend.create_dashboard_task(
                 task_text,
                 normalize_task_category(category),
                 metadata=metadata or {},
             )
         )
+        clear_task_cache()
+        clear_activity_cache()
+        return task
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 
@@ -104,6 +162,8 @@ def complete_task(task_id, *, metadata=None):
     try:
         backend = get_supabase_backend()
         completed = backend.complete_dashboard_task(task_id, metadata=metadata or {})
+        clear_task_cache()
+        clear_activity_cache()
         return _normalise_task(completed) if completed else None
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
@@ -142,16 +202,25 @@ def clean_activity_source(value):
 def activity_from_audit_row(row):
     row = dict(row or {})
     payload = _json_dict(row.get("new_value"))
-    metadata = _json_dict(payload.get("metadata"))
+    metadata = _json_dict(row.get("activity_metadata") or payload.get("metadata"))
     message = (
-        str(payload.get("message") or "").strip()
+        str(row.get("activity_message") or "").strip()
+        or str(payload.get("message") or "").strip()
         or str(row.get("reason") or "").strip()
         or humanise_event_type(row.get("event_type"))
     )
-    page = str(payload.get("page") or "").strip() or clean_activity_source(row.get("source"))
+    page = (
+        str(row.get("activity_page") or "").strip()
+        or str(payload.get("page") or "").strip()
+        or clean_activity_source(row.get("source"))
+    )
+    action_type = (
+        str(row.get("activity_action_type") or "").strip()
+        or str(payload.get("action_type") or row.get("event_type") or "").strip()
+    )
     return {
         "id": str(row.get("id") or ""),
-        "action_type": str(payload.get("action_type") or row.get("event_type") or "").strip(),
+        "action_type": action_type,
         "message": message,
         "page": page,
         "source": page,
@@ -225,13 +294,37 @@ def filter_activity_entries(entries, view, local_now, *, month_start=None):
     return filtered
 
 
-def list_activity_entries(view=ACTIVITY_VIEW_TODAY, local_now=None, *, month_start=None, limit=ACTIVITY_LOG_LIMIT):
+def activity_limit_for_view(view, limit=None):
+    view = view if view in ACTIVITY_VIEWS else ACTIVITY_VIEW_TODAY
+    view_limit = ACTIVITY_VIEW_LIMITS.get(view, ACTIVITY_LOG_LIMIT)
+    if limit is None:
+        return view_limit
+    try:
+        requested = max(int(limit), 1)
+    except (TypeError, ValueError):
+        return view_limit
+    return min(requested, view_limit)
+
+
+def list_activity_entries(view=ACTIVITY_VIEW_TODAY, local_now=None, *, month_start=None, limit=None):
     local_now = local_now or datetime.now(timezone.utc)
     start, end = activity_log_bounds(view, local_now, month_start=month_start)
+    safe_limit = activity_limit_for_view(view, limit)
+    cache_key = (
+        "activity",
+        view if view in ACTIVITY_VIEWS else ACTIVITY_VIEW_TODAY,
+        start.isoformat() if start else "",
+        end.isoformat() if end else "",
+        safe_limit,
+    )
+    cached = _cache_get(_ACTIVITY_CACHE, cache_key)
+    if cached is not None:
+        return cached
     try:
         backend = get_supabase_backend()
-        rows = backend.list_activity_logs(start_at=start, end_at=end, limit=limit)
-        return [activity_from_audit_row(row) for row in rows]
+        rows = backend.list_activity_logs(start_at=start, end_at=end, limit=safe_limit)
+        entries = [activity_from_audit_row(row) for row in rows]
+        return _cache_set(_ACTIVITY_CACHE, cache_key, entries, ACTIVITY_CACHE_TTL_SECONDS)
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 
@@ -271,9 +364,17 @@ def greeting_for_datetime(local_dt):
 
 
 def load_calendar_events(path=SPORTING_CALENDAR_PATH):
+    path = Path(path)
+    try:
+        cache_key = (str(path), path.stat().st_mtime)
+    except OSError:
+        cache_key = (str(path), None)
+    cached = _cache_get(_CALENDAR_CACHE, cache_key)
+    if cached is not None:
+        return cached
     data = _read_json(path, {"events": []})
     events = data.get("events") if isinstance(data.get("events"), list) else []
-    return events
+    return _cache_set(_CALENDAR_CACHE, cache_key, events, CALENDAR_CACHE_TTL_SECONDS)
 
 
 def parse_event_date(value):

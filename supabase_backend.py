@@ -86,6 +86,7 @@ REQUIRED_DATABASE_ENV_VARS = ("DATABASE_URL",)
 _SCHEMA_READY = False
 _ORDER_READ_SCHEMA_READY = False
 _PROMPT_TEMPLATE_SCHEMA_READY = False
+_DASHBOARD_SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
 _LAST_DATABASE_STATUS = {}
 _LAST_DATABASE_READ_DIAGNOSTIC = contextvars.ContextVar(
@@ -2009,11 +2010,12 @@ def _ensure_schema_uncached():
 
 
 def reset_schema_cache():
-    global _SCHEMA_READY, _ORDER_READ_SCHEMA_READY, _PROMPT_TEMPLATE_SCHEMA_READY
+    global _SCHEMA_READY, _ORDER_READ_SCHEMA_READY, _PROMPT_TEMPLATE_SCHEMA_READY, _DASHBOARD_SCHEMA_READY
     with _SCHEMA_LOCK:
         _SCHEMA_READY = False
         _ORDER_READ_SCHEMA_READY = False
         _PROMPT_TEMPLATE_SCHEMA_READY = False
+        _DASHBOARD_SCHEMA_READY = False
 
 
 def ensure_schema():
@@ -2028,6 +2030,64 @@ def ensure_schema():
         elapsed = time.perf_counter() - started
         print(f"PERF DB migration time={elapsed:.3f}s", flush=True)
         _SCHEMA_READY = True
+
+
+def ensure_dashboard_schema():
+    """Create only the small tables/indexes needed by Home dashboard reads."""
+    global _DASHBOARD_SCHEMA_READY
+    if _SCHEMA_READY or _DASHBOARD_SCHEMA_READY:
+        return
+    if not is_configured():
+        raise SupabaseNotConfigured(
+            "No Supabase/Postgres database URL is configured. Set DATABASE_URL, "
+            "SUPABASE_DATABASE_URL, or POSTGRES_URL in Render."
+        )
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY or _DASHBOARD_SCHEMA_READY:
+            return
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS audit_logs (
+                        id BIGSERIAL PRIMARY KEY,
+                        event_type TEXT NOT NULL,
+                        entity_type TEXT,
+                        entity_id TEXT,
+                        shopify_order_id TEXT,
+                        shopify_line_item_id TEXT,
+                        shopify_handle TEXT,
+                        old_value JSONB DEFAULT '{}'::jsonb,
+                        new_value JSONB DEFAULT '{}'::jsonb,
+                        reason TEXT,
+                        actor TEXT DEFAULT 'sports_cave_os',
+                        source TEXT DEFAULT 'sports_cave_os',
+                        created_at TIMESTAMPTZ DEFAULT now()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS dashboard_tasks (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        title TEXT NOT NULL,
+                        section TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'open',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        completed_at TIMESTAMPTZ,
+                        completed_by TEXT,
+                        metadata JSONB DEFAULT '{}'::jsonb
+                    )
+                    """
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_status_created ON dashboard_tasks(status, created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_section_status ON dashboard_tasks(section, status)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type_created ON audit_logs(event_type, created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_source_created ON audit_logs(source, created_at DESC)")
+            conn.commit()
+        _DASHBOARD_SCHEMA_READY = True
 
 
 def ensure_prompt_template_schema():
@@ -2587,7 +2647,7 @@ def record_activity_log(
     metadata=None,
     actor="sports_cave_os",
 ):
-    ensure_schema()
+    ensure_dashboard_schema()
     clean_message = str(message or "").strip()
     clean_page = str(page or "").strip() or "Sports Cave"
     clean_action = str(action_type or "").strip() or "activity"
@@ -2623,8 +2683,15 @@ def record_activity_log(
     return row
 
 
+def _dashboard_query_timeout_ms(default=2500):
+    try:
+        return max(int(os.getenv("DASHBOARD_SUPABASE_TIMEOUT_MS", str(default))), 500)
+    except (TypeError, ValueError):
+        return default
+
+
 def list_activity_logs(*, start_at=None, end_at=None, limit=200):
-    ensure_schema()
+    ensure_dashboard_schema()
     clauses = []
     params = []
     if start_at is not None:
@@ -2641,9 +2708,14 @@ def list_activity_logs(*, start_at=None, end_at=None, limit=200):
     params.append(safe_limit)
     with connect() as conn:
         with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
             cur.execute(
                 f"""
-                SELECT *
+                SELECT id, event_type, entity_type, entity_id, reason, source, created_at,
+                       COALESCE(new_value->>'message', '') AS activity_message,
+                       COALESCE(new_value->>'page', '') AS activity_page,
+                       COALESCE(new_value->>'action_type', '') AS activity_action_type,
+                       COALESCE(new_value->'metadata', '{{}}'::jsonb) AS activity_metadata
                 FROM audit_logs
                 {where_sql}
                 ORDER BY created_at DESC
@@ -2654,22 +2726,29 @@ def list_activity_logs(*, start_at=None, end_at=None, limit=200):
             return cur.fetchall()
 
 
-def list_dashboard_tasks(status="open"):
-    ensure_schema()
+def list_dashboard_tasks(status="open", *, limit=200):
+    ensure_dashboard_schema()
     clean_status = str(status or "open").strip().casefold()
     params = []
     where_sql = ""
     if clean_status and clean_status != "all":
         where_sql = "WHERE status = %s"
         params.append(clean_status)
+    try:
+        safe_limit = min(max(int(limit or 200), 1), 500)
+    except (TypeError, ValueError):
+        safe_limit = 200
+    params.append(safe_limit)
     with connect() as conn:
         with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
             cur.execute(
                 f"""
-                SELECT *
+                SELECT id, title, section, status, created_at, completed_at, completed_by, metadata
                 FROM dashboard_tasks
                 {where_sql}
                 ORDER BY created_at DESC
+                LIMIT %s
                 """,
                 params,
             )
@@ -2683,7 +2762,7 @@ def create_dashboard_task(title, section, *, metadata=None):
         raise ValueError("Task title is required.")
     if not clean_section:
         raise ValueError("Task section is required.")
-    ensure_schema()
+    ensure_dashboard_schema()
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -2720,7 +2799,7 @@ def complete_dashboard_task(task_id, *, completed_by="", metadata=None):
     clean_task_id = str(task_id or "").strip()
     if not clean_task_id:
         return None
-    ensure_schema()
+    ensure_dashboard_schema()
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(
