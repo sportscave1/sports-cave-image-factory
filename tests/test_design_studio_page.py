@@ -15,7 +15,15 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         self.assertIn("Michael Jordan final shot collector piece", prompt)
         self.assertIn("Use current web research", prompt)
         self.assertIn("do not find or display images yet", prompt)
+        self.assertIn("research the sporting moment", prompt)
+        self.assertIn("The best design angle for the moment", prompt)
+        self.assertIn("Why the moment matters now", prompt)
         self.assertNotIn("display approximately 10-12 strong images", prompt)
+        self.assertNotIn("commercial", prompt.casefold())
+        self.assertNotIn("copyright", prompt.casefold())
+        self.assertNotIn("country markets", prompt.casefold())
+        self.assertNotIn("strong enough to sell", prompt.casefold())
+        self.assertNotIn("bestseller", prompt.casefold())
         self.assertIn("Do not generate the final artwork yet.", prompt)
 
     def test_image_prompt_only_requests_image_carousel(self):
@@ -24,18 +32,25 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
             "The strongest angle is the final shot and Chicago nostalgia.",
         )
 
-        self.assertEqual(
+        self.assertIn(
+            "find me the strongest, most accurate, and most useful reference images",
             prompt,
-            (
-                "Based on everything above, find me the strongest and most accurate images "
-                "for this design and display them directly in this chat as an image carousel.\n\n"
-                "Do not copy and paste or repeat the research.\n"
-                "Do not provide more research, analysis, recommendations or creative direction.\n"
-                "Only find and display the images in this chat."
-            ),
         )
+        self.assertIn("display them directly in this chat as an image carousel", prompt)
+        self.assertIn("Find multiple different image types, not just one hero photo.", prompt)
+        self.assertIn("The correct athlete, driver, team, rivalry, event, season, era", prompt)
+        self.assertIn("If Motorsport:", prompt)
+        self.assertIn("For Bathurst/Supercars, prioritise Mount Panorama", prompt)
+        self.assertIn("If Soccer/Football:", prompt)
+        self.assertIn("If NBA/Basketball:", prompt)
+        self.assertIn("If Cricket:", prompt)
+        self.assertIn("If Boxing/UFC:", prompt)
+        self.assertIn("If NFL/Baseball/Ice Hockey:", prompt)
+        self.assertIn("Display a strong variety of images", prompt)
+        self.assertIn("Only display the strongest and most accurate images directly in this chat", prompt)
         self.assertNotIn("Michael Jordan final shot collector piece", prompt)
         self.assertNotIn("The strongest angle is the final shot", prompt)
+        self.assertNotIn("recommendations, or creative direction", prompt.split("Only find and display the images.")[1])
         self.assertNotIn("display approximately 10-12 strong images", prompt)
         self.assertNotIn("Limited-edition plaque position", prompt)
 

@@ -495,7 +495,7 @@ You are the dedicated Sports Cave sports-product researcher and premium collecto
 
 Analyse the task above deeply and conduct current web research before recommending any creative direction.
 
-Your job is to verify the subject, identify the strongest commercial angle, and build a clear research brief for a realistic, premium, bestselling Sports Cave limited-edition collector artwork.
+Your job is to research the sporting moment and identify the strongest accurate details needed for a realistic, premium Sports Cave collector artwork.
 
 RESEARCH THE SUBJECT
 
@@ -508,9 +508,8 @@ Identify and verify:
 - Accurate uniforms, race liveries, cars, equipment and colours
 - Correct stadium, circuit, arena, pitch, course or background
 - Correct trophies, medals and historical details
-- The strongest country markets for the product
-- Any current event or calendar reason the design is commercially relevant now
-- Whether the proposed title and concept are strong enough to sell
+- Any current event or calendar reason the moment matters now
+- The best design angle for the moment
 
 RESEARCH OUTPUT
 
@@ -520,14 +519,12 @@ Provide:
 - Core fan emotion
 - Verified subject, era, event and location
 - Why the concept matters to fans
-- Why it is commercially relevant now
-- Strongest country markets
+- Why the moment matters now
 - Accurate visual details that must appear
 - Historical details that must not be shown incorrectly
 - Best hero-subject direction
 - Best venue, track, stadium or background direction
 - Important supporting details such as a trophy, car or equipment
-- Any factual, historical or copyright risks
 - A concise image-search brief for the next step
 
 The final direction must feel:
@@ -540,11 +537,8 @@ The final direction must feel:
 - Framed-first
 - Collector-driven
 - Suitable for a landscape 4:3 artwork
-- Strong enough to become a Sports Cave bestseller
 
-Be commercially honest.
-
-If the task is weak, historically inaccurate or unlikely to sell, say so and recommend a stronger angle.
+If the task is too broad or unclear, recommend a stronger sporting moment or clearer design angle.
 
 Use current web research, but do not find or display images yet.
 
@@ -555,11 +549,118 @@ Stop after completing the research brief.
 
 
 DESIGN_IMAGE_CAROUSEL_PROMPT_TEMPLATE = """
-Based on everything above, find me the strongest and most accurate images for this design and display them directly in this chat as an image carousel.
+Based on everything above, find me the strongest, most accurate, and most useful reference images for this Sports Cave design and display them directly in this chat as an image carousel.
 
 Do not copy and paste or repeat the research.
-Do not provide more research, analysis, recommendations or creative direction.
-Only find and display the images in this chat.
+Do not provide more research, analysis, recommendations, or creative direction.
+Only find and display the images.
+
+Find multiple different image types, not just one hero photo.
+
+Prioritise images that are accurate to:
+- The correct athlete, driver, team, rivalry, event, season, era, venue, kit, livery, equipment, trophy, and location
+- The emotional hook of the design
+- What would help create a premium Sports Cave limited-edition collector artwork
+
+Image requirements by sport:
+
+If Motorsport:
+Find images of:
+- The exact driver
+- The exact car
+- The correct race livery
+- The helmet/suit if relevant
+- The circuit or race location
+- Pit lane, garage, podium, trophy, smoke, burnout, or track atmosphere
+For Bathurst/Supercars, prioritise Mount Panorama, mountain road atmosphere, pit lane, garages, podium moments, and correct car liveries.
+
+If Soccer/Football:
+Find images of:
+- The player or players
+- Correct team/national kit
+- Stadium or pitch background
+- Trophy or celebration moment if relevant
+- Crowd/floodlight atmosphere
+- Team celebration or rivalry image if useful
+
+If NBA/Basketball:
+Find images of:
+- The player
+- Correct jersey/era
+- Arena background
+- Court action
+- Championship/trophy/celebration references
+- Rivalry or legacy images if relevant
+
+If AFL/NRL/Rugby:
+Find images of:
+- The player
+- Correct club or national kit
+- Stadium/floodlights
+- Turf/action background
+- Grand final, rivalry, or trophy references if relevant
+
+If Cricket:
+Find images of:
+- The player
+- Correct whites or team kit
+- Batting/bowling action
+- Stadium/pitch background
+- MCG, Lord's, SCG, or correct venue if relevant
+- Trophy, celebration, or historic match atmosphere
+
+If Tennis:
+Find images of:
+- The player
+- Correct outfit/era
+- Court surface and stadium
+- Trophy/celebration moment
+- Rival player if the design is rivalry-based
+- Wimbledon, Roland Garros, US Open, Australian Open, or correct venue if relevant
+
+If Golf:
+Find images of:
+- The golfer
+- Swing or celebration moment
+- Correct course
+- Clubhouse, green, fairway, or trophy background
+- Masters/Open/PGA/Ryder Cup atmosphere if relevant
+
+If Boxing/UFC:
+Find images of:
+- The fighter
+- Ring or octagon action
+- Gloves, belt, robe, walkout, or face-off
+- Championship lighting and crowd atmosphere
+- Rival opponent if relevant
+
+If Horse Racing:
+Find images of:
+- The horse
+- The jockey
+- Race action
+- Finish line or winning moment
+- Track, grandstand, dust, turf, or trophy atmosphere
+
+If NFL/Baseball/Ice Hockey:
+Find images of:
+- The athlete
+- Correct uniform/era
+- Stadium, field, rink, or arena background
+- Trophy, celebration, rivalry, or iconic moment references
+- Equipment close-ups if useful
+
+Display a strong variety of images, including:
+- Main hero subject
+- Supporting action image
+- Venue/background image
+- Trophy or celebration image
+- Detail image such as car, kit, helmet, gloves, bat, ball, belt, trophy, jersey, or equipment
+- Atmosphere image for lighting, crowd, smoke, dust, rain, sunset, stadium lights, or premium cinematic mood
+
+Do not show weak, generic, inaccurate, low-resolution, cartoon, AI-looking, wrong-era, wrong-kit, wrong-car, wrong-stadium, or unrelated images.
+
+Only display the strongest and most accurate images directly in this chat as an image carousel.
 """
 
 
