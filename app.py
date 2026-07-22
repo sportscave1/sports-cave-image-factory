@@ -2139,93 +2139,241 @@ def inject_styles():
             padding: 0.75rem 0.85rem;
         }
 
-        .st-key-files-team-folder-open {
-            margin: 2rem 0 0 0.2rem;
-            max-width: 230px;
+        .st-key-files-explorer {
+            color: #202124;
+            font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+            margin-top: 0.2rem;
         }
 
-        .st-key-files-team-folder-open button {
+        .sc-files-breadcrumb {
             align-items: center;
-            background: transparent !important;
-            border: 1px solid transparent !important;
-            border-radius: 6px !important;
-            box-shadow: none !important;
-            color: #171717 !important;
+            border: 1px solid #DADDE1;
+            border-radius: 4px;
             display: flex;
-            flex-direction: column;
-            font-size: 0.96rem;
-            font-weight: 540;
-            gap: 0.35rem;
-            height: 155px;
-            justify-content: center;
-            line-height: 1.25;
-            padding: 0.65rem;
-            white-space: normal;
-        }
-
-        .st-key-files-team-folder-open button::before {
-            content: "📁";
-            display: block;
-            font-size: 4.9rem;
-            line-height: 1;
-        }
-
-        .st-key-files-team-folder-open button:hover {
-            background: #EAF3FC !important;
-            border-color: #B7D6F2 !important;
-            color: #171717 !important;
-        }
-
-        [class*="st-key-files-crumb-"] button {
-            background: transparent !important;
-            border: 0 !important;
-            border-radius: 4px !important;
-            box-shadow: none !important;
-            color: #3A3A3A !important;
             font-size: 0.82rem;
-            font-weight: 520;
-            min-height: 2rem;
-            padding: 0.2rem 0.4rem;
+            gap: 0;
+            height: 34px;
+            margin: 0 0 0.35rem;
+            overflow-x: auto;
+            padding: 0 0.4rem;
+            white-space: nowrap;
         }
 
-        [class*="st-key-files-crumb-"] button:hover {
-            background: #EDF4FA !important;
-            color: #111111 !important;
+        .sc-files-breadcrumb a,
+        .sc-files-breadcrumb span {
+            align-items: center;
+            color: #27292C;
+            display: inline-flex;
+            height: 26px;
+            padding: 0 0.42rem;
+            text-decoration: none;
         }
 
-        [class*="st-key-files-crumb-"] button:disabled {
-            background: transparent !important;
-            border: 0 !important;
-            color: #171717 !important;
-            opacity: 1 !important;
+        .sc-files-breadcrumb a:hover {
+            background: #EDF3F8;
+            border-radius: 3px;
+            color: #111111;
         }
 
-        [class*="st-key-files-entry-"] button {
-            background: #FFFFFF !important;
-            border: 1px solid transparent !important;
-            border-radius: 5px !important;
-            box-shadow: none !important;
-            color: #171717 !important;
-            font-size: 0.86rem;
-            font-weight: 520;
-            justify-content: flex-start;
-            line-height: 1.25;
-            min-height: 4.8rem;
-            padding: 0.7rem;
-            text-align: left;
-            white-space: normal;
+        .sc-files-breadcrumb .sc-files-chevron {
+            color: #72767B;
+            font-size: 1rem;
+            padding: 0 0.08rem;
         }
 
-        [class*="st-key-files-entry-"] button:hover {
-            background: #EAF3FC !important;
-            border-color: #B7D6F2 !important;
-            color: #171717 !important;
+        .sc-files-table {
+            border: 1px solid #E0E2E5;
+            border-radius: 0;
+            margin-top: 0.25rem;
+            min-width: 670px;
+            overflow: hidden;
         }
+
+        .sc-files-table-wrap {
+            overflow-x: auto;
+            width: 100%;
+        }
+
+        .sc-files-grid {
+            align-items: center;
+            display: grid;
+            grid-template-columns: minmax(290px, 1fr) 190px 150px 90px;
+        }
+
+        .sc-files-header {
+            background: #FAFAFA;
+            border-bottom: 1px solid #DADDE1;
+            color: #4A4D51;
+            font-size: 0.75rem;
+            height: 32px;
+            user-select: none;
+        }
+
+        .sc-files-header > span,
+        .sc-files-row > span {
+            align-items: center;
+            border-right: 1px solid #ECEDEF;
+            display: flex;
+            height: 100%;
+            min-width: 0;
+            padding: 0 0.62rem;
+        }
+
+        .sc-files-header > span:last-child,
+        .sc-files-row > span:last-child {
+            border-right: 0;
+            justify-content: flex-end;
+        }
+
+        .sc-files-row {
+            background: #FFFFFF;
+            border-bottom: 1px solid #EFF0F1;
+            color: #202124;
+            font-size: 0.82rem;
+            height: 40px;
+            text-decoration: none;
+        }
+
+        .sc-files-row:last-child {
+            border-bottom: 0;
+        }
+
+        .sc-files-row:hover,
+        .sc-files-row:focus-visible {
+            background: #EAF2F8;
+            color: #111111;
+            outline: none;
+        }
+
+        .sc-files-name {
+            gap: 0.55rem;
+            font-weight: 400;
+            overflow: hidden;
+        }
+
+        .sc-files-name-text {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sc-files-meta {
+            color: #55595E;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .sc-files-icon {
+            display: inline-block;
+            flex: 0 0 auto;
+            position: relative;
+        }
+
+        .sc-files-icon-folder {
+            background: #F5C84B;
+            border: 1px solid #D7A92D;
+            border-radius: 2px;
+            height: 14px;
+            margin-top: 3px;
+            width: 19px;
+        }
+
+        .sc-files-icon-folder::before {
+            background: #F7D56D;
+            border: 1px solid #D7A92D;
+            border-bottom: 0;
+            border-radius: 2px 2px 0 0;
+            content: "";
+            height: 5px;
+            left: -1px;
+            position: absolute;
+            top: -5px;
+            width: 9px;
+        }
+
+        .sc-files-icon-file {
+            background: #FFFFFF;
+            border: 1px solid #8B929A;
+            border-radius: 1px;
+            height: 20px;
+            width: 16px;
+        }
+
+        .sc-files-icon-file::before {
+            border-left: 5px solid transparent;
+            border-top: 5px solid #DCE2E7;
+            content: "";
+            position: absolute;
+            right: 0;
+            top: 0;
+        }
+
+        .sc-files-icon-file::after {
+            bottom: 1px;
+            color: #5D646B;
+            content: "FILE";
+            font-size: 0.38rem;
+            font-weight: 700;
+            left: 1px;
+            line-height: 1;
+            position: absolute;
+        }
+
+        .sc-files-icon-image::after { color: #267A4B; content: "IMG"; }
+        .sc-files-icon-pdf::after { color: #B3261E; content: "PDF"; }
+        .sc-files-icon-document::after { color: #185ABD; content: "DOC"; }
+        .sc-files-icon-sheet::after { color: #107C41; content: "XLS"; }
+        .sc-files-icon-video::after { color: #744DA9; content: "VID"; }
+        .sc-files-icon-archive::after { color: #9A6417; content: "ZIP"; }
+        .sc-files-icon-design::after { color: #3155A4; content: "ART"; }
 
         .sc-files-empty {
-            color: #6A6A6A;
-            font-size: 0.88rem;
-            padding: 2rem 0.35rem;
+            border: 1px solid #E0E2E5;
+            color: #666A70;
+            font-size: 0.82rem;
+            padding: 1.15rem 0.65rem;
+        }
+
+        .sc-files-preview-header {
+            border-bottom: 1px solid #E0E2E5;
+            margin-bottom: 0.7rem;
+            padding: 0.35rem 0 0.65rem;
+        }
+
+        .sc-files-preview-header strong {
+            color: #202124;
+            display: block;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .sc-files-preview-header span {
+            color: #63676C;
+            font-size: 0.76rem;
+        }
+
+        .sc-files-preview-note {
+            color: #4E5358;
+            font-size: 0.84rem;
+            padding: 0.45rem 0 0.7rem;
+        }
+
+        .sc-files-action {
+            background: #FFFFFF;
+            border: 1px solid #B9BEC4;
+            border-radius: 4px;
+            color: #202124 !important;
+            display: inline-block;
+            font-size: 0.8rem;
+            margin: 0.35rem 0.35rem 0 0;
+            padding: 0.42rem 0.7rem;
+            text-decoration: none !important;
+        }
+
+        .sc-files-action:hover {
+            background: #EDF3F8;
+            border-color: #8AA9C0;
         }
 
         .sc-task-card {
@@ -9004,135 +9152,303 @@ def _files_modified_label(value, user):
         return ""
     try:
         parsed = datetime.fromisoformat(clean_value.replace("Z", "+00:00"))
-        return parsed.astimezone(timezone_for_os_user(user)).strftime("%d %b %Y, %I:%M %p")
+        local_value = parsed.astimezone(timezone_for_os_user(user))
+        hour = local_value.strftime("%I").lstrip("0") or "0"
+        return f"{local_value.strftime('%d/%m/%Y')} {hour}:{local_value.strftime('%M %p')}"
     except (TypeError, ValueError):
         return clean_value
 
 
-def _files_item_icon(entry):
+def _files_item_kind(entry):
     if str(entry.get(".tag") or "").casefold() == "folder":
-        return "📁"
+        return "folder"
     extension = Path(str(entry.get("name") or "")).suffix.casefold()
     if extension in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
-        return "🖼️"
+        return "image"
     if extension == ".pdf":
-        return "📕"
+        return "pdf"
+    if extension in {".doc", ".docx", ".txt", ".rtf", ".md"}:
+        return "document"
+    if extension in {".xls", ".xlsx", ".csv"}:
+        return "sheet"
+    if extension in {".mp4", ".webm", ".mov", ".m4v", ".avi"}:
+        return "video"
     if extension in {".zip", ".rar", ".7z"}:
-        return "🗜️"
-    return "📄"
+        return "archive"
+    if extension in {".psd", ".psb", ".ai", ".indd", ".eps"}:
+        return "design"
+    return "file"
 
 
-def _render_files_open_dialog(access_token, entry):
-    name = str(entry.get("name") or "File")
-    path = entry.get("path_display") or entry.get("path_lower") or ""
-
-    def dialog_body():
-        try:
-            details = dropbox_integration.file_open_details(access_token, path)
-            link = details["temporary_link"]
-            extension = Path(name).suffix.casefold()
-            if extension in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
-                st.image(link, caption=name, use_container_width=True)
-            elif extension == ".pdf":
-                st.caption("Open the PDF in your browser.")
-            else:
-                st.caption("Open or download this file from Dropbox.")
-            if hasattr(st, "link_button"):
-                st.link_button("Open file", link, use_container_width=True)
-            else:
-                st.markdown(f"[Open file]({link})")
-        except Exception:
-            st.error("This file could not be opened right now.")
-
-    if hasattr(st, "dialog"):
-        st.dialog(name)(dialog_body)()
-    else:
-        with st.expander(name, expanded=True):
-            dialog_body()
+def _files_type_label(entry):
+    if str(entry.get(".tag") or "").casefold() == "folder":
+        return "File folder"
+    extension = Path(str(entry.get("name") or "")).suffix.lstrip(".").upper()
+    labels = {
+        "JPG": "JPEG image",
+        "JPEG": "JPEG image",
+        "PNG": "PNG image",
+        "WEBP": "WebP image",
+        "GIF": "GIF image",
+        "PDF": "PDF document",
+        "DOC": "Word document",
+        "DOCX": "Word document",
+        "XLS": "Excel worksheet",
+        "XLSX": "Excel worksheet",
+        "PSD": "Photoshop document",
+        "PSB": "Photoshop document",
+        "AI": "Illustrator artwork",
+        "INDD": "InDesign document",
+        "MP4": "MP4 video",
+        "WEBM": "WebM video",
+        "MOV": "QuickTime video",
+        "ZIP": "Compressed folder",
+    }
+    return labels.get(extension, f"{extension} file" if extension else "File")
 
 
-def _render_files_breadcrumb(current_path, root_path):
-    items = dropbox_integration.breadcrumb_items(current_path, root_path)
-    columns = st.columns([max(0.65, min(len(label) / 5, 3.2)) for label, _ in items])
-    for index, (column, (label, path)) in enumerate(zip(columns, items)):
-        if column.button(
-            label,
-            key=f"files-crumb-{index}-{hashlib.sha1(path.encode('utf-8')).hexdigest()[:10]}",
-            use_container_width=True,
-            disabled=path == current_path,
-        ):
-            if path:
-                st.session_state["files_browser_path"] = path
-            else:
-                st.session_state.pop("files_browser_path", None)
-            st.rerun()
+def _files_route_url(*, folder_path="", preview_path="", root=False):
+    parts = [f"{PAGE_QUERY_PARAM}={quote(page_query_value('Files'), safe='')}" ]
+    if root:
+        parts.append("files_path=__root__")
+    elif folder_path:
+        parts.append(f"files_path={quote(folder_path, safe='')}")
+    if preview_path:
+        parts.append(f"files_preview={quote(preview_path, safe='')}")
+    return "?" + "&".join(parts)
 
 
-def _render_files_landing(root_path):
-    if st.button(
-        dropbox_integration.DROPBOX_TEAM_FOLDER,
-        key="files-team-folder-open",
-        use_container_width=False,
-    ):
-        st.session_state["files_browser_path"] = root_path
-        st.rerun()
-
-
-def _render_files_browser(access_token, user, root_path):
-    raw_path = st.session_state.get("files_browser_path")
-    if not raw_path:
-        _render_files_landing(root_path)
-        return
-    current_path = dropbox_integration.normalize_dropbox_path(
-        raw_path
-    )
-    if not dropbox_integration.path_is_within_root(current_path, root_path):
-        st.session_state.pop("files_browser_path", None)
-        _render_files_landing(root_path)
-        return
-    st.session_state["files_browser_path"] = current_path
-
-    _render_files_breadcrumb(current_path, root_path)
-
-    try:
-        entries = _files_directory_entries(access_token, current_path)
-    except Exception:
-        st.info("This folder could not be loaded right now.")
-        return
-    if not entries:
-        st.markdown(
-            '<div class="sc-files-empty">This folder is empty.</div>',
-            unsafe_allow_html=True,
+def _files_breadcrumb_markup(current_path, root_path, *, preview_name=""):
+    items = list(dropbox_integration.breadcrumb_items(current_path, root_path))
+    chunks = ['<nav class="sc-files-breadcrumb" aria-label="Files breadcrumb">']
+    last_index = len(items) - 1
+    for index, (label, path) in enumerate(items):
+        is_current = index == last_index and not preview_name
+        safe_label = html.escape(str(label or "Files"))
+        if is_current:
+            chunks.append(f'<span aria-current="page">{safe_label}</span>')
+        else:
+            href = _files_route_url(folder_path=path, root=not path)
+            chunks.append(
+                f'<a href="{html.escape(href, quote=True)}">{safe_label}</a>'
+            )
+        if index < last_index or preview_name:
+            chunks.append('<span class="sc-files-chevron" aria-hidden="true">&#8250;</span>')
+    if preview_name:
+        chunks.append(
+            f'<span aria-current="page">{html.escape(str(preview_name))}</span>'
         )
-        return
+    chunks.append("</nav>")
+    return "".join(chunks)
 
-    file_to_open = None
-    grid = st.columns(4)
-    for index, entry in enumerate(entries):
+
+def _files_details_markup(entries, user, *, show_header=True):
+    chunks = ['<div class="sc-files-table-wrap"><div class="sc-files-table">']
+    if show_header:
+        chunks.append(
+            '<div class="sc-files-grid sc-files-header" role="row">'
+            '<span role="columnheader">Name</span>'
+            '<span role="columnheader">Date modified</span>'
+            '<span role="columnheader">Type</span>'
+            '<span role="columnheader">Size</span>'
+            '</div>'
+        )
+    for entry in dropbox_integration.sort_folder_entries(entries):
         tag = str(entry.get(".tag") or "").casefold()
         path = dropbox_integration.normalize_dropbox_path(
             entry.get("path_display") or entry.get("path_lower") or ""
         )
         name = str(entry.get("name") or "Untitled")
-        key_digest = hashlib.sha1(path.encode("utf-8")).hexdigest()[:12]
-        with grid[index % len(grid)]:
-            if st.button(
-                f"{_files_item_icon(entry)}  {name}",
-                key=f"files-entry-{tag}-{key_digest}",
-                use_container_width=True,
+        if not path:
+            continue
+        if tag == "folder":
+            href = _files_route_url(folder_path=path)
+            target = ""
+        else:
+            parent_path = path.rsplit("/", 1)[0]
+            href = _files_route_url(folder_path=parent_path, preview_path=path)
+            target = ' target="_blank" rel="noopener noreferrer"'
+        kind = _files_item_kind(entry)
+        icon_class = "sc-files-icon-folder" if kind == "folder" else (
+            f"sc-files-icon-file sc-files-icon-{kind}"
+        )
+        modified = _files_modified_label(entry.get("server_modified"), user)
+        size = "" if tag == "folder" else dropbox_integration.format_file_size(entry.get("size"))
+        chunks.append(
+            f'<a class="sc-files-grid sc-files-row" role="row" '
+            f'href="{html.escape(href, quote=True)}"{target} '
+            f'title="{html.escape(name, quote=True)}">'
+            '<span class="sc-files-name" role="cell">'
+            f'<i class="sc-files-icon {icon_class}" aria-hidden="true"></i>'
+            f'<span class="sc-files-name-text">{html.escape(name)}</span>'
+            '</span>'
+            f'<span class="sc-files-meta" role="cell">{html.escape(modified)}</span>'
+            f'<span class="sc-files-meta" role="cell">{html.escape(_files_type_label(entry))}</span>'
+            f'<span class="sc-files-meta" role="cell">{html.escape(size)}</span>'
+            '</a>'
+        )
+    chunks.append("</div></div>")
+    return "".join(chunks)
+
+
+def _files_preview_kind(name):
+    extension = Path(str(name or "")).suffix.casefold()
+    if extension in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+        return "image"
+    if extension in {".mp4", ".webm", ".mov", ".m4v"}:
+        return "video"
+    if extension in {".mp3", ".wav", ".m4a", ".ogg"}:
+        return "audio"
+    if extension in {".pdf", ".txt", ".md", ".csv"}:
+        return "document"
+    return "unsupported"
+
+
+def _files_desktop_application(name):
+    extension = Path(str(name or "")).suffix.casefold()
+    applications = {
+        ".psd": "Adobe Photoshop",
+        ".psb": "Adobe Photoshop",
+        ".ai": "Adobe Illustrator",
+        ".indd": "Adobe InDesign",
+        ".doc": "Microsoft Word",
+        ".docx": "Microsoft Word",
+        ".xls": "Microsoft Excel",
+        ".xlsx": "Microsoft Excel",
+        ".ppt": "Microsoft PowerPoint",
+        ".pptx": "Microsoft PowerPoint",
+        ".zip": "File Explorer or your archive application",
+    }
+    return applications.get(extension, "the associated desktop application")
+
+
+def _render_files_preview(access_token, user, root_path, preview_path):
+    clean_path = dropbox_integration.normalize_dropbox_path(preview_path)
+    if not dropbox_integration.path_is_within_root(clean_path, root_path):
+        st.info("This file is not available.")
+        return
+    try:
+        details = dropbox_integration.file_open_details(access_token, clean_path)
+    except Exception as error:
+        logging.warning("Files preview failed: %s", error)
+        st.info("This file could not be opened right now.")
+        return
+    metadata = dict(details.get("metadata") or {})
+    name = str(metadata.get("name") or clean_path.rsplit("/", 1)[-1] or "File")
+    parent_path = clean_path.rsplit("/", 1)[0]
+    st.markdown(
+        _files_breadcrumb_markup(parent_path, root_path, preview_name=name),
+        unsafe_allow_html=True,
+    )
+    modified = _files_modified_label(metadata.get("server_modified"), user)
+    size = dropbox_integration.format_file_size(metadata.get("size"))
+    summary = " · ".join(value for value in (_files_type_label(metadata), modified, size) if value)
+    st.markdown(
+        '<div class="sc-files-preview-header">'
+        f'<strong>{html.escape(name)}</strong>'
+        f'<span>{html.escape(summary)}</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+    link = str(details.get("temporary_link") or "").strip()
+    safe_link = html.escape(link, quote=True)
+    preview_kind = _files_preview_kind(name)
+    if preview_kind == "image":
+        st.image(link, caption=name, use_container_width=True)
+    elif preview_kind == "video":
+        st.video(link)
+    elif preview_kind == "audio":
+        st.audio(link)
+    elif preview_kind == "document":
+        if hasattr(st, "iframe"):
+            st.iframe(link, height=650)
+        else:
+            get_components_module().iframe(link, height=650, scrolling=True)
+    else:
+        application = _files_desktop_application(name)
+        st.markdown(
+            '<div class="sc-files-preview-note">'
+            f'This format is normally opened with {html.escape(application)}. '
+            'Download it only when you are ready to open a local copy.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+    if preview_kind == "unsupported":
+        actions = (
+            f'<a class="sc-files-action" href="{safe_link}" target="_blank" '
+            'rel="noopener noreferrer">Download and open</a>'
+        )
+    else:
+        actions = (
+            f'<a class="sc-files-action" href="{safe_link}" target="_blank" '
+            'rel="noopener noreferrer">Open original</a>'
+            f'<a class="sc-files-action" href="{safe_link}" download '
+            'rel="noopener noreferrer">Download</a>'
+        )
+    st.markdown(actions, unsafe_allow_html=True)
+
+def _render_files_browser(access_token, user, root_path):
+    with st.container(key="files-explorer"):
+        preview_path = _query_value("files_preview") or str(
+            st.session_state.get("files_preview_path") or ""
+        )
+        requested_path = _query_value("files_path")
+        if preview_path:
+            _render_files_preview(access_token, user, root_path, preview_path)
+            return
+
+        if requested_path == "__root__":
+            st.session_state.pop("files_browser_path", None)
+            current_path = ""
+        elif requested_path:
+            candidate = dropbox_integration.normalize_dropbox_path(requested_path)
+            current_path = candidate if dropbox_integration.path_is_within_root(
+                candidate, root_path
+            ) else ""
+            if current_path:
+                st.session_state["files_browser_path"] = current_path
+        else:
+            current_path = dropbox_integration.normalize_dropbox_path(
+                st.session_state.get("files_browser_path") or ""
+            )
+            if current_path and not dropbox_integration.path_is_within_root(
+                current_path, root_path
             ):
-                if tag == "folder":
-                    st.session_state["files_browser_path"] = path
-                    st.rerun()
-                else:
-                    file_to_open = entry
-            modified = _files_modified_label(entry.get("server_modified"), user)
-            size = "" if tag == "folder" else dropbox_integration.format_file_size(entry.get("size"))
-            meta = " · ".join(value for value in (modified, size) if value)
-            if meta:
-                st.caption(meta)
-    if file_to_open:
-        _render_files_open_dialog(access_token, file_to_open)
+                current_path = ""
+                st.session_state.pop("files_browser_path", None)
+
+        st.markdown(
+            _files_breadcrumb_markup(current_path, root_path),
+            unsafe_allow_html=True,
+        )
+        if not current_path:
+            root_entry = {
+                ".tag": "folder",
+                "name": dropbox_integration.DROPBOX_TEAM_FOLDER,
+                "path_display": root_path,
+            }
+            st.markdown(
+                _files_details_markup([root_entry], user, show_header=False),
+                unsafe_allow_html=True,
+            )
+            return
+
+        try:
+            entries = _files_directory_entries(access_token, current_path)
+        except Exception as error:
+            logging.warning("Files folder listing failed: %s", error)
+            st.info("This folder could not be loaded right now.")
+            return
+        if not entries:
+            st.markdown(
+                '<div class="sc-files-empty">This folder is empty</div>',
+                unsafe_allow_html=True,
+            )
+            return
+        st.markdown(
+            _files_details_markup(entries, user),
+            unsafe_allow_html=True,
+        )
 
 
 def render_files_page():
@@ -9151,24 +9467,19 @@ def render_files_page():
 
     try:
         access_token = _files_access_token(supabase)
-    except Exception:
+    except Exception as error:
+        logging.warning("Files authentication unavailable: %s", error)
         st.info("Files unavailable")
         return
 
     try:
         root_path = _files_team_root(access_token)
     except dropbox_integration.DropboxFolderAccessError as error:
+        logging.warning("Files root unavailable (%s): %s", error.reason, error)
         st.info("Files unavailable")
-        if os_accounts.is_admin(user):
-            if error.reason == "permission":
-                st.caption("The connected Dropbox app does not have permission to browse files.")
-            else:
-                st.caption(
-                    "Sportscave Team Folder is not visible to this Dropbox app. "
-                    "If the app uses App Folder access, change it to Full Dropbox access and reconnect."
-                )
         return
-    except Exception:
+    except Exception as error:
+        logging.warning("Files root could not be loaded: %s", error)
         st.info("Files unavailable")
         return
 
