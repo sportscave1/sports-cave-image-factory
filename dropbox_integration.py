@@ -10,6 +10,8 @@ DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token"
 DROPBOX_API_URL = "https://api.dropboxapi.com/2"
 DROPBOX_CONTENT_URL = "https://content.dropboxapi.com/2"
 DROPBOX_ROOT_FOLDER = "Sports Cave OS Assets"
+DROPBOX_REFRESH_TOKEN_ENV = "DROPBOX_REFRESH_TOKEN"
+DROPBOX_ROOT_PATH_ENV = "DROPBOX_ROOT_PATH"
 
 DROPBOX_FOLDER_OPTIONS = (
     ("brand_assets", "01 Brand Assets"),
@@ -38,29 +40,46 @@ def dropbox_config():
         "app_key": str(os.getenv("DROPBOX_APP_KEY", "") or "").strip(),
         "app_secret": str(os.getenv("DROPBOX_APP_SECRET", "") or "").strip(),
         "redirect_uri": str(os.getenv("DROPBOX_REDIRECT_URI", "") or "").strip(),
+        "refresh_token": str(os.getenv(DROPBOX_REFRESH_TOKEN_ENV, "") or "").strip(),
+        "root_path": str(os.getenv(DROPBOX_ROOT_PATH_ENV, "") or "").strip(),
     }
 
 
-def missing_config_keys(config=None):
+def missing_config_keys(config=None, *, require_refresh=False, require_redirect=True):
     config = config or dropbox_config()
     required = {
         "DROPBOX_APP_KEY": config.get("app_key"),
         "DROPBOX_APP_SECRET": config.get("app_secret"),
-        "DROPBOX_REDIRECT_URI": config.get("redirect_uri"),
     }
+    if require_redirect:
+        required["DROPBOX_REDIRECT_URI"] = config.get("redirect_uri")
+    if require_refresh:
+        required[DROPBOX_REFRESH_TOKEN_ENV] = config.get("refresh_token")
     return tuple(key for key, value in required.items() if not str(value or "").strip())
 
 
-def require_config(config=None):
+def missing_server_config_keys(config=None):
+    return missing_config_keys(config, require_refresh=True, require_redirect=False)
+
+
+def missing_oauth_config_keys(config=None):
+    return missing_config_keys(config, require_refresh=False, require_redirect=True)
+
+
+def require_config(config=None, *, require_refresh=False, require_redirect=True):
     config = config or dropbox_config()
-    missing = missing_config_keys(config)
+    missing = missing_config_keys(
+        config,
+        require_refresh=require_refresh,
+        require_redirect=require_redirect,
+    )
     if missing:
         raise DropboxConfigError(f"Missing Dropbox setup: {', '.join(missing)}")
     return config
 
 
 def build_authorization_url(state, config=None):
-    config = require_config(config)
+    config = require_config(config, require_redirect=True)
     params = {
         "client_id": config["app_key"],
         "response_type": "code",
@@ -112,7 +131,7 @@ def exchange_code_for_refresh_token(code, config=None, *, timeout=12):
 
 
 def refresh_access_token(refresh_token, config=None, *, timeout=12):
-    config = require_config(config)
+    config = require_config(config, require_redirect=False)
     response = _requests().post(
         DROPBOX_TOKEN_URL,
         data={"refresh_token": str(refresh_token or ""), "grant_type": "refresh_token"},
@@ -157,6 +176,12 @@ def normalize_dropbox_path(path):
             raise ValueError("Dropbox paths cannot contain '..'.")
         parts.append(part)
     return "/" + "/".join(parts) if parts else ""
+
+
+def configured_root_path(config=None):
+    config = config or dropbox_config()
+    root = str(config.get("root_path") or "").strip() or DROPBOX_ROOT_FOLDER
+    return normalize_dropbox_path(root)
 
 
 def list_folder(access_token, path="", *, max_entries=2000):
@@ -232,15 +257,17 @@ def sort_folder_entries(entries):
 
 
 def preferred_browser_root(entries):
+    configured_root = configured_root_path()
+    configured_name = configured_root.strip("/").split("/")[-1] if configured_root else ""
     for entry in entries or ():
         if (
             str(entry.get(".tag") or "").casefold() == "folder"
-            and str(entry.get("name") or "").casefold() == DROPBOX_ROOT_FOLDER.casefold()
+            and str(entry.get("name") or "").casefold() == configured_name.casefold()
         ):
             return normalize_dropbox_path(
-                entry.get("path_display") or entry.get("path_lower") or folder_path()
+                entry.get("path_display") or entry.get("path_lower") or configured_root
             )
-    return ""
+    return configured_root
 
 
 def file_open_details(access_token, path):
@@ -253,7 +280,7 @@ def file_open_details(access_token, path):
 
 
 def folder_path(folder_name=""):
-    parts = [DROPBOX_ROOT_FOLDER]
+    parts = [configured_root_path().strip("/") or DROPBOX_ROOT_FOLDER]
     clean_folder = str(folder_name or "").strip().strip("/")
     if clean_folder:
         parts.append(clean_folder)

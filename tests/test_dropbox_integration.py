@@ -64,6 +64,29 @@ class DropboxIntegrationTests(unittest.TestCase):
             ("DROPBOX_APP_KEY", "DROPBOX_REDIRECT_URI"),
         )
 
+    def test_server_config_requires_refresh_but_not_redirect(self):
+        config = {
+            "app_key": "app-key",
+            "app_secret": "secret",
+            "redirect_uri": "",
+            "refresh_token": "",
+        }
+
+        self.assertEqual(
+            dropbox_integration.missing_server_config_keys(config),
+            ("DROPBOX_REFRESH_TOKEN",),
+        )
+
+    def test_configured_root_path_defaults_and_can_be_overridden(self):
+        self.assertEqual(
+            dropbox_integration.configured_root_path({"root_path": ""}),
+            "/Sports Cave OS Assets",
+        )
+        self.assertEqual(
+            dropbox_integration.configured_root_path({"root_path": "/Team Files"}),
+            "/Team Files",
+        )
+
     def test_oauth_url_requests_offline_refresh_token(self):
         config = {
             "app_key": "app-key",

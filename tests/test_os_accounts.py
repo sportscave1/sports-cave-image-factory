@@ -301,6 +301,7 @@ class AccountAccessTests(unittest.TestCase):
                 "DROPBOX_APP_KEY": "",
                 "DROPBOX_APP_SECRET": "",
                 "DROPBOX_REDIRECT_URI": "",
+                "DROPBOX_REFRESH_TOKEN": "",
             },
         ):
             app_test = AppTest.from_file(str(ROOT / "app.py"))
@@ -324,7 +325,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertIn("Files", [title.value for title in app_test.title])
         self.assertIn("Files setup is not complete.", text)
 
-    def test_connected_worker_sees_files_browser_without_connection_controls(self):
+    def test_files_page_uses_server_refresh_token_without_connect_step(self):
         root_entry = {
             ".tag": "folder",
             "name": dropbox_integration.DROPBOX_ROOT_FOLDER,
@@ -347,20 +348,13 @@ class AccountAccessTests(unittest.TestCase):
                 "DROPBOX_APP_KEY": "app-key",
                 "DROPBOX_APP_SECRET": "app-secret",
                 "DROPBOX_REDIRECT_URI": "https://example.test/dropbox/callback",
+                "DROPBOX_REFRESH_TOKEN": "server-refresh-token",
             },
-        ), patch.object(
-            supabase_backend,
-            "get_dropbox_connection_status",
-            return_value={"connected": True, "account_name": "Sports Cave"},
-        ), patch.object(
-            supabase_backend,
-            "get_dropbox_refresh_token",
-            return_value="refresh-token",
         ), patch.object(
             dropbox_integration,
             "refresh_access_token",
             return_value="access-token",
-        ), patch.object(
+        ) as refresh_access_token, patch.object(
             dropbox_integration,
             "list_folder",
             side_effect=list_folder,
@@ -396,26 +390,25 @@ class AccountAccessTests(unittest.TestCase):
         self.assertIn("Files", [title.value for title in app_test.title])
         self.assertIn("collector.pdf", text)
         self.assertIn("Open", button_labels)
+        self.assertNotIn("Connect Files", button_labels)
         self.assertNotIn("Test Connection", button_labels)
         self.assertNotIn("Reconnect Files", text)
         self.assertNotIn("Upload test", text)
+        refresh_access_token.assert_called_with("server-refresh-token")
         file_open_details.assert_called_once_with(
             "access-token",
             "/Sports Cave OS Assets/collector.pdf",
         )
 
-    def test_admin_disconnected_state_offers_connect_files(self):
+    def test_admin_missing_refresh_token_shows_setup_message_not_blank_page(self):
         with patch.dict(
             "os.environ",
             {
                 "DROPBOX_APP_KEY": "app-key",
                 "DROPBOX_APP_SECRET": "app-secret",
                 "DROPBOX_REDIRECT_URI": "https://example.test/dropbox/callback",
+                "DROPBOX_REFRESH_TOKEN": "",
             },
-        ), patch.object(
-            supabase_backend,
-            "get_dropbox_connection_status",
-            return_value={"connected": False},
         ):
             app_test = AppTest.from_file(str(ROOT / "app.py"))
             app_test.session_state["sports_cave_authenticated"] = True
@@ -433,9 +426,44 @@ class AccountAccessTests(unittest.TestCase):
             app_test.run(timeout=20)
 
         self.assertFalse(app_test.exception)
-        self.assertIn("Files are not connected.", self._app_text(app_test))
+        text = self._app_text(app_test)
+        self.assertIn("Missing DROPBOX_REFRESH_TOKEN", text)
+        self.assertNotIn("This page failed to load", text)
         link_labels = [item.label for item in app_test.get("link_button")]
-        self.assertIn("Connect Files", link_labels)
+        self.assertNotIn("Connect Files", link_labels)
+
+    def test_invalid_server_refresh_token_shows_helpful_error(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DROPBOX_APP_KEY": "app-key",
+                "DROPBOX_APP_SECRET": "app-secret",
+                "DROPBOX_REFRESH_TOKEN": "bad-refresh-token",
+            },
+        ), patch.object(
+            dropbox_integration,
+            "refresh_access_token",
+            side_effect=dropbox_integration.DropboxApiError("invalid_grant: token revoked"),
+        ):
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
+            app_test.session_state["sports_cave_current_user"] = {
+                "id": "admin-1",
+                "username": "nathan",
+                "display_name": "Nathan",
+                "role": "admin",
+                "timezone": os_accounts.ADMIN_TIMEZONE,
+                "is_active": True,
+                "page_permissions": [],
+            }
+            app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+            app_test.session_state["selected_page"] = "Files"
+            app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertIn("Token invalid or revoked", text)
+        self.assertNotIn("This page failed to load", text)
 
     @staticmethod
     def _app_text(app_test):
@@ -447,6 +475,7 @@ class AccountAccessTests(unittest.TestCase):
             app_test.markdown,
             app_test.caption,
             app_test.warning,
+            app_test.info,
         ):
             values.extend(str(item.value) for item in collection)
         return "\n".join(values)
