@@ -676,6 +676,39 @@ class AccountAccessTests(unittest.TestCase):
 
         self.assertFalse(app_test.exception)
 
+    def test_files_workspace_has_compact_write_controls_and_current_folder_drop_target(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        command_bar = source[
+            source.index("def _render_files_command_bar") : source.index("\n\ndef _clear_files_action_query")
+        ]
+        browser = source[
+            source.index("def _render_files_browser") : source.index("\n\ndef render_files_page")
+        ]
+        upload = source[
+            source.index("def _render_files_upload_control") : source.index("\n\ndef _render_files_command_bar")
+        ]
+
+        self.assertIn('"New folder"', command_bar)
+        self.assertIn('"Upload files"', command_bar)
+        self.assertIn('"Upload folder"', command_bar)
+        self.assertIn('accept_multiple_files="directory" if directory else True', upload)
+        self.assertIn('key="files-drop-target"', browser)
+        self.assertIn("current_path", browser)
+        self.assertIn("auto_submit=True", browser)
+        self.assertIn('"Drop files into this folder"', upload)
+        self.assertIn('"files_uploaded"', source)
+        self.assertIn('"files_folder_created"', source)
+        self.assertIn('"files_item_renamed"', source)
+
+    def test_files_write_operations_remain_behind_files_permission(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        files_page = source[
+            source.index("def render_files_page") : source.index("\n\ndef render_selected_page")
+        ]
+
+        self.assertIn('os_accounts.can_access_page(user, "Files")', files_page)
+        self.assertIn("Access not approved", files_page)
+
     def test_missing_team_folder_reports_scope_problem_only_to_admin(self):
         with patch.dict(
             "os.environ",

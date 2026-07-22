@@ -576,14 +576,21 @@ class MockupReelsTests(unittest.TestCase):
         self.assertIn("st.text_area", mockup_actions)
         self.assertIn("prompt_store.save_prompt", mockup_actions)
 
-    def test_final_zip_area_keeps_existing_filters_and_empty_selection_warning(self):
+    def test_final_export_area_keeps_zip_and_adds_direct_dropbox_save(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         final_zip = source[
             source.index("def render_final_zip_download") : source.index("\n\ndef render_prompt_cards")
         ]
+        dropbox_save = source[
+            source.index("def _save_mockups_to_dropbox") : source.index("\n\ndef _open_files_folder")
+        ]
+        dropbox_ui = source[
+            source.index("def _render_mockups_dropbox_save") : source.index("\n\ndef render_final_zip_download")
+        ]
 
-        self.assertIn('st.subheader("Download ZIP")', final_zip)
-        self.assertIn("Choose which image groups to include, then download one ZIP.", final_zip)
+        self.assertIn('st.subheader("Export mockups")', final_zip)
+        self.assertIn("Save to Dropbox", source)
+        self.assertIn("Download ZIP", final_zip)
         for label in ("Core Images", "Social Mockups", "Product Images"):
             self.assertIn(label, source)
         self.assertIn("MOCKUPS_ZIP_GROUP_OPTIONS", final_zip)
@@ -592,6 +599,27 @@ class MockupReelsTests(unittest.TestCase):
         self.assertIn("value=True", final_zip)
         self.assertIn("selected_assets = get_selected_zip_assets(result, selected_groups)", final_zip)
         self.assertIn("assets=selected_assets", source)
+        self.assertIn('f"{root_path}/04_OUTPUT/product-images"', source)
+        self.assertIn('"relative_path": entry["archive_name"]', dropbox_save)
+        self.assertIn('"local_path": entry["path"]', dropbox_save)
+        self.assertIn("dropbox_integration.upload_batch", dropbox_save)
+        self.assertIn('conflict_labels = {', dropbox_ui)
+        self.assertIn('"Merge and replace matching files"', dropbox_ui)
+        self.assertIn('"Save as a new numbered folder"', dropbox_ui)
+        self.assertIn('"Open folder"', dropbox_ui)
+        self.assertIn('os_accounts.can_access_page(user, "Files")', dropbox_ui)
+        self.assertIn('"mockups_saved_dropbox"', dropbox_save)
+
+    def test_mockups_dropbox_manifest_uses_individual_asset_files_not_only_zip(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        manifest_source = source[
+            source.index("def _mockup_dropbox_manifest") : source.index("\n\ndef _mockup_dropbox_folder_name")
+        ]
+
+        self.assertIn("get_selected_zip_assets", manifest_source)
+        self.assertIn("build_asset_zip_manifest", manifest_source)
+        self.assertNotIn("zipfile", manifest_source)
+        self.assertNotIn("complete_zip_path", manifest_source)
 
 
 if __name__ == "__main__":

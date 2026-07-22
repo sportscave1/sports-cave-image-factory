@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+import io
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -231,6 +232,238 @@ class DropboxIntegrationTests(unittest.TestCase):
         self.assertEqual(dropbox_integration.normalize_dropbox_path("/"), "")
         with self.assertRaises(ValueError):
             dropbox_integration.normalize_dropbox_path("/Sports Cave OS Assets/../Private")
+
+    def test_folder_upload_paths_preserve_structure_and_block_traversal(self):
+        self.assertEqual(
+            dropbox_integration.sanitize_relative_upload_path(
+                "Campaign/Hero Images/hero.jpg"
+            ),
+            "Campaign/Hero Images/hero.jpg",
+        )
+        self.assertEqual(
+            dropbox_integration.join_upload_path(
+                "/Sportscave Team Folder/03_ASSETS",
+                "Campaign/Hero Images/hero.jpg",
+            ),
+            "/Sportscave Team Folder/03_ASSETS/Campaign/Hero Images/hero.jpg",
+        )
+        for unsafe_path in ("../private.jpg", "Campaign/../../private.jpg", "/private.jpg"):
+            with self.assertRaises(ValueError):
+                dropbox_integration.sanitize_relative_upload_path(unsafe_path)
+
+    def test_small_stream_upload_uses_current_team_space_client(self):
+        client = MagicMock()
+        client.files_upload.return_value = {
+            ".tag": "file",
+            "id": "id:hero",
+            "name": "hero.jpg",
+            "path_display": "/Sportscave Team Folder/hero.jpg",
+            "size": 4,
+        }
+        sdk = SimpleNamespace(
+            files=SimpleNamespace(
+                WriteMode=SimpleNamespace(add="add", overwrite="overwrite")
+            )
+        )
+        with patch.object(
+            dropbox_integration,
+            "get_metadata_if_exists",
+            return_value=None,
+        ), patch.object(
+            dropbox_integration,
+            "team_space_client",
+            return_value=client,
+        ), patch.object(dropbox_integration, "_dropbox_sdk", return_value=sdk):
+            metadata = dropbox_integration.upload_stream(
+                "token",
+                "/Sportscave Team Folder/hero.jpg",
+                io.BytesIO(b"hero"),
+                size=4,
+            )
+
+        self.assertEqual(metadata["id"], "id:hero")
+        client.files_upload.assert_called_once_with(
+            b"hero",
+            "/Sportscave Team Folder/hero.jpg",
+            mode="add",
+            autorename=False,
+            mute=False,
+        )
+
+    def test_large_stream_upload_uses_chunked_upload_session(self):
+        class Cursor:
+            def __init__(self, session_id, offset):
+                self.session_id = session_id
+                self.offset = offset
+
+        class Commit:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        client = MagicMock()
+        client.files_upload_session_start.return_value = SimpleNamespace(session_id="session-1")
+        client.files_upload_session_finish.return_value = {
+            ".tag": "file",
+            "name": "large.psd",
+            "size": 10,
+        }
+        sdk = SimpleNamespace(
+            files=SimpleNamespace(
+                WriteMode=SimpleNamespace(add="add", overwrite="overwrite"),
+                UploadSessionCursor=Cursor,
+                CommitInfo=Commit,
+            )
+        )
+        progress = []
+        with patch.object(
+            dropbox_integration,
+            "get_metadata_if_exists",
+            return_value=None,
+        ), patch.object(
+            dropbox_integration,
+            "team_space_client",
+            return_value=client,
+        ), patch.object(dropbox_integration, "_dropbox_sdk", return_value=sdk):
+            metadata = dropbox_integration.upload_stream(
+                "token",
+                "/Sportscave Team Folder/large.psd",
+                io.BytesIO(b"0123456789"),
+                size=10,
+                simple_limit=4,
+                chunk_size=4,
+                progress_callback=lambda uploaded, total: progress.append((uploaded, total)),
+            )
+
+        self.assertEqual(metadata["name"], "large.psd")
+        client.files_upload.assert_not_called()
+        client.files_upload_session_start.assert_called_once_with(b"0123")
+        self.assertEqual(client.files_upload_session_append_v2.call_args.args[0], b"4567")
+        self.assertEqual(client.files_upload_session_finish.call_args.args[0], b"89")
+        self.assertEqual(progress[-1], (10, 10))
+
+    def test_upload_batch_preserves_nested_paths_and_partial_success(self):
+        items = [
+            {"relative_path": "Campaign/hero.jpg", "data": b"hero", "size": 4},
+            {"relative_path": "Campaign/detail.jpg", "data": b"detail", "size": 6},
+        ]
+        with patch.object(
+            dropbox_integration,
+            "ensure_relative_folders",
+        ) as ensure_folders, patch.object(
+            dropbox_integration,
+            "upload_stream",
+            side_effect=[
+                {".tag": "file", "name": "hero.jpg"},
+                dropbox_integration.DropboxApiError("upload failed"),
+            ],
+        ) as upload_stream:
+            result = dropbox_integration.upload_batch(
+                "token",
+                "/Sportscave Team Folder/03_ASSETS",
+                items,
+                conflict="keep_both",
+            )
+
+        self.assertEqual(len(result["successes"]), 1)
+        self.assertEqual(result["successes"][0]["relative_path"], "Campaign/hero.jpg")
+        self.assertEqual(len(result["failures"]), 1)
+        self.assertEqual(result["failures"][0]["relative_path"], "Campaign/detail.jpg")
+        self.assertEqual(ensure_folders.call_count, 2)
+        self.assertEqual(
+            upload_stream.call_args_list[0].args[1],
+            "/Sportscave Team Folder/03_ASSETS/Campaign/hero.jpg",
+        )
+
+    def test_conflict_choices_never_overwrite_without_explicit_replace(self):
+        existing = {".tag": "file", "name": "hero.jpg"}
+        with patch.object(
+            dropbox_integration,
+            "get_metadata_if_exists",
+            return_value=existing,
+        ):
+            self.assertIsNone(
+                dropbox_integration.resolve_upload_destination(
+                    "token",
+                    "/Sportscave Team Folder/hero.jpg",
+                    "cancel",
+                )
+            )
+            replaced = dropbox_integration.resolve_upload_destination(
+                "token",
+                "/Sportscave Team Folder/hero.jpg",
+                "replace",
+            )
+
+        self.assertEqual(replaced["mode"], "overwrite")
+        with patch.object(
+            dropbox_integration,
+            "get_metadata_if_exists",
+            return_value=existing,
+        ), patch.object(
+            dropbox_integration,
+            "numbered_path",
+            return_value="/Sportscave Team Folder/hero (1).jpg",
+        ):
+            kept = dropbox_integration.resolve_upload_destination(
+                "token",
+                "/Sportscave Team Folder/hero.jpg",
+                "keep_both",
+            )
+        self.assertEqual(kept["path"], "/Sportscave Team Folder/hero (1).jpg")
+
+    def test_new_folder_and_rename_use_rooted_client(self):
+        client = MagicMock()
+        client.files_create_folder_v2.return_value = SimpleNamespace(
+            metadata={
+                ".tag": "folder",
+                "name": "Campaign",
+                "path_display": "/Sportscave Team Folder/Campaign",
+            }
+        )
+        client.files_move_v2.return_value = SimpleNamespace(
+            metadata={
+                ".tag": "folder",
+                "name": "Campaign 2026",
+                "path_display": "/Sportscave Team Folder/Campaign 2026",
+            }
+        )
+        with patch.object(
+            dropbox_integration,
+            "get_metadata_if_exists",
+            return_value=None,
+        ), patch.object(
+            dropbox_integration,
+            "path_exists",
+            return_value=False,
+        ), patch.object(
+            dropbox_integration,
+            "team_space_client",
+            return_value=client,
+        ):
+            created = dropbox_integration.create_folder(
+                "token",
+                "/Sportscave Team Folder",
+                "Campaign",
+            )
+            renamed = dropbox_integration.rename_path(
+                "token",
+                "/Sportscave Team Folder/Campaign",
+                "Campaign 2026",
+                root_path="/Sportscave Team Folder",
+            )
+
+        self.assertEqual(created["name"], "Campaign")
+        self.assertEqual(renamed["name"], "Campaign 2026")
+        client.files_create_folder_v2.assert_called_once_with(
+            "/Sportscave Team Folder/Campaign",
+            autorename=False,
+        )
+        client.files_move_v2.assert_called_once_with(
+            "/Sportscave Team Folder/Campaign",
+            "/Sportscave Team Folder/Campaign 2026",
+            autorename=False,
+            allow_shared_folder=False,
+        )
 
     def test_folder_entries_sort_folders_first_then_by_name(self):
         entries = [

@@ -2181,6 +2181,69 @@ def inject_styles():
             padding: 0 0.08rem;
         }
 
+        .st-key-files-command-bar {
+            align-items: center;
+            background: #F7F8FA;
+            border: 1px solid #E0E2E5;
+            border-bottom: 0;
+            display: flex;
+            min-height: 38px;
+            padding: 0.18rem 0.3rem;
+        }
+
+        .st-key-files-command-bar [data-testid="stHorizontalBlock"] {
+            gap: 0.25rem;
+        }
+
+        .st-key-files-command-bar button,
+        .st-key-mockups-dropbox-actions button,
+        .st-key-mockups-dropbox-picker button {
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            border-radius: 4px !important;
+            box-shadow: none !important;
+            color: #202124 !important;
+            font-size: 0.78rem !important;
+            min-height: 30px !important;
+            padding: 0.2rem 0.5rem !important;
+        }
+
+        .st-key-files-command-bar button:hover,
+        .st-key-mockups-dropbox-actions button:hover,
+        .st-key-mockups-dropbox-picker button:hover {
+            background: #EAF2F8 !important;
+            border-color: #C5D5E0 !important;
+        }
+
+        .st-key-files-drop-target {
+            margin: 0;
+            position: relative;
+        }
+
+        .st-key-files-drop-target [data-testid="stFileUploaderDropzone"] {
+            background: #FFFFFF;
+            border: 1px dashed #D4D8DC;
+            border-radius: 0;
+            min-height: 38px;
+            padding: 0.2rem 0.6rem;
+        }
+
+        .st-key-files-drop-target [data-testid="stFileUploaderDropzone"]:hover,
+        .st-key-files-drop-target [data-testid="stFileUploaderDropzone"]:focus-within {
+            background: #EEF5FA;
+            border-color: #8BAFC7;
+        }
+
+        .st-key-files-drop-target [data-testid="stFileUploaderDropzoneInstructions"] {
+            font-size: 0.76rem;
+            line-height: 1.1;
+        }
+
+        .st-key-files-drop-target small,
+        .st-key-files-drop-target [data-testid="stFileUploaderDropzone"] button {
+            display: none;
+        }
+
         .sc-files-table {
             border: 1px solid #E0E2E5;
             border-radius: 0;
@@ -2236,6 +2299,36 @@ def inject_styles():
 
         .sc-files-row:last-child {
             border-bottom: 0;
+        }
+
+        .sc-files-row-wrap {
+            position: relative;
+        }
+
+        .sc-files-row-menu {
+            align-items: center;
+            border-radius: 3px;
+            color: #55595E !important;
+            display: flex;
+            font-size: 1rem;
+            height: 28px;
+            justify-content: center;
+            opacity: 0;
+            position: absolute;
+            right: 0.3rem;
+            text-decoration: none !important;
+            top: 6px;
+            width: 28px;
+            z-index: 2;
+        }
+
+        .sc-files-row-wrap:hover .sc-files-row-menu,
+        .sc-files-row-menu:focus-visible {
+            opacity: 1;
+        }
+
+        .sc-files-row-menu:hover {
+            background: #DDEAF3;
         }
 
         .sc-files-row:hover,
@@ -2374,6 +2467,18 @@ def inject_styles():
         .sc-files-action:hover {
             background: #EDF3F8;
             border-color: #8AA9C0;
+        }
+
+        .sc-files-operation-note {
+            color: #5B6066;
+            font-size: 0.76rem;
+            margin: 0.15rem 0 0.35rem;
+        }
+
+        .sc-mockups-dropbox-picker {
+            border: 1px solid #E0E2E5;
+            margin: 0.35rem 0 0.6rem;
+            padding: 0.4rem;
         }
 
         .sc-task-card {
@@ -5689,10 +5794,305 @@ def render_primary_zip_download(result, section_key):
         st.info(result["zip_drive_error"])
 
 
+def _mockup_dropbox_manifest(result, selected_groups):
+    selected_assets = get_selected_zip_assets(result, selected_groups)
+    return image_factory.build_asset_zip_manifest(selected_assets, include_content_hash=False)
+
+
+def _mockup_dropbox_folder_name(result):
+    value = result.get("product_slug") or result.get("product_name") or "mockups"
+    return dropbox_integration.sanitize_path_component(value, fallback="mockups")
+
+
+def _mockup_dropbox_picker_path(root_path, run_key):
+    default_path = dropbox_integration.normalize_dropbox_path(
+        f"{root_path}/04_OUTPUT/product-images"
+    )
+    state_key = f"mockups-dropbox-picker-path::{run_key}"
+    current = dropbox_integration.normalize_dropbox_path(
+        st.session_state.get(state_key) or default_path
+    )
+    if not dropbox_integration.path_is_within_root(current, root_path):
+        current = default_path
+    st.session_state[state_key] = current
+    return state_key, current, default_path
+
+
+def _render_mockup_folder_picker(access_token, root_path, run_key):
+    state_key, current_path, default_path = _mockup_dropbox_picker_path(root_path, run_key)
+    try:
+        dropbox_integration.ensure_folder_path(
+            access_token,
+            default_path,
+            root_path=root_path,
+        )
+        folders = [
+            entry
+            for entry in _files_directory_entries(access_token, current_path)
+            if str(entry.get(".tag") or "").casefold() == "folder"
+        ]
+    except Exception as error:
+        logging.warning("Mockups Dropbox folder picker failed: %s", error)
+        st.info("This Dropbox folder could not be opened right now.")
+        return current_path
+
+    with st.container(key="mockups-dropbox-picker"):
+        st.markdown('<div class="sc-mockups-dropbox-picker">', unsafe_allow_html=True)
+        breadcrumb = dropbox_integration.breadcrumb_items(current_path, root_path)
+        breadcrumb_cols = st.columns([1] * max(1, len(breadcrumb)))
+        for index, (label, path) in enumerate(breadcrumb):
+            target = root_path if not path else path
+            with breadcrumb_cols[index]:
+                if st.button(
+                    str(label),
+                    key=f"mockups-picker-crumb::{run_key}::{index}::{target}",
+                    use_container_width=True,
+                ):
+                    st.session_state[state_key] = target
+                    st.rerun()
+
+        if folders:
+            for folder in dropbox_integration.sort_folder_entries(folders):
+                path = dropbox_integration.normalize_dropbox_path(
+                    folder.get("path_display") or folder.get("path_lower") or ""
+                )
+                if st.button(
+                    str(folder.get("name") or "Folder"),
+                    icon=":material/folder:",
+                    key=f"mockups-picker-folder::{run_key}::{path}",
+                    use_container_width=True,
+                ):
+                    st.session_state[state_key] = path
+                    st.rerun()
+        else:
+            st.caption("No subfolders here.")
+
+        with st.popover("New folder", icon=":material/create_new_folder:"):
+            folder_name = st.text_input(
+                "Folder name",
+                key=f"mockups-picker-new-name::{run_key}::{current_path}",
+            )
+            if st.button(
+                "Create",
+                key=f"mockups-picker-new-submit::{run_key}::{current_path}",
+                use_container_width=True,
+            ):
+                try:
+                    metadata = dropbox_integration.create_folder(
+                        access_token,
+                        current_path,
+                        folder_name,
+                        conflict="keep_both",
+                    )
+                    if metadata:
+                        _files_clear_directory_cache(current_path)
+                        st.session_state[state_key] = str(
+                            metadata.get("path_display") or metadata.get("path_lower") or current_path
+                        )
+                        record_activity_log(
+                            "files_folder_created",
+                            "Mockups",
+                            f"Folder created: {metadata.get('name') or folder_name}",
+                            entity_type="dropbox_folder",
+                            entity_id=str(metadata.get("path_display") or metadata.get("path_lower") or ""),
+                        )
+                        st.rerun()
+                except Exception as error:
+                    logging.warning("Mockups destination folder creation failed: %s", error)
+                    st.warning("This folder could not be created.")
+        st.markdown("</div>", unsafe_allow_html=True)
+    return current_path
+
+
+def _save_mockups_to_dropbox(
+    access_token,
+    user,
+    result,
+    manifest,
+    root_path,
+    destination_parent,
+    folder_name,
+    destination_conflict,
+):
+    clean_name = dropbox_integration.sanitize_path_component(folder_name, fallback="mockups")
+    proposed = dropbox_integration.join_upload_path(destination_parent, clean_name)
+    existing = dropbox_integration.get_metadata_if_exists(access_token, proposed)
+    conflict_key = str(destination_conflict or "cancel")
+    if existing:
+        if str(existing.get(".tag") or "").casefold() != "folder":
+            raise dropbox_integration.DropboxConflictError("A file already uses this output name.")
+        if conflict_key == "cancel":
+            return {"cancelled": True, "destination": proposed, "successes": [], "failures": []}
+        if conflict_key == "numbered":
+            destination = dropbox_integration.numbered_path(access_token, proposed)
+            file_conflict = "cancel"
+        else:
+            destination = proposed
+            file_conflict = "replace"
+    else:
+        destination = proposed
+        file_conflict = "cancel"
+
+    dropbox_integration.ensure_folder_path(
+        access_token,
+        destination,
+        root_path=root_path,
+    )
+    items = [
+        {
+            "relative_path": entry["archive_name"],
+            "local_path": entry["path"],
+            "size": entry.get("byte_length"),
+        }
+        for entry in manifest
+    ]
+    progress = st.progress(0, text="Saving mockups to Dropbox...")
+
+    def update_progress(index, total, name, uploaded, file_total):
+        file_fraction = (uploaded / file_total) if file_total else 1
+        overall = ((index - 1) + min(1, file_fraction)) / max(1, total)
+        progress.progress(min(1.0, overall), text=f"Saving {name}")
+
+    upload_result = dropbox_integration.upload_batch(
+        access_token,
+        destination,
+        items,
+        conflict=file_conflict,
+        progress_callback=update_progress,
+    )
+    progress.empty()
+    upload_result["destination"] = destination
+    upload_result["cancelled"] = False
+    successes = list(upload_result.get("successes") or ())
+    if successes:
+        _files_save_upload_metadata(successes, user, asset_type="mockups")
+        _files_clear_directory_cache(destination_parent, destination)
+        record_activity_log(
+            "mockups_saved_dropbox",
+            "Mockups",
+            f"Mockups saved to Dropbox: {result.get('product_name') or clean_name}",
+            entity_type="dropbox_folder",
+            entity_id=destination,
+            metadata={
+                "count": len(successes),
+                "destination": destination,
+                "files": [row.get("relative_path") for row in successes],
+            },
+        )
+    return upload_result
+
+
+def _open_files_folder(path):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    st.session_state["files_browser_path"] = clean_path
+    st.session_state.pop("files_preview_path", None)
+    set_current_page("Files", source="mockups-dropbox")
+    with suppress(Exception):
+        st.query_params["files_path"] = clean_path
+        for key in ("files_preview", "files_action", "files_selected"):
+            if key in st.query_params:
+                del st.query_params[key]
+    st.rerun()
+
+
+def _render_mockups_dropbox_save(result, selected_groups, manifest, *, show_button=True):
+    run_key = hashlib.sha1(str(result.get("run_dir") or "mockups").encode("utf-8")).hexdigest()[:12]
+    state_key = f"mockups-dropbox-save-open::{run_key}"
+    user = current_os_user()
+    if show_button:
+        with st.container(key="mockups-dropbox-actions"):
+            if st.button(
+                "Save to Dropbox",
+                key=f"mockups-save-dropbox::{run_key}",
+                icon=":material/cloud_upload:",
+                use_container_width=True,
+            ):
+                st.session_state[state_key] = True
+        return
+    if not st.session_state.get(state_key):
+        return
+    if not os_accounts.can_access_page(user, "Files"):
+        st.info("Files access is not approved for this account.")
+        return
+    try:
+        access_token = _files_access_token()
+        root_path = _files_team_root(access_token)
+    except Exception as error:
+        logging.warning("Mockups Dropbox connection unavailable: %s", error)
+        st.info("Dropbox is unavailable right now.")
+        return
+
+    st.markdown("**Dropbox destination**")
+    destination_parent = _render_mockup_folder_picker(access_token, root_path, run_key)
+    folder_name = st.text_input(
+        "Output folder name",
+        value=_mockup_dropbox_folder_name(result),
+        key=f"mockups-dropbox-folder-name::{run_key}",
+    )
+    conflict_labels = {
+        "Merge and replace matching files": "merge_replace",
+        "Save as a new numbered folder": "numbered",
+        "Cancel": "cancel",
+    }
+    conflict_label = st.selectbox(
+        "If the output folder already exists",
+        tuple(conflict_labels),
+        key=f"mockups-dropbox-conflict::{run_key}",
+    )
+    action_cols = st.columns([1, 1])
+    if action_cols[0].button(
+        "Save files",
+        key=f"mockups-dropbox-confirm::{run_key}",
+        use_container_width=True,
+    ):
+        try:
+            saved = _save_mockups_to_dropbox(
+                access_token,
+                user,
+                result,
+                manifest,
+                root_path,
+                destination_parent,
+                folder_name,
+                conflict_labels[conflict_label],
+            )
+            if saved.get("cancelled"):
+                st.info("Save cancelled.")
+            elif saved.get("successes"):
+                result["dropbox_saved_path"] = saved["destination"]
+                result["dropbox_save_failures"] = list(saved.get("failures") or ())
+                st.session_state.last_generation_result = result
+                st.success("Saved to Dropbox")
+            else:
+                st.warning("No mockup files were saved.")
+        except Exception as error:
+            logging.warning("Mockups Dropbox save failed: %s", error)
+            st.warning("The mockups could not be saved to Dropbox.")
+    if action_cols[1].button(
+        "Cancel",
+        key=f"mockups-dropbox-close::{run_key}",
+        use_container_width=True,
+    ):
+        st.session_state[state_key] = False
+        st.rerun()
+
+    saved_path = str(result.get("dropbox_saved_path") or "")
+    if saved_path:
+        st.success("Saved to Dropbox")
+        if result.get("dropbox_save_failures"):
+            st.warning(f"{len(result['dropbox_save_failures'])} files could not be saved.")
+        if st.button(
+            "Open folder",
+            key=f"mockups-dropbox-open::{run_key}",
+            icon=":material/folder_open:",
+        ):
+            _open_files_folder(saved_path)
+
+
 def render_final_zip_download(result):
     result = normalize_generation_result(result)
-    st.subheader("Download ZIP")
-    st.caption("Choose which image groups to include, then download one ZIP.")
+    st.subheader("Export mockups")
+    st.caption("Choose the image groups, then save them to Dropbox or download a ZIP.")
 
     selected_groups = []
     filter_cols = st.columns(len(MOCKUPS_ZIP_GROUP_OPTIONS))
@@ -5708,7 +6108,7 @@ def render_final_zip_download(result):
         return
 
     selected_assets = get_selected_zip_assets(result, selected_groups)
-    selected_manifest = image_factory.build_asset_zip_manifest(selected_assets, include_content_hash=False)
+    selected_manifest = _mockup_dropbox_manifest(result, selected_groups)
     selected_file_count = len(selected_manifest)
     st.caption(f"{selected_file_count} files selected for ZIP")
 
@@ -5717,19 +6117,22 @@ def render_final_zip_download(result):
         st.button("Download ZIP", key=f"download-filtered-zip-empty::{result['run_dir']}", disabled=True, use_container_width=True)
         return
 
-    try:
-        filtered_zip_path = build_filtered_download_zip(result, selected_groups)
-    except Exception as error:
-        st.error("Could not create the ZIP.")
-        st.exception(error)
-        return
-
-    render_download_button(
-        "Download ZIP",
-        filtered_zip_path,
-        "application/zip",
-        key=f"download-filtered-zip::{result['run_dir']}::{hashlib.sha1('|'.join(selected_groups).encode('utf-8')).hexdigest()[:10]}",
-    )
+    action_cols = st.columns(2)
+    with action_cols[0]:
+        _render_mockups_dropbox_save(result, selected_groups, selected_manifest, show_button=True)
+    with action_cols[1]:
+        try:
+            filtered_zip_path = build_filtered_download_zip(result, selected_groups)
+            render_download_button(
+                "Download ZIP",
+                filtered_zip_path,
+                "application/zip",
+                key=f"download-filtered-zip::{result['run_dir']}::{hashlib.sha1('|'.join(selected_groups).encode('utf-8')).hexdigest()[:10]}",
+            )
+        except Exception as error:
+            logging.warning("Mockups ZIP creation failed: %s", error)
+            st.warning("Could not create the ZIP.")
+    _render_mockups_dropbox_save(result, selected_groups, selected_manifest, show_button=False)
 
 
 def render_prompt_cards(result, prompt_paths, heading, caption=None):
@@ -9207,7 +9610,7 @@ def _files_type_label(entry):
     return labels.get(extension, f"{extension} file" if extension else "File")
 
 
-def _files_route_url(*, folder_path="", preview_path="", root=False):
+def _files_route_url(*, folder_path="", preview_path="", root=False, action="", selected_path=""):
     parts = [f"{PAGE_QUERY_PARAM}={quote(page_query_value('Files'), safe='')}" ]
     if root:
         parts.append("files_path=__root__")
@@ -9215,6 +9618,10 @@ def _files_route_url(*, folder_path="", preview_path="", root=False):
         parts.append(f"files_path={quote(folder_path, safe='')}")
     if preview_path:
         parts.append(f"files_preview={quote(preview_path, safe='')}")
+    if action:
+        parts.append(f"files_action={quote(str(action), safe='')}")
+    if selected_path:
+        parts.append(f"files_selected={quote(selected_path, safe='')}")
     return "?" + "&".join(parts)
 
 
@@ -9274,7 +9681,13 @@ def _files_details_markup(entries, user, *, show_header=True):
         )
         modified = _files_modified_label(entry.get("server_modified"), user)
         size = "" if tag == "folder" else dropbox_integration.format_file_size(entry.get("size"))
+        action_href = _files_route_url(
+            folder_path=path.rsplit("/", 1)[0],
+            action="rename",
+            selected_path=path,
+        )
         chunks.append(
+            '<div class="sc-files-row-wrap">'
             f'<a class="sc-files-grid sc-files-row" role="row" '
             f'href="{html.escape(href, quote=True)}"{target} '
             f'title="{html.escape(name, quote=True)}">'
@@ -9286,6 +9699,9 @@ def _files_details_markup(entries, user, *, show_header=True):
             f'<span class="sc-files-meta" role="cell">{html.escape(_files_type_label(entry))}</span>'
             f'<span class="sc-files-meta" role="cell">{html.escape(size)}</span>'
             '</a>'
+            f'<a class="sc-files-row-menu" href="{html.escape(action_href, quote=True)}" '
+            f'aria-label="Rename {html.escape(name, quote=True)}" title="Rename">&#8943;</a>'
+            '</div>'
         )
     chunks.append("</div></div>")
     return "".join(chunks)
@@ -9387,6 +9803,272 @@ def _render_files_preview(access_token, user, root_path, preview_path):
         )
     st.markdown(actions, unsafe_allow_html=True)
 
+
+def _files_clear_directory_cache(*paths):
+    cache = st.session_state.setdefault("files_directory_cache", {})
+    for path in paths:
+        with suppress(Exception):
+            cache.pop(dropbox_integration.normalize_dropbox_path(path), None)
+
+
+def _files_set_notice(message, *, level="success"):
+    st.session_state["files_operation_notice"] = {
+        "message": str(message or "").strip(),
+        "level": str(level or "success"),
+    }
+
+
+def _files_render_notice():
+    notice = st.session_state.pop("files_operation_notice", None) or {}
+    message = str(notice.get("message") or "").strip()
+    if not message:
+        return
+    if notice.get("level") == "warning":
+        st.warning(message)
+    else:
+        st.success(message)
+
+
+def _files_save_upload_metadata(rows, user, *, asset_type="files"):
+    try:
+        supabase = importlib.import_module("supabase_backend")
+    except Exception:
+        return
+    for row in rows or ():
+        metadata = dict((row or {}).get("metadata") or {})
+        if not metadata:
+            continue
+        path = str(metadata.get("path_display") or metadata.get("path_lower") or "")
+        with suppress(Exception):
+            supabase.save_dropbox_asset_metadata(
+                dropbox_integration.normalise_asset_metadata(
+                    dropbox_file_id=metadata.get("id"),
+                    dropbox_path=path,
+                    name=metadata.get("name"),
+                    size=metadata.get("size"),
+                    asset_type=asset_type,
+                    uploaded_by_user_name=_activity_actor_for_user(user),
+                    uploaded_by_user_email=(user or {}).get("email") or "",
+                )
+            )
+
+
+def _files_uploaded_items(uploaded_files):
+    items = []
+    for uploaded_file in uploaded_files or ():
+        relative_path = str(getattr(uploaded_file, "name", "") or "")
+        items.append(
+            {
+                "relative_path": relative_path,
+                "stream": uploaded_file,
+                "size": getattr(uploaded_file, "size", None),
+            }
+        )
+    return items
+
+
+def _files_run_upload(access_token, user, current_path, uploaded_files, conflict, *, asset_type="files"):
+    items = _files_uploaded_items(uploaded_files)
+    progress = st.progress(0, text="Preparing upload...")
+
+    def update_progress(index, total, name, uploaded, file_total):
+        file_fraction = (uploaded / file_total) if file_total else 1
+        overall = ((index - 1) + min(1, file_fraction)) / max(1, total)
+        progress.progress(min(1.0, overall), text=f"Uploading {name}")
+
+    result = dropbox_integration.upload_batch(
+        access_token,
+        current_path,
+        items,
+        conflict=conflict,
+        progress_callback=update_progress,
+    )
+    progress.empty()
+    successes = list(result.get("successes") or ())
+    failures = list(result.get("failures") or ())
+    if successes:
+        _files_save_upload_metadata(successes, user, asset_type=asset_type)
+        count = len(successes)
+        record_activity_log(
+            "files_uploaded",
+            "Files",
+            f"Uploaded {count} file{'s' if count != 1 else ''}: {current_path}",
+            entity_type="dropbox_folder",
+            entity_id=current_path,
+            metadata={
+                "count": count,
+                "files": [row.get("relative_path") for row in successes],
+            },
+        )
+        _files_clear_directory_cache(current_path)
+    return {"successes": successes, "failures": failures}
+
+
+def _render_files_upload_control(
+    access_token,
+    user,
+    current_path,
+    *,
+    key,
+    directory=False,
+    compact=False,
+    auto_submit=False,
+):
+    generation_key = f"{key}-generation"
+    generation = int(st.session_state.get(generation_key) or 0)
+    picker_key = f"{key}-picker-{generation}" if auto_submit else f"{key}-picker"
+    selected = st.file_uploader(
+        "Drop files into this folder" if compact else ("Choose a folder" if directory else "Choose files"),
+        accept_multiple_files="directory" if directory else True,
+        key=picker_key,
+        label_visibility="collapsed" if compact else "visible",
+    )
+    if not selected:
+        return
+    conflict_labels = {
+        "Cancel matching files": "cancel",
+        "Keep both": "keep_both",
+        "Replace matching files": "replace",
+    }
+    if auto_submit:
+        conflict = "cancel"
+    else:
+        choice = st.selectbox(
+            "If a name already exists",
+            tuple(conflict_labels),
+            key=f"{key}-conflict",
+        )
+        if not st.button("Upload", key=f"{key}-submit", use_container_width=True):
+            return
+        conflict = conflict_labels[choice]
+    result = _files_run_upload(
+        access_token,
+        user,
+        current_path,
+        selected,
+        conflict,
+    )
+    successes = result["successes"]
+    failures = result["failures"]
+    if successes and failures:
+        failed_names = ", ".join(str(row.get("relative_path") or "file") for row in failures[:5])
+        _files_set_notice(
+            f"{len(successes)} files uploaded. Could not upload: {failed_names}",
+            level="warning",
+        )
+    elif failures:
+        failed_names = ", ".join(str(row.get("relative_path") or "file") for row in failures[:5])
+        _files_set_notice(f"Could not upload: {failed_names}", level="warning")
+    else:
+        _files_set_notice(f"{len(successes)} file{'s' if len(successes) != 1 else ''} uploaded")
+    if auto_submit:
+        st.session_state[generation_key] = generation + 1
+    st.rerun()
+
+
+def _render_files_command_bar(access_token, user, current_path):
+    with st.container(key="files-command-bar"):
+        columns = st.columns([1, 1, 1, 5])
+        with columns[0]:
+            with st.popover("New folder", icon=":material/create_new_folder:", width="stretch"):
+                folder_name = st.text_input("Folder name", key=f"files-new-folder-name::{current_path}")
+                folder_conflict = st.selectbox(
+                    "If it already exists",
+                    ("Cancel", "Keep both"),
+                    key=f"files-new-folder-conflict::{current_path}",
+                )
+                if st.button("Create", key=f"files-new-folder-submit::{current_path}", use_container_width=True):
+                    try:
+                        metadata = dropbox_integration.create_folder(
+                            access_token,
+                            current_path,
+                            folder_name,
+                            conflict="keep_both" if folder_conflict == "Keep both" else "cancel",
+                        )
+                        if metadata:
+                            created_path = str(metadata.get("path_display") or metadata.get("path_lower") or "")
+                            _files_clear_directory_cache(current_path)
+                            record_activity_log(
+                                "files_folder_created",
+                                "Files",
+                                f"Folder created: {metadata.get('name') or folder_name}",
+                                entity_type="dropbox_folder",
+                                entity_id=created_path,
+                            )
+                            _files_set_notice("Folder created")
+                        else:
+                            _files_set_notice("Folder was not created", level="warning")
+                        st.rerun()
+                    except Exception as error:
+                        logging.warning("Files folder creation failed: %s", error)
+                        st.warning("This folder could not be created.")
+        with columns[1]:
+            with st.popover("Upload files", icon=":material/upload_file:", width="stretch"):
+                _render_files_upload_control(
+                    access_token,
+                    user,
+                    current_path,
+                    key=f"files-command-upload::{current_path}",
+                )
+        with columns[2]:
+            with st.popover("Upload folder", icon=":material/drive_folder_upload:", width="stretch"):
+                _render_files_upload_control(
+                    access_token,
+                    user,
+                    current_path,
+                    key=f"files-folder-upload::{current_path}",
+                    directory=True,
+                )
+
+
+def _clear_files_action_query():
+    for key in ("files_action", "files_selected"):
+        with suppress(Exception):
+            if key in st.query_params:
+                del st.query_params[key]
+
+
+def _render_files_rename_action(access_token, user, root_path, current_path):
+    if _query_value("files_action") != "rename":
+        return
+    selected_path = dropbox_integration.normalize_dropbox_path(_query_value("files_selected"))
+    if not dropbox_integration.path_is_within_root(selected_path, root_path) or selected_path == root_path:
+        st.info("This item cannot be renamed here.")
+        return
+    old_name = selected_path.rsplit("/", 1)[-1]
+    with st.form(f"files-rename::{selected_path}"):
+        st.markdown(f"**Rename {html.escape(old_name)}**")
+        new_name = st.text_input("Name", value=old_name)
+        save_col, cancel_col = st.columns(2)
+        save = save_col.form_submit_button("Rename", use_container_width=True)
+        cancel = cancel_col.form_submit_button("Cancel", use_container_width=True)
+    if cancel:
+        _clear_files_action_query()
+        st.rerun()
+    if save:
+        try:
+            metadata = dropbox_integration.rename_path(
+                access_token,
+                selected_path,
+                new_name,
+                root_path=root_path,
+            )
+            parent = selected_path.rsplit("/", 1)[0]
+            _files_clear_directory_cache(parent, current_path)
+            record_activity_log(
+                "files_item_renamed",
+                "Files",
+                f"Renamed {old_name} to {metadata.get('name') or new_name}",
+                entity_type="dropbox_item",
+                entity_id=str(metadata.get("path_display") or metadata.get("path_lower") or ""),
+            )
+            _files_set_notice("Item renamed")
+            _clear_files_action_query()
+            st.rerun()
+        except Exception as error:
+            logging.warning("Files rename failed: %s", error)
+            st.warning("This item could not be renamed.")
+
 def _render_files_browser(access_token, user, root_path):
     with st.container(key="files-explorer"):
         preview_path = _query_value("files_preview") or str(
@@ -9432,6 +10114,19 @@ def _render_files_browser(access_token, user, root_path):
                 unsafe_allow_html=True,
             )
             return
+
+        _files_render_notice()
+        _render_files_command_bar(access_token, user, current_path)
+        _render_files_rename_action(access_token, user, root_path, current_path)
+        with st.container(key="files-drop-target"):
+            _render_files_upload_control(
+                access_token,
+                user,
+                current_path,
+                key=f"files-drop-upload::{current_path}",
+                compact=True,
+                auto_submit=True,
+            )
 
         try:
             entries = _files_directory_entries(access_token, current_path)

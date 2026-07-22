@@ -1,6 +1,8 @@
 import json
 import hashlib
+import io
 import os
+from pathlib import Path
 import threading
 import time
 from datetime import datetime, timezone
@@ -21,6 +23,9 @@ DROPBOX_ACCESS_TOKEN_ENV = "DROPBOX_ACCESS_TOKEN"
 DROPBOX_ROOT_PATH_ENV = "DROPBOX_ROOT_PATH"
 DROPBOX_CLIENT_CACHE_SECONDS = 45 * 60
 DROPBOX_CLIENT_CACHE_LIMIT = 8
+DROPBOX_SIMPLE_UPLOAD_LIMIT = 8 * 1024 * 1024
+DROPBOX_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024
+DROPBOX_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 DROPBOX_FOLDER_OPTIONS = (
     ("brand_assets", "01 Brand Assets"),
@@ -50,6 +55,10 @@ class DropboxFolderAccessError(DropboxApiError):
     def __init__(self, message, *, reason="not_visible"):
         super().__init__(message)
         self.reason = reason
+
+
+class DropboxConflictError(DropboxApiError):
+    pass
 
 
 _TEAM_SPACE_CLIENT_CACHE = {}
@@ -605,6 +614,344 @@ def upload_file(access_token, dropbox_path, data, *, timeout=30):
         )
     except Exception as error:
         raise _dropbox_error(error, "Dropbox upload failed.") from error
+    return _metadata_to_dict(metadata)
+
+
+def sanitize_path_component(value, *, fallback=""):
+    """Return one Dropbox-safe filename component without changing its extension."""
+    clean = str(value or "").strip()
+    clean = "".join("_" if ord(char) < 32 else char for char in clean)
+    for char in '<>:"/\\|?*':
+        clean = clean.replace(char, "_")
+    clean = re_collapse_spaces(clean).strip(" .")
+    if clean in {"", ".", ".."}:
+        clean = str(fallback or "").strip()
+    if clean in {"", ".", ".."}:
+        raise ValueError("A valid file or folder name is required.")
+    return clean[:255]
+
+
+def re_collapse_spaces(value):
+    return " ".join(str(value or "").split())
+
+
+def sanitize_relative_upload_path(relative_path):
+    """Validate a browser-supplied relative path and preserve safe subfolders."""
+    raw = str(relative_path or "").strip().replace("\\", "/")
+    if not raw:
+        raise ValueError("An upload filename is required.")
+    if raw.startswith("/") or (len(raw) > 1 and raw[1] == ":"):
+        raise ValueError("Upload paths must be relative to the current folder.")
+    raw_parts = raw.split("/")
+    if any(part.strip() == ".." for part in raw_parts):
+        raise ValueError("Upload paths cannot leave the current folder.")
+    parts = [
+        sanitize_path_component(part)
+        for part in raw_parts
+        if part.strip() not in {"", "."}
+    ]
+    if not parts:
+        raise ValueError("An upload filename is required.")
+    return "/".join(parts)
+
+
+def join_upload_path(current_folder, relative_path):
+    clean_folder = normalize_dropbox_path(current_folder)
+    if not clean_folder:
+        raise ValueError("A Dropbox destination folder is required.")
+    clean_relative = sanitize_relative_upload_path(relative_path)
+    destination = normalize_dropbox_path(f"{clean_folder}/{clean_relative}")
+    if not path_is_within_root(destination, clean_folder):
+        raise ValueError("Upload paths cannot leave the current folder.")
+    return destination
+
+
+def get_metadata_if_exists(access_token, path):
+    try:
+        return get_file_metadata(access_token, path)
+    except DropboxApiError as error:
+        if _is_missing_path_error(error):
+            return None
+        raise
+
+
+def path_exists(access_token, path):
+    return get_metadata_if_exists(access_token, path) is not None
+
+
+def numbered_path(access_token, path, *, max_attempts=999):
+    clean_path = normalize_dropbox_path(path)
+    parent, _, name = clean_path.rpartition("/")
+    suffix = PurePosixPath(name).suffix
+    stem = name[: -len(suffix)] if suffix else name
+    for index in range(1, max(2, int(max_attempts or 999)) + 1):
+        candidate_name = f"{stem} ({index}){suffix}"
+        candidate = normalize_dropbox_path(f"{parent}/{candidate_name}")
+        if not path_exists(access_token, candidate):
+            return candidate
+    raise DropboxConflictError("A free Dropbox filename could not be found.")
+
+
+def resolve_upload_destination(access_token, path, conflict="cancel"):
+    """Resolve explicit overwrite policy without silently replacing Dropbox data."""
+    clean_path = normalize_dropbox_path(path)
+    existing = get_metadata_if_exists(access_token, clean_path)
+    if not existing:
+        return {"path": clean_path, "mode": "add", "conflict": False}
+
+    policy = str(conflict or "cancel").strip().casefold().replace(" ", "_")
+    if policy in {"cancel", "skip"}:
+        return None
+    if policy in {"keep_both", "numbered"}:
+        return {"path": numbered_path(access_token, clean_path), "mode": "add", "conflict": True}
+    if policy in {"replace", "overwrite", "merge_replace"}:
+        if str(existing.get(".tag") or "").casefold() == "folder":
+            raise DropboxConflictError("A folder already uses this name.")
+        return {"path": clean_path, "mode": "overwrite", "conflict": True}
+    raise ValueError("Unknown Dropbox conflict choice.")
+
+
+def _create_folder_path(access_token, path):
+    clean_path = normalize_dropbox_path(path)
+    if not clean_path:
+        return ""
+    client = team_space_client(access_token)
+    built = ""
+    for part in clean_path.strip("/").split("/"):
+        built = normalize_dropbox_path(f"{built}/{part}")
+        try:
+            client.files_create_folder_v2(built, autorename=False)
+        except Exception as error:
+            if "conflict" not in str(error).casefold():
+                raise _dropbox_error(error, "Dropbox folder could not be created.") from error
+    return clean_path
+
+
+def ensure_folder_path(access_token, path, *, root_path=None):
+    clean_path = normalize_dropbox_path(path)
+    if root_path and not path_is_within_root(clean_path, root_path):
+        raise ValueError("This folder is outside the shared Files folder.")
+    return _create_folder_path(access_token, clean_path)
+
+
+def ensure_relative_folders(access_token, current_folder, relative_parent):
+    clean_folder = normalize_dropbox_path(current_folder)
+    clean_relative = str(relative_parent or "").strip().replace("\\", "/").strip("/")
+    if not clean_relative:
+        return clean_folder
+    safe_relative = sanitize_relative_upload_path(f"{clean_relative}/placeholder.bin")
+    safe_parent = str(PurePosixPath(safe_relative).parent)
+    destination = join_upload_path(clean_folder, safe_parent)
+    _create_folder_path(access_token, destination)
+    return destination
+
+
+def create_folder(access_token, current_folder, folder_name, *, conflict="cancel"):
+    clean_name = sanitize_path_component(folder_name)
+    destination = join_upload_path(current_folder, clean_name)
+    existing = get_metadata_if_exists(access_token, destination)
+    if existing:
+        policy = str(conflict or "cancel").strip().casefold().replace(" ", "_")
+        if policy in {"keep_both", "numbered"}:
+            destination = numbered_path(access_token, destination)
+        elif policy in {"cancel", "skip"}:
+            return None
+        else:
+            raise DropboxConflictError("A file or folder already uses this name.")
+    try:
+        result = team_space_client(access_token).files_create_folder_v2(
+            destination,
+            autorename=False,
+        )
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox folder could not be created.") from error
+    metadata = getattr(result, "metadata", result)
+    return _metadata_to_dict(metadata)
+
+
+def _stream_size(stream, explicit_size=None):
+    if explicit_size is not None:
+        return max(0, int(explicit_size))
+    try:
+        current = stream.tell()
+        stream.seek(0, os.SEEK_END)
+        size = stream.tell()
+        stream.seek(current)
+        return max(0, int(size))
+    except Exception as error:
+        raise ValueError("Upload size is required for this file.") from error
+
+
+def upload_stream(
+    access_token,
+    dropbox_path,
+    stream,
+    *,
+    size=None,
+    conflict="cancel",
+    progress_callback=None,
+    simple_limit=DROPBOX_SIMPLE_UPLOAD_LIMIT,
+    chunk_size=DROPBOX_UPLOAD_CHUNK_SIZE,
+    max_bytes=DROPBOX_MAX_UPLOAD_BYTES,
+):
+    """Upload one stream using explicit conflict handling and chunking when needed."""
+    total_size = _stream_size(stream, size)
+    if total_size > int(max_bytes):
+        raise ValueError("This file is larger than the current upload limit.")
+    resolved = resolve_upload_destination(access_token, dropbox_path, conflict)
+    if resolved is None:
+        return None
+    destination = resolved["path"]
+    sdk = _dropbox_sdk()
+    mode = sdk.files.WriteMode.overwrite if resolved["mode"] == "overwrite" else sdk.files.WriteMode.add
+    client = team_space_client(access_token)
+    if hasattr(stream, "seek"):
+        stream.seek(0)
+
+    try:
+        if total_size <= int(simple_limit):
+            data = stream.read()
+            metadata = client.files_upload(
+                data,
+                destination,
+                mode=mode,
+                autorename=False,
+                mute=False,
+            )
+            if progress_callback:
+                progress_callback(total_size, total_size)
+            return _metadata_to_dict(metadata)
+
+        first_chunk = stream.read(int(chunk_size))
+        session = client.files_upload_session_start(first_chunk)
+        uploaded = len(first_chunk)
+        cursor = sdk.files.UploadSessionCursor(
+            session_id=getattr(session, "session_id"),
+            offset=uploaded,
+        )
+        if progress_callback:
+            progress_callback(uploaded, total_size)
+        remaining = total_size - uploaded
+        while remaining > int(chunk_size):
+            chunk = stream.read(int(chunk_size))
+            if not chunk:
+                raise IOError("The upload ended before the expected file size.")
+            client.files_upload_session_append_v2(chunk, cursor)
+            uploaded += len(chunk)
+            cursor.offset = uploaded
+            remaining = total_size - uploaded
+            if progress_callback:
+                progress_callback(uploaded, total_size)
+        final_chunk = stream.read(max(0, remaining))
+        commit = sdk.files.CommitInfo(
+            path=destination,
+            mode=mode,
+            autorename=False,
+            mute=False,
+        )
+        metadata = client.files_upload_session_finish(final_chunk, cursor, commit)
+        uploaded += len(final_chunk)
+        if progress_callback:
+            progress_callback(uploaded, total_size)
+        return _metadata_to_dict(metadata)
+    except DropboxApiError:
+        raise
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox upload failed.") from error
+    finally:
+        if hasattr(stream, "seek"):
+            try:
+                stream.seek(0)
+            except Exception:
+                pass
+
+
+def upload_local_file(access_token, dropbox_path, local_path, *, conflict="cancel", progress_callback=None):
+    source = Path(local_path)
+    with source.open("rb") as stream:
+        return upload_stream(
+            access_token,
+            dropbox_path,
+            stream,
+            size=source.stat().st_size,
+            conflict=conflict,
+            progress_callback=progress_callback,
+        )
+
+
+def upload_batch(access_token, current_folder, items, *, conflict="cancel", progress_callback=None):
+    """Upload independent items and retain successes when another item fails."""
+    clean_folder = normalize_dropbox_path(current_folder)
+    successes = []
+    failures = []
+    rows = list(items or ())
+    total = len(rows)
+    for index, item in enumerate(rows, start=1):
+        item = dict(item or {})
+        relative_path = str(item.get("relative_path") or item.get("name") or "")
+        try:
+            clean_relative = sanitize_relative_upload_path(relative_path)
+            parent = str(PurePosixPath(clean_relative).parent)
+            if parent not in {"", "."}:
+                ensure_relative_folders(access_token, clean_folder, parent)
+            destination = join_upload_path(clean_folder, clean_relative)
+
+            def on_file_progress(uploaded, file_total):
+                if progress_callback:
+                    progress_callback(index, total, clean_relative, uploaded, file_total)
+
+            local_path = item.get("local_path")
+            if local_path:
+                metadata = upload_local_file(
+                    access_token,
+                    destination,
+                    local_path,
+                    conflict=conflict,
+                    progress_callback=on_file_progress,
+                )
+            else:
+                stream = item.get("stream")
+                if stream is None and "data" in item:
+                    stream = io.BytesIO(item.get("data") or b"")
+                if stream is None:
+                    raise ValueError("Upload data is missing.")
+                metadata = upload_stream(
+                    access_token,
+                    destination,
+                    stream,
+                    size=item.get("size"),
+                    conflict=conflict,
+                    progress_callback=on_file_progress,
+                )
+            if metadata is None:
+                failures.append({"relative_path": clean_relative, "error": "cancelled"})
+            else:
+                successes.append({"relative_path": clean_relative, "metadata": metadata})
+        except Exception as error:
+            failures.append({"relative_path": relative_path, "error": str(error)[:300]})
+    return {"successes": successes, "failures": failures}
+
+
+def rename_path(access_token, path, new_name, *, root_path=None):
+    clean_path = normalize_dropbox_path(path)
+    if root_path and not path_is_within_root(clean_path, root_path):
+        raise ValueError("This item is outside the shared Files folder.")
+    parent, _, old_name = clean_path.rpartition("/")
+    if not parent or not old_name:
+        raise ValueError("The shared Files folder cannot be renamed here.")
+    destination = normalize_dropbox_path(f"{parent}/{sanitize_path_component(new_name)}")
+    if destination.casefold() != clean_path.casefold() and path_exists(access_token, destination):
+        raise DropboxConflictError("A file or folder already uses this name.")
+    try:
+        result = team_space_client(access_token).files_move_v2(
+            clean_path,
+            destination,
+            autorename=False,
+            allow_shared_folder=False,
+        )
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox item could not be renamed.") from error
+    metadata = getattr(result, "metadata", result)
     return _metadata_to_dict(metadata)
 
 
