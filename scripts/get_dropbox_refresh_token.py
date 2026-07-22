@@ -69,13 +69,12 @@ def print_dropbox_error(response, message):
         )
 
 
-def validate_env(app_key, app_secret, redirect_uri):
+def validate_env(app_key, app_secret):
     missing = [
         name
         for name, value in (
             ("DROPBOX_APP_KEY", app_key),
             ("DROPBOX_APP_SECRET", app_secret),
-            ("DROPBOX_REDIRECT_URI", redirect_uri),
         )
         if not value
     ]
@@ -88,40 +87,52 @@ def validate_env(app_key, app_secret, redirect_uri):
 def main():
     app_key = env_value("DROPBOX_APP_KEY")
     app_secret = env_value("DROPBOX_APP_SECRET")
-    redirect_uri = env_value("DROPBOX_REDIRECT_URI")
 
-    if not validate_env(app_key, app_secret, redirect_uri):
+    if not validate_env(app_key, app_secret):
         return 1
 
+    # Omitting redirect_uri makes Dropbox display a one-time code directly on
+    # its authorization page. The token exchange must omit it as well.
     params = {
         "client_id": app_key,
         "response_type": "code",
-        "redirect_uri": redirect_uri,
         "token_access_type": "offline",
         "force_reapprove": "true",
     }
-    print("Open this Dropbox authorisation URL:")
-    print(f"{AUTHORIZE_URL}?{urlencode(params)}")
-    print()
-    print("Important: use the newest code only. Dropbox codes expire quickly and can be used once.")
-    print("The same DROPBOX_REDIRECT_URI will be used for the token exchange:")
-    print(redirect_uri)
+    print("Open this Dropbox authorisation URL:", file=sys.stderr)
+    print(f"{AUTHORIZE_URL}?{urlencode(params)}", file=sys.stderr)
+    print(file=sys.stderr)
+    print(
+        "Dropbox will display a one-time authorization code after approval.",
+        file=sys.stderr,
+    )
+    print(
+        "Paste that newest code below. Codes expire quickly and can be used only once.",
+        file=sys.stderr,
+    )
+    print("Authorization code: ", end="", file=sys.stderr, flush=True)
 
-    code = code_from_input(input("Paste the returned code or full callback URL: "))
+    code = code_from_input(input())
     if not code:
         print("ERROR: No code supplied.", file=sys.stderr)
         return 1
 
-    response = requests.post(
-        TOKEN_URL,
-        data={
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": redirect_uri,
-        },
-        auth=(app_key, app_secret),
-        timeout=20,
-    )
+    try:
+        response = requests.post(
+            TOKEN_URL,
+            data={
+                "code": code,
+                "grant_type": "authorization_code",
+            },
+            auth=(app_key, app_secret),
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        print(
+            f"ERROR: Could not contact Dropbox: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return 1
     if not 200 <= response.status_code < 300:
         print_dropbox_error(response, "Dropbox token exchange failed.")
         return 1
@@ -137,8 +148,6 @@ def main():
         print_dropbox_error(response, "Dropbox did not return a refresh_token.")
         return 1
 
-    print()
-    print("Success. Add this Render env var:")
     print(f"DROPBOX_REFRESH_TOKEN={refresh_token}")
     return 0
 
