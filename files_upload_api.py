@@ -1,13 +1,16 @@
 import os
+import io
 import secrets
 import threading
 import time
+import zipfile
+from contextlib import suppress
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 from activity_log import record_activity_log
 import dropbox_integration
@@ -17,6 +20,9 @@ import sc_auth
 
 FILES_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
 FILES_UPLOAD_SESSION_SECONDS = 6 * 60 * 60
+FILES_THUMBNAIL_CACHE_SECONDS = 30 * 60
+FILES_THUMBNAIL_CACHE_LIMIT = 256
+DESKTOP_HELPER_DIR = Path(__file__).resolve().parent / "desktop_helper"
 
 
 class FilesUploadError(RuntimeError):
@@ -265,6 +271,50 @@ class DropboxChunkUploadManager:
 UPLOAD_MANAGER = DropboxChunkUploadManager()
 _DROPBOX_CONTEXT = {}
 _DROPBOX_CONTEXT_LOCK = threading.Lock()
+_THUMBNAIL_CACHE = {}
+_THUMBNAIL_CACHE_LOCK = threading.Lock()
+
+
+def invalidate_thumbnail_cache(*paths):
+    clean_paths = set()
+    for path in paths:
+        with suppress(Exception):
+            clean_path = dropbox_integration.normalize_dropbox_path(path)
+            if clean_path:
+                clean_paths.add(clean_path.casefold())
+    if not clean_paths:
+        return
+    with _THUMBNAIL_CACHE_LOCK:
+        for key in list(_THUMBNAIL_CACHE):
+            if str(key[0]).casefold() in clean_paths:
+                _THUMBNAIL_CACHE.pop(key, None)
+
+
+def _thumbnail_bytes(access_token, path, revision=""):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    cache_key = (clean_path, str(revision or ""))
+    now = time.monotonic()
+    with _THUMBNAIL_CACHE_LOCK:
+        cached = _THUMBNAIL_CACHE.get(cache_key) or {}
+        if cached.get("expires_at", 0) > now:
+            return bytes(cached.get("content") or b"")
+    content = dropbox_integration.get_thumbnail_bytes(
+        access_token,
+        clean_path,
+        size="w64h64",
+    )
+    with _THUMBNAIL_CACHE_LOCK:
+        _THUMBNAIL_CACHE[cache_key] = {
+            "content": bytes(content),
+            "expires_at": now + FILES_THUMBNAIL_CACHE_SECONDS,
+        }
+        while len(_THUMBNAIL_CACHE) > FILES_THUMBNAIL_CACHE_LIMIT:
+            oldest = min(
+                _THUMBNAIL_CACHE,
+                key=lambda key: _THUMBNAIL_CACHE[key].get("expires_at", 0),
+            )
+            _THUMBNAIL_CACHE.pop(oldest, None)
+    return bytes(content)
 
 
 def _dropbox_context(*, force=False):
@@ -451,6 +501,7 @@ async def append_files_upload_chunk(request: Request):
                 result.get("upload_id"),
                 request.headers.get("x-upload-secret"),
             )
+            invalidate_thumbnail_cache(context["destination"])
             actor = (
                 str(context["user"].get("display_name") or "").strip()
                 or str(context["user"].get("email") or "").strip()
@@ -524,6 +575,62 @@ async def download_file(request: Request):
         return _response_error(error)
 
 
+async def file_thumbnail(request: Request):
+    """Serve a cached, tiny Dropbox thumbnail to an approved Files user."""
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Preview request is not allowed.", status_code=403)
+        await run_in_threadpool(_request_user, request)
+        context = await run_in_threadpool(_dropbox_context)
+        path = dropbox_integration.normalize_dropbox_path(request.query_params.get("path") or "")
+        if not path or not dropbox_integration.path_is_within_root(path, context["root_path"]):
+            raise FilesUploadError("This preview is not available.", status_code=403)
+        content = await run_in_threadpool(
+            _thumbnail_bytes,
+            context["access_token"],
+            path,
+            request.query_params.get("rev") or "",
+        )
+        return Response(
+            content,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, max-age=900"},
+        )
+    except Exception as error:
+        if isinstance(error, FilesUploadError):
+            return _response_error(error)
+        return Response(status_code=404)
+
+
+async def desktop_helper_package(request: Request):
+    """Download the credential-free Windows helper package on explicit request."""
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Helper request is not allowed.", status_code=403)
+        await run_in_threadpool(_request_user, request)
+        package = io.BytesIO()
+        with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for name in (
+                "Install.cmd",
+                "Install.ps1",
+                "SportsCaveFilesHelper.ps1",
+                "Uninstall.ps1",
+                "README.md",
+            ):
+                source = DESKTOP_HELPER_DIR / name
+                archive.writestr(name, source.read_bytes())
+        return Response(
+            package.getvalue(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": 'attachment; filename="Sports-Cave-Files-Desktop-Helper.zip"',
+                "Cache-Control": "no-store",
+            },
+        )
+    except Exception as error:
+        return _response_error(error)
+
+
 async def delete_files(request: Request):
     """Move selected Dropbox items into recoverable Dropbox Deleted Files."""
     try:
@@ -548,6 +655,7 @@ async def delete_files(request: Request):
                     root_path=context["root_path"],
                 )
                 successful.append({"path": path, "metadata": dict(metadata or {})})
+                invalidate_thumbnail_cache(path)
             except Exception:
                 failed.append(
                     {
@@ -594,5 +702,7 @@ FILES_UPLOAD_ROUTES = (
     ("/api/files-upload/status", files_upload_status, ("GET",)),
     ("/api/files-upload/remove", remove_files_upload, ("POST",)),
     ("/api/files-download", download_file, ("GET",)),
+    ("/api/files-thumbnail", file_thumbnail, ("GET",)),
+    ("/api/files-desktop-helper", desktop_helper_package, ("GET",)),
     ("/api/files-delete", delete_files, ("POST",)),
 )

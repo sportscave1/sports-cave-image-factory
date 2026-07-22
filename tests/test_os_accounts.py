@@ -628,7 +628,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertFalse(app_test.exception)
         self.assertIn("collector-art.psd", text)
         self.assertIn("Adobe Photoshop", text)
-        self.assertIn("Desktop opening is not available in this browser", text)
+        self.assertIn("Use Open with the Sports Cave desktop helper", text)
         self.assertIn("Download", text)
         self.assertNotIn("Download and open", text)
 
@@ -835,7 +835,8 @@ class AccountAccessTests(unittest.TestCase):
         self.assertIn('event.key === "Escape"', component)
         self.assertIn('addEventListener("contextmenu"', component)
         self.assertIn('emitCommand("selection_changed"', component)
-        self.assertIn('emitTarget("open_requested"', component)
+        self.assertIn('function openItem(item)', component)
+        self.assertIn('sports-cave-files://open?path=', component)
         self.assertIn('contextAction(menu, "Open"', component)
         self.assertIn('contextAction(menu, "Preview"', component)
         self.assertIn('contextAction(menu, "Rename"', component)

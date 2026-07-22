@@ -34,7 +34,7 @@
         border: 1px solid transparent;
         border-radius: 4px;
         color: #202124;
-        cursor: pointer;
+        cursor: default;
         display: inline-flex;
         font: 12px "Segoe UI", system-ui, sans-serif;
         gap: 4px;
@@ -211,6 +211,8 @@
     <script>
       const CHUNK_BYTES = 8 * 1024 * 1024;
       const MAX_CONCURRENT = 2;
+      const MAX_THUMBNAIL_CONCURRENT = 3;
+      const MAX_CLIENT_THUMBNAILS = 128;
       const state = {
         args: {},
         rows: [],
@@ -232,6 +234,17 @@
         focusedIndex: -1,
         selectionSyncTimer: 0,
         selectionRect: null,
+        thumbnailObserver: null,
+        thumbnailQueue: [],
+        thumbnailActive: 0,
+        thumbnailCache: new Map(),
+        thumbnailControllers: new Set(),
+        thumbnailInFlight: new Set(),
+        thumbnailFolder: "",
+        desktopHandoffTimer: 0,
+        desktopHandoffObserved: false,
+        desktopAttempt: 0,
+        desktopHandoffCleanup: null,
       };
       const shell = document.getElementById("shell");
       const uploads = document.getElementById("uploads");
@@ -339,6 +352,95 @@
         if (!item || item.kind === "folder") return;
         const url = `/api/files-download?path=${encodeURIComponent(item.path)}`;
         window.parent.open(url, "_blank", "noopener,noreferrer");
+      }
+
+      function closeDesktopHelperNotice() {
+        window.clearTimeout(state.desktopHandoffTimer);
+        if (state.desktopHandoffCleanup) state.desktopHandoffCleanup();
+        state.desktopHandoffCleanup = null;
+        let parentDocument;
+        try { parentDocument = window.parent.document; } catch (_) { return; }
+        const notice = parentDocument.querySelector(".sc-files-helper-notice");
+        if (notice) notice.remove();
+      }
+
+      function showDesktopHelperNotice(item) {
+        let parentDocument;
+        try { parentDocument = window.parent.document; } catch (_) { return; }
+        closeDesktopHelperNotice();
+        const notice = parentDocument.createElement("div");
+        notice.className = "sc-files-helper-notice";
+        notice.setAttribute("role", "status");
+        const message = parentDocument.createElement("span");
+        message.textContent = "Sports Cave desktop helper is required if this file did not open.";
+        notice.appendChild(message);
+        if (item && item.preview_supported) {
+          const preview = parentDocument.createElement("button");
+          preview.type = "button";
+          preview.textContent = "Preview";
+          preview.onclick = () => {
+            closeDesktopHelperNotice();
+            emitTarget("preview_requested", item);
+          };
+          notice.appendChild(preview);
+        }
+        const install = parentDocument.createElement("a");
+        install.href = "/api/files-desktop-helper";
+        install.textContent = "Install desktop helper";
+        install.setAttribute("download", "Sports-Cave-Files-Desktop-Helper.zip");
+        notice.appendChild(install);
+        const close = parentDocument.createElement("button");
+        close.type = "button";
+        close.textContent = "Close";
+        close.onclick = closeDesktopHelperNotice;
+        notice.appendChild(close);
+        parentDocument.body.appendChild(notice);
+      }
+
+      function invokeDesktopHelper(item, { kind="file" } = {}) {
+        if (!item || !item.desktop_relative_path) {
+          showDesktopHelperNotice(item);
+          return;
+        }
+        closeDesktopHelperNotice();
+        state.desktopHandoffObserved = false;
+        const attempt = ++state.desktopAttempt;
+        const markHandoff = () => {
+          if (attempt === state.desktopAttempt) state.desktopHandoffObserved = true;
+        };
+        const visibilityHandler = () => {
+          if (window.parent.document.hidden) markHandoff();
+        };
+        window.parent.addEventListener("blur", markHandoff, { once: true });
+        window.parent.document.addEventListener("visibilitychange", visibilityHandler);
+        state.desktopHandoffCleanup = () => {
+          window.parent.removeEventListener("blur", markHandoff);
+          window.parent.document.removeEventListener("visibilitychange", visibilityHandler);
+        };
+        const protocolUrl = `sports-cave-files://open?path=${encodeURIComponent(item.desktop_relative_path)}&kind=${encodeURIComponent(kind)}`;
+        const protocolLink = window.parent.document.createElement("a");
+        protocolLink.hidden = true;
+        protocolLink.setAttribute("aria-hidden", "true");
+        protocolLink.href = protocolUrl;
+        window.parent.document.body.appendChild(protocolLink);
+        protocolLink.click();
+        protocolLink.remove();
+        state.desktopHandoffTimer = window.setTimeout(() => {
+          if (state.desktopHandoffCleanup) state.desktopHandoffCleanup();
+          state.desktopHandoffCleanup = null;
+          if (attempt === state.desktopAttempt && !state.desktopHandoffObserved) {
+            showDesktopHelperNotice(item);
+          }
+        }, 1350);
+      }
+
+      function openItem(item) {
+        if (!item) return;
+        if (item.kind === "folder") {
+          emitTarget("open_requested", item);
+          return;
+        }
+        invokeDesktopHelper(item, { kind: "file" });
       }
       function render() {
         uploads.innerHTML = state.rows.map(row => {
@@ -649,6 +751,131 @@
         if (sync) emitCommand("clear_selection");
       }
 
+      function stopThumbnailLoading({ cancel=true } = {}) {
+        if (state.thumbnailObserver) state.thumbnailObserver.disconnect();
+        state.thumbnailObserver = null;
+        state.thumbnailQueue = [];
+        if (cancel) {
+          state.thumbnailControllers.forEach(controller => controller.abort());
+          state.thumbnailControllers.clear();
+        }
+      }
+
+      function rememberThumbnail(key, url) {
+        if (state.thumbnailCache.has(key)) {
+          const previous = state.thumbnailCache.get(key);
+          if (previous !== url) URL.revokeObjectURL(previous);
+          state.thumbnailCache.delete(key);
+        }
+        state.thumbnailCache.set(key, url);
+        while (state.thumbnailCache.size > MAX_CLIENT_THUMBNAILS) {
+          const oldestKey = state.thumbnailCache.keys().next().value;
+          URL.revokeObjectURL(state.thumbnailCache.get(oldestKey));
+          state.thumbnailCache.delete(oldestKey);
+        }
+      }
+
+      function installThumbnail(row, item, objectUrl) {
+        if (!row || !row.isConnected || !objectUrl) return;
+        const firstButton = row.querySelector('[data-testid="stColumn"]:first-child button');
+        if (!firstButton) return;
+        let image = firstButton.querySelector(".sc-files-thumbnail");
+        if (!image) {
+          image = row.ownerDocument.createElement("img");
+          image.className = "sc-files-thumbnail";
+          image.alt = "";
+          image.setAttribute("aria-hidden", "true");
+          firstButton.prepend(image);
+        }
+        image.src = objectUrl;
+        row.classList.add("sc-files-thumbnail-loaded");
+      }
+
+      function installThumbnailForCurrentRow(key, objectUrl) {
+        const binding = state.workspaceBinding;
+        if (!binding || !binding.workspace.isConnected) return;
+        const rows = Array.from(
+          binding.workspace.querySelectorAll('div[class*="st-key-files-row-native-"]')
+        );
+        const items = rowItems();
+        rows.forEach((row, index) => {
+          const item = items[index];
+          if (item && String(item.thumbnail_key || item.thumbnail_url) === key) {
+            installThumbnail(row, item, objectUrl);
+          }
+        });
+      }
+
+      async function fetchThumbnail(task) {
+        const controller = new AbortController();
+        state.thumbnailControllers.add(controller);
+        try {
+          const response = await fetch(task.item.thumbnail_url, {
+            credentials: "same-origin",
+            signal: controller.signal,
+          });
+          if (!response.ok) return;
+          const blob = await response.blob();
+          if (!blob.type.startsWith("image/") || state.thumbnailFolder !== task.folder) return;
+          const objectUrl = URL.createObjectURL(blob);
+          rememberThumbnail(task.key, objectUrl);
+          installThumbnailForCurrentRow(task.key, objectUrl);
+        } catch (error) {
+          if (error && error.name !== "AbortError") {
+            // File-type icons remain in place when Dropbox has no thumbnail.
+          }
+        } finally {
+          state.thumbnailControllers.delete(controller);
+          state.thumbnailInFlight.delete(task.key);
+          state.thumbnailActive = Math.max(0, state.thumbnailActive - 1);
+          drainThumbnailQueue();
+        }
+      }
+
+      function drainThumbnailQueue() {
+        while (state.thumbnailActive < MAX_THUMBNAIL_CONCURRENT && state.thumbnailQueue.length) {
+          const task = state.thumbnailQueue.shift();
+          if (!task || !task.row.isConnected || task.folder !== state.thumbnailFolder) continue;
+          if (state.thumbnailInFlight.has(task.key)) continue;
+          state.thumbnailInFlight.add(task.key);
+          state.thumbnailActive += 1;
+          fetchThumbnail(task);
+        }
+      }
+
+      function setupLazyThumbnails(rows, items) {
+        stopThumbnailLoading({ cancel: state.thumbnailFolder !== String(state.args.current_path || "") });
+        state.thumbnailFolder = String(state.args.current_path || "");
+        const root = state.workspaceBinding && (
+          state.workspaceBinding.details
+          || state.workspaceBinding.workspace.querySelector(".st-key-files-details-list")
+        );
+        if (!root || !window.parent.IntersectionObserver) return;
+        state.thumbnailObserver = new window.parent.IntersectionObserver(records => {
+          records.forEach(record => {
+            if (!record.isIntersecting) return;
+            state.thumbnailObserver.unobserve(record.target);
+            const index = rows.indexOf(record.target);
+            const item = items[index];
+            if (!item || !item.thumbnail_url) return;
+            const key = String(item.thumbnail_key || item.thumbnail_url);
+            const cached = state.thumbnailCache.get(key);
+            if (cached) {
+              state.thumbnailCache.delete(key);
+              state.thumbnailCache.set(key, cached);
+              installThumbnail(record.target, item, cached);
+              return;
+            }
+            if (state.thumbnailInFlight.has(key)) return;
+            state.thumbnailQueue.push({ row: record.target, item, key, folder: state.thumbnailFolder });
+          });
+          drainThumbnailQueue();
+        }, { root, rootMargin: "48px 0px", threshold: 0.01 });
+        rows.forEach((row, index) => {
+          if (items[index] && items[index].thumbnail_url) state.thumbnailObserver.observe(row);
+        });
+      }
+
       function contextAction(menu, label, callback) {
         const button = menu.ownerDocument.createElement("button");
         button.type = "button";
@@ -676,11 +903,11 @@
         const menu = binding.document.createElement("div");
         menu.className = "sc-files-context-menu";
         menu.setAttribute("role", "menu");
-        if (chosen.length === 1) contextAction(menu, "Open", () => emitTarget("open_requested", item));
+        if (chosen.length === 1) contextAction(menu, "Open", () => openItem(item));
+        if (chosen.length === 1 && item.kind === "folder" && item.desktop_relative_path) {
+          contextAction(menu, "Open in File Explorer", () => invokeDesktopHelper(item, { kind: "folder" }));
+        }
         if (chosen.length === 1 && item.kind !== "folder") {
-          if (item.desktop_available) {
-            contextAction(menu, "Open in desktop app", () => emitTarget("desktop_open_requested", item));
-          }
           if (item.preview_supported) contextAction(menu, "Preview", () => emitTarget("preview_requested", item));
         }
         if (chosen.length === 1) contextAction(menu, "Rename", () => emitTarget("rename_requested", item));
@@ -848,7 +1075,7 @@
             closeContextMenu();
             if (!state.selection.has(String(item.path || ""))) setSingleSelection(index, { sync: false });
             state.focusedIndex = index;
-            emitTarget("open_requested", item);
+            openItem(item);
           };
           const onContextMenu = event => {
             event.preventDefault();
@@ -861,7 +1088,7 @@
             if (event.key === "Enter") {
               event.preventDefault();
               event.stopImmediatePropagation();
-              emitTarget("open_requested", item);
+              openItem(item);
             } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
               event.preventDefault();
               event.stopImmediatePropagation();
@@ -892,6 +1119,7 @@
           row.addEventListener("keydown", onKeyDown, true);
           state.rowBindings.push({ row, onClick, onDoubleClick, onContextMenu, onKeyDown });
         });
+        setupLazyThumbnails(rows, items);
         updateSelectionUi();
       }
 
@@ -960,6 +1188,8 @@
           binding.document.removeEventListener("pointerup", binding.onDocumentPointerUp, true);
         }
         unbindFileRows();
+        stopThumbnailLoading();
+        closeDesktopHelperNotice();
         closeContextMenu();
         closeDeleteConfirmation();
         if (state.selectionRect && state.selectionRect.element) state.selectionRect.element.remove();
@@ -980,7 +1210,13 @@
         }
         const workspace = parentDocument.querySelector(".st-key-files-explorer");
         if (!workspace) return;
-        const binding = { document: parentDocument, workspace, details: null, overlay: null, observer: null };
+        const binding = {
+          document: parentDocument,
+          workspace,
+          details: workspace.querySelector(".st-key-files-details-list"),
+          overlay: null,
+          observer: null,
+        };
         const isActive = () => (
           workspace.isConnected && parentDocument.querySelector(".st-key-files-explorer") === workspace
         );
@@ -1104,7 +1340,7 @@
           if (event.target && event.target.closest && event.target.closest('div[class*="st-key-files-row-native-"]')) return;
           if (event.key === "Enter" && selectedItem()) {
             event.preventDefault();
-            emitTarget("open_requested", selectedItem());
+            openItem(selectedItem());
           } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
             event.preventDefault();
             selectAllVisible();
@@ -1139,7 +1375,7 @@
       }
       openButton.onclick = () => {
         closeMenus();
-        emitTarget("open_requested", selectedItem());
+        openItem(selectedItem());
       };
       document.getElementById("newButton").onclick = () => { closeMenus(); emitCommand("new_folder_requested"); };
       document.getElementById("uploadButton").onclick = event => {

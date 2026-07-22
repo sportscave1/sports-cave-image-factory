@@ -896,6 +896,34 @@ class DropboxIntegrationTests(unittest.TestCase):
             "https://dropbox.test/temporary/collector.pdf",
         )
 
+    def test_thumbnail_uses_team_space_client_and_never_downloads_original(self):
+        client = MagicMock()
+        client.files_get_thumbnail.return_value = (
+            SimpleNamespace(name="collector.jpg"),
+            SimpleNamespace(content=b"tiny-thumbnail"),
+        )
+        with patch.object(
+            dropbox_integration,
+            "team_space_client",
+            return_value=client,
+        ) as rooted_client, patch.object(
+            dropbox_integration,
+            "get_temporary_link",
+        ) as temporary_link:
+            content = dropbox_integration.get_thumbnail_bytes(
+                "short-lived-token",
+                "/Sportscave Team Folder/collector.jpg",
+                size="w64h64",
+            )
+
+        self.assertEqual(content, b"tiny-thumbnail")
+        rooted_client.assert_called_once_with("short-lived-token")
+        call = client.files_get_thumbnail.call_args
+        self.assertEqual(call.args[0], "/Sportscave Team Folder/collector.jpg")
+        self.assertIn("w64h64", repr(call.kwargs["size"]))
+        self.assertIn("jpeg", repr(call.kwargs["format"]))
+        temporary_link.assert_not_called()
+
     def test_file_size_formatting_is_compact(self):
         self.assertEqual(dropbox_integration.format_file_size(0), "0 B")
         self.assertEqual(dropbox_integration.format_file_size(1536), "1.5 KB")

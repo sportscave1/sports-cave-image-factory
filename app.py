@@ -2529,8 +2529,9 @@ def inject_styles():
         div[class*="st-key-files-row-native-"] {
             background: #FFFFFF;
             border-bottom: 1px solid #EFF0F1;
-            height: 36px;
-            min-height: 36px;
+            cursor: default !important;
+            height: 48px;
+            min-height: 48px;
             overflow: hidden;
         }
 
@@ -2541,7 +2542,7 @@ def inject_styles():
         div[class*="st-key-files-row-native-"] [data-testid="stHorizontalBlock"] {
             align-items: stretch;
             gap: 0;
-            height: 36px;
+            height: 48px;
         }
 
         div[class*="st-key-files-row-native-"] [data-testid="stElementContainer"] {
@@ -2566,8 +2567,9 @@ def inject_styles():
             font-size: 0.78rem !important;
             font-weight: 400 !important;
             justify-content: flex-start !important;
-            height: 36px !important;
-            min-height: 36px !important;
+            cursor: default !important;
+            height: 48px !important;
+            min-height: 48px !important;
             overflow: hidden;
             padding: 0 0.5rem !important;
             text-align: left !important;
@@ -2628,6 +2630,7 @@ def inject_styles():
             padding: 0 0.65rem !important;
             text-align: left !important;
             width: 100%;
+            cursor: default !important;
         }
 
         .sc-files-context-menu button:hover,
@@ -2685,6 +2688,7 @@ def inject_styles():
             border-radius: 4px !important;
             box-shadow: none !important;
             color: #202124 !important;
+            cursor: default !important;
             font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif !important;
             font-size: 0.78rem !important;
             height: 32px !important;
@@ -2704,6 +2708,63 @@ def inject_styles():
             pointer-events: none;
             position: fixed;
             z-index: 9990;
+        }
+
+        .sc-files-thumbnail {
+            border: 1px solid #D9DDE1;
+            border-radius: 2px;
+            flex: 0 0 36px;
+            height: 36px;
+            margin-right: 0.45rem;
+            object-fit: cover;
+            width: 36px;
+        }
+
+        div[class*="st-key-files-row-native-"].sc-files-thumbnail-loaded [data-testid="stColumn"]:first-child [data-testid="stIconMaterial"] {
+            display: none !important;
+        }
+
+        .sc-files-helper-notice {
+            align-items: center;
+            background: #F7F9FA;
+            border: 1px solid #CCD4DA;
+            border-radius: 5px;
+            bottom: 18px;
+            box-shadow: 0 8px 24px rgba(35, 42, 48, 0.16);
+            color: #202124;
+            display: flex;
+            font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+            font-size: 0.78rem;
+            gap: 8px;
+            left: 50%;
+            max-width: min(720px, calc(100vw - 32px));
+            padding: 8px 10px;
+            position: fixed;
+            transform: translateX(-50%);
+            z-index: 10010;
+        }
+
+        .sc-files-helper-notice span {
+            flex: 1 1 auto;
+        }
+
+        .sc-files-helper-notice button,
+        .sc-files-helper-notice a {
+            background: #FFFFFF !important;
+            border: 1px solid #C7CDD2 !important;
+            border-radius: 4px !important;
+            color: #202124 !important;
+            cursor: default !important;
+            font: 0.76rem "Segoe UI Variable", "Segoe UI", system-ui, sans-serif !important;
+            padding: 5px 8px !important;
+            text-decoration: none !important;
+            white-space: nowrap;
+        }
+
+        .st-key-files-explorer button,
+        .st-key-files-explorer a,
+        .st-key-files-explorer [role="row"] {
+            cursor: default !important;
         }
 
         div[class*="st-key-files-row-native-folder-"] [data-testid="stColumn"]:first-child [data-testid="stIconMaterial"],
@@ -10690,6 +10751,20 @@ def _files_interaction_rows(entries, root_path=""):
         if not path:
             continue
         name = str((entry or {}).get("name") or "Untitled")
+        relative_path = (
+            path[len(dropbox_integration.normalize_dropbox_path(root_path)) :].lstrip("/")
+            if root_path
+            and path.casefold().startswith(
+                dropbox_integration.normalize_dropbox_path(root_path).casefold()
+            )
+            else ""
+        )
+        revision = str((entry or {}).get("rev") or (entry or {}).get("content_hash") or "")
+        extension = Path(name).suffix.casefold()
+        thumbnail_supported = extension in {
+            ".bmp", ".gif", ".jpeg", ".jpg", ".mov", ".mp4", ".pdf",
+            ".png", ".psb", ".psd", ".tif", ".tiff", ".webm", ".webp",
+        }
         rows.append(
             {
                 "path": path,
@@ -10700,7 +10775,15 @@ def _files_interaction_rows(entries, root_path=""):
                     else "file"
                 ),
                 "desktop_available": _files_desktop_open_available(path),
+                "desktop_relative_path": relative_path,
                 "preview_supported": _files_preview_kind(name) != "unsupported",
+                "thumbnail_url": (
+                    f"/api/files-thumbnail?path={quote(path, safe='')}&rev={quote(revision, safe='')}"
+                    if thumbnail_supported
+                    and str((entry or {}).get(".tag") or "").casefold() != "folder"
+                    else ""
+                ),
+                "thumbnail_key": f"{path}|{revision}",
                 "protected": bool(
                     root_path
                     and path.casefold()
@@ -10752,9 +10835,9 @@ def _files_open_strategy(name, *, desktop_available=False):
 
 
 def _files_desktop_open_available(_path=""):
-    # A hosted HTTPS app cannot launch a local Windows application without an
-    # explicitly installed desktop bridge. Sports Cave does not currently have one.
-    return False
+    # The browser cannot prove whether the per-user protocol helper is installed.
+    # Open requests use the helper and retain an in-app preview fallback.
+    return True
 
 
 def _files_download_url(path):
@@ -10810,8 +10893,8 @@ def _render_files_preview(access_token, user, root_path, preview_path):
         st.markdown(
             '<div class="sc-files-preview-note">'
             f'This format is normally opened with {html.escape(application)}. '
-            'Desktop opening is not available in this browser. You can inspect the '
-            'file details here or deliberately download a local copy.'
+            'Use Open with the Sports Cave desktop helper, inspect the file details '
+            'here, or deliberately download a local copy.'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -11163,6 +11246,11 @@ def _render_files_rename_action(access_token, user, root_path, current_path):
                 selected_path,
                 renamed_path,
             )
+            with suppress(Exception):
+                importlib.import_module("files_upload_api").invalidate_thumbnail_cache(
+                    selected_path,
+                    renamed_path,
+                )
             record_activity_log(
                 "files_item_renamed",
                 "Files",

@@ -418,6 +418,25 @@ def get_temporary_link(access_token, path):
     return link
 
 
+def get_thumbnail_bytes(access_token, path, *, size="w64h64"):
+    """Return a small Dropbox-generated thumbnail without downloading the original."""
+    clean_path = normalize_dropbox_path(path)
+    dropbox = _dropbox_sdk()
+    try:
+        _metadata, response = team_space_client(access_token).files_get_thumbnail(
+            clean_path,
+            format=dropbox.files.ThumbnailFormat("jpeg"),
+            size=dropbox.files.ThumbnailSize(str(size or "w64h64")),
+            mode=dropbox.files.ThumbnailMode("bestfit"),
+        )
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox thumbnail is unavailable.") from error
+    content = bytes(getattr(response, "content", b"") or b"")
+    if not content:
+        raise DropboxApiError("Dropbox thumbnail is unavailable.")
+    return content
+
+
 def get_file_metadata(access_token, path):
     try:
         metadata = team_space_client(access_token).files_get_metadata(

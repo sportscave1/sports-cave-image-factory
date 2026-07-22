@@ -1,8 +1,10 @@
 from pathlib import Path
 from types import SimpleNamespace
 import asyncio
+import io
 import json
 import unittest
+import zipfile
 from urllib.parse import urlencode
 from unittest.mock import MagicMock, patch
 
@@ -420,6 +422,100 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
                 files_upload_api._request_files_delete_user(request)
         self.assertEqual(caught.exception.code, "access_denied")
 
+    def test_thumbnail_cache_reuses_revision_and_refreshes_changed_revision(self):
+        path = f"{TEAM_ROOT}/Artwork.jpg"
+        files_upload_api._THUMBNAIL_CACHE.clear()
+        with patch.object(
+            files_upload_api.dropbox_integration,
+            "get_thumbnail_bytes",
+            side_effect=[b"revision-one", b"revision-two"],
+        ) as thumbnail:
+            first = files_upload_api._thumbnail_bytes("token", path, "rev-1")
+            cached = files_upload_api._thumbnail_bytes("token", path, "rev-1")
+            changed = files_upload_api._thumbnail_bytes("token", path, "rev-2")
+
+        self.assertEqual(first, b"revision-one")
+        self.assertEqual(cached, b"revision-one")
+        self.assertEqual(changed, b"revision-two")
+        self.assertEqual(thumbnail.call_count, 2)
+        thumbnail.assert_any_call("token", path, size="w64h64")
+
+    def test_thumbnail_invalidation_is_limited_to_the_affected_file(self):
+        first = f"{TEAM_ROOT}/first.jpg"
+        second = f"{TEAM_ROOT}/second.jpg"
+        files_upload_api._THUMBNAIL_CACHE.clear()
+        files_upload_api._THUMBNAIL_CACHE[(first, "1")] = {
+            "content": b"one",
+            "expires_at": float("inf"),
+        }
+        files_upload_api._THUMBNAIL_CACHE[(second, "1")] = {
+            "content": b"two",
+            "expires_at": float("inf"),
+        }
+
+        files_upload_api.invalidate_thumbnail_cache(first)
+
+        self.assertNotIn((first, "1"), files_upload_api._THUMBNAIL_CACHE)
+        self.assertIn((second, "1"), files_upload_api._THUMBNAIL_CACHE)
+
+    def test_thumbnail_endpoint_returns_only_tiny_image_bytes_to_files_user(self):
+        path = f"{TEAM_ROOT}/Artwork.jpg"
+        query = urlencode({"path": path, "rev": "revision-7"}).encode("ascii")
+        request = files_upload_api.Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/api/files-thumbnail",
+                "query_string": query,
+                "headers": [],
+                "scheme": "https",
+                "server": ("sports-cave.test", 443),
+            }
+        )
+        with patch.object(
+            files_upload_api,
+            "_request_user",
+            return_value=self.user,
+        ), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
+        ), patch.object(
+            files_upload_api,
+            "_thumbnail_bytes",
+            return_value=b"small-jpeg",
+        ) as thumbnail:
+            response = asyncio.run(files_upload_api.file_thumbnail(request))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.media_type, "image/jpeg")
+        self.assertEqual(response.body, b"small-jpeg")
+        self.assertNotIn("secret-token", str(response.headers))
+        thumbnail.assert_called_once_with("secret-token", path, "revision-7")
+
+    def test_desktop_helper_package_is_an_explicit_authenticated_download(self):
+        request = files_upload_api.Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/api/files-desktop-helper",
+                "query_string": b"",
+                "headers": [],
+                "scheme": "https",
+                "server": ("sports-cave.test", 443),
+            }
+        )
+        with patch.object(files_upload_api, "_request_user", return_value=self.user):
+            response = asyncio.run(files_upload_api.desktop_helper_package(request))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.media_type, "application/zip")
+        self.assertIn("Sports-Cave-Files-Desktop-Helper.zip", response.headers["content-disposition"])
+        self.assertGreater(len(response.body), 100)
+        with zipfile.ZipFile(io.BytesIO(response.body)) as package:
+            self.assertIn("Install.cmd", package.namelist())
+            self.assertIn("SportsCaveFilesHelper.ps1", package.namelist())
+
 
 class FilesChunkUploaderSourceTests(unittest.TestCase):
     @classmethod
@@ -586,7 +682,8 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
         self.assertNotIn("_files_navigate_folder_state", details)
         self.assertNotIn("download", details.casefold())
         self.assertIn('emitCommand("selection_changed"', self.component_source)
-        self.assertIn('emitTarget("open_requested", item)', self.component_source)
+        self.assertIn('function openItem(item)', self.component_source)
+        self.assertIn('invokeDesktopHelper(item, { kind: "file" })', self.component_source)
         self.assertIn('addEventListener("dblclick"', self.component_source)
         self.assertIn('event.key === "Enter"', self.component_source)
 
@@ -614,6 +711,7 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
         self.assertIn('emitCommand("clear_selection")', self.component_source)
         self.assertIn('item.kind === "folder"', self.component_source)
         self.assertIn('emitTarget("open_requested", item)', self.component_source)
+        self.assertIn('openItem(item)', self.component_source)
         self.assertIn('st.rerun(scope="fragment")', self.app_source)
 
     def test_windows_multi_selection_keyboard_and_delete_confirmation_contract(self):
@@ -638,7 +736,7 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
     def test_opening_and_deleting_are_separate_deliberate_paths(self):
         component = self.component_source
         open_handler = component[
-            component.index("function emitTarget") : component.index("function explicitDownload")
+            component.index("function invokeDesktopHelper") : component.index("function render()")
         ]
         delete_handler = component[
             component.index("async function confirmDelete") : component.index(
@@ -647,8 +745,53 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
         ]
         self.assertNotIn("files-download", open_handler)
         self.assertNotIn("download", open_handler.casefold())
+        self.assertIn("sports-cave-files://open?path=", open_handler)
         self.assertIn('/api/files-delete', delete_handler)
         self.assertIn('emitCommand("delete_completed"', delete_handler)
+
+    def test_desktop_open_uses_only_relative_protocol_path_and_has_safe_fallback(self):
+        component = self.component_source
+        open_handler = component[
+            component.index("function showDesktopHelperNotice") : component.index("function render()")
+        ]
+
+        self.assertIn("item.desktop_relative_path", open_handler)
+        self.assertIn("sports-cave-files://open?path=", open_handler)
+        self.assertNotIn("item.path}", open_handler)
+        self.assertIn("Sports Cave desktop helper is required", open_handler)
+        self.assertIn('/api/files-desktop-helper', open_handler)
+        self.assertIn('emitTarget("preview_requested", item)', open_handler)
+        self.assertNotIn("/api/files-download", open_handler)
+
+    def test_thumbnail_loading_is_viewport_lazy_bounded_and_non_blocking(self):
+        component = self.component_source
+
+        self.assertIn("new window.parent.IntersectionObserver", component)
+        self.assertIn('rootMargin: "48px 0px"', component)
+        self.assertIn("const MAX_THUMBNAIL_CONCURRENT = 3", component)
+        self.assertIn("state.thumbnailActive < MAX_THUMBNAIL_CONCURRENT", component)
+        self.assertIn("setupLazyThumbnails(rows, items)", component)
+        self.assertIn("thumbnail_url", component)
+        self.assertIn("thumbnail_key", self.app_source)
+        self.assertNotIn("get_temporary_link", component)
+
+    def test_thumbnail_clicks_keep_row_selection_and_open_contract(self):
+        component = self.component_source
+
+        self.assertIn('firstButton.prepend(image)', component)
+        self.assertIn('row.addEventListener("click", onClick, true)', component)
+        self.assertIn('row.addEventListener("dblclick", onDoubleClick, true)', component)
+        self.assertIn("openItem(item)", component)
+        self.assertIn("sc-files-thumbnail", self.app_source)
+
+    def test_files_cursor_stays_default_inside_the_explorer(self):
+        files_css = self.app_source[
+            self.app_source.index(".st-key-files-explorer") : self.app_source.index(".sc-task-card")
+        ]
+
+        self.assertIn(".st-key-files-explorer button", files_css)
+        self.assertIn("cursor: default !important", files_css)
+        self.assertIn("cursor: default;", self.component_source)
 
 
 if __name__ == "__main__":
