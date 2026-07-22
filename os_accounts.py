@@ -42,6 +42,7 @@ PAGE_REGISTRY = (
         "label": "VA Training",
         "worker_assignable": True,
     },
+    {"key": "dropbox", "route": "Dropbox", "label": "Dropbox", "worker_assignable": True},
     {
         "key": "accounts_access",
         "route": "Accounts & Access",

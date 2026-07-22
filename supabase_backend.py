@@ -87,7 +87,9 @@ _SCHEMA_READY = False
 _ORDER_READ_SCHEMA_READY = False
 _PROMPT_TEMPLATE_SCHEMA_READY = False
 _DASHBOARD_SCHEMA_READY = False
+_DROPBOX_SCHEMA_READY = False
 _SCHEMA_LOCK = threading.Lock()
+DROPBOX_CONNECTION_SETTING_KEY = "dropbox_connection"
 _LAST_DATABASE_STATUS = {}
 _LAST_DATABASE_READ_DIAGNOSTIC = contextvars.ContextVar(
     "last_database_read_diagnostic",
@@ -1258,6 +1260,24 @@ def _ensure_schema_uncached():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS dropbox_assets (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    dropbox_file_id TEXT,
+                    dropbox_path TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    file_extension TEXT,
+                    size BIGINT DEFAULT 0,
+                    asset_type TEXT,
+                    status TEXT DEFAULT 'uploaded',
+                    uploaded_by_user_name TEXT,
+                    uploaded_by_user_email TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS os_users (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     username TEXT NOT NULL,
@@ -1754,6 +1774,19 @@ def _ensure_schema_uncached():
                     ("source", "TEXT DEFAULT 'sports_cave_os'"),
                     ("created_at", "TIMESTAMPTZ DEFAULT now()"),
                 ),
+                "dropbox_assets": (
+                    ("dropbox_file_id", "TEXT"),
+                    ("dropbox_path", "TEXT"),
+                    ("name", "TEXT"),
+                    ("file_extension", "TEXT"),
+                    ("size", "BIGINT DEFAULT 0"),
+                    ("asset_type", "TEXT"),
+                    ("status", "TEXT DEFAULT 'uploaded'"),
+                    ("uploaded_by_user_name", "TEXT"),
+                    ("uploaded_by_user_email", "TEXT"),
+                    ("created_at", "TIMESTAMPTZ DEFAULT now()"),
+                    ("updated_at", "TIMESTAMPTZ DEFAULT now()"),
+                ),
             }
             for table_name, columns in additive_columns.items():
                 if not table_exists(cur, table_name):
@@ -2012,6 +2045,9 @@ def _ensure_schema_uncached():
             cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_handle ON audit_logs(shopify_handle)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_status_created ON dashboard_tasks(status, created_at DESC)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_section_status ON dashboard_tasks(section, status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dropbox_assets_created_at ON dropbox_assets(created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dropbox_assets_asset_type ON dropbox_assets(asset_type, created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dropbox_assets_path ON dropbox_assets(dropbox_path)")
             _safe_create_index(cur, "CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_events_id_unique ON webhook_events(webhook_id)", "idx_webhook_events_id_unique")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_title ON shopify_products(title)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_shopify_products_updated_at ON shopify_products(updated_at DESC)")
@@ -2201,6 +2237,61 @@ def ensure_dashboard_schema():
                 )
             conn.commit()
         _DASHBOARD_SCHEMA_READY = True
+
+
+def ensure_dropbox_schema():
+    """Create only the small tables needed by the Dropbox connector."""
+    global _DROPBOX_SCHEMA_READY
+    if _SCHEMA_READY or _DROPBOX_SCHEMA_READY:
+        return
+    if not is_configured():
+        raise SupabaseNotConfigured(
+            "No Supabase/Postgres database URL is configured. Set DATABASE_URL, "
+            "SUPABASE_DATABASE_URL, or POSTGRES_URL in Render."
+        )
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY or _DROPBOX_SCHEMA_READY:
+            return
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_settings (
+                        key TEXT PRIMARY KEY,
+                        value JSONB DEFAULT '{}'::jsonb,
+                        updated_at TIMESTAMPTZ DEFAULT now()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS dropbox_assets (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        dropbox_file_id TEXT,
+                        dropbox_path TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        file_extension TEXT,
+                        size BIGINT DEFAULT 0,
+                        asset_type TEXT,
+                        status TEXT DEFAULT 'uploaded',
+                        uploaded_by_user_name TEXT,
+                        uploaded_by_user_email TEXT,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    )
+                    """
+                )
+                _safe_create_index(
+                    cur,
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_app_settings_key_unique ON app_settings(key)",
+                    "idx_app_settings_key_unique",
+                )
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_dropbox_assets_created_at ON dropbox_assets(created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_dropbox_assets_asset_type ON dropbox_assets(asset_type, created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_dropbox_assets_path ON dropbox_assets(dropbox_path)")
+            conn.commit()
+        _DROPBOX_SCHEMA_READY = True
 
 
 def ensure_prompt_template_schema():
@@ -7844,6 +7935,104 @@ def set_app_setting(key, value, *, ensure_schema_first=True):
         if schema_message:
             raise RuntimeError(schema_message) from error
         raise
+
+
+def get_dropbox_connection_status():
+    ensure_dropbox_schema()
+    connection = get_app_setting(
+        DROPBOX_CONNECTION_SETTING_KEY,
+        {},
+        ensure_schema_first=False,
+    )
+    if not isinstance(connection, dict):
+        connection = {}
+    refresh_token = str(connection.get("refresh_token") or "").strip()
+    return {
+        "connected": bool(refresh_token),
+        "account_id": str(connection.get("account_id") or "").strip(),
+        "account_name": str(connection.get("account_name") or "").strip(),
+        "account_email": str(connection.get("account_email") or "").strip(),
+        "connected_at": str(connection.get("connected_at") or "").strip(),
+    }
+
+
+def get_dropbox_refresh_token():
+    ensure_dropbox_schema()
+    connection = get_app_setting(
+        DROPBOX_CONNECTION_SETTING_KEY,
+        {},
+        ensure_schema_first=False,
+    )
+    if not isinstance(connection, dict):
+        return ""
+    return str(connection.get("refresh_token") or "").strip()
+
+
+def save_dropbox_connection(refresh_token, account_info=None, *, actor="sports_cave_os"):
+    ensure_dropbox_schema()
+    account_info = account_info or {}
+    name_info = account_info.get("name") if isinstance(account_info.get("name"), dict) else {}
+    account_name = (
+        account_info.get("display_name")
+        or name_info.get("display_name")
+        or name_info.get("familiar_name")
+        or ""
+    )
+    payload = {
+        "refresh_token": str(refresh_token or "").strip(),
+        "account_id": str(account_info.get("account_id") or "").strip(),
+        "account_name": str(account_name or "").strip(),
+        "account_email": str(account_info.get("email") or "").strip(),
+        "connected_at": datetime.now(timezone.utc).isoformat(),
+        "connected_by": str(actor or "").strip(),
+    }
+    set_app_setting(DROPBOX_CONNECTION_SETTING_KEY, payload, ensure_schema_first=False)
+    return {key: value for key, value in payload.items() if key != "refresh_token"}
+
+
+def save_dropbox_asset_metadata(metadata):
+    ensure_dropbox_schema()
+    row = dict(metadata or {})
+    name = str(row.get("name") or "").strip()
+    dropbox_path = str(row.get("dropbox_path") or "").strip()
+    if not name or not dropbox_path:
+        raise ValueError("Dropbox asset name and path are required.")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO dropbox_assets(
+                    dropbox_file_id,
+                    dropbox_path,
+                    name,
+                    file_extension,
+                    size,
+                    asset_type,
+                    status,
+                    uploaded_by_user_name,
+                    uploaded_by_user_email,
+                    updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, COALESCE(NULLIF(%s, ''), 'uploaded'), %s, %s, now())
+                RETURNING id, dropbox_file_id, dropbox_path, name, file_extension, size,
+                          asset_type, status, uploaded_by_user_name, uploaded_by_user_email,
+                          created_at, updated_at
+                """,
+                (
+                    row.get("dropbox_file_id") or "",
+                    dropbox_path,
+                    name,
+                    row.get("file_extension") or "",
+                    int(row.get("size") or 0),
+                    row.get("asset_type") or "",
+                    row.get("status") or "uploaded",
+                    row.get("uploaded_by_user_name") or "",
+                    row.get("uploaded_by_user_email") or "",
+                ),
+            )
+            saved = cur.fetchone()
+        conn.commit()
+    return dict(saved or {})
 
 
 def get_sync_setting(key, default="", *, ensure_schema_first=True):

@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import shutil
+import secrets
 import tempfile
 import time
 import traceback
@@ -37,6 +38,7 @@ from dotenv import load_dotenv
 import streamlit as st
 
 from activity_log import clear_activity_actor, record_activity_log, set_activity_actor
+import dropbox_integration
 import os_accounts
 import prompt_store
 import sc_auth
@@ -2133,6 +2135,24 @@ def inject_styles():
             color: #5D574E !important;
             font-size: 0.9rem;
             padding: 0.75rem 0.85rem;
+        }
+
+        .sc-dropbox-status {
+            align-items: center;
+            background: #FFFFFF;
+            border: 1px solid #E3DDCF;
+            border-left: 3px solid var(--sc-gold);
+            border-radius: 8px;
+            display: flex;
+            gap: 0.6rem;
+            justify-content: space-between;
+            margin: 0.45rem 0 0.75rem;
+            padding: 0.62rem 0.72rem;
+        }
+
+        .sc-dropbox-status span {
+            color: #6C665D !important;
+            font-size: 0.82rem;
         }
 
         .sc-task-card {
@@ -8623,6 +8643,172 @@ def ensure_current_page_access(current_page):
     return False
 
 
+def _query_value(name):
+    try:
+        value = st.query_params.get(name, "")
+    except Exception:
+        return ""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    return str(value or "")
+
+
+def _dropbox_oauth_pending():
+    return bool(_query_value("code") and _query_value("state"))
+
+
+def _prepare_dropbox_connect_url():
+    state = f"dropbox-{secrets.token_urlsafe(24)}"
+    st.session_state["dropbox_oauth_state"] = state
+    return dropbox_integration.build_authorization_url(state)
+
+
+def _dropbox_handle_callback(user):
+    code = _query_value("code")
+    state = _query_value("state")
+    if not code or not state:
+        return
+    expected_state = str(st.session_state.get("dropbox_oauth_state") or "")
+    if not expected_state or state != expected_state:
+        st.error("Dropbox connection could not be verified. Please reconnect.")
+        return
+    try:
+        token_data = dropbox_integration.exchange_code_for_refresh_token(code)
+        refresh_token = token_data["refresh_token"]
+        access_token = dropbox_integration.refresh_access_token(refresh_token)
+        account = dropbox_integration.get_current_account(access_token)
+        dropbox_integration.ensure_folder_structure(access_token)
+        supabase = importlib.import_module("supabase_backend")
+        saved = supabase.save_dropbox_connection(
+            refresh_token,
+            account,
+            actor=_activity_actor_for_user(user),
+        )
+        record_activity_log(
+            "dropbox_connected",
+            "Dropbox",
+            "Dropbox connected",
+            entity_type="dropbox_account",
+            entity_id=saved.get("account_id", ""),
+            metadata={"account_email": saved.get("account_email", "")},
+        )
+        st.session_state.pop("dropbox_oauth_state", None)
+        with suppress(Exception):
+            st.query_params.clear()
+        st.success("Dropbox connected.")
+    except Exception as error:
+        st.error(f"Dropbox connection failed: {error}")
+
+
+def render_dropbox_page():
+    user = current_os_user()
+    if not os_accounts.can_access_page(user, "Dropbox"):
+        st.title("Access not approved")
+        st.caption("This page is not available for your account.")
+        return
+
+    st.title("Dropbox")
+    st.caption("Connect Sports Cave Dropbox and test asset access.")
+
+    missing = dropbox_integration.missing_config_keys()
+    if missing:
+        st.warning("Dropbox setup is not complete.")
+        st.caption("Required Render env vars: " + ", ".join(missing))
+        return
+
+    _dropbox_handle_callback(user)
+
+    supabase = importlib.import_module("supabase_backend")
+    status = {}
+    status_error = ""
+    try:
+        status = supabase.get_dropbox_connection_status()
+    except Exception as error:
+        status_error = str(error)
+
+    connected = bool(status.get("connected"))
+    status_label = "Connected" if connected else "Not connected"
+    st.markdown(
+        f"""
+        <div class="sc-dashboard-card sc-dropbox-status">
+            <strong>{html.escape(status_label)}</strong>
+            <span>{html.escape(status.get("account_name") or status.get("account_email") or "Sports Cave Dropbox")}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if status_error:
+        st.info("Dropbox storage is not ready yet. Check Supabase setup and try again.")
+
+    try:
+        connect_url = _prepare_dropbox_connect_url()
+        connect_label = "Reconnect Dropbox" if connected else "Connect Dropbox"
+        if hasattr(st, "link_button"):
+            st.link_button(connect_label, connect_url, use_container_width=True)
+        else:
+            st.markdown(f"[{connect_label}]({connect_url})")
+    except Exception as error:
+        st.error(f"Dropbox connection link could not be created: {error}")
+
+    if connected and st.button("Test Connection", use_container_width=True):
+        try:
+            refresh_token = supabase.get_dropbox_refresh_token()
+            access_token = dropbox_integration.refresh_access_token(refresh_token)
+            account = dropbox_integration.get_current_account(access_token)
+            dropbox_integration.ensure_folder_structure(access_token)
+            saved = supabase.save_dropbox_connection(
+                refresh_token,
+                account,
+                actor=_activity_actor_for_user(user),
+            )
+            st.success("Dropbox connection works.")
+            if saved.get("account_email"):
+                st.caption(saved["account_email"])
+        except Exception as error:
+            st.error(f"Dropbox test failed: {error}")
+
+    st.subheader("Upload test")
+    folder_options = list(dropbox_integration.folder_options())
+    asset_type = st.selectbox(
+        "Asset folder",
+        [key for key, _ in folder_options],
+        format_func=lambda key: dict(folder_options).get(key, key),
+    )
+    uploaded = st.file_uploader("Choose one file", key="dropbox-test-upload")
+    if st.button("Upload to Dropbox", use_container_width=True, disabled=not connected or uploaded is None):
+        try:
+            refresh_token = supabase.get_dropbox_refresh_token()
+            access_token = dropbox_integration.refresh_access_token(refresh_token)
+            dropbox_integration.ensure_folder_structure(access_token)
+            data = uploaded.getvalue()
+            path = dropbox_integration.dropbox_upload_path(asset_type, uploaded.name)
+            result = dropbox_integration.upload_file(access_token, path, data)
+            metadata = dropbox_integration.normalise_asset_metadata(
+                dropbox_file_id=result.get("id"),
+                dropbox_path=result.get("path_display") or result.get("path_lower") or path,
+                name=result.get("name") or uploaded.name,
+                size=result.get("size") or len(data),
+                asset_type=asset_type,
+                uploaded_by_user_name=user.get("display_name") or user.get("username"),
+                uploaded_by_user_email=user.get("email"),
+            )
+            saved_asset = supabase.save_dropbox_asset_metadata(metadata)
+            record_activity_log(
+                "dropbox_upload",
+                "Dropbox",
+                f"Dropbox test upload completed: {saved_asset.get('name') or uploaded.name}",
+                entity_type="dropbox_asset",
+                entity_id=str(saved_asset.get("id") or result.get("id") or ""),
+                metadata={"dropbox_path": saved_asset.get("dropbox_path") or path, "asset_type": asset_type},
+            )
+            st.success("Upload saved to Dropbox.")
+            st.caption(f"{saved_asset.get('name') or uploaded.name} - {saved_asset.get('dropbox_path') or path}")
+            if saved_asset.get("dropbox_file_id") or result.get("id"):
+                st.caption(f"File ID: {saved_asset.get('dropbox_file_id') or result.get('id')}")
+        except Exception as error:
+            st.error(f"Dropbox upload failed: {error}")
+
+
 def render_selected_page(current_page):
     def os_route_pages():
         import_started = time.perf_counter()
@@ -8636,6 +8822,8 @@ def render_selected_page(current_page):
         render_lightweight_dashboard_page()
     elif current_page == "Accounts & Access":
         render_accounts_access_page()
+    elif current_page == "Dropbox":
+        render_dropbox_page()
     elif current_page == "Products":
         render_placeholder_page("Products", "Full product sync is paused. Use Edition Ops for product edition fields.")
     elif current_page == "Mockups":
@@ -8693,6 +8881,8 @@ def main():
         return
 
     set_activity_actor(_activity_actor_for_user(current_os_user()))
+    if _dropbox_oauth_pending() and os_accounts.can_access_page(current_os_user(), "Dropbox"):
+        st.session_state.selected_page = "Dropbox"
 
     log_startup_stage("SIDEBAR START")
     render_sidebar()

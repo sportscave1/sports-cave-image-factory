@@ -1,6 +1,7 @@
 from pathlib import Path
 import time
 import unittest
+from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
@@ -153,6 +154,16 @@ class AccountAccessTests(unittest.TestCase):
         self.assertFalse(os_accounts.can_access_page(worker, "Accounts & Access"))
         self.assertFalse(os_accounts.can_access_page(worker, "Developer"))
 
+    def test_dropbox_can_be_assigned_to_staff_accounts(self):
+        worker = {
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["dashboard", "dropbox"],
+        }
+
+        self.assertIn("Dropbox", os_accounts.allowed_navigation_routes(worker))
+        self.assertTrue(os_accounts.can_access_page(worker, "Dropbox"))
+
     def test_blocked_worker_cannot_invoke_page_renderer(self):
         worker = {"role": "worker", "is_active": True, "page_permissions": ["dashboard"]}
         rendered = []
@@ -256,6 +267,55 @@ class AccountAccessTests(unittest.TestCase):
 
         self.assertFalse(app_test.exception)
         self.assertIn("Access not approved", [title.value for title in app_test.title])
+
+    def test_blocked_worker_cannot_render_dropbox_page(self):
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = {
+            "id": "worker-1",
+            "username": "worker",
+            "display_name": "Worker",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["dashboard"],
+        }
+        app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+        app_test.session_state["selected_page"] = "Dropbox"
+
+        app_test.run(timeout=20)
+
+        self.assertFalse(app_test.exception)
+        self.assertIn("Access not approved", [title.value for title in app_test.title])
+
+    def test_admin_can_render_dropbox_setup_page_without_env_vars(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DROPBOX_APP_KEY": "",
+                "DROPBOX_APP_SECRET": "",
+                "DROPBOX_REDIRECT_URI": "",
+            },
+        ):
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
+            app_test.session_state["sports_cave_current_user"] = {
+                "id": "admin-1",
+                "username": "nathan",
+                "display_name": "Nathan",
+                "role": "admin",
+                "timezone": os_accounts.ADMIN_TIMEZONE,
+                "is_active": True,
+                "page_permissions": [],
+            }
+            app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+            app_test.session_state["selected_page"] = "Dropbox"
+
+            app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertIn("Dropbox", [title.value for title in app_test.title])
+        self.assertIn("Dropbox setup is not complete.", text)
 
     @staticmethod
     def _app_text(app_test):
