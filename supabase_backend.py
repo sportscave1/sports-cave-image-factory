@@ -3313,21 +3313,38 @@ def create_daily_execution_sheet(*, user_id, user_name, sheet_date, timezone_nam
     return sheet
 
 
-def update_daily_execution_top_tasks(sheet_id, top_tasks):
+def update_daily_execution_top_tasks(sheet_id, top_tasks, additional_items=None):
     ensure_dashboard_schema()
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
-            cur.execute(
-                """
-                UPDATE daily_execution_sheets
-                SET top_tasks=%s::jsonb,
-                    updated_at=now()
-                WHERE id=%s
-                RETURNING *
-                """,
-                (json_dumps(top_tasks or []), str(sheet_id or "").strip()),
-            )
+            if additional_items is None:
+                cur.execute(
+                    """
+                    UPDATE daily_execution_sheets
+                    SET top_tasks=%s::jsonb,
+                        updated_at=now()
+                    WHERE id=%s
+                    RETURNING *
+                    """,
+                    (json_dumps(top_tasks or []), str(sheet_id or "").strip()),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE daily_execution_sheets
+                    SET top_tasks=%s::jsonb,
+                        additional_items=%s::jsonb,
+                        updated_at=now()
+                    WHERE id=%s
+                    RETURNING *
+                    """,
+                    (
+                        json_dumps(top_tasks or []),
+                        json_dumps(additional_items or []),
+                        str(sheet_id or "").strip(),
+                    ),
+                )
             row = cur.fetchone()
         conn.commit()
     return _daily_execution_sheet_from_row(row)
@@ -3389,33 +3406,55 @@ def complete_daily_execution_review(sheet_id, review_payload, *, actor="sports_c
     ratings = review_payload.get("ratings") or {}
     daily_summary = str(review_payload.get("daily_summary") or "").strip()
     tomorrow_intention = str(review_payload.get("tomorrow_intention") or "").strip()
-    additional_items = review_payload.get("additional_items") or []
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
-            cur.execute(
-                """
-                UPDATE daily_execution_sheets
-                SET status='completed',
-                    no_grey_zone=%s::jsonb,
-                    ratings=%s::jsonb,
-                    additional_items=%s::jsonb,
-                    daily_summary=%s,
-                    tomorrow_intention=%s,
-                    completed_at=now(),
-                    updated_at=now()
-                WHERE id=%s
-                RETURNING *
-                """,
-                (
-                    json_dumps(no_grey_zone),
-                    json_dumps(ratings),
-                    json_dumps(additional_items),
-                    daily_summary,
-                    tomorrow_intention,
-                    str(sheet_id or "").strip(),
-                ),
-            )
+            if "additional_items" in review_payload:
+                cur.execute(
+                    """
+                    UPDATE daily_execution_sheets
+                    SET status='completed',
+                        no_grey_zone=%s::jsonb,
+                        ratings=%s::jsonb,
+                        additional_items=%s::jsonb,
+                        daily_summary=%s,
+                        tomorrow_intention=%s,
+                        completed_at=now(),
+                        updated_at=now()
+                    WHERE id=%s
+                    RETURNING *
+                    """,
+                    (
+                        json_dumps(no_grey_zone),
+                        json_dumps(ratings),
+                        json_dumps(review_payload.get("additional_items") or []),
+                        daily_summary,
+                        tomorrow_intention,
+                        str(sheet_id or "").strip(),
+                    ),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE daily_execution_sheets
+                    SET status='completed',
+                        no_grey_zone=%s::jsonb,
+                        ratings=%s::jsonb,
+                        daily_summary=%s,
+                        tomorrow_intention=%s,
+                        completed_at=now(),
+                        updated_at=now()
+                    WHERE id=%s
+                    RETURNING *
+                    """,
+                    (
+                        json_dumps(no_grey_zone),
+                        json_dumps(ratings),
+                        daily_summary,
+                        tomorrow_intention,
+                        str(sheet_id or "").strip(),
+                    ),
+                )
             row = cur.fetchone()
             if row:
                 _insert_audit_log(

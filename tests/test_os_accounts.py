@@ -8,6 +8,7 @@ from streamlit.testing.v1 import AppTest
 import dropbox_integration
 import os_accounts
 import sc_auth
+import sports_cave_dashboard
 import supabase_backend
 
 
@@ -496,6 +497,65 @@ class AccountAccessTests(unittest.TestCase):
         self.assertIn("Daily Task Execution Sheet - The 5 Million Dollar Man", text)
         self.assertIn("Activity log", text)
 
+    def test_admin_home_renders_after_daily_execution_save_with_legacy_other_tasks(self):
+        class DailyExecutionBackend:
+            def is_configured(self):
+                return True
+
+            def list_dashboard_tasks(self, status="open"):
+                return []
+
+            def list_activity_logs(self, *, start_at=None, end_at=None, limit=200):
+                return []
+
+            def list_dashboard_edition_products(self, *, limit=1000):
+                return []
+
+            def get_daily_execution_sheet(self, user_id, sheet_date):
+                if sheet_date == "2026-07-23":
+                    return {}
+                return {
+                    "id": "sheet-1",
+                    "user_id": user_id,
+                    "user_name": "Nathan",
+                    "sheet_date": sheet_date,
+                    "timezone": os_accounts.ADMIN_TIMEZONE,
+                    "status": "active",
+                    "top_tasks": [
+                        {"task": "Launch offer", "why": "Revenue", "time_blocked": "9am", "status": "done"},
+                        {"task": "Upload products", "why": "SKUs", "time_blocked": "11am", "status": "couldnt_finish"},
+                        {"task": "Fix ads", "why": "Traffic", "time_blocked": "2pm", "completed": True},
+                    ],
+                    "additional_items": {"task": "Legacy other task", "details": "Reloaded after save", "completed": True},
+                    "no_grey_zone": {},
+                    "ratings": {},
+                    "daily_summary": "",
+                    "tomorrow_intention": "",
+                    "generated_prompt": "",
+                }
+
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = {
+            "id": "admin-1",
+            "username": "nathan",
+            "display_name": "Nathan",
+            "role": "admin",
+            "timezone": os_accounts.ADMIN_TIMEZONE,
+            "is_active": True,
+            "page_permissions": [],
+        }
+        app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=DailyExecutionBackend()):
+            app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertNotIn("This page failed to load", text)
+        self.assertIn("**Other tasks**", text)
+
     def test_daily_execution_renderer_has_admin_guard(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         panel_source = source[
@@ -509,7 +569,8 @@ class AccountAccessTests(unittest.TestCase):
 
         self.assertIn("if not os_accounts.is_admin(user):", panel_source)
         self.assertIn("Access not approved", panel_source)
-        self.assertIn("if os_accounts.is_admin(user):\n        render_daily_execution_panel", dashboard_source)
+        self.assertIn("if os_accounts.is_admin(user):", dashboard_source)
+        self.assertIn("render_daily_execution_panel(local_now, events, state)", dashboard_source)
 
 
 if __name__ == "__main__":

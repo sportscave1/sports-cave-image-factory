@@ -276,13 +276,43 @@ def _blank_top_tasks():
     ]
 
 
-def _blank_additional_items(count=4):
-    return [{"task": "", "details": "", "completed": False} for _ in range(count)]
+def _blank_additional_items(count=1):
+    return [
+        {"task": "", "details": "", "time_blocked": "", "completed": False, "status": ""}
+        for _ in range(count)
+    ]
+
+
+def _coerce_daily_item_rows(items):
+    if items is None:
+        return []
+    if isinstance(items, str):
+        text = items.strip()
+        if not text:
+            return []
+        try:
+            decoded = json.loads(text)
+        except json.JSONDecodeError:
+            return [{"task": text}]
+        return _coerce_daily_item_rows(decoded)
+    if isinstance(items, dict):
+        return [items]
+    if isinstance(items, (list, tuple)):
+        rows = []
+        for item in items:
+            if isinstance(item, dict):
+                rows.append(item)
+            elif isinstance(item, str):
+                text = item.strip()
+                if text:
+                    rows.append({"task": text})
+        return rows
+    return []
 
 
 def _normalise_top_tasks(items):
     rows = []
-    for item in list(items or [])[:3]:
+    for item in _coerce_daily_item_rows(items)[:3]:
         item = dict(item or {})
         status = _compact_text(item.get("status") or "").casefold()
         if status not in DAILY_TASK_FINISHED_STATUSES:
@@ -302,18 +332,60 @@ def _normalise_top_tasks(items):
     return rows
 
 
-def _normalise_additional_items(items):
+def _normalise_daily_task_status(item):
+    item = dict(item or {})
+    status = _compact_text(item.get("status") or "").casefold()
+    if status not in DAILY_TASK_FINISHED_STATUSES:
+        status = DAILY_TASK_STATUS_DONE if bool(item.get("completed")) else ""
+    return status
+
+
+def _normalise_additional_items(items, *, include_blank=True):
     rows = []
-    for item in list(items or []):
+    for item in _coerce_daily_item_rows(items):
         item = dict(item or {})
-        rows.append(
-            {
-                "task": _compact_text(item.get("task") or item.get("note") or ""),
-                "details": _compact_text(item.get("details") or ""),
-                "completed": bool(item.get("completed")),
-            }
-        )
-    return rows or _blank_additional_items()
+        status = _normalise_daily_task_status(item)
+        completed = status in DAILY_TASK_FINISHED_STATUSES
+        row = {
+            "task": _compact_text(item.get("task") or item.get("note") or item.get("title") or ""),
+            "details": _compact_text(item.get("details") or item.get("why") or item.get("outcome") or ""),
+            "time_blocked": _compact_text(item.get("time_blocked") or item.get("time") or item.get("time_allocated") or ""),
+            "completed": completed,
+            "status": status,
+        }
+        if _daily_additional_item_has_content(row) or include_blank:
+            rows.append(row)
+    if include_blank:
+        rows = [row for row in rows if _daily_additional_item_has_content(row)]
+        rows.append(_blank_additional_items(1)[0])
+    return rows
+
+
+def _daily_additional_item_has_content(item):
+    if not isinstance(item, dict):
+        item = _coerce_daily_item_rows(item)
+        item = item[0] if item else {}
+    return bool(
+        _compact_text(item.get("task") or "")
+        or _compact_text(item.get("details") or "")
+        or _compact_text(item.get("time_blocked") or "")
+    )
+
+
+def _normalise_additional_items_for_save(items):
+    rows = []
+    for item in _normalise_additional_items(items, include_blank=False):
+        if _daily_additional_item_has_content(item):
+            rows.append(
+                {
+                    "task": item.get("task") or "",
+                    "details": item.get("details") or "",
+                    "time_blocked": item.get("time_blocked") or "",
+                    "completed": daily_execution_task_finished(item),
+                    "status": item.get("status") or "",
+                }
+            )
+    return rows
 
 
 def _normalise_daily_sheet(sheet):
@@ -398,6 +470,22 @@ def save_daily_execution_top_tasks(sheet_id, top_tasks):
     try:
         backend = get_supabase_backend()
         sheet = _normalise_daily_sheet(backend.update_daily_execution_top_tasks(sheet_id, _normalise_top_tasks(top_tasks)))
+        clear_daily_execution_cache()
+        return sheet
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def save_daily_execution_tasks(sheet_id, top_tasks, additional_items):
+    try:
+        backend = get_supabase_backend()
+        sheet = _normalise_daily_sheet(
+            backend.update_daily_execution_top_tasks(
+                sheet_id,
+                _normalise_top_tasks(top_tasks),
+                _normalise_additional_items_for_save(additional_items),
+            )
+        )
         clear_daily_execution_cache()
         return sheet
     except Exception as error:
@@ -504,7 +592,14 @@ def _sheet_summary(sheet):
     for index, task in enumerate(sheet.get("top_tasks") or [], start=1):
         if task.get("task"):
             marker = task.get("status") or ("done" if task.get("completed") else "open")
-            lines.append(f"  Task {index}: {task.get('task')} ({marker}) - {task.get('why') or 'No details noted'}")
+            lines.append(f"  MIP Task {index}: {task.get('task')} ({marker}) - {task.get('why') or 'No details noted'}")
+    other_tasks = [
+        item for item in (sheet.get("additional_items") or [])
+        if _daily_additional_item_has_content(item)
+    ]
+    for index, item in enumerate(other_tasks[:10], start=1):
+        marker = item.get("status") or ("done" if item.get("completed") else "open")
+        lines.append(f"  Other task {index}: {item.get('task') or item.get('details')} ({marker})")
     if sheet.get("daily_summary"):
         lines.append(f"  Summary: {_compact_text(sheet.get('daily_summary'))}")
     if sheet.get("tomorrow_intention"):
