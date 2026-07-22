@@ -234,6 +234,7 @@ HIDDEN_PAGE_OPTIONS = [
     if not page["worker_assignable"]
 ]
 ALL_PAGE_OPTIONS = [*MENU_OPTIONS, *HIDDEN_PAGE_OPTIONS]
+PAGE_QUERY_PARAM = "page"
 APP_VERSION = "Sports Cave Dashboard - 2026-07-21"
 DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
 DRIVE_SECTION_NAMES = {
@@ -2444,16 +2445,68 @@ def inject_styles():
     )
 
 
+def normalise_app_page(page):
+    route = os_accounts.normalise_route(page)
+    return route if route in ALL_PAGE_OPTIONS else ""
+
+
+def page_from_query_params():
+    try:
+        value = st.query_params.get(PAGE_QUERY_PARAM, "")
+    except Exception:
+        return ""
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    route = normalise_app_page(value)
+    if route:
+        return route
+    page = os_accounts.PAGE_BY_KEY.get(os_accounts.normalise_page_key(value))
+    return page["route"] if page else ""
+
+
+def page_query_value(page):
+    route = normalise_app_page(page)
+    if not route:
+        return ""
+    return os_accounts.page_key_for_route(route) or route
+
+
+def sync_current_page_query_param(page):
+    query_value = page_query_value(page)
+    if not query_value:
+        return
+    try:
+        current = st.query_params.get(PAGE_QUERY_PARAM, "")
+        if isinstance(current, (list, tuple)):
+            current = current[0] if current else ""
+        if str(current or "") != query_value:
+            st.query_params[PAGE_QUERY_PARAM] = query_value
+    except Exception:
+        pass
+
+
+def set_current_page(page, *, sync_query=True):
+    route = normalise_app_page(page) or "Dashboard"
+    st.session_state.selected_page = route
+    if sync_query:
+        sync_current_page_query_param(route)
+    return route
+
+
 def init_session_state():
     if "selected_page" not in st.session_state:
-        st.session_state.selected_page = "Dashboard"
+        query_page = page_from_query_params()
+        st.session_state.selected_page = query_page or "Dashboard"
 
     if "startup_shell_loaded" not in st.session_state:
         st.session_state.startup_shell_loaded = True
 
     pending_page = os_accounts.normalise_route(st.session_state.pop("pending_page", None))
     if pending_page in ALL_PAGE_OPTIONS:
-        st.session_state.selected_page = pending_page
+        set_current_page(pending_page, sync_query=False)
 
     st.session_state.selected_page = os_accounts.normalise_route(
         st.session_state.selected_page
@@ -5676,7 +5729,7 @@ def render_sidebar():
             type="primary" if page == visible_page else "secondary",
         ):
             if page != visible_page:
-                st.session_state.selected_page = page
+                set_current_page(page)
                 st.rerun()
     if (
         st.session_state.selected_page not in MENU_OPTIONS
@@ -5689,7 +5742,7 @@ def render_sidebar():
         )
         st.sidebar.caption(f"{page_label} open")
         if st.sidebar.button("Back to Home", use_container_width=True):
-            st.session_state.selected_page = "Dashboard"
+            set_current_page("Dashboard")
             st.rerun()
 
     if os_accounts.is_admin(user):
@@ -5700,7 +5753,7 @@ def render_sidebar():
             use_container_width=True,
             type="primary" if st.session_state.selected_page == "Accounts & Access" else "secondary",
         ):
-            st.session_state.selected_page = "Accounts & Access"
+            set_current_page("Accounts & Access")
             st.rerun()
 
     st.sidebar.divider()
@@ -6094,11 +6147,6 @@ def _set_authenticated_user(user, *, legacy=False):
     st.session_state["sports_cave_current_user"] = clean_user
     st.session_state["sports_cave_auth_checked_at"] = time.monotonic()
     set_activity_actor(_activity_actor_for_user(clean_user))
-    current_page = st.session_state.get("selected_page") or "Dashboard"
-    if not os_accounts.can_access_page(clean_user, current_page):
-        allowed_routes = os_accounts.allowed_navigation_routes(clean_user)
-        if allowed_routes:
-            st.session_state["selected_page"] = allowed_routes[0]
 
 
 def _account_system_status():
@@ -6363,7 +6411,7 @@ def render_admin_account_setup():
 def logout_app():
     record_activity_log("logout", "Dashboard", "Signed out", entity_type="session")
     st.session_state["sports_cave_authenticated"] = False
-    st.session_state["selected_page"] = "Dashboard"
+    set_current_page("Dashboard")
     st.session_state.pop("sports_cave_current_user", None)
     st.session_state.pop("sports_cave_admin_setup_required", None)
     st.session_state.pop("files_access_token", None)
@@ -9133,7 +9181,7 @@ def main():
         and os_accounts.is_admin(current_os_user())
         and os_accounts.can_access_page(current_os_user(), "Files")
     ):
-        st.session_state.selected_page = "Files"
+        set_current_page("Files")
 
     log_startup_stage("SIDEBAR START")
     render_sidebar()
