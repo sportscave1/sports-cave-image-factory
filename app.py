@@ -8065,6 +8065,217 @@ def render_todays_design_ideas(local_now, events):
             )
 
 
+def _daily_execution_review_payload(prefix):
+    completed = st.text_area("What did I actually complete today?", key=f"{prefix}-completed")
+    avoided = st.text_area("What did I avoid or half-do?", key=f"{prefix}-avoided")
+    revenue = st.text_area("What moved Sports Cave closer to $5M revenue?", key=f"{prefix}-revenue")
+    noise = st.text_area("What was noise/distraction?", key=f"{prefix}-noise")
+    lesson = st.text_area("What lesson did today teach me?", key=f"{prefix}-lesson")
+    protected = st.text_area("What must be protected tomorrow?", key=f"{prefix}-protected")
+    rating_cols = st.columns(4)
+    ratings = {}
+    for index, label in enumerate(sports_cave_dashboard.DAILY_RATING_FIELDS):
+        with rating_cols[index % len(rating_cols)]:
+            ratings[label] = st.number_input(label, min_value=0, max_value=10, value=0, step=1, key=f"{prefix}-rating-{label}")
+    tomorrow = st.text_area(
+        "What is the ONE THING tomorrow must nail?",
+        key=f"{prefix}-tomorrow",
+    )
+    return {
+        "daily_summary": completed,
+        "tomorrow_intention": tomorrow,
+        "no_grey_zone": {
+            "completed": completed,
+            "avoided": avoided,
+            "revenue": revenue,
+            "noise": noise,
+            "lesson": lesson,
+            "protected": protected,
+        },
+        "ratings": ratings,
+        "additional_items": [
+            {"task": "Moved toward $5M", "details": revenue, "completed": bool(revenue.strip())},
+            {"task": "Lesson", "details": lesson, "completed": bool(lesson.strip())},
+        ],
+    }
+
+
+def _save_daily_execution_review(sheet, payload):
+    try:
+        sports_cave_dashboard.complete_daily_execution_review(sheet.get("id"), payload)
+    except sports_cave_dashboard.DashboardStorageError:
+        st.warning("Daily Review could not save right now. Please try again.")
+        return False
+    st.session_state.pop("daily_execution_review_sheet_id", None)
+    st.success("Daily Review saved.")
+    st.rerun()
+    return True
+
+
+def render_daily_execution_review(sheet):
+    if hasattr(st, "dialog"):
+        @st.dialog("Complete Daily Review")
+        def review_dialog():
+            with st.form(f"daily-execution-review::{sheet.get('id')}"):
+                payload = _daily_execution_review_payload(f"daily-review::{sheet.get('id')}")
+                submitted = st.form_submit_button("Complete Daily Review", type="primary", use_container_width=True)
+            if submitted:
+                _save_daily_execution_review(sheet, payload)
+
+        review_dialog()
+        return
+
+    with st.expander("Complete Daily Review", expanded=True):
+        with st.form(f"daily-execution-review::{sheet.get('id')}"):
+            payload = _daily_execution_review_payload(f"daily-review::{sheet.get('id')}")
+            submitted = st.form_submit_button("Complete Daily Review", type="primary", use_container_width=True)
+        if submitted:
+            _save_daily_execution_review(sheet, payload)
+
+
+def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
+    user = current_os_user()
+    if not os_accounts.is_admin(user):
+        if show_denied:
+            st.title("Access not approved")
+            st.caption("This page is not available for your account.")
+        return False
+
+    render_html_section_title("Today's Execution")
+    st.caption(sports_cave_dashboard.DAILY_EXECUTION_TITLE)
+    user_name = sports_cave_dashboard.daily_execution_user_name(user)
+    today = local_now.date()
+    timezone_name = os_accounts.timezone_for_user(user)
+    try:
+        sheet = sports_cave_dashboard.get_daily_execution_sheet(user, today)
+    except sports_cave_dashboard.DashboardStorageError:
+        st.warning("Daily Execution could not load right now.")
+        return False
+
+    for alert in sports_cave_dashboard.daily_execution_alerts(sheet, local_now, user_name=user_name):
+        st.warning(alert)
+
+    if not sheet:
+        st.markdown(
+            f'<div class="sc-empty-note">{html.escape(user_name)}, today&apos;s execution sheet is not filled out yet.</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Create Today's Sheet", key="daily-execution-create-today", type="primary", use_container_width=True):
+            try:
+                sports_cave_dashboard.create_daily_execution_sheet(user, today, timezone_name)
+            except sports_cave_dashboard.DashboardStorageError:
+                st.warning("Could not create today's sheet right now.")
+                return False
+            st.rerun()
+        return True
+
+    completed_count = sports_cave_dashboard.daily_execution_completed_count(sheet)
+    filled_count = sports_cave_dashboard.daily_execution_filled_task_count(sheet)
+    status_text = "Daily Review completed." if sheet.get("status") == sports_cave_dashboard.DAILY_EXECUTION_STATUS_COMPLETED else "Today's MIPs are still open."
+    st.caption(f"{completed_count}/3 complete - {status_text}")
+
+    with st.form(f"daily-execution-mips::{sheet.get('id')}"):
+        updated_tasks = []
+        for index, task in enumerate(sheet.get("top_tasks") or [], start=1):
+            st.markdown(f"**MIP {index}**")
+            cols = st.columns([2.2, 2.2, 1.1, 0.65])
+            updated_tasks.append(
+                {
+                    "task": cols[0].text_input("Task", value=task.get("task") or "", key=f"daily-mip-task-{index}", label_visibility="collapsed"),
+                    "why": cols[1].text_input("Why it matters / outcome", value=task.get("why") or "", key=f"daily-mip-why-{index}", label_visibility="collapsed"),
+                    "time_blocked": cols[2].text_input("Time", value=task.get("time_blocked") or "", key=f"daily-mip-time-{index}", label_visibility="collapsed"),
+                    "completed": cols[3].checkbox("Done", value=bool(task.get("completed")), key=f"daily-mip-done-{index}"),
+                }
+            )
+        save_mips = st.form_submit_button("Save MIPs", use_container_width=True)
+    if save_mips:
+        try:
+            sports_cave_dashboard.save_daily_execution_top_tasks(sheet.get("id"), updated_tasks)
+        except sports_cave_dashboard.DashboardStorageError:
+            st.warning("MIPs could not save right now.")
+            return False
+        st.rerun()
+
+    if filled_count == 0:
+        st.warning("Today's execution sheet has no MIP tasks yet.")
+
+    action_cols = st.columns([1, 1, 1.4])
+    if sports_cave_dashboard.daily_execution_all_mips_complete(sheet) and sheet.get("status") != sports_cave_dashboard.DAILY_EXECUTION_STATUS_COMPLETED:
+        if action_cols[0].button("Complete Daily Review", key="daily-execution-open-review", type="primary", use_container_width=True):
+            st.session_state["daily_execution_review_sheet_id"] = sheet.get("id")
+    else:
+        action_cols[0].caption("Complete all 3 MIPs to unlock review.")
+
+    if action_cols[1].button("Generate Tomorrow's Execution Prompt", key="daily-execution-generate-prompt", use_container_width=True):
+        try:
+            start_day = today - timedelta(days=6)
+            yesterday = today - timedelta(days=1)
+            week_sheets = sports_cave_dashboard.list_daily_execution_sheets(user, start_day, today, limit=7)
+            yesterday_sheet = next((item for item in week_sheets if item.get("sheet_date") == yesterday.isoformat()), {})
+            activity_entries = sports_cave_dashboard.list_activity_entries(
+                sports_cave_dashboard.ACTIVITY_VIEW_LAST_7_DAYS,
+                local_now,
+            )
+            upcoming_events = sports_cave_dashboard.filter_calendar_events(
+                events,
+                today,
+                status="Active/upcoming",
+                upcoming_days=90,
+            )
+            prompt = sports_cave_dashboard.build_tomorrow_execution_prompt(
+                today_sheet=sheet,
+                yesterday_sheet=yesterday_sheet,
+                week_sheets=week_sheets,
+                open_tasks=state.get("tasks") or [],
+                activity_entries=activity_entries,
+                upcoming_events=upcoming_events,
+            )
+            sheet = sports_cave_dashboard.save_daily_execution_prompt(sheet.get("id"), prompt)
+        except sports_cave_dashboard.DashboardStorageError:
+            st.warning("Prompt could not be generated right now.")
+            return False
+        st.rerun()
+
+    if st.session_state.get("daily_execution_review_sheet_id") == sheet.get("id"):
+        render_daily_execution_review(sheet)
+
+    if sheet.get("generated_prompt"):
+        with st.expander("Tomorrow prompt", expanded=False):
+            render_copy_prompt_button(
+                sheet.get("generated_prompt") or "",
+                "daily-execution-tomorrow-prompt",
+                label="Copy prompt",
+                background="#111111",
+                text_color="#FFFFFF",
+                border_color="#111111",
+            )
+            st.text_area(
+                "Generated prompt",
+                value=sheet.get("generated_prompt") or "",
+                height=180,
+                label_visibility="collapsed",
+                key="daily-execution-generated-prompt",
+            )
+            pasted_plan = st.text_area(
+                "Paste tomorrow plan",
+                placeholder="Paste ChatGPT's execution sheet here if you want to save it against tomorrow.",
+                height=110,
+                key="daily-execution-tomorrow-plan",
+            )
+            if st.button("Create Tomorrow From Prompt", key="daily-execution-create-tomorrow", use_container_width=True):
+                tomorrow = today + timedelta(days=1)
+                try:
+                    tomorrow_sheet = sports_cave_dashboard.create_daily_execution_sheet(user, tomorrow, timezone_name)
+                    if pasted_plan.strip():
+                        sports_cave_dashboard.save_daily_execution_prompt(tomorrow_sheet.get("id"), pasted_plan)
+                except sports_cave_dashboard.DashboardStorageError:
+                    st.warning("Tomorrow's sheet could not be created right now.")
+                    return False
+                st.success("Tomorrow's sheet created.")
+                st.rerun()
+    return True
+
+
 def render_task_group(group, tasks):
     st.markdown(f"**{html.escape(group)}**")
     group_tasks = [task for task in tasks if task.get("category") == group]
@@ -8379,12 +8590,14 @@ def render_lightweight_dashboard_page():
         """,
         unsafe_allow_html=True,
     )
+    if os_accounts.is_admin(user):
+        render_daily_execution_panel(local_now, events, state)
     render_active_alerts(events, today)
     render_todays_design_ideas(local_now, events)
     render_dashboard_tasks(state)
-    render_sports_sales_calendar(events, local_now)
     if os_accounts.is_admin(user):
         render_activity_log(local_now)
+        render_sports_sales_calendar(events, local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 

@@ -21,6 +21,8 @@ class FakeDashboardBackend:
         self.task_status_calls = []
         self.edition_products = []
         self.edition_product_calls = []
+        self.daily_sheets = []
+        self.daily_calls = []
 
     def _activity_row(self, event_type, message):
         row = {
@@ -82,6 +84,91 @@ class FakeDashboardBackend:
     def list_dashboard_edition_products(self, *, limit=1000):
         self.edition_product_calls.append(limit)
         return self.edition_products[:limit]
+
+    def get_daily_execution_sheet(self, user_id, sheet_date):
+        self.daily_calls.append(("get", user_id, sheet_date))
+        return next(
+            (
+                dict(sheet)
+                for sheet in self.daily_sheets
+                if sheet.get("user_id") == user_id and sheet.get("sheet_date") == sheet_date
+            ),
+            {},
+        )
+
+    def create_daily_execution_sheet(self, *, user_id, user_name, sheet_date, timezone_name, actor="sports_cave_os"):
+        existing = self.get_daily_execution_sheet(user_id, sheet_date)
+        if existing:
+            return existing
+        sheet = {
+            "id": f"sheet-{len(self.daily_sheets) + 1}",
+            "user_id": user_id,
+            "user_name": user_name,
+            "sheet_date": sheet_date,
+            "day_name": "Tuesday",
+            "timezone": timezone_name,
+            "status": "active",
+            "top_tasks": [
+                {"task": "", "why": "", "time_blocked": "", "completed": False},
+                {"task": "", "why": "", "time_blocked": "", "completed": False},
+                {"task": "", "why": "", "time_blocked": "", "completed": False},
+            ],
+            "additional_items": [],
+            "no_grey_zone": {},
+            "ratings": {},
+            "daily_summary": "",
+            "tomorrow_intention": "",
+            "generated_prompt": "",
+            "created_at": "2026-07-21T00:00:00+00:00",
+            "updated_at": "2026-07-21T00:00:00+00:00",
+        }
+        self.daily_sheets.append(sheet)
+        self._activity_row("daily_execution_created", f"Daily Execution sheet created: {sheet_date}")
+        self.activity_rows[0]["actor"] = actor
+        return dict(sheet)
+
+    def update_daily_execution_top_tasks(self, sheet_id, top_tasks):
+        for sheet in self.daily_sheets:
+            if sheet["id"] == sheet_id:
+                sheet["top_tasks"] = top_tasks
+                return dict(sheet)
+        return {}
+
+    def set_daily_execution_mip_completed(self, sheet_id, index, completed):
+        for sheet in self.daily_sheets:
+            if sheet["id"] == sheet_id:
+                sheet["top_tasks"][index]["completed"] = completed
+                self._activity_row("daily_execution_mip_completed", f"Daily MIP completed: {sheet['top_tasks'][index]['task']}")
+                return dict(sheet)
+        return {}
+
+    def complete_daily_execution_review(self, sheet_id, review_payload, *, actor="sports_cave_os"):
+        for sheet in self.daily_sheets:
+            if sheet["id"] == sheet_id:
+                sheet["status"] = "completed"
+                sheet["no_grey_zone"] = review_payload.get("no_grey_zone") or {}
+                sheet["ratings"] = review_payload.get("ratings") or {}
+                sheet["daily_summary"] = review_payload.get("daily_summary") or ""
+                sheet["tomorrow_intention"] = review_payload.get("tomorrow_intention") or ""
+                sheet["completed_at"] = "2026-07-21T09:00:00+00:00"
+                self._activity_row("daily_execution_completed", f"Daily Review completed: {sheet['sheet_date']}")
+                self.activity_rows[0]["actor"] = actor
+                return dict(sheet)
+        return {}
+
+    def update_daily_execution_prompt(self, sheet_id, prompt):
+        for sheet in self.daily_sheets:
+            if sheet["id"] == sheet_id:
+                sheet["generated_prompt"] = prompt
+                return dict(sheet)
+        return {}
+
+    def list_daily_execution_sheets(self, user_id, start_date, end_date, *, limit=10):
+        return [
+            dict(sheet)
+            for sheet in self.daily_sheets
+            if sheet.get("user_id") == user_id and start_date <= sheet.get("sheet_date") <= end_date
+        ][:limit]
 
 
 class SportsCaveAuthTests(unittest.TestCase):
@@ -310,6 +397,126 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
                 }
             )
         )
+
+    def test_daily_execution_sheet_creation_logs_with_actor(self):
+        backend = FakeDashboardBackend()
+        user = {
+            "id": "admin-1",
+            "display_name": "Nathan",
+            "role": "admin",
+            "timezone": "Australia/Sydney",
+        }
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend), patch(
+            "activity_log.get_activity_actor",
+            return_value="Nathan",
+        ):
+            sheet = sports_cave_dashboard.create_daily_execution_sheet(
+                user,
+                date(2026, 7, 21),
+                "Australia/Sydney",
+            )
+
+        self.assertEqual(sheet["sheet_date"], "2026-07-21")
+        self.assertEqual(sheet["user_name"], "Nathan")
+        self.assertEqual(sheet["timezone"], "Australia/Sydney")
+        self.assertEqual(backend.activity_rows[0]["event_type"], "daily_execution_created")
+        self.assertEqual(backend.activity_rows[0]["actor"], "Nathan")
+
+    def test_daily_execution_mip_checklist_save_and_complete(self):
+        backend = FakeDashboardBackend()
+        user = {"id": "admin-1", "display_name": "Nathan"}
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            sheet = sports_cave_dashboard.create_daily_execution_sheet(user, date(2026, 7, 21), "Australia/Sydney")
+            sheet = sports_cave_dashboard.save_daily_execution_top_tasks(
+                sheet["id"],
+                [
+                    {"task": "Launch offer", "why": "Revenue", "time_blocked": "9-11", "completed": False},
+                    {"task": "Upload products", "why": "More SKUs", "time_blocked": "11-1", "completed": False},
+                    {"task": "Fix ads", "why": "Traffic", "time_blocked": "2-3", "completed": False},
+                ],
+            )
+            sheet = sports_cave_dashboard.set_daily_execution_mip_completed(sheet["id"], 0, True)
+
+        self.assertEqual(sports_cave_dashboard.daily_execution_filled_task_count(sheet), 3)
+        self.assertEqual(sports_cave_dashboard.daily_execution_completed_count(sheet), 1)
+        self.assertFalse(sports_cave_dashboard.daily_execution_all_mips_complete(sheet))
+
+    def test_daily_execution_all_mips_complete_permits_review(self):
+        sheet = {
+            "top_tasks": [
+                {"task": "One", "completed": True},
+                {"task": "Two", "completed": True},
+                {"task": "Three", "completed": True},
+            ]
+        }
+
+        self.assertTrue(sports_cave_dashboard.daily_execution_all_mips_complete(sheet))
+
+    def test_daily_execution_review_saves_ratings_and_reflections(self):
+        backend = FakeDashboardBackend()
+        user = {"id": "admin-1", "display_name": "Nathan"}
+        review = {
+            "daily_summary": "Uploaded the products.",
+            "tomorrow_intention": "Nail ads.",
+            "no_grey_zone": {"avoided": "Email cleanup"},
+            "ratings": {"Focus": 8, "Overall Score": 7},
+        }
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend), patch(
+            "activity_log.get_activity_actor",
+            return_value="Nathan",
+        ):
+            sheet = sports_cave_dashboard.create_daily_execution_sheet(user, date(2026, 7, 21), "Australia/Sydney")
+            completed = sports_cave_dashboard.complete_daily_execution_review(sheet["id"], review)
+
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(completed["ratings"]["Focus"], 8)
+        self.assertEqual(completed["no_grey_zone"]["avoided"], "Email cleanup")
+        self.assertEqual(completed["tomorrow_intention"], "Nail ads.")
+        self.assertEqual(backend.activity_rows[0]["event_type"], "daily_execution_completed")
+        self.assertEqual(backend.activity_rows[0]["actor"], "Nathan")
+
+    def test_tomorrow_execution_prompt_includes_required_context(self):
+        today_sheet = {
+            "sheet_date": "2026-07-21",
+            "status": "active",
+            "top_tasks": [
+                {"task": "Launch NASCAR drop", "why": "Revenue", "completed": False},
+                {"task": "Upload golf product", "why": "More SKUs", "completed": True},
+            ],
+        }
+        yesterday_sheet = {
+            "sheet_date": "2026-07-20",
+            "status": "completed",
+            "top_tasks": [{"task": "Avoided ad testing", "why": "Traffic", "completed": False}],
+            "no_grey_zone": {"avoided": "Ad testing"},
+        }
+        prompt = sports_cave_dashboard.build_tomorrow_execution_prompt(
+            today_sheet=today_sheet,
+            yesterday_sheet=yesterday_sheet,
+            week_sheets=[today_sheet, yesterday_sheet],
+            open_tasks=[{"text": "Create Bathurst mockups", "category": "New designs to complete"}],
+            activity_entries=[{"message": "Mockup made: Bathurst", "actor": "Nathan"}],
+            upcoming_events=[
+                {
+                    "title": "Black Friday 2026",
+                    "sport": "Sales",
+                    "regions": ["USA"],
+                    "start_date": "2026-11-27",
+                    "end_date": "2026-11-27",
+                    "importance": 5,
+                }
+            ],
+        )
+
+        self.assertIn("$5,000,000 revenue", prompt)
+        self.assertIn("Launch NASCAR drop", prompt)
+        self.assertIn("Avoided ad testing", prompt)
+        self.assertIn("Create Bathurst mockups", prompt)
+        self.assertIn("Mockup made: Bathurst", prompt)
+        self.assertIn("Black Friday 2026", prompt)
 
     def test_activity_log_filters_today_last_7_days_month_and_all_time(self):
         now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
@@ -758,8 +965,12 @@ class DashboardRenderContractTests(unittest.TestCase):
             dashboard_source.index("def render_lightweight_dashboard_page") :
         ]
         self.assertLess(
-            render_body.index("render_sports_sales_calendar(events, local_now)"),
+            render_body.index("render_daily_execution_panel(local_now, events, state)"),
             render_body.index("render_activity_log(local_now)"),
+        )
+        self.assertLess(
+            render_body.index("render_activity_log(local_now)"),
+            render_body.index("render_sports_sales_calendar(events, local_now)"),
         )
 
     def test_calendar_helper_has_no_backend_or_network_imports(self):

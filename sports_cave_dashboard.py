@@ -30,6 +30,7 @@ TASK_CACHE_TTL_SECONDS = 15
 ACTIVITY_CACHE_TTL_SECONDS = 20
 CALENDAR_CACHE_TTL_SECONDS = 300
 EDITION_PRODUCT_CACHE_TTL_SECONDS = 300
+DAILY_EXECUTION_CACHE_TTL_SECONDS = 15
 DEFAULT_UPCOMING_DAYS = 60
 ACTIVITY_VIEW_TODAY = "Today"
 ACTIVITY_VIEW_LAST_7_DAYS = "Last 7 days"
@@ -51,6 +52,7 @@ _TASK_CACHE = {}
 _ACTIVITY_CACHE = {}
 _CALENDAR_CACHE = {}
 _EDITION_PRODUCT_CACHE = {}
+_DAILY_EXECUTION_CACHE = {}
 
 
 class DashboardStorageError(RuntimeError):
@@ -100,6 +102,10 @@ def clear_activity_cache():
     _ACTIVITY_CACHE.clear()
 
 
+def clear_daily_execution_cache():
+    _DAILY_EXECUTION_CACHE.clear()
+
+
 def clear_calendar_cache():
     _CALENDAR_CACHE.clear()
 
@@ -111,6 +117,7 @@ def clear_edition_product_cache():
 def clear_dashboard_caches():
     clear_task_cache()
     clear_activity_cache()
+    clear_daily_execution_cache()
     clear_edition_product_cache()
 
 
@@ -245,6 +252,374 @@ def complete_design_task_for_upload(task_id, task_text, mockup_scope, *, metadat
     return {"completed": completed, "upload_task": upload_task}
 
 
+DAILY_EXECUTION_TITLE = "Daily Task Execution Sheet - The 5 Million Dollar Man"
+DAILY_EXECUTION_STATUS_ACTIVE = "active"
+DAILY_EXECUTION_STATUS_COMPLETED = "completed"
+DAILY_RATING_FIELDS = (
+    "Focus",
+    "Attention",
+    "Flow Awareness",
+    "Emotional Control",
+    "Execution",
+    "Vision Alignment",
+    "Overall Score",
+)
+
+
+def _blank_top_tasks():
+    return [
+        {"task": "", "why": "", "time_blocked": "", "completed": False}
+        for _ in range(3)
+    ]
+
+
+def _blank_additional_items(count=4):
+    return [{"task": "", "details": "", "completed": False} for _ in range(count)]
+
+
+def _normalise_top_tasks(items):
+    rows = []
+    for item in list(items or [])[:3]:
+        item = dict(item or {})
+        rows.append(
+            {
+                "task": _compact_text(item.get("task") or item.get("title") or ""),
+                "why": _compact_text(item.get("why") or item.get("outcome") or item.get("details") or ""),
+                "time_blocked": _compact_text(item.get("time_blocked") or item.get("time") or ""),
+                "completed": bool(item.get("completed")),
+            }
+        )
+    while len(rows) < 3:
+        rows.append({"task": "", "why": "", "time_blocked": "", "completed": False})
+    return rows
+
+
+def _normalise_additional_items(items):
+    rows = []
+    for item in list(items or []):
+        item = dict(item or {})
+        rows.append(
+            {
+                "task": _compact_text(item.get("task") or item.get("note") or ""),
+                "details": _compact_text(item.get("details") or ""),
+                "completed": bool(item.get("completed")),
+            }
+        )
+    return rows or _blank_additional_items()
+
+
+def _normalise_daily_sheet(sheet):
+    sheet = dict(sheet or {})
+    if not sheet:
+        return {}
+    top_tasks = _normalise_top_tasks(sheet.get("top_tasks") or [])
+    additional_items = _normalise_additional_items(sheet.get("additional_items") or [])
+    no_grey_zone = sheet.get("no_grey_zone") if isinstance(sheet.get("no_grey_zone"), dict) else {}
+    ratings = sheet.get("ratings") if isinstance(sheet.get("ratings"), dict) else {}
+    return {
+        **sheet,
+        "id": str(sheet.get("id") or ""),
+        "user_id": str(sheet.get("user_id") or ""),
+        "user_name": _compact_text(sheet.get("user_name") or ""),
+        "sheet_date": str(sheet.get("sheet_date") or ""),
+        "day_name": _compact_text(sheet.get("day_name") or ""),
+        "timezone": _compact_text(sheet.get("timezone") or "Australia/Sydney"),
+        "status": _compact_text(sheet.get("status") or DAILY_EXECUTION_STATUS_ACTIVE),
+        "top_tasks": top_tasks,
+        "additional_items": additional_items,
+        "no_grey_zone": no_grey_zone,
+        "ratings": ratings,
+        "daily_summary": str(sheet.get("daily_summary") or ""),
+        "tomorrow_intention": str(sheet.get("tomorrow_intention") or ""),
+        "generated_prompt": str(sheet.get("generated_prompt") or ""),
+    }
+
+
+def daily_execution_user_id(user):
+    return str((user or {}).get("id") or "").strip()
+
+
+def daily_execution_user_name(user):
+    return _compact_text(
+        (user or {}).get("display_name")
+        or (user or {}).get("email")
+        or (user or {}).get("username")
+        or "Nathan"
+    )
+
+
+def get_daily_execution_sheet(user, sheet_date):
+    user_id = daily_execution_user_id(user)
+    clean_date = sheet_date.isoformat() if isinstance(sheet_date, date) else str(sheet_date or "")
+    cache_key = ("daily_execution", user_id, clean_date)
+    cached = _cache_get(_DAILY_EXECUTION_CACHE, cache_key)
+    if cached is not None:
+        return cached[0] if cached else {}
+    try:
+        backend = get_supabase_backend()
+        sheet = _normalise_daily_sheet(backend.get_daily_execution_sheet(user_id, clean_date))
+        _cache_set(_DAILY_EXECUTION_CACHE, cache_key, [sheet] if sheet else [], DAILY_EXECUTION_CACHE_TTL_SECONDS)
+        return sheet
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def create_daily_execution_sheet(user, sheet_date, timezone_name):
+    clean_date = sheet_date.isoformat() if isinstance(sheet_date, date) else str(sheet_date or "")
+    try:
+        backend = get_supabase_backend()
+        from activity_log import get_activity_actor
+
+        sheet = _normalise_daily_sheet(
+            backend.create_daily_execution_sheet(
+                user_id=daily_execution_user_id(user),
+                user_name=daily_execution_user_name(user),
+                sheet_date=clean_date,
+                timezone_name=timezone_name,
+                actor=get_activity_actor(),
+            )
+        )
+        clear_daily_execution_cache()
+        clear_activity_cache()
+        return sheet
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def save_daily_execution_top_tasks(sheet_id, top_tasks):
+    try:
+        backend = get_supabase_backend()
+        sheet = _normalise_daily_sheet(backend.update_daily_execution_top_tasks(sheet_id, _normalise_top_tasks(top_tasks)))
+        clear_daily_execution_cache()
+        return sheet
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def set_daily_execution_mip_completed(sheet_id, index, completed):
+    try:
+        backend = get_supabase_backend()
+        sheet = _normalise_daily_sheet(backend.set_daily_execution_mip_completed(sheet_id, index, bool(completed)))
+        clear_daily_execution_cache()
+        clear_activity_cache()
+        return sheet
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def complete_daily_execution_review(sheet_id, review_payload):
+    try:
+        backend = get_supabase_backend()
+        from activity_log import get_activity_actor
+
+        sheet = _normalise_daily_sheet(
+            backend.complete_daily_execution_review(
+                sheet_id,
+                review_payload or {},
+                actor=get_activity_actor(),
+            )
+        )
+        clear_daily_execution_cache()
+        clear_activity_cache()
+        return sheet
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def save_daily_execution_prompt(sheet_id, prompt):
+    try:
+        backend = get_supabase_backend()
+        sheet = _normalise_daily_sheet(backend.update_daily_execution_prompt(sheet_id, str(prompt or "")))
+        clear_daily_execution_cache()
+        return sheet
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def list_daily_execution_sheets(user, start_date, end_date, *, limit=10):
+    try:
+        backend = get_supabase_backend()
+        rows = backend.list_daily_execution_sheets(
+            daily_execution_user_id(user),
+            start_date.isoformat() if isinstance(start_date, date) else str(start_date or ""),
+            end_date.isoformat() if isinstance(end_date, date) else str(end_date or ""),
+            limit=limit,
+        )
+        return [_normalise_daily_sheet(row) for row in rows or []]
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def daily_execution_completed_count(sheet):
+    return sum(1 for task in (sheet or {}).get("top_tasks") or [] if task.get("task") and task.get("completed"))
+
+
+def daily_execution_filled_task_count(sheet):
+    return sum(1 for task in (sheet or {}).get("top_tasks") or [] if task.get("task"))
+
+
+def daily_execution_all_mips_complete(sheet):
+    return daily_execution_filled_task_count(sheet) == 3 and daily_execution_completed_count(sheet) == 3
+
+
+def daily_execution_alerts(sheet, local_now, *, user_name="Nathan"):
+    alerts = []
+    name = _compact_text(user_name or "Nathan")
+    if not sheet:
+        alerts.append(f"{name}, today's execution sheet is not filled out yet.")
+        return alerts
+    filled = daily_execution_filled_task_count(sheet)
+    complete = daily_execution_completed_count(sheet)
+    if filled == 0:
+        alerts.append("Today's execution sheet has no MIP tasks yet.")
+    if local_now.hour >= 15 and complete < 2:
+        alerts.append("Past 3pm: fewer than 2/3 MIPs are complete.")
+    if local_now.hour >= 19 and sheet.get("status") != DAILY_EXECUTION_STATUS_COMPLETED:
+        alerts.append("Past 7pm: Daily Review is still open.")
+    return alerts
+
+
+def _sheet_summary(sheet):
+    if not sheet:
+        return "- No sheet found."
+    lines = [f"- {sheet.get('sheet_date')}: {sheet.get('status')}"]
+    for index, task in enumerate(sheet.get("top_tasks") or [], start=1):
+        if task.get("task"):
+            marker = "done" if task.get("completed") else "open"
+            lines.append(f"  MIP {index}: {task.get('task')} ({marker}) - {task.get('why') or 'No outcome noted'}")
+    if sheet.get("daily_summary"):
+        lines.append(f"  Summary: {_compact_text(sheet.get('daily_summary'))}")
+    if sheet.get("tomorrow_intention"):
+        lines.append(f"  Tomorrow: {_compact_text(sheet.get('tomorrow_intention'))}")
+    no_grey = sheet.get("no_grey_zone") or {}
+    avoided = _compact_text(no_grey.get("avoided") or no_grey.get("half_done") or "")
+    if avoided:
+        lines.append(f"  Avoided/half-done: {avoided}")
+    return "\n".join(lines)
+
+
+def _tasks_summary(tasks):
+    lines = []
+    for task in (tasks or [])[:25]:
+        title = _compact_text(task.get("text") or task.get("title") or "")
+        if title:
+            lines.append(f"- {title} [{task.get('category') or task.get('section') or 'Task'}]")
+    return "\n".join(lines) if lines else "- No open Home tasks loaded."
+
+
+def _activity_summary(entries):
+    lines = []
+    for entry in (entries or [])[:40]:
+        message = _compact_text(entry.get("message") or "")
+        actor = _compact_text(entry.get("actor") or "")
+        if message:
+            suffix = f" ({actor})" if actor else ""
+            lines.append(f"- {message}{suffix}")
+    return "\n".join(lines) if lines else "- No activity loaded."
+
+
+def _event_summary(events):
+    lines = []
+    for event in (events or [])[:20]:
+        title = _compact_text(event.get("title") or "")
+        if not title:
+            continue
+        sport = _compact_text(event.get("sport") or "Event")
+        regions = ", ".join(event.get("regions") or event.get("markets") or [])
+        date_label = format_event_date_range(event)
+        region_text = f", {regions}" if regions else ""
+        lines.append(f"- {title} ({sport}{region_text}; {date_label})")
+    return "\n".join(lines) if lines else "- No upcoming sports or sales calendar moments loaded."
+
+
+def build_tomorrow_execution_prompt(
+    *,
+    today_sheet,
+    yesterday_sheet,
+    week_sheets,
+    open_tasks,
+    activity_entries,
+    upcoming_events,
+):
+    incomplete_mips = []
+    for task in (today_sheet or {}).get("top_tasks") or []:
+        if task.get("task") and not task.get("completed"):
+            incomplete_mips.append(f"- {task.get('task')} - {task.get('why') or 'No outcome noted'}")
+    calendar_summary = _event_summary(upcoming_events or [])
+    week_summary = "\n".join(_sheet_summary(sheet) for sheet in (week_sheets or [])[:7]) or "- No recent execution sheets loaded."
+    incomplete_text = "\n".join(incomplete_mips) if incomplete_mips else "- No incomplete MIPs from today."
+    return f"""You are Nathan's Sports Cave 12 Week Year execution coach.
+
+Your job is to review the latest Sports Cave OS data and build tomorrow's execution plan.
+
+Primary goal:
+Move Sports Cave toward $5,000,000 revenue through daily focused execution.
+
+Use the data below:
+- Today's completed and incomplete MIP tasks
+- Yesterday's execution sheet
+- Last 7 days of execution patterns
+- Activity Log
+- Open Home dashboard tasks
+- Upcoming sales/sporting calendar events
+- Notes, wins, lessons, distractions, and avoided tasks
+
+Do not be motivational fluff.
+Be direct, commercially honest, and execution-focused.
+
+Identify:
+1. What Nathan actually moved forward
+2. What was avoided, delayed, or half-done
+3. What is noise
+4. What matters most for revenue
+5. What must be protected tomorrow
+6. The top 3 Mission-Critical Tasks for tomorrow
+7. The small supporting tasks that keep momentum moving
+8. The one task that would make tomorrow a win even if everything else fails
+
+Create tomorrow's Daily Execution Sheet with:
+- Top 3 Mission-Critical Tasks
+- Why each task matters
+- Suggested time block
+- Additional small tasks
+- No Grey Zone warning
+- Tomorrow's ONE THING
+- A blunt accountability note for Nathan
+
+Rules:
+- Prioritise revenue, product uploads, ads, mockups, customer/order issues, website improvements, and bottlenecks.
+- Do not overload the day.
+- Pick only 3 true MIPs.
+- Small tasks must support the MIPs.
+- If yesterday's same task was avoided, call it out.
+- If something is a distraction, say so.
+- Keep Nathan moving toward the 12 Week Year and $5M target.
+
+SPORTS CAVE OS DATA
+
+Today's sheet:
+{_sheet_summary(today_sheet)}
+
+Incomplete MIPs:
+{incomplete_text}
+
+Yesterday's sheet:
+{_sheet_summary(yesterday_sheet)}
+
+Last 7 days:
+{week_summary}
+
+Activity Log:
+{_activity_summary(activity_entries)}
+
+Open Home dashboard tasks:
+{_tasks_summary(open_tasks)}
+
+Upcoming sports and sales calendar:
+{calendar_summary}
+"""
+
+
 def _json_dict(value):
     if isinstance(value, dict):
         return value
@@ -334,6 +709,9 @@ _ACTIVITY_LABELS = {
     "certificate_uploaded": "Certificate generated",
     "dashboard_task_added": "Task added",
     "dashboard_task_completed": "Task completed",
+    "daily_execution_completed": "Daily Review completed",
+    "daily_execution_created": "Daily sheet created",
+    "daily_execution_mip_completed": "Daily MIP completed",
     "design_prompt_saved": "Design prompt saved",
     "edition_product_updated": "Edition updated",
     "edition_updated": "Edition updated",

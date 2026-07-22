@@ -290,6 +290,8 @@ class AccountAccessTests(unittest.TestCase):
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
+        self.assertNotIn("Today's Execution", text)
+        self.assertNotIn("Daily Task Execution Sheet", text)
         self.assertNotIn("Activity log", text)
         self.assertNotIn("dashboard-activity-view", text)
 
@@ -312,7 +314,23 @@ class AccountAccessTests(unittest.TestCase):
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
+        self.assertIn("Daily Task Execution Sheet - The 5 Million Dollar Man", text)
         self.assertIn("Activity log", text)
+
+    def test_daily_execution_renderer_has_admin_guard(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        panel_source = source[
+            source.index("def render_daily_execution_panel") :
+            source.index("\n\ndef render_task_group")
+        ]
+        dashboard_source = source[
+            source.index("def render_lightweight_dashboard_page") :
+            source.index("\n\ndef page_uses_local_database")
+        ]
+
+        self.assertIn("if not os_accounts.is_admin(user):", panel_source)
+        self.assertIn("Access not approved", panel_source)
+        self.assertIn("if os_accounts.is_admin(user):\n        render_daily_execution_panel", dashboard_source)
 
 
 if __name__ == "__main__":

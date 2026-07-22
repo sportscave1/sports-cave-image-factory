@@ -1235,6 +1235,29 @@ def _ensure_schema_uncached():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS daily_execution_sheets (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id TEXT,
+                    user_name TEXT DEFAULT '',
+                    sheet_date DATE NOT NULL,
+                    timezone TEXT NOT NULL DEFAULT 'Australia/Sydney',
+                    status TEXT NOT NULL DEFAULT 'active',
+                    top_tasks JSONB DEFAULT '[]'::jsonb,
+                    additional_items JSONB DEFAULT '[]'::jsonb,
+                    no_grey_zone JSONB DEFAULT '{}'::jsonb,
+                    ratings JSONB DEFAULT '{}'::jsonb,
+                    daily_summary TEXT DEFAULT '',
+                    tomorrow_intention TEXT DEFAULT '',
+                    generated_prompt TEXT DEFAULT '',
+                    completed_at TIMESTAMPTZ,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    UNIQUE (user_id, sheet_date)
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS os_users (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     username TEXT NOT NULL,
@@ -2140,8 +2163,33 @@ def ensure_dashboard_schema():
                     )
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS daily_execution_sheets (
+                        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                        user_id TEXT,
+                        user_name TEXT DEFAULT '',
+                        sheet_date DATE NOT NULL,
+                        timezone TEXT NOT NULL DEFAULT 'Australia/Sydney',
+                        status TEXT NOT NULL DEFAULT 'active',
+                        top_tasks JSONB DEFAULT '[]'::jsonb,
+                        additional_items JSONB DEFAULT '[]'::jsonb,
+                        no_grey_zone JSONB DEFAULT '{}'::jsonb,
+                        ratings JSONB DEFAULT '{}'::jsonb,
+                        daily_summary TEXT DEFAULT '',
+                        tomorrow_intention TEXT DEFAULT '',
+                        generated_prompt TEXT DEFAULT '',
+                        completed_at TIMESTAMPTZ,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        UNIQUE (user_id, sheet_date)
+                    )
+                    """
+                )
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_status_created ON dashboard_tasks(status, created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_section_status ON dashboard_tasks(section, status)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_daily_execution_user_date ON daily_execution_sheets(user_id, sheet_date DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_daily_execution_status_date ON daily_execution_sheets(status, sheet_date DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type_created ON audit_logs(event_type, created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_source_created ON audit_logs(source, created_at DESC)")
@@ -3078,6 +3126,270 @@ def complete_dashboard_task(
             )
         conn.commit()
     return task
+
+
+def _daily_execution_sheet_from_row(row):
+    if not row:
+        return {}
+    sheet_date = row.get("sheet_date")
+    return {
+        "id": str(row.get("id") or ""),
+        "user_id": str(row.get("user_id") or ""),
+        "user_name": str(row.get("user_name") or ""),
+        "sheet_date": str(sheet_date or ""),
+        "day_name": sheet_date.strftime("%A") if hasattr(sheet_date, "strftime") else "",
+        "timezone": str(row.get("timezone") or "Australia/Sydney"),
+        "status": str(row.get("status") or "active"),
+        "top_tasks": row.get("top_tasks") or [],
+        "additional_items": row.get("additional_items") or [],
+        "no_grey_zone": row.get("no_grey_zone") or {},
+        "ratings": row.get("ratings") or {},
+        "daily_summary": row.get("daily_summary") or "",
+        "tomorrow_intention": row.get("tomorrow_intention") or "",
+        "generated_prompt": row.get("generated_prompt") or "",
+        "completed_at": row.get("completed_at"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+    }
+
+
+def _default_daily_top_tasks():
+    return [{"task": "", "why": "", "time_blocked": "", "completed": False} for _ in range(3)]
+
+
+def get_daily_execution_sheet(user_id, sheet_date):
+    ensure_dashboard_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                SELECT *
+                FROM daily_execution_sheets
+                WHERE user_id=%s AND sheet_date=%s::date
+                LIMIT 1
+                """,
+                (str(user_id or "").strip(), str(sheet_date or "").strip()),
+            )
+            return _daily_execution_sheet_from_row(cur.fetchone())
+
+
+def create_daily_execution_sheet(*, user_id, user_name, sheet_date, timezone_name, actor="sports_cave_os"):
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    clean_user_name = str(user_name or "").strip() or "Nathan"
+    clean_timezone = str(timezone_name or "").strip() or "Australia/Sydney"
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                INSERT INTO daily_execution_sheets(
+                    user_id, user_name, sheet_date, timezone, status,
+                    top_tasks, additional_items, no_grey_zone, ratings
+                )
+                VALUES (%s, %s, %s::date, %s, 'active', %s::jsonb, '[]'::jsonb, '{}'::jsonb, '{}'::jsonb)
+                ON CONFLICT (user_id, sheet_date)
+                DO UPDATE SET updated_at=now()
+                RETURNING *
+                """,
+                (
+                    clean_user_id,
+                    clean_user_name,
+                    str(sheet_date or "").strip(),
+                    clean_timezone,
+                    json_dumps(_default_daily_top_tasks()),
+                ),
+            )
+            row = cur.fetchone() or {}
+            sheet = _daily_execution_sheet_from_row(row)
+            _insert_audit_log(
+                cur,
+                event_type="daily_execution_created",
+                entity_type="daily_execution_sheet",
+                entity_id=sheet.get("id") or "",
+                new_value={
+                    "message": f"Daily Execution sheet created: {sheet.get('sheet_date')}",
+                    "page": "Dashboard",
+                    "action_type": "daily_execution_created",
+                    "metadata": {"sheet_date": sheet.get("sheet_date") or "", "user_name": clean_user_name},
+                },
+                reason=f"Daily Execution sheet created: {sheet.get('sheet_date')}",
+                actor=str(actor or "").strip() or clean_user_name,
+                source="Dashboard",
+            )
+        conn.commit()
+    return sheet
+
+
+def update_daily_execution_top_tasks(sheet_id, top_tasks):
+    ensure_dashboard_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                UPDATE daily_execution_sheets
+                SET top_tasks=%s::jsonb,
+                    updated_at=now()
+                WHERE id=%s
+                RETURNING *
+                """,
+                (json_dumps(top_tasks or []), str(sheet_id or "").strip()),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return _daily_execution_sheet_from_row(row)
+
+
+def set_daily_execution_mip_completed(sheet_id, index, completed):
+    ensure_dashboard_schema()
+    safe_index = max(min(int(index or 0), 2), 0)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute("SELECT * FROM daily_execution_sheets WHERE id=%s LIMIT 1", (str(sheet_id or "").strip(),))
+            row = cur.fetchone()
+            if not row:
+                return {}
+            tasks = list(row.get("top_tasks") or _default_daily_top_tasks())
+            while len(tasks) < 3:
+                tasks.append({"task": "", "why": "", "time_blocked": "", "completed": False})
+            task = dict(tasks[safe_index] or {})
+            was_complete = bool(task.get("completed"))
+            task["completed"] = bool(completed)
+            tasks[safe_index] = task
+            cur.execute(
+                """
+                UPDATE daily_execution_sheets
+                SET top_tasks=%s::jsonb,
+                    updated_at=now()
+                WHERE id=%s
+                RETURNING *
+                """,
+                (json_dumps(tasks), str(sheet_id or "").strip()),
+            )
+            updated = cur.fetchone()
+            if task.get("completed") and not was_complete and str(task.get("task") or "").strip():
+                _insert_audit_log(
+                    cur,
+                    event_type="daily_execution_mip_completed",
+                    entity_type="daily_execution_sheet",
+                    entity_id=str(sheet_id or "").strip(),
+                    new_value={
+                        "message": f"Daily MIP completed: {task.get('task')}",
+                        "page": "Dashboard",
+                        "action_type": "daily_execution_mip_completed",
+                        "metadata": {"task": task.get("task") or "", "index": safe_index},
+                    },
+                    reason=f"Daily MIP completed: {task.get('task')}",
+                    actor=str(row.get("user_name") or "sports_cave_os"),
+                    source="Dashboard",
+                )
+        conn.commit()
+    return _daily_execution_sheet_from_row(updated)
+
+
+def complete_daily_execution_review(sheet_id, review_payload, *, actor="sports_cave_os"):
+    ensure_dashboard_schema()
+    review_payload = dict(review_payload or {})
+    no_grey_zone = review_payload.get("no_grey_zone") or {}
+    ratings = review_payload.get("ratings") or {}
+    daily_summary = str(review_payload.get("daily_summary") or "").strip()
+    tomorrow_intention = str(review_payload.get("tomorrow_intention") or "").strip()
+    additional_items = review_payload.get("additional_items") or []
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                UPDATE daily_execution_sheets
+                SET status='completed',
+                    no_grey_zone=%s::jsonb,
+                    ratings=%s::jsonb,
+                    additional_items=%s::jsonb,
+                    daily_summary=%s,
+                    tomorrow_intention=%s,
+                    completed_at=now(),
+                    updated_at=now()
+                WHERE id=%s
+                RETURNING *
+                """,
+                (
+                    json_dumps(no_grey_zone),
+                    json_dumps(ratings),
+                    json_dumps(additional_items),
+                    daily_summary,
+                    tomorrow_intention,
+                    str(sheet_id or "").strip(),
+                ),
+            )
+            row = cur.fetchone()
+            if row:
+                _insert_audit_log(
+                    cur,
+                    event_type="daily_execution_completed",
+                    entity_type="daily_execution_sheet",
+                    entity_id=str(sheet_id or "").strip(),
+                    new_value={
+                        "message": f"Daily Review completed: {row.get('sheet_date')}",
+                        "page": "Dashboard",
+                        "action_type": "daily_execution_completed",
+                        "metadata": {
+                            "sheet_date": str(row.get("sheet_date") or ""),
+                            "overall_score": ratings.get("Overall Score"),
+                        },
+                    },
+                    reason=f"Daily Review completed: {row.get('sheet_date')}",
+                    actor=str(actor or "").strip() or row.get("user_name") or "sports_cave_os",
+                    source="Dashboard",
+                )
+        conn.commit()
+    return _daily_execution_sheet_from_row(row)
+
+
+def update_daily_execution_prompt(sheet_id, prompt):
+    ensure_dashboard_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                UPDATE daily_execution_sheets
+                SET generated_prompt=%s,
+                    updated_at=now()
+                WHERE id=%s
+                RETURNING *
+                """,
+                (str(prompt or ""), str(sheet_id or "").strip()),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return _daily_execution_sheet_from_row(row)
+
+
+def list_daily_execution_sheets(user_id, start_date, end_date, *, limit=10):
+    ensure_dashboard_schema()
+    try:
+        safe_limit = min(max(int(limit or 10), 1), 60)
+    except (TypeError, ValueError):
+        safe_limit = 10
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                SELECT *
+                FROM daily_execution_sheets
+                WHERE user_id=%s
+                  AND sheet_date >= %s::date
+                  AND sheet_date <= %s::date
+                ORDER BY sheet_date DESC
+                LIMIT %s
+                """,
+                (str(user_id or "").strip(), str(start_date or "").strip(), str(end_date or "").strip(), safe_limit),
+            )
+            return [_daily_execution_sheet_from_row(row) for row in cur.fetchall()]
 
 
 def start_sync_run(sync_type, *, ensure_schema_first=True):
