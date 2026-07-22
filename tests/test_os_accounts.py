@@ -655,12 +655,21 @@ class AccountAccessTests(unittest.TestCase):
             app_test.session_state["selected_page"] = "Files"
             app_test.run(timeout=20)
 
-            self.assertEqual(app_test.text_input, [])
+            self.assertEqual(len(app_test.text_input), 1)
+            self.assertEqual(app_test.text_input[0].label, "Search current folder")
             app_test.session_state["files_browser_path"] = root_path
             app_test.run(timeout=20)
             root_text = self._app_text(app_test)
             self.assertIn("05 Mockups", root_text)
             self.assertIn("File folder", root_text)
+            self.assertEqual(list_folder_mock.call_count, 1)
+
+            app_test.text_input[0].input("mockups")
+            app_test.run(timeout=20)
+            self.assertIn("05 Mockups", self._app_text(app_test))
+            self.assertEqual(list_folder_mock.call_count, 1)
+            app_test.text_input[0].input("")
+            app_test.run(timeout=20)
             self.assertEqual(list_folder_mock.call_count, 1)
 
             next(button for button in app_test.button if button.label == "05 Mockups").click()
@@ -673,11 +682,28 @@ class AccountAccessTests(unittest.TestCase):
             self.assertEqual(app_test.session_state["files_browser_path"], mockups_path)
             self.assertEqual(list_folder_mock.call_count, 2)
 
+            next(button for button in app_test.button if button.label == "Back").click()
+            app_test.run(timeout=20)
+            self.assertEqual(app_test.session_state["files_browser_path"], root_path)
+            self.assertEqual(list_folder_mock.call_count, 2)
+
+            next(button for button in app_test.button if button.label == "Forward").click()
+            app_test.run(timeout=20)
+            self.assertEqual(app_test.session_state["files_browser_path"], mockups_path)
+            self.assertEqual(list_folder_mock.call_count, 2)
+
             next(
                 button
                 for button in app_test.button
                 if button.label == "Sportscave Team Folder"
             ).click()
+            app_test.run(timeout=20)
+            self.assertEqual(app_test.session_state["files_browser_path"], root_path)
+            self.assertEqual(list_folder_mock.call_count, 2)
+
+            next(button for button in app_test.button if button.label == "05 Mockups").click()
+            app_test.run(timeout=20)
+            next(button for button in app_test.button if button.label == "Up").click()
             app_test.run(timeout=20)
             self.assertEqual(app_test.session_state["files_browser_path"], root_path)
             self.assertEqual(list_folder_mock.call_count, 2)
@@ -690,6 +716,9 @@ class AccountAccessTests(unittest.TestCase):
 
     def test_files_workspace_has_compact_write_controls_and_current_folder_drop_target(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
+        component = (ROOT / "components" / "files_chunk_uploader" / "index.html").read_text(
+            encoding="utf-8"
+        )
         command_bar = source[
             source.index("def _render_files_command_bar") : source.index("\n\ndef _render_files_rename_action")
         ]
@@ -697,20 +726,25 @@ class AccountAccessTests(unittest.TestCase):
             source.index("def _render_files_browser") : source.index("\n\ndef render_files_page")
         ]
         upload = source[
-            source.index("def _render_files_upload_control") : source.index("\n\ndef _render_files_command_bar")
+            source.index("def _render_files_chunk_uploader") : source.index("\n\ndef _render_files_command_bar")
         ]
 
-        self.assertIn('"New folder"', command_bar)
-        self.assertIn('"Upload files"', command_bar)
-        self.assertIn('"Upload folder"', command_bar)
-        self.assertIn('accept_multiple_files="directory" if directory else True', upload)
-        self.assertIn('key="files-drop-target"', browser)
+        self.assertIn("new_folder_requested", component)
+        self.assertIn("**New folder**", command_bar)
+        self.assertIn(">New</button>", component)
+        self.assertIn(">Upload <", component)
+        self.assertIn(">Rename</button>", component)
+        self.assertIn("More actions", component)
+        self.assertIn(">Upload files<", component)
+        self.assertIn(">Upload folder<", component)
+        self.assertIn("webkitdirectory", component)
+        self.assertIn("droppedItems", component)
         self.assertIn("current_path", browser)
-        self.assertIn("auto_submit=True", browser)
         self.assertIn("@st.fragment", source)
         self.assertNotIn("_files_route_url", source)
-        self.assertIn('"Drop files into this folder"', upload)
-        self.assertIn('"files_uploaded"', source)
+        self.assertIn("Drop files into this folder", component)
+        self.assertIn("_files_chunk_component()", upload)
+        self.assertNotIn("st.file_uploader", upload + command_bar + browser)
         self.assertIn('"files_folder_created"', source)
         self.assertIn('"files_item_renamed"', source)
 
@@ -727,7 +761,7 @@ class AccountAccessTests(unittest.TestCase):
             )
         ]
         breadcrumb = source[
-            source.index("def _render_files_breadcrumb") : source.index(
+            source.index("def _render_files_navigation") : source.index(
                 "\n\ndef _files_row_icon"
             )
         ]
@@ -737,16 +771,66 @@ class AccountAccessTests(unittest.TestCase):
         self.assertIn("callback = _files_navigate_folder_state", details)
         self.assertIn("on_click=callback", details)
         self.assertIn("on_click=_files_navigate_folder_state", breadcrumb)
+        self.assertIn('"Back"', breadcrumb)
+        self.assertIn('"Forward"', breadcrumb)
+        self.assertIn('"Up"', breadcrumb)
+        self.assertIn('"Refresh"', breadcrumb)
+        self.assertIn('"Search current folder"', breadcrumb)
         self.assertNotIn("href=", details)
         self.assertNotIn("href=", breadcrumb)
         self.assertNotIn("st.query_params", details)
         self.assertNotIn("st.query_params", breadcrumb)
 
+    def test_files_explorer_styles_are_compact_neutral_and_scoped(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        component = (ROOT / "components" / "files_chunk_uploader" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        files_css = source[
+            source.index(".st-key-files-explorer") : source.index(".sc-task-card")
+        ]
+        details = source[
+            source.index("def _render_files_details") : source.index("\n\ndef _files_preview_kind")
+        ]
+
+        self.assertIn("height: 42px", files_css)
+        self.assertIn("height: 40px", files_css)
+        self.assertIn("height: 36px", files_css)
+        self.assertIn("max-height: calc(100vh - 205px)", files_css)
+        self.assertIn("background: transparent !important", files_css)
+        self.assertNotIn("var(--sc-gold)", files_css)
+        self.assertNotIn("files-breadcrumb-native", files_css)
+        self.assertIn("<span role=\"columnheader\">Status</span>", details)
+        self.assertNotIn("20MB per file", component)
+        self.assertIn('class="menu"', component)
+        self.assertIn("Large files supported", component)
+
+    def test_files_search_filters_cached_metadata_without_recursive_dropbox_work(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        filter_helper = source[
+            source.index("def _files_filter_entries") : source.index(
+                "\n\ndef _files_address_items"
+            )
+        ]
+        browser = source[
+            source.index("@st.fragment\ndef _render_files_browser") : source.index(
+                "\n\ndef render_files_page"
+            )
+        ]
+
+        self.assertIn("clean_query", filter_helper)
+        self.assertIn("casefold()", filter_helper)
+        self.assertIn("dropbox_integration.sort_folder_entries(rows)", filter_helper)
+        self.assertNotIn("list_folder", filter_helper)
+        self.assertNotIn("recursive", filter_helper)
+        self.assertIn("_files_filter_entries(entries, search_query)", browser)
+        self.assertIn("No items match your search", browser)
+
     def test_files_operations_invalidate_only_affected_directory_caches(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         upload = source[
-            source.index("def _files_run_upload") : source.index(
-                "\n\ndef _render_files_upload_control"
+            source.index("def _render_files_chunk_uploader") : source.index(
+                "\n\ndef _render_files_command_bar"
             )
         ]
         command_bar = source[
@@ -765,7 +849,7 @@ class AccountAccessTests(unittest.TestCase):
             )
         ]
 
-        self.assertIn("_files_changed_directory_paths(current_path, successes)", upload)
+        self.assertIn("_files_clear_directory_cache(current_path)", upload)
         self.assertIn("_files_clear_directory_cache(current_path)", command_bar)
         self.assertIn("selected_path", rename)
         self.assertIn("renamed_path", rename)

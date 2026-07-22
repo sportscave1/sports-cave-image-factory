@@ -1,4 +1,4 @@
-streamlit>=1.36,<2
+streamlit>=1.58,<2
 # Use a Pillow release with prebuilt wheels for modern Python versions to avoid build failures on Render
 pillow==10.4.0
 google-api-python-client==2.109.0

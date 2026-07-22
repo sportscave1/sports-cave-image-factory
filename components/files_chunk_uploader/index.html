@@ -1,0 +1,533 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        background: transparent;
+        color: #202124;
+        font-family: "Segoe UI", system-ui, sans-serif;
+        margin: 0;
+        padding: 0;
+      }
+      .shell {
+        border: 1px solid transparent;
+        min-height: 38px;
+        position: relative;
+      }
+      .shell.dragover {
+        background: rgba(229, 240, 248, 0.95);
+        border-color: #7fa6c1;
+      }
+      .toolbar {
+        align-items: center;
+        display: flex;
+        gap: 3px;
+        height: 38px;
+        min-height: 38px;
+        position: relative;
+      }
+      button {
+        align-items: center;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        color: #202124;
+        cursor: pointer;
+        display: inline-flex;
+        font: 12px "Segoe UI", system-ui, sans-serif;
+        gap: 4px;
+        height: 30px;
+        padding: 0 8px;
+      }
+      button:hover { background: #eaf2f8; border-color: #c5d5e0; }
+      button:disabled { cursor: default; opacity: .55; }
+      .command-icon { color: #4f565d; font-size: 15px; line-height: 1; }
+      .hint { color: #6d7277; font-size: 11px; margin-left: auto; padding-right: 6px; }
+      .menu-wrap { position: relative; }
+      .menu {
+        background: #fff;
+        border: 1px solid #d5d9dd;
+        border-radius: 5px;
+        box-shadow: 0 6px 16px rgba(35, 42, 48, .12);
+        display: none;
+        left: 0;
+        min-width: 170px;
+        padding: 4px;
+        position: absolute;
+        top: 32px;
+        z-index: 8;
+      }
+      .menu.open { display: block; }
+      .menu button { justify-content: flex-start; width: 100%; }
+      .menu select { margin: 4px; width: calc(100% - 8px); }
+      .more-menu { left: auto; min-width: 145px; right: 0; }
+      select {
+        background: #fff;
+        border: 1px solid #d6d9dc;
+        border-radius: 3px;
+        color: #3d4145;
+        font: 11.5px "Segoe UI", system-ui, sans-serif;
+        height: 26px;
+        margin-left: 0;
+        padding: 0 5px;
+      }
+      .folder-glyph {
+        background: #e2b84f;
+        border-radius: 1px;
+        display: inline-block;
+        height: 10px;
+        position: relative;
+        width: 14px;
+      }
+      .folder-glyph::before {
+        background: #e2b84f;
+        border-radius: 1px 1px 0 0;
+        content: "";
+        height: 3px;
+        left: 1px;
+        position: absolute;
+        top: -3px;
+        width: 6px;
+      }
+      input[type="file"] { display: none; }
+      .drop-overlay {
+        align-items: center;
+        background: rgba(234, 242, 248, .97);
+        color: #244a64;
+        display: none;
+        font-size: 12px;
+        font-weight: 600;
+        inset: 0;
+        justify-content: center;
+        position: absolute;
+        z-index: 3;
+      }
+      .shell.dragover .drop-overlay { display: flex; }
+      .uploads { border-top: 1px solid #e0e2e5; }
+      .upload-row {
+        align-items: center;
+        border-bottom: 1px solid #eff0f1;
+        display: grid;
+        font-size: 12px;
+        grid-template-columns: minmax(300px, 1fr) 105px 178px 148px 86px 78px;
+        min-height: 36px;
+      }
+      .cell {
+        align-items: center;
+        border-right: 1px solid #eceff1;
+        display: flex;
+        height: 36px;
+        min-width: 0;
+        overflow: hidden;
+        padding: 0 9px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .cell:last-child { border-right: 0; gap: 3px; justify-content: flex-end; }
+      .name { gap: 8px; }
+      .file-icon {
+        align-items: center;
+        background: #d8e5ef;
+        border-radius: 2px;
+        color: #29485f;
+        display: inline-flex;
+        flex: 0 0 27px;
+        font-size: 8px;
+        font-weight: 700;
+        height: 30px;
+        justify-content: center;
+      }
+      .file-icon.psd { background: #d7ebff; color: #135c9f; }
+      .file-icon.pdf { background: #fbe0e0; color: #a32626; }
+      .file-icon.zip { background: #f0e7cd; color: #705716; }
+      .file-icon.video { background: #e5ddf5; color: #583b86; }
+      .spinner {
+        animation: spin .8s linear infinite;
+        border: 2px solid #c9d7e0;
+        border-radius: 50%;
+        border-top-color: #39779e;
+        height: 14px;
+        width: 14px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .status { color: #4f5960; }
+      .failed { color: #a02c2c; }
+      .mini { font-size: 11px; height: 25px; padding: 0 5px; }
+      .reason {
+        color: #8a3333;
+        font-size: 11px;
+        grid-column: 1 / -1;
+        min-height: 22px;
+        padding: 3px 44px;
+      }
+      @media (max-width: 760px) {
+        .upload-row { grid-template-columns: minmax(220px, 1fr) 130px 145px 80px 72px; }
+        .upload-row .cell:nth-child(3) { display: none; }
+        .hint { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="shell" class="shell">
+      <div class="toolbar">
+        <button id="newButton" type="button" title="Create a new folder"><span class="command-icon">+</span>New</button>
+        <div class="menu-wrap">
+          <button id="uploadButton" type="button" title="Upload to this folder"><span class="command-icon">&#8593;</span>Upload <span aria-hidden="true">&#8964;</span></button>
+          <div id="uploadMenu" class="menu">
+            <button id="filesButton" type="button"><span class="command-icon">&#8679;</span>Upload files</button>
+            <button id="folderButton" type="button"><span class="folder-glyph" aria-hidden="true"></span>Upload folder</button>
+            <select id="conflict" aria-label="If a name already exists">
+              <option value="cancel">Cancel matching files</option>
+              <option value="keep_both">Keep both</option>
+              <option value="replace">Replace matching files</option>
+            </select>
+          </div>
+        </div>
+        <button id="renameButton" type="button" title="Rename selected item" disabled><span class="command-icon">&#9998;</span>Rename</button>
+        <div class="menu-wrap">
+          <button id="moreButton" type="button" title="More actions" aria-label="More actions"><span class="command-icon">&#8943;</span></button>
+          <div id="moreMenu" class="menu more-menu">
+            <button id="clearSelectionButton" type="button">Clear selection</button>
+          </div>
+        </div>
+        <span class="hint">Large files supported</span>
+      </div>
+      <div class="drop-overlay">Drop files into this folder</div>
+      <div id="uploads" class="uploads"></div>
+      <input id="filesInput" type="file" multiple />
+      <input id="folderInput" type="file" multiple webkitdirectory directory />
+    </div>
+
+    <script>
+      const CHUNK_BYTES = 8 * 1024 * 1024;
+      const MAX_CONCURRENT = 2;
+      const state = {
+        args: {},
+        rows: [],
+        queue: [],
+        active: 0,
+        acknowledged: "",
+        completionQueue: [],
+        awaitingAck: null,
+      };
+      const shell = document.getElementById("shell");
+      const uploads = document.getElementById("uploads");
+      const filesInput = document.getElementById("filesInput");
+      const folderInput = document.getElementById("folderInput");
+      const conflictInput = document.getElementById("conflict");
+      const uploadMenu = document.getElementById("uploadMenu");
+      const moreMenu = document.getElementById("moreMenu");
+      const renameButton = document.getElementById("renameButton");
+
+      function sendMessage(type, data) {
+        window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, data || {}), "*");
+      }
+      function setValue(value) { sendMessage("streamlit:setComponentValue", { value }); }
+      function setFrameHeight() {
+        sendMessage("streamlit:setFrameHeight", { height: Math.max(34, document.body.scrollHeight) });
+      }
+      function ready() {
+        sendMessage("streamlit:componentReady", { apiVersion: 1 });
+        setFrameHeight();
+      }
+      function safeText(value) {
+        return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+      }
+      function sizeLabel(bytes) {
+        let amount = Number(bytes || 0);
+        const units = ["B", "KB", "MB", "GB", "TB"];
+        let index = 0;
+        while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index += 1; }
+        return `${amount < 10 && index ? amount.toFixed(1) : Math.round(amount)} ${units[index]}`;
+      }
+      function typeInfo(name, mime) {
+        const ext = String(name || "").split(".").pop().toLowerCase();
+        if (["psd", "psb"].includes(ext)) return ["PSD", "Photoshop file", "psd"];
+        if (["tif", "tiff"].includes(ext)) return ["TIF", "TIFF image", ""];
+        if (ext === "pdf") return ["PDF", "PDF document", "pdf"];
+        if (["zip", "rar", "7z"].includes(ext)) return [ext.toUpperCase(), "Compressed folder", "zip"];
+        if (/^video\//.test(mime || "") || ["mp4", "mov", "webm", "avi"].includes(ext)) return [ext.toUpperCase() || "VID", "Video file", "video"];
+        if (/^image\//.test(mime || "") || ["jpg", "jpeg", "png", "webp"].includes(ext)) return [ext.toUpperCase() || "IMG", "Image file", ""];
+        return [ext.toUpperCase().slice(0, 4) || "FILE", `${ext.toUpperCase() || "File"} file`, ""];
+      }
+      function progressText(row) {
+        if (row.status === "failed") return "Upload failed";
+        if (row.status === "queued") return "Waiting";
+        const percent = row.size ? Math.min(100, Math.round((row.uploaded / row.size) * 100)) : (row.status === "completed" ? 100 : 0);
+        return `Uploading ${percent}% - ${sizeLabel(row.uploaded)} of ${sizeLabel(row.size)}`;
+      }
+      function emitCommand(eventName) {
+        setValue({
+          event: eventName,
+          nonce: `${Date.now()}-${Math.random()}`,
+          current_path: state.args.current_path,
+        });
+      }
+      function render() {
+        uploads.innerHTML = state.rows.map(row => {
+          const [badge, type, className] = typeInfo(row.name, row.file.type);
+          const actions = row.status === "failed"
+            ? `<button class="mini" data-retry="${safeText(row.clientId)}">Retry</button><button class="mini" data-remove="${safeText(row.clientId)}">Remove</button>`
+            : `<span class="spinner" aria-label="Uploading"></span>`;
+          const reason = row.status === "failed" && row.error ? `<div class="reason">${safeText(row.error)}</div>` : "";
+          return `<div class="upload-row">
+            <div class="cell name"><span class="file-icon ${className}">${safeText(badge)}</span><span>${safeText(row.name)}</span></div>
+            <div class="cell status ${row.status === "failed" ? "failed" : ""}">${safeText(progressText(row))}</div>
+            <div class="cell"></div>
+            <div class="cell">${safeText(type)}</div>
+            <div class="cell">${safeText(sizeLabel(row.size))}</div>
+            <div class="cell">${actions}</div>${reason}
+          </div>`;
+        }).join("");
+        uploads.style.display = state.rows.length ? "block" : "none";
+        uploads.querySelectorAll("[data-retry]").forEach(button => button.onclick = () => retryRow(button.dataset.retry));
+        uploads.querySelectorAll("[data-remove]").forEach(button => button.onclick = () => removeRow(button.dataset.remove));
+        setFrameHeight();
+      }
+      function createRow(file, relativePath) {
+        return {
+          clientId: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
+          file,
+          name: file.name,
+          relativePath: relativePath || file.webkitRelativePath || file.name,
+          size: file.size,
+          uploaded: 0,
+          status: "queued",
+          error: "",
+          uploadId: "",
+          uploadSecret: "",
+          errorCode: "",
+        };
+      }
+      function addFiles(items) {
+        const rows = items.map(item => createRow(item.file || item, item.relativePath));
+        state.rows.push(...rows);
+        state.queue.push(...rows);
+        render();
+        drainQueue();
+      }
+      async function apiJson(path, options) {
+        const response = await fetch(path, Object.assign({ credentials: "same-origin" }, options || {}));
+        let payload = {};
+        try { payload = await response.json(); } catch (_) {}
+        if (!response.ok || payload.ok === false) {
+          const error = new Error(payload.message || "Upload could not continue.");
+          error.code = payload.code || "upload_error";
+          error.offset = payload.offset;
+          throw error;
+        }
+        return payload;
+      }
+      async function startUpload(row) {
+        const payload = await apiJson("/api/files-upload/start", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            current_path: state.args.current_path,
+            relative_path: row.relativePath,
+            size: row.size,
+            conflict: conflictInput.value || "cancel",
+          }),
+        });
+        row.uploadId = payload.upload_id;
+        row.uploadSecret = payload.upload_secret;
+        row.uploaded = Number(payload.offset || 0);
+      }
+      async function uploadChunk(row, blob, final) {
+        const headers = {
+          "Content-Type": "application/octet-stream",
+          "X-Upload-Id": row.uploadId,
+          "X-Upload-Secret": row.uploadSecret,
+          "X-Upload-Offset": String(row.uploaded),
+          "X-Upload-Final": final ? "true" : "false",
+        };
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            return await apiJson("/api/files-upload/chunk", { method: "POST", headers, body: blob });
+          } catch (error) {
+            if (error.code === "offset_mismatch") {
+              const status = await uploadStatus(row);
+              row.uploaded = Number(status.offset || row.uploaded);
+              return status;
+            }
+            if (attempt === 2) throw error;
+            await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+          }
+        }
+      }
+      async function uploadStatus(row) {
+        return apiJson(`/api/files-upload/status?upload_id=${encodeURIComponent(row.uploadId)}`, {
+          headers: { "X-Upload-Secret": row.uploadSecret },
+        });
+      }
+      async function runRow(row) {
+        row.status = "uploading";
+        row.error = "";
+        row.errorCode = "";
+        render();
+        try {
+          if (!row.uploadId) await startUpload(row);
+          else {
+            const status = await uploadStatus(row);
+            row.uploaded = Number(status.offset || 0);
+            if (status.state === "completed") {
+              row.status = "completed";
+              completeRow(row, status);
+              return;
+            }
+          }
+          while (row.uploaded < row.size || (row.size === 0 && row.uploaded === 0)) {
+            const end = Math.min(row.size, row.uploaded + CHUNK_BYTES);
+            const final = end >= row.size;
+            const payload = await uploadChunk(row, row.file.slice(row.uploaded, end), final);
+            row.uploaded = Number(payload.offset || end);
+            render();
+            if (payload.state === "completed" || final) {
+              row.status = "completed";
+              completeRow(row, payload);
+              return;
+            }
+          }
+        } catch (error) {
+          row.status = "failed";
+          row.error = error.message || "Upload interrupted. Retry to continue.";
+          row.errorCode = error.code || "upload_error";
+          render();
+        }
+      }
+      function completeRow(row, payload) {
+        render();
+        row.completionPayload = payload;
+        if (!state.completionQueue.includes(row) && (!state.awaitingAck || state.awaitingAck.row !== row)) {
+          state.completionQueue.push(row);
+        }
+        flushCompletion();
+      }
+      function flushCompletion() {
+        if (state.awaitingAck || !state.completionQueue.length) return;
+        const row = state.completionQueue.shift();
+        const nonce = `${Date.now()}-${Math.random()}`;
+        state.awaitingAck = { nonce, row };
+        setValue({
+          event: "upload_completed",
+          nonce,
+          current_path: state.args.current_path,
+          metadata: (row.completionPayload || {}).metadata || {},
+          name: row.name,
+        });
+      }
+      function drainQueue() {
+        while (state.active < MAX_CONCURRENT && state.queue.length) {
+          const row = state.queue.shift();
+          state.active += 1;
+          runRow(row).finally(() => { state.active -= 1; drainQueue(); });
+        }
+      }
+      function retryRow(clientId) {
+        const row = state.rows.find(item => item.clientId === clientId);
+        if (!row) return;
+        if (row.errorCode === "upload_missing") {
+          row.uploadId = "";
+          row.uploadSecret = "";
+          row.uploaded = 0;
+        }
+        row.status = "queued";
+        row.error = "";
+        row.errorCode = "";
+        state.queue.push(row);
+        render();
+        drainQueue();
+      }
+      async function removeRow(clientId) {
+        const row = state.rows.find(item => item.clientId === clientId);
+        if (row && row.uploadId) {
+          try {
+            await apiJson("/api/files-upload/remove", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "X-Upload-Secret": row.uploadSecret },
+              body: JSON.stringify({ upload_id: row.uploadId }),
+            });
+          } catch (_) {}
+        }
+        state.rows = state.rows.filter(item => item.clientId !== clientId);
+        render();
+      }
+      async function walkEntry(entry, prefix) {
+        if (entry.isFile) {
+          const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+          return [{ file, relativePath: `${prefix}${file.name}` }];
+        }
+        if (!entry.isDirectory) return [];
+        const reader = entry.createReader();
+        const children = [];
+        while (true) {
+          const batch = await new Promise((resolve, reject) => reader.readEntries(resolve, reject));
+          if (!batch.length) break;
+          children.push(...batch);
+        }
+        const nested = await Promise.all(children.map(child => walkEntry(child, `${prefix}${entry.name}/`)));
+        return nested.flat();
+      }
+      async function droppedItems(dataTransfer) {
+        const entries = Array.from(dataTransfer.items || []).map(item => item.webkitGetAsEntry && item.webkitGetAsEntry()).filter(Boolean);
+        if (entries.length) return (await Promise.all(entries.map(entry => walkEntry(entry, "")))).flat();
+        return Array.from(dataTransfer.files || []).map(file => ({ file, relativePath: file.name }));
+      }
+
+      function closeMenus() {
+        uploadMenu.classList.remove("open");
+        moreMenu.classList.remove("open");
+        setFrameHeight();
+      }
+      document.getElementById("newButton").onclick = () => { closeMenus(); emitCommand("new_folder_requested"); };
+      document.getElementById("uploadButton").onclick = event => {
+        event.stopPropagation();
+        moreMenu.classList.remove("open");
+        uploadMenu.classList.toggle("open");
+        setFrameHeight();
+      };
+      document.getElementById("moreButton").onclick = event => {
+        event.stopPropagation();
+        uploadMenu.classList.remove("open");
+        moreMenu.classList.toggle("open");
+        setFrameHeight();
+      };
+      document.getElementById("filesButton").onclick = () => { closeMenus(); filesInput.click(); };
+      document.getElementById("folderButton").onclick = () => { closeMenus(); folderInput.click(); };
+      renameButton.onclick = () => { closeMenus(); emitCommand("rename_requested"); };
+      document.getElementById("clearSelectionButton").onclick = () => { closeMenus(); emitCommand("clear_selection"); };
+      document.addEventListener("click", event => {
+        if (!event.target.closest(".menu-wrap")) closeMenus();
+      });
+      filesInput.onchange = () => { addFiles(Array.from(filesInput.files || [])); filesInput.value = ""; };
+      folderInput.onchange = () => { addFiles(Array.from(folderInput.files || [])); folderInput.value = ""; };
+      shell.ondragover = event => { event.preventDefault(); shell.classList.add("dragover"); };
+      shell.ondragleave = () => shell.classList.remove("dragover");
+      shell.ondrop = async event => {
+        event.preventDefault();
+        shell.classList.remove("dragover");
+        addFiles(await droppedItems(event.dataTransfer));
+      };
+      window.addEventListener("message", event => {
+        if (!event.data || event.data.type !== "streamlit:render") return;
+        state.args = event.data.args || {};
+        renameButton.disabled = !String(state.args.selected_path || "");
+        document.getElementById("clearSelectionButton").disabled = renameButton.disabled;
+        const ack = String(state.args.ack_nonce || "");
+        if (ack && ack !== state.acknowledged) {
+          state.acknowledged = ack;
+          if (state.awaitingAck && state.awaitingAck.nonce === ack) {
+            const completedRow = state.awaitingAck.row;
+            state.rows = state.rows.filter(row => row !== completedRow);
+            state.awaitingAck = null;
+            flushCompletion();
+          }
+        }
+        render();
+      });
+      ready();
+    </script>
+  </body>
+</html>

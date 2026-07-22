@@ -341,6 +341,86 @@ class DropboxIntegrationTests(unittest.TestCase):
         self.assertEqual(client.files_upload_session_finish.call_args.args[0], b"89")
         self.assertEqual(progress[-1], (10, 10))
 
+    def test_incremental_upload_session_helpers_use_the_rooted_team_space_client(self):
+        class Cursor:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        class Commit:
+            def __init__(self, **kwargs):
+                self.__dict__.update(kwargs)
+
+        client = MagicMock()
+        client.files_upload_session_start.return_value = SimpleNamespace(session_id="session-1")
+        client.files_upload_session_finish.return_value = {
+            ".tag": "file",
+            "name": "large.psd",
+            "size": 10,
+        }
+        sdk = SimpleNamespace(
+            files=SimpleNamespace(
+                WriteMode=SimpleNamespace(add="add", overwrite="overwrite"),
+                UploadSessionCursor=Cursor,
+                CommitInfo=Commit,
+            )
+        )
+        with patch.object(
+            dropbox_integration,
+            "team_space_client",
+            return_value=client,
+        ) as rooted_client, patch.object(
+            dropbox_integration,
+            "_dropbox_sdk",
+            return_value=sdk,
+        ):
+            session_id = dropbox_integration.start_upload_session("token", b"0123")
+            offset = dropbox_integration.append_upload_session(
+                "token", session_id, 4, b"4567"
+            )
+            metadata = dropbox_integration.finish_upload_session(
+                "token",
+                session_id,
+                8,
+                b"89",
+                "/Sportscave Team Folder/large.psd",
+                mode="add",
+            )
+
+        self.assertEqual(session_id, "session-1")
+        self.assertEqual(offset, 8)
+        self.assertEqual(metadata["name"], "large.psd")
+        self.assertEqual(rooted_client.call_count, 3)
+        client.files_upload_session_start.assert_called_once_with(b"0123")
+        self.assertEqual(client.files_upload_session_append_v2.call_args.args[0], b"4567")
+        self.assertEqual(client.files_upload_session_finish.call_args.args[0], b"89")
+
+    def test_incremental_upload_session_helpers_reject_oversized_chunks(self):
+        oversized = b"x" * (dropbox_integration.DROPBOX_UPLOAD_CHUNK_SIZE + 1)
+
+        with self.assertRaises(ValueError):
+            dropbox_integration.start_upload_session("token", oversized)
+
+    def test_dropbox_error_preserves_upload_session_correct_offset(self):
+        offset_error = SimpleNamespace(correct_offset=24)
+        api_error = MagicMock()
+        api_error.is_incorrect_offset.return_value = True
+        api_error.get_incorrect_offset.return_value = offset_error
+        original = SimpleNamespace(error=api_error)
+        original.__str__ = lambda _self: "incorrect_offset"
+
+        wrapped = dropbox_integration._dropbox_error(original)
+
+        self.assertEqual(wrapped.correct_offset, 24)
+
+    def test_upload_stream_has_no_default_application_file_size_cap(self):
+        source = (ROOT / "dropbox_integration.py").read_text(encoding="utf-8")
+        upload_stream = source[
+            source.index("def upload_stream(") : source.index("\n\ndef start_upload_session")
+        ]
+
+        self.assertIn("max_bytes=None", upload_stream)
+        self.assertNotIn("DROPBOX_MAX_UPLOAD_BYTES", source)
+
     def test_upload_batch_preserves_nested_paths_and_partial_success(self):
         items = [
             {"relative_path": "Campaign/hero.jpg", "data": b"hero", "size": 4},

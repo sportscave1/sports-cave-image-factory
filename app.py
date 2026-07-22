@@ -2142,103 +2142,187 @@ def inject_styles():
         .st-key-files-explorer {
             color: #202124;
             font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-            margin-top: 0.2rem;
+            margin-top: -0.2rem;
         }
 
-        .sc-files-breadcrumb {
+        div[data-testid="stAppViewContainer"]:has(.st-key-files-explorer) .block-container {
+            padding-top: 1.15rem;
+        }
+
+        .st-key-files-navigation-row {
+            height: 42px;
+            margin: 0 0 0.2rem;
+            overflow: hidden;
+        }
+
+        .st-key-files-navigation-row [data-testid="stHorizontalBlock"] {
             align-items: center;
-            border: 1px solid #DADDE1;
+            flex-wrap: nowrap !important;
+            gap: 0.28rem;
+            height: 42px;
+        }
+
+        .st-key-files-navigation-row [data-testid="stColumn"] {
+            min-width: 0;
+        }
+
+        .st-key-files-navigation-row button {
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            border-radius: 4px !important;
+            box-shadow: none !important;
+            color: #303338 !important;
+            height: 34px !important;
+            min-height: 34px !important;
+            padding: 0 !important;
+            white-space: nowrap !important;
+        }
+
+        .st-key-files-navigation-row button:hover:not(:disabled) {
+            background: #EAF2F8 !important;
+            border-color: #D1DFE9 !important;
+        }
+
+        .st-key-files-navigation-row button:disabled {
+            color: #A6ABB0 !important;
+            opacity: 0.72;
+        }
+
+        .st-key-files-nav-back button p,
+        .st-key-files-nav-forward button p,
+        .st-key-files-nav-up button p,
+        .st-key-files-nav-refresh button p {
+            display: none;
+        }
+
+        .st-key-files-address-bar {
+            background: #FFFFFF;
+            border: 1px solid #C9CDD2;
             border-radius: 4px;
-            display: flex;
-            font-size: 0.82rem;
-            gap: 0;
             height: 34px;
-            margin: 0 0 0.35rem;
-            overflow-x: auto;
-            padding: 0 0.4rem;
-            white-space: nowrap;
+            overflow: hidden;
+            padding: 0 0.2rem;
         }
 
-        .sc-files-breadcrumb a,
-        .sc-files-breadcrumb span {
+        .st-key-files-address-bar [data-testid="stHorizontalBlock"] {
             align-items: center;
-            color: #27292C;
-            display: inline-flex;
-            height: 26px;
-            padding: 0 0.42rem;
-            text-decoration: none;
-        }
-
-        .sc-files-breadcrumb a:hover {
-            background: #EDF3F8;
-            border-radius: 3px;
-            color: #111111;
-        }
-
-        .sc-files-breadcrumb .sc-files-chevron {
-            color: #72767B;
-            font-size: 1rem;
-            padding: 0 0.08rem;
-        }
-
-        .st-key-files-breadcrumb-native {
-            align-items: center;
-            border: 1px solid #DADDE1;
-            border-radius: 4px;
-            min-height: 34px;
-            margin: 0 0 0.35rem;
-            overflow-x: auto;
-            padding: 0.08rem 0.25rem;
-        }
-
-        .st-key-files-breadcrumb-native [data-testid="stHorizontalBlock"] {
-            align-items: center;
-            gap: 0.08rem;
+            flex-wrap: nowrap !important;
+            gap: 0;
+            height: 32px;
             min-width: max-content;
         }
 
-        .st-key-files-breadcrumb-native button {
-            background: transparent !important;
-            border: 1px solid transparent !important;
-            border-radius: 3px !important;
-            box-shadow: none !important;
-            color: #27292C !important;
-            font-size: 0.78rem !important;
-            min-height: 28px !important;
-            padding: 0.1rem 0.35rem !important;
+        .st-key-files-address-bar [data-testid="stColumn"] {
+            min-width: 0;
         }
 
-        .st-key-files-breadcrumb-native button:hover {
-            background: #EDF3F8 !important;
-            border-color: #D7E3EB !important;
+        .st-key-files-address-bar button {
+            border-radius: 3px !important;
+            color: #25282C !important;
+            font-size: 0.76rem !important;
+            font-weight: 400 !important;
+            height: 28px !important;
+            min-height: 28px !important;
+            overflow: hidden;
+            padding: 0 0.35rem !important;
+            text-overflow: ellipsis;
+        }
+
+        .st-key-files-address-bar button p {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .st-key-files-address-bar button::after {
+            color: #777C82;
+            content: "chevron_right";
+            font-family: "Material Symbols Rounded";
+            font-size: 0.95rem;
+            font-weight: 400;
+            margin-left: 0.22rem;
         }
 
         .sc-files-current-crumb {
             align-items: center;
             color: #202124;
             display: flex;
-            font-size: 0.78rem;
-            font-weight: 600;
-            min-height: 28px;
+            font-size: 0.76rem;
+            font-weight: 500;
+            height: 28px;
+            min-width: 0;
+            overflow: hidden;
             padding: 0 0.35rem;
+            text-overflow: ellipsis;
             white-space: nowrap;
         }
 
+        .st-key-files-address-bar [data-testid="stColumn"]:not(:first-child) .sc-files-current-crumb::before {
+            color: #777C82;
+            content: "chevron_right";
+            font-family: "Material Symbols Rounded";
+            font-size: 0.95rem;
+            font-weight: 400;
+            margin-right: 0.22rem;
+        }
+
+        .sc-files-chevron {
+            color: #7A7E83;
+            font-size: 0.82rem;
+            line-height: 1;
+            padding: 0 0.08rem;
+        }
+
+        div[class*="st-key-files-search-"] [data-testid="stTextInput"] {
+            margin: 0;
+        }
+
+        div[class*="st-key-files-search-"] input {
+            background: #FFFFFF !important;
+            border: 1px solid #C9CDD2 !important;
+            border-radius: 4px !important;
+            color: #202124 !important;
+            font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif !important;
+            font-size: 0.78rem !important;
+            height: 34px !important;
+            min-height: 34px !important;
+            padding: 0 0.65rem 0 2rem !important;
+        }
+
+        div[class*="st-key-files-search-"]::before {
+            color: #687078;
+            content: "search";
+            font-family: "Material Symbols Rounded";
+            font-size: 1rem;
+            left: 0.62rem;
+            pointer-events: none;
+            position: absolute;
+            top: 0.5rem;
+            z-index: 2;
+        }
+
         .st-key-files-command-bar {
-            align-items: center;
             background: #F7F8FA;
             border: 1px solid #E0E2E5;
             border-bottom: 0;
-            display: flex;
+            min-height: 40px;
+            overflow: visible;
+            padding: 0 0.28rem;
+        }
+
+        .st-key-files-command-bar iframe {
+            display: block;
             min-height: 38px;
-            padding: 0.18rem 0.3rem;
         }
 
-        .st-key-files-command-bar [data-testid="stHorizontalBlock"] {
-            gap: 0.25rem;
+        div[class*="st-key-files-inline-"] {
+            background: #F8F9FA;
+            border: 1px solid #E0E2E5;
+            border-bottom: 0;
+            padding: 0.35rem 0.5rem;
         }
 
-        .st-key-files-command-bar button,
+        div[class*="st-key-files-inline-"] button,
         .st-key-mockups-dropbox-actions button,
         .st-key-mockups-dropbox-picker button {
             background: transparent !important;
@@ -2251,60 +2335,34 @@ def inject_styles():
             padding: 0.2rem 0.5rem !important;
         }
 
-        .st-key-files-command-bar button:hover,
+        div[class*="st-key-files-inline-"] button:hover,
         .st-key-mockups-dropbox-actions button:hover,
         .st-key-mockups-dropbox-picker button:hover {
             background: #EAF2F8 !important;
             border-color: #C5D5E0 !important;
         }
 
-        .st-key-files-drop-target {
-            margin: 0;
-            position: relative;
-        }
-
-        .st-key-files-drop-target [data-testid="stFileUploaderDropzone"] {
-            background: #FFFFFF;
-            border: 1px dashed #D4D8DC;
-            border-radius: 0;
-            min-height: 38px;
-            padding: 0.2rem 0.6rem;
-        }
-
-        .st-key-files-drop-target [data-testid="stFileUploaderDropzone"]:hover,
-        .st-key-files-drop-target [data-testid="stFileUploaderDropzone"]:focus-within {
-            background: #EEF5FA;
-            border-color: #8BAFC7;
-        }
-
-        .st-key-files-drop-target [data-testid="stFileUploaderDropzoneInstructions"] {
-            font-size: 0.76rem;
-            line-height: 1.1;
-        }
-
-        .st-key-files-drop-target small,
-        .st-key-files-drop-target [data-testid="stFileUploaderDropzone"] button {
-            display: none;
-        }
-
-        .sc-files-table,
         .st-key-files-details-list {
             border: 1px solid #E0E2E5;
             border-radius: 0;
-            margin-top: 0.25rem;
-            min-width: 670px;
-            overflow: hidden;
+            margin-top: 0;
+            max-height: calc(100vh - 205px);
+            min-height: 112px;
+            min-width: 720px;
+            overflow: auto;
+            scrollbar-color: #C4C8CC #F7F8FA;
+            scrollbar-width: thin;
+            width: 100%;
         }
 
-        .sc-files-table-wrap {
-            overflow-x: auto;
-            width: 100%;
+        .st-key-files-details-list [data-testid="stVerticalBlock"] {
+            gap: 0 !important;
         }
 
         .sc-files-grid {
             align-items: center;
             display: grid;
-            grid-template-columns: minmax(290px, 1fr) 190px 150px 90px 34px;
+            grid-template-columns: minmax(300px, 1fr) 105px 178px 148px 86px 34px;
         }
 
         .sc-files-header {
@@ -2312,8 +2370,11 @@ def inject_styles():
             border-bottom: 1px solid #DADDE1;
             color: #4A4D51;
             font-size: 0.75rem;
-            height: 32px;
+            height: 34px;
+            position: sticky;
+            top: 0;
             user-select: none;
+            z-index: 2;
         }
 
         .sc-files-header > span,
@@ -2323,7 +2384,7 @@ def inject_styles():
             display: flex;
             height: 100%;
             min-width: 0;
-            padding: 0 0.62rem;
+            padding: 0 0.5rem;
         }
 
         .sc-files-header > span:last-child,
@@ -2337,7 +2398,7 @@ def inject_styles():
             border-bottom: 1px solid #EFF0F1;
             color: #202124;
             font-size: 0.82rem;
-            height: 40px;
+            height: 36px;
             text-decoration: none;
         }
 
@@ -2385,7 +2446,9 @@ def inject_styles():
         div[class*="st-key-files-row-native-"] {
             background: #FFFFFF;
             border-bottom: 1px solid #EFF0F1;
-            min-height: 40px;
+            height: 36px;
+            min-height: 36px;
+            overflow: hidden;
         }
 
         div[class*="st-key-files-row-native-"]:last-child {
@@ -2395,6 +2458,11 @@ def inject_styles():
         div[class*="st-key-files-row-native-"] [data-testid="stHorizontalBlock"] {
             align-items: stretch;
             gap: 0;
+            height: 36px;
+        }
+
+        div[class*="st-key-files-row-native-"] [data-testid="stElementContainer"] {
+            margin: 0 !important;
         }
 
         div[class*="st-key-files-row-native-"] [data-testid="stColumn"] {
@@ -2415,9 +2483,10 @@ def inject_styles():
             font-size: 0.78rem !important;
             font-weight: 400 !important;
             justify-content: flex-start !important;
-            min-height: 40px !important;
+            height: 36px !important;
+            min-height: 36px !important;
             overflow: hidden;
-            padding: 0 0.58rem !important;
+            padding: 0 0.5rem !important;
             text-align: left !important;
             white-space: nowrap;
             width: 100%;
@@ -2432,6 +2501,25 @@ def inject_styles():
         div[class*="st-key-files-row-native-"]:has(button:hover),
         div[class*="st-key-files-row-native-"]:has(button:focus-visible) {
             background: #EAF2F8;
+        }
+
+        div[class*="st-key-files-row-native-selected-"] {
+            background: #DCECF7;
+        }
+
+        div[class*="st-key-files-row-native-folder-"] [data-testid="stColumn"]:first-child [data-testid="stIconMaterial"],
+        div[class*="st-key-files-row-native-selected-folder-"] [data-testid="stColumn"]:first-child [data-testid="stIconMaterial"] {
+            color: #E1B23D !important;
+        }
+
+        div[class*="st-key-files-row-native-pdf-"] [data-testid="stColumn"]:first-child [data-testid="stIconMaterial"],
+        div[class*="st-key-files-row-native-selected-pdf-"] [data-testid="stColumn"]:first-child [data-testid="stIconMaterial"] {
+            color: #B3261E !important;
+        }
+
+        div[class*="st-key-files-row-native-image-"] [data-testid="stColumn"]:first-child [data-testid="stIconMaterial"],
+        div[class*="st-key-files-row-native-selected-image-"] [data-testid="stColumn"]:first-child [data-testid="stIconMaterial"] {
+            color: #267A4B !important;
         }
 
         div[class*="st-key-files-row-native-"] button:hover,
@@ -2453,6 +2541,27 @@ def inject_styles():
         div[class*="st-key-files-row-native-"]:hover [data-testid="stColumn"]:last-child button,
         div[class*="st-key-files-row-native-"] [data-testid="stColumn"]:last-child button:focus-visible {
             opacity: 1;
+        }
+
+        @media (max-width: 900px) {
+            .st-key-files-navigation-row [data-testid="stHorizontalBlock"] {
+                gap: 0.12rem;
+            }
+
+            .st-key-files-details-list {
+                min-width: 590px;
+            }
+
+            .sc-files-grid {
+                grid-template-columns: minmax(270px, 1fr) 170px 80px 34px;
+            }
+
+            .sc-files-grid > :nth-child(2),
+            .sc-files-grid > :nth-child(4),
+            div[class*="st-key-files-row-native-"] [data-testid="stColumn"]:nth-child(2),
+            div[class*="st-key-files-row-native-"] [data-testid="stColumn"]:nth-child(4) {
+                display: none;
+            }
         }
 
         .sc-files-name {
@@ -9564,6 +9673,15 @@ def _dropbox_handle_callback(user):
 FILES_DIRECTORY_CACHE_SECONDS = 90
 FILES_DIRECTORY_CACHE_LIMIT = 32
 FILES_TEAM_ROOT_CACHE_SECONDS = 15 * 60
+FILES_CHUNK_COMPONENT_DIR = BASE_DIR / "components" / "files_chunk_uploader"
+
+
+@lru_cache(maxsize=1)
+def _files_chunk_component():
+    return get_components_module().declare_component(
+        "files_chunk_uploader",
+        path=str(FILES_CHUNK_COMPONENT_DIR),
+    )
 
 
 def _files_access_token(*, force=False):
@@ -9795,13 +9913,18 @@ def _files_navigate_folder_state(path, root_path, *, remember=True):
         if not history or history[-1] != current:
             history.append(current)
         st.session_state["files_navigation_history"] = history[-30:]
+        st.session_state["files_forward_history"] = []
     st.session_state["files_browser_path"] = destination
     st.session_state.pop("files_preview_path", None)
     st.session_state.pop("files_rename_path", None)
+    st.session_state.pop("files_selected_path", None)
 
 
 def _files_navigate_back_state(root_path):
     history = list(st.session_state.get("files_navigation_history") or ())
+    current = dropbox_integration.normalize_dropbox_path(
+        st.session_state.get("files_browser_path") or ""
+    )
     while history:
         destination = history.pop()
         try:
@@ -9809,8 +9932,46 @@ def _files_navigate_back_state(root_path):
         except ValueError:
             continue
         st.session_state["files_navigation_history"] = history
+        forward = list(st.session_state.get("files_forward_history") or ())
+        if not forward or forward[-1] != current:
+            forward.append(current)
+        st.session_state["files_forward_history"] = forward[-30:]
         _files_navigate_folder_state(destination, root_path, remember=False)
         return
+
+
+def _files_navigate_forward_state(root_path):
+    forward = list(st.session_state.get("files_forward_history") or ())
+    current = dropbox_integration.normalize_dropbox_path(
+        st.session_state.get("files_browser_path") or ""
+    )
+    while forward:
+        destination = forward.pop()
+        try:
+            destination = _files_normalize_browser_path(destination, root_path)
+        except ValueError:
+            continue
+        history = list(st.session_state.get("files_navigation_history") or ())
+        if not history or history[-1] != current:
+            history.append(current)
+        st.session_state["files_navigation_history"] = history[-30:]
+        st.session_state["files_forward_history"] = forward
+        _files_navigate_folder_state(destination, root_path, remember=False)
+        return
+
+
+def _files_parent_path(path, root_path):
+    current = _files_normalize_browser_path(path, root_path)
+    if not current:
+        return ""
+    if current.casefold() == root_path.casefold():
+        return ""
+    parent = current.rsplit("/", 1)[0]
+    return parent if dropbox_integration.path_is_within_root(parent, root_path) else ""
+
+
+def _files_navigate_up_state(path, root_path):
+    _files_navigate_folder_state(_files_parent_path(path, root_path), root_path)
 
 
 def _files_open_preview_state(path, root_path):
@@ -9828,6 +9989,13 @@ def _files_begin_rename_state(path, root_path):
     st.session_state["files_rename_path"] = clean_path
 
 
+def _files_select_item_state(path, root_path):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    if not dropbox_integration.path_is_within_root(clean_path, root_path):
+        raise ValueError("This item is outside the shared Files folder.")
+    st.session_state["files_selected_path"] = clean_path
+
+
 def _files_refresh_folder_state(path):
     _files_clear_directory_cache(path)
 
@@ -9836,40 +10004,109 @@ def _files_fragment_rerun():
     st.rerun(scope="fragment")
 
 
-def _render_files_breadcrumb(current_path, root_path, *, preview_name=""):
-    items = list(dropbox_integration.breadcrumb_items(current_path, root_path))
+def _files_filter_entries(entries, query):
+    clean_query = str(query or "").strip().casefold()
+    rows = list(entries or ())
+    if clean_query:
+        rows = [
+            entry
+            for entry in rows
+            if clean_query in str((entry or {}).get("name") or "").casefold()
+        ]
+    return dropbox_integration.sort_folder_entries(rows)
+
+
+def _files_address_items(current_path, root_path, *, preview_name=""):
+    items = [("Computer", ""), ("Sportscave Dropbox", "")]
+    current = dropbox_integration.normalize_dropbox_path(current_path)
+    if current:
+        root_name = root_path.rsplit("/", 1)[-1] or dropbox_integration.DROPBOX_TEAM_FOLDER
+        items.append((root_name, root_path))
+        relative = current[len(root_path) :].strip("/") if current.casefold().startswith(root_path.casefold()) else ""
+        built = root_path
+        for part in [part for part in relative.split("/") if part]:
+            built = dropbox_integration.normalize_dropbox_path(f"{built}/{part}")
+            items.append((part, built))
     if preview_name:
         items.append((str(preview_name), None))
+    if len(items) > 6:
+        items = items[:2] + [("...", None)] + items[-3:]
+    return items
+
+
+def _render_files_navigation(current_path, root_path, *, preview_name=""):
     history = list(st.session_state.get("files_navigation_history") or ())
-    widths = [0.35] + [max(0.85, min(3.2, len(str(label or "Files")) / 6)) for label, _ in items]
-    with st.container(key="files-breadcrumb-native"):
-        columns = st.columns(widths, gap="small")
+    forward = list(st.session_state.get("files_forward_history") or ())
+    current = dropbox_integration.normalize_dropbox_path(current_path)
+    with st.container(key="files-navigation-row"):
+        columns = st.columns([0.34, 0.34, 0.34, 0.34, 5.6, 2.35], gap="small")
         columns[0].button(
             "Back",
             icon=":material/arrow_back:",
-            key="files-history-back",
+            key="files-nav-back",
             disabled=not history,
-            help="Previous folder",
+            help="Back",
             on_click=_files_navigate_back_state,
             args=(root_path,),
         )
-        last_index = len(items) - 1
-        for index, (label, path) in enumerate(items):
-            clean_label = str(label or "Files")
-            if path is None or index == last_index:
-                columns[index + 1].markdown(
-                    f'<span class="sc-files-current-crumb">{html.escape(clean_label)}</span>',
-                    unsafe_allow_html=True,
-                )
-                continue
-            columns[index + 1].button(
-                clean_label,
-                key=_files_widget_key("files-crumb", f"{index}:{path}"),
-                help=f"Open {clean_label}",
-                on_click=_files_navigate_folder_state,
-                args=(path, root_path),
-                use_container_width=True,
+        columns[1].button(
+            "Forward",
+            icon=":material/arrow_forward:",
+            key="files-nav-forward",
+            disabled=not forward,
+            help="Forward",
+            on_click=_files_navigate_forward_state,
+            args=(root_path,),
+        )
+        columns[2].button(
+            "Up",
+            icon=":material/arrow_upward:",
+            key="files-nav-up",
+            disabled=not current,
+            help="Up one folder",
+            on_click=_files_navigate_up_state,
+            args=(current, root_path),
+        )
+        columns[3].button(
+            "Refresh",
+            icon=":material/refresh:",
+            key="files-nav-refresh",
+            disabled=not current,
+            help="Refresh this folder",
+            on_click=_files_refresh_folder_state,
+            args=(current,),
+        )
+        items = _files_address_items(current, root_path, preview_name=preview_name)
+        with columns[4]:
+            with st.container(key="files-address-bar"):
+                widths = [max(0.8, min(2.8, len(label) / 7)) for label, _path in items]
+                crumb_columns = st.columns(widths, gap=None)
+                last_index = len(items) - 1
+                for index, (label, path) in enumerate(items):
+                    if path is None or index == last_index:
+                        crumb_columns[index].markdown(
+                            f'<span class="sc-files-current-crumb">{html.escape(label)}</span>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        crumb_columns[index].button(
+                            label,
+                            icon=":material/computer:" if index == 0 else None,
+                            key=_files_widget_key("files-crumb", f"{index}:{path}"),
+                            help=f"Open {label}",
+                            on_click=_files_navigate_folder_state,
+                            args=(path, root_path),
+                            use_container_width=True,
+                        )
+        folder_name = preview_name or (current.rsplit("/", 1)[-1] if current else "Files")
+        with columns[5]:
+            query = st.text_input(
+                "Search current folder",
+                placeholder=f"Search {folder_name}",
+                label_visibility="collapsed",
+                key=_files_widget_key("files-search", current or "__root__"),
             )
+    return query
 
 
 def _files_row_icon(kind):
@@ -9892,6 +10129,7 @@ def _render_files_details(entries, user, root_path, *, show_header=True):
             st.markdown(
                 '<div class="sc-files-grid sc-files-header" role="row">'
                 '<span role="columnheader">Name</span>'
+                '<span role="columnheader">Status</span>'
                 '<span role="columnheader">Date modified</span>'
                 '<span role="columnheader">Type</span>'
                 '<span role="columnheader">Size</span>'
@@ -9911,17 +10149,21 @@ def _render_files_details(entries, user, root_path, *, show_header=True):
             modified = _files_modified_label(entry.get("server_modified"), user)
             type_label = _files_type_label(entry)
             size = "" if tag == "folder" else dropbox_integration.format_file_size(entry.get("size"))
-            row_key = _files_widget_key("files-row-native", path)
+            selected = path == dropbox_integration.normalize_dropbox_path(
+                st.session_state.get("files_selected_path") or ""
+            )
+            row_prefix = f"files-row-native-{'selected-' if selected else ''}{kind}"
+            row_key = _files_widget_key(row_prefix, path)
             with st.container(key=row_key):
-                columns = st.columns([6, 2.2, 1.8, 1, 0.45], gap=None)
+                columns = st.columns([6, 1.15, 2.1, 1.7, 0.9, 0.42], gap=None)
                 if tag == "folder":
                     callback = _files_navigate_folder_state
                     callback_args = (path, root_path)
                 else:
                     callback = _files_open_preview_state
                     callback_args = (path, root_path)
-                values = (name, modified or " ", type_label, size or " ")
-                for column_index, (column, value) in enumerate(zip(columns[:4], values)):
+                values = (name, " ", modified or " ", type_label, size or " ")
+                for column_index, (column, value) in enumerate(zip(columns[:5], values)):
                     column.button(
                         value,
                         icon=_files_row_icon(kind) if column_index == 0 else None,
@@ -9931,12 +10173,12 @@ def _render_files_details(entries, user, root_path, *, show_header=True):
                         args=callback_args,
                         use_container_width=True,
                     )
-                columns[4].button(
+                columns[5].button(
                     "More",
                     icon=":material/more_horiz:",
                     key=_files_widget_key("files-more", path),
-                    help=f"Rename {name}",
-                    on_click=_files_begin_rename_state,
+                    help=f"Select {name}",
+                    on_click=_files_select_item_state,
                     args=(path, root_path),
                 )
 
@@ -9986,7 +10228,7 @@ def _render_files_preview(access_token, user, root_path, preview_path):
     metadata = dict(details.get("metadata") or {})
     name = str(metadata.get("name") or clean_path.rsplit("/", 1)[-1] or "File")
     parent_path = clean_path.rsplit("/", 1)[0]
-    _render_files_breadcrumb(parent_path, root_path, preview_name=name)
+    _render_files_navigation(parent_path, root_path, preview_name=name)
     modified = _files_modified_label(metadata.get("server_modified"), user)
     size = dropbox_integration.format_file_size(metadata.get("size"))
     summary = " · ".join(value for value in (_files_type_label(metadata), modified, size) if value)
@@ -10104,182 +10346,96 @@ def _files_save_upload_metadata(rows, user, *, asset_type="files"):
             )
 
 
-def _files_uploaded_items(uploaded_files):
-    items = []
-    for uploaded_file in uploaded_files or ():
-        relative_path = str(getattr(uploaded_file, "name", "") or "")
-        items.append(
-            {
-                "relative_path": relative_path,
-                "stream": uploaded_file,
-                "size": getattr(uploaded_file, "size", None),
-            }
-        )
-    return items
-
-
-def _files_run_upload(access_token, user, current_path, uploaded_files, conflict, *, asset_type="files"):
-    items = _files_uploaded_items(uploaded_files)
-    progress = st.progress(0, text="Preparing upload...")
-
-    def update_progress(index, total, name, uploaded, file_total):
-        file_fraction = (uploaded / file_total) if file_total else 1
-        overall = ((index - 1) + min(1, file_fraction)) / max(1, total)
-        progress.progress(min(1.0, overall), text=f"Uploading {name}")
-
-    result = dropbox_integration.upload_batch(
-        access_token,
-        current_path,
-        items,
-        conflict=conflict,
-        progress_callback=update_progress,
+def _render_files_chunk_uploader(user, current_path):
+    selected_path = dropbox_integration.normalize_dropbox_path(
+        st.session_state.get("files_selected_path") or ""
     )
-    progress.empty()
-    successes = list(result.get("successes") or ())
-    failures = list(result.get("failures") or ())
-    if successes:
-        _files_save_upload_metadata(successes, user, asset_type=asset_type)
-        count = len(successes)
-        record_activity_log(
-            "files_uploaded",
-            "Files",
-            f"Uploaded {count} file{'s' if count != 1 else ''}: {current_path}",
-            entity_type="dropbox_folder",
-            entity_id=current_path,
-            metadata={
-                "count": count,
-                "files": [row.get("relative_path") for row in successes],
-            },
-        )
-        _files_clear_directory_cache(*_files_changed_directory_paths(current_path, successes))
-    return {"successes": successes, "failures": failures}
-
-
-def _render_files_upload_control(
-    access_token,
-    user,
-    current_path,
-    *,
-    key,
-    directory=False,
-    compact=False,
-    auto_submit=False,
-):
-    generation_key = f"{key}-generation"
-    generation = int(st.session_state.get(generation_key) or 0)
-    picker_key = f"{key}-picker-{generation}" if auto_submit else f"{key}-picker"
-    selected = st.file_uploader(
-        "Drop files into this folder" if compact else ("Choose a folder" if directory else "Choose files"),
-        accept_multiple_files="directory" if directory else True,
-        key=picker_key,
-        label_visibility="collapsed" if compact else "visible",
+    event = _files_chunk_component()(
+        current_path=current_path,
+        ack_nonce=str(st.session_state.get("files_chunk_upload_ack") or ""),
+        selected_path=selected_path,
+        selected_name=selected_path.rsplit("/", 1)[-1] if selected_path else "",
+        key=_files_widget_key("files-chunk-uploader", current_path),
+        default=None,
     )
-    if not selected:
+    event = dict(event or {}) if isinstance(event, dict) else {}
+    nonce = str(event.get("nonce") or "")
+    event_name = str(event.get("event") or "")
+    if not event_name or not nonce:
         return
-    conflict_labels = {
-        "Cancel matching files": "cancel",
-        "Keep both": "keep_both",
-        "Replace matching files": "replace",
-    }
-    if auto_submit:
-        conflict = "cancel"
-    else:
-        choice = st.selectbox(
-            "If a name already exists",
-            tuple(conflict_labels),
-            key=f"{key}-conflict",
-        )
-        if not st.button("Upload", key=f"{key}-submit", use_container_width=True):
-            return
-        conflict = conflict_labels[choice]
-    result = _files_run_upload(
-        access_token,
-        user,
-        current_path,
-        selected,
-        conflict,
-    )
-    successes = result["successes"]
-    failures = result["failures"]
-    if successes and failures:
-        failed_names = ", ".join(str(row.get("relative_path") or "file") for row in failures[:5])
-        _files_set_notice(
-            f"{len(successes)} files uploaded. Could not upload: {failed_names}",
-            level="warning",
-        )
-    elif failures:
-        failed_names = ", ".join(str(row.get("relative_path") or "file") for row in failures[:5])
-        _files_set_notice(f"Could not upload: {failed_names}", level="warning")
-    else:
-        _files_set_notice(f"{len(successes)} file{'s' if len(successes) != 1 else ''} uploaded")
-    if auto_submit:
-        st.session_state[generation_key] = generation + 1
+    if nonce == str(st.session_state.get("files_chunk_upload_processed") or ""):
+        return
+    event_path = dropbox_integration.normalize_dropbox_path(event.get("current_path") or "")
+    if event_path != dropbox_integration.normalize_dropbox_path(current_path):
+        return
+    if event_name == "upload_completed":
+        metadata = dict(event.get("metadata") or {})
+        name = str(metadata.get("name") or event.get("name") or "file")
+        if metadata:
+            _files_save_upload_metadata(
+                [{"relative_path": name, "metadata": metadata}],
+                user,
+                asset_type="files",
+            )
+        _files_clear_directory_cache(current_path)
+        _files_set_notice(f"Uploaded {name}")
+    elif event_name == "new_folder_requested":
+        st.session_state["files_new_folder_open"] = True
+    elif event_name == "rename_requested" and selected_path:
+        _files_begin_rename_state(selected_path, current_path)
+    elif event_name == "clear_selection":
+        st.session_state.pop("files_selected_path", None)
+        st.session_state.pop("files_rename_path", None)
+    st.session_state["files_chunk_upload_processed"] = nonce
+    st.session_state["files_chunk_upload_ack"] = nonce
     _files_fragment_rerun()
 
 
 def _render_files_command_bar(access_token, user, current_path):
     with st.container(key="files-command-bar"):
-        columns = st.columns([1, 1, 1, 0.8, 4.2])
-        with columns[0]:
-            with st.popover("New folder", icon=":material/create_new_folder:", width="stretch"):
-                folder_name = st.text_input("Folder name", key=f"files-new-folder-name::{current_path}")
-                folder_conflict = st.selectbox(
-                    "If it already exists",
-                    ("Cancel", "Keep both"),
-                    key=f"files-new-folder-conflict::{current_path}",
-                )
-                if st.button("Create", key=f"files-new-folder-submit::{current_path}", use_container_width=True):
-                    try:
-                        metadata = dropbox_integration.create_folder(
-                            access_token,
-                            current_path,
-                            folder_name,
-                            conflict="keep_both" if folder_conflict == "Keep both" else "cancel",
-                        )
-                        if metadata:
-                            created_path = str(metadata.get("path_display") or metadata.get("path_lower") or "")
-                            _files_clear_directory_cache(current_path)
-                            record_activity_log(
-                                "files_folder_created",
-                                "Files",
-                                f"Folder created: {metadata.get('name') or folder_name}",
-                                entity_type="dropbox_folder",
-                                entity_id=created_path,
-                            )
-                            _files_set_notice("Folder created")
-                        else:
-                            _files_set_notice("Folder was not created", level="warning")
-                        _files_fragment_rerun()
-                    except Exception as error:
-                        logging.warning("Files folder creation failed: %s", error)
-                        st.warning("This folder could not be created.")
-        with columns[1]:
-            with st.popover("Upload files", icon=":material/upload_file:", width="stretch"):
-                _render_files_upload_control(
-                    access_token,
-                    user,
-                    current_path,
-                    key=f"files-command-upload::{current_path}",
-                )
-        with columns[2]:
-            with st.popover("Upload folder", icon=":material/drive_folder_upload:", width="stretch"):
-                _render_files_upload_control(
-                    access_token,
-                    user,
-                    current_path,
-                    key=f"files-folder-upload::{current_path}",
-                    directory=True,
-                )
-        with columns[3]:
-            st.button(
-                "Refresh",
-                icon=":material/refresh:",
-                key=_files_widget_key("files-refresh", current_path),
-                help="Refresh this folder",
-                on_click=_files_refresh_folder_state,
-                args=(current_path,),
-                use_container_width=True,
+        _render_files_chunk_uploader(user, current_path)
+
+
+def _render_files_new_folder_action(access_token, user, current_path):
+    if not st.session_state.get("files_new_folder_open"):
+        return
+    with st.container(key="files-inline-new-folder"):
+        with st.form(_files_widget_key("files-new-folder-form", current_path)):
+            st.markdown("**New folder**")
+            folder_name = st.text_input("Folder name")
+            folder_conflict = st.selectbox("If it already exists", ("Cancel", "Keep both"))
+            create_col, cancel_col = st.columns(2)
+            create = create_col.form_submit_button("Create", use_container_width=True)
+            cancel = cancel_col.form_submit_button("Cancel", use_container_width=True)
+    if cancel:
+        st.session_state.pop("files_new_folder_open", None)
+        _files_fragment_rerun()
+    if create:
+        try:
+            metadata = dropbox_integration.create_folder(
+                access_token,
+                current_path,
+                folder_name,
+                conflict="keep_both" if folder_conflict == "Keep both" else "cancel",
             )
+            if metadata:
+                created_path = str(metadata.get("path_display") or metadata.get("path_lower") or "")
+                _files_clear_directory_cache(current_path)
+                record_activity_log(
+                    "files_folder_created",
+                    "Files",
+                    f"Folder created: {metadata.get('name') or folder_name}",
+                    entity_type="dropbox_folder",
+                    entity_id=created_path,
+                )
+                _files_set_notice("Folder created")
+            else:
+                _files_set_notice("Folder was not created", level="warning")
+            st.session_state.pop("files_new_folder_open", None)
+            _files_fragment_rerun()
+        except Exception as error:
+            logging.warning("Files folder creation failed: %s", error)
+            st.warning("This folder could not be created.")
 
 
 def _render_files_rename_action(access_token, user, root_path, current_path):
@@ -10293,14 +10449,16 @@ def _render_files_rename_action(access_token, user, root_path, current_path):
         st.info("This item cannot be renamed here.")
         return
     old_name = selected_path.rsplit("/", 1)[-1]
-    with st.form(f"files-rename::{selected_path}"):
-        st.markdown(f"**Rename {html.escape(old_name)}**")
-        new_name = st.text_input("Name", value=old_name)
-        save_col, cancel_col = st.columns(2)
-        save = save_col.form_submit_button("Rename", use_container_width=True)
-        cancel = cancel_col.form_submit_button("Cancel", use_container_width=True)
+    with st.container(key="files-inline-rename"):
+        with st.form(f"files-rename::{selected_path}"):
+            st.markdown(f"**Rename {html.escape(old_name)}**")
+            new_name = st.text_input("Name", value=old_name)
+            save_col, cancel_col = st.columns(2)
+            save = save_col.form_submit_button("Rename", use_container_width=True)
+            cancel = cancel_col.form_submit_button("Cancel", use_container_width=True)
     if cancel:
         st.session_state.pop("files_rename_path", None)
+        st.session_state.pop("files_selected_path", None)
         _files_fragment_rerun()
     if save:
         try:
@@ -10327,6 +10485,7 @@ def _render_files_rename_action(access_token, user, root_path, current_path):
             )
             _files_set_notice("Item renamed")
             st.session_state.pop("files_rename_path", None)
+            st.session_state.pop("files_selected_path", None)
             _files_fragment_rerun()
         except Exception as error:
             logging.warning("Files rename failed: %s", error)
@@ -10370,28 +10529,27 @@ def _render_files_browser(access_token, user, root_path):
             current_path = ""
             st.session_state["files_browser_path"] = ""
 
-        _render_files_breadcrumb(current_path, root_path)
+        search_query = _render_files_navigation(current_path, root_path)
         if not current_path:
             root_entry = {
                 ".tag": "folder",
                 "name": dropbox_integration.DROPBOX_TEAM_FOLDER,
                 "path_display": root_path,
             }
-            _render_files_details([root_entry], user, root_path, show_header=False)
+            root_rows = _files_filter_entries([root_entry], search_query)
+            if root_rows:
+                _render_files_details(root_rows, user, root_path)
+            else:
+                st.markdown(
+                    '<div class="sc-files-empty">No items match your search</div>',
+                    unsafe_allow_html=True,
+                )
             return
 
         _files_render_notice()
         _render_files_command_bar(access_token, user, current_path)
+        _render_files_new_folder_action(access_token, user, current_path)
         _render_files_rename_action(access_token, user, root_path, current_path)
-        with st.container(key="files-drop-target"):
-            _render_files_upload_control(
-                access_token,
-                user,
-                current_path,
-                key=f"files-drop-upload::{current_path}",
-                compact=True,
-                auto_submit=True,
-            )
 
         loading = st.empty()
         if not _files_directory_is_cached(current_path):
@@ -10410,7 +10568,14 @@ def _render_files_browser(access_token, user, root_path):
                 unsafe_allow_html=True,
             )
             return
-        _render_files_details(entries, user, root_path)
+        filtered_entries = _files_filter_entries(entries, search_query)
+        if not filtered_entries:
+            st.markdown(
+                '<div class="sc-files-empty">No items match your search</div>',
+                unsafe_allow_html=True,
+            )
+            return
+        _render_files_details(filtered_entries, user, root_path)
 
 
 def render_files_page():

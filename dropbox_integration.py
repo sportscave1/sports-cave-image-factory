@@ -25,7 +25,6 @@ DROPBOX_CLIENT_CACHE_SECONDS = 45 * 60
 DROPBOX_CLIENT_CACHE_LIMIT = 8
 DROPBOX_SIMPLE_UPLOAD_LIMIT = 8 * 1024 * 1024
 DROPBOX_UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024
-DROPBOX_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 DROPBOX_FOLDER_OPTIONS = (
     ("brand_assets", "01 Brand Assets"),
@@ -117,7 +116,15 @@ def _metadata_to_dict(metadata):
 
 def _dropbox_error(error, fallback="Dropbox request failed."):
     message = str(error or "").strip() or fallback
-    return DropboxApiError(message[:500])
+    wrapped = DropboxApiError(message[:500])
+    api_error = getattr(error, "error", None)
+    try:
+        if api_error is not None and api_error.is_incorrect_offset():
+            offset_error = api_error.get_incorrect_offset()
+            wrapped.correct_offset = int(getattr(offset_error, "correct_offset"))
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return wrapped
 
 
 def clear_team_space_client_cache():
@@ -792,11 +799,11 @@ def upload_stream(
     progress_callback=None,
     simple_limit=DROPBOX_SIMPLE_UPLOAD_LIMIT,
     chunk_size=DROPBOX_UPLOAD_CHUNK_SIZE,
-    max_bytes=DROPBOX_MAX_UPLOAD_BYTES,
+    max_bytes=None,
 ):
     """Upload one stream using explicit conflict handling and chunking when needed."""
     total_size = _stream_size(stream, size)
-    if total_size > int(max_bytes):
+    if max_bytes is not None and total_size > int(max_bytes):
         raise ValueError("This file is larger than the current upload limit.")
     resolved = resolve_upload_destination(access_token, dropbox_path, conflict)
     if resolved is None:
@@ -864,6 +871,74 @@ def upload_stream(
                 stream.seek(0)
             except Exception:
                 pass
+
+
+def start_upload_session(access_token, data=b""):
+    """Start a Dropbox upload session with one bounded chunk."""
+    chunk = bytes(data or b"")
+    if len(chunk) > DROPBOX_UPLOAD_CHUNK_SIZE:
+        raise ValueError("Upload chunk is too large.")
+    try:
+        result = team_space_client(access_token).files_upload_session_start(chunk)
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox upload could not start.") from error
+    session_id = str(getattr(result, "session_id", "") or "")
+    if not session_id:
+        raise DropboxApiError("Dropbox did not return an upload session.")
+    return session_id
+
+
+def append_upload_session(access_token, session_id, offset, data):
+    """Append one bounded chunk to an existing Dropbox upload session."""
+    chunk = bytes(data or b"")
+    if len(chunk) > DROPBOX_UPLOAD_CHUNK_SIZE:
+        raise ValueError("Upload chunk is too large.")
+    sdk = _dropbox_sdk()
+    cursor = sdk.files.UploadSessionCursor(
+        session_id=str(session_id or ""),
+        offset=max(0, int(offset or 0)),
+    )
+    try:
+        team_space_client(access_token).files_upload_session_append_v2(chunk, cursor)
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox upload could not continue.") from error
+    return cursor.offset + len(chunk)
+
+
+def finish_upload_session(
+    access_token,
+    session_id,
+    offset,
+    data,
+    dropbox_path,
+    *,
+    mode="add",
+):
+    """Commit a Dropbox upload session only after its final bounded chunk."""
+    chunk = bytes(data or b"")
+    if len(chunk) > DROPBOX_UPLOAD_CHUNK_SIZE:
+        raise ValueError("Upload chunk is too large.")
+    sdk = _dropbox_sdk()
+    cursor = sdk.files.UploadSessionCursor(
+        session_id=str(session_id or ""),
+        offset=max(0, int(offset or 0)),
+    )
+    write_mode = sdk.files.WriteMode.overwrite if str(mode) == "overwrite" else sdk.files.WriteMode.add
+    commit = sdk.files.CommitInfo(
+        path=normalize_dropbox_path(dropbox_path),
+        mode=write_mode,
+        autorename=False,
+        mute=False,
+    )
+    try:
+        metadata = team_space_client(access_token).files_upload_session_finish(
+            chunk,
+            cursor,
+            commit,
+        )
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox upload could not finish.") from error
+    return _metadata_to_dict(metadata)
 
 
 def upload_local_file(access_token, dropbox_path, local_path, *, conflict="cancel", progress_callback=None):
