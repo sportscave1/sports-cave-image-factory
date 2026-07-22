@@ -1,0 +1,109 @@
+warning: in the working copy of 'ads_page.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_ads_page.py', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/ads_page.py b/ads_page.py[m
+[1mindex 9cf372e..6f2c246 100644[m
+[1m--- a/ads_page.py[m
+[1m+++ b/ads_page.py[m
+[36m@@ -33,7 +33,7 @@[m [mCAMPAIGN_TYPE_OPTIONS = [[m
+     "Single Image / Video",[m
+ ][m
+ [m
+[31m-CAROUSEL_CARD_MAX_CHARACTERS = 17[m
+[32m+[m[32mCAROUSEL_CARD_MAX_CHARACTERS = 13[m
+ CAROUSEL_CARD_COUNT = 5[m
+ [m
+ BANNED_GENERIC_CAROUSEL_PHRASES = ([m
+[36m@@ -50,6 +50,32 @@[m [mBANNED_GENERIC_CAROUSEL_PHRASES = ([m
+     "Sports Glory",[m
+     "Wall Worthy",[m
+     "Premium Piece",[m
+[32m+[m[32m    "Framed",[m
+[32m+[m[32m    "Framed Art",[m
+[32m+[m[32m    "Wall Art",[m
+[32m+[m[32m    "Collector",[m
+[32m+[m[32m    "Collector Piece",[m
+[32m+[m[32m    "Garage Pride",[m
+[32m+[m[32m    "Fan Favourite",[m
+[32m+[m[32m    "Motorsport Art",[m
+[32m+[m[32m    "Racing Art",[m
+[32m+[m[32m    "Must Have",[m
+[32m+[m[32m    "Shop Now",[m
+[32m+[m[32m    "Own It Now",[m
+[32m+[m[32m)[m
+[32m+[m
+[32m+[m[32mPRODUCT_SPECIFIC_CAROUSEL_EXAMPLES = ([m
+[32m+[m[32m    "Six Laps",[m
+[32m+[m[32m    "Peter Brock",[m
+[32m+[m[32m    "Bathurst 1979",[m
+[32m+[m[32m    "Mt Panorama",[m
+[32m+[m[32m    "Brock Legacy",[m
+[32m+[m[32m    "Still Roars",[m
+[32m+[m[32m    "Ford v Holden",[m
+[32m+[m[32m    "Lap Of Gods",[m
+[32m+[m[32m    "Race Legend",[m
+[32m+[m[32m    "Only 100 Made",[m
+[32m+[m[32m    "No Second Run",[m
+ )[m
+ [m
+ SCARCITY_TERMS = ([m
+[36m@@ -82,12 +108,22 @@[m [mCATEGORY_COPY_CUES = {[m
+ [m
+ SUPPORTED_TEMPLATES = {[m
+     ("Motorsport", "Carousel"): "motorsport_carousel",[m
+[32m+[m[32m    ("Baseball", "Instant Experience"): "baseball_instant_experience",[m
+ }[m
+ [m
+ TEMPLATES_WITH_PRIMARY_TEXT_VARIATIONS = {[m
+     "motorsport_carousel",[m
+ }[m
+ [m
+[32m+[m[32mBASEBALL_INSTANT_EXPERIENCE_PRODUCT_SET_NAME = "Baseball Wall Art"[m
+[32m+[m[32mBASEBALL_INSTANT_EXPERIENCE_CTA = "Claim Your Edition"[m
+[32m+[m[32mBASEBALL_INSTANT_EXPERIENCE_APPROVED_CLAIMS = ([m
+[32m+[m[32m    "✔ Only 100 editions.",[m
+[32m+[m[32m    "✔ Numbered C.O.A. included.",[m
+[32m+[m[32m    "✔ Made in the USA.",[m
+[32m+[m[32m    "✔ Rated 4.9 / 5 by thousands of collectors.",[m
+[32m+[m[32m)[m
+[32m+[m
+ IMAGE_ORDER = [[m
+     ("Hero", "Cleanest, strongest front-facing product mockup."),[m
+     ("Story", "A mockup that supports the race, rivalry, driver, car or historic moment."),[m
+[36m@@ -103,16 +139,87 @@[m [mMETA_BUILD_ORDER = [[m
+     "Add the five primary-text variations and allow Meta to test them.",[m
+ ][m
+ [m
+[32m+[m[32mCOUNTRY_LANGUAGE_PROFILES = {[m
+[32m+[m[32m    "Australia": {[m
+[32m+[m[32m        "heading": "COUNTRY LANGUAGE AND LOCALISATION — AUSTRALIA",[m
+[32m+[m[32m        "english_variant": "natural Australian English",[m
+[32m+[m[32m        "spellings": "colour, favourite, organise, personalised, centre, licence as a noun, licensed as a verb or adjective, travelled, travelling",[m
+[32m+[m[32m        "terminology": "delivery, free delivery, add to cart, shop, order, collector, limited edition, framed artwork, race day, and footy only when the selected sport and context make it genuinely appropriate",[m
+[32m+[m[32m        "sports": "For Australian motorsport, cricket, AFL and other categories, use terminology Australian fans naturally expect. Motorsport may reference Bathurst, the Mountain, race day, touring-car heritage or Australian motorsport history only when supported by the selected product. AFL may use footy where natural. Cricket language should sound Australian rather than American. Association football should normally be called football or soccer according to the specific Australian audience and existing category naming.",[m
+[32m+[m[32m        "avoid": "Do not force words such as mate, Aussie, bloody, legend or reckon. Do not use American spelling such as color, favorite, center, personalize, organize or license as a noun when licence is required. Do not use American retail terminology where it would feel unnatural.",[m
+[32m+[m[32m        "quality": "Australian spelling throughout. No accidental American spelling.",[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "USA": {[m
+[32m+[m[32m        "heading": "COUNTRY LANGUAGE AND LOCALISATION — UNITED STATES",[m
+[32m+[m[32m        "english_variant": "natural American English",[m
+[32m+[m[32m        "spellings": "color, favorite, organize, personalized, center, license, traveled, traveling",[m
+[32m+[m[32m        "terminology": "shipping, free shipping, add to cart, shop now, game day, home, fan, collector, limited edition, framed artwork, sports room, and man cave",[m
+[32m+[m[32m        "sports": "Use the terminology American fans expect for each sport. Association football should normally be called soccer. American football should be called football or NFL when factually appropriate. Baseball copy should use natural American baseball terminology. Basketball copy should sound like copy written for an American NBA audience. Motorsport language should match the actual product and racing category.",[m
+[32m+[m[32m        "avoid": "Do not use British or Australian spellings such as colour, favourite, centre, personalised, organise or licence as the noun form. Do not use add to basket. Do not use Australian or British fan terminology where it would sound foreign to the intended US audience.",[m
+[32m+[m[32m        "quality": "American spelling throughout. No accidental British or Australian spelling.",[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "UK": {[m
+[32m+[m[32m        "heading": "COUNTRY LANGUAGE AND LOCALISATION — UNITED KINGDOM",[m
+[32m+[m[32m        "english_variant": "natural British English",[m
+[32m+[m[32m        "spellings": "colour, favourite, organise, personalised, centre, licence as a noun, licensed as a verb or adjective, travelled, travelling",[m
+[32m+[m[32m        "terminology": "delivery, free delivery, add to basket, shop, order, supporter, fan, collector, limited edition, framed artwork, and matchday",[m
+[32m+[m[32m        "sports": "Use the terminology UK sports fans naturally expect. Association football must normally be called football, not soccer. Use club, supporter, match, matchday, fixture, season and derby where natural and factually appropriate. Motorsport and cricket terminology should sound natural to UK audiences. Do not use American sports vocabulary where it conflicts with UK usage.",[m
+[32m+[m[32m        "avoid": "Do not use American spelling such as color, favorite, center, personalized or organize. Do not use add to cart when the intended UI or copy context should naturally use basket. Do not use soccer for UK football audiences. Avoid forced British slang such as mate, proper, brilliant or cheeky unless genuinely natural, commercially appropriate and aligned with Sports Cave's premium tone.",[m
+[32m+[m[32m        "quality": "British spelling throughout. Football terminology instead of soccer where association football is intended. No accidental American spelling.",[m
+[32m+[m[32m    },[m
+[32m+[m[32m    "Canada": {[m
+[32m+[m[32m        "heading": "COUNTRY LANGUAGE AND LOCALISATION — CANADA",[m
+[32m+[m[32m        "english_variant": "natural Canadian English",[m
+[32m+[m[32m        "spellings": "colour, favourite, centre, travelled and travelling, while using clear North American phrasing where it is natural",[m
+[32m+[m[32m        "terminology": "shipping, delivery, add to cart, shop, order, fan, collector, limited edition, framed artwork, sports room, and man cave where appropriate",[m
+[32m+[m[32m        "sports": "Use terminology Canadian fans naturally expect for the selected sport. Hockey language should sound Canadian when hockey is selected. Basketball, baseball, football, motorsport and other categories must stay tied to the supplied produ

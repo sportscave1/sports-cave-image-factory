@@ -1,4 +1,5 @@
 from datetime import date, datetime, time, timedelta, timezone
+from collections import Counter
 import json
 from pathlib import Path
 import re
@@ -104,8 +105,23 @@ def clear_activity_cache():
     _ACTIVITY_CACHE.clear()
 
 
-def clear_daily_execution_cache():
-    _DAILY_EXECUTION_CACHE.clear()
+def clear_daily_execution_cache(user_id=None, sheet_dates=None):
+    clean_user_id = str(user_id or "").strip()
+    clean_dates = {
+        value.isoformat() if isinstance(value, date) else str(value or "").strip()
+        for value in (sheet_dates or [])
+    }
+    if not clean_user_id and not clean_dates:
+        _DAILY_EXECUTION_CACHE.clear()
+        return
+    for key in list(_DAILY_EXECUTION_CACHE):
+        key_text = tuple(str(part or "") for part in (key if isinstance(key, tuple) else (key,)))
+        if clean_user_id and clean_user_id not in key_text:
+            continue
+        if clean_dates and not any(value in key_text for value in clean_dates):
+            if key_text and key_text[0] not in {"daily_week", "daily_archive_detail"}:
+                continue
+        _DAILY_EXECUTION_CACHE.pop(key, None)
 
 
 def clear_calendar_cache():
@@ -255,8 +271,16 @@ def complete_design_task_for_upload(task_id, task_text, mockup_scope, *, metadat
 
 
 DAILY_EXECUTION_TITLE = "Daily Task Execution Sheet - The 5 Million Dollar Man"
+DAILY_EXECUTION_STATUS_PLANNED = "planned"
 DAILY_EXECUTION_STATUS_ACTIVE = "active"
 DAILY_EXECUTION_STATUS_COMPLETED = "completed"
+DAILY_EXECUTION_STATUS_REVIEWED = "reviewed"
+DAILY_EXECUTION_STATUS_ARCHIVED = "archived"
+DAILY_EXECUTION_REVIEWED_STATUSES = (
+    DAILY_EXECUTION_STATUS_COMPLETED,
+    DAILY_EXECUTION_STATUS_REVIEWED,
+    DAILY_EXECUTION_STATUS_ARCHIVED,
+)
 DAILY_TASK_STATUS_DONE = "done"
 DAILY_TASK_STATUS_COULDNT_FINISH = "couldnt_finish"
 DAILY_TASK_FINISHED_STATUSES = (DAILY_TASK_STATUS_DONE, DAILY_TASK_STATUS_COULDNT_FINISH)
@@ -327,6 +351,8 @@ def _normalise_top_tasks(items):
                 "time_blocked": _compact_text(item.get("time_blocked") or item.get("time") or ""),
                 "completed": completed,
                 "status": status,
+                "completed_at": item.get("completed_at"),
+                "carried_from": _compact_text(item.get("carried_from") or ""),
             }
         )
     while len(rows) < 3:
@@ -354,6 +380,8 @@ def _normalise_additional_items(items, *, include_blank=True):
             "time_blocked": _compact_text(item.get("time_blocked") or item.get("time") or item.get("time_allocated") or ""),
             "completed": completed,
             "status": status,
+            "completed_at": item.get("completed_at"),
+            "carried_from": _compact_text(item.get("carried_from") or ""),
         }
         if _daily_additional_item_has_content(row) or include_blank:
             rows.append(row)
@@ -385,6 +413,8 @@ def _normalise_additional_items_for_save(items):
                     "time_blocked": item.get("time_blocked") or "",
                     "completed": daily_execution_task_finished(item),
                     "status": item.get("status") or "",
+                    "completed_at": item.get("completed_at"),
+                    "carried_from": item.get("carried_from") or "",
                 }
             )
     return rows
@@ -398,6 +428,9 @@ def _normalise_daily_sheet(sheet):
     additional_items = _normalise_additional_items(sheet.get("additional_items") or [])
     no_grey_zone = sheet.get("no_grey_zone") if isinstance(sheet.get("no_grey_zone"), dict) else {}
     ratings = sheet.get("ratings") if isinstance(sheet.get("ratings"), dict) else {}
+    planning_data = sheet.get("planning_data") if isinstance(sheet.get("planning_data"), dict) else {}
+    review_data = sheet.get("review_data") if isinstance(sheet.get("review_data"), dict) else {}
+    archived_snapshot = sheet.get("archived_snapshot") if isinstance(sheet.get("archived_snapshot"), dict) else {}
     return {
         **sheet,
         "id": str(sheet.get("id") or ""),
@@ -411,9 +444,14 @@ def _normalise_daily_sheet(sheet):
         "additional_items": additional_items,
         "no_grey_zone": no_grey_zone,
         "ratings": ratings,
+        "planning_data": planning_data,
+        "review_data": review_data,
+        "archived_snapshot": archived_snapshot,
         "daily_summary": str(sheet.get("daily_summary") or ""),
         "tomorrow_intention": str(sheet.get("tomorrow_intention") or ""),
         "generated_prompt": str(sheet.get("generated_prompt") or ""),
+        "activated_at": sheet.get("activated_at"),
+        "archived_at": sheet.get("archived_at"),
     }
 
 
@@ -446,22 +484,64 @@ def get_daily_execution_sheet(user, sheet_date):
         raise DashboardStorageError(_storage_error(error)) from error
 
 
-def create_daily_execution_sheet(user, sheet_date, timezone_name):
+def get_daily_execution_home_sheets(user, today):
+    user_id = daily_execution_user_id(user)
+    clean_today = today.isoformat() if isinstance(today, date) else str(today or "")
+    tomorrow = date.fromisoformat(clean_today) + timedelta(days=1)
+    cache_key = ("daily_home", user_id, clean_today)
+    cached = _cache_get(_DAILY_EXECUTION_CACHE, cache_key)
+    if cached is not None:
+        by_date = {row.get("sheet_date"): row for row in cached}
+        return {
+            "today": by_date.get(clean_today, {}),
+            "tomorrow": by_date.get(tomorrow.isoformat(), {}),
+        }
+    try:
+        backend = get_supabase_backend()
+        if hasattr(backend, "get_daily_execution_home_sheets"):
+            rows = backend.get_daily_execution_home_sheets(user_id, clean_today)
+            normalised = [_normalise_daily_sheet(row) for row in rows or [] if row]
+        else:
+            normalised = [
+                row
+                for row in (
+                    get_daily_execution_sheet(user, clean_today),
+                    get_daily_execution_sheet(user, tomorrow),
+                )
+                if row
+            ]
+        _cache_set(_DAILY_EXECUTION_CACHE, cache_key, normalised, DAILY_EXECUTION_CACHE_TTL_SECONDS)
+        by_date = {row.get("sheet_date"): row for row in normalised}
+        return {
+            "today": by_date.get(clean_today, {}),
+            "tomorrow": by_date.get(tomorrow.isoformat(), {}),
+        }
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def create_daily_execution_sheet(user, sheet_date, timezone_name, *, status=None):
     clean_date = sheet_date.isoformat() if isinstance(sheet_date, date) else str(sheet_date or "")
     try:
         backend = get_supabase_backend()
         from activity_log import get_activity_actor
 
-        sheet = _normalise_daily_sheet(
-            backend.create_daily_execution_sheet(
-                user_id=daily_execution_user_id(user),
-                user_name=daily_execution_user_name(user),
-                sheet_date=clean_date,
-                timezone_name=timezone_name,
-                actor=get_activity_actor(),
-            )
-        )
-        clear_daily_execution_cache()
+        kwargs = {
+            "user_id": daily_execution_user_id(user),
+            "user_name": daily_execution_user_name(user),
+            "sheet_date": clean_date,
+            "timezone_name": timezone_name,
+            "actor": get_activity_actor(),
+        }
+        if status is not None:
+            kwargs["status"] = status
+        try:
+            raw_sheet = backend.create_daily_execution_sheet(**kwargs)
+        except TypeError:
+            kwargs.pop("status", None)
+            raw_sheet = backend.create_daily_execution_sheet(**kwargs)
+        sheet = _normalise_daily_sheet(raw_sheet)
+        clear_daily_execution_cache(daily_execution_user_id(user), [clean_date])
         clear_activity_cache()
         return sheet
     except Exception as error:
@@ -478,7 +558,7 @@ def save_daily_execution_top_tasks(sheet_id, top_tasks):
         raise DashboardStorageError(_storage_error(error)) from error
 
 
-def save_daily_execution_tasks(sheet_id, top_tasks, additional_items):
+def save_daily_execution_tasks(sheet_id, top_tasks, additional_items, *, user=None):
     try:
         backend = get_supabase_backend()
         sheet = _normalise_daily_sheet(
@@ -488,7 +568,7 @@ def save_daily_execution_tasks(sheet_id, top_tasks, additional_items):
                 _normalise_additional_items_for_save(additional_items),
             )
         )
-        clear_daily_execution_cache()
+        clear_daily_execution_cache(daily_execution_user_id(user) if user else None)
         return sheet
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
@@ -505,19 +585,21 @@ def set_daily_execution_mip_completed(sheet_id, index, completed):
         raise DashboardStorageError(_storage_error(error)) from error
 
 
-def complete_daily_execution_review(sheet_id, review_payload):
+def complete_daily_execution_review(sheet_id, review_payload, *, user=None):
     try:
         backend = get_supabase_backend()
         from activity_log import get_activity_actor
 
-        sheet = _normalise_daily_sheet(
-            backend.complete_daily_execution_review(
-                sheet_id,
-                review_payload or {},
-                actor=get_activity_actor(),
-            )
-        )
-        clear_daily_execution_cache()
+        kwargs = {"actor": get_activity_actor()}
+        if user:
+            kwargs["user_id"] = daily_execution_user_id(user)
+        try:
+            raw_sheet = backend.complete_daily_execution_review(sheet_id, review_payload or {}, **kwargs)
+        except TypeError:
+            kwargs.pop("user_id", None)
+            raw_sheet = backend.complete_daily_execution_review(sheet_id, review_payload or {}, **kwargs)
+        sheet = _normalise_daily_sheet(raw_sheet)
+        clear_daily_execution_cache(daily_execution_user_id(user) if user else None)
         clear_activity_cache()
         return sheet
     except Exception as error:
@@ -548,6 +630,108 @@ def list_daily_execution_sheets(user, start_date, end_date, *, limit=10):
         raise DashboardStorageError(_storage_error(error)) from error
 
 
+def save_daily_execution_plan(
+    user,
+    sheet_date,
+    timezone_name,
+    top_tasks,
+    additional_items,
+    planning_data,
+    *,
+    archive_sheet_id=None,
+):
+    clean_date = sheet_date.isoformat() if isinstance(sheet_date, date) else str(sheet_date or "")
+    user_id = daily_execution_user_id(user)
+    try:
+        backend = get_supabase_backend()
+        from activity_log import get_activity_actor
+
+        if hasattr(backend, "save_daily_execution_plan"):
+            raw = backend.save_daily_execution_plan(
+                user_id=user_id,
+                user_name=daily_execution_user_name(user),
+                sheet_date=clean_date,
+                timezone_name=timezone_name,
+                top_tasks=_normalise_top_tasks(top_tasks),
+                additional_items=_normalise_additional_items_for_save(additional_items),
+                planning_data=dict(planning_data or {}),
+                archive_sheet_id=str(archive_sheet_id or "").strip() or None,
+                actor=get_activity_actor(),
+            )
+        else:
+            existing = get_daily_execution_sheet(user, clean_date)
+            if existing:
+                raw = backend.update_daily_execution_top_tasks(
+                    existing.get("id"),
+                    _normalise_top_tasks(top_tasks),
+                    _normalise_additional_items_for_save(additional_items),
+                )
+            else:
+                raw = backend.create_daily_execution_sheet(
+                    user_id=user_id,
+                    user_name=daily_execution_user_name(user),
+                    sheet_date=clean_date,
+                    timezone_name=timezone_name,
+                    actor=get_activity_actor(),
+                )
+                raw = backend.update_daily_execution_top_tasks(
+                    raw.get("id"),
+                    _normalise_top_tasks(top_tasks),
+                    _normalise_additional_items_for_save(additional_items),
+                )
+        clear_daily_execution_cache(user_id, [clean_date])
+        clear_activity_cache()
+        return _normalise_daily_sheet(raw)
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def list_daily_execution_archive_summaries(user, start_date, end_date, *, limit=8):
+    user_id = daily_execution_user_id(user)
+    clean_start = start_date.isoformat() if isinstance(start_date, date) else str(start_date or "")
+    clean_end = end_date.isoformat() if isinstance(end_date, date) else str(end_date or "")
+    cache_key = ("daily_week", user_id, clean_start, clean_end, int(limit))
+    cached = _cache_get(_DAILY_EXECUTION_CACHE, cache_key)
+    if cached is not None:
+        return [_normalise_daily_sheet(row) for row in cached]
+    try:
+        backend = get_supabase_backend()
+        if hasattr(backend, "list_daily_execution_archive_summaries"):
+            rows = backend.list_daily_execution_archive_summaries(
+                user_id,
+                clean_start,
+                clean_end,
+                limit=limit,
+            )
+        else:
+            rows = backend.list_daily_execution_sheets(user_id, clean_start, clean_end, limit=limit)
+        normalised = [_normalise_daily_sheet(row) for row in rows or []]
+        _cache_set(_DAILY_EXECUTION_CACHE, cache_key, normalised, DAILY_EXECUTION_CACHE_TTL_SECONDS)
+        return normalised
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
+def get_daily_execution_archive_detail(user, sheet_id):
+    user_id = daily_execution_user_id(user)
+    clean_id = str(sheet_id or "").strip()
+    cache_key = ("daily_archive_detail", user_id, clean_id)
+    cached = _cache_get(_DAILY_EXECUTION_CACHE, cache_key)
+    if cached is not None:
+        return _normalise_daily_sheet(cached[0]) if cached else {}
+    try:
+        backend = get_supabase_backend()
+        if hasattr(backend, "get_daily_execution_archive_detail"):
+            row = backend.get_daily_execution_archive_detail(user_id, clean_id)
+        else:
+            row = {}
+        normalised = _normalise_daily_sheet(row)
+        _cache_set(_DAILY_EXECUTION_CACHE, cache_key, [normalised] if normalised else [], DAILY_EXECUTION_CACHE_TTL_SECONDS)
+        return normalised
+    except Exception as error:
+        raise DashboardStorageError(_storage_error(error)) from error
+
+
 def daily_execution_completed_count(sheet):
     return sum(1 for task in (sheet or {}).get("top_tasks") or [] if task.get("task") and daily_execution_task_finished(task))
 
@@ -570,11 +754,123 @@ def daily_execution_all_mips_complete(sheet):
     return daily_execution_all_tasks_complete(sheet)
 
 
+def daily_execution_review_complete(sheet):
+    return str((sheet or {}).get("status") or "").strip().casefold() in DAILY_EXECUTION_REVIEWED_STATUSES
+
+
+def daily_execution_unfinished_tasks(sheet):
+    rows = []
+    for source, items in (("mip", (sheet or {}).get("top_tasks") or []), ("other", (sheet or {}).get("additional_items") or [])):
+        for index, item in enumerate(items):
+            item = dict(item or {})
+            if item.get("task") and _normalise_daily_task_status(item) == DAILY_TASK_STATUS_COULDNT_FINISH:
+                rows.append(
+                    {
+                        "key": f"{source}:{index}:{_compact_text(item.get('task'))}",
+                        "task": _compact_text(item.get("task") or ""),
+                        "details": _compact_text(item.get("why") or item.get("details") or ""),
+                        "time_blocked": _compact_text(item.get("time_blocked") or ""),
+                        "source": source,
+                    }
+                )
+    return rows
+
+
+def daily_execution_week_bounds(anchor_date):
+    day = anchor_date if isinstance(anchor_date, date) else date.fromisoformat(str(anchor_date))
+    start = day - timedelta(days=day.weekday())
+    return start, start + timedelta(days=6)
+
+
+def _planned_hours(value):
+    text = _compact_text(value or "").casefold()
+    if not text:
+        return 0.0
+    range_match = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(?:am|pm)?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(?:am|pm)?\b", text)
+    if range_match:
+        start = int(range_match.group(1)) + int(range_match.group(2) or 0) / 60
+        end = int(range_match.group(3)) + int(range_match.group(4) or 0) / 60
+        if end < start:
+            end += 12
+        return max(end - start, 0.0)
+    number_match = re.search(r"(\d+(?:\.\d+)?)", text)
+    if not number_match:
+        return 0.0
+    amount = float(number_match.group(1))
+    if "min" in text or re.search(r"\b\d+(?:\.\d+)?m\b", text):
+        return amount / 60
+    return amount
+
+
+def daily_execution_weekly_summary(sheets):
+    rows = [_normalise_daily_sheet(sheet) for sheet in sheets or []]
+    mip_done = 0
+    mip_open = 0
+    other_done = 0
+    planned_hours = 0.0
+    ratings = []
+    reasons = []
+    carried = []
+    wins = []
+    blockers = []
+    for sheet in rows:
+        for task in sheet.get("top_tasks") or []:
+            if not task.get("task"):
+                continue
+            if _normalise_daily_task_status(task) == DAILY_TASK_STATUS_DONE:
+                mip_done += 1
+            else:
+                mip_open += 1
+            planned_hours += _planned_hours(task.get("time_blocked"))
+        for task in sheet.get("additional_items") or []:
+            if not _daily_additional_item_has_content(task):
+                continue
+            if _normalise_daily_task_status(task) == DAILY_TASK_STATUS_DONE:
+                other_done += 1
+            planned_hours += _planned_hours(task.get("time_blocked"))
+        review = sheet.get("review_data") or {}
+        no_grey = sheet.get("no_grey_zone") or {}
+        reason = _compact_text(review.get("could_not_finish") or no_grey.get("avoided") or "")
+        if reason:
+            reasons.append(reason)
+            blockers.append(reason)
+        win = _compact_text(review.get("worked_well") or review.get("completed") or sheet.get("daily_summary") or "")
+        if win:
+            wins.append(win)
+        score = (sheet.get("ratings") or {}).get("Overall Score")
+        try:
+            if score is not None and float(score) > 0:
+                ratings.append(float(score))
+        except (TypeError, ValueError):
+            pass
+        for item in (sheet.get("planning_data") or {}).get("carried_forward") or []:
+            task_name = _compact_text((item or {}).get("task") if isinstance(item, dict) else item)
+            if task_name:
+                carried.append(task_name)
+    reason_counts = Counter(reasons)
+    carry_counts = Counter(carried)
+    repeated = [name for name, count in carry_counts.most_common() if count > 1]
+    return {
+        "days_planned": sum(1 for sheet in rows if daily_execution_filled_task_count(sheet) or any(_daily_additional_item_has_content(item) for item in sheet.get("additional_items") or [])),
+        "days_reviewed": sum(1 for sheet in rows if daily_execution_review_complete(sheet)),
+        "mip_completed": mip_done,
+        "mip_not_completed": mip_open,
+        "other_completed": other_done,
+        "planned_hours": round(planned_hours, 1),
+        "unfinished_reasons": [name for name, _count in reason_counts.most_common(3)],
+        "average_day_rating": round(sum(ratings) / len(ratings), 1) if ratings else 0,
+        "repeated_carryovers": repeated,
+        "biggest_wins": wins[:3],
+        "main_blockers": blockers[:3],
+        "recommended_priorities": repeated[:3] or [name for name, _count in carry_counts.most_common(3)],
+    }
+
+
 def daily_execution_alerts(sheet, local_now, *, user_name="Nathan"):
     alerts = []
     name = _compact_text(user_name or "Nathan")
     if not sheet:
-        alerts.append(f"{name}, today's execution sheet is not filled out yet.")
+        alerts.append("Today's execution sheet has not been planned.")
         return alerts
     filled = daily_execution_filled_task_count(sheet)
     complete = daily_execution_completed_count(sheet)
@@ -582,7 +878,7 @@ def daily_execution_alerts(sheet, local_now, *, user_name="Nathan"):
         alerts.append("Today's list has no tasks yet.")
     if local_now.hour >= 15 and complete < 2:
         alerts.append("Past 3pm: fewer than 2/3 tasks are complete.")
-    if local_now.hour >= 19 and sheet.get("status") != DAILY_EXECUTION_STATUS_COMPLETED:
+    if local_now.hour >= 19 and not daily_execution_review_complete(sheet):
         alerts.append("Past 7pm: Daily Review is still open.")
     return alerts
 

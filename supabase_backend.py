@@ -1248,16 +1248,26 @@ def _ensure_schema_uncached():
                     additional_items JSONB DEFAULT '[]'::jsonb,
                     no_grey_zone JSONB DEFAULT '{}'::jsonb,
                     ratings JSONB DEFAULT '{}'::jsonb,
+                    planning_data JSONB DEFAULT '{}'::jsonb,
+                    review_data JSONB DEFAULT '{}'::jsonb,
+                    archived_snapshot JSONB DEFAULT '{}'::jsonb,
                     daily_summary TEXT DEFAULT '',
                     tomorrow_intention TEXT DEFAULT '',
                     generated_prompt TEXT DEFAULT '',
+                    activated_at TIMESTAMPTZ,
                     completed_at TIMESTAMPTZ,
+                    archived_at TIMESTAMPTZ,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     UNIQUE (user_id, sheet_date)
                 )
                 """
             )
+            cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS planning_data JSONB DEFAULT '{}'::jsonb")
+            cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS review_data JSONB DEFAULT '{}'::jsonb")
+            cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS archived_snapshot JSONB DEFAULT '{}'::jsonb")
+            cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ")
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS dropbox_assets (
@@ -2212,16 +2222,26 @@ def ensure_dashboard_schema():
                         additional_items JSONB DEFAULT '[]'::jsonb,
                         no_grey_zone JSONB DEFAULT '{}'::jsonb,
                         ratings JSONB DEFAULT '{}'::jsonb,
+                        planning_data JSONB DEFAULT '{}'::jsonb,
+                        review_data JSONB DEFAULT '{}'::jsonb,
+                        archived_snapshot JSONB DEFAULT '{}'::jsonb,
                         daily_summary TEXT DEFAULT '',
                         tomorrow_intention TEXT DEFAULT '',
                         generated_prompt TEXT DEFAULT '',
+                        activated_at TIMESTAMPTZ,
                         completed_at TIMESTAMPTZ,
+                        archived_at TIMESTAMPTZ,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                         UNIQUE (user_id, sheet_date)
                     )
                     """
                 )
+                cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS planning_data JSONB DEFAULT '{}'::jsonb")
+                cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS review_data JSONB DEFAULT '{}'::jsonb")
+                cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS archived_snapshot JSONB DEFAULT '{}'::jsonb")
+                cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ")
+                cur.execute("ALTER TABLE daily_execution_sheets ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_status_created ON dashboard_tasks(status, created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_section_status ON dashboard_tasks(section, status)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_daily_execution_user_date ON daily_execution_sheets(user_id, sheet_date DESC)")
@@ -3235,10 +3255,15 @@ def _daily_execution_sheet_from_row(row):
         "additional_items": row.get("additional_items") or [],
         "no_grey_zone": row.get("no_grey_zone") or {},
         "ratings": row.get("ratings") or {},
+        "planning_data": row.get("planning_data") or {},
+        "review_data": row.get("review_data") or {},
+        "archived_snapshot": row.get("archived_snapshot") or {},
         "daily_summary": row.get("daily_summary") or "",
         "tomorrow_intention": row.get("tomorrow_intention") or "",
         "generated_prompt": row.get("generated_prompt") or "",
+        "activated_at": row.get("activated_at"),
         "completed_at": row.get("completed_at"),
+        "archived_at": row.get("archived_at"),
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
@@ -3265,21 +3290,37 @@ def get_daily_execution_sheet(user_id, sheet_date):
             return _daily_execution_sheet_from_row(cur.fetchone())
 
 
-def create_daily_execution_sheet(*, user_id, user_name, sheet_date, timezone_name, actor="sports_cave_os"):
+def create_daily_execution_sheet(
+    *,
+    user_id,
+    user_name,
+    sheet_date,
+    timezone_name,
+    actor="sports_cave_os",
+    status="active",
+):
     ensure_dashboard_schema()
     clean_user_id = str(user_id or "").strip()
     clean_user_name = str(user_name or "").strip() or "Nathan"
     clean_timezone = str(timezone_name or "").strip() or "Australia/Sydney"
+    clean_status = str(status or "active").strip().casefold()
+    if clean_status not in {"planned", "active"}:
+        clean_status = "active"
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                "SELECT id FROM daily_execution_sheets WHERE user_id=%s AND sheet_date=%s::date LIMIT 1",
+                (clean_user_id, str(sheet_date or "").strip()),
+            )
+            existed = bool(cur.fetchone())
             cur.execute(
                 """
                 INSERT INTO daily_execution_sheets(
                     user_id, user_name, sheet_date, timezone, status,
                     top_tasks, additional_items, no_grey_zone, ratings
                 )
-                VALUES (%s, %s, %s::date, %s, 'active', %s::jsonb, '[]'::jsonb, '{}'::jsonb, '{}'::jsonb)
+                VALUES (%s, %s, %s::date, %s, %s, %s::jsonb, '[]'::jsonb, '{}'::jsonb, '{}'::jsonb)
                 ON CONFLICT (user_id, sheet_date)
                 DO UPDATE SET updated_at=now()
                 RETURNING *
@@ -3289,26 +3330,28 @@ def create_daily_execution_sheet(*, user_id, user_name, sheet_date, timezone_nam
                     clean_user_name,
                     str(sheet_date or "").strip(),
                     clean_timezone,
+                    clean_status,
                     json_dumps(_default_daily_top_tasks()),
                 ),
             )
             row = cur.fetchone() or {}
             sheet = _daily_execution_sheet_from_row(row)
-            _insert_audit_log(
-                cur,
-                event_type="daily_execution_created",
-                entity_type="daily_execution_sheet",
-                entity_id=sheet.get("id") or "",
-                new_value={
-                    "message": f"Daily Execution sheet created: {sheet.get('sheet_date')}",
-                    "page": "Dashboard",
-                    "action_type": "daily_execution_created",
-                    "metadata": {"sheet_date": sheet.get("sheet_date") or "", "user_name": clean_user_name},
-                },
-                reason=f"Daily Execution sheet created: {sheet.get('sheet_date')}",
-                actor=str(actor or "").strip() or clean_user_name,
-                source="Dashboard",
-            )
+            if not existed:
+                _insert_audit_log(
+                    cur,
+                    event_type="daily_execution_created",
+                    entity_type="daily_execution_sheet",
+                    entity_id=sheet.get("id") or "",
+                    new_value={
+                        "message": f"Daily sheet created: {sheet.get('sheet_date')}",
+                        "page": "Dashboard",
+                        "action_type": "daily_execution_created",
+                        "metadata": {"sheet_date": sheet.get("sheet_date") or "", "user_name": clean_user_name},
+                    },
+                    reason=f"Daily sheet created: {sheet.get('sheet_date')}",
+                    actor=str(actor or "").strip() or clean_user_name,
+                    source="Dashboard",
+                )
         conn.commit()
     return sheet
 
@@ -3399,13 +3442,16 @@ def set_daily_execution_mip_completed(sheet_id, index, completed):
     return _daily_execution_sheet_from_row(updated)
 
 
-def complete_daily_execution_review(sheet_id, review_payload, *, actor="sports_cave_os"):
+def complete_daily_execution_review(sheet_id, review_payload, *, actor="sports_cave_os", user_id=None):
     ensure_dashboard_schema()
     review_payload = dict(review_payload or {})
     no_grey_zone = review_payload.get("no_grey_zone") or {}
     ratings = review_payload.get("ratings") or {}
     daily_summary = str(review_payload.get("daily_summary") or "").strip()
     tomorrow_intention = str(review_payload.get("tomorrow_intention") or "").strip()
+    review_data = review_payload.get("review_data") or no_grey_zone
+    owner_clause = " AND user_id=%s" if str(user_id or "").strip() else ""
+    owner_params = (str(user_id or "").strip(),) if owner_clause else ()
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
@@ -3413,47 +3459,51 @@ def complete_daily_execution_review(sheet_id, review_payload, *, actor="sports_c
                 cur.execute(
                     """
                     UPDATE daily_execution_sheets
-                    SET status='completed',
+                    SET status='reviewed',
                         no_grey_zone=%s::jsonb,
                         ratings=%s::jsonb,
+                        review_data=%s::jsonb,
                         additional_items=%s::jsonb,
                         daily_summary=%s,
                         tomorrow_intention=%s,
                         completed_at=now(),
                         updated_at=now()
-                    WHERE id=%s
+                    WHERE id=%s""" + owner_clause + """
                     RETURNING *
                     """,
                     (
                         json_dumps(no_grey_zone),
                         json_dumps(ratings),
+                        json_dumps(review_data),
                         json_dumps(review_payload.get("additional_items") or []),
                         daily_summary,
                         tomorrow_intention,
                         str(sheet_id or "").strip(),
-                    ),
+                    ) + owner_params,
                 )
             else:
                 cur.execute(
                     """
                     UPDATE daily_execution_sheets
-                    SET status='completed',
+                    SET status='reviewed',
                         no_grey_zone=%s::jsonb,
                         ratings=%s::jsonb,
+                        review_data=%s::jsonb,
                         daily_summary=%s,
                         tomorrow_intention=%s,
                         completed_at=now(),
                         updated_at=now()
-                    WHERE id=%s
+                    WHERE id=%s""" + owner_clause + """
                     RETURNING *
                     """,
                     (
                         json_dumps(no_grey_zone),
                         json_dumps(ratings),
+                        json_dumps(review_data),
                         daily_summary,
                         tomorrow_intention,
                         str(sheet_id or "").strip(),
-                    ),
+                    ) + owner_params,
                 )
             row = cur.fetchone()
             if row:

@@ -1,0 +1,184 @@
+warning: in the working copy of 'ads_page.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/test_ads_page.py', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/ads_page.py b/ads_page.py[m
+[1mindex 6f2c246..d5dab0f 100644[m
+[1m--- a/ads_page.py[m
+[1m+++ b/ads_page.py[m
+[36m@@ -139,6 +139,11 @@[m [mMETA_BUILD_ORDER = [[m
+     "Add the five primary-text variations and allow Meta to test them.",[m
+ ][m
+ [m
+[32m+[m[32mMETA_AD_URL_PARAMETERS = ([m
+[32m+[m[32m    "utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}"[m
+[32m+[m[32m    "&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}"[m
+[32m+[m[32m)[m
+[32m+[m
+ COUNTRY_LANGUAGE_PROFILES = {[m
+     "Australia": {[m
+         "heading": "COUNTRY LANGUAGE AND LOCALISATION — AUSTRALIA",[m
+[36m@@ -290,6 +295,24 @@[m [mdef apply_country_language_guidance(prompt, country):[m
+     return f"{prompt.rstrip()}\n\n{guidance}"[m
+ [m
+ [m
+[32m+[m[32mdef build_meta_url_parameters_guidance():[m
+[32m+[m[32m    return f"""META URL PARAMETERS[m
+[32m+[m
+[32m+[m[32mFor every Meta ad created from this prompt, paste this exact string into the Meta URL parameters field:[m
+[32m+[m
+[32m+[m[32m{META_AD_URL_PARAMETERS}[m
+[32m+[m
+[32m+[m[32mDo not rewrite, localise, encode, shorten, remove, or add to these URL parameters."""[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef apply_meta_url_parameters_guidance(prompt):[m
+[32m+[m[32m    if not prompt:[m
+[32m+[m[32m        return prompt[m
+[32m+[m[32m    if "META URL PARAMETERS" in prompt:[m
+[32m+[m[32m        return prompt[m
+[32m+[m[32m    return f"{prompt.rstrip()}\n\n{build_meta_url_parameters_guidance()}"[m
+[32m+[m
+[32m+[m
+ def mask_protected_terms(text, protected_terms=()):[m
+     masked = str(text or "")[m
+     for index, term in enumerate(protected_terms or ()):[m
+[36m@@ -607,7 +630,8 @@[m [mdef compose_final_ads_prompt([m
+         include_primary_text_variations=include_primary_text_variations,[m
+         category=category,[m
+     )[m
+[31m-    return apply_country_language_guidance(prompt, country)[m
+[32m+[m[32m    prompt = apply_country_language_guidance(prompt, country)[m
+[32m+[m[32m    return apply_meta_url_parameters_guidance(prompt)[m
+ [m
+ [m
+ def build_motorsport_carousel_prompt(product_name, category, country, campaign_type):[m
+[36m@@ -1335,9 +1359,12 @@[m [mUse this exact workflow in the generated setup section:[m
+ 11. Set the Fixed button destination to the exact selected product-page URL supplied in the campaign form:[m
+     {product_url}[m
+ [m
+[31m-12. Confirm the correct Baseball product catalogue/product set is attached.[m
+[32m+[m[32m12. Under URL parameters, use:[m
+[32m+[m[32m    {META_AD_URL_PARAMETERS}[m
+ [m
+[31m-13. Preview the Instant Experience on both Facebook and Instagram before publishing.[m
+[32m+[m[32m13. Confirm the correct Baseball product catalogue/product set is attached.[m
+[32m+[m
+[32m+[m[32m14. Preview the Instant Experience on both Facebook and Instagram before publishing.[m
+ [m
+ Do not invent the destination URL.[m
+ [m
+[36m@@ -1385,6 +1412,7 @@[m [mBefore returning the output, confirm:[m
+ - Product headline is product.name.[m
+ - Product description is Limited Edition.[m
+ - The fixed-button destination uses the supplied product URL.[m
+[32m+[m[32m- The URL parameters field uses the exact supplied Meta URL parameters.[m
+ - The copy feels written for genuine baseball fans.[m
+ - The product or rivalry identity is clear.[m
+ - The opening is strong enough to stop attention.[m
+[36m@@ -1426,6 +1454,12 @@[m [mdef render_insufficient_winner_data():[m
+     st.caption("Approved winner examples have not been added for this category and campaign type yet.")[m
+ [m
+ [m
+[32m+[m[32mdef render_meta_url_parameters_section(section_number):[m
+[32m+[m[32m    st.subheader(f"{section_number}. URL parameters")[m
+[32m+[m[32m    st.caption("Paste this into the Meta URL parameters field for every ad.")[m
+[32m+[m[32m    st.code(META_AD_URL_PARAMETERS, language="text")[m
+[32m+[m
+[32m+[m
+ def render_supported_result(product_name, category, country, campaign_type, product_url=""):[m
+     if get_template_key(category, campaign_type) == "baseball_instant_experience":[m
+         st.subheader("1. Copy this ChatGPT prompt")[m
+[36m@@ -1433,6 +1467,7 @@[m [mdef render_supported_result(product_name, category, country, campaign_type, prod[m
+ [m
+         st.subheader("2. Build it in Meta")[m
+         st.caption("Follow the INSTANT EXPERIENCE SETUP section inside the generated prompt.")[m
+[32m+[m[32m        render_meta_url_parameters_section(3)[m
+         return[m
+ [m
+     st.subheader("1. Upload these five images")[m
+[36m@@ -1448,6 +1483,7 @@[m [mdef render_supported_result(product_name, category, country, campaign_type, prod[m
+     for index, step in enumerate(META_BUILD_ORDER, start=1):[m
+         st.markdown(f"{index}. {step}")[m
+     st.caption("Review every fact before publishing. Remove anything that cannot be confirmed from the product or artwork.")[m
+[32m+[m[32m    render_meta_url_parameters_section(4)[m
+ [m
+ [m
+ def render_page():[m
+[1mdiff --git a/tests/test_ads_page.py b/tests/test_ads_page.py[m
+[1mindex 52209ba..2c1219b 100644[m
+[1m--- a/tests/test_ads_page.py[m
+[1m+++ b/tests/test_ads_page.py[m
+[36m@@ -203,6 +203,8 @@[m [mclass AdsPageTests(unittest.TestCase):[m
+         self.assertNotIn("CAROUSEL CARDS\n\nCard 1", prompt)[m
+         self.assertNotIn("CAROUSEL CARD CHARACTER LIMIT", prompt)[m
+         self.assertNotIn("13 characters", prompt)[m
+[32m+[m[32m        self.assertIn("META URL PARAMETERS", prompt)[m
+[32m+[m[32m        self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)[m
+ [m
+     def test_baseball_instant_experience_uses_brand_opening_identity_and_ownership_rules(self):[m
+         prompt = ads_page.build_ads_prompt([m
+[36m@@ -264,9 +266,35 @@[m [mclass AdsPageTests(unittest.TestCase):[m
+         self.assertIn("Under Product headline, use:\n   product.name", prompt)[m
+         self.assertIn("Under Product description, use:\n   Limited Edition", prompt)[m
+         self.assertIn("Under Fixed button, set the label to:\n    Claim Your Edition", prompt)[m
+[32m+[m[32m        self.assertIn("Under URL parameters, use:\n    " + ads_page.META_AD_URL_PARAMETERS, prompt)[m
+         self.assertIn("https://sportscave.com.au/products/summer-98", prompt)[m
+         self.assertIn("Do not invent the destination URL.", prompt)[m
+ [m
+[32m+[m[32m    def test_shared_meta_url_parameters_are_added_to_every_supported_ads_prompt(self):[m
+[32m+[m[32m        motorsport_prompt = ads_page.build_ads_prompt([m
+[32m+[m[32m            "Six Laps Ahead",[m
+[32m+[m[32m            "Motorsport",[m
+[32m+[m[32m            "Australia",[m
+[32m+[m[32m            "Carousel",[m
+[32m+[m[32m        )[m
+[32m+[m[32m        baseball_prompt = ads_page.build_ads_prompt([m
+[32m+[m[32m            "Shohei Ohtani 50/50 Season",[m
+[32m+[m[32m            "Baseball",[m
+[32m+[m[32m            "USA",[m
+[32m+[m[32m            "Instant Experience",[m
+[32m+[m[32m            product_url="https://sportscave.com.au/products/ohtani-50-50",[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m        self.assertIn("def build_meta_url_parameters_guidance", (ROOT / "ads_page.py").read_text(encoding="utf-8"))[m
+[32m+[m[32m        self.assertIn("META URL PARAMETERS", motorsport_prompt)[m
+[32m+[m[32m        self.assertIn("META URL PARAMETERS", baseball_prompt)[m
+[32m+[m[32m        self.assertIn(ads_page.META_AD_URL_PARAMETERS, motorsport_prompt)[m
+[32m+[m[32m        self.assertIn(ads_page.META_AD_URL_PARAMETERS, baseball_prompt)[m
+[32m+[m[32m        self.assertEqual([m
+[32m+[m[32m            ads_page.META_AD_URL_PARAMETERS,[m
+[32m+[m[32m            "utm_source=facebook&utm_medium=paid_social&utm_campaign={{campaign.name}}&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}",[m
+[32m+[m[32m        )[m
+[32m+[m
+     def test_baseball_instant_experience_receives_country_localisation_without_changing_baseball_terms(self):[m
+         countries = {[m
+             "USA": "American English",[m
+[36m@@ -598,7 +626,7 @@[m [mPRIMARY TEXT VARIATIONS[m
+         self.assertIn("NEUTRAL INTERNATIONAL ENGLISH", guidance)[m
+         self.assertIn("Do not silently treat unknown countries as American English", guidance)[m
+ [m
+[31m-    def test_submit_supported_result_renders_three_compact_sections(self):[m
+[32m+[m[32m    def test_submit_supported_result_renders_compact_sections_with_url_parameters(self):[m
+         app_test = run_ads_page()[m
+         app_test.text_input[0].set_value("Six Laps Ahead")[m
+         app_test.selectbox[0].select("Motorsport")[m
+[36m@@ -608,11 +636,18 @@[m [mPRIMARY TEXT VARIATIONS[m
+ [m
+         self.assertEqual([m
+             [subheader.value for subheader in app_test.subheader],[m
+[31m-            ["1. Upload these five images", "2. Copy this ChatGPT prompt", "3. Build it in Meta"],[m
+[32m+[m[32m            [[m
+[32m+[m[32m                "1. Upload these five images",[m
+[32m+[m[32m                "2. Copy this ChatGPT prompt",[m
+[32m+[m[32m                "3. Build it in Meta",[m
+[32m+[m[32m                "4. URL parameters",[m
+[32m+[m[32m            ],[m
+         )[m
+[31m-        self.assertEqual(len(app_test.code), 1)[m
+[32m+[m[32m        self.assertEqual(len(app_test.code), 2)[m
+         self.assertIn("Product name: Six Laps Ahead", app_test.code[0].value)[m
+         self.assertIn("Market: Canada", app_test.code[0].value)[m
+[32m+[m[32m        self.assertIn(ads_page.META_AD_URL_PARAMETERS, app_test.code[0].value)[m
+[32m+[m[32m        self.assertEqual(app_test.code[1].value, ads_page.META_AD_URL_PARAMETERS)[m
+         self.assertEqual(len(app_test.exception), 0)[m
+ [m
+     def test_submit_unsupported_result_renders_insufficient_winner_data(self):[m
