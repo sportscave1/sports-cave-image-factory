@@ -274,6 +274,16 @@ class AccountAccessTests(unittest.TestCase):
 
         self.assertFalse(app_test.exception)
         self.assertIn("Access not approved", [title.value for title in app_test.title])
+        self.assertEqual(app_test.session_state["selected_page"], "Orders")
+
+    def test_auth_refresh_does_not_silently_replace_blocked_page_with_home(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        auth_source = source[
+            source.index("def _set_authenticated_user") : source.index("\n\ndef _account_system_status")
+        ]
+
+        self.assertNotIn('st.session_state["selected_page"] = allowed_routes[0]', auth_source)
+        self.assertNotIn("st.session_state.selected_page = allowed_routes[0]", auth_source)
 
     def test_blocked_worker_cannot_render_files_page(self):
         app_test = AppTest.from_file(str(ROOT / "app.py"))
