@@ -12,6 +12,7 @@ import traceback
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from zoneinfo import ZoneInfo
 
 import shopify_sync
 from certificate_service import certificate_id, generate_certificate_pdf, generate_certificate_preview_png
@@ -3290,6 +3291,38 @@ def get_daily_execution_sheet(user_id, sheet_date):
             return _daily_execution_sheet_from_row(cur.fetchone())
 
 
+def get_daily_execution_home_sheets(user_id, today):
+    """Load today and tomorrow in one round trip, promoting today's planned sheet."""
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    clean_today = str(today or "").strip()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                UPDATE daily_execution_sheets
+                SET status='active', activated_at=COALESCE(activated_at, now()), updated_at=now()
+                WHERE user_id=%s AND sheet_date=%s::date AND status='planned'
+                """,
+                (clean_user_id, clean_today),
+            )
+            cur.execute(
+                """
+                SELECT *
+                FROM daily_execution_sheets
+                WHERE user_id=%s
+                  AND sheet_date >= %s::date
+                  AND sheet_date <= (%s::date + INTERVAL '1 day')
+                ORDER BY sheet_date ASC
+                """,
+                (clean_user_id, clean_today, clean_today),
+            )
+            rows = [_daily_execution_sheet_from_row(row) for row in cur.fetchall()]
+        conn.commit()
+    return rows
+
+
 def create_daily_execution_sheet(
     *,
     user_id,
@@ -3354,6 +3387,165 @@ def create_daily_execution_sheet(
                 )
         conn.commit()
     return sheet
+
+
+def _daily_execution_archive_snapshot(row):
+    if not row:
+        return {}
+    return {
+        "id": str(row.get("id") or ""),
+        "user_id": str(row.get("user_id") or ""),
+        "user_name": str(row.get("user_name") or ""),
+        "sheet_date": str(row.get("sheet_date") or ""),
+        "timezone": str(row.get("timezone") or "Australia/Sydney"),
+        "status": str(row.get("status") or ""),
+        "top_tasks": row.get("top_tasks") or [],
+        "additional_items": row.get("additional_items") or [],
+        "planning_data": row.get("planning_data") or {},
+        "review_data": row.get("review_data") or {},
+        "no_grey_zone": row.get("no_grey_zone") or {},
+        "ratings": row.get("ratings") or {},
+        "daily_summary": row.get("daily_summary") or "",
+        "tomorrow_intention": row.get("tomorrow_intention") or "",
+        "generated_prompt": row.get("generated_prompt") or "",
+        "activated_at": row.get("activated_at"),
+        "completed_at": row.get("completed_at"),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "archived_at": row.get("archived_at"),
+    }
+
+
+def save_daily_execution_plan(
+    *,
+    user_id,
+    user_name,
+    sheet_date,
+    timezone_name,
+    top_tasks,
+    additional_items,
+    planning_data,
+    archive_sheet_id=None,
+    actor="sports_cave_os",
+):
+    """Upsert one dated plan and archive a reviewed source sheet atomically."""
+    ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    clean_user_name = str(user_name or "").strip() or "Nathan"
+    clean_date = str(sheet_date or "").strip()
+    clean_timezone = str(timezone_name or "").strip() or "Australia/Sydney"
+    target_status = "active" if clean_date == datetime.now(ZoneInfo(clean_timezone)).date().isoformat() else "planned"
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                "SELECT id, status FROM daily_execution_sheets WHERE user_id=%s AND sheet_date=%s::date LIMIT 1 FOR UPDATE",
+                (clean_user_id, clean_date),
+            )
+            existing = cur.fetchone() or {}
+            if str(existing.get("status") or "").casefold() == "archived":
+                raise ValueError("Archived execution sheets are read-only.")
+            cur.execute(
+                """
+                INSERT INTO daily_execution_sheets(
+                    user_id, user_name, sheet_date, timezone, status,
+                    top_tasks, additional_items, planning_data,
+                    no_grey_zone, ratings, review_data
+                )
+                VALUES (%s, %s, %s::date, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb,
+                        '{}'::jsonb, '{}'::jsonb, '{}'::jsonb)
+                ON CONFLICT (user_id, sheet_date)
+                DO UPDATE SET
+                    user_name=EXCLUDED.user_name,
+                    timezone=EXCLUDED.timezone,
+                    status=CASE
+                        WHEN daily_execution_sheets.status IN ('reviewed', 'completed') THEN daily_execution_sheets.status
+                        ELSE EXCLUDED.status
+                    END,
+                    top_tasks=EXCLUDED.top_tasks,
+                    additional_items=EXCLUDED.additional_items,
+                    planning_data=EXCLUDED.planning_data,
+                    updated_at=now()
+                RETURNING *
+                """,
+                (
+                    clean_user_id,
+                    clean_user_name,
+                    clean_date,
+                    clean_timezone,
+                    target_status,
+                    json_dumps(top_tasks or []),
+                    json_dumps(additional_items or []),
+                    json_dumps(planning_data or {}),
+                ),
+            )
+            saved_row = cur.fetchone() or {}
+            event_type = "daily_execution_tomorrow_planned" if target_status == "planned" else "daily_execution_created"
+            message = f"Tomorrow planned: {clean_date}" if target_status == "planned" else f"Daily sheet created: {clean_date}"
+            _insert_audit_log(
+                cur,
+                event_type=event_type,
+                entity_type="daily_execution_sheet",
+                entity_id=str(saved_row.get("id") or ""),
+                new_value={
+                    "message": message,
+                    "page": "Dashboard",
+                    "action_type": event_type,
+                    "metadata": {"sheet_date": clean_date, "updated_existing": bool(existing)},
+                },
+                reason=message,
+                actor=str(actor or "").strip() or clean_user_name,
+                source="Dashboard",
+            )
+            clean_archive_id = str(archive_sheet_id or "").strip()
+            if clean_archive_id:
+                cur.execute(
+                    """
+                    SELECT * FROM daily_execution_sheets
+                    WHERE id=%s AND user_id=%s
+                    LIMIT 1 FOR UPDATE
+                    """,
+                    (clean_archive_id, clean_user_id),
+                )
+                archive_row = cur.fetchone() or {}
+                archive_status = str(archive_row.get("status") or "").casefold()
+                if archive_row and archive_status in {"reviewed", "completed"} and archive_row.get("completed_at"):
+                    snapshot = _daily_execution_archive_snapshot(archive_row)
+                    cur.execute(
+                        """
+                        UPDATE daily_execution_sheets
+                        SET status='archived',
+                            archived_snapshot=CASE
+                                WHEN archived_snapshot IS NULL OR archived_snapshot='{}'::jsonb THEN %s::jsonb
+                                ELSE archived_snapshot
+                            END,
+                            archived_at=COALESCE(archived_at, now()),
+                            updated_at=now()
+                        WHERE id=%s AND user_id=%s AND archived_at IS NULL
+                        RETURNING *
+                        """,
+                        (json_dumps(snapshot), clean_archive_id, clean_user_id),
+                    )
+                    archived = cur.fetchone()
+                    if archived:
+                        archive_message = f"Daily sheet archived: {archived.get('sheet_date')}"
+                        _insert_audit_log(
+                            cur,
+                            event_type="daily_execution_archived",
+                            entity_type="daily_execution_sheet",
+                            entity_id=clean_archive_id,
+                            new_value={
+                                "message": archive_message,
+                                "page": "Dashboard",
+                                "action_type": "daily_execution_archived",
+                                "metadata": {"sheet_date": str(archived.get("sheet_date") or "")},
+                            },
+                            reason=archive_message,
+                            actor=str(actor or "").strip() or clean_user_name,
+                            source="Dashboard",
+                        )
+        conn.commit()
+    return _daily_execution_sheet_from_row(saved_row)
 
 
 def update_daily_execution_top_tasks(sheet_id, top_tasks, additional_items=None):
@@ -3571,6 +3763,45 @@ def list_daily_execution_sheets(user_id, start_date, end_date, *, limit=10):
                 (str(user_id or "").strip(), str(start_date or "").strip(), str(end_date or "").strip(), safe_limit),
             )
             return [_daily_execution_sheet_from_row(row) for row in cur.fetchall()]
+
+
+def list_daily_execution_archive_summaries(user_id, start_date, end_date, *, limit=8):
+    ensure_dashboard_schema()
+    safe_limit = min(max(int(limit or 8), 1), 31)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                SELECT id, user_id, user_name, sheet_date, timezone, status,
+                       top_tasks, additional_items, planning_data, ratings,
+                       completed_at, archived_at, created_at, updated_at
+                FROM daily_execution_sheets
+                WHERE user_id=%s
+                  AND sheet_date >= %s::date
+                  AND sheet_date <= %s::date
+                ORDER BY sheet_date DESC
+                LIMIT %s
+                """,
+                (str(user_id or "").strip(), str(start_date or "").strip(), str(end_date or "").strip(), safe_limit),
+            )
+            return [_daily_execution_sheet_from_row(row) for row in cur.fetchall()]
+
+
+def get_daily_execution_archive_detail(user_id, sheet_id):
+    ensure_dashboard_schema()
+    with connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
+            cur.execute(
+                """
+                SELECT * FROM daily_execution_sheets
+                WHERE id=%s AND user_id=%s
+                LIMIT 1
+                """,
+                (str(sheet_id or "").strip(), str(user_id or "").strip()),
+            )
+            return _daily_execution_sheet_from_row(cur.fetchone())
 
 
 def start_sync_run(sync_type, *, ensure_schema_first=True):
