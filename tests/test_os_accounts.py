@@ -796,7 +796,11 @@ class AccountAccessTests(unittest.TestCase):
         self.assertIn("height: 42px", files_css)
         self.assertIn("height: 40px", files_css)
         self.assertIn("height: 36px", files_css)
-        self.assertIn("max-height: calc(100vh - 205px)", files_css)
+        self.assertIn("height: calc(100dvh - 0.9rem)", files_css)
+        self.assertIn("height: 100dvh", files_css)
+        self.assertIn("overflow: hidden", files_css)
+        self.assertIn("height: 100%", files_css)
+        self.assertNotIn("max-height: calc(100vh - 205px)", files_css)
         self.assertIn("background: transparent !important", files_css)
         self.assertNotIn("var(--sc-gold)", files_css)
         self.assertNotIn("files-breadcrumb-native", files_css)
@@ -804,6 +808,19 @@ class AccountAccessTests(unittest.TestCase):
         self.assertNotIn("20MB per file", component)
         self.assertIn('class="menu"', component)
         self.assertIn("Large files supported", component)
+
+    def test_files_header_is_removed_only_in_the_files_workspace(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        files_css = source[
+            source.index(".st-key-files-explorer") : source.index(".sc-task-card")
+        ]
+
+        scoped_header = '.stApp:has(.st-key-files-explorer) header[data-testid="stHeader"]'
+        self.assertIn(scoped_header, files_css)
+        self.assertIn("pointer-events: none !important", files_css)
+        self.assertIn("padding-top: 0.45rem !important", files_css)
+        self.assertNotIn("margin-top: -0.2rem", files_css)
+        self.assertNotIn('header[data-testid="stHeader"] {\n            display: none', source[: source.index(".st-key-files-explorer")])
 
     def test_files_search_filters_cached_metadata_without_recursive_dropbox_work(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -849,7 +866,7 @@ class AccountAccessTests(unittest.TestCase):
             )
         ]
 
-        self.assertIn("_files_clear_directory_cache(current_path)", upload)
+        self.assertIn("_files_clear_directory_cache(event_path)", upload)
         self.assertIn("_files_clear_directory_cache(current_path)", command_bar)
         self.assertIn("selected_path", rename)
         self.assertIn("renamed_path", rename)

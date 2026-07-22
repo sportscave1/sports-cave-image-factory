@@ -2247,6 +2247,8 @@ def ensure_dashboard_schema():
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_dashboard_tasks_section_status ON dashboard_tasks(section, status)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_daily_execution_user_date ON daily_execution_sheets(user_id, sheet_date DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_daily_execution_status_date ON daily_execution_sheets(status, sheet_date DESC)")
+                cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_execution_owner_date ON daily_execution_sheets(user_id, sheet_date)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_daily_execution_owner_status_date ON daily_execution_sheets(user_id, status, sheet_date DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type_created ON audit_logs(event_type, created_at DESC)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_source_created ON audit_logs(source, created_at DESC)")
@@ -3509,8 +3511,16 @@ def save_daily_execution_plan(
                 )
                 archive_row = cur.fetchone() or {}
                 archive_status = str(archive_row.get("status") or "").casefold()
-                if archive_row and archive_status in {"reviewed", "completed"} and archive_row.get("completed_at"):
+                archive_date = archive_row.get("sheet_date")
+                if isinstance(archive_date, str):
+                    archive_date = date.fromisoformat(archive_date)
+                archive_matches_plan = isinstance(archive_date, date) and archive_date + timedelta(days=1) == date.fromisoformat(clean_date)
+                if archive_row and archive_matches_plan and archive_status in {"reviewed", "completed"} and archive_row.get("completed_at"):
                     snapshot = _daily_execution_archive_snapshot(archive_row)
+                    archive_timestamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+                    snapshot["status"] = "archived"
+                    snapshot["archived_at"] = archive_timestamp
+                    snapshot["updated_at"] = archive_timestamp
                     cur.execute(
                         """
                         UPDATE daily_execution_sheets
@@ -3519,12 +3529,12 @@ def save_daily_execution_plan(
                                 WHEN archived_snapshot IS NULL OR archived_snapshot='{}'::jsonb THEN %s::jsonb
                                 ELSE archived_snapshot
                             END,
-                            archived_at=COALESCE(archived_at, now()),
-                            updated_at=now()
+                            archived_at=COALESCE(archived_at, %s::timestamptz),
+                            updated_at=%s::timestamptz
                         WHERE id=%s AND user_id=%s AND archived_at IS NULL
                         RETURNING *
                         """,
-                        (json_dumps(snapshot), clean_archive_id, clean_user_id),
+                        (json_dumps(snapshot), archive_timestamp, archive_timestamp, clean_archive_id, clean_user_id),
                     )
                     archived = cur.fetchone()
                     if archived:
@@ -3559,7 +3569,7 @@ def update_daily_execution_top_tasks(sheet_id, top_tasks, additional_items=None)
                     UPDATE daily_execution_sheets
                     SET top_tasks=%s::jsonb,
                         updated_at=now()
-                    WHERE id=%s
+                    WHERE id=%s AND status <> 'archived'
                     RETURNING *
                     """,
                     (json_dumps(top_tasks or []), str(sheet_id or "").strip()),
@@ -3571,7 +3581,7 @@ def update_daily_execution_top_tasks(sheet_id, top_tasks, additional_items=None)
                     SET top_tasks=%s::jsonb,
                         additional_items=%s::jsonb,
                         updated_at=now()
-                    WHERE id=%s
+                    WHERE id=%s AND status <> 'archived'
                     RETURNING *
                     """,
                     (
@@ -3591,7 +3601,7 @@ def set_daily_execution_mip_completed(sheet_id, index, completed):
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
-            cur.execute("SELECT * FROM daily_execution_sheets WHERE id=%s LIMIT 1", (str(sheet_id or "").strip(),))
+            cur.execute("SELECT * FROM daily_execution_sheets WHERE id=%s AND status <> 'archived' LIMIT 1", (str(sheet_id or "").strip(),))
             row = cur.fetchone()
             if not row:
                 return {}
@@ -3608,7 +3618,7 @@ def set_daily_execution_mip_completed(sheet_id, index, completed):
                 UPDATE daily_execution_sheets
                 SET top_tasks=%s::jsonb,
                     updated_at=now()
-                WHERE id=%s
+                WHERE id=%s AND status <> 'archived'
                 RETURNING *
                 """,
                 (json_dumps(tasks), str(sheet_id or "").strip()),
@@ -3660,7 +3670,7 @@ def complete_daily_execution_review(sheet_id, review_payload, *, actor="sports_c
                         tomorrow_intention=%s,
                         completed_at=now(),
                         updated_at=now()
-                    WHERE id=%s""" + owner_clause + """
+                    WHERE id=%s AND status <> 'archived'""" + owner_clause + """
                     RETURNING *
                     """,
                     (
@@ -3685,7 +3695,7 @@ def complete_daily_execution_review(sheet_id, review_payload, *, actor="sports_c
                         tomorrow_intention=%s,
                         completed_at=now(),
                         updated_at=now()
-                    WHERE id=%s""" + owner_clause + """
+                    WHERE id=%s AND status <> 'archived'""" + owner_clause + """
                     RETURNING *
                     """,
                     (

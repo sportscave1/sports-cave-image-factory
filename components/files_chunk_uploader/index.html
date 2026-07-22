@@ -211,6 +211,10 @@
         acknowledged: "",
         completionQueue: [],
         awaitingAck: null,
+        workspaceBinding: null,
+        workspaceDragDepth: 0,
+        workspaceDragDestination: "",
+        shellDragDepth: 0,
       };
       const shell = document.getElementById("shell");
       const uploads = document.getElementById("uploads");
@@ -286,7 +290,7 @@
         uploads.querySelectorAll("[data-remove]").forEach(button => button.onclick = () => removeRow(button.dataset.remove));
         setFrameHeight();
       }
-      function createRow(file, relativePath) {
+      function createRow(file, relativePath, destinationPath) {
         return {
           clientId: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
           file,
@@ -299,10 +303,13 @@
           uploadId: "",
           uploadSecret: "",
           errorCode: "",
+          destinationPath: String(destinationPath || state.args.current_path || ""),
         };
       }
-      function addFiles(items) {
-        const rows = items.map(item => createRow(item.file || item, item.relativePath));
+      function addFiles(items, destinationPath) {
+        const destination = String(destinationPath || state.args.current_path || "");
+        const rows = items.map(item => createRow(item.file || item, item.relativePath, destination));
+        if (!rows.length) return;
         state.rows.push(...rows);
         state.queue.push(...rows);
         render();
@@ -325,7 +332,7 @@
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            current_path: state.args.current_path,
+            current_path: row.destinationPath,
             relative_path: row.relativePath,
             size: row.size,
             conflict: conflictInput.value || "cancel",
@@ -413,7 +420,7 @@
         setValue({
           event: "upload_completed",
           nonce,
-          current_path: state.args.current_path,
+          current_path: row.destinationPath,
           metadata: (row.completionPayload || {}).metadata || {},
           name: row.name,
         });
@@ -476,6 +483,131 @@
         return Array.from(dataTransfer.files || []).map(file => ({ file, relativePath: file.name }));
       }
 
+      function hasExternalFiles(event) {
+        const transfer = event && event.dataTransfer;
+        return Boolean(transfer && Array.from(transfer.types || []).includes("Files"));
+      }
+
+      function currentFolderName(path) {
+        const parts = String(path || "").split("/").filter(Boolean);
+        return parts.length ? parts[parts.length - 1] : "this folder";
+      }
+
+      function removeWorkspaceOverlay() {
+        const binding = state.workspaceBinding;
+        if (!binding) return;
+        if (binding.overlay && binding.overlay.parentNode) binding.overlay.parentNode.removeChild(binding.overlay);
+        if (binding.details) binding.details.classList.remove("sc-files-drop-active");
+        binding.overlay = null;
+      }
+
+      function showWorkspaceOverlay() {
+        const binding = state.workspaceBinding;
+        if (!binding || !binding.workspace.isConnected) return;
+        const details = binding.workspace.querySelector(".st-key-files-details-list");
+        if (!details) return;
+        if (binding.details !== details) {
+          removeWorkspaceOverlay();
+          binding.details = details;
+        }
+        details.classList.add("sc-files-drop-active");
+        if (!binding.overlay || !binding.overlay.isConnected) {
+          const overlay = binding.document.createElement("div");
+          overlay.className = "sc-files-workspace-drop-overlay";
+          overlay.setAttribute("role", "status");
+          details.appendChild(overlay);
+          binding.overlay = overlay;
+        }
+        binding.overlay.textContent = `Drop to upload to ${currentFolderName(state.workspaceDragDestination)}`;
+      }
+
+      function resetWorkspaceDrag() {
+        state.workspaceDragDepth = 0;
+        state.workspaceDragDestination = "";
+        removeWorkspaceOverlay();
+      }
+
+      function cleanupWorkspaceDropTarget() {
+        const binding = state.workspaceBinding;
+        if (!binding) return;
+        binding.workspace.removeEventListener("dragenter", binding.onDragEnter);
+        binding.workspace.removeEventListener("dragover", binding.onDragOver);
+        binding.workspace.removeEventListener("dragleave", binding.onDragLeave);
+        binding.workspace.removeEventListener("drop", binding.onDrop);
+        binding.document.removeEventListener("dragover", binding.onPageDragOver, true);
+        binding.document.removeEventListener("drop", binding.onPageDrop, true);
+        if (binding.observer) binding.observer.disconnect();
+        removeWorkspaceOverlay();
+        state.workspaceBinding = null;
+        state.workspaceDragDepth = 0;
+        state.workspaceDragDestination = "";
+      }
+
+      function bindWorkspaceDropTarget() {
+        cleanupWorkspaceDropTarget();
+        let parentDocument;
+        try {
+          parentDocument = window.parent.document;
+        } catch (_) {
+          return;
+        }
+        const workspace = parentDocument.querySelector(".st-key-files-explorer");
+        if (!workspace) return;
+        const binding = { document: parentDocument, workspace, details: null, overlay: null, observer: null };
+        const isActive = () => (
+          workspace.isConnected && parentDocument.querySelector(".st-key-files-explorer") === workspace
+        );
+        binding.onPageDragOver = event => {
+          if (isActive() && hasExternalFiles(event)) event.preventDefault();
+        };
+        binding.onPageDrop = event => {
+          if (isActive() && hasExternalFiles(event)) event.preventDefault();
+        };
+        binding.onDragEnter = event => {
+          if (!hasExternalFiles(event)) return;
+          event.preventDefault();
+          if (state.workspaceDragDepth === 0) {
+            state.workspaceDragDestination = String(state.args.current_path || "");
+          }
+          state.workspaceDragDepth += 1;
+          showWorkspaceOverlay();
+        };
+        binding.onDragOver = event => {
+          if (!hasExternalFiles(event)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          showWorkspaceOverlay();
+        };
+        binding.onDragLeave = event => {
+          if (!state.workspaceDragDepth) return;
+          state.workspaceDragDepth = Math.max(0, state.workspaceDragDepth - 1);
+          if (state.workspaceDragDepth === 0) resetWorkspaceDrag();
+        };
+        binding.onDrop = async event => {
+          if (!hasExternalFiles(event)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const destination = state.workspaceDragDestination || String(state.args.current_path || "");
+          const transfer = event.dataTransfer;
+          resetWorkspaceDrag();
+          addFiles(await droppedItems(transfer), destination);
+        };
+        workspace.addEventListener("dragenter", binding.onDragEnter);
+        workspace.addEventListener("dragover", binding.onDragOver);
+        workspace.addEventListener("dragleave", binding.onDragLeave);
+        workspace.addEventListener("drop", binding.onDrop);
+        parentDocument.addEventListener("dragover", binding.onPageDragOver, true);
+        parentDocument.addEventListener("drop", binding.onPageDrop, true);
+        const frame = window.frameElement;
+        if (frame && window.parent.MutationObserver) {
+          binding.observer = new window.parent.MutationObserver(() => {
+            if (!frame.isConnected || !workspace.isConnected) cleanupWorkspaceDropTarget();
+          });
+          binding.observer.observe(parentDocument.body, { childList: true, subtree: true });
+        }
+        state.workspaceBinding = binding;
+      }
+
       function closeMenus() {
         uploadMenu.classList.remove("open");
         moreMenu.classList.remove("open");
@@ -501,14 +633,31 @@
       document.addEventListener("click", event => {
         if (!event.target.closest(".menu-wrap")) closeMenus();
       });
-      filesInput.onchange = () => { addFiles(Array.from(filesInput.files || [])); filesInput.value = ""; };
-      folderInput.onchange = () => { addFiles(Array.from(folderInput.files || [])); folderInput.value = ""; };
-      shell.ondragover = event => { event.preventDefault(); shell.classList.add("dragover"); };
-      shell.ondragleave = () => shell.classList.remove("dragover");
-      shell.ondrop = async event => {
+      filesInput.onchange = () => { addFiles(Array.from(filesInput.files || []), state.args.current_path); filesInput.value = ""; };
+      folderInput.onchange = () => { addFiles(Array.from(folderInput.files || []), state.args.current_path); folderInput.value = ""; };
+      shell.ondragenter = event => {
+        if (!hasExternalFiles(event)) return;
         event.preventDefault();
+        state.shellDragDepth += 1;
+        shell.classList.add("dragover");
+      };
+      shell.ondragover = event => {
+        if (!hasExternalFiles(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      };
+      shell.ondragleave = event => {
+        if (!state.shellDragDepth) return;
+        state.shellDragDepth = Math.max(0, state.shellDragDepth - 1);
+        if (!state.shellDragDepth) shell.classList.remove("dragover");
+      };
+      shell.ondrop = async event => {
+        if (!hasExternalFiles(event)) return;
+        event.preventDefault();
+        state.shellDragDepth = 0;
         shell.classList.remove("dragover");
-        addFiles(await droppedItems(event.dataTransfer));
+        const destination = String(state.args.current_path || "");
+        addFiles(await droppedItems(event.dataTransfer), destination);
       };
       window.addEventListener("message", event => {
         if (!event.data || event.data.type !== "streamlit:render") return;
@@ -526,7 +675,9 @@
           }
         }
         render();
+        bindWorkspaceDropTarget();
       });
+      window.addEventListener("beforeunload", cleanupWorkspaceDropTarget);
       ready();
     </script>
   </body>

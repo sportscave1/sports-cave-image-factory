@@ -313,13 +313,90 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
         self.assertIn('value="keep_both"', self.component_source)
         self.assertIn('value="replace"', self.component_source)
 
-    def test_completion_invalidates_only_the_current_files_cache(self):
+    def test_complete_files_workspace_is_the_drop_target(self):
+        self.assertIn(
+            'parentDocument.querySelector(".st-key-files-explorer")',
+            self.component_source,
+        )
+        self.assertIn(
+            'workspace.addEventListener("dragenter", binding.onDragEnter)',
+            self.component_source,
+        )
+        self.assertIn(
+            'workspace.addEventListener("dragover", binding.onDragOver)',
+            self.component_source,
+        )
+        self.assertIn(
+            'workspace.addEventListener("drop", binding.onDrop)',
+            self.component_source,
+        )
+        self.assertIn("event.preventDefault()", self.component_source)
+        self.assertIn('event.dataTransfer.dropEffect = "copy"', self.component_source)
+        self.assertIn("sc-files-workspace-drop-overlay", self.component_source)
+        self.assertIn(
+            "Drop to upload to ${currentFolderName(state.workspaceDragDestination)}",
+            self.component_source,
+        )
+
+    def test_external_file_drag_uses_depth_counter_and_does_not_affect_other_pages(self):
+        self.assertIn('includes("Files")', self.component_source)
+        self.assertIn("state.workspaceDragDepth += 1", self.component_source)
+        self.assertIn(
+            "state.workspaceDragDepth = Math.max(0, state.workspaceDragDepth - 1)",
+            self.component_source,
+        )
+        self.assertIn("if (state.workspaceDragDepth === 0) resetWorkspaceDrag()", self.component_source)
+        self.assertIn("const isActive = () => (", self.component_source)
+        self.assertIn(
+            'parentDocument.querySelector(".st-key-files-explorer") === workspace',
+            self.component_source,
+        )
+        self.assertIn("cleanupWorkspaceDropTarget", self.component_source)
+
+    def test_drop_destination_is_captured_and_survives_folder_navigation(self):
+        self.assertIn(
+            'state.workspaceDragDestination = String(state.args.current_path || "")',
+            self.component_source,
+        )
+        self.assertIn("destinationPath: String(destinationPath", self.component_source)
+        self.assertIn("current_path: row.destinationPath", self.component_source)
+        self.assertIn(
+            "addFiles(await droppedItems(transfer), destination)",
+            self.component_source,
+        )
+        self.assertIn('key="files-chunk-uploader"', self.app_source)
+        self.assertNotIn(
+            'key=_files_widget_key("files-chunk-uploader", current_path)',
+            self.app_source,
+        )
+
+    def test_workspace_drop_reuses_folder_traversal_and_chunked_upload(self):
+        self.assertIn("droppedItems(transfer)", self.component_source)
+        self.assertIn("webkitGetAsEntry", self.component_source)
+        self.assertIn("walkEntry", self.component_source)
+        self.assertIn("relativePath", self.component_source)
+        self.assertIn("row.file.slice(row.uploaded, end)", self.component_source)
+        self.assertIn("const CHUNK_BYTES = 8 * 1024 * 1024", self.component_source)
+
+    def test_files_drop_styling_is_scoped_to_the_files_list(self):
+        files_css = self.app_source[
+            self.app_source.index(".st-key-files-explorer") : self.app_source.index(
+                ".sc-task-card"
+            )
+        ]
+        self.assertIn(".st-key-files-details-list.sc-files-drop-active", files_css)
+        self.assertIn(".sc-files-workspace-drop-overlay", files_css)
+        self.assertIn("pointer-events: none", files_css)
+        self.assertNotIn("body.sc-files-drop-active", files_css)
+
+    def test_completion_invalidates_only_the_captured_destination_cache(self):
         handler = self.app_source[
             self.app_source.index("def _render_files_chunk_uploader") : self.app_source.index(
                 "\n\ndef _render_files_command_bar"
             )
         ]
-        self.assertIn("_files_clear_directory_cache(current_path)", handler)
+        self.assertIn("_files_clear_directory_cache(event_path)", handler)
+        self.assertIn("path_is_within_root(event_path, root_path)", handler)
         self.assertNotIn('pop("files_directory_cache"', handler)
         self.assertIn("_files_fragment_rerun()", handler)
 

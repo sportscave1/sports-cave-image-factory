@@ -118,10 +118,24 @@ def clear_daily_execution_cache(user_id=None, sheet_dates=None):
         key_text = tuple(str(part or "") for part in (key if isinstance(key, tuple) else (key,)))
         if clean_user_id and clean_user_id not in key_text:
             continue
-        if clean_dates and not any(value in key_text for value in clean_dates):
-            if key_text and key_text[0] not in {"daily_week", "daily_archive_detail"}:
-                continue
-        _DAILY_EXECUTION_CACHE.pop(key, None)
+        if not clean_dates:
+            _DAILY_EXECUTION_CACHE.pop(key, None)
+            continue
+        kind = key_text[0] if key_text else ""
+        affected = False
+        if kind == "daily_execution" and len(key_text) > 2:
+            affected = key_text[2] in clean_dates
+        elif kind == "daily_home" and len(key_text) > 2:
+            home_date = date.fromisoformat(key_text[2])
+            affected = any(value in {home_date.isoformat(), (home_date + timedelta(days=1)).isoformat()} for value in clean_dates)
+        elif kind == "daily_week" and len(key_text) > 3:
+            week_start = date.fromisoformat(key_text[2])
+            week_end = date.fromisoformat(key_text[3])
+            affected = any(week_start <= date.fromisoformat(value) <= week_end for value in clean_dates)
+        elif kind == "daily_archive_detail":
+            affected = True
+        if affected:
+            _DAILY_EXECUTION_CACHE.pop(key, None)
 
 
 def clear_calendar_cache():
@@ -541,7 +555,7 @@ def create_daily_execution_sheet(user, sheet_date, timezone_name, *, status=None
             kwargs.pop("status", None)
             raw_sheet = backend.create_daily_execution_sheet(**kwargs)
         sheet = _normalise_daily_sheet(raw_sheet)
-        clear_daily_execution_cache(daily_execution_user_id(user), [clean_date])
+        clear_daily_execution_cache(daily_execution_user_id(user))
         clear_activity_cache()
         return sheet
     except Exception as error:
@@ -679,7 +693,13 @@ def save_daily_execution_plan(
                     _normalise_top_tasks(top_tasks),
                     _normalise_additional_items_for_save(additional_items),
                 )
-        clear_daily_execution_cache(user_id, [clean_date])
+        affected_dates = [clean_date]
+        if archive_sheet_id:
+            try:
+                affected_dates.append((date.fromisoformat(clean_date) - timedelta(days=1)).isoformat())
+            except ValueError:
+                pass
+        clear_daily_execution_cache(user_id, affected_dates)
         clear_activity_cache()
         return _normalise_daily_sheet(raw)
     except Exception as error:
@@ -1122,6 +1142,8 @@ _ACTIVITY_LABELS = {
     "dashboard_task_completed": "Task completed",
     "daily_execution_completed": "Daily Review completed",
     "daily_execution_created": "Daily sheet created",
+    "daily_execution_tomorrow_planned": "Tomorrow planned",
+    "daily_execution_archived": "Daily sheet archived",
     "daily_execution_mip_completed": "Daily task completed",
     "daily_execution_task_completed": "Daily task completed",
     "design_prompt_saved": "Design prompt saved",

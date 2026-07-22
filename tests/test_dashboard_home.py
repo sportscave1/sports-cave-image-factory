@@ -1,13 +1,16 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+import time as wall_time
 import unittest
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
+from streamlit.testing.v1 import AppTest
 
 import sc_auth
 import os_accounts
 import sports_cave_dashboard
 import sports_sales_calendar
+import supabase_backend
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -96,7 +99,7 @@ class FakeDashboardBackend:
             {},
         )
 
-    def create_daily_execution_sheet(self, *, user_id, user_name, sheet_date, timezone_name, actor="sports_cave_os"):
+    def create_daily_execution_sheet(self, *, user_id, user_name, sheet_date, timezone_name, actor="sports_cave_os", status="active"):
         existing = self.get_daily_execution_sheet(user_id, sheet_date)
         if existing:
             return existing
@@ -107,7 +110,7 @@ class FakeDashboardBackend:
             "sheet_date": sheet_date,
             "day_name": "Tuesday",
             "timezone": timezone_name,
-            "status": "active",
+            "status": status,
             "top_tasks": [
                 {"task": "", "why": "", "time_blocked": "", "completed": False, "status": ""},
                 {"task": "", "why": "", "time_blocked": "", "completed": False, "status": ""},
@@ -116,6 +119,9 @@ class FakeDashboardBackend:
             "additional_items": [],
             "no_grey_zone": {},
             "ratings": {},
+            "planning_data": {},
+            "review_data": {},
+            "archived_snapshot": {},
             "daily_summary": "",
             "tomorrow_intention": "",
             "generated_prompt": "",
@@ -126,6 +132,60 @@ class FakeDashboardBackend:
         self._activity_row("daily_execution_created", f"Daily Execution sheet created: {sheet_date}")
         self.activity_rows[0]["actor"] = actor
         return dict(sheet)
+
+    def get_daily_execution_home_sheets(self, user_id, today):
+        self.daily_calls.append(("home", user_id, today))
+        today_date = date.fromisoformat(str(today))
+        wanted = {today_date.isoformat(), (today_date + timedelta(days=1)).isoformat()}
+        rows = []
+        for sheet in self.daily_sheets:
+            if sheet.get("user_id") != user_id or sheet.get("sheet_date") not in wanted:
+                continue
+            if sheet.get("sheet_date") == today_date.isoformat() and sheet.get("status") == "planned":
+                sheet["status"] = "active"
+                sheet["activated_at"] = "2026-07-22T00:00:00+10:00"
+            rows.append(dict(sheet))
+        return rows
+
+    def save_daily_execution_plan(
+        self,
+        *,
+        user_id,
+        user_name,
+        sheet_date,
+        timezone_name,
+        top_tasks,
+        additional_items,
+        planning_data,
+        archive_sheet_id=None,
+        actor="sports_cave_os",
+    ):
+        existing = next((sheet for sheet in self.daily_sheets if sheet.get("user_id") == user_id and sheet.get("sheet_date") == sheet_date), None)
+        if existing and existing.get("status") == "archived":
+            raise ValueError("Archived execution sheets are read-only.")
+        if not existing:
+            existing = self.create_daily_execution_sheet(
+                user_id=user_id,
+                user_name=user_name,
+                sheet_date=sheet_date,
+                timezone_name=timezone_name,
+                actor=actor,
+                status="planned",
+            )
+            existing = next(sheet for sheet in self.daily_sheets if sheet["id"] == existing["id"])
+        existing["top_tasks"] = top_tasks
+        existing["additional_items"] = additional_items
+        existing["planning_data"] = planning_data
+        if archive_sheet_id:
+            source = next((sheet for sheet in self.daily_sheets if sheet.get("id") == archive_sheet_id and sheet.get("user_id") == user_id), None)
+            if source and source.get("status") in {"completed", "reviewed"} and not source.get("archived_at"):
+                source["archived_snapshot"] = dict(source)
+                source["status"] = "archived"
+                source["archived_at"] = "2026-07-22T20:00:00+10:00"
+                self._activity_row("daily_execution_archived", f"Daily sheet archived: {source['sheet_date']}")
+        self._activity_row("daily_execution_tomorrow_planned", f"Tomorrow planned: {sheet_date}")
+        self.activity_rows[0]["actor"] = actor
+        return dict(existing)
 
     def update_daily_execution_top_tasks(self, sheet_id, top_tasks, additional_items=None):
         for sheet in self.daily_sheets:
@@ -145,12 +205,13 @@ class FakeDashboardBackend:
                 return dict(sheet)
         return {}
 
-    def complete_daily_execution_review(self, sheet_id, review_payload, *, actor="sports_cave_os"):
+    def complete_daily_execution_review(self, sheet_id, review_payload, *, actor="sports_cave_os", user_id=None):
         for sheet in self.daily_sheets:
-            if sheet["id"] == sheet_id:
-                sheet["status"] = "completed"
+            if sheet["id"] == sheet_id and (not user_id or sheet.get("user_id") == user_id):
+                sheet["status"] = "reviewed"
                 sheet["no_grey_zone"] = review_payload.get("no_grey_zone") or {}
                 sheet["ratings"] = review_payload.get("ratings") or {}
+                sheet["review_data"] = review_payload.get("review_data") or review_payload.get("no_grey_zone") or {}
                 if "additional_items" in review_payload:
                     sheet["additional_items"] = review_payload.get("additional_items") or []
                 sheet["daily_summary"] = review_payload.get("daily_summary") or ""
@@ -174,6 +235,14 @@ class FakeDashboardBackend:
             for sheet in self.daily_sheets
             if sheet.get("user_id") == user_id and start_date <= sheet.get("sheet_date") <= end_date
         ][:limit]
+
+    def list_daily_execution_archive_summaries(self, user_id, start_date, end_date, *, limit=8):
+        self.daily_calls.append(("week", user_id, start_date, end_date, limit))
+        return self.list_daily_execution_sheets(user_id, start_date, end_date, limit=limit)
+
+    def get_daily_execution_archive_detail(self, user_id, sheet_id):
+        self.daily_calls.append(("detail", user_id, sheet_id))
+        return next((dict(sheet) for sheet in self.daily_sheets if sheet.get("user_id") == user_id and sheet.get("id") == sheet_id), {})
 
 
 class SportsCaveAuthTests(unittest.TestCase):
@@ -482,7 +551,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertTrue(sports_cave_dashboard.daily_execution_all_mips_complete(sheet))
 
-    def test_daily_execution_panel_has_today_catchup_and_tomorrow_list_controls(self):
+    def test_daily_execution_panel_has_today_catchup_and_real_tomorrow_planning(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         panel_source = source[
             source.index("def render_daily_execution_panel") :
@@ -490,10 +559,11 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         ]
 
         self.assertIn("Daily Execution", panel_source)
-        self.assertIn("Create Today's List", panel_source)
-        self.assertIn("Create Tomorrow's List", panel_source)
-        self.assertIn("Tomorrow&apos;s list is ready.", panel_source)
-        self.assertIn('key="daily-execution-create-tomorrow-list"', panel_source)
+        self.assertIn("Create today's sheet", panel_source)
+        self.assertIn("Plan tomorrow", panel_source)
+        self.assertIn("_render_daily_planning_form", panel_source)
+        self.assertNotIn("Tomorrow&apos;s list is ready.", panel_source)
+        self.assertNotIn('key="daily-execution-create-tomorrow-list"', panel_source)
         self.assertNotIn("Generate Tomorrow's Execution Prompt", panel_source)
         self.assertNotIn("Create Today's Sheet", panel_source)
 
@@ -654,12 +724,299 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             sheet = sports_cave_dashboard.create_daily_execution_sheet(user, date(2026, 7, 21), "Australia/Sydney")
             completed = sports_cave_dashboard.complete_daily_execution_review(sheet["id"], review)
 
-        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(completed["status"], "reviewed")
         self.assertEqual(completed["ratings"]["Focus"], 8)
         self.assertEqual(completed["no_grey_zone"]["avoided"], "Email cleanup")
         self.assertEqual(completed["tomorrow_intention"], "Nail ads.")
         self.assertEqual(backend.activity_rows[0]["event_type"], "daily_execution_completed")
         self.assertEqual(backend.activity_rows[0]["actor"], "Nathan")
+
+    def test_tomorrow_plan_upserts_one_sheet_and_archives_reviewed_today_once(self):
+        backend = FakeDashboardBackend()
+        user = {"id": "admin-1", "display_name": "Nathan"}
+        today = date(2026, 7, 22)
+        tomorrow = date(2026, 7, 23)
+        top_tasks = [
+            {"task": f"MIP {index}", "why": "Revenue", "time_blocked": "1 hour", "status": ""}
+            for index in range(1, 4)
+        ]
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend), patch(
+            "activity_log.get_activity_actor", return_value="Nathan"
+        ):
+            current = sports_cave_dashboard.create_daily_execution_sheet(user, today, "Australia/Sydney")
+            current = sports_cave_dashboard.complete_daily_execution_review(
+                current["id"],
+                {"daily_summary": "Finished", "ratings": {"Overall Score": 8}},
+                user=user,
+            )
+            first = sports_cave_dashboard.save_daily_execution_plan(
+                user, tomorrow, "Australia/Sydney", top_tasks, [], {"main_outcome": "Launch"}, archive_sheet_id=current["id"]
+            )
+            second = sports_cave_dashboard.save_daily_execution_plan(
+                user, tomorrow, "Australia/Sydney", top_tasks, [], {"main_outcome": "Launch updated"}, archive_sheet_id=current["id"]
+            )
+
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(len(backend.daily_sheets), 2)
+        archived = next(sheet for sheet in backend.daily_sheets if sheet["sheet_date"] == today.isoformat())
+        self.assertEqual(archived["status"], "archived")
+        self.assertEqual(
+            [task.get("task") for task in archived["archived_snapshot"]["top_tasks"]],
+            [task.get("task") for task in current["top_tasks"]],
+        )
+        self.assertEqual(sum(row["event_type"] == "daily_execution_archived" for row in backend.activity_rows), 1)
+
+    def test_unreviewed_sheet_is_not_archived_and_archived_sheet_is_read_only(self):
+        backend = FakeDashboardBackend()
+        user = {"id": "admin-1", "display_name": "Nathan"}
+        top_tasks = [{"task": f"MIP {index}"} for index in range(1, 4)]
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend), patch(
+            "activity_log.get_activity_actor", return_value="Nathan"
+        ):
+            current = sports_cave_dashboard.create_daily_execution_sheet(user, date(2026, 7, 22), "Australia/Sydney")
+            sports_cave_dashboard.save_daily_execution_plan(
+                user,
+                date(2026, 7, 23),
+                "Australia/Sydney",
+                top_tasks,
+                [],
+                {},
+                archive_sheet_id=current["id"],
+            )
+            self.assertEqual(backend.daily_sheets[0]["status"], "active")
+            backend.daily_sheets[0]["status"] = "archived"
+            with self.assertRaises(sports_cave_dashboard.DashboardStorageError):
+                sports_cave_dashboard.save_daily_execution_plan(
+                    user, date(2026, 7, 22), "Australia/Sydney", top_tasks, [], {}
+                )
+
+    def test_archive_queries_are_scoped_to_signed_in_owner(self):
+        backend = FakeDashboardBackend()
+        backend.daily_sheets = [
+            {"id": "nathan", "user_id": "admin-1", "sheet_date": "2026-07-21", "status": "archived"},
+            {"id": "other", "user_id": "admin-2", "sheet_date": "2026-07-21", "status": "archived"},
+        ]
+        user = {"id": "admin-1", "display_name": "Nathan"}
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            rows = sports_cave_dashboard.list_daily_execution_archive_summaries(user, date(2026, 7, 20), date(2026, 7, 26))
+            blocked_detail = sports_cave_dashboard.get_daily_execution_archive_detail(user, "other")
+        self.assertEqual([row["id"] for row in rows], ["nathan"])
+        self.assertEqual(blocked_detail, {})
+
+    def test_planned_sheet_becomes_active_on_its_sydney_date(self):
+        backend = FakeDashboardBackend()
+        backend.daily_sheets.append(
+            {
+                "id": "tomorrow-1",
+                "user_id": "admin-1",
+                "user_name": "Nathan",
+                "sheet_date": "2026-07-23",
+                "timezone": "Australia/Sydney",
+                "status": "planned",
+                "top_tasks": [],
+                "additional_items": [],
+            }
+        )
+        user = {"id": "admin-1", "display_name": "Nathan"}
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            home = sports_cave_dashboard.get_daily_execution_home_sheets(user, date(2026, 7, 23))
+        self.assertEqual(home["today"]["status"], "active")
+        self.assertEqual([call[0] for call in backend.daily_calls], ["home"])
+
+    def test_couldnt_finish_tasks_are_selective_carryover_candidates(self):
+        sheet = sports_cave_dashboard._normalise_daily_sheet(
+            {
+                "id": "today",
+                "sheet_date": "2026-07-22",
+                "top_tasks": [
+                    {"task": "Carry me", "status": "couldnt_finish", "why": "Blocked"},
+                    {"task": "Done task", "status": "done"},
+                ],
+                "additional_items": [{"task": "Carry other", "status": "couldnt_finish"}],
+            }
+        )
+        candidates = sports_cave_dashboard.daily_execution_unfinished_tasks(sheet)
+        self.assertEqual([item["task"] for item in candidates], ["Carry me", "Carry other"])
+        self.assertNotIn("Done task", [item["task"] for item in candidates])
+
+    def test_archive_week_summary_and_detail_are_separate_queries(self):
+        backend = FakeDashboardBackend()
+        user = {"id": "admin-1", "display_name": "Nathan"}
+        backend.daily_sheets.append(
+            {
+                "id": "archive-1",
+                "user_id": "admin-1",
+                "sheet_date": "2026-07-21",
+                "status": "archived",
+                "top_tasks": [{"task": "Launch", "status": "done", "time_blocked": "2 hours"}],
+                "additional_items": [],
+                "ratings": {"Overall Score": 8},
+            }
+        )
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            rows = sports_cave_dashboard.list_daily_execution_archive_summaries(user, date(2026, 7, 20), date(2026, 7, 26))
+            self.assertFalse(any(call[0] == "detail" for call in backend.daily_calls))
+            detail = sports_cave_dashboard.get_daily_execution_archive_detail(user, "archive-1")
+        self.assertEqual(rows[0]["id"], detail["id"])
+        self.assertEqual(sum(call[0] == "detail" for call in backend.daily_calls), 1)
+
+    def test_weekly_execution_summary_is_deterministic(self):
+        sheets = [
+            {
+                "id": "one",
+                "sheet_date": "2026-07-21",
+                "status": "archived",
+                "top_tasks": [
+                    {"task": "A", "status": "done", "time_blocked": "2 hours"},
+                    {"task": "B", "status": "couldnt_finish", "time_blocked": "90m"},
+                    {"task": "C", "status": "done", "time_blocked": "1 hour"},
+                ],
+                "additional_items": [{"task": "Small", "status": "done", "time_blocked": "30m"}],
+                "ratings": {"Overall Score": 8},
+                "review_data": {"worked_well": "Launch shipped", "could_not_finish": "Supplier delay"},
+                "planning_data": {"carried_forward": [{"task": "B"}]},
+            },
+            {
+                "id": "two",
+                "sheet_date": "2026-07-22",
+                "status": "reviewed",
+                "top_tasks": [{"task": "B", "status": "couldnt_finish", "time_blocked": "1 hour"}],
+                "additional_items": [],
+                "ratings": {"Overall Score": 6},
+                "review_data": {"could_not_finish": "Supplier delay"},
+                "planning_data": {"carried_forward": [{"task": "B"}]},
+            },
+        ]
+        summary = sports_cave_dashboard.daily_execution_weekly_summary(sheets)
+        self.assertEqual(summary["days_planned"], 2)
+        self.assertEqual(summary["days_reviewed"], 2)
+        self.assertEqual(summary["mip_completed"], 2)
+        self.assertEqual(summary["mip_not_completed"], 2)
+        self.assertEqual(summary["other_completed"], 1)
+        self.assertEqual(summary["planned_hours"], 6.0)
+        self.assertEqual(summary["average_day_rating"], 7.0)
+        self.assertEqual(summary["repeated_carryovers"], ["B"])
+
+    def test_home_execution_bundle_uses_one_backend_query_and_warm_cache(self):
+        backend = FakeDashboardBackend()
+        user = {"id": "admin-1", "display_name": "Nathan"}
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            sports_cave_dashboard.get_daily_execution_home_sheets(user, date(2026, 7, 22))
+            sports_cave_dashboard.get_daily_execution_home_sheets(user, date(2026, 7, 22))
+        self.assertEqual([call[0] for call in backend.daily_calls], ["home"])
+
+    def test_plan_save_invalidates_only_the_affected_execution_week(self):
+        backend = FakeDashboardBackend()
+        user = {"id": "admin-1", "display_name": "Nathan"}
+        top_tasks = [{"task": f"MIP {index}", "why": "Revenue", "time_blocked": "1h"} for index in range(1, 4)]
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend), patch(
+            "activity_log.get_activity_actor", return_value="Nathan"
+        ):
+            sports_cave_dashboard.list_daily_execution_archive_summaries(user, date(2026, 7, 20), date(2026, 7, 26))
+            sports_cave_dashboard.list_daily_execution_archive_summaries(user, date(2026, 7, 27), date(2026, 8, 2))
+            sports_cave_dashboard.save_daily_execution_plan(
+                user, date(2026, 7, 23), "Australia/Sydney", top_tasks, [], {}
+            )
+            sports_cave_dashboard.list_daily_execution_archive_summaries(user, date(2026, 7, 20), date(2026, 7, 26))
+            sports_cave_dashboard.list_daily_execution_archive_summaries(user, date(2026, 7, 27), date(2026, 8, 2))
+        week_calls = [call for call in backend.daily_calls if call[0] == "week"]
+        self.assertEqual(len(week_calls), 3)
+        self.assertEqual(sum(call[2] == "2026-07-27" for call in week_calls), 1)
+
+    def test_daily_execution_ui_contains_planning_archive_and_read_only_flow(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        self.assertIn("Save tomorrow's plan", source)
+        self.assertIn("Main outcome for the day", source)
+        self.assertIn("Appointment, deadline or fixed event", source)
+        self.assertIn("Select only the unfinished work", source)
+        self.assertIn("Daily Execution Archive", source)
+        self.assertIn("View archived sheet", source)
+        self.assertIn("@st.fragment\ndef render_daily_execution_panel", source)
+
+    def test_plan_tomorrow_button_opens_editable_inline_form(self):
+        backend = FakeDashboardBackend()
+        backend.daily_sheets.append(
+            {
+                "id": "today-reviewed",
+                "user_id": "admin-1",
+                "user_name": "Nathan",
+                "sheet_date": "2026-07-22",
+                "timezone": "Australia/Sydney",
+                "status": "reviewed",
+                "top_tasks": [
+                    {"task": "One", "status": "done"},
+                    {"task": "Two", "status": "done"},
+                    {"task": "Three", "status": "done"},
+                ],
+                "additional_items": [],
+                "ratings": {"Overall Score": 8},
+                "completed_at": "2026-07-22T18:00:00+10:00",
+            }
+        )
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = {
+            "id": "admin-1",
+            "username": "nathan",
+            "display_name": "Nathan",
+            "role": "admin",
+            "timezone": "Australia/Sydney",
+            "is_active": True,
+            "page_permissions": [],
+        }
+        app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            app_test.run(timeout=20)
+            plan_button = next(button for button in app_test.button if button.label == "Plan tomorrow")
+            plan_button.click().run(timeout=20)
+        rendered = "\n".join(str(item.value) for item in app_test.markdown)
+        self.assertFalse(app_test.exception)
+        self.assertIn("Plan Thursday, 23 July 2026", rendered)
+        self.assertTrue(any(field.label == "Main outcome for the day" for field in app_test.text_input))
+
+    def test_dashboard_schema_setup_is_not_repeated_on_warm_calls(self):
+        calls = []
+
+        class Cursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, statement, _params=None):
+                calls.append(str(statement))
+
+        class Connection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return Cursor()
+
+            def commit(self):
+                return None
+
+        old_ready = supabase_backend._DASHBOARD_SCHEMA_READY
+        old_full_ready = supabase_backend._SCHEMA_READY
+        try:
+            supabase_backend._DASHBOARD_SCHEMA_READY = False
+            supabase_backend._SCHEMA_READY = False
+            with patch.object(supabase_backend, "is_configured", return_value=True), patch.object(
+                supabase_backend, "connect", side_effect=lambda: Connection()
+            ):
+                supabase_backend.ensure_dashboard_schema()
+                first_count = len(calls)
+                supabase_backend.ensure_dashboard_schema()
+            self.assertGreater(first_count, 0)
+            self.assertEqual(len(calls), first_count)
+        finally:
+            supabase_backend._DASHBOARD_SCHEMA_READY = old_ready
+            supabase_backend._SCHEMA_READY = old_full_ready
 
     def test_tomorrow_execution_prompt_includes_required_context(self):
         today_sheet = {

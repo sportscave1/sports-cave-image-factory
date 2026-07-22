@@ -2142,11 +2142,44 @@ def inject_styles():
         .st-key-files-explorer {
             color: #202124;
             font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-            margin-top: -0.2rem;
+            height: calc(100dvh - 0.9rem);
+            min-height: 0;
+            overflow: hidden;
+        }
+
+        .stApp:has(.st-key-files-explorer) header[data-testid="stHeader"],
+        .stApp:has(.st-key-files-explorer) [data-testid="stToolbar"],
+        .stApp:has(.st-key-files-explorer) [data-testid="stDecoration"] {
+            display: none !important;
+            height: 0 !important;
+            min-height: 0 !important;
+            pointer-events: none !important;
         }
 
         div[data-testid="stAppViewContainer"]:has(.st-key-files-explorer) .block-container {
-            padding-top: 1.15rem;
+            height: 100dvh;
+            min-height: 0;
+            overflow: hidden;
+            padding-bottom: 0.45rem !important;
+            padding-top: 0.45rem !important;
+        }
+
+        .st-key-files-explorer > [data-testid="stVerticalBlock"] {
+            gap: 0.2rem !important;
+            height: 100%;
+            min-height: 0;
+        }
+
+        .st-key-files-explorer > [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"]:has(> .st-key-files-details-list) {
+            flex: 1 1 auto;
+            min-height: 0;
+        }
+
+        div[data-testid="stAppViewContainer"]:has(.sc-files-preview-header) .block-container,
+        .st-key-files-explorer:has(.sc-files-preview-header) {
+            height: auto;
+            min-height: 100dvh;
+            overflow: visible;
         }
 
         .st-key-files-navigation-row {
@@ -2345,14 +2378,35 @@ def inject_styles():
         .st-key-files-details-list {
             border: 1px solid #E0E2E5;
             border-radius: 0;
+            height: 100%;
             margin-top: 0;
-            max-height: calc(100vh - 205px);
             min-height: 112px;
             min-width: 720px;
             overflow: auto;
+            position: relative;
             scrollbar-color: #C4C8CC #F7F8FA;
             scrollbar-width: thin;
             width: 100%;
+        }
+
+        .st-key-files-details-list.sc-files-drop-active {
+            border-color: #6C9DC0;
+            outline: 1px dashed #6C9DC0;
+            outline-offset: -3px;
+        }
+
+        .sc-files-workspace-drop-overlay {
+            align-items: center;
+            background: rgba(229, 240, 248, 0.94);
+            color: #244A64;
+            display: flex;
+            font-size: 0.82rem;
+            font-weight: 600;
+            inset: 0;
+            justify-content: center;
+            pointer-events: none;
+            position: absolute;
+            z-index: 30;
         }
 
         .st-key-files-details-list [data-testid="stVerticalBlock"] {
@@ -9000,46 +9054,69 @@ def render_todays_design_ideas(local_now, events):
             )
 
 
-def _daily_execution_review_payload(prefix):
-    completed = st.text_area("What did I actually complete today?", key=f"{prefix}-completed")
-    avoided = st.text_area("What did I avoid or half-do?", key=f"{prefix}-avoided")
-    revenue = st.text_area("What moved Sports Cave closer to $5M revenue?", key=f"{prefix}-revenue")
-    noise = st.text_area("What was noise/distraction?", key=f"{prefix}-noise")
-    lesson = st.text_area("What lesson did today teach me?", key=f"{prefix}-lesson")
-    protected = st.text_area("What must be protected tomorrow?", key=f"{prefix}-protected")
+def _daily_execution_fragment_rerun():
+    try:
+        st.rerun(scope="fragment")
+    except (TypeError, AttributeError):
+        st.rerun()
+    except Exception as error:
+        if 'scope="fragment" can only be specified' not in str(error):
+            raise
+        st.rerun()
+
+
+def _daily_execution_review_payload(prefix, sheet):
+    saved = dict((sheet or {}).get("review_data") or (sheet or {}).get("no_grey_zone") or {})
+    completed = st.text_area("What was completed today?", value=saved.get("completed") or (sheet or {}).get("daily_summary") or "", key=f"{prefix}-completed")
+    unfinished = st.text_area("What could not be finished and why?", value=saved.get("could_not_finish") or saved.get("avoided") or "", key=f"{prefix}-unfinished")
+    worked_well = st.text_area("What worked well?", value=saved.get("worked_well") or "", key=f"{prefix}-worked")
+    improve = st.text_area("What needs improving tomorrow?", value=saved.get("improve_tomorrow") or "", key=f"{prefix}-improve")
+    revenue = st.text_area("What moved Sports Cave closer to $5M revenue?", value=saved.get("revenue") or "", key=f"{prefix}-revenue")
+    noise = st.text_area("What was noise/distraction?", value=saved.get("noise") or "", key=f"{prefix}-noise")
+    lesson = st.text_area("What lesson did today teach me?", value=saved.get("lesson") or "", key=f"{prefix}-lesson")
+    protected = st.text_area("What must be protected tomorrow?", value=saved.get("protected") or "", key=f"{prefix}-protected")
     rating_cols = st.columns(4)
     ratings = {}
     for index, label in enumerate(sports_cave_dashboard.DAILY_RATING_FIELDS):
         with rating_cols[index % len(rating_cols)]:
-            ratings[label] = st.number_input(label, min_value=0, max_value=10, value=0, step=1, key=f"{prefix}-rating-{label}")
+            minimum = 1 if label == "Overall Score" else 0
+            old_rating = int(((sheet or {}).get("ratings") or {}).get(label) or minimum)
+            ratings[label] = st.number_input(label, min_value=minimum, max_value=10, value=old_rating, step=1, key=f"{prefix}-rating-{label}")
     tomorrow = st.text_area(
         "What is the ONE THING tomorrow must nail?",
+        value=(sheet or {}).get("tomorrow_intention") or "",
         key=f"{prefix}-tomorrow",
     )
+    notes = st.text_area("Optional notes", value=saved.get("notes") or "", key=f"{prefix}-notes")
+    review_data = {
+        "completed": completed,
+        "could_not_finish": unfinished,
+        "worked_well": worked_well,
+        "improve_tomorrow": improve,
+        "revenue": revenue,
+        "noise": noise,
+        "lesson": lesson,
+        "protected": protected,
+        "notes": notes,
+    }
     return {
         "daily_summary": completed,
         "tomorrow_intention": tomorrow,
-        "no_grey_zone": {
-            "completed": completed,
-            "avoided": avoided,
-            "revenue": revenue,
-            "noise": noise,
-            "lesson": lesson,
-            "protected": protected,
-        },
+        "no_grey_zone": {**review_data, "avoided": unfinished},
+        "review_data": review_data,
         "ratings": ratings,
     }
 
 
 def _save_daily_execution_review(sheet, payload):
     try:
-        sports_cave_dashboard.complete_daily_execution_review(sheet.get("id"), payload)
+        sports_cave_dashboard.complete_daily_execution_review(sheet.get("id"), payload, user=current_os_user())
     except sports_cave_dashboard.DashboardStorageError:
         st.warning("Daily Review could not save right now. Please try again.")
         return False
     st.session_state.pop("daily_execution_review_sheet_id", None)
-    st.success("Daily Review saved.")
-    st.rerun()
+    st.success("Daily Review complete.")
+    _daily_execution_fragment_rerun()
     return True
 
 
@@ -9048,7 +9125,7 @@ def render_daily_execution_review(sheet):
         @st.dialog("Complete Daily Review")
         def review_dialog():
             with st.form(f"daily-execution-review::{sheet.get('id')}"):
-                payload = _daily_execution_review_payload(f"daily-review::{sheet.get('id')}")
+                payload = _daily_execution_review_payload(f"daily-review::{sheet.get('id')}", sheet)
                 submitted = st.form_submit_button("Complete Daily Review", type="primary", use_container_width=True)
             if submitted:
                 _save_daily_execution_review(sheet, payload)
@@ -9058,12 +9135,139 @@ def render_daily_execution_review(sheet):
 
     with st.expander("Complete Daily Review", expanded=True):
         with st.form(f"daily-execution-review::{sheet.get('id')}"):
-            payload = _daily_execution_review_payload(f"daily-review::{sheet.get('id')}")
+            payload = _daily_execution_review_payload(f"daily-review::{sheet.get('id')}", sheet)
             submitted = st.form_submit_button("Complete Daily Review", type="primary", use_container_width=True)
         if submitted:
             _save_daily_execution_review(sheet, payload)
 
 
+def _daily_execution_date_heading(target_date):
+    return target_date.strftime("%A, %d %B %Y").replace(", 0", ", ")
+
+
+def _daily_execution_status_control(container, label, current, key):
+    options = ("", sports_cave_dashboard.DAILY_TASK_STATUS_DONE, sports_cave_dashboard.DAILY_TASK_STATUS_COULDNT_FINISH)
+    labels = {"": "Open", sports_cave_dashboard.DAILY_TASK_STATUS_DONE: "Done", sports_cave_dashboard.DAILY_TASK_STATUS_COULDNT_FINISH: "Couldn't finish"}
+    selected = current if current in options else (sports_cave_dashboard.DAILY_TASK_STATUS_DONE if current is True else "")
+    return container.selectbox(label, options, index=options.index(selected), format_func=lambda value: labels[value], key=key, label_visibility="collapsed")
+
+
+def _render_daily_planning_form(user, target_date, existing_sheet, source_sheet, timezone_name):
+    date_key = target_date.isoformat()
+    st.markdown(f"**Plan {_daily_execution_date_heading(target_date)}**")
+    top_tasks = (existing_sheet or {}).get("top_tasks") or sports_cave_dashboard._blank_top_tasks()
+    existing_other = [item for item in (existing_sheet or {}).get("additional_items") or [] if sports_cave_dashboard._daily_additional_item_has_content(item)]
+    count_key = f"daily-plan-other-count::{date_key}"
+    st.session_state.setdefault(count_key, max(len(existing_other) + 1, 1))
+    carry_candidates = sports_cave_dashboard.daily_execution_unfinished_tasks(source_sheet)
+    carried_saved = (existing_sheet or {}).get("planning_data", {}).get("carried_forward") or []
+    carried_keys = {str(item.get("key") or "") for item in carried_saved if isinstance(item, dict)}
+
+    with st.form(f"daily-execution-plan::{date_key}"):
+        st.caption("Three major execution tasks")
+        header = st.columns([2.1, 2.4, 1.1])
+        header[0].markdown("**Task**")
+        header[1].markdown("**Details/outcome required**")
+        header[2].markdown("**Time allocated**")
+        planned_top = []
+        for index in range(3):
+            task = dict(top_tasks[index] if index < len(top_tasks) else {})
+            st.markdown(f"**MIP Task {index + 1}**")
+            cols = st.columns([2.1, 2.4, 1.1])
+            planned_top.append({
+                "task": cols[0].text_input("Task", value=task.get("task") or "", key=f"daily-plan-mip-task::{date_key}::{index}", label_visibility="collapsed"),
+                "why": cols[1].text_input("Details/outcome required", value=task.get("why") or "", key=f"daily-plan-mip-details::{date_key}::{index}", label_visibility="collapsed"),
+                "time_blocked": cols[2].text_input("Time allocated", value=task.get("time_blocked") or "", key=f"daily-plan-mip-time::{date_key}::{index}", label_visibility="collapsed"),
+                "status": "",
+            })
+
+        selected_carryovers = []
+        if carry_candidates:
+            st.markdown("**Carryover from today**")
+            st.caption("Select only the unfinished work that belongs in tomorrow's plan.")
+            for index, candidate in enumerate(carry_candidates):
+                carry_key = candidate.get("key") or str(index)
+                selected = st.checkbox(candidate.get("task") or "Unfinished task", value=carry_key in carried_keys, key=f"daily-plan-carry-select::{date_key}::{index}")
+                cols = st.columns([2.1, 2.4, 1.1])
+                task_text = cols[0].text_input("Carryover task", value=candidate.get("task") or "", key=f"daily-plan-carry-task::{date_key}::{index}", label_visibility="collapsed")
+                details = cols[1].text_input("Carryover details", value=candidate.get("details") or "", key=f"daily-plan-carry-details::{date_key}::{index}", label_visibility="collapsed")
+                time_blocked = cols[2].text_input("Carryover time", value=candidate.get("time_blocked") or "", key=f"daily-plan-carry-time::{date_key}::{index}", label_visibility="collapsed")
+                if selected:
+                    selected_carryovers.append({"key": carry_key, "task": task_text, "details": details, "time_blocked": time_blocked, "status": "", "carried_from": (source_sheet or {}).get("sheet_date") or ""})
+
+        st.markdown("**Other tasks**")
+        planned_other = []
+        for index in range(int(st.session_state.get(count_key) or 1)):
+            task = dict(existing_other[index] if index < len(existing_other) else {})
+            cols = st.columns([2.1, 2.4, 1.1])
+            planned_other.append({
+                "task": cols[0].text_input("Other task", value=task.get("task") or "", key=f"daily-plan-other-task::{date_key}::{index}", label_visibility="collapsed"),
+                "details": cols[1].text_input("Other task details", value=task.get("details") or "", key=f"daily-plan-other-details::{date_key}::{index}", label_visibility="collapsed"),
+                "time_blocked": cols[2].text_input("Other task time", value=task.get("time_blocked") or "", key=f"daily-plan-other-time::{date_key}::{index}", label_visibility="collapsed"),
+                "status": "",
+            })
+
+        planning = (existing_sheet or {}).get("planning_data") or {}
+        outcome = st.text_input("Main outcome for the day", value=planning.get("main_outcome") or "", key=f"daily-plan-outcome::{date_key}")
+        fixed_event = st.text_input("Appointment, deadline or fixed event", value=planning.get("fixed_event") or "", key=f"daily-plan-fixed::{date_key}")
+        notes = st.text_area("Optional planning notes", value=planning.get("notes") or "", key=f"daily-plan-notes::{date_key}")
+        actions = st.columns([1, 1, 1.7])
+        add_other = actions[0].form_submit_button("Add other task", use_container_width=True)
+        cancel = actions[1].form_submit_button("Cancel", use_container_width=True)
+        sydney_today = datetime.now(ZoneInfo("Australia/Sydney")).date()
+        save = actions[2].form_submit_button("Save tomorrow's plan" if target_date > sydney_today else "Save today's plan", type="primary", use_container_width=True)
+
+    if add_other:
+        st.session_state[count_key] = int(st.session_state.get(count_key) or 1) + 1
+        _daily_execution_fragment_rerun()
+    if cancel:
+        st.session_state.pop("daily_execution_plan_date", None)
+        _daily_execution_fragment_rerun()
+    if save:
+        if any(not str(task.get("task") or "").strip() for task in planned_top):
+            st.warning("Add all three MIP tasks before saving the plan.")
+            return
+        all_other = selected_carryovers + planned_other
+        planning_data = {
+            "main_outcome": outcome,
+            "fixed_event": fixed_event,
+            "notes": notes,
+            "carried_forward": selected_carryovers,
+            "planned_for": date_key,
+        }
+        archive_sheet_id = None
+        if target_date > sydney_today and sports_cave_dashboard.daily_execution_review_complete(source_sheet):
+            archive_sheet_id = (source_sheet or {}).get("id")
+        try:
+            saved_sheet = sports_cave_dashboard.save_daily_execution_plan(
+                user,
+                target_date,
+                timezone_name,
+                planned_top,
+                all_other,
+                planning_data,
+                archive_sheet_id=archive_sheet_id,
+            )
+        except sports_cave_dashboard.DashboardStorageError:
+            st.warning("The plan could not save right now. Please try again.")
+            return
+        if not saved_sheet or saved_sheet.get("sheet_date") != date_key or not saved_sheet.get("id"):
+            st.warning("The plan could not be confirmed as saved. Please try again.")
+            return
+        st.session_state.pop("daily_execution_plan_date", None)
+        st.success("Tomorrow's plan saved." if target_date > sydney_today else "Today's plan saved.")
+        _daily_execution_fragment_rerun()
+
+
+def _render_daily_execution_read_only(sheet):
+    st.caption("Daily Review complete." if sports_cave_dashboard.daily_execution_review_complete(sheet) else "Read-only")
+    for index, task in enumerate((sheet or {}).get("top_tasks") or [], start=1):
+        if task.get("task"):
+            status = "Done" if task.get("status") == sports_cave_dashboard.DAILY_TASK_STATUS_DONE else "Couldn't finish"
+            st.markdown(f"**MIP Task {index}:** {html.escape(task.get('task') or '')} · {html.escape(status)}")
+
+
+@st.fragment
 def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
     user = current_os_user()
     if not os_accounts.is_admin(user):
@@ -9079,8 +9283,9 @@ def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
     tomorrow = today + timedelta(days=1)
     timezone_name = os_accounts.timezone_for_user(user)
     try:
-        sheet = sports_cave_dashboard.get_daily_execution_sheet(user, today)
-        tomorrow_sheet = sports_cave_dashboard.get_daily_execution_sheet(user, tomorrow)
+        home_sheets = sports_cave_dashboard.get_daily_execution_home_sheets(user, today)
+        sheet = home_sheets.get("today") or {}
+        tomorrow_sheet = home_sheets.get("tomorrow") or {}
     except sports_cave_dashboard.DashboardStorageError:
         st.warning("Daily Execution could not load right now.")
         return False
@@ -9088,41 +9293,40 @@ def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
     for alert in sports_cave_dashboard.daily_execution_alerts(sheet, local_now, user_name=user_name):
         st.warning(alert)
 
-    planning_cols = st.columns([1, 1, 2])
+    planning_cols = st.columns([2.3, 1, 1])
     if not sheet:
         planning_cols[0].markdown(
-            f'<div class="sc-empty-note">{html.escape(user_name)}, today&apos;s list is not filled out yet.</div>',
+            '<div class="sc-empty-note">Today&apos;s execution sheet has not been planned.</div>',
             unsafe_allow_html=True,
         )
-        if planning_cols[1].button("Create Today's List", key="daily-execution-create-today", use_container_width=True):
-            try:
-                sports_cave_dashboard.create_daily_execution_sheet(user, today, timezone_name)
-            except sports_cave_dashboard.DashboardStorageError:
-                st.warning("Could not create today's list right now.")
-                return False
-            st.rerun()
+        if planning_cols[1].button("Create today's sheet", key="daily-execution-create-today", use_container_width=True):
+            st.session_state["daily_execution_plan_date"] = today.isoformat()
+            _daily_execution_fragment_rerun()
 
-    if tomorrow_sheet:
-        planning_cols[2].markdown(
-            '<div class="sc-empty-note">Tomorrow&apos;s list is ready.</div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        if planning_cols[2].button("Create Tomorrow's List", key="daily-execution-create-tomorrow-list", type="primary", use_container_width=True):
-            try:
-                sports_cave_dashboard.create_daily_execution_sheet(user, tomorrow, timezone_name)
-            except sports_cave_dashboard.DashboardStorageError:
-                st.warning("Tomorrow's list could not be created right now.")
-                return False
-            st.rerun()
+    if sheet and sports_cave_dashboard.daily_execution_review_complete(sheet):
+        if planning_cols[2].button("Plan tomorrow", key="daily-execution-plan-tomorrow", type="primary", use_container_width=True):
+            st.session_state["daily_execution_plan_date"] = tomorrow.isoformat()
+            _daily_execution_fragment_rerun()
+        if tomorrow_sheet:
+            planning_cols[0].caption("Tomorrow's plan saved. Select Plan tomorrow to review or update it.")
+
+    planning_date = st.session_state.get("daily_execution_plan_date")
+    if planning_date in {today.isoformat(), tomorrow.isoformat()}:
+        target = date.fromisoformat(planning_date)
+        existing = sheet if target == today else tomorrow_sheet
+        _render_daily_planning_form(user, target, existing, sheet, timezone_name)
 
     if not sheet:
         return True
 
     completed_count = sports_cave_dashboard.daily_execution_completed_count(sheet)
     filled_count = sports_cave_dashboard.daily_execution_filled_task_count(sheet)
-    status_text = "Daily Review completed." if sheet.get("status") == sports_cave_dashboard.DAILY_EXECUTION_STATUS_COMPLETED else "Today's tasks are still open."
+    status_text = "Daily Review complete." if sports_cave_dashboard.daily_execution_review_complete(sheet) else "Today's tasks are still open."
     st.caption(f"{completed_count}/3 complete - {status_text}")
+
+    if sports_cave_dashboard.daily_execution_review_complete(sheet):
+        _render_daily_execution_read_only(sheet)
+        return True
 
     with st.form(f"daily-execution-tasks::{sheet.get('id')}"):
         updated_tasks = []
@@ -9189,17 +9393,17 @@ def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
         save_list = st.form_submit_button("Save List", use_container_width=True)
     if save_list:
         try:
-            sports_cave_dashboard.save_daily_execution_tasks(sheet.get("id"), updated_tasks, updated_other_tasks)
+            sports_cave_dashboard.save_daily_execution_tasks(sheet.get("id"), updated_tasks, updated_other_tasks, user=user)
         except sports_cave_dashboard.DashboardStorageError:
             st.warning("List could not save right now.")
             return False
-        st.rerun()
+        _daily_execution_fragment_rerun()
 
     if filled_count == 0:
         st.warning("Today's list has no tasks yet.")
 
     action_cols = st.columns([1, 2.4])
-    if sports_cave_dashboard.daily_execution_all_tasks_complete(sheet) and sheet.get("status") != sports_cave_dashboard.DAILY_EXECUTION_STATUS_COMPLETED:
+    if sports_cave_dashboard.daily_execution_all_tasks_complete(sheet) and not sports_cave_dashboard.daily_execution_review_complete(sheet):
         if action_cols[0].button("Complete Daily Review", key="daily-execution-open-review", type="primary", use_container_width=True):
             st.session_state["daily_execution_review_sheet_id"] = sheet.get("id")
     else:
@@ -9208,41 +9412,6 @@ def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
     if st.session_state.get("daily_execution_review_sheet_id") == sheet.get("id"):
         render_daily_execution_review(sheet)
 
-    if sheet.get("generated_prompt"):
-        with st.expander("Tomorrow prompt", expanded=False):
-            render_copy_prompt_button(
-                sheet.get("generated_prompt") or "",
-                "daily-execution-tomorrow-prompt",
-                label="Copy prompt",
-                background="#111111",
-                text_color="#FFFFFF",
-                border_color="#111111",
-            )
-            st.text_area(
-                "Generated prompt",
-                value=sheet.get("generated_prompt") or "",
-                height=180,
-                label_visibility="collapsed",
-                key="daily-execution-generated-prompt",
-            )
-            pasted_plan = st.text_area(
-                "Paste tomorrow plan",
-                placeholder="Paste ChatGPT's execution sheet here if you want to save it against tomorrow.",
-                height=110,
-                key="daily-execution-tomorrow-plan",
-            )
-            if tomorrow_sheet:
-                st.caption("Tomorrow's list is ready.")
-            elif st.button("Create Tomorrow's List", key="daily-execution-create-tomorrow", use_container_width=True):
-                try:
-                    tomorrow_sheet = sports_cave_dashboard.create_daily_execution_sheet(user, tomorrow, timezone_name)
-                    if pasted_plan.strip():
-                        sports_cave_dashboard.save_daily_execution_prompt(tomorrow_sheet.get("id"), pasted_plan)
-                except sports_cave_dashboard.DashboardStorageError:
-                    st.warning("Tomorrow's list could not be created right now.")
-                    return False
-                st.success("Tomorrow's list created.")
-                st.rerun()
     return True
 
 
@@ -9475,6 +9644,134 @@ def render_activity_log(local_now, *, show_denied=True):
     return True
 
 
+def _daily_archive_row_metrics(sheet):
+    mip_tasks = [task for task in (sheet or {}).get("top_tasks") or [] if task.get("task")]
+    other_tasks = [task for task in (sheet or {}).get("additional_items") or [] if sports_cave_dashboard._daily_additional_item_has_content(task)]
+    hours = sum(sports_cave_dashboard._planned_hours(task.get("time_blocked")) for task in mip_tasks + other_tasks)
+    return {
+        "mip": f"{sum(1 for task in mip_tasks if sports_cave_dashboard.daily_execution_task_finished(task))}/{len(mip_tasks)}",
+        "other": str(sum(1 for task in other_tasks if sports_cave_dashboard.daily_execution_task_finished(task))),
+        "hours": f"{hours:.1f}" if hours else "0",
+        "rating": str(((sheet or {}).get("ratings") or {}).get("Overall Score") or "-") ,
+    }
+
+
+def _render_archived_sheet_detail(sheet):
+    snapshot = (sheet or {}).get("archived_snapshot") or sheet or {}
+    snapshot = sports_cave_dashboard._normalise_daily_sheet(snapshot)
+    st.markdown(f"**{html.escape(snapshot.get('day_name') or '')} {html.escape(snapshot.get('sheet_date') or '')}**")
+    planning = snapshot.get("planning_data") or {}
+    if planning.get("main_outcome"):
+        st.caption(f"Main outcome: {planning.get('main_outcome')}")
+    for index, task in enumerate(snapshot.get("top_tasks") or [], start=1):
+        if not task.get("task"):
+            continue
+        status = "Done" if task.get("status") == sports_cave_dashboard.DAILY_TASK_STATUS_DONE else ("Couldn't finish" if sports_cave_dashboard.daily_execution_task_finished(task) else "Open")
+        st.markdown(f"**MIP Task {index}:** {html.escape(task.get('task') or '')} · {html.escape(task.get('why') or '')} · {html.escape(task.get('time_blocked') or '')} · {html.escape(status)}")
+    other = [item for item in snapshot.get("additional_items") or [] if sports_cave_dashboard._daily_additional_item_has_content(item)]
+    if other:
+        st.markdown("**Other tasks**")
+        for item in other:
+            status = "Done" if item.get("status") == sports_cave_dashboard.DAILY_TASK_STATUS_DONE else ("Couldn't finish" if sports_cave_dashboard.daily_execution_task_finished(item) else "Open")
+            st.markdown(f"- {html.escape(item.get('task') or item.get('details') or '')} · {html.escape(item.get('time_blocked') or '')} · {html.escape(status)}")
+    review = snapshot.get("review_data") or snapshot.get("no_grey_zone") or {}
+    if review:
+        st.markdown("**Daily Review**")
+        for label, key in (
+            ("Completed", "completed"),
+            ("Could not finish", "could_not_finish"),
+            ("Worked well", "worked_well"),
+            ("Improve tomorrow", "improve_tomorrow"),
+            ("Notes", "notes"),
+        ):
+            if review.get(key):
+                st.markdown(f"**{label}:** {html.escape(str(review.get(key)))}")
+
+
+@st.fragment
+def render_daily_execution_archive(local_now, *, show_denied=True):
+    user = current_os_user()
+    if not os_accounts.is_admin(user):
+        if show_denied:
+            st.title("Access not approved")
+            st.caption("This page is not available for your account.")
+        return False
+    render_html_section_title("Daily Execution Archive")
+    current_start, current_end = sports_cave_dashboard.daily_execution_week_bounds(local_now.date())
+    choice_cols = st.columns([1.8, 1])
+    view = choice_cols[0].radio(
+        "Archive week",
+        ("This week", "Last week", "Select week"),
+        horizontal=True,
+        label_visibility="collapsed",
+        key="daily-execution-archive-week-view",
+    )
+    if view == "Last week":
+        week_start = current_start - timedelta(days=7)
+    elif view == "Select week":
+        anchor = choice_cols[1].date_input("Week", value=current_start, label_visibility="collapsed", key="daily-execution-archive-week-date")
+        week_start, _unused = sports_cave_dashboard.daily_execution_week_bounds(anchor)
+    else:
+        week_start = current_start
+    week_end = week_start + timedelta(days=6)
+    choice_cols[1].caption(f"{week_start.strftime('%d %b')} - {week_end.strftime('%d %b %Y')}")
+    try:
+        sheets = sports_cave_dashboard.list_daily_execution_archive_summaries(user, week_start, week_end, limit=8)
+    except sports_cave_dashboard.DashboardStorageError:
+        st.warning("Daily Execution Archive could not load right now.")
+        return False
+
+    header = st.columns([1.3, 1, 1.15, 0.9, 0.8, 1, 0.7])
+    for column, label in zip(header, ("Date", "MIP completed", "Other tasks", "Planned hours", "Day rating", "Status", "View")):
+        column.markdown(f"**{label}**")
+    if not sheets:
+        st.caption("No execution sheets for this week.")
+    for sheet in sheets:
+        metrics = _daily_archive_row_metrics(sheet)
+        row = st.columns([1.3, 1, 1.15, 0.9, 0.8, 1, 0.7])
+        try:
+            row_date = date.fromisoformat(sheet.get("sheet_date") or "")
+            date_label = row_date.strftime("%a %d %b")
+        except ValueError:
+            date_label = sheet.get("sheet_date") or ""
+        row[0].write(date_label)
+        row[1].write(metrics["mip"])
+        row[2].write(metrics["other"])
+        row[3].write(metrics["hours"])
+        row[4].write(metrics["rating"])
+        row[5].write(str(sheet.get("status") or "").title())
+        if row[6].button("View", key=f"daily-archive-view::{sheet.get('id')}", use_container_width=True):
+            st.session_state["daily_execution_archive_sheet_id"] = sheet.get("id")
+            _daily_execution_fragment_rerun()
+
+    detail_id = st.session_state.get("daily_execution_archive_sheet_id")
+    if detail_id:
+        try:
+            detail = sports_cave_dashboard.get_daily_execution_archive_detail(user, detail_id)
+        except sports_cave_dashboard.DashboardStorageError:
+            detail = {}
+            st.warning("That archived sheet could not load right now.")
+        if detail:
+            with st.expander("View archived sheet", expanded=True):
+                _render_archived_sheet_detail(detail)
+
+    summary = sports_cave_dashboard.daily_execution_weekly_summary(sheets)
+    with st.expander("Weekly review", expanded=False):
+        metrics = st.columns(4)
+        metrics[0].metric("Days planned", summary["days_planned"])
+        metrics[1].metric("Days reviewed", summary["days_reviewed"])
+        metrics[2].metric("MIPs completed", summary["mip_completed"])
+        metrics[3].metric("Average rating", summary["average_day_rating"] or "-")
+        st.caption(
+            f"MIPs not completed: {summary['mip_not_completed']} · Other tasks completed: {summary['other_completed']} · Planned hours: {summary['planned_hours']}"
+        )
+        st.markdown(f"**Biggest wins:** {html.escape('; '.join(summary['biggest_wins']) or 'No wins recorded yet.')}")
+        st.markdown(f"**Main blockers:** {html.escape('; '.join(summary['main_blockers']) or 'No blockers recorded yet.')}")
+        st.markdown(f"**Repeated unfinished work:** {html.escape('; '.join(summary['repeated_carryovers']) or 'None repeated this week.')}")
+        st.markdown(f"**Recommended priorities:** {html.escape('; '.join(summary['recommended_priorities']) or 'Use the next plan to protect the top three revenue tasks.')}")
+    return True
+
+
 def _calendar_event_pill(event):
     title = str(event.get("title") or "Sports Cave event").strip()
     date_label = sports_sales_calendar.format_event_date(event)
@@ -9584,6 +9881,7 @@ def render_lightweight_dashboard_page():
     render_dashboard_tasks(state)
     if os_accounts.is_admin(user):
         render_activity_log(local_now)
+        render_daily_execution_archive(local_now)
         render_sports_sales_calendar(events, local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
@@ -10122,7 +10420,14 @@ def _files_row_icon(kind):
     }.get(kind, ":material/draft:")
 
 
-def _render_files_details(entries, user, root_path, *, show_header=True):
+def _render_files_details(
+    entries,
+    user,
+    root_path,
+    *,
+    show_header=True,
+    empty_message="",
+):
     rows = dropbox_integration.sort_folder_entries(entries)
     with st.container(key="files-details-list"):
         if show_header:
@@ -10135,6 +10440,11 @@ def _render_files_details(entries, user, root_path, *, show_header=True):
                 '<span role="columnheader">Size</span>'
                 '<span aria-hidden="true"></span>'
                 '</div>',
+                unsafe_allow_html=True,
+            )
+        if not rows and empty_message:
+            st.markdown(
+                f'<div class="sc-files-empty">{html.escape(empty_message)}</div>',
                 unsafe_allow_html=True,
             )
         for entry in rows:
@@ -10346,7 +10656,7 @@ def _files_save_upload_metadata(rows, user, *, asset_type="files"):
             )
 
 
-def _render_files_chunk_uploader(user, current_path):
+def _render_files_chunk_uploader(user, current_path, root_path):
     selected_path = dropbox_integration.normalize_dropbox_path(
         st.session_state.get("files_selected_path") or ""
     )
@@ -10355,7 +10665,7 @@ def _render_files_chunk_uploader(user, current_path):
         ack_nonce=str(st.session_state.get("files_chunk_upload_ack") or ""),
         selected_path=selected_path,
         selected_name=selected_path.rsplit("/", 1)[-1] if selected_path else "",
-        key=_files_widget_key("files-chunk-uploader", current_path),
+        key="files-chunk-uploader",
         default=None,
     )
     event = dict(event or {}) if isinstance(event, dict) else {}
@@ -10366,7 +10676,8 @@ def _render_files_chunk_uploader(user, current_path):
     if nonce == str(st.session_state.get("files_chunk_upload_processed") or ""):
         return
     event_path = dropbox_integration.normalize_dropbox_path(event.get("current_path") or "")
-    if event_path != dropbox_integration.normalize_dropbox_path(current_path):
+    current_path = dropbox_integration.normalize_dropbox_path(current_path)
+    if not event_path or not dropbox_integration.path_is_within_root(event_path, root_path):
         return
     if event_name == "upload_completed":
         metadata = dict(event.get("metadata") or {})
@@ -10377,13 +10688,20 @@ def _render_files_chunk_uploader(user, current_path):
                 user,
                 asset_type="files",
             )
-        _files_clear_directory_cache(current_path)
-        _files_set_notice(f"Uploaded {name}")
+        _files_clear_directory_cache(event_path)
+        if event_path == current_path:
+            _files_set_notice(f"Uploaded {name}")
     elif event_name == "new_folder_requested":
+        if event_path != current_path:
+            return
         st.session_state["files_new_folder_open"] = True
     elif event_name == "rename_requested" and selected_path:
+        if event_path != current_path:
+            return
         _files_begin_rename_state(selected_path, current_path)
     elif event_name == "clear_selection":
+        if event_path != current_path:
+            return
         st.session_state.pop("files_selected_path", None)
         st.session_state.pop("files_rename_path", None)
     st.session_state["files_chunk_upload_processed"] = nonce
@@ -10391,9 +10709,9 @@ def _render_files_chunk_uploader(user, current_path):
     _files_fragment_rerun()
 
 
-def _render_files_command_bar(access_token, user, current_path):
+def _render_files_command_bar(access_token, user, current_path, root_path):
     with st.container(key="files-command-bar"):
-        _render_files_chunk_uploader(user, current_path)
+        _render_files_chunk_uploader(user, current_path, root_path)
 
 
 def _render_files_new_folder_action(access_token, user, current_path):
@@ -10540,14 +10858,16 @@ def _render_files_browser(access_token, user, root_path):
             if root_rows:
                 _render_files_details(root_rows, user, root_path)
             else:
-                st.markdown(
-                    '<div class="sc-files-empty">No items match your search</div>',
-                    unsafe_allow_html=True,
+                _render_files_details(
+                    [],
+                    user,
+                    root_path,
+                    empty_message="No items match your search",
                 )
             return
 
         _files_render_notice()
-        _render_files_command_bar(access_token, user, current_path)
+        _render_files_command_bar(access_token, user, current_path, root_path)
         _render_files_new_folder_action(access_token, user, current_path)
         _render_files_rename_action(access_token, user, root_path, current_path)
 
@@ -10563,16 +10883,20 @@ def _render_files_browser(access_token, user, root_path):
             return
         loading.empty()
         if not entries:
-            st.markdown(
-                '<div class="sc-files-empty">This folder is empty</div>',
-                unsafe_allow_html=True,
+            _render_files_details(
+                [],
+                user,
+                root_path,
+                empty_message="This folder is empty",
             )
             return
         filtered_entries = _files_filter_entries(entries, search_query)
         if not filtered_entries:
-            st.markdown(
-                '<div class="sc-files-empty">No items match your search</div>',
-                unsafe_allow_html=True,
+            _render_files_details(
+                [],
+                user,
+                root_path,
+                empty_message="No items match your search",
             )
             return
         _render_files_details(filtered_entries, user, root_path)
