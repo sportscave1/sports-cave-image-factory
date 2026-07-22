@@ -4,7 +4,7 @@ import csv
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 import io
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import gc
 import hashlib
 import html
@@ -2181,6 +2181,49 @@ def inject_styles():
             padding: 0 0.08rem;
         }
 
+        .st-key-files-breadcrumb-native {
+            align-items: center;
+            border: 1px solid #DADDE1;
+            border-radius: 4px;
+            min-height: 34px;
+            margin: 0 0 0.35rem;
+            overflow-x: auto;
+            padding: 0.08rem 0.25rem;
+        }
+
+        .st-key-files-breadcrumb-native [data-testid="stHorizontalBlock"] {
+            align-items: center;
+            gap: 0.08rem;
+            min-width: max-content;
+        }
+
+        .st-key-files-breadcrumb-native button {
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            border-radius: 3px !important;
+            box-shadow: none !important;
+            color: #27292C !important;
+            font-size: 0.78rem !important;
+            min-height: 28px !important;
+            padding: 0.1rem 0.35rem !important;
+        }
+
+        .st-key-files-breadcrumb-native button:hover {
+            background: #EDF3F8 !important;
+            border-color: #D7E3EB !important;
+        }
+
+        .sc-files-current-crumb {
+            align-items: center;
+            color: #202124;
+            display: flex;
+            font-size: 0.78rem;
+            font-weight: 600;
+            min-height: 28px;
+            padding: 0 0.35rem;
+            white-space: nowrap;
+        }
+
         .st-key-files-command-bar {
             align-items: center;
             background: #F7F8FA;
@@ -2244,7 +2287,8 @@ def inject_styles():
             display: none;
         }
 
-        .sc-files-table {
+        .sc-files-table,
+        .st-key-files-details-list {
             border: 1px solid #E0E2E5;
             border-radius: 0;
             margin-top: 0.25rem;
@@ -2260,7 +2304,7 @@ def inject_styles():
         .sc-files-grid {
             align-items: center;
             display: grid;
-            grid-template-columns: minmax(290px, 1fr) 190px 150px 90px;
+            grid-template-columns: minmax(290px, 1fr) 190px 150px 90px 34px;
         }
 
         .sc-files-header {
@@ -2336,6 +2380,79 @@ def inject_styles():
             background: #EAF2F8;
             color: #111111;
             outline: none;
+        }
+
+        div[class*="st-key-files-row-native-"] {
+            background: #FFFFFF;
+            border-bottom: 1px solid #EFF0F1;
+            min-height: 40px;
+        }
+
+        div[class*="st-key-files-row-native-"]:last-child {
+            border-bottom: 0;
+        }
+
+        div[class*="st-key-files-row-native-"] [data-testid="stHorizontalBlock"] {
+            align-items: stretch;
+            gap: 0;
+        }
+
+        div[class*="st-key-files-row-native-"] [data-testid="stColumn"] {
+            border-right: 1px solid #ECEDEF;
+            min-width: 0;
+        }
+
+        div[class*="st-key-files-row-native-"] [data-testid="stColumn"]:last-child {
+            border-right: 0;
+        }
+
+        div[class*="st-key-files-row-native-"] button {
+            background: transparent !important;
+            border: 0 !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            color: #202124 !important;
+            font-size: 0.78rem !important;
+            font-weight: 400 !important;
+            justify-content: flex-start !important;
+            min-height: 40px !important;
+            overflow: hidden;
+            padding: 0 0.58rem !important;
+            text-align: left !important;
+            white-space: nowrap;
+            width: 100%;
+        }
+
+        div[class*="st-key-files-row-native-"] button p {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        div[class*="st-key-files-row-native-"]:has(button:hover),
+        div[class*="st-key-files-row-native-"]:has(button:focus-visible) {
+            background: #EAF2F8;
+        }
+
+        div[class*="st-key-files-row-native-"] button:hover,
+        div[class*="st-key-files-row-native-"] button:focus-visible {
+            background: transparent !important;
+            outline: none !important;
+        }
+
+        div[class*="st-key-files-row-native-"] [data-testid="stColumn"]:not(:first-child) button {
+            color: #55595E !important;
+        }
+
+        div[class*="st-key-files-row-native-"] [data-testid="stColumn"]:last-child button {
+            justify-content: center !important;
+            opacity: 0;
+            padding: 0 !important;
+        }
+
+        div[class*="st-key-files-row-native-"]:hover [data-testid="stColumn"]:last-child button,
+        div[class*="st-key-files-row-native-"] [data-testid="stColumn"]:last-child button:focus-visible {
+            opacity: 1;
         }
 
         .sc-files-name {
@@ -5966,7 +6083,10 @@ def _save_mockups_to_dropbox(
     successes = list(upload_result.get("successes") or ())
     if successes:
         _files_save_upload_metadata(successes, user, asset_type="mockups")
-        _files_clear_directory_cache(destination_parent, destination)
+        _files_clear_directory_cache(
+            destination_parent,
+            *_files_changed_directory_paths(destination, successes),
+        )
         record_activity_log(
             "mockups_saved_dropbox",
             "Mockups",
@@ -9441,7 +9561,12 @@ def _dropbox_handle_callback(user):
         st.error("Files connection failed. Please try again.")
 
 
-def _files_access_token(supabase=None, *, force=False):
+FILES_DIRECTORY_CACHE_SECONDS = 90
+FILES_DIRECTORY_CACHE_LIMIT = 32
+FILES_TEAM_ROOT_CACHE_SECONDS = 15 * 60
+
+
+def _files_access_token(*, force=False):
     cached = st.session_state.get("files_access_token") or {}
     if (
         not force
@@ -9521,16 +9646,52 @@ def _files_directory_entries(access_token, path, *, force=False):
     clean_path = dropbox_integration.normalize_dropbox_path(path)
     cache = st.session_state.setdefault("files_directory_cache", {})
     cached = cache.get(clean_path) or {}
+    started = time.perf_counter()
     if (
         not force
-        and cached.get("loaded_at", 0) + 30 > time.monotonic()
+        and cached.get("loaded_at", 0) + FILES_DIRECTORY_CACHE_SECONDS > time.monotonic()
     ):
+        st.session_state["files_last_directory_timing"] = {
+            "path": clean_path,
+            "cache_hit": True,
+            "seconds": time.perf_counter() - started,
+            "entry_count": len(cached.get("entries") or ()),
+        }
         return list(cached.get("entries") or [])
     entries = dropbox_integration.sort_folder_entries(
         dropbox_integration.list_folder(access_token, clean_path)
     )
-    cache[clean_path] = {"loaded_at": time.monotonic(), "entries": entries}
+    loaded_at = time.monotonic()
+    cache[clean_path] = {"loaded_at": loaded_at, "entries": entries}
+    if len(cache) > FILES_DIRECTORY_CACHE_LIMIT:
+        oldest_paths = sorted(
+            cache,
+            key=lambda cached_path: float((cache.get(cached_path) or {}).get("loaded_at") or 0),
+        )
+        for stale_path in oldest_paths[: len(cache) - FILES_DIRECTORY_CACHE_LIMIT]:
+            cache.pop(stale_path, None)
+    elapsed = time.perf_counter() - started
+    st.session_state["files_last_directory_timing"] = {
+        "path": clean_path,
+        "cache_hit": False,
+        "seconds": elapsed,
+        "entry_count": len(entries),
+    }
+    logging.info(
+        "FILES_PERF directory path=%s cache_hit=false entries=%s elapsed=%.3fs",
+        clean_path,
+        len(entries),
+        elapsed,
+    )
     return entries
+
+
+def _files_directory_is_cached(path):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    cached = (st.session_state.get("files_directory_cache") or {}).get(clean_path) or {}
+    return bool(
+        cached.get("loaded_at", 0) + FILES_DIRECTORY_CACHE_SECONDS > time.monotonic()
+    )
 
 
 def _files_team_root(access_token, *, force=False):
@@ -9538,7 +9699,7 @@ def _files_team_root(access_token, *, force=False):
     if (
         not force
         and cached.get("path")
-        and cached.get("loaded_at", 0) + 60 > time.monotonic()
+        and cached.get("loaded_at", 0) + FILES_TEAM_ROOT_CACHE_SECONDS > time.monotonic()
     ):
         return str(cached["path"])
     root_path = dropbox_integration.find_team_folder(access_token)
@@ -9610,102 +9771,174 @@ def _files_type_label(entry):
     return labels.get(extension, f"{extension} file" if extension else "File")
 
 
-def _files_route_url(*, folder_path="", preview_path="", root=False, action="", selected_path=""):
-    parts = [f"{PAGE_QUERY_PARAM}={quote(page_query_value('Files'), safe='')}" ]
-    if root:
-        parts.append("files_path=__root__")
-    elif folder_path:
-        parts.append(f"files_path={quote(folder_path, safe='')}")
-    if preview_path:
-        parts.append(f"files_preview={quote(preview_path, safe='')}")
-    if action:
-        parts.append(f"files_action={quote(str(action), safe='')}")
-    if selected_path:
-        parts.append(f"files_selected={quote(selected_path, safe='')}")
-    return "?" + "&".join(parts)
+def _files_widget_key(prefix, path):
+    digest = hashlib.sha1(str(path or "files-root").encode("utf-8")).hexdigest()[:14]
+    return f"{prefix}-{digest}"
 
 
-def _files_breadcrumb_markup(current_path, root_path, *, preview_name=""):
-    items = list(dropbox_integration.breadcrumb_items(current_path, root_path))
-    chunks = ['<nav class="sc-files-breadcrumb" aria-label="Files breadcrumb">']
-    last_index = len(items) - 1
-    for index, (label, path) in enumerate(items):
-        is_current = index == last_index and not preview_name
-        safe_label = html.escape(str(label or "Files"))
-        if is_current:
-            chunks.append(f'<span aria-current="page">{safe_label}</span>')
-        else:
-            href = _files_route_url(folder_path=path, root=not path)
-            chunks.append(
-                f'<a href="{html.escape(href, quote=True)}" target="_self">{safe_label}</a>'
-            )
-        if index < last_index or preview_name:
-            chunks.append('<span class="sc-files-chevron" aria-hidden="true">&#8250;</span>')
-    if preview_name:
-        chunks.append(
-            f'<span aria-current="page">{html.escape(str(preview_name))}</span>'
-        )
-    chunks.append("</nav>")
-    return "".join(chunks)
+def _files_normalize_browser_path(path, root_path):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    if not clean_path:
+        return ""
+    if not dropbox_integration.path_is_within_root(clean_path, root_path):
+        raise ValueError("This folder is outside the shared Files folder.")
+    return clean_path
 
 
-def _files_details_markup(entries, user, *, show_header=True):
-    chunks = ['<div class="sc-files-table-wrap"><div class="sc-files-table">']
-    if show_header:
-        chunks.append(
-            '<div class="sc-files-grid sc-files-header" role="row">'
-            '<span role="columnheader">Name</span>'
-            '<span role="columnheader">Date modified</span>'
-            '<span role="columnheader">Type</span>'
-            '<span role="columnheader">Size</span>'
-            '</div>'
-        )
-    for entry in dropbox_integration.sort_folder_entries(entries):
-        tag = str(entry.get(".tag") or "").casefold()
-        path = dropbox_integration.normalize_dropbox_path(
-            entry.get("path_display") or entry.get("path_lower") or ""
-        )
-        name = str(entry.get("name") or "Untitled")
-        if not path:
+def _files_navigate_folder_state(path, root_path, *, remember=True):
+    destination = _files_normalize_browser_path(path, root_path)
+    current = dropbox_integration.normalize_dropbox_path(
+        st.session_state.get("files_browser_path") or ""
+    )
+    if remember and destination != current:
+        history = list(st.session_state.get("files_navigation_history") or ())
+        if not history or history[-1] != current:
+            history.append(current)
+        st.session_state["files_navigation_history"] = history[-30:]
+    st.session_state["files_browser_path"] = destination
+    st.session_state.pop("files_preview_path", None)
+    st.session_state.pop("files_rename_path", None)
+
+
+def _files_navigate_back_state(root_path):
+    history = list(st.session_state.get("files_navigation_history") or ())
+    while history:
+        destination = history.pop()
+        try:
+            destination = _files_normalize_browser_path(destination, root_path)
+        except ValueError:
             continue
-        if tag == "folder":
-            href = _files_route_url(folder_path=path)
-            target = ' target="_self"'
-        else:
-            parent_path = path.rsplit("/", 1)[0]
-            href = _files_route_url(folder_path=parent_path, preview_path=path)
-            target = ' target="_blank" rel="noopener noreferrer"'
-        kind = _files_item_kind(entry)
-        icon_class = "sc-files-icon-folder" if kind == "folder" else (
-            f"sc-files-icon-file sc-files-icon-{kind}"
+        st.session_state["files_navigation_history"] = history
+        _files_navigate_folder_state(destination, root_path, remember=False)
+        return
+
+
+def _files_open_preview_state(path, root_path):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    if not dropbox_integration.path_is_within_root(clean_path, root_path):
+        raise ValueError("This file is outside the shared Files folder.")
+    st.session_state["files_preview_path"] = clean_path
+    st.session_state.pop("files_rename_path", None)
+
+
+def _files_begin_rename_state(path, root_path):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    if not dropbox_integration.path_is_within_root(clean_path, root_path):
+        raise ValueError("This item is outside the shared Files folder.")
+    st.session_state["files_rename_path"] = clean_path
+
+
+def _files_refresh_folder_state(path):
+    _files_clear_directory_cache(path)
+
+
+def _files_fragment_rerun():
+    st.rerun(scope="fragment")
+
+
+def _render_files_breadcrumb(current_path, root_path, *, preview_name=""):
+    items = list(dropbox_integration.breadcrumb_items(current_path, root_path))
+    if preview_name:
+        items.append((str(preview_name), None))
+    history = list(st.session_state.get("files_navigation_history") or ())
+    widths = [0.35] + [max(0.85, min(3.2, len(str(label or "Files")) / 6)) for label, _ in items]
+    with st.container(key="files-breadcrumb-native"):
+        columns = st.columns(widths, gap="small")
+        columns[0].button(
+            "Back",
+            icon=":material/arrow_back:",
+            key="files-history-back",
+            disabled=not history,
+            help="Previous folder",
+            on_click=_files_navigate_back_state,
+            args=(root_path,),
         )
-        modified = _files_modified_label(entry.get("server_modified"), user)
-        size = "" if tag == "folder" else dropbox_integration.format_file_size(entry.get("size"))
-        action_href = _files_route_url(
-            folder_path=path.rsplit("/", 1)[0],
-            action="rename",
-            selected_path=path,
-        )
-        chunks.append(
-            '<div class="sc-files-row-wrap">'
-            f'<a class="sc-files-grid sc-files-row" role="row" '
-            f'href="{html.escape(href, quote=True)}"{target} '
-            f'title="{html.escape(name, quote=True)}">'
-            '<span class="sc-files-name" role="cell">'
-            f'<i class="sc-files-icon {icon_class}" aria-hidden="true"></i>'
-            f'<span class="sc-files-name-text">{html.escape(name)}</span>'
-            '</span>'
-            f'<span class="sc-files-meta" role="cell">{html.escape(modified)}</span>'
-            f'<span class="sc-files-meta" role="cell">{html.escape(_files_type_label(entry))}</span>'
-            f'<span class="sc-files-meta" role="cell">{html.escape(size)}</span>'
-            '</a>'
-            f'<a class="sc-files-row-menu" href="{html.escape(action_href, quote=True)}" '
-            f'target="_self" aria-label="Rename {html.escape(name, quote=True)}" '
-            f'title="Rename">&#8943;</a>'
-            '</div>'
-        )
-    chunks.append("</div></div>")
-    return "".join(chunks)
+        last_index = len(items) - 1
+        for index, (label, path) in enumerate(items):
+            clean_label = str(label or "Files")
+            if path is None or index == last_index:
+                columns[index + 1].markdown(
+                    f'<span class="sc-files-current-crumb">{html.escape(clean_label)}</span>',
+                    unsafe_allow_html=True,
+                )
+                continue
+            columns[index + 1].button(
+                clean_label,
+                key=_files_widget_key("files-crumb", f"{index}:{path}"),
+                help=f"Open {clean_label}",
+                on_click=_files_navigate_folder_state,
+                args=(path, root_path),
+                use_container_width=True,
+            )
+
+
+def _files_row_icon(kind):
+    return {
+        "folder": ":material/folder:",
+        "image": ":material/image:",
+        "pdf": ":material/picture_as_pdf:",
+        "document": ":material/description:",
+        "sheet": ":material/table:",
+        "video": ":material/movie:",
+        "archive": ":material/folder_zip:",
+        "design": ":material/draw:",
+    }.get(kind, ":material/draft:")
+
+
+def _render_files_details(entries, user, root_path, *, show_header=True):
+    rows = dropbox_integration.sort_folder_entries(entries)
+    with st.container(key="files-details-list"):
+        if show_header:
+            st.markdown(
+                '<div class="sc-files-grid sc-files-header" role="row">'
+                '<span role="columnheader">Name</span>'
+                '<span role="columnheader">Date modified</span>'
+                '<span role="columnheader">Type</span>'
+                '<span role="columnheader">Size</span>'
+                '<span aria-hidden="true"></span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        for entry in rows:
+            tag = str(entry.get(".tag") or "").casefold()
+            path = dropbox_integration.normalize_dropbox_path(
+                entry.get("path_display") or entry.get("path_lower") or ""
+            )
+            if not path:
+                continue
+            name = str(entry.get("name") or "Untitled")
+            kind = _files_item_kind(entry)
+            modified = _files_modified_label(entry.get("server_modified"), user)
+            type_label = _files_type_label(entry)
+            size = "" if tag == "folder" else dropbox_integration.format_file_size(entry.get("size"))
+            row_key = _files_widget_key("files-row-native", path)
+            with st.container(key=row_key):
+                columns = st.columns([6, 2.2, 1.8, 1, 0.45], gap=None)
+                if tag == "folder":
+                    callback = _files_navigate_folder_state
+                    callback_args = (path, root_path)
+                else:
+                    callback = _files_open_preview_state
+                    callback_args = (path, root_path)
+                values = (name, modified or " ", type_label, size or " ")
+                for column_index, (column, value) in enumerate(zip(columns[:4], values)):
+                    column.button(
+                        value,
+                        icon=_files_row_icon(kind) if column_index == 0 else None,
+                        key=_files_widget_key(f"files-cell-{column_index}", path),
+                        help=f"Open {name}",
+                        on_click=callback,
+                        args=callback_args,
+                        use_container_width=True,
+                    )
+                columns[4].button(
+                    "More",
+                    icon=":material/more_horiz:",
+                    key=_files_widget_key("files-more", path),
+                    help=f"Rename {name}",
+                    on_click=_files_begin_rename_state,
+                    args=(path, root_path),
+                )
 
 
 def _files_preview_kind(name):
@@ -9753,10 +9986,7 @@ def _render_files_preview(access_token, user, root_path, preview_path):
     metadata = dict(details.get("metadata") or {})
     name = str(metadata.get("name") or clean_path.rsplit("/", 1)[-1] or "File")
     parent_path = clean_path.rsplit("/", 1)[0]
-    st.markdown(
-        _files_breadcrumb_markup(parent_path, root_path, preview_name=name),
-        unsafe_allow_html=True,
-    )
+    _render_files_breadcrumb(parent_path, root_path, preview_name=name)
     modified = _files_modified_label(metadata.get("server_modified"), user)
     size = dropbox_integration.format_file_size(metadata.get("size"))
     summary = " · ".join(value for value in (_files_type_label(metadata), modified, size) if value)
@@ -9810,6 +10040,26 @@ def _files_clear_directory_cache(*paths):
     for path in paths:
         with suppress(Exception):
             cache.pop(dropbox_integration.normalize_dropbox_path(path), None)
+
+
+def _files_changed_directory_paths(base_path, uploaded_rows):
+    base = dropbox_integration.normalize_dropbox_path(base_path)
+    affected = {base}
+    for row in uploaded_rows or ():
+        relative_path = str((row or {}).get("relative_path") or "")
+        try:
+            parent_parts = PurePosixPath(
+                dropbox_integration.sanitize_relative_upload_path(relative_path)
+            ).parent.parts
+        except (TypeError, ValueError):
+            continue
+        current = base
+        for part in parent_parts:
+            if part in {"", "."}:
+                continue
+            current = dropbox_integration.normalize_dropbox_path(f"{current}/{part}")
+            affected.add(current)
+    return tuple(affected)
 
 
 def _files_set_notice(message, *, level="success"):
@@ -9901,7 +10151,7 @@ def _files_run_upload(access_token, user, current_path, uploaded_files, conflict
                 "files": [row.get("relative_path") for row in successes],
             },
         )
-        _files_clear_directory_cache(current_path)
+        _files_clear_directory_cache(*_files_changed_directory_paths(current_path, successes))
     return {"successes": successes, "failures": failures}
 
 
@@ -9964,12 +10214,12 @@ def _render_files_upload_control(
         _files_set_notice(f"{len(successes)} file{'s' if len(successes) != 1 else ''} uploaded")
     if auto_submit:
         st.session_state[generation_key] = generation + 1
-    st.rerun()
+    _files_fragment_rerun()
 
 
 def _render_files_command_bar(access_token, user, current_path):
     with st.container(key="files-command-bar"):
-        columns = st.columns([1, 1, 1, 5])
+        columns = st.columns([1, 1, 1, 0.8, 4.2])
         with columns[0]:
             with st.popover("New folder", icon=":material/create_new_folder:", width="stretch"):
                 folder_name = st.text_input("Folder name", key=f"files-new-folder-name::{current_path}")
@@ -9999,7 +10249,7 @@ def _render_files_command_bar(access_token, user, current_path):
                             _files_set_notice("Folder created")
                         else:
                             _files_set_notice("Folder was not created", level="warning")
-                        st.rerun()
+                        _files_fragment_rerun()
                     except Exception as error:
                         logging.warning("Files folder creation failed: %s", error)
                         st.warning("This folder could not be created.")
@@ -10020,20 +10270,26 @@ def _render_files_command_bar(access_token, user, current_path):
                     key=f"files-folder-upload::{current_path}",
                     directory=True,
                 )
-
-
-def _clear_files_action_query():
-    for key in ("files_action", "files_selected"):
-        with suppress(Exception):
-            if key in st.query_params:
-                del st.query_params[key]
+        with columns[3]:
+            st.button(
+                "Refresh",
+                icon=":material/refresh:",
+                key=_files_widget_key("files-refresh", current_path),
+                help="Refresh this folder",
+                on_click=_files_refresh_folder_state,
+                args=(current_path,),
+                use_container_width=True,
+            )
 
 
 def _render_files_rename_action(access_token, user, root_path, current_path):
-    if _query_value("files_action") != "rename":
+    selected_path = dropbox_integration.normalize_dropbox_path(
+        st.session_state.get("files_rename_path") or ""
+    )
+    if not selected_path:
         return
-    selected_path = dropbox_integration.normalize_dropbox_path(_query_value("files_selected"))
     if not dropbox_integration.path_is_within_root(selected_path, root_path) or selected_path == root_path:
+        st.session_state.pop("files_rename_path", None)
         st.info("This item cannot be renamed here.")
         return
     old_name = selected_path.rsplit("/", 1)[-1]
@@ -10044,8 +10300,8 @@ def _render_files_rename_action(access_token, user, root_path, current_path):
         save = save_col.form_submit_button("Rename", use_container_width=True)
         cancel = cancel_col.form_submit_button("Cancel", use_container_width=True)
     if cancel:
-        _clear_files_action_query()
-        st.rerun()
+        st.session_state.pop("files_rename_path", None)
+        _files_fragment_rerun()
     if save:
         try:
             metadata = dropbox_integration.rename_path(
@@ -10055,7 +10311,13 @@ def _render_files_rename_action(access_token, user, root_path, current_path):
                 root_path=root_path,
             )
             parent = selected_path.rsplit("/", 1)[0]
-            _files_clear_directory_cache(parent, current_path)
+            renamed_path = str(metadata.get("path_display") or metadata.get("path_lower") or "")
+            _files_clear_directory_cache(
+                parent,
+                current_path,
+                selected_path,
+                renamed_path,
+            )
             record_activity_log(
                 "files_item_renamed",
                 "Files",
@@ -10064,56 +10326,58 @@ def _render_files_rename_action(access_token, user, root_path, current_path):
                 entity_id=str(metadata.get("path_display") or metadata.get("path_lower") or ""),
             )
             _files_set_notice("Item renamed")
-            _clear_files_action_query()
-            st.rerun()
+            st.session_state.pop("files_rename_path", None)
+            _files_fragment_rerun()
         except Exception as error:
             logging.warning("Files rename failed: %s", error)
             st.warning("This item could not be renamed.")
 
+
+def _files_apply_initial_route(root_path):
+    requested_path = _query_value("files_path")
+    preview_path = _query_value("files_preview")
+    signature = (requested_path, preview_path)
+    if signature == tuple(st.session_state.get("files_applied_route") or ()):
+        return
+    st.session_state["files_applied_route"] = signature
+    if preview_path:
+        try:
+            _files_open_preview_state(preview_path, root_path)
+        except ValueError:
+            st.session_state.pop("files_preview_path", None)
+        return
+    if requested_path == "__root__":
+        _files_navigate_folder_state("", root_path, remember=False)
+    elif requested_path:
+        try:
+            _files_navigate_folder_state(requested_path, root_path, remember=False)
+        except ValueError:
+            _files_navigate_folder_state("", root_path, remember=False)
+
+
+@st.fragment
 def _render_files_browser(access_token, user, root_path):
     with st.container(key="files-explorer"):
-        preview_path = _query_value("files_preview") or str(
-            st.session_state.get("files_preview_path") or ""
-        )
-        requested_path = _query_value("files_path")
+        preview_path = str(st.session_state.get("files_preview_path") or "")
         if preview_path:
             _render_files_preview(access_token, user, root_path, preview_path)
             return
 
-        if requested_path == "__root__":
-            st.session_state.pop("files_browser_path", None)
-            current_path = ""
-        elif requested_path:
-            candidate = dropbox_integration.normalize_dropbox_path(requested_path)
-            current_path = candidate if dropbox_integration.path_is_within_root(
-                candidate, root_path
-            ) else ""
-            if current_path:
-                st.session_state["files_browser_path"] = current_path
-        else:
-            current_path = dropbox_integration.normalize_dropbox_path(
-                st.session_state.get("files_browser_path") or ""
-            )
-            if current_path and not dropbox_integration.path_is_within_root(
-                current_path, root_path
-            ):
-                current_path = ""
-                st.session_state.pop("files_browser_path", None)
-
-        st.markdown(
-            _files_breadcrumb_markup(current_path, root_path),
-            unsafe_allow_html=True,
+        current_path = dropbox_integration.normalize_dropbox_path(
+            st.session_state.get("files_browser_path") or ""
         )
+        if current_path and not dropbox_integration.path_is_within_root(current_path, root_path):
+            current_path = ""
+            st.session_state["files_browser_path"] = ""
+
+        _render_files_breadcrumb(current_path, root_path)
         if not current_path:
             root_entry = {
                 ".tag": "folder",
                 "name": dropbox_integration.DROPBOX_TEAM_FOLDER,
                 "path_display": root_path,
             }
-            st.markdown(
-                _files_details_markup([root_entry], user, show_header=False),
-                unsafe_allow_html=True,
-            )
+            _render_files_details([root_entry], user, root_path, show_header=False)
             return
 
         _files_render_notice()
@@ -10129,22 +10393,24 @@ def _render_files_browser(access_token, user, root_path):
                 auto_submit=True,
             )
 
+        loading = st.empty()
+        if not _files_directory_is_cached(current_path):
+            loading.caption("Opening folder...")
         try:
             entries = _files_directory_entries(access_token, current_path)
         except Exception as error:
+            loading.empty()
             logging.warning("Files folder listing failed: %s", error)
             st.info("This folder could not be loaded right now.")
             return
+        loading.empty()
         if not entries:
             st.markdown(
                 '<div class="sc-files-empty">This folder is empty</div>',
                 unsafe_allow_html=True,
             )
             return
-        st.markdown(
-            _files_details_markup(entries, user),
-            unsafe_allow_html=True,
-        )
+        _render_files_details(entries, user, root_path)
 
 
 def render_files_page():
@@ -10157,12 +10423,8 @@ def render_files_page():
     if os_accounts.is_admin(user):
         _dropbox_handle_callback(user)
 
-    supabase = None
-    with suppress(Exception):
-        supabase = importlib.import_module("supabase_backend")
-
     try:
-        access_token = _files_access_token(supabase)
+        access_token = _files_access_token()
     except Exception as error:
         logging.warning("Files authentication unavailable: %s", error)
         st.info("Files unavailable")
@@ -10179,6 +10441,7 @@ def render_files_page():
         st.info("Files unavailable")
         return
 
+    _files_apply_initial_route(root_path)
     _render_files_browser(access_token, user, root_path)
 
 

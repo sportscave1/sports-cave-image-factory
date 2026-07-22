@@ -563,6 +563,36 @@ class DropboxIntegrationTests(unittest.TestCase):
         sdk.common.PathRoot.root.assert_called_once_with("team-root-123")
         base_client.with_path_root.assert_called_once_with(path_root)
 
+    def test_team_space_client_cache_avoids_repeated_account_lookup(self):
+        account = SimpleNamespace(
+            account_id="dbid:account",
+            email="hello@sportscave.com.au",
+            name=SimpleNamespace(display_name="Sports Cave", familiar_name="Sports Cave"),
+            root_info=SimpleNamespace(root_namespace_id="team-root-123"),
+        )
+        rooted_client = object()
+        base_client = MagicMock()
+        base_client.users_get_current_account.return_value = account
+        base_client.with_path_root.return_value = rooted_client
+        sdk = SimpleNamespace(
+            common=SimpleNamespace(
+                PathRoot=SimpleNamespace(root=MagicMock(return_value="root-selector"))
+            )
+        )
+
+        with patch.object(
+            dropbox_integration,
+            "_new_dropbox_client",
+            return_value=base_client,
+        ), patch.object(dropbox_integration, "_dropbox_sdk", return_value=sdk):
+            first = dropbox_integration.team_space_client("same-session-token")
+            second = dropbox_integration.team_space_client("same-session-token")
+
+        self.assertIs(first, rooted_client)
+        self.assertIs(second, rooted_client)
+        base_client.users_get_current_account.assert_called_once_with()
+        base_client.with_path_root.assert_called_once_with("root-selector")
+
     def test_rooted_client_is_reused_for_navigation_metadata_preview_and_upload(self):
         root_result = SimpleNamespace(
             entries=[{".tag": "folder", "name": "05 Mockups"}],
