@@ -400,6 +400,7 @@ class AccountAccessTests(unittest.TestCase):
                 "DROPBOX_APP_SECRET": "",
                 "DROPBOX_REDIRECT_URI": "",
                 "DROPBOX_REFRESH_TOKEN": "",
+                "DROPBOX_ACCESS_TOKEN": "",
             },
         ):
             app_test = AppTest.from_file(str(ROOT / "app.py"))
@@ -447,12 +448,17 @@ class AccountAccessTests(unittest.TestCase):
                 "DROPBOX_APP_SECRET": "app-secret",
                 "DROPBOX_REDIRECT_URI": "https://example.test/dropbox/callback",
                 "DROPBOX_REFRESH_TOKEN": "server-refresh-token",
+                "DROPBOX_ACCESS_TOKEN": "fallback-token",
             },
         ), patch.object(
             dropbox_integration,
-            "refresh_access_token",
-            return_value="access-token",
-        ) as refresh_access_token, patch.object(
+            "resolve_server_auth",
+            return_value={
+                "access_token": "access-token",
+                "source": "refresh_token",
+                "account": {"email": "files@sportscave.test"},
+            },
+        ) as resolve_server_auth, patch.object(
             dropbox_integration,
             "list_folder",
             side_effect=list_folder,
@@ -492,7 +498,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertNotIn("Test Connection", button_labels)
         self.assertNotIn("Reconnect Files", text)
         self.assertNotIn("Upload test", text)
-        refresh_access_token.assert_called_with("server-refresh-token")
+        resolve_server_auth.assert_called()
         file_open_details.assert_called_once_with(
             "access-token",
             "/Sports Cave OS Assets/collector.pdf",
@@ -506,6 +512,7 @@ class AccountAccessTests(unittest.TestCase):
                 "DROPBOX_APP_SECRET": "app-secret",
                 "DROPBOX_REDIRECT_URI": "https://example.test/dropbox/callback",
                 "DROPBOX_REFRESH_TOKEN": "",
+                "DROPBOX_ACCESS_TOKEN": "",
             },
         ):
             app_test = AppTest.from_file(str(ROOT / "app.py"))
@@ -525,7 +532,8 @@ class AccountAccessTests(unittest.TestCase):
 
         self.assertFalse(app_test.exception)
         text = self._app_text(app_test)
-        self.assertIn("Missing DROPBOX_REFRESH_TOKEN", text)
+        self.assertIn("Files setup is not complete.", text)
+        self.assertIn("DROPBOX_REFRESH_TOKEN or DROPBOX_ACCESS_TOKEN", text)
         self.assertNotIn("This page failed to load", text)
         link_labels = [item.label for item in app_test.get("link_button")]
         self.assertNotIn("Connect Files", link_labels)
@@ -537,6 +545,7 @@ class AccountAccessTests(unittest.TestCase):
                 "DROPBOX_APP_KEY": "app-key",
                 "DROPBOX_APP_SECRET": "app-secret",
                 "DROPBOX_REFRESH_TOKEN": "bad-refresh-token",
+                "DROPBOX_ACCESS_TOKEN": "",
             },
         ), patch.object(
             dropbox_integration,
@@ -560,8 +569,155 @@ class AccountAccessTests(unittest.TestCase):
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
-        self.assertIn("Token invalid or revoked", text)
+        self.assertIn("Files could not connect right now.", text)
+        self.assertNotIn("invalid_grant", text)
+        self.assertNotIn("bad-refresh-token", text)
         self.assertNotIn("This page failed to load", text)
+
+    def test_admin_sees_access_token_fallback_warning_and_files_browser(self):
+        file_entry = {
+            ".tag": "file",
+            "name": "collector.pdf",
+            "path_display": "/Sports Cave OS Assets/collector.pdf",
+            "server_modified": "2026-07-22T01:30:00Z",
+            "size": 2048,
+        }
+
+        with patch.dict(
+            "os.environ",
+            {
+                "DROPBOX_APP_KEY": "app-key",
+                "DROPBOX_APP_SECRET": "app-secret",
+                "DROPBOX_REFRESH_TOKEN": "invalid-refresh-token",
+                "DROPBOX_ACCESS_TOKEN": "temporary-access-token",
+            },
+        ), patch.object(
+            dropbox_integration,
+            "resolve_server_auth",
+            return_value={
+                "access_token": "temporary-access-token",
+                "source": "access_token",
+                "account": {"email": "files@sportscave.test"},
+            },
+        ), patch.object(
+            dropbox_integration,
+            "list_folder",
+            return_value=[file_entry],
+        ):
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
+            app_test.session_state["sports_cave_current_user"] = {
+                "id": "admin-1",
+                "username": "nathan",
+                "display_name": "Nathan",
+                "role": "admin",
+                "timezone": os_accounts.ADMIN_TIMEZONE,
+                "is_active": True,
+                "page_permissions": [],
+            }
+            app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+            app_test.session_state["selected_page"] = "Files"
+            app_test.session_state["files_browser_path"] = "/Sports Cave OS Assets"
+            app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertIn("collector.pdf", text)
+        self.assertIn(
+            "Using temporary Dropbox access token. Refresh token recommended.",
+            text,
+        )
+        self.assertNotIn("Reconnect Files", text)
+
+    def test_staff_access_token_fallback_has_no_token_warning(self):
+        file_entry = {
+            ".tag": "file",
+            "name": "collector.pdf",
+            "path_display": "/Sports Cave OS Assets/collector.pdf",
+            "server_modified": "2026-07-22T01:30:00Z",
+            "size": 2048,
+        }
+
+        with patch.dict(
+            "os.environ",
+            {
+                "DROPBOX_APP_KEY": "app-key",
+                "DROPBOX_APP_SECRET": "app-secret",
+                "DROPBOX_REFRESH_TOKEN": "invalid-refresh-token",
+                "DROPBOX_ACCESS_TOKEN": "temporary-access-token",
+            },
+        ), patch.object(
+            dropbox_integration,
+            "resolve_server_auth",
+            return_value={
+                "access_token": "temporary-access-token",
+                "source": "access_token",
+                "account": {"email": "files@sportscave.test"},
+            },
+        ), patch.object(
+            dropbox_integration,
+            "list_folder",
+            return_value=[file_entry],
+        ):
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
+            app_test.session_state["sports_cave_current_user"] = {
+                "id": "worker-1",
+                "username": "reina",
+                "display_name": "Reina",
+                "role": "worker",
+                "timezone": os_accounts.WORKER_TIMEZONE,
+                "is_active": True,
+                "page_permissions": ["files"],
+            }
+            app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+            app_test.session_state["selected_page"] = "Files"
+            app_test.session_state["files_browser_path"] = "/Sports Cave OS Assets"
+            app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertIn("collector.pdf", text)
+        self.assertNotIn("temporary Dropbox access token", text)
+        self.assertNotIn("refresh token", text.casefold())
+        self.assertNotIn("Connection settings", text)
+
+    def test_staff_sees_clean_files_unavailable_when_both_tokens_fail(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DROPBOX_APP_KEY": "app-key",
+                "DROPBOX_APP_SECRET": "app-secret",
+                "DROPBOX_REFRESH_TOKEN": "invalid-refresh-token",
+                "DROPBOX_ACCESS_TOKEN": "invalid-access-token",
+            },
+        ), patch.object(
+            dropbox_integration,
+            "resolve_server_auth",
+            side_effect=dropbox_integration.DropboxApiError(
+                "Dropbox server credentials could not be verified."
+            ),
+        ):
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
+            app_test.session_state["sports_cave_current_user"] = {
+                "id": "worker-1",
+                "username": "reina",
+                "display_name": "Reina",
+                "role": "worker",
+                "timezone": os_accounts.WORKER_TIMEZONE,
+                "is_active": True,
+                "page_permissions": ["files"],
+            }
+            app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+            app_test.session_state["selected_page"] = "Files"
+            app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertIn("Files unavailable", text)
+        self.assertNotIn("token", text.casefold())
+        self.assertNotIn("Connection settings", text)
 
     @staticmethod
     def _app_text(app_test):

@@ -8796,12 +8796,8 @@ def _dropbox_handle_callback(user):
         with suppress(Exception):
             st.query_params.clear()
         st.success("Files connected.")
-    except Exception as error:
-        st.error(f"Files connection failed: {error}")
-
-
-def _dropbox_env_refresh_token():
-    return str(os.getenv("DROPBOX_REFRESH_TOKEN", "") or "").strip()
+    except Exception:
+        st.error("Files connection failed. Please try again.")
 
 
 def _files_access_token(supabase=None, *, force=False):
@@ -8812,14 +8808,32 @@ def _files_access_token(supabase=None, *, force=False):
         and float(cached.get("expires_at") or 0) > time.monotonic()
     ):
         return cached["token"]
-    refresh_token = _dropbox_env_refresh_token()
-    if not refresh_token:
-        raise dropbox_integration.DropboxConfigError("Missing Dropbox setup: DROPBOX_REFRESH_TOKEN")
-    access_token = dropbox_integration.refresh_access_token(refresh_token)
+    auth = dropbox_integration.resolve_server_auth()
+    access_token = auth["access_token"]
+    source = auth.get("source") or "refresh_token"
+    account = auth.get("account") or {}
+    cache_seconds = 25 * 60 if source == "refresh_token" else 5 * 60
     st.session_state["files_access_token"] = {
         "token": access_token,
-        "source": "server",
-        "expires_at": time.monotonic() + 30 * 60,
+        "source": source,
+        "expires_at": time.monotonic() + cache_seconds,
+    }
+    message = (
+        "Connected using server refresh token"
+        if source == "refresh_token"
+        else "Connected using temporary access token"
+    )
+    st.session_state["files_connection_status"] = {
+        "loaded_at": time.monotonic(),
+        "status": {
+            "connected": True,
+            "mode": source,
+            "message": message,
+            "account_name": account.get("name", {}).get("display_name")
+            if isinstance(account.get("name"), dict)
+            else account.get("name") or "Sports Cave Dropbox",
+            "account_email": account.get("email") or "",
+        },
     }
     return access_token
 
@@ -8848,20 +8862,12 @@ def _files_server_status(*, force=False):
         return dict(cached.get("status") or {})
 
     missing = dropbox_integration.missing_server_config_keys()
-    if missing:
-        status = {
-            "connected": False,
-            "mode": "server",
-            "message": "Missing Dropbox setup: " + ", ".join(missing),
-            "missing": missing,
-        }
-    else:
-        status = {
-            "connected": True,
-            "mode": "server",
-            "message": "Connected using server refresh token",
-            "account_name": "Sports Cave Dropbox",
-        }
+    status = {
+        "connected": False,
+        "mode": "server",
+        "message": "Dropbox server credentials are ready" if not missing else "Files setup is incomplete",
+        "missing": missing,
+    }
 
     st.session_state["files_connection_status"] = {
         "loaded_at": time.monotonic(),
@@ -8936,8 +8942,8 @@ def _render_files_open_dialog(access_token, entry):
                 st.link_button("Open file", link, use_container_width=True)
             else:
                 st.markdown(f"[Open file]({link})")
-        except Exception as error:
-            st.error(f"This file could not be opened: {error}")
+        except Exception:
+            st.error("This file could not be opened right now.")
 
     if hasattr(st, "dialog"):
         st.dialog(name)(dialog_body)()
@@ -8995,9 +9001,8 @@ def _render_files_browser(access_token, user):
 
     try:
         entries = _files_directory_entries(access_token, current_path)
-    except Exception as error:
+    except Exception:
         st.info("This folder could not be loaded right now.")
-        st.caption(str(error))
         return
     if search:
         entries = [
@@ -9055,62 +9060,41 @@ def render_files_page():
     if os_accounts.is_admin(user):
         _dropbox_handle_callback(user)
 
-    status = _files_server_status()
-    missing = tuple(status.get("missing") or ())
-    if missing:
-        if os_accounts.is_admin(user):
-            if "DROPBOX_APP_KEY" in missing or "DROPBOX_APP_SECRET" in missing:
-                st.warning("Files setup is not complete.")
-                st.caption("Required Render env vars: DROPBOX_APP_KEY, DROPBOX_APP_SECRET, DROPBOX_REFRESH_TOKEN")
-            else:
-                st.info("Missing DROPBOX_REFRESH_TOKEN")
-                st.caption("Add DROPBOX_REFRESH_TOKEN in Render so Files can load automatically.")
-            with st.expander("Connection settings", expanded=False):
-                st.caption("DROPBOX_REDIRECT_URI is optional for admin reconnect.")
-                try:
-                    connect_url = _prepare_dropbox_connect_url()
-                    if hasattr(st, "link_button"):
-                        st.link_button("Reconnect Files", connect_url, use_container_width=True)
-                    else:
-                        st.markdown(f"[Reconnect Files]({connect_url})")
-                except Exception as link_error:
-                    st.caption(f"Reconnect unavailable: {link_error}")
-        else:
-            st.info("Files are not available right now. Please ask an admin.")
-        return
-
     supabase = None
     with suppress(Exception):
         supabase = importlib.import_module("supabase_backend")
 
     try:
         access_token = _files_access_token(supabase)
-    except Exception as error:
-        message = str(error or "").strip()
-        lower_message = message.casefold()
-        if "invalid" in lower_message or "revoked" in lower_message or "expired" in lower_message:
-            status_message = "Token invalid or revoked"
-        elif "dropbox_app_key" in lower_message or "dropbox_app_secret" in lower_message:
-            status_message = "App key/secret missing"
-        elif "dropbox_refresh_token" in lower_message:
-            status_message = "Missing DROPBOX_REFRESH_TOKEN"
-        else:
-            status_message = "Files could not connect right now."
-        st.info(status_message)
+    except Exception:
         if os_accounts.is_admin(user):
-            st.caption(message)
+            config = dropbox_integration.dropbox_config()
+            has_server_token = bool(config.get("refresh_token") or config.get("access_token"))
+            if has_server_token:
+                st.info("Files could not connect right now.")
+            else:
+                st.warning("Files setup is not complete.")
             with st.expander("Connection settings", expanded=False):
-                st.caption("Required Render env vars: DROPBOX_APP_KEY, DROPBOX_APP_SECRET, DROPBOX_REFRESH_TOKEN")
-                st.caption("DROPBOX_REDIRECT_URI is optional for admin reconnect.")
+                if has_server_token:
+                    st.caption("Server Dropbox credentials could not be verified.")
+                else:
+                    st.caption("Add DROPBOX_REFRESH_TOKEN or DROPBOX_ACCESS_TOKEN in Render.")
+                st.caption("OAuth reconnect is available only as a manual fallback.")
                 try:
                     connect_url = _prepare_dropbox_connect_url()
                     if hasattr(st, "link_button"):
                         st.link_button("Reconnect Files", connect_url, use_container_width=True)
                     else:
                         st.markdown(f"[Reconnect Files]({connect_url})")
-                except Exception as link_error:
-                    st.caption(f"Reconnect unavailable: {link_error}")
+                except Exception:
+                    st.caption("Reconnect is unavailable until OAuth settings are complete.")
+        else:
+            st.info("Files unavailable")
         return
+
+    status = _files_server_status()
+    if os_accounts.is_admin(user) and status.get("mode") == "access_token":
+        st.warning("Using temporary Dropbox access token. Refresh token recommended.")
 
     _render_files_browser(access_token, user)
 
@@ -9121,17 +9105,7 @@ def render_files_page():
             st.caption(f"Root: {root_label or '/'}")
             account_label = status.get("account_name") or status.get("account_email") or "Connected"
             st.caption(str(account_label))
-            settings_columns = st.columns(2)
-            try:
-                connect_url = _prepare_dropbox_connect_url()
-                settings_columns[0].link_button(
-                    "Reconnect Files",
-                    connect_url,
-                    use_container_width=True,
-                )
-            except Exception as error:
-                settings_columns[0].caption(f"Reconnect unavailable: {error}")
-            if settings_columns[1].button(
+            if st.button(
                 "Test Connection",
                 key="files-test-connection",
                 use_container_width=True,
@@ -9142,8 +9116,8 @@ def render_files_page():
                     st.success("Connection works.")
                     if account.get("email"):
                         st.caption(account["email"])
-                except Exception as error:
-                    st.error(f"Connection test failed: {error}")
+                except Exception:
+                    st.error("Connection test failed. Please check the Render credentials.")
 
 
 def render_selected_page(current_page):

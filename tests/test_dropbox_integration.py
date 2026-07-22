@@ -64,18 +64,126 @@ class DropboxIntegrationTests(unittest.TestCase):
             ("DROPBOX_APP_KEY", "DROPBOX_REDIRECT_URI"),
         )
 
-    def test_server_config_requires_refresh_but_not_redirect(self):
+    def test_server_config_requires_refresh_or_access_token(self):
         config = {
             "app_key": "app-key",
             "app_secret": "secret",
             "redirect_uri": "",
             "refresh_token": "",
+            "access_token": "",
         }
 
         self.assertEqual(
             dropbox_integration.missing_server_config_keys(config),
-            ("DROPBOX_REFRESH_TOKEN",),
+            ("DROPBOX_REFRESH_TOKEN", "DROPBOX_ACCESS_TOKEN"),
         )
+
+    def test_dropbox_config_reads_access_token_from_environment(self):
+        with patch.dict(
+            "os.environ",
+            {"DROPBOX_ACCESS_TOKEN": "temporary-access-token"},
+        ):
+            config = dropbox_integration.dropbox_config()
+
+        self.assertEqual(config["access_token"], "temporary-access-token")
+
+    def test_valid_refresh_token_is_preferred_over_access_token(self):
+        config = {
+            "app_key": "app-key",
+            "app_secret": "app-secret",
+            "refresh_token": "refresh-token",
+            "access_token": "fallback-token",
+        }
+        account = {"email": "files@sportscave.test"}
+
+        with patch.object(
+            dropbox_integration,
+            "refresh_access_token",
+            return_value="short-access-token",
+        ) as refresh, patch.object(
+            dropbox_integration,
+            "get_current_account",
+            return_value=account,
+        ) as get_account:
+            auth = dropbox_integration.resolve_server_auth(config)
+
+        refresh.assert_called_once_with("refresh-token", config)
+        get_account.assert_called_once_with("short-access-token")
+        self.assertEqual(auth["source"], "refresh_token")
+        self.assertEqual(auth["access_token"], "short-access-token")
+        self.assertEqual(auth["account"], account)
+
+    def test_invalid_refresh_token_falls_back_to_access_token(self):
+        config = {
+            "app_key": "app-key",
+            "app_secret": "app-secret",
+            "refresh_token": "invalid-refresh-token",
+            "access_token": "fallback-token",
+        }
+
+        with patch.object(
+            dropbox_integration,
+            "refresh_access_token",
+            side_effect=dropbox_integration.DropboxApiError("invalid_grant"),
+        ), patch.object(
+            dropbox_integration,
+            "get_current_account",
+            return_value={"email": "files@sportscave.test"},
+        ) as get_account:
+            auth = dropbox_integration.resolve_server_auth(config)
+
+        get_account.assert_called_once_with("fallback-token")
+        self.assertEqual(auth["source"], "access_token")
+        self.assertEqual(auth["access_token"], "fallback-token")
+
+    def test_missing_refresh_token_uses_access_token(self):
+        config = {
+            "app_key": "app-key",
+            "app_secret": "app-secret",
+            "refresh_token": "",
+            "access_token": "fallback-token",
+        }
+
+        with patch.object(dropbox_integration, "refresh_access_token") as refresh, patch.object(
+            dropbox_integration,
+            "get_current_account",
+            return_value={"email": "files@sportscave.test"},
+        ):
+            auth = dropbox_integration.resolve_server_auth(config)
+
+        refresh.assert_not_called()
+        self.assertEqual(auth["source"], "access_token")
+
+    def test_missing_or_invalid_server_tokens_raise_sanitized_failure(self):
+        with self.assertRaisesRegex(
+            dropbox_integration.DropboxConfigError,
+            "server credentials are not configured",
+        ):
+            dropbox_integration.resolve_server_auth(
+                {"app_key": "", "app_secret": "", "refresh_token": "", "access_token": ""}
+            )
+
+        config = {
+            "app_key": "app-key",
+            "app_secret": "app-secret",
+            "refresh_token": "secret-refresh-value",
+            "access_token": "secret-access-value",
+        }
+        with patch.object(
+            dropbox_integration,
+            "refresh_access_token",
+            side_effect=dropbox_integration.DropboxApiError("invalid refresh"),
+        ), patch.object(
+            dropbox_integration,
+            "get_current_account",
+            side_effect=dropbox_integration.DropboxApiError("expired access"),
+        ), self.assertRaises(dropbox_integration.DropboxApiError) as raised:
+            dropbox_integration.resolve_server_auth(config)
+
+        message = str(raised.exception)
+        self.assertEqual(message, "Dropbox server credentials could not be verified.")
+        self.assertNotIn("secret-refresh-value", message)
+        self.assertNotIn("secret-access-value", message)
 
     def test_configured_root_path_defaults_and_can_be_overridden(self):
         self.assertEqual(

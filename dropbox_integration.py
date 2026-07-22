@@ -11,6 +11,7 @@ DROPBOX_API_URL = "https://api.dropboxapi.com/2"
 DROPBOX_CONTENT_URL = "https://content.dropboxapi.com/2"
 DROPBOX_ROOT_FOLDER = "Sports Cave OS Assets"
 DROPBOX_REFRESH_TOKEN_ENV = "DROPBOX_REFRESH_TOKEN"
+DROPBOX_ACCESS_TOKEN_ENV = "DROPBOX_ACCESS_TOKEN"
 DROPBOX_ROOT_PATH_ENV = "DROPBOX_ROOT_PATH"
 
 DROPBOX_FOLDER_OPTIONS = (
@@ -41,6 +42,7 @@ def dropbox_config():
         "app_secret": str(os.getenv("DROPBOX_APP_SECRET", "") or "").strip(),
         "redirect_uri": str(os.getenv("DROPBOX_REDIRECT_URI", "") or "").strip(),
         "refresh_token": str(os.getenv(DROPBOX_REFRESH_TOKEN_ENV, "") or "").strip(),
+        "access_token": str(os.getenv(DROPBOX_ACCESS_TOKEN_ENV, "") or "").strip(),
         "root_path": str(os.getenv(DROPBOX_ROOT_PATH_ENV, "") or "").strip(),
     }
 
@@ -59,7 +61,16 @@ def missing_config_keys(config=None, *, require_refresh=False, require_redirect=
 
 
 def missing_server_config_keys(config=None):
-    return missing_config_keys(config, require_refresh=True, require_redirect=False)
+    config = config or dropbox_config()
+    if str(config.get("access_token") or "").strip():
+        return ()
+    if str(config.get("refresh_token") or "").strip():
+        required = {
+            "DROPBOX_APP_KEY": config.get("app_key"),
+            "DROPBOX_APP_SECRET": config.get("app_secret"),
+        }
+        return tuple(key for key, value in required.items() if not str(value or "").strip())
+    return (DROPBOX_REFRESH_TOKEN_ENV, DROPBOX_ACCESS_TOKEN_ENV)
 
 
 def missing_oauth_config_keys(config=None):
@@ -143,6 +154,40 @@ def refresh_access_token(refresh_token, config=None, *, timeout=12):
     if not access_token:
         raise DropboxApiError("Dropbox did not return an access token.")
     return access_token
+
+
+def resolve_server_auth(config=None, *, validate=True):
+    """Resolve Render credentials, preferring refresh-token OAuth."""
+    config = config or dropbox_config()
+    refresh_token = str(config.get("refresh_token") or "").strip()
+    fallback_token = str(config.get("access_token") or "").strip()
+
+    if refresh_token and config.get("app_key") and config.get("app_secret"):
+        try:
+            access_token = refresh_access_token(refresh_token, config)
+            account = get_current_account(access_token) if validate else {}
+            return {
+                "access_token": access_token,
+                "source": "refresh_token",
+                "account": account,
+            }
+        except Exception:
+            pass
+
+    if fallback_token:
+        try:
+            account = get_current_account(fallback_token) if validate else {}
+            return {
+                "access_token": fallback_token,
+                "source": "access_token",
+                "account": account,
+            }
+        except Exception:
+            pass
+
+    if not refresh_token and not fallback_token:
+        raise DropboxConfigError("Dropbox server credentials are not configured.")
+    raise DropboxApiError("Dropbox server credentials could not be verified.")
 
 
 def dropbox_rpc(access_token, endpoint, payload=None, *, timeout=12):
