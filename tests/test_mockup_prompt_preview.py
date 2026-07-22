@@ -61,6 +61,13 @@ def run_mockups_page():
     return app_test.run(timeout=20)
 
 
+def run_mockups_page_from_query_param():
+    app_test = AppTest.from_file(str(ROOT / "app.py"))
+    app_test.session_state["sports_cave_authenticated"] = True
+    app_test.query_params["page"] = "mockups"
+    return app_test.run(timeout=20)
+
+
 def tiny_png_bytes(color=(212, 165, 76)):
     buffer = io.BytesIO()
     Image.new("RGB", (10, 10), color).save(buffer, format="PNG")
@@ -474,12 +481,14 @@ class MockupPromptPreviewTests(unittest.TestCase):
         app_test = run_mockups_page()
 
         self.assertEqual(app_test.session_state["selected_page"], "Mockups")
+        self.assertEqual(app_test.session_state["current_page"], "Mockups")
         app_test.file_uploader[0].set_value(
             [("first-upload.png", tiny_png_bytes(), "image/png")]
         )
         app_test.run(timeout=20)
 
         self.assertEqual(app_test.session_state["selected_page"], "Mockups")
+        self.assertEqual(app_test.session_state["current_page"], "Mockups")
         self.assertEqual(len(app_test.exception), 0)
         self.assertIn("Uploaded Artwork", [subheader.value for subheader in app_test.subheader])
         self.assertIn("mockups_upload_processing_cache", app_test.session_state)
@@ -508,6 +517,46 @@ class MockupPromptPreviewTests(unittest.TestCase):
         self.assertIn('key="mockups_artwork_upload"', mockups_page)
         self.assertIn("process_uploaded_artwork_once(uploaded_file)", mockups_page)
         self.assertNotIn("on_change", mockups_page)
+
+    def test_mockups_route_restores_from_page_query_param_after_state_loss(self):
+        app_test = run_mockups_page_from_query_param()
+
+        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
+        self.assertEqual(app_test.session_state["current_page"], "Mockups")
+        self.assertIn("mockups", app_test.query_params["page"])
+        self.assertIn("Mockups", [title.value for title in app_test.title])
+        self.assertEqual(len(app_test.exception), 0)
+
+    def test_mockups_route_remains_selected_after_generate_button_rerun(self):
+        app_test = run_mockups_page()
+        app_test.text_input[0].set_value("Route Stable Product")
+        app_test.selectbox[0].select("Motorsport")
+        app_test.run(timeout=20)
+
+        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
+        self.assertEqual(app_test.session_state["current_page"], "Mockups")
+
+    def test_mockups_canonical_route_survives_legacy_state_reset_and_rerun(self):
+        app_test = run_mockups_page()
+        app_test.session_state["selected_page"] = "Dashboard"
+
+        app_test.run(timeout=20)
+
+        self.assertEqual(app_test.session_state["current_page"], "Mockups")
+        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
+        self.assertIn("mockups", app_test.query_params["page"])
+        self.assertIn("Mockups", [title.value for title in app_test.title])
+        self.assertEqual(len(app_test.exception), 0)
+
+    def test_mockup_callbacks_do_not_contain_home_navigation(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        mockup_workflow = source[
+            source.index("def save_uploaded_lifestyle_result") : source.index("\n\ndef render_recent_runs_sidebar")
+        ]
+
+        self.assertNotIn('set_current_page("Dashboard"', mockup_workflow)
+        self.assertNotIn('session_state["current_page"] = "Dashboard"', mockup_workflow)
+        self.assertNotIn('session_state.selected_page = "Dashboard"', mockup_workflow)
 
     def test_same_upload_is_processed_once_across_product_and_sport_reruns(self):
         app_test = run_mockups_page()

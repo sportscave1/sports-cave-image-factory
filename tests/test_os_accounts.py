@@ -275,6 +275,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertFalse(app_test.exception)
         self.assertIn("Access not approved", [title.value for title in app_test.title])
         self.assertEqual(app_test.session_state["selected_page"], "Orders")
+        self.assertEqual(app_test.session_state["current_page"], "Orders")
 
     def test_auth_refresh_does_not_silently_replace_blocked_page_with_home(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -284,6 +285,93 @@ class AccountAccessTests(unittest.TestCase):
 
         self.assertNotIn('st.session_state["selected_page"] = allowed_routes[0]', auth_source)
         self.assertNotIn("st.session_state.selected_page = allowed_routes[0]", auth_source)
+
+    def test_staff_stays_on_allowed_mockups_page_after_auth_refresh(self):
+        worker = {
+            "id": "worker-mockups",
+            "username": "reina",
+            "display_name": "Reina",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["dashboard", "mockups"],
+        }
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = worker
+        app_test.session_state["sports_cave_auth_checked_at"] = 0.0
+        app_test.session_state["current_page"] = "Mockups"
+        app_test.session_state["selected_page"] = "Mockups"
+
+        with patch.object(os_accounts.DEFAULT_STORE, "get_user", return_value=worker):
+            app_test.run(timeout=20)
+
+        self.assertFalse(app_test.exception)
+        self.assertEqual(app_test.session_state["current_page"], "Mockups")
+        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
+        self.assertIn("Mockups", [title.value for title in app_test.title])
+
+    def test_admin_stays_on_mockups_page_after_auth_refresh(self):
+        admin = {
+            "id": "admin-mockups",
+            "username": "nathan",
+            "display_name": "Nathan",
+            "role": "admin",
+            "is_active": True,
+            "page_permissions": [],
+        }
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = admin
+        app_test.session_state["sports_cave_auth_checked_at"] = 0.0
+        app_test.session_state["current_page"] = "Mockups"
+        app_test.session_state["selected_page"] = "Mockups"
+
+        with patch.object(os_accounts.DEFAULT_STORE, "get_user", return_value=admin):
+            app_test.run(timeout=20)
+
+        self.assertFalse(app_test.exception)
+        self.assertEqual(app_test.session_state["current_page"], "Mockups")
+        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
+        self.assertIn("Mockups", [title.value for title in app_test.title])
+
+    def test_home_admin_sections_do_not_change_current_page(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        home_source = source[
+            source.index("def render_lightweight_dashboard_page") : source.index("\n\ndef page_uses_local_database")
+        ]
+
+        self.assertNotIn("set_current_page(", home_source)
+        self.assertNotIn("selected_page", home_source)
+        self.assertNotIn('session_state["current_page"]', home_source)
+
+    def test_missing_route_defaults_home_only_on_first_load(self):
+        worker = {
+            "id": "worker-first-load",
+            "username": "worker",
+            "display_name": "Worker",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["dashboard", "mockups"],
+        }
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = worker
+        app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+
+        with patch.object(
+            sports_cave_dashboard,
+            "load_dashboard_state",
+            return_value={"tasks": [], "activity_log": [], "task_error": "", "activity_error": ""},
+        ), patch.object(sports_cave_dashboard, "load_calendar_events", return_value=[]):
+            app_test.run(timeout=20)
+
+        self.assertEqual(app_test.session_state["current_page"], "Dashboard")
+        app_test.session_state["current_page"] = "Mockups"
+        app_test.session_state["selected_page"] = "Dashboard"
+        app_test.run(timeout=20)
+
+        self.assertEqual(app_test.session_state["current_page"], "Mockups")
+        self.assertEqual(app_test.session_state["selected_page"], "Mockups")
 
     def test_blocked_worker_cannot_render_files_page(self):
         app_test = AppTest.from_file(str(ROOT / "app.py"))

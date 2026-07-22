@@ -890,6 +890,137 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(record["User"], "Maria")
         self.assertEqual(record["Activity"], "Mockup made")
 
+    def test_mockup_upload_activity_is_grouped_with_all_item_details(self):
+        entries = [
+            {
+                "id": "mockup-2",
+                "action_type": "mockup_uploaded",
+                "message": "Added mockup: 02 - Office (Product Page)",
+                "page": "Mockups",
+                "actor": "Reina",
+                "entity_id": "run-final-crown",
+                "created_at": "2026-07-21T02:02:00+00:00",
+                "metadata": {"product_name": "The Final Crown Spain World Cup"},
+            },
+            {
+                "id": "mockup-1",
+                "action_type": "mockup_uploaded",
+                "message": "Added mockup: 01 - Man Cave (Product Page)",
+                "page": "Mockups",
+                "actor": "Reina",
+                "entity_id": "run-final-crown",
+                "created_at": "2026-07-21T02:01:00+00:00",
+                "metadata": {"product_name": "The Final Crown Spain World Cup"},
+            },
+            {
+                "id": "task-1",
+                "action_type": "task_added",
+                "message": "Task added: Refresh NASCAR collection",
+                "page": "Dashboard",
+                "actor": "Nathan",
+                "created_at": "2026-07-21T02:00:00+00:00",
+                "metadata": {},
+            },
+        ]
+
+        grouped = sports_cave_dashboard.group_mockup_activity_entries(
+            entries,
+            ZoneInfo("Australia/Sydney"),
+        )
+
+        self.assertEqual(len(grouped), 2)
+        mockup_group = next(entry for entry in grouped if entry.get("is_mockup_group"))
+        record = sports_cave_dashboard.activity_table_record(mockup_group)
+        self.assertEqual(record["Activity"], "Product mockups done")
+        self.assertEqual(
+            record["Details"],
+            "the-final-crown-spain-world-cup — 2 mockups uploaded",
+        )
+        self.assertEqual(record["User"], "Reina")
+        self.assertEqual(
+            mockup_group["mockup_items"],
+            ["01 - Man Cave (Product Page)", "02 - Office (Product Page)"],
+        )
+        task_entry = next(entry for entry in grouped if entry.get("id") == "task-1")
+        self.assertEqual(task_entry, entries[2])
+
+    def test_mockup_groups_do_not_mix_products_or_users(self):
+        entries = [
+            {
+                "action_type": "mockup_uploaded",
+                "message": "Added mockup: 01 - Man Cave",
+                "page": "Mockups",
+                "actor": "Reina",
+                "entity_id": "run-one",
+                "created_at": "2026-07-21T03:03:00+00:00",
+                "metadata": {"product_name": "Product One"},
+            },
+            {
+                "action_type": "mockup_uploaded",
+                "message": "Added mockup: 02 - Office",
+                "page": "Mockups",
+                "actor": "Reina",
+                "entity_id": "run-two",
+                "created_at": "2026-07-21T03:02:00+00:00",
+                "metadata": {"product_name": "Product Two"},
+            },
+            {
+                "action_type": "mockup_uploaded",
+                "message": "Added mockup: 03 - Living Room",
+                "page": "Mockups",
+                "actor": "Maria",
+                "entity_id": "run-three",
+                "created_at": "2026-07-21T03:01:00+00:00",
+                "metadata": {"product_name": "Product One"},
+            },
+        ]
+
+        grouped = sports_cave_dashboard.group_mockup_activity_entries(entries)
+        mockup_groups = [entry for entry in grouped if entry.get("is_mockup_group")]
+
+        self.assertEqual(len(mockup_groups), 3)
+        self.assertEqual(
+            {(entry["metadata"]["product_handle"], entry["actor"]) for entry in mockup_groups},
+            {("product-one", "Reina"), ("product-two", "Reina"), ("product-one", "Maria")},
+        )
+
+    def test_mockup_group_infers_product_from_same_run_summary(self):
+        entries = [
+            {
+                "action_type": "mockup_uploaded",
+                "message": "Added mockup: 02 - Office",
+                "page": "Mockups",
+                "actor": "Reina",
+                "entity_id": "run-with-context",
+                "created_at": "2026-07-21T04:02:00+00:00",
+                "metadata": {"prompt": "02-office-prompt.txt"},
+            },
+            {
+                "action_type": "mockup_uploaded",
+                "message": "Added mockup: 01 - Man Cave",
+                "page": "Mockups",
+                "actor": "Reina",
+                "entity_id": "run-with-context",
+                "created_at": "2026-07-21T04:01:00+00:00",
+                "metadata": {"prompt": "01-man-cave-prompt.txt"},
+            },
+            {
+                "action_type": "mockup_generated",
+                "message": "Mockup made: Bathurst Champion",
+                "page": "Mockups",
+                "actor": "Reina",
+                "entity_id": "run-with-context",
+                "created_at": "2026-07-21T04:00:00+00:00",
+                "metadata": {"product_name": "Bathurst Champion"},
+            },
+        ]
+
+        grouped = sports_cave_dashboard.group_mockup_activity_entries(entries)
+        mockup_group = next(entry for entry in grouped if entry.get("is_mockup_group"))
+        record = sports_cave_dashboard.activity_table_record(mockup_group)
+
+        self.assertEqual(record["Details"], "bathurst-champion — 2 mockups uploaded")
+
 
 class SportsCaveCalendarTests(unittest.TestCase):
     def test_alert_logic_prefers_active_and_upcoming_major_events(self):

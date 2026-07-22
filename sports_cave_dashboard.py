@@ -48,6 +48,8 @@ ACTIVITY_VIEW_LIMITS = {
     ACTIVITY_VIEW_MONTH: 150,
     ACTIVITY_VIEW_ALL_TIME: 200,
 }
+MOCKUP_ACTIVITY_GROUP_WINDOW = timedelta(minutes=45)
+MOCKUP_ACTIVITY_GROUP_ACTIONS = {"mockup_uploaded", "mockup_made"}
 _TASK_CACHE = {}
 _ACTIVITY_CACHE = {}
 _CALENDAR_CACHE = {}
@@ -832,6 +834,7 @@ _ACTIVITY_LABELS = {
     "mockup_exported": "Mockup pack exported",
     "mockup_generated": "Mockup made",
     "mockup_made": "Mockup made",
+    "mockup_uploaded": "Mockup uploaded",
     "mockup_pack_exported": "Mockup pack exported",
     "mockup_zip_exported": "Mockup pack exported",
     "order_fulfilled": "Order fulfilled",
@@ -1083,8 +1086,185 @@ def split_activity_message(entry):
     return humanise_event_type(action_type) if action_type else "Activity", message
 
 
+def _activity_product_slug(value):
+    text = _compact_text(value).casefold()
+    text = re.sub(r"[^a-z0-9]+", "-", text).strip("-")
+    return text
+
+
+def _mockup_product_label(entry, run_products=None):
+    entry = dict(entry or {})
+    metadata = entry.get("metadata") or {}
+    label = _metadata_text(
+        metadata,
+        "product_handle",
+        "shopify_handle",
+        "handle",
+        "product_slug",
+        "product_name",
+        "product_title",
+        "product",
+    )
+    entity_id = _compact_text(entry.get("entity_id"))
+    if not label and entity_id and run_products:
+        label = _compact_text(run_products.get(entity_id))
+    return label
+
+
+def _mockup_item_label(entry):
+    entry = dict(entry or {})
+    metadata = entry.get("metadata") or {}
+    label = _metadata_text(metadata, "mockup_name", "prompt_label", "scene_name")
+    message = _compact_text(entry.get("message"))
+    if not label:
+        label = _text_after_prefix(
+            message,
+            (
+                "Added mockup",
+                "Uploaded mockup",
+                "Mockup uploaded",
+                "Created mockup",
+                "Mockup made",
+            ),
+        )
+    if not label:
+        prompt_name = _metadata_text(metadata, "prompt", "prompt_name")
+        if prompt_name:
+            stem = re.sub(r"-prompt$", "", Path(prompt_name).stem, flags=re.IGNORECASE)
+            number_match = re.match(r"^(\d+)[-_ ]+(.*)$", stem)
+            if number_match:
+                label = f"{number_match.group(1)} - {number_match.group(2).replace('-', ' ').title()}"
+            else:
+                label = stem.replace("-", " ").title()
+    return label or message or "Mockup"
+
+
+def _mockup_group_sort_key(label):
+    match = re.match(r"^\s*(\d+)", str(label or ""))
+    return (int(match.group(1)) if match else 10_000, str(label or "").casefold())
+
+
+def group_mockup_activity_entries(entries, tzinfo=timezone.utc):
+    """Group noisy per-image mockup rows without changing stored audit data."""
+    source_entries = [dict(entry or {}) for entry in entries or []]
+    run_products = {}
+    for entry in source_entries:
+        if clean_activity_source(entry.get("page") or entry.get("source")).casefold() != "mockups":
+            continue
+        product_label = _mockup_product_label(entry)
+        entity_id = _compact_text(entry.get("entity_id"))
+        if entity_id and product_label:
+            run_products.setdefault(entity_id, product_label)
+
+    grouped = []
+    normal = []
+    for entry in source_entries:
+        action_type = _compact_text(entry.get("action_type")).casefold()
+        area = clean_activity_source(entry.get("page") or entry.get("source"))
+        if area.casefold() != "mockups" or action_type not in MOCKUP_ACTIVITY_GROUP_ACTIONS:
+            normal.append(entry)
+            continue
+
+        created_at = _as_aware_datetime(entry.get("created_at"), timezone.utc)
+        local_created_at = created_at.astimezone(tzinfo or timezone.utc) if created_at else None
+        local_date = local_created_at.date().isoformat() if local_created_at else ""
+        actor = _compact_text(entry.get("actor") or (entry.get("metadata") or {}).get("email"))
+        entity_id = _compact_text(entry.get("entity_id"))
+        product_label = _mockup_product_label(entry, run_products)
+        product_slug = _activity_product_slug(product_label)
+
+        match = None
+        for candidate in grouped:
+            if candidate["local_date"] != local_date or candidate["actor_key"] != actor.casefold():
+                continue
+            if candidate["product_slug"] != product_slug:
+                continue
+            same_run = bool(entity_id and candidate["entity_id"] == entity_id)
+            close_in_time = bool(
+                created_at
+                and candidate["oldest_at"]
+                and abs(candidate["oldest_at"] - created_at) <= MOCKUP_ACTIVITY_GROUP_WINDOW
+            )
+            if same_run or (not entity_id and not candidate["entity_id"] and close_in_time):
+                match = candidate
+                break
+
+        if match is None:
+            match = {
+                "actor": actor,
+                "actor_key": actor.casefold(),
+                "created_at": entry.get("created_at"),
+                "latest_at": created_at,
+                "oldest_at": created_at,
+                "entity_id": entity_id,
+                "local_date": local_date,
+                "product_label": product_label,
+                "product_slug": product_slug,
+                "entries": [],
+            }
+            grouped.append(match)
+        elif created_at:
+            if match["latest_at"] is None or created_at > match["latest_at"]:
+                match["latest_at"] = created_at
+                match["created_at"] = entry.get("created_at")
+            if match["oldest_at"] is None or created_at < match["oldest_at"]:
+                match["oldest_at"] = created_at
+        match["entries"].append(entry)
+
+    summaries = []
+    for index, group in enumerate(grouped):
+        item_labels = sorted(
+            (_mockup_item_label(entry) for entry in group["entries"]),
+            key=_mockup_group_sort_key,
+        )
+        count = len(item_labels)
+        product_text = group["product_slug"]
+        group_actions = {
+            _compact_text(entry.get("action_type")).casefold()
+            for entry in group["entries"]
+        }
+        action_word = "uploaded" if group_actions == {"mockup_uploaded"} else "made"
+        count_text = (
+            f"{count} mockup {action_word}"
+            if count == 1
+            else f"{count} mockups {action_word}"
+        )
+        details = f"{product_text} — {count_text}" if product_text else count_text
+        summaries.append(
+            {
+                "id": f"mockup-group-{index}-{group['entity_id'] or group['local_date']}",
+                "action_type": "mockup_activity_group",
+                "message": f"Product mockups done: {details}",
+                "page": "Mockups",
+                "source": "Mockups",
+                "created_at": group["created_at"],
+                "entity_type": "mockup_run",
+                "entity_id": group["entity_id"],
+                "actor": group["actor"],
+                "metadata": {
+                    "mockup_count": count,
+                    "product_handle": product_text,
+                },
+                "is_mockup_group": True,
+                "mockup_items": item_labels,
+            }
+        )
+
+    combined = normal + summaries
+    combined.sort(
+        key=lambda entry: _as_aware_datetime(entry.get("created_at"), timezone.utc)
+        or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    return combined
+
+
 def activity_table_record(entry, tzinfo=timezone.utc):
-    activity, details = split_activity_message(entry)
+    if entry.get("is_mockup_group"):
+        activity = "Product mockups done"
+        details = _text_after_prefix(entry.get("message"), ("Product mockups done",))
+    else:
+        activity, details = split_activity_message(entry)
     created_at = _as_aware_datetime(entry.get("created_at"), timezone.utc)
     if created_at is not None:
         local_created_at = created_at.astimezone(tzinfo or timezone.utc)

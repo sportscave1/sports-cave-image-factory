@@ -235,6 +235,8 @@ HIDDEN_PAGE_OPTIONS = [
 ]
 ALL_PAGE_OPTIONS = [*MENU_OPTIONS, *HIDDEN_PAGE_OPTIONS]
 PAGE_QUERY_PARAM = "page"
+CURRENT_PAGE_STATE_KEY = "current_page"
+LEGACY_PAGE_STATE_KEY = "selected_page"
 APP_VERSION = "Sports Cave Dashboard - 2026-07-21"
 DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
 DRIVE_SECTION_NAMES = {
@@ -2474,7 +2476,7 @@ def page_query_value(page):
     return os_accounts.page_key_for_route(route) or route
 
 
-def sync_current_page_query_param(page):
+def sync_current_page_to_query_params(page):
     query_value = page_query_value(page)
     if not query_value:
         return
@@ -2488,32 +2490,54 @@ def sync_current_page_query_param(page):
         pass
 
 
-def set_current_page(page, *, sync_query=True):
-    route = normalise_app_page(page) or "Dashboard"
-    st.session_state.selected_page = route
+def sync_current_page_query_param(page):
+    """Backward-compatible alias for older callers and tests."""
+    sync_current_page_to_query_params(page)
+
+
+def _store_current_page(route, *, source="restore"):
+    st.session_state[CURRENT_PAGE_STATE_KEY] = route
+    st.session_state[LEGACY_PAGE_STATE_KEY] = route
+    st.session_state["current_page_source"] = str(source or "restore")
+
+
+def get_current_page():
+    route = normalise_app_page(st.session_state.get(CURRENT_PAGE_STATE_KEY))
+    if not route:
+        query_page = page_from_query_params()
+        legacy_page = normalise_app_page(st.session_state.get(LEGACY_PAGE_STATE_KEY))
+        route = query_page or legacy_page or "Dashboard"
+        _store_current_page(route, source="initial" if route == "Dashboard" else "restore")
+    else:
+        _store_current_page(route, source=st.session_state.get("current_page_source") or "restore")
+
+    # Access is checked separately so a denied route remains visible instead
+    # of being replaced by the first allowed page or Home.
+    return route
+
+
+def set_current_page(page, *, source="user", sync_query=True):
+    route = normalise_app_page(page)
+    if not route:
+        raise ValueError(f"Unknown Sports Cave page: {page}")
+    _store_current_page(route, source=source)
     if sync_query:
-        sync_current_page_query_param(route)
+        sync_current_page_to_query_params(route)
     return route
 
 
 def init_session_state():
-    if "selected_page" not in st.session_state:
-        query_page = page_from_query_params()
-        st.session_state.selected_page = query_page or "Dashboard"
+    current_page = get_current_page()
 
     if "startup_shell_loaded" not in st.session_state:
         st.session_state.startup_shell_loaded = True
 
     pending_page = os_accounts.normalise_route(st.session_state.pop("pending_page", None))
     if pending_page in ALL_PAGE_OPTIONS:
-        set_current_page(pending_page, sync_query=False)
+        current_page = set_current_page(pending_page, source="pending", sync_query=False)
 
-    st.session_state.selected_page = os_accounts.normalise_route(
-        st.session_state.selected_page
-    )
-
-    if st.session_state.selected_page not in ALL_PAGE_OPTIONS:
-        st.session_state.selected_page = "Dashboard"
+    _store_current_page(current_page, source=st.session_state.get("current_page_source") or "restore")
+    sync_current_page_to_query_params(current_page)
 
     if "selected_product_id" not in st.session_state:
         st.session_state.selected_product_id = None
@@ -5703,6 +5727,7 @@ def render_recent_runs_sidebar():
 
 def render_sidebar():
     user = current_os_user()
+    current_page = get_current_page()
     st.sidebar.markdown(
         f"""
         <div class="sc-sidebar-brand">
@@ -5716,8 +5741,8 @@ def render_sidebar():
         page for page in MENU_OPTIONS if os_accounts.can_access_page(user, page)
     ]
     visible_page = (
-        st.session_state.selected_page
-        if st.session_state.selected_page in allowed_menu_options
+        current_page
+        if current_page in allowed_menu_options
         else ""
     )
     for page in allowed_menu_options:
@@ -5729,20 +5754,20 @@ def render_sidebar():
             type="primary" if page == visible_page else "secondary",
         ):
             if page != visible_page:
-                set_current_page(page)
+                set_current_page(page, source="sidebar")
                 st.rerun()
     if (
-        st.session_state.selected_page not in MENU_OPTIONS
-        and st.session_state.selected_page != "Accounts & Access"
+        current_page not in MENU_OPTIONS
+        and current_page != "Accounts & Access"
         and os_accounts.is_admin(user)
     ):
         page_label = SIDEBAR_NAV_LABELS.get(
-            st.session_state.selected_page,
-            st.session_state.selected_page,
+            current_page,
+            current_page,
         )
         st.sidebar.caption(f"{page_label} open")
         if st.sidebar.button("Back to Home", use_container_width=True):
-            set_current_page("Dashboard")
+            set_current_page("Dashboard", source="sidebar")
             st.rerun()
 
     if os_accounts.is_admin(user):
@@ -5751,9 +5776,9 @@ def render_sidebar():
             "Accounts & Access",
             key="sidebar-nav::Accounts & Access",
             use_container_width=True,
-            type="primary" if st.session_state.selected_page == "Accounts & Access" else "secondary",
+            type="primary" if current_page == "Accounts & Access" else "secondary",
         ):
-            set_current_page("Accounts & Access")
+            set_current_page("Accounts & Access", source="sidebar")
             st.rerun()
 
     st.sidebar.divider()
@@ -6411,7 +6436,7 @@ def render_admin_account_setup():
 def logout_app():
     record_activity_log("logout", "Dashboard", "Signed out", entity_type="session")
     st.session_state["sports_cave_authenticated"] = False
-    set_current_page("Dashboard")
+    set_current_page("Dashboard", source="logout")
     st.session_state.pop("sports_cave_current_user", None)
     st.session_state.pop("sports_cave_admin_setup_required", None)
     st.session_state.pop("files_access_token", None)
@@ -8545,9 +8570,14 @@ def render_activity_log(local_now, *, show_denied=True):
             unsafe_allow_html=True,
         )
         return True
+    activity_timezone = timezone_for_os_user(current_os_user())
+    display_entries = sports_cave_dashboard.group_mockup_activity_entries(
+        entries,
+        activity_timezone,
+    )
     records = [
-        sports_cave_dashboard.activity_table_record(entry, timezone_for_os_user(current_os_user()))
-        for entry in entries
+        sports_cave_dashboard.activity_table_record(entry, activity_timezone)
+        for entry in display_entries
     ]
     page_count = max((len(records) + ACTIVITY_TABLE_PAGE_SIZE - 1) // ACTIVITY_TABLE_PAGE_SIZE, 1)
     page_number = 1
@@ -8562,7 +8592,17 @@ def render_activity_log(local_now, *, show_denied=True):
         )
     first_row = (page_number - 1) * ACTIVITY_TABLE_PAGE_SIZE
     page_records = records[first_row : first_row + ACTIVITY_TABLE_PAGE_SIZE]
+    page_entries = display_entries[first_row : first_row + ACTIVITY_TABLE_PAGE_SIZE]
     st.markdown(_activity_table_html(page_records), unsafe_allow_html=True)
+    for entry, record in zip(page_entries, page_records):
+        if not entry.get("is_mockup_group"):
+            continue
+        with st.expander(
+            f"{record['Activity']} · {record['Details']}",
+            expanded=False,
+        ):
+            for item in entry.get("mockup_items") or []:
+                st.markdown(f"- {item}")
     return True
 
 
@@ -9181,14 +9221,14 @@ def main():
         and os_accounts.is_admin(current_os_user())
         and os_accounts.can_access_page(current_os_user(), "Files")
     ):
-        set_current_page("Files")
+        set_current_page("Files", source="oauth")
 
     log_startup_stage("SIDEBAR START")
     render_sidebar()
     log_startup_stage("SIDEBAR DONE")
 
     log_startup_stage("ROUTER START")
-    current_page = st.session_state.selected_page
+    current_page = get_current_page()
     log_startup_stage(f"PAGE SELECTED: {current_page}")
     log_app_memory(f"Page load start: {current_page}")
 
