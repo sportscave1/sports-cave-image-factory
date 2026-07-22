@@ -664,6 +664,13 @@ class AccountAccessTests(unittest.TestCase):
             self.assertIn("05 Mockups", root_text)
             self.assertIn("File folder", root_text)
             self.assertIn("files_path=%2FSportscave%20Team%20Folder%2F05%20Mockups", root_text)
+            self.assertRegex(
+                root_text,
+                r'<a class="sc-files-grid sc-files-row"[^>]+files_path='
+                r'%2FSportscave%20Team%20Folder%2F05%20Mockups[^>]+target="_self"',
+            )
+            folder_row = root_text[root_text.index("05 Mockups") - 600 : root_text.index("05 Mockups") + 600]
+            self.assertNotIn('target="_blank"', folder_row)
 
             app_test.session_state["files_browser_path"] = mockups_path
             app_test.run(timeout=20)
@@ -673,6 +680,14 @@ class AccountAccessTests(unittest.TestCase):
             self.assertIn("Sportscave Team Folder", empty_text)
             self.assertIn("05 Mockups", empty_text)
             self.assertIn("sc-files-chevron", empty_text)
+            self.assertRegex(
+                empty_text,
+                r'<nav class="sc-files-breadcrumb"[^>]*>.*target="_self"',
+            )
+            breadcrumb = empty_text[
+                empty_text.index('<nav class="sc-files-breadcrumb"') : empty_text.index("</nav>")
+            ]
+            self.assertNotIn('target="_blank"', breadcrumb)
 
         self.assertFalse(app_test.exception)
 

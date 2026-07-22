@@ -9637,7 +9637,7 @@ def _files_breadcrumb_markup(current_path, root_path, *, preview_name=""):
         else:
             href = _files_route_url(folder_path=path, root=not path)
             chunks.append(
-                f'<a href="{html.escape(href, quote=True)}">{safe_label}</a>'
+                f'<a href="{html.escape(href, quote=True)}" target="_self">{safe_label}</a>'
             )
         if index < last_index or preview_name:
             chunks.append('<span class="sc-files-chevron" aria-hidden="true">&#8250;</span>')
@@ -9670,7 +9670,7 @@ def _files_details_markup(entries, user, *, show_header=True):
             continue
         if tag == "folder":
             href = _files_route_url(folder_path=path)
-            target = ""
+            target = ' target="_self"'
         else:
             parent_path = path.rsplit("/", 1)[0]
             href = _files_route_url(folder_path=parent_path, preview_path=path)
@@ -9700,7 +9700,8 @@ def _files_details_markup(entries, user, *, show_header=True):
             f'<span class="sc-files-meta" role="cell">{html.escape(size)}</span>'
             '</a>'
             f'<a class="sc-files-row-menu" href="{html.escape(action_href, quote=True)}" '
-            f'aria-label="Rename {html.escape(name, quote=True)}" title="Rename">&#8943;</a>'
+            f'target="_self" aria-label="Rename {html.escape(name, quote=True)}" '
+            f'title="Rename">&#8943;</a>'
             '</div>'
         )
     chunks.append("</div></div>")

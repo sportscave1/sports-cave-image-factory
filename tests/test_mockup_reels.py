@@ -610,6 +610,16 @@ class MockupReelsTests(unittest.TestCase):
         self.assertIn('os_accounts.can_access_page(user, "Files")', dropbox_ui)
         self.assertIn('"mockups_saved_dropbox"', dropbox_save)
 
+        open_folder = source[
+            source.index("def _open_files_folder") : source.index("\n\ndef _render_mockups_dropbox_save")
+        ]
+        self.assertIn('st.session_state["files_browser_path"] = clean_path', open_folder)
+        self.assertIn('st.query_params["files_path"] = clean_path', open_folder)
+        self.assertIn('set_current_page("Files"', open_folder)
+        self.assertIn("st.rerun()", open_folder)
+        self.assertNotIn('target="_blank"', open_folder)
+        self.assertNotIn("window.open", open_folder)
+
     def test_mockups_dropbox_manifest_uses_individual_asset_files_not_only_zip(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         manifest_source = source[
