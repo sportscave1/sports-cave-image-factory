@@ -1,5 +1,8 @@
 import json
+import hashlib
 import os
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlencode
@@ -16,6 +19,8 @@ DROPBOX_ROOT_FOLDER = DROPBOX_TEAM_FOLDER
 DROPBOX_REFRESH_TOKEN_ENV = "DROPBOX_REFRESH_TOKEN"
 DROPBOX_ACCESS_TOKEN_ENV = "DROPBOX_ACCESS_TOKEN"
 DROPBOX_ROOT_PATH_ENV = "DROPBOX_ROOT_PATH"
+DROPBOX_CLIENT_CACHE_SECONDS = 45 * 60
+DROPBOX_CLIENT_CACHE_LIMIT = 8
 
 DROPBOX_FOLDER_OPTIONS = (
     ("brand_assets", "01 Brand Assets"),
@@ -45,6 +50,117 @@ class DropboxFolderAccessError(DropboxApiError):
     def __init__(self, message, *, reason="not_visible"):
         super().__init__(message)
         self.reason = reason
+
+
+_TEAM_SPACE_CLIENT_CACHE = {}
+_TEAM_SPACE_CLIENT_LOCK = threading.Lock()
+
+
+def _dropbox_sdk():
+    import dropbox
+
+    return dropbox
+
+
+def _new_dropbox_client(access_token):
+    return _dropbox_sdk().Dropbox(oauth2_access_token=str(access_token or "").strip())
+
+
+def _account_to_dict(account):
+    if isinstance(account, dict):
+        return dict(account)
+    name = getattr(account, "name", None)
+    return {
+        "account_id": str(getattr(account, "account_id", "") or ""),
+        "email": str(getattr(account, "email", "") or ""),
+        "display_name": str(getattr(name, "display_name", "") or ""),
+        "name": {
+            "display_name": str(getattr(name, "display_name", "") or ""),
+            "familiar_name": str(getattr(name, "familiar_name", "") or ""),
+        },
+    }
+
+
+def _metadata_to_dict(metadata):
+    if isinstance(metadata, dict):
+        return dict(metadata)
+    class_name = metadata.__class__.__name__.casefold()
+    tag = "folder" if "folder" in class_name else "file" if "file" in class_name else ""
+    row = {".tag": tag}
+    for field in (
+        "id",
+        "name",
+        "path_display",
+        "path_lower",
+        "size",
+        "rev",
+        "content_hash",
+        "client_modified",
+        "server_modified",
+    ):
+        value = getattr(metadata, field, None)
+        if isinstance(value, datetime):
+            value = value.isoformat()
+        if value is not None:
+            row[field] = value
+    return row
+
+
+def _dropbox_error(error, fallback="Dropbox request failed."):
+    message = str(error or "").strip() or fallback
+    return DropboxApiError(message[:500])
+
+
+def clear_team_space_client_cache():
+    with _TEAM_SPACE_CLIENT_LOCK:
+        _TEAM_SPACE_CLIENT_CACHE.clear()
+
+
+def _team_space_context(access_token, *, force=False):
+    """Return one Dropbox client rooted at the connected account's Team Space."""
+    token = str(access_token or "").strip()
+    if not token:
+        raise DropboxConfigError("Dropbox access is not available.")
+    cache_key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    now = time.monotonic()
+    with _TEAM_SPACE_CLIENT_LOCK:
+        cached = _TEAM_SPACE_CLIENT_CACHE.get(cache_key) or {}
+        if not force and cached.get("expires_at", 0) > now:
+            return cached
+
+    try:
+        base_client = _new_dropbox_client(token)
+        account = base_client.users_get_current_account()
+        root_info = getattr(account, "root_info", None)
+        root_namespace_id = str(getattr(root_info, "root_namespace_id", "") or "").strip()
+        if not root_namespace_id:
+            raise DropboxApiError("Dropbox account root namespace is unavailable.")
+        path_root = _dropbox_sdk().common.PathRoot.root(root_namespace_id)
+        rooted_client = base_client.with_path_root(path_root)
+    except DropboxApiError:
+        raise
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox Team Space could not be opened.") from error
+
+    context = {
+        "client": rooted_client,
+        "account": _account_to_dict(account),
+        "root_namespace_id": root_namespace_id,
+        "expires_at": now + DROPBOX_CLIENT_CACHE_SECONDS,
+    }
+    with _TEAM_SPACE_CLIENT_LOCK:
+        if len(_TEAM_SPACE_CLIENT_CACHE) >= DROPBOX_CLIENT_CACHE_LIMIT:
+            oldest_key = min(
+                _TEAM_SPACE_CLIENT_CACHE,
+                key=lambda key: _TEAM_SPACE_CLIENT_CACHE[key].get("expires_at", 0),
+            )
+            _TEAM_SPACE_CLIENT_CACHE.pop(oldest_key, None)
+        _TEAM_SPACE_CLIENT_CACHE[cache_key] = context
+    return context
+
+
+def team_space_client(access_token, *, force=False):
+    return _team_space_context(access_token, force=force)["client"]
 
 
 def dropbox_config():
@@ -202,11 +318,15 @@ def resolve_server_auth(config=None, *, validate=True):
 
 
 def dropbox_rpc(access_token, endpoint, payload=None, *, timeout=12):
+    context = _team_space_context(access_token)
     response = _requests().post(
         f"{DROPBOX_API_URL}/{str(endpoint).lstrip('/')}",
         headers={
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
+            "Dropbox-API-Path-Root": json.dumps(
+                {".tag": "root", "root": context["root_namespace_id"]}
+            ),
         },
         data=json.dumps(payload or {}),
         timeout=timeout,
@@ -216,7 +336,7 @@ def dropbox_rpc(access_token, endpoint, payload=None, *, timeout=12):
 
 
 def get_current_account(access_token):
-    return dropbox_rpc(access_token, "users/get_current_account", {})
+    return dict(_team_space_context(access_token)["account"])
 
 
 def normalize_dropbox_path(path):
@@ -243,55 +363,55 @@ def configured_root_path(config=None):
 def list_folder(access_token, path="", *, max_entries=2000):
     clean_path = normalize_dropbox_path(path)
     limit = max(1, min(int(max_entries or 2000), 2000))
-    response = dropbox_rpc(
-        access_token,
-        "files/list_folder",
-        {
-            "path": clean_path,
-            "recursive": False,
-            "include_deleted": False,
-            "include_media_info": False,
-            "limit": limit,
-        },
-    )
-    entries = list(response.get("entries") or [])
+    client = team_space_client(access_token)
+    try:
+        response = client.files_list_folder(
+            clean_path,
+            recursive=False,
+            include_deleted=False,
+            include_media_info=False,
+            limit=limit,
+        )
+    except Exception as error:
+        raise _dropbox_error(error) from error
+    entries = list(getattr(response, "entries", ()) or ())
     seen_cursors = set()
-    while response.get("has_more") and len(entries) < limit:
-        cursor = str(response.get("cursor") or "").strip()
+    while bool(getattr(response, "has_more", False)) and len(entries) < limit:
+        cursor = str(getattr(response, "cursor", "") or "").strip()
         if not cursor or cursor in seen_cursors:
             break
         seen_cursors.add(cursor)
-        response = dropbox_rpc(
-            access_token,
-            "files/list_folder/continue",
-            {"cursor": cursor},
-        )
-        entries.extend(response.get("entries") or [])
-    return entries[:limit]
+        try:
+            response = client.files_list_folder_continue(cursor)
+        except Exception as error:
+            raise _dropbox_error(error) from error
+        entries.extend(getattr(response, "entries", ()) or ())
+    return [_metadata_to_dict(entry) for entry in entries[:limit]]
 
 
 def get_temporary_link(access_token, path):
-    result = dropbox_rpc(
-        access_token,
-        "files/get_temporary_link",
-        {"path": normalize_dropbox_path(path)},
-    )
-    link = str(result.get("link") or "").strip()
+    try:
+        result = team_space_client(access_token).files_get_temporary_link(
+            normalize_dropbox_path(path)
+        )
+    except Exception as error:
+        raise _dropbox_error(error) from error
+    link = str(getattr(result, "link", "") or "").strip()
     if not link:
         raise DropboxApiError("Dropbox did not return a temporary file link.")
     return link
 
 
 def get_file_metadata(access_token, path):
-    return dropbox_rpc(
-        access_token,
-        "files/get_metadata",
-        {
-            "path": normalize_dropbox_path(path),
-            "include_media_info": False,
-            "include_deleted": False,
-        },
-    )
+    try:
+        metadata = team_space_client(access_token).files_get_metadata(
+            normalize_dropbox_path(path),
+            include_media_info=False,
+            include_deleted=False,
+        )
+    except Exception as error:
+        raise _dropbox_error(error) from error
+    return _metadata_to_dict(metadata)
 
 
 def format_file_size(size):
@@ -460,33 +580,32 @@ def dropbox_upload_path(asset_type, filename):
 
 
 def ensure_folder_structure(access_token):
+    client = team_space_client(access_token)
     created = []
     for folder in [DROPBOX_ROOT_FOLDER, *[name for _, name in DROPBOX_FOLDER_OPTIONS]]:
         path = folder_path("" if folder == DROPBOX_ROOT_FOLDER else folder)
         try:
-            dropbox_rpc(access_token, "files/create_folder_v2", {"path": path, "autorename": False})
+            client.files_create_folder_v2(path, autorename=False)
             created.append(path)
-        except DropboxApiError as error:
+        except Exception as error:
             if "conflict" not in str(error).casefold():
-                raise
+                raise _dropbox_error(error) from error
     return created
 
 
 def upload_file(access_token, dropbox_path, data, *, timeout=30):
-    response = _requests().post(
-        f"{DROPBOX_CONTENT_URL}/files/upload",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/octet-stream",
-            "Dropbox-API-Arg": json.dumps(
-                {"path": dropbox_path, "mode": "add", "autorename": True, "mute": False}
-            ),
-        },
-        data=data,
-        timeout=timeout,
-    )
-    _raise_for_dropbox_response(response, "Dropbox upload failed.")
-    return response.json()
+    del timeout  # The Dropbox SDK owns transport timeouts for the shared rooted client.
+    try:
+        metadata = team_space_client(access_token).files_upload(
+            data,
+            normalize_dropbox_path(dropbox_path),
+            mode=_dropbox_sdk().files.WriteMode.add,
+            autorename=True,
+            mute=False,
+        )
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox upload failed.") from error
+    return _metadata_to_dict(metadata)
 
 
 def normalise_asset_metadata(

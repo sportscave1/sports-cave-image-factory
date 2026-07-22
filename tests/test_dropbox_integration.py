@@ -1,6 +1,7 @@
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import dropbox_integration
 import supabase_backend
@@ -56,6 +57,12 @@ class FakeConnection:
 
 
 class DropboxIntegrationTests(unittest.TestCase):
+    def setUp(self):
+        dropbox_integration.clear_team_space_client_cache()
+
+    def tearDown(self):
+        dropbox_integration.clear_team_space_client_cache()
+
     def test_missing_env_vars_are_reported(self):
         config = {"app_key": "", "app_secret": "secret", "redirect_uri": ""}
 
@@ -241,38 +248,42 @@ class DropboxIntegrationTests(unittest.TestCase):
         )
 
     def test_list_folder_uses_current_folder_only_and_is_bounded(self):
-        with patch.object(
-            dropbox_integration,
-            "dropbox_rpc",
-            return_value={"entries": [{".tag": "folder", "name": "05 Mockups"}]},
-        ) as rpc:
+        client = MagicMock()
+        client.files_list_folder.return_value = SimpleNamespace(
+            entries=[{".tag": "folder", "name": "05 Mockups"}],
+            has_more=False,
+            cursor="",
+        )
+        with patch.object(dropbox_integration, "team_space_client", return_value=client):
             entries = dropbox_integration.list_folder(
                 "access-token",
                 "/Sports Cave OS Assets",
             )
 
         self.assertEqual(entries[0]["name"], "05 Mockups")
-        endpoint, payload = rpc.call_args.args[1:3]
-        self.assertEqual(endpoint, "files/list_folder")
-        self.assertEqual(payload["path"], "/Sports Cave OS Assets")
-        self.assertFalse(payload["recursive"])
-        self.assertEqual(payload["limit"], 2000)
+        client.files_list_folder.assert_called_once_with(
+            "/Sports Cave OS Assets",
+            recursive=False,
+            include_deleted=False,
+            include_media_info=False,
+            limit=2000,
+        )
 
     def test_list_folder_uses_dropbox_pagination_without_recursive_scan(self):
-        first_page = {
-            "entries": [{".tag": "folder", "name": "01 Artwork"}],
-            "has_more": True,
-            "cursor": "cursor-1",
-        }
-        second_page = {
-            "entries": [{".tag": "file", "name": "collector.pdf"}],
-            "has_more": False,
-        }
-        with patch.object(
-            dropbox_integration,
-            "dropbox_rpc",
-            side_effect=[first_page, second_page],
-        ) as rpc:
+        first_page = SimpleNamespace(
+            entries=[{".tag": "folder", "name": "01 Artwork"}],
+            has_more=True,
+            cursor="cursor-1",
+        )
+        second_page = SimpleNamespace(
+            entries=[{".tag": "file", "name": "collector.pdf"}],
+            has_more=False,
+            cursor="",
+        )
+        client = MagicMock()
+        client.files_list_folder.return_value = first_page
+        client.files_list_folder_continue.return_value = second_page
+        with patch.object(dropbox_integration, "team_space_client", return_value=client):
             entries = dropbox_integration.list_folder(
                 "access-token",
                 "/Sportscave Team Folder",
@@ -280,10 +291,114 @@ class DropboxIntegrationTests(unittest.TestCase):
             )
 
         self.assertEqual([entry["name"] for entry in entries], ["01 Artwork", "collector.pdf"])
-        self.assertEqual(rpc.call_args_list[0].args[1], "files/list_folder")
-        self.assertFalse(rpc.call_args_list[0].args[2]["recursive"])
-        self.assertEqual(rpc.call_args_list[1].args[1], "files/list_folder/continue")
-        self.assertEqual(rpc.call_args_list[1].args[2], {"cursor": "cursor-1"})
+        client.files_list_folder.assert_called_once_with(
+            "/Sportscave Team Folder",
+            recursive=False,
+            include_deleted=False,
+            include_media_info=False,
+            limit=10,
+        )
+        client.files_list_folder_continue.assert_called_once_with("cursor-1")
+
+    def test_team_space_client_selects_account_root_namespace(self):
+        account = SimpleNamespace(
+            account_id="dbid:account",
+            email="hello@sportscave.com.au",
+            name=SimpleNamespace(display_name="Sports Cave", familiar_name="Sports Cave"),
+            root_info=SimpleNamespace(root_namespace_id="team-root-123"),
+        )
+        rooted_client = object()
+        base_client = MagicMock()
+        base_client.users_get_current_account.return_value = account
+        base_client.with_path_root.return_value = rooted_client
+        path_root = object()
+        sdk = SimpleNamespace(
+            common=SimpleNamespace(
+                PathRoot=SimpleNamespace(root=MagicMock(return_value=path_root))
+            )
+        )
+
+        with patch.object(
+            dropbox_integration,
+            "_new_dropbox_client",
+            return_value=base_client,
+        ), patch.object(dropbox_integration, "_dropbox_sdk", return_value=sdk):
+            client = dropbox_integration.team_space_client("short-access-token", force=True)
+
+        self.assertIs(client, rooted_client)
+        base_client.users_get_current_account.assert_called_once_with()
+        sdk.common.PathRoot.root.assert_called_once_with("team-root-123")
+        base_client.with_path_root.assert_called_once_with(path_root)
+
+    def test_rooted_client_is_reused_for_navigation_metadata_preview_and_upload(self):
+        root_result = SimpleNamespace(
+            entries=[{".tag": "folder", "name": "05 Mockups"}],
+            has_more=False,
+            cursor="",
+        )
+        child_result = SimpleNamespace(
+            entries=[{".tag": "file", "name": "mockup.jpg"}],
+            has_more=False,
+            cursor="",
+        )
+        client = MagicMock()
+        client.files_list_folder.side_effect = [root_result, child_result]
+        client.files_get_metadata.return_value = {
+            ".tag": "file",
+            "name": "mockup.jpg",
+        }
+        client.files_get_temporary_link.return_value = SimpleNamespace(
+            link="https://dropbox.test/mockup.jpg"
+        )
+        client.files_upload.return_value = {
+            ".tag": "file",
+            "name": "new.jpg",
+            "path_display": "/Sportscave Team Folder/05 Mockups/new.jpg",
+        }
+        sdk = SimpleNamespace(files=SimpleNamespace(WriteMode=SimpleNamespace(add="add")))
+
+        with patch.object(
+            dropbox_integration,
+            "team_space_client",
+            return_value=client,
+        ) as rooted, patch.object(dropbox_integration, "_dropbox_sdk", return_value=sdk):
+            dropbox_integration.list_folder("token", "/Sportscave Team Folder")
+            dropbox_integration.list_folder("token", "/Sportscave Team Folder/05 Mockups")
+            details = dropbox_integration.file_open_details(
+                "token",
+                "/Sportscave Team Folder/05 Mockups/mockup.jpg",
+            )
+            uploaded = dropbox_integration.upload_file(
+                "token",
+                "/Sportscave Team Folder/05 Mockups/new.jpg",
+                b"image-data",
+            )
+
+        self.assertEqual(rooted.call_count, 5)
+        self.assertEqual(details["temporary_link"], "https://dropbox.test/mockup.jpg")
+        self.assertEqual(uploaded["name"], "new.jpg")
+        self.assertEqual(
+            [call.args[0] for call in client.files_list_folder.call_args_list],
+            [
+                "/Sportscave Team Folder",
+                "/Sportscave Team Folder/05 Mockups",
+            ],
+        )
+        client.files_get_metadata.assert_called_once_with(
+            "/Sportscave Team Folder/05 Mockups/mockup.jpg",
+            include_media_info=False,
+            include_deleted=False,
+        )
+        client.files_get_temporary_link.assert_called_once_with(
+            "/Sportscave Team Folder/05 Mockups/mockup.jpg"
+        )
+        client.files_upload.assert_called_once_with(
+            b"image-data",
+            "/Sportscave Team Folder/05 Mockups/new.jpg",
+            mode="add",
+            autorename=True,
+            mute=False,
+        )
 
     def test_find_team_folder_resolves_real_dropbox_metadata(self):
         metadata = {
