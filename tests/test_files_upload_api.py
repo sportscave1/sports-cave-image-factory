@@ -1,6 +1,9 @@
 from pathlib import Path
 from types import SimpleNamespace
+import asyncio
+import json
 import unittest
+from urllib.parse import urlencode
 from unittest.mock import MagicMock, patch
 
 import files_upload_api
@@ -264,6 +267,159 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
 
         self.assertEqual(caught.exception.code, "access_denied")
 
+    def test_explicit_download_route_authenticates_and_redirects_to_temporary_link(self):
+        query = urlencode({"path": f"{TEAM_ROOT}/collector-art.psd"}).encode("ascii")
+        request = files_upload_api.Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/api/files-download",
+                "query_string": query,
+                "headers": [],
+                "scheme": "https",
+                "server": ("sports-cave.test", 443),
+            }
+        )
+        with patch.object(
+            files_upload_api,
+            "_request_user",
+            return_value=self.user,
+        ), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "short-lived-token", "root_path": TEAM_ROOT},
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "get_temporary_link",
+            return_value="https://dropbox.test/temporary/collector-art.psd",
+        ) as temporary_link:
+            response = asyncio.run(files_upload_api.download_file(request))
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(
+            response.headers["location"],
+            "https://dropbox.test/temporary/collector-art.psd",
+        )
+        temporary_link.assert_called_once_with(
+            "short-lived-token",
+            f"{TEAM_ROOT}/collector-art.psd",
+        )
+
+    @staticmethod
+    def json_request(path, payload):
+        body = json.dumps(payload).encode("utf-8")
+        sent = False
+
+        async def receive():
+            nonlocal sent
+            if sent:
+                return {"type": "http.disconnect"}
+            sent = True
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        return files_upload_api.Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": path,
+                "query_string": b"",
+                "headers": [(b"content-type", b"application/json")],
+                "scheme": "https",
+                "server": ("sports-cave.test", 443),
+            },
+            receive,
+        )
+
+    def test_delete_route_uses_recoverable_dropbox_delete_and_records_actor(self):
+        paths = [f"{TEAM_ROOT}/Artwork.psd", f"{TEAM_ROOT}/Old folder"]
+        request = self.json_request(
+            "/api/files-delete",
+            {"current_path": TEAM_ROOT, "paths": paths},
+        )
+        admin = {**self.user, "role": "admin", "is_active": True}
+        with patch.object(
+            files_upload_api,
+            "_request_files_delete_user",
+            return_value=admin,
+        ), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "short-lived-token", "root_path": TEAM_ROOT},
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "delete_path_recoverable",
+            side_effect=lambda _token, path, **_kwargs: {"path_display": path},
+        ) as delete_path, patch.object(
+            files_upload_api,
+            "record_activity_log",
+        ) as activity:
+            response = asyncio.run(files_upload_api.delete_files(request))
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row["path"] for row in payload["successful"]], paths)
+        self.assertFalse(payload["failed"])
+        self.assertEqual(delete_path.call_count, 2)
+        delete_path.assert_any_call(
+            "short-lived-token",
+            paths[0],
+            root_path=TEAM_ROOT,
+        )
+        self.assertEqual(activity.call_args.kwargs["actor"], "Nathan")
+        self.assertEqual(activity.call_args.kwargs["metadata"]["item_count"], 2)
+
+    def test_delete_route_preserves_partial_success_without_repeating_it(self):
+        first = f"{TEAM_ROOT}/first.psd"
+        second = f"{TEAM_ROOT}/second.psd"
+        request = self.json_request(
+            "/api/files-delete",
+            {"current_path": TEAM_ROOT, "paths": [first, second]},
+        )
+        with patch.object(
+            files_upload_api,
+            "_request_files_delete_user",
+            return_value={**self.user, "role": "admin"},
+        ), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "token", "root_path": TEAM_ROOT},
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "delete_path_recoverable",
+            side_effect=[{"path_display": first}, RuntimeError("private Dropbox detail")],
+        ), patch.object(files_upload_api, "record_activity_log"):
+            response = asyncio.run(files_upload_api.delete_files(request))
+
+        payload = json.loads(response.body)
+        self.assertEqual([row["path"] for row in payload["successful"]], [first])
+        self.assertEqual([row["path"] for row in payload["failed"]], [second])
+        self.assertNotIn("private Dropbox detail", payload["failed"][0]["message"])
+
+    def test_delete_validation_rejects_root_outside_and_non_current_paths(self):
+        with self.assertRaises(files_upload_api.FilesUploadError):
+            files_upload_api._validated_delete_paths([TEAM_ROOT], TEAM_ROOT, TEAM_ROOT)
+        with self.assertRaises(files_upload_api.FilesUploadError):
+            files_upload_api._validated_delete_paths(
+                ["/Another Team/private.psd"], TEAM_ROOT, TEAM_ROOT
+            )
+        with self.assertRaises(files_upload_api.FilesUploadError):
+            files_upload_api._validated_delete_paths(
+                [f"{TEAM_ROOT}/Nested/private.psd"], TEAM_ROOT, TEAM_ROOT
+            )
+
+    def test_worker_delete_permission_is_checked_server_side(self):
+        request = SimpleNamespace(cookies={"sports_cave_auth": "signed-cookie"})
+        worker = {
+            **self.user,
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["files"],
+        }
+        with patch.object(files_upload_api, "_request_user", return_value=worker):
+            with self.assertRaises(files_upload_api.FilesUploadError) as caught:
+                files_upload_api._request_files_delete_user(request)
+        self.assertEqual(caught.exception.code, "access_denied")
+
 
 class FilesChunkUploaderSourceTests(unittest.TestCase):
     @classmethod
@@ -419,6 +575,80 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
         self.assertIn("record_activity_log", api_source)
         self.assertIn('"files_uploaded"', api_source)
         self.assertIn('actor=actor', api_source)
+
+    def test_file_opening_never_uses_download_from_a_normal_row_activation(self):
+        details_start = self.app_source.index("def _render_files_details")
+        details_end = self.app_source.index("\n\ndef _files_interaction_rows")
+        details = self.app_source[details_start:details_end]
+
+        self.assertIn("on_click=_files_select_item_state", details)
+        self.assertNotIn("_files_open_preview_state", details)
+        self.assertNotIn("_files_navigate_folder_state", details)
+        self.assertNotIn("download", details.casefold())
+        self.assertIn('emitCommand("selection_changed"', self.component_source)
+        self.assertIn('emitTarget("open_requested", item)', self.component_source)
+        self.assertIn('addEventListener("dblclick"', self.component_source)
+        self.assertIn('event.key === "Enter"', self.component_source)
+
+    def test_download_is_a_deliberate_authenticated_action_only(self):
+        api_source = (ROOT / "files_upload_api.py").read_text(encoding="utf-8")
+        preview_start = self.app_source.index("def _render_files_preview")
+        preview_end = self.app_source.index("\n\ndef _render_files_properties")
+        preview = self.app_source[preview_start:preview_end]
+
+        self.assertIn('contextAction(menu, "Download"', self.component_source)
+        self.assertIn('downloadButton.onclick', self.component_source)
+        self.assertIn('/api/files-download?path=', self.component_source)
+        self.assertIn('async def download_file', api_source)
+        self.assertIn('await run_in_threadpool(_request_user, request)', api_source)
+        self.assertIn('path_is_within_root(path, context["root_path"])', api_source)
+        self.assertIn('dropbox_integration.get_temporary_link', api_source)
+        self.assertIn('("/api/files-download", download_file, ("GET",))', api_source)
+        self.assertNotIn("Download and open", preview)
+
+    def test_right_click_menu_and_keyboard_stay_inside_files_interaction_bridge(self):
+        self.assertIn('addEventListener("contextmenu"', self.component_source)
+        self.assertIn('event.preventDefault()', self.component_source)
+        self.assertIn('event.stopImmediatePropagation()', self.component_source)
+        self.assertIn('event.key === "Escape"', self.component_source)
+        self.assertIn('emitCommand("clear_selection")', self.component_source)
+        self.assertIn('item.kind === "folder"', self.component_source)
+        self.assertIn('emitTarget("open_requested", item)', self.component_source)
+        self.assertIn('st.rerun(scope="fragment")', self.app_source)
+
+    def test_windows_multi_selection_keyboard_and_delete_confirmation_contract(self):
+        component = self.component_source
+        self.assertIn("event.ctrlKey || event.metaKey", component)
+        self.assertIn("selectRange(index", component)
+        self.assertIn("selectAllVisible()", component)
+        self.assertIn('event.key === "ArrowDown"', component)
+        self.assertIn('event.key === "Delete"', component)
+        self.assertIn('event.key === "F2"', component)
+        self.assertIn('event.key === "Backspace"', component)
+        self.assertIn("isTypingTarget(event.target)", component)
+        self.assertIn("sc-files-selection-rectangle", component)
+        self.assertIn("Move these ${items.length} items to the Recycle Bin?", component)
+        self.assertIn("Yes, move to Recycle Bin", component)
+        self.assertIn('no.textContent = "No"', component)
+        self.assertIn("no.onclick = closeDeleteConfirmation", component)
+        self.assertIn("yes.onclick = () => confirmDelete", component)
+        self.assertIn("Dropbox Deleted Files", component)
+        self.assertIn('/api/files-delete', component)
+
+    def test_opening_and_deleting_are_separate_deliberate_paths(self):
+        component = self.component_source
+        open_handler = component[
+            component.index("function emitTarget") : component.index("function explicitDownload")
+        ]
+        delete_handler = component[
+            component.index("async function confirmDelete") : component.index(
+                "function showDeleteConfirmation"
+            )
+        ]
+        self.assertNotIn("files-download", open_handler)
+        self.assertNotIn("download", open_handler.casefold())
+        self.assertIn('/api/files-delete', delete_handler)
+        self.assertIn('emitCommand("delete_completed"', delete_handler)
 
 
 if __name__ == "__main__":

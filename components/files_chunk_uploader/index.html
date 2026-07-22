@@ -41,7 +41,8 @@
         height: 30px;
         padding: 0 8px;
       }
-      button:hover { background: #eaf2f8; border-color: #c5d5e0; }
+      button:hover { background: #eef1f4; border-color: #d5d9dd; }
+      button:active, button[aria-pressed="true"] { background: #dcecf7; border-color: #b7d1e3; }
       button:disabled { cursor: default; opacity: .55; }
       .command-icon { color: #4f565d; font-size: 15px; line-height: 1; }
       .hint { color: #6d7277; font-size: 11px; margin-left: auto; padding-right: 6px; }
@@ -172,6 +173,7 @@
   <body>
     <div id="shell" class="shell">
       <div class="toolbar">
+        <button id="openButton" type="button" title="Open selected item" disabled><span class="command-icon">&#8599;</span>Open</button>
         <button id="newButton" type="button" title="Create a new folder"><span class="command-icon">+</span>New</button>
         <div class="menu-wrap">
           <button id="uploadButton" type="button" title="Upload to this folder"><span class="command-icon">&#8593;</span>Upload <span aria-hidden="true">&#8964;</span></button>
@@ -186,9 +188,15 @@
           </div>
         </div>
         <button id="renameButton" type="button" title="Rename selected item" disabled><span class="command-icon">&#9998;</span>Rename</button>
+        <button id="deleteButton" type="button" title="Move selected items to Recycle Bin" disabled><span class="command-icon">&#128465;</span>Delete</button>
+        <span id="selectionCount" class="hint" aria-live="polite"></span>
         <div class="menu-wrap">
           <button id="moreButton" type="button" title="More actions" aria-label="More actions"><span class="command-icon">&#8943;</span></button>
           <div id="moreMenu" class="menu more-menu">
+            <button id="previewButton" type="button">Preview</button>
+            <button id="downloadButton" type="button">Download</button>
+            <button id="moreDeleteButton" type="button">Delete</button>
+            <button id="propertiesButton" type="button">Properties</button>
             <button id="clearSelectionButton" type="button">Clear selection</button>
           </div>
         </div>
@@ -215,6 +223,15 @@
         workspaceDragDepth: 0,
         workspaceDragDestination: "",
         shellDragDepth: 0,
+        rowBindings: [],
+        rowBindTimer: 0,
+        contextMenu: null,
+        clickTimer: 0,
+        selection: new Set(),
+        anchorIndex: -1,
+        focusedIndex: -1,
+        selectionSyncTimer: 0,
+        selectionRect: null,
       };
       const shell = document.getElementById("shell");
       const uploads = document.getElementById("uploads");
@@ -224,13 +241,21 @@
       const uploadMenu = document.getElementById("uploadMenu");
       const moreMenu = document.getElementById("moreMenu");
       const renameButton = document.getElementById("renameButton");
+      const deleteButton = document.getElementById("deleteButton");
+      const moreDeleteButton = document.getElementById("moreDeleteButton");
+      const selectionCount = document.getElementById("selectionCount");
+      const openButton = document.getElementById("openButton");
+      const previewButton = document.getElementById("previewButton");
+      const downloadButton = document.getElementById("downloadButton");
+      const propertiesButton = document.getElementById("propertiesButton");
 
       function sendMessage(type, data) {
         window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, data || {}), "*");
       }
       function setValue(value) { sendMessage("streamlit:setComponentValue", { value }); }
       function setFrameHeight() {
-        sendMessage("streamlit:setFrameHeight", { height: Math.max(34, document.body.scrollHeight) });
+        const height = state.args.show_toolbar === false ? 1 : Math.max(34, document.body.scrollHeight);
+        sendMessage("streamlit:setFrameHeight", { height });
       }
       function ready() {
         sendMessage("streamlit:componentReady", { apiVersion: 1 });
@@ -262,12 +287,58 @@
         const percent = row.size ? Math.min(100, Math.round((row.uploaded / row.size) * 100)) : (row.status === "completed" ? 100 : 0);
         return `Uploading ${percent}% - ${sizeLabel(row.uploaded)} of ${sizeLabel(row.size)}`;
       }
-      function emitCommand(eventName) {
+      function emitCommand(eventName, extra) {
         setValue({
           event: eventName,
           nonce: `${Date.now()}-${Math.random()}`,
           current_path: state.args.current_path,
+          ...(extra || {}),
         });
+      }
+      function emitTarget(eventName, item) {
+        if (!item || !item.path) return;
+        setValue({
+          event: eventName,
+          nonce: `${Date.now()}-${Math.random()}`,
+          current_path: state.args.current_path,
+          target_path: item.path,
+          target_kind: item.kind,
+        });
+      }
+      function rowItems() {
+        return Array.from(state.args.row_items || []);
+      }
+      function selectedPaths() {
+        return Array.from(state.selection);
+      }
+      function selectedItems() {
+        const paths = state.selection;
+        return rowItems().filter(item => paths.has(String(item.path || "")));
+      }
+      function selectedItem() {
+        const items = rowItems();
+        if (state.focusedIndex >= 0 && items[state.focusedIndex] && state.selection.has(String(items[state.focusedIndex].path || ""))) {
+          return items[state.focusedIndex];
+        }
+        return selectedItems()[0] || null;
+      }
+      function isTypingTarget(target) {
+        const tagName = String(target && target.tagName || "").toLowerCase();
+        return ["input", "textarea", "select"].includes(tagName) || Boolean(target && target.isContentEditable);
+      }
+      function syncSelectionSoon() {
+        window.clearTimeout(state.selectionSyncTimer);
+        state.selectionSyncTimer = window.setTimeout(() => {
+          emitCommand("selection_changed", {
+            selected_paths: selectedPaths(),
+            focused_path: selectedItem() ? selectedItem().path : "",
+          });
+        }, 140);
+      }
+      function explicitDownload(item) {
+        if (!item || item.kind === "folder") return;
+        const url = `/api/files-download?path=${encodeURIComponent(item.path)}`;
+        window.parent.open(url, "_blank", "noopener,noreferrer");
       }
       function render() {
         uploads.innerHTML = state.rows.map(row => {
@@ -493,6 +564,342 @@
         return parts.length ? parts[parts.length - 1] : "this folder";
       }
 
+      function closeContextMenu() {
+        if (state.contextMenu && state.contextMenu.parentNode) {
+          state.contextMenu.parentNode.removeChild(state.contextMenu);
+        }
+        state.contextMenu = null;
+      }
+
+      function updateSelectionUi() {
+        const binding = state.workspaceBinding;
+        if (!binding) return;
+        const rows = Array.from(binding.workspace.querySelectorAll('div[class*="st-key-files-row-native-"]'));
+        rows.forEach((row, index) => {
+          const item = rowItems()[index];
+          const selected = Boolean(item && state.selection.has(String(item.path || "")));
+          row.classList.toggle("sc-files-client-selected", selected);
+          row.classList.toggle("sc-files-client-focused", index === state.focusedIndex);
+          row.setAttribute("aria-selected", selected ? "true" : "false");
+          row.tabIndex = index === state.focusedIndex ? 0 : -1;
+        });
+        const count = state.selection.size;
+        selectionCount.textContent = count > 1 ? `${count} items selected` : "";
+        const chosen = selectedItems();
+        const canDelete = Boolean(state.args.can_delete) && count > 0 && chosen.every(item => !item.protected);
+        openButton.disabled = count !== 1;
+        renameButton.disabled = count !== 1;
+        deleteButton.disabled = !canDelete;
+        moreDeleteButton.disabled = !canDelete;
+        const only = selectedItem();
+        previewButton.disabled = count !== 1 || !only || only.kind === "folder" || !only.preview_supported;
+        downloadButton.disabled = count !== 1 || !only || only.kind === "folder";
+        propertiesButton.disabled = count !== 1;
+        document.getElementById("clearSelectionButton").disabled = count === 0;
+      }
+
+      function setSingleSelection(index, { sync=true } = {}) {
+        const item = rowItems()[index];
+        state.selection = new Set(item && item.path ? [String(item.path)] : []);
+        state.anchorIndex = item ? index : -1;
+        state.focusedIndex = item ? index : -1;
+        updateSelectionUi();
+        if (sync) syncSelectionSoon();
+      }
+
+      function toggleSelection(index) {
+        const item = rowItems()[index];
+        if (!item || !item.path) return;
+        const path = String(item.path);
+        if (state.selection.has(path)) state.selection.delete(path);
+        else state.selection.add(path);
+        state.anchorIndex = index;
+        state.focusedIndex = index;
+        updateSelectionUi();
+        syncSelectionSoon();
+      }
+
+      function selectRange(index, { additive=false } = {}) {
+        const items = rowItems();
+        if (!items.length) return;
+        const anchor = state.anchorIndex >= 0 ? state.anchorIndex : (state.focusedIndex >= 0 ? state.focusedIndex : index);
+        const next = additive ? new Set(state.selection) : new Set();
+        for (let cursor = Math.min(anchor, index); cursor <= Math.max(anchor, index); cursor += 1) {
+          if (items[cursor] && items[cursor].path) next.add(String(items[cursor].path));
+        }
+        state.selection = next;
+        state.focusedIndex = index;
+        updateSelectionUi();
+        syncSelectionSoon();
+      }
+
+      function selectAllVisible() {
+        state.selection = new Set(rowItems().map(item => String(item.path || "")).filter(Boolean));
+        state.anchorIndex = state.selection.size ? 0 : -1;
+        state.focusedIndex = state.selection.size ? 0 : -1;
+        updateSelectionUi();
+        syncSelectionSoon();
+      }
+
+      function clearClientSelection({ sync=true } = {}) {
+        state.selection.clear();
+        state.anchorIndex = -1;
+        state.focusedIndex = -1;
+        updateSelectionUi();
+        if (sync) emitCommand("clear_selection");
+      }
+
+      function contextAction(menu, label, callback) {
+        const button = menu.ownerDocument.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.addEventListener("click", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          closeContextMenu();
+          callback();
+        });
+        menu.appendChild(button);
+      }
+
+      function showContextMenu(item, rowElement, clientX, clientY, rowIndex) {
+        const binding = state.workspaceBinding;
+        if (!binding || !item) return;
+        closeContextMenu();
+        const itemPath = String(item.path || "");
+        if (!state.selection.has(itemPath)) setSingleSelection(rowIndex);
+        else {
+          state.focusedIndex = rowIndex;
+          updateSelectionUi();
+        }
+        const chosen = selectedItems();
+        const menu = binding.document.createElement("div");
+        menu.className = "sc-files-context-menu";
+        menu.setAttribute("role", "menu");
+        if (chosen.length === 1) contextAction(menu, "Open", () => emitTarget("open_requested", item));
+        if (chosen.length === 1 && item.kind !== "folder") {
+          if (item.desktop_available) {
+            contextAction(menu, "Open in desktop app", () => emitTarget("desktop_open_requested", item));
+          }
+          if (item.preview_supported) contextAction(menu, "Preview", () => emitTarget("preview_requested", item));
+        }
+        if (chosen.length === 1) contextAction(menu, "Rename", () => emitTarget("rename_requested", item));
+        if (chosen.length === 1 && item.kind !== "folder") {
+          contextAction(menu, "Download", () => explicitDownload(item));
+        }
+        if (state.args.can_delete && chosen.every(selected => !selected.protected)) contextAction(menu, "Delete", () => showDeleteConfirmation());
+        if (chosen.length === 1) contextAction(menu, "Properties", () => emitTarget("properties_requested", item));
+        binding.document.body.appendChild(menu);
+        const maxLeft = Math.max(4, binding.document.documentElement.clientWidth - menu.offsetWidth - 6);
+        const maxTop = Math.max(4, binding.document.documentElement.clientHeight - menu.offsetHeight - 6);
+        menu.style.left = `${Math.min(Math.max(4, clientX), maxLeft)}px`;
+        menu.style.top = `${Math.min(Math.max(4, clientY), maxTop)}px`;
+        state.contextMenu = menu;
+        const first = menu.querySelector("button");
+        if (first) first.focus();
+      }
+
+      function closeDeleteConfirmation() {
+        const binding = state.workspaceBinding;
+        if (!binding) return;
+        const dialog = binding.document.querySelector(".sc-files-delete-backdrop");
+        if (dialog) dialog.remove();
+      }
+
+      function deleteConfirmationText(items) {
+        if (items.length === 1) return `Move '${items[0].name}' to the Recycle Bin?`;
+        return `Move these ${items.length} items to the Recycle Bin?`;
+      }
+
+      async function confirmDelete(items, yesButton, statusNode) {
+        yesButton.disabled = true;
+        statusNode.textContent = "Moving items...";
+        try {
+          const payload = await apiJson("/api/files-delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              current_path: state.args.current_path,
+              paths: items.map(item => item.path),
+            }),
+          });
+          const successful = Array.from(payload.successful || []).map(item => String(item.path || "")).filter(Boolean);
+          const failed = Array.from(payload.failed || []).map(item => String(item.path || "")).filter(Boolean);
+          state.selection = new Set(failed);
+          state.focusedIndex = failed.length ? rowItems().findIndex(item => String(item.path || "") === failed[0]) : -1;
+          state.anchorIndex = state.focusedIndex;
+          updateSelectionUi();
+          closeDeleteConfirmation();
+          const movedCount = successful.length;
+          const failedCount = failed.length;
+          const message = failedCount
+            ? `${movedCount} item${movedCount === 1 ? " was" : "s were"} moved. ${failedCount} could not be removed. Select Delete to retry.`
+            : `${movedCount} item${movedCount === 1 ? "" : "s"} moved to Recycle Bin.`;
+          emitCommand("delete_completed", {
+            successful_paths: successful,
+            failed_paths: failed,
+            message,
+          });
+        } catch (error) {
+          yesButton.disabled = false;
+          statusNode.textContent = error.message || "These items could not be removed right now.";
+        }
+      }
+
+      function showDeleteConfirmation() {
+        const binding = state.workspaceBinding;
+        const items = selectedItems();
+        if (!binding || !items.length || !state.args.can_delete || items.some(item => item.protected)) return;
+        closeContextMenu();
+        closeDeleteConfirmation();
+        const backdrop = binding.document.createElement("div");
+        backdrop.className = "sc-files-delete-backdrop";
+        const dialog = binding.document.createElement("div");
+        dialog.className = "sc-files-delete-dialog";
+        dialog.setAttribute("role", "dialog");
+        dialog.setAttribute("aria-modal", "true");
+        dialog.setAttribute("aria-labelledby", "sc-files-delete-title");
+        const title = binding.document.createElement("h3");
+        title.id = "sc-files-delete-title";
+        title.textContent = deleteConfirmationText(items);
+        const support = binding.document.createElement("p");
+        support.textContent = "Items are removed from this folder and may be recoverable from Dropbox Deleted Files.";
+        const status = binding.document.createElement("div");
+        status.className = "sc-files-delete-status";
+        status.setAttribute("aria-live", "polite");
+        const actions = binding.document.createElement("div");
+        actions.className = "sc-files-delete-actions";
+        const yes = binding.document.createElement("button");
+        yes.type = "button";
+        yes.textContent = "Yes, move to Recycle Bin";
+        const no = binding.document.createElement("button");
+        no.type = "button";
+        no.textContent = "No";
+        no.className = "primary-focus";
+        no.onclick = closeDeleteConfirmation;
+        yes.onclick = () => confirmDelete(items, yes, status);
+        actions.append(yes, no);
+        dialog.append(title, support, status, actions);
+        backdrop.appendChild(dialog);
+        binding.document.body.appendChild(backdrop);
+        backdrop.addEventListener("pointerdown", event => {
+          if (event.target === backdrop) closeDeleteConfirmation();
+        });
+        dialog.addEventListener("keydown", event => {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            closeDeleteConfirmation();
+          }
+        });
+        no.focus();
+      }
+
+      function unbindFileRows() {
+        state.rowBindings.forEach(binding => {
+          binding.row.removeEventListener("click", binding.onClick, true);
+          binding.row.removeEventListener("dblclick", binding.onDoubleClick, true);
+          binding.row.removeEventListener("contextmenu", binding.onContextMenu, true);
+          binding.row.removeEventListener("keydown", binding.onKeyDown, true);
+        });
+        state.rowBindings = [];
+      }
+
+      function bindFileRows() {
+        const binding = state.workspaceBinding;
+        if (!binding || !binding.workspace.isConnected) return;
+        unbindFileRows();
+        const rows = Array.from(
+          binding.workspace.querySelectorAll('div[class*="st-key-files-row-native-"]')
+        );
+        const items = Array.from(state.args.row_items || []);
+        rows.forEach((row, index) => {
+          const item = items[index];
+          if (!item) return;
+          row.tabIndex = index === state.focusedIndex ? 0 : -1;
+          row.setAttribute("role", "row");
+          row.setAttribute("aria-label", `${item.kind === "folder" ? "Folder" : "File"}: ${item.name}`);
+          row.setAttribute(
+            "aria-selected",
+            state.selection.has(String(item.path || "")) ? "true" : "false"
+          );
+          const isMoreButton = event => {
+            const buttons = Array.from(row.querySelectorAll("button"));
+            return event.target.closest("button") === buttons[buttons.length - 1];
+          };
+          const onClick = event => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (isMoreButton(event)) {
+              const rect = event.target.closest("button").getBoundingClientRect();
+              showContextMenu(item, row, rect.left, rect.bottom + 2, index);
+              return;
+            }
+            closeContextMenu();
+            window.clearTimeout(state.clickTimer);
+            if (event.shiftKey) selectRange(index, { additive: event.ctrlKey || event.metaKey });
+            else if (event.ctrlKey || event.metaKey) toggleSelection(index);
+            else setSingleSelection(index);
+          };
+          const onDoubleClick = event => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            window.clearTimeout(state.clickTimer);
+            window.clearTimeout(state.selectionSyncTimer);
+            closeContextMenu();
+            if (!state.selection.has(String(item.path || ""))) setSingleSelection(index, { sync: false });
+            state.focusedIndex = index;
+            emitTarget("open_requested", item);
+          };
+          const onContextMenu = event => {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            window.clearTimeout(state.clickTimer);
+            showContextMenu(item, row, event.clientX, event.clientY, index);
+          };
+          const onKeyDown = event => {
+            if (isTypingTarget(event.target)) return;
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              emitTarget("open_requested", item);
+            } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              const direction = event.key === "ArrowDown" ? 1 : -1;
+              const destination = Math.max(0, Math.min(rowItems().length - 1, index + direction));
+              if (event.shiftKey) selectRange(destination);
+              else setSingleSelection(destination);
+              const targetRow = rows[destination];
+              if (targetRow) targetRow.focus({ preventScroll: true });
+            } else if (event.key === "Delete") {
+              event.preventDefault();
+              if (state.args.can_delete) showDeleteConfirmation();
+            } else if (event.key === "F2") {
+              event.preventDefault();
+              if (state.selection.size === 1) emitTarget("rename_requested", selectedItem());
+            } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+              event.preventDefault();
+              selectAllVisible();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              closeContextMenu();
+              clearClientSelection();
+            }
+          };
+          row.addEventListener("click", onClick, true);
+          row.addEventListener("dblclick", onDoubleClick, true);
+          row.addEventListener("contextmenu", onContextMenu, true);
+          row.addEventListener("keydown", onKeyDown, true);
+          state.rowBindings.push({ row, onClick, onDoubleClick, onContextMenu, onKeyDown });
+        });
+        updateSelectionUi();
+      }
+
+      function scheduleRowBinding() {
+        window.clearTimeout(state.rowBindTimer);
+        state.rowBindTimer = window.setTimeout(bindFileRows, 30);
+      }
+
       function removeWorkspaceOverlay() {
         const binding = state.workspaceBinding;
         if (!binding) return;
@@ -537,6 +944,26 @@
         binding.document.removeEventListener("dragover", binding.onPageDragOver, true);
         binding.document.removeEventListener("drop", binding.onPageDrop, true);
         if (binding.observer) binding.observer.disconnect();
+        if (binding.onDocumentPointerDown) {
+          binding.document.removeEventListener("pointerdown", binding.onDocumentPointerDown, true);
+        }
+        if (binding.onDocumentKeyDown) {
+          binding.document.removeEventListener("keydown", binding.onDocumentKeyDown, true);
+        }
+        if (binding.onWorkspacePointerDown) {
+          binding.workspace.removeEventListener("pointerdown", binding.onWorkspacePointerDown, true);
+        }
+        if (binding.onDocumentPointerMove) {
+          binding.document.removeEventListener("pointermove", binding.onDocumentPointerMove, true);
+        }
+        if (binding.onDocumentPointerUp) {
+          binding.document.removeEventListener("pointerup", binding.onDocumentPointerUp, true);
+        }
+        unbindFileRows();
+        closeContextMenu();
+        closeDeleteConfirmation();
+        if (state.selectionRect && state.selectionRect.element) state.selectionRect.element.remove();
+        state.selectionRect = null;
         removeWorkspaceOverlay();
         state.workspaceBinding = null;
         state.workspaceDragDepth = 0;
@@ -598,14 +1025,111 @@
         workspace.addEventListener("drop", binding.onDrop);
         parentDocument.addEventListener("dragover", binding.onPageDragOver, true);
         parentDocument.addEventListener("drop", binding.onPageDrop, true);
+        binding.onDocumentPointerDown = event => {
+          if (state.contextMenu && !state.contextMenu.contains(event.target)) closeContextMenu();
+        };
+        parentDocument.addEventListener("pointerdown", binding.onDocumentPointerDown, true);
+        binding.onWorkspacePointerDown = event => {
+          if (event.button !== 0 || isTypingTarget(event.target)) return;
+          if (event.target.closest('div[class*="st-key-files-row-native-"]')) return;
+          if (event.target.closest("button, a, iframe, .sc-files-context-menu, .sc-files-delete-dialog")) return;
+          const details = event.target.closest(".st-key-files-details-list");
+          if (!details) return;
+          state.selectionRect = {
+            active: false,
+            additive: event.ctrlKey || event.metaKey,
+            base: new Set(event.ctrlKey || event.metaKey ? state.selection : []),
+            startX: event.clientX,
+            startY: event.clientY,
+            element: null,
+          };
+          event.preventDefault();
+        };
+        workspace.addEventListener("pointerdown", binding.onWorkspacePointerDown, true);
+        binding.onDocumentPointerMove = event => {
+          const drag = state.selectionRect;
+          if (!drag) return;
+          const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
+          if (!drag.active && distance < 5) return;
+          if (!drag.active) {
+            drag.active = true;
+            drag.element = parentDocument.createElement("div");
+            drag.element.className = "sc-files-selection-rectangle";
+            parentDocument.body.appendChild(drag.element);
+          }
+          event.preventDefault();
+          const left = Math.min(drag.startX, event.clientX);
+          const top = Math.min(drag.startY, event.clientY);
+          const right = Math.max(drag.startX, event.clientX);
+          const bottom = Math.max(drag.startY, event.clientY);
+          Object.assign(drag.element.style, {
+            left: `${left}px`, top: `${top}px`, width: `${right - left}px`, height: `${bottom - top}px`,
+          });
+          const next = new Set(drag.base);
+          const rows = Array.from(workspace.querySelectorAll('div[class*="st-key-files-row-native-"]'));
+          rows.forEach((row, index) => {
+            const bounds = row.getBoundingClientRect();
+            if (bounds.left <= right && bounds.right >= left && bounds.top <= bottom && bounds.bottom >= top) {
+              const item = rowItems()[index];
+              if (item && item.path) next.add(String(item.path));
+            }
+          });
+          state.selection = next;
+          state.focusedIndex = rows.findIndex((row, index) => {
+            const item = rowItems()[index];
+            return item && next.has(String(item.path || ""));
+          });
+          updateSelectionUi();
+        };
+        binding.onDocumentPointerUp = () => {
+          const drag = state.selectionRect;
+          if (!drag) return;
+          if (drag.element) drag.element.remove();
+          state.selectionRect = null;
+          if (drag.active) syncSelectionSoon();
+          else clearClientSelection();
+        };
+        parentDocument.addEventListener("pointermove", binding.onDocumentPointerMove, true);
+        parentDocument.addEventListener("pointerup", binding.onDocumentPointerUp, true);
+        binding.onDocumentKeyDown = event => {
+          if (!isActive()) return;
+          if (isTypingTarget(event.target)) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            if (state.contextMenu) closeContextMenu();
+            else if (parentDocument.querySelector(".sc-files-delete-backdrop")) closeDeleteConfirmation();
+            else clearClientSelection();
+            return;
+          }
+          if (event.target && event.target.closest && event.target.closest('div[class*="st-key-files-row-native-"]')) return;
+          if (event.key === "Enter" && selectedItem()) {
+            event.preventDefault();
+            emitTarget("open_requested", selectedItem());
+          } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+            event.preventDefault();
+            selectAllVisible();
+          } else if (event.key === "Delete" && state.selection.size) {
+            event.preventDefault();
+            if (state.args.can_delete) showDeleteConfirmation();
+          } else if (event.key === "F2" && state.selection.size === 1) {
+            event.preventDefault();
+            emitTarget("rename_requested", selectedItem());
+          } else if (event.key === "Backspace") {
+            event.preventDefault();
+            emitCommand("back_requested");
+          }
+        };
+        parentDocument.addEventListener("keydown", binding.onDocumentKeyDown, true);
         const frame = window.frameElement;
         if (frame && window.parent.MutationObserver) {
           binding.observer = new window.parent.MutationObserver(() => {
             if (!frame.isConnected || !workspace.isConnected) cleanupWorkspaceDropTarget();
+            else scheduleRowBinding();
           });
           binding.observer.observe(parentDocument.body, { childList: true, subtree: true });
         }
         state.workspaceBinding = binding;
+        scheduleRowBinding();
       }
 
       function closeMenus() {
@@ -613,6 +1137,10 @@
         moreMenu.classList.remove("open");
         setFrameHeight();
       }
+      openButton.onclick = () => {
+        closeMenus();
+        emitTarget("open_requested", selectedItem());
+      };
       document.getElementById("newButton").onclick = () => { closeMenus(); emitCommand("new_folder_requested"); };
       document.getElementById("uploadButton").onclick = event => {
         event.stopPropagation();
@@ -628,8 +1156,13 @@
       };
       document.getElementById("filesButton").onclick = () => { closeMenus(); filesInput.click(); };
       document.getElementById("folderButton").onclick = () => { closeMenus(); folderInput.click(); };
-      renameButton.onclick = () => { closeMenus(); emitCommand("rename_requested"); };
-      document.getElementById("clearSelectionButton").onclick = () => { closeMenus(); emitCommand("clear_selection"); };
+      renameButton.onclick = () => { closeMenus(); emitTarget("rename_requested", selectedItem()); };
+      deleteButton.onclick = () => { closeMenus(); showDeleteConfirmation(); };
+      moreDeleteButton.onclick = () => { closeMenus(); showDeleteConfirmation(); };
+      previewButton.onclick = () => { closeMenus(); emitTarget("preview_requested", selectedItem()); };
+      downloadButton.onclick = () => { closeMenus(); explicitDownload(selectedItem()); };
+      propertiesButton.onclick = () => { closeMenus(); emitTarget("properties_requested", selectedItem()); };
+      document.getElementById("clearSelectionButton").onclick = () => { closeMenus(); clearClientSelection(); };
       document.addEventListener("click", event => {
         if (!event.target.closest(".menu-wrap")) closeMenus();
       });
@@ -662,8 +1195,19 @@
       window.addEventListener("message", event => {
         if (!event.data || event.data.type !== "streamlit:render") return;
         state.args = event.data.args || {};
-        renameButton.disabled = !String(state.args.selected_path || "");
-        document.getElementById("clearSelectionButton").disabled = renameButton.disabled;
+        shell.style.display = state.args.show_toolbar === false ? "none" : "block";
+        const visible = new Set(rowItems().map(item => String(item.path || "")));
+        state.selection = new Set(
+          Array.from(state.args.selected_paths || (state.args.selected_path ? [state.args.selected_path] : []))
+            .map(String)
+            .filter(path => visible.has(path))
+        );
+        const focusedPath = String(state.args.selected_path || "");
+        state.focusedIndex = rowItems().findIndex(item => String(item.path || "") === focusedPath);
+        if (state.focusedIndex < 0 && state.selection.size) {
+          state.focusedIndex = rowItems().findIndex(item => state.selection.has(String(item.path || "")));
+        }
+        state.anchorIndex = state.focusedIndex;
         const ack = String(state.args.ack_nonce || "");
         if (ack && ack !== state.acknowledged) {
           state.acknowledged = ack;
@@ -676,6 +1220,7 @@
         }
         render();
         bindWorkspaceDropTarget();
+        updateSelectionUi();
       });
       window.addEventListener("beforeunload", cleanupWorkspaceDropTarget);
       ready();

@@ -120,6 +120,33 @@ class PasswordSecurityTests(unittest.TestCase):
 
 
 class AccountAccessTests(unittest.TestCase):
+    def test_files_delete_capability_defaults_off_for_workers_and_on_for_admin(self):
+        admin = {"role": "admin", "is_active": True, "page_permissions": []}
+        worker = {
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["files"],
+        }
+
+        self.assertTrue(os_accounts.can_delete_files(admin))
+        self.assertFalse(os_accounts.can_delete_files(worker))
+        self.assertTrue(
+            os_accounts.can_delete_files(
+                {
+                    **worker,
+                    "page_permissions": ["files", os_accounts.FILES_DELETE_CAPABILITY],
+                }
+            )
+        )
+        self.assertFalse(
+            os_accounts.can_delete_files(
+                {
+                    **worker,
+                    "page_permissions": [os_accounts.FILES_DELETE_CAPABILITY],
+                }
+            )
+        )
+
     def test_first_admin_bootstrap_does_not_duplicate_user(self):
         store = FakeAccountStore()
 
@@ -601,7 +628,9 @@ class AccountAccessTests(unittest.TestCase):
         self.assertFalse(app_test.exception)
         self.assertIn("collector-art.psd", text)
         self.assertIn("Adobe Photoshop", text)
-        self.assertIn("Download and open", text)
+        self.assertIn("Desktop opening is not available in this browser", text)
+        self.assertIn("Download", text)
+        self.assertNotIn("Download and open", text)
 
     def test_files_browses_subfolders_with_breadcrumb_and_empty_folder_state(self):
         root_path = "/Sportscave Team Folder"
@@ -672,7 +701,8 @@ class AccountAccessTests(unittest.TestCase):
             app_test.run(timeout=20)
             self.assertEqual(list_folder_mock.call_count, 1)
 
-            next(button for button in app_test.button if button.label == "05 Mockups").click()
+            app_test.session_state["files_navigation_history"] = [root_path]
+            app_test.session_state["files_browser_path"] = mockups_path
             app_test.run(timeout=20)
             empty_text = self._app_text(app_test)
             self.assertIn("This folder is empty", empty_text)
@@ -701,7 +731,8 @@ class AccountAccessTests(unittest.TestCase):
             self.assertEqual(app_test.session_state["files_browser_path"], root_path)
             self.assertEqual(list_folder_mock.call_count, 2)
 
-            next(button for button in app_test.button if button.label == "05 Mockups").click()
+            app_test.session_state["files_navigation_history"] = [root_path]
+            app_test.session_state["files_browser_path"] = mockups_path
             app_test.run(timeout=20)
             next(button for button in app_test.button if button.label == "Up").click()
             app_test.run(timeout=20)
@@ -768,8 +799,9 @@ class AccountAccessTests(unittest.TestCase):
 
         self.assertIn("@st.fragment", browser)
         self.assertIn("_files_directory_entries(access_token, current_path)", browser)
-        self.assertIn("callback = _files_navigate_folder_state", details)
-        self.assertIn("on_click=callback", details)
+        self.assertIn("on_click=_files_select_item_state", details)
+        self.assertNotIn("on_click=_files_open_preview_state", details)
+        self.assertNotIn("on_click=_files_navigate_folder_state", details)
         self.assertIn("on_click=_files_navigate_folder_state", breadcrumb)
         self.assertIn('"Back"', breadcrumb)
         self.assertIn('"Forward"', breadcrumb)
@@ -780,6 +812,40 @@ class AccountAccessTests(unittest.TestCase):
         self.assertNotIn("href=", breadcrumb)
         self.assertNotIn("st.query_params", details)
         self.assertNotIn("st.query_params", breadcrumb)
+
+    def test_files_rows_use_windows_selection_open_and_context_menu_contract(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        component = (ROOT / "components" / "files_chunk_uploader" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        details = source[
+            source.index("def _render_files_details") : source.index(
+                "\n\ndef _files_interaction_rows"
+            )
+        ]
+        preview = source[
+            source.index("def _files_open_strategy") : source.index(
+                "\n\ndef _files_clear_directory_cache"
+            )
+        ]
+
+        self.assertIn("on_click=_files_select_item_state", details)
+        self.assertIn('addEventListener("dblclick"', component)
+        self.assertIn('event.key === "Enter"', component)
+        self.assertIn('event.key === "Escape"', component)
+        self.assertIn('addEventListener("contextmenu"', component)
+        self.assertIn('emitCommand("selection_changed"', component)
+        self.assertIn('emitTarget("open_requested"', component)
+        self.assertIn('contextAction(menu, "Open"', component)
+        self.assertIn('contextAction(menu, "Preview"', component)
+        self.assertIn('contextAction(menu, "Rename"', component)
+        self.assertIn('contextAction(menu, "Download"', component)
+        self.assertIn('contextAction(menu, "Properties"', component)
+        self.assertIn('window.parent.open(url, "_blank"', component)
+        self.assertIn('desktop_available=_files_desktop_open_available', preview)
+        self.assertIn('return "desktop"', preview)
+        self.assertIn('return "details"', preview)
+        self.assertNotIn("Download and open", preview)
 
     def test_files_explorer_styles_are_compact_neutral_and_scoped(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -808,6 +874,15 @@ class AccountAccessTests(unittest.TestCase):
         self.assertNotIn("20MB per file", component)
         self.assertIn('class="menu"', component)
         self.assertIn("Large files supported", component)
+        self.assertIn("background: #FFFFFF !important", files_css)
+        self.assertIn("background: #DCECF7 !important", files_css)
+        navigation_css = files_css[
+            files_css.index(".st-key-files-navigation-row") : files_css.index(
+                ".st-key-files-command-bar"
+            )
+        ]
+        self.assertNotIn("#D4A54C", navigation_css)
+        self.assertNotIn("#E1B23D", navigation_css)
 
     def test_files_header_is_removed_only_in_the_files_workspace(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")

@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 from activity_log import record_activity_log
 import dropbox_integration
@@ -320,6 +320,45 @@ def _request_user(request):
     raise FilesUploadError("Access not approved.", status_code=403, code="access_denied")
 
 
+def _request_files_delete_user(request):
+    user = _request_user(request)
+    if not os_accounts.can_delete_files(user):
+        raise FilesUploadError("Access not approved.", status_code=403, code="access_denied")
+    return user
+
+
+def _validated_delete_paths(paths, current_path, root_path):
+    if not isinstance(paths, (list, tuple)):
+        raise FilesUploadError("Select at least one item.")
+    try:
+        clean_root = dropbox_integration.normalize_dropbox_path(root_path)
+        clean_folder = dropbox_integration.normalize_dropbox_path(current_path)
+    except (TypeError, ValueError) as error:
+        raise FilesUploadError("This folder is not available.", status_code=403) from error
+    if not dropbox_integration.path_is_within_root(clean_folder, clean_root):
+        raise FilesUploadError("This folder is not available.", status_code=403)
+    selected = []
+    for path in paths or ():
+        try:
+            clean_path = dropbox_integration.normalize_dropbox_path(path)
+        except (TypeError, ValueError) as error:
+            raise FilesUploadError("This item is not available.", status_code=403) from error
+        if not clean_path or clean_path.casefold() == clean_root.casefold():
+            raise FilesUploadError("The shared Files folder cannot be removed.", status_code=403)
+        if not dropbox_integration.path_is_within_root(clean_path, clean_root):
+            raise FilesUploadError("This item is not available.", status_code=403)
+        parent = clean_path.rsplit("/", 1)[0]
+        if parent.casefold() != clean_folder.casefold():
+            raise FilesUploadError("This item is not in the open folder.", status_code=403)
+        if clean_path not in selected:
+            selected.append(clean_path)
+    if not selected:
+        raise FilesUploadError("Select at least one item.")
+    if len(selected) > 100:
+        raise FilesUploadError("Select no more than 100 items at once.")
+    return selected
+
+
 def _same_origin(request):
     origin = str(request.headers.get("origin") or "").strip()
     if not origin:
@@ -463,9 +502,97 @@ async def remove_files_upload(request: Request):
         return _response_error(error)
 
 
+async def download_file(request: Request):
+    """Resolve a short-lived Dropbox link only after an explicit Download action."""
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Download request is not allowed.", status_code=403)
+        await run_in_threadpool(_request_user, request)
+        context = await run_in_threadpool(_dropbox_context)
+        path = dropbox_integration.normalize_dropbox_path(request.query_params.get("path") or "")
+        if not path or not dropbox_integration.path_is_within_root(path, context["root_path"]):
+            raise FilesUploadError("This file is not available.", status_code=403)
+        link = await run_in_threadpool(
+            dropbox_integration.get_temporary_link,
+            context["access_token"],
+            path,
+        )
+        if not link:
+            raise FilesUploadError("This file could not be downloaded right now.", status_code=503)
+        return RedirectResponse(str(link), status_code=307)
+    except Exception as error:
+        return _response_error(error)
+
+
+async def delete_files(request: Request):
+    """Move selected Dropbox items into recoverable Dropbox Deleted Files."""
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Delete request is not allowed.", status_code=403)
+        user = await run_in_threadpool(_request_files_delete_user, request)
+        payload = await _json_body(request)
+        context = await run_in_threadpool(_dropbox_context)
+        paths = _validated_delete_paths(
+            payload.get("paths"),
+            payload.get("current_path"),
+            context["root_path"],
+        )
+        successful = []
+        failed = []
+        for path in paths:
+            try:
+                metadata = await run_in_threadpool(
+                    dropbox_integration.delete_path_recoverable,
+                    context["access_token"],
+                    path,
+                    root_path=context["root_path"],
+                )
+                successful.append({"path": path, "metadata": dict(metadata or {})})
+            except Exception:
+                failed.append(
+                    {
+                        "path": path,
+                        "message": "This item could not be removed right now.",
+                    }
+                )
+        if successful:
+            actor = (
+                str(user.get("display_name") or "").strip()
+                or str(user.get("email") or "").strip()
+                or str(user.get("username") or "").strip()
+                or "Sports Cave"
+            )
+            await run_in_threadpool(
+                record_activity_log,
+                "files_moved_to_recycle_bin",
+                "Files",
+                f"Moved {len(successful)} item{'s' if len(successful) != 1 else ''} to Recycle Bin",
+                entity_type="dropbox_folder",
+                entity_id=dropbox_integration.normalize_dropbox_path(payload.get("current_path")),
+                metadata={
+                    "folder": dropbox_integration.normalize_dropbox_path(payload.get("current_path")),
+                    "item_count": len(successful),
+                    "failed_count": len(failed),
+                    "paths": [item["path"] for item in successful],
+                },
+                actor=actor,
+            )
+        return JSONResponse(
+            {
+                "ok": True,
+                "successful": successful,
+                "failed": failed,
+            }
+        )
+    except Exception as error:
+        return _response_error(error)
+
+
 FILES_UPLOAD_ROUTES = (
     ("/api/files-upload/start", start_files_upload, ("POST",)),
     ("/api/files-upload/chunk", append_files_upload_chunk, ("POST",)),
     ("/api/files-upload/status", files_upload_status, ("GET",)),
     ("/api/files-upload/remove", remove_files_upload, ("POST",)),
+    ("/api/files-download", download_file, ("GET",)),
+    ("/api/files-delete", delete_files, ("POST",)),
 )

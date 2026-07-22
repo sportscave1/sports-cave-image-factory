@@ -1030,6 +1030,22 @@ def rename_path(access_token, path, new_name, *, root_path=None):
     return _metadata_to_dict(metadata)
 
 
+def delete_path_recoverable(access_token, path, *, root_path):
+    """Remove a Dropbox item while retaining Dropbox Deleted Files recovery."""
+    clean_path = normalize_dropbox_path(path)
+    clean_root = normalize_dropbox_path(root_path)
+    if not path_is_within_root(clean_path, clean_root):
+        raise ValueError("This item is outside the shared Files folder.")
+    if clean_path.casefold() == clean_root.casefold():
+        raise ValueError("The shared Files folder cannot be removed.")
+    try:
+        result = team_space_client(access_token).files_delete_v2(clean_path)
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox item could not be removed.") from error
+    metadata = getattr(result, "metadata", result)
+    return _metadata_to_dict(metadata)
+
+
 def normalise_asset_metadata(
     *,
     dropbox_file_id,

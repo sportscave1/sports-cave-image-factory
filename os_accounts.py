@@ -10,6 +10,7 @@ ROLE_WORKER = "worker"
 VALID_ROLES = {ROLE_ADMIN, ROLE_WORKER}
 ADMIN_TIMEZONE = "Australia/Sydney"
 WORKER_TIMEZONE = "Asia/Manila"
+FILES_DELETE_CAPABILITY = "delete_files"
 
 PAGE_REGISTRY = (
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
@@ -161,6 +162,18 @@ def can_access_page(user, route_or_key):
     if not page or not page.get("worker_assignable"):
         return False
     return page["key"] in permission_keys(user)
+
+
+def can_delete_files(user):
+    """Return whether the account may remove items from the shared Files root."""
+    if not user or not bool(user.get("is_active", True)):
+        return False
+    if is_admin(user):
+        return True
+    return bool(
+        can_access_page(user, "Files")
+        and FILES_DELETE_CAPABILITY in permission_keys(user)
+    )
 
 
 def allowed_navigation_routes(user):
@@ -378,6 +391,7 @@ class PostgresAccountStore:
     @staticmethod
     def _replace_permissions(cur, user_id, page_keys):
         valid_keys = {page["key"] for page in worker_assignable_pages()}
+        valid_keys.add(FILES_DELETE_CAPABILITY)
         selected = sorted(
             {
                 normalise_page_key(key)

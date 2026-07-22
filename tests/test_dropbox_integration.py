@@ -545,6 +545,37 @@ class DropboxIntegrationTests(unittest.TestCase):
             allow_shared_folder=False,
         )
 
+    def test_recoverable_delete_uses_team_space_client_and_protects_root(self):
+        client = MagicMock()
+        client.files_delete_v2.return_value = SimpleNamespace(
+            metadata={
+                ".tag": "file",
+                "name": "Old artwork.psd",
+                "path_display": "/Sportscave Team Folder/Old artwork.psd",
+            }
+        )
+        with patch.object(
+            dropbox_integration,
+            "team_space_client",
+            return_value=client,
+        ):
+            result = dropbox_integration.delete_path_recoverable(
+                "token",
+                "/Sportscave Team Folder/Old artwork.psd",
+                root_path="/Sportscave Team Folder",
+            )
+
+        client.files_delete_v2.assert_called_once_with(
+            "/Sportscave Team Folder/Old artwork.psd"
+        )
+        self.assertEqual(result["name"], "Old artwork.psd")
+        with self.assertRaises(ValueError):
+            dropbox_integration.delete_path_recoverable(
+                "token",
+                "/Sportscave Team Folder",
+                root_path="/Sportscave Team Folder",
+            )
+
     def test_folder_entries_sort_folders_first_then_by_name(self):
         entries = [
             {".tag": "file", "name": "Alpha.pdf"},
