@@ -35,6 +35,7 @@ class FakeAccountStore:
             "display_name": display_name,
             "password_hash": password_hash,
             "role": role,
+            "timezone": os_accounts.default_timezone_for_role(role),
             "is_active": True,
             "page_permissions": sorted(page_keys),
             "last_login_at": None,
@@ -80,6 +81,7 @@ class FakeAccountStore:
                     email=email,
                     display_name=display_name,
                     is_active=is_active,
+                    timezone=os_accounts.default_timezone_for_role(user.get("role")),
                     page_permissions=sorted(page_keys),
                 )
                 if password_hash:
@@ -204,10 +206,25 @@ class AccountAccessTests(unittest.TestCase):
         self.assertEqual(updated["display_name"], "VA One")
         self.assertEqual(updated["email"], "worker@sportscave.test")
 
+    def test_account_timezones_default_by_role(self):
+        self.assertEqual(os_accounts.default_timezone_for_role("admin"), "Australia/Sydney")
+        self.assertEqual(os_accounts.default_timezone_for_role("worker"), "Asia/Manila")
+        self.assertEqual(
+            os_accounts.timezone_for_user({"role": "admin", "timezone": ""}),
+            "Australia/Sydney",
+        )
+        self.assertEqual(
+            os_accounts.timezone_for_user({"role": "worker", "timezone": ""}),
+            "Asia/Manila",
+        )
+
     def test_account_migration_contains_both_required_tables(self):
         sql = (ROOT / "migrations" / "20260722_os_accounts_access.sql").read_text(encoding="utf-8")
 
         self.assertIn("CREATE TABLE IF NOT EXISTS os_users", sql)
+        self.assertIn("timezone TEXT NOT NULL DEFAULT 'Asia/Manila'", sql)
+        self.assertIn("Australia/Sydney", sql)
+        self.assertIn("Asia/Manila", sql)
         self.assertIn("CREATE TABLE IF NOT EXISTS os_user_page_permissions", sql)
         self.assertIn("REFERENCES os_users(id) ON DELETE CASCADE", sql)
 
@@ -239,6 +256,63 @@ class AccountAccessTests(unittest.TestCase):
 
         self.assertFalse(app_test.exception)
         self.assertIn("Access not approved", [title.value for title in app_test.title])
+
+    @staticmethod
+    def _app_text(app_test):
+        values = []
+        for collection in (
+            app_test.title,
+            app_test.header,
+            app_test.subheader,
+            app_test.markdown,
+            app_test.caption,
+            app_test.warning,
+        ):
+            values.extend(str(item.value) for item in collection)
+        return "\n".join(values)
+
+    def test_worker_home_does_not_render_activity_log(self):
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = {
+            "id": "worker-1",
+            "username": "worker",
+            "display_name": "Maria",
+            "role": "worker",
+            "timezone": os_accounts.WORKER_TIMEZONE,
+            "is_active": True,
+            "page_permissions": ["dashboard"],
+        }
+        app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+
+        app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertNotIn("Activity log", text)
+        self.assertNotIn("dashboard-activity-view", text)
+
+    def test_admin_home_still_renders_activity_log(self):
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = {
+            "id": "admin-1",
+            "username": "nathan",
+            "display_name": "Nathan",
+            "role": "admin",
+            "timezone": os_accounts.ADMIN_TIMEZONE,
+            "is_active": True,
+            "page_permissions": [],
+        }
+        app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+
+        app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertIn("Activity log", text)
 
 
 if __name__ == "__main__":

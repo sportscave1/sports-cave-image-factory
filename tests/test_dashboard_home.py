@@ -2,8 +2,10 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 import unittest
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 import sc_auth
+import os_accounts
 import sports_cave_dashboard
 import sports_sales_calendar
 
@@ -445,6 +447,59 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertEqual(entry["message"], "Order #SC1234 fulfilled + certificate generated")
 
+    def test_home_greeting_includes_signed_in_user_name(self):
+        local_now = datetime(2026, 7, 21, 9, 30, tzinfo=ZoneInfo("Australia/Sydney"))
+
+        greeting = sports_cave_dashboard.greeting_for_account(
+            local_now,
+            {"display_name": "Nathan", "email": "nathan@sportscave.test"},
+        )
+
+        self.assertEqual(greeting, "Good morning, Nathan")
+
+    def test_admin_greeting_uses_australia_sydney_time(self):
+        utc_now = datetime(2026, 7, 21, 20, 30, tzinfo=timezone.utc)
+        admin = {
+            "role": os_accounts.ROLE_ADMIN,
+            "display_name": "Nathan",
+            "timezone": os_accounts.ADMIN_TIMEZONE,
+        }
+        local_now = utc_now.astimezone(ZoneInfo(os_accounts.timezone_for_user(admin)))
+
+        self.assertEqual(
+            sports_cave_dashboard.greeting_for_account(local_now, admin),
+            "Good morning, Nathan",
+        )
+
+    def test_worker_greeting_uses_asia_manila_time(self):
+        utc_now = datetime(2026, 7, 21, 20, 30, tzinfo=timezone.utc)
+        worker = {
+            "role": os_accounts.ROLE_WORKER,
+            "display_name": "Maria",
+            "timezone": os_accounts.WORKER_TIMEZONE,
+        }
+        local_now = utc_now.astimezone(ZoneInfo(os_accounts.timezone_for_user(worker)))
+
+        self.assertEqual(
+            sports_cave_dashboard.greeting_for_account(local_now, worker),
+            "Good night, Maria",
+        )
+
+    def test_activity_table_record_displays_actor_name(self):
+        record = sports_cave_dashboard.activity_table_record(
+            {
+                "action_type": "mockup_generated",
+                "message": "Mockup made: Veery Elleegant 2021 Melbourne Cup",
+                "page": "Mockups",
+                "actor": "Maria",
+                "created_at": "2026-07-21T00:00:00+00:00",
+            },
+            ZoneInfo("Asia/Manila"),
+        )
+
+        self.assertEqual(record["User"], "Maria")
+        self.assertEqual(record["Activity"], "Mockup made")
+
 
 class SportsCaveCalendarTests(unittest.TestCase):
     def test_alert_logic_prefers_active_and_upcoming_major_events(self):
@@ -739,7 +794,7 @@ class DashboardRenderContractTests(unittest.TestCase):
             source.index("\n\ndef _calendar_event_pill")
         ]
 
-        for heading in ("Date", "Time", "Activity", "Details", "Area"):
+        for heading in ("Date", "Time", "Activity", "Details", "User", "Area"):
             self.assertIn(f"<th>{heading}</th>", table_source)
         self.assertIn("activity_table_record", table_source)
         self.assertNotIn('<div class="sc-log-row">', table_source)

@@ -8,6 +8,8 @@ import sc_auth
 ROLE_ADMIN = "admin"
 ROLE_WORKER = "worker"
 VALID_ROLES = {ROLE_ADMIN, ROLE_WORKER}
+ADMIN_TIMEZONE = "Australia/Sydney"
+WORKER_TIMEZONE = "Asia/Manila"
 
 PAGE_REGISTRY = (
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
@@ -120,6 +122,15 @@ def worker_assignable_pages():
     return tuple(page for page in PAGE_REGISTRY if page["worker_assignable"])
 
 
+def default_timezone_for_role(role):
+    return ADMIN_TIMEZONE if str(role or "").strip().casefold() == ROLE_ADMIN else WORKER_TIMEZONE
+
+
+def timezone_for_user(user):
+    user = user or {}
+    return str(user.get("timezone") or "").strip() or default_timezone_for_role(user.get("role"))
+
+
 def permission_keys(user):
     return {
         str(key or "").strip()
@@ -169,6 +180,7 @@ def _clean_user(row, permissions=None):
     row["email"] = str(row.get("email") or "")
     row["display_name"] = str(row.get("display_name") or row.get("username") or "")
     row["role"] = str(row.get("role") or ROLE_WORKER).casefold()
+    row["timezone"] = str(row.get("timezone") or default_timezone_for_role(row["role"])).strip()
     row["is_active"] = bool(row.get("is_active", True))
     if permissions is not None:
         row["page_permissions"] = sorted(set(permissions))
@@ -235,6 +247,7 @@ class PostgresAccountStore:
                                 password_hash TEXT NOT NULL,
                                 role TEXT NOT NULL DEFAULT 'worker'
                                     CHECK (role IN ('admin', 'worker')),
+                                timezone TEXT NOT NULL DEFAULT 'Asia/Manila',
                                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
                                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -255,6 +268,20 @@ class PostgresAccountStore:
                             )
                             """
                         )
+                        cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS timezone TEXT")
+                        cur.execute(
+                            """
+                            UPDATE os_users
+                            SET timezone = CASE
+                                WHEN role = 'admin' THEN %s
+                                ELSE %s
+                            END
+                            WHERE timezone IS NULL OR timezone = ''
+                            """,
+                            (ADMIN_TIMEZONE, WORKER_TIMEZONE),
+                        )
+                        cur.execute("ALTER TABLE os_users ALTER COLUMN timezone SET DEFAULT 'Asia/Manila'")
+                        cur.execute("ALTER TABLE os_users ALTER COLUMN timezone SET NOT NULL")
                         cur.execute(
                             "CREATE UNIQUE INDEX IF NOT EXISTS idx_os_users_username_unique "
                             "ON os_users (lower(username))"
@@ -330,7 +357,7 @@ class PostgresAccountStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, username, email, display_name, role, is_active,
+                    SELECT id, username, email, display_name, role, timezone, is_active,
                            created_at, updated_at, last_login_at
                     FROM os_users
                     ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, display_name, username
@@ -366,8 +393,8 @@ class PostgresAccountStore:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        INSERT INTO os_users(username, email, display_name, password_hash, role)
-                        VALUES (%s, %s, %s, %s, %s)
+                        INSERT INTO os_users(username, email, display_name, password_hash, role, timezone)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         RETURNING *
                         """,
                         (
@@ -376,6 +403,7 @@ class PostgresAccountStore:
                             str(display_name or "").strip(),
                             str(password_hash or ""),
                             clean_role,
+                            default_timezone_for_role(clean_role),
                         ),
                     )
                     row = cur.fetchone() or {}

@@ -565,7 +565,12 @@ def activity_from_audit_row(row):
         "created_at": row.get("created_at"),
         "entity_type": row.get("entity_type") or "",
         "entity_id": row.get("entity_id") or "",
-        "actor": row.get("actor") or "",
+        "actor": row.get("actor")
+        or metadata.get("actor_name")
+        or metadata.get("display_name")
+        or metadata.get("email")
+        or metadata.get("username")
+        or "",
         "metadata": metadata,
     }
 
@@ -601,6 +606,7 @@ def activity_table_record(entry, tzinfo=timezone.utc):
         "Time": time_text,
         "Activity": activity,
         "Details": details,
+        "User": _compact_text(entry.get("actor") or (entry.get("metadata") or {}).get("email") or ""),
         "Area": clean_activity_source(entry.get("page") or entry.get("source")),
     }
 
@@ -768,6 +774,16 @@ def greeting_for_datetime(local_dt):
     if 12 <= hour < 17:
         return "Good afternoon :)"
     return "Good night :)"
+
+
+def greeting_for_account(local_dt, user):
+    base = greeting_for_datetime(local_dt).replace(" :)", "").strip()
+    name = _compact_text(
+        (user or {}).get("display_name")
+        or (user or {}).get("email")
+        or (user or {}).get("username")
+    )
+    return f"{base}, {name}" if name else base
 
 
 def load_calendar_events(path=SPORTING_CALENDAR_PATH):

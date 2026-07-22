@@ -2402,6 +2402,7 @@ def inject_styles():
         .sc-activity-date,
         .sc-activity-time,
         .sc-activity-name,
+        .sc-activity-user,
         .sc-activity-area {
             white-space: nowrap;
         }
@@ -6059,6 +6060,7 @@ def _legacy_admin_account():
         "email": "",
         "display_name": "Sports Cave Admin",
         "role": os_accounts.ROLE_ADMIN,
+        "timezone": os_accounts.ADMIN_TIMEZONE,
         "is_active": True,
         "page_permissions": [],
         "legacy": True,
@@ -6077,9 +6079,22 @@ def current_os_user():
 def _activity_actor_for_user(user):
     return (
         str((user or {}).get("display_name") or "").strip()
+        or str((user or {}).get("email") or "").strip()
         or str((user or {}).get("username") or "").strip()
         or "sports_cave_os"
     )
+
+
+def timezone_for_os_user(user):
+    timezone_name = os_accounts.timezone_for_user(user or _legacy_admin_account())
+    try:
+        return ZoneInfo(timezone_name)
+    except Exception:
+        return ZoneInfo(os_accounts.default_timezone_for_role((user or {}).get("role")))
+
+
+def account_local_now(user=None):
+    return datetime.now(timezone.utc).astimezone(timezone_for_os_user(user or current_os_user()))
 
 
 def _set_authenticated_user(user, *, legacy=False):
@@ -7978,7 +7993,7 @@ def format_dashboard_timestamp(value):
         return str(value)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(get_browser_timezone()).strftime("%d %b, %I:%M %p").lstrip("0")
+    return parsed.astimezone(timezone_for_os_user(current_os_user())).strftime("%d %b, %I:%M %p").lstrip("0")
 
 
 def render_html_section_title(title):
@@ -8186,19 +8201,25 @@ def _activity_table_html(records):
             f'<td class="sc-activity-time">{html.escape(record.get("Time") or "")}</td>'
             f'<td class="sc-activity-name"><strong>{html.escape(record.get("Activity") or "Activity")}</strong></td>'
             f'<td class="sc-activity-details">{html.escape(record.get("Details") or "")}</td>'
+            f'<td class="sc-activity-user">{html.escape(record.get("User") or "")}</td>'
             f'<td class="sc-activity-area">{html.escape(record.get("Area") or "Sports Cave")}</td>'
             "</tr>"
         )
     return (
         '<div class="sc-activity-table-wrap"><table class="sc-activity-table">'
         '<colgroup><col style="width: 8.2rem;"><col style="width: 6.8rem;">'
-        '<col style="width: 10.5rem;"><col><col style="width: 8.5rem;"></colgroup>'
-        '<thead><tr><th>Date</th><th>Time</th><th>Activity</th><th>Details</th><th>Area</th></tr></thead>'
+        '<col style="width: 10.5rem;"><col><col style="width: 9rem;"><col style="width: 8.5rem;"></colgroup>'
+        '<thead><tr><th>Date</th><th>Time</th><th>Activity</th><th>Details</th><th>User</th><th>Area</th></tr></thead>'
         f'<tbody>{"".join(rows)}</tbody></table></div>'
     )
 
 
-def render_activity_log(local_now):
+def render_activity_log(local_now, *, show_denied=True):
+    if not os_accounts.is_admin(current_os_user()):
+        if show_denied:
+            st.title("Access not approved")
+            st.caption("This page is not available for your account.")
+        return False
     render_html_section_title("Activity log")
     control_columns = st.columns([1.2, 1])
     view = control_columns[0].radio(
@@ -8231,28 +8252,14 @@ def render_activity_log(local_now):
         st.warning("Activity could not load right now. Please try again shortly.")
         return
 
-    if not os_accounts.is_admin(current_os_user()):
-        admin_activity_types = {
-            "account_created",
-            "account_updated",
-            "permissions_changed",
-            "access_blocked",
-        }
-        entries = [
-            entry
-            for entry in entries
-            if str(entry.get("action_type") or "").strip().casefold()
-            not in admin_activity_types
-        ]
-
     if not entries:
         st.markdown(
             '<div class="sc-empty-note">No activity yet.</div>',
             unsafe_allow_html=True,
         )
-        return
+        return True
     records = [
-        sports_cave_dashboard.activity_table_record(entry, get_browser_timezone())
+        sports_cave_dashboard.activity_table_record(entry, timezone_for_os_user(current_os_user()))
         for entry in entries
     ]
     page_count = max((len(records) + ACTIVITY_TABLE_PAGE_SIZE - 1) // ACTIVITY_TABLE_PAGE_SIZE, 1)
@@ -8269,6 +8276,7 @@ def render_activity_log(local_now):
     first_row = (page_number - 1) * ACTIVITY_TABLE_PAGE_SIZE
     page_records = records[first_row : first_row + ACTIVITY_TABLE_PAGE_SIZE]
     st.markdown(_activity_table_html(page_records), unsafe_allow_html=True)
+    return True
 
 
 def _calendar_event_pill(event):
@@ -8355,16 +8363,18 @@ def render_sports_sales_calendar(events, local_now):
 
 def render_lightweight_dashboard_page():
     started = time.perf_counter()
-    local_now = browser_local_now()
+    user = current_os_user()
+    local_now = account_local_now(user)
     today = local_now.date()
     state = sports_cave_dashboard.load_dashboard_state(include_activity=False)
     events = sports_cave_dashboard.load_calendar_events()
+    greeting = sports_cave_dashboard.greeting_for_account(local_now, user)
 
     st.markdown(
         f"""
         <div class="sc-home-header">
             <div class="sc-home-kicker">Sports Cave</div>
-            <h1>{html.escape(sports_cave_dashboard.greeting_for_datetime(local_now))}</h1>
+            <h1>{html.escape(greeting)}</h1>
         </div>
         """,
         unsafe_allow_html=True,
@@ -8373,7 +8383,8 @@ def render_lightweight_dashboard_page():
     render_todays_design_ideas(local_now, events)
     render_dashboard_tasks(state)
     render_sports_sales_calendar(events, local_now)
-    render_activity_log(local_now)
+    if os_accounts.is_admin(user):
+        render_activity_log(local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 
 

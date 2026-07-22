@@ -1243,6 +1243,7 @@ def _ensure_schema_uncached():
                     password_hash TEXT NOT NULL,
                     role TEXT NOT NULL DEFAULT 'worker'
                         CHECK (role IN ('admin', 'worker')),
+                    timezone TEXT NOT NULL DEFAULT 'Asia/Manila',
                     is_active BOOLEAN NOT NULL DEFAULT TRUE,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1250,6 +1251,19 @@ def _ensure_schema_uncached():
                 )
                 """
             )
+            cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS timezone TEXT")
+            cur.execute(
+                """
+                UPDATE os_users
+                SET timezone = CASE
+                    WHEN role = 'admin' THEN 'Australia/Sydney'
+                    ELSE 'Asia/Manila'
+                END
+                WHERE timezone IS NULL OR timezone = ''
+                """
+            )
+            cur.execute("ALTER TABLE os_users ALTER COLUMN timezone SET DEFAULT 'Asia/Manila'")
+            cur.execute("ALTER TABLE os_users ALTER COLUMN timezone SET NOT NULL")
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS os_user_page_permissions (
