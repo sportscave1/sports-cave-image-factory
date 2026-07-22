@@ -144,6 +144,114 @@ def get_current_account(access_token):
     return dropbox_rpc(access_token, "users/get_current_account", {})
 
 
+def normalize_dropbox_path(path):
+    clean = str(path or "").strip().replace("\\", "/")
+    if not clean or clean == "/":
+        return ""
+    parts = []
+    for part in clean.split("/"):
+        part = part.strip()
+        if not part or part == ".":
+            continue
+        if part == "..":
+            raise ValueError("Dropbox paths cannot contain '..'.")
+        parts.append(part)
+    return "/" + "/".join(parts) if parts else ""
+
+
+def list_folder(access_token, path="", *, max_entries=2000):
+    clean_path = normalize_dropbox_path(path)
+    limit = max(1, min(int(max_entries or 2000), 2000))
+    response = dropbox_rpc(
+        access_token,
+        "files/list_folder",
+        {
+            "path": clean_path,
+            "recursive": False,
+            "include_deleted": False,
+            "include_media_info": False,
+            "limit": limit,
+        },
+    )
+    entries = list(response.get("entries") or [])
+    while response.get("has_more") and len(entries) < limit:
+        response = dropbox_rpc(
+            access_token,
+            "files/list_folder/continue",
+            {"cursor": response.get("cursor")},
+        )
+        entries.extend(response.get("entries") or [])
+    return entries[:limit]
+
+
+def get_temporary_link(access_token, path):
+    result = dropbox_rpc(
+        access_token,
+        "files/get_temporary_link",
+        {"path": normalize_dropbox_path(path)},
+    )
+    link = str(result.get("link") or "").strip()
+    if not link:
+        raise DropboxApiError("Dropbox did not return a temporary file link.")
+    return link
+
+
+def get_file_metadata(access_token, path):
+    return dropbox_rpc(
+        access_token,
+        "files/get_metadata",
+        {
+            "path": normalize_dropbox_path(path),
+            "include_media_info": False,
+            "include_deleted": False,
+        },
+    )
+
+
+def format_file_size(size):
+    value = max(0, int(size or 0))
+    units = ("B", "KB", "MB", "GB", "TB")
+    amount = float(value)
+    for unit in units:
+        if amount < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(amount)} {unit}"
+            return f"{amount:.1f} {unit}" if amount < 10 else f"{amount:.0f} {unit}"
+        amount /= 1024
+    return f"{value} B"
+
+
+def sort_folder_entries(entries):
+    return sorted(
+        (dict(entry or {}) for entry in entries or ()),
+        key=lambda entry: (
+            0 if str(entry.get(".tag") or "").casefold() == "folder" else 1,
+            str(entry.get("name") or "").casefold(),
+        ),
+    )
+
+
+def preferred_browser_root(entries):
+    for entry in entries or ():
+        if (
+            str(entry.get(".tag") or "").casefold() == "folder"
+            and str(entry.get("name") or "").casefold() == DROPBOX_ROOT_FOLDER.casefold()
+        ):
+            return normalize_dropbox_path(
+                entry.get("path_display") or entry.get("path_lower") or folder_path()
+            )
+    return ""
+
+
+def file_open_details(access_token, path):
+    clean_path = normalize_dropbox_path(path)
+    metadata = get_file_metadata(access_token, clean_path)
+    return {
+        "metadata": metadata,
+        "temporary_link": get_temporary_link(access_token, clean_path),
+    }
+
+
 def folder_path(folder_name=""):
     parts = [DROPBOX_ROOT_FOLDER]
     clean_folder = str(folder_name or "").strip().strip("/")

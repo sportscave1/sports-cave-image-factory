@@ -83,6 +83,81 @@ class DropboxIntegrationTests(unittest.TestCase):
 
         self.assertEqual(path, "/Sports Cave OS Assets/09 Research Images/hero.jpg")
 
+    def test_paths_are_normalized_for_dropbox(self):
+        self.assertEqual(
+            dropbox_integration.normalize_dropbox_path(
+                "\\Sports Cave OS Assets\\05 Mockups\\"
+            ),
+            "/Sports Cave OS Assets/05 Mockups",
+        )
+        self.assertEqual(dropbox_integration.normalize_dropbox_path("/"), "")
+        with self.assertRaises(ValueError):
+            dropbox_integration.normalize_dropbox_path("/Sports Cave OS Assets/../Private")
+
+    def test_folder_entries_sort_folders_first_then_by_name(self):
+        entries = [
+            {".tag": "file", "name": "Alpha.pdf"},
+            {".tag": "folder", "name": "Zulu"},
+            {".tag": "folder", "name": "Brand"},
+            {".tag": "file", "name": "Beta.psd"},
+        ]
+
+        sorted_entries = dropbox_integration.sort_folder_entries(entries)
+
+        self.assertEqual(
+            [entry["name"] for entry in sorted_entries],
+            ["Brand", "Zulu", "Alpha.pdf", "Beta.psd"],
+        )
+
+    def test_list_folder_uses_current_folder_only_and_is_bounded(self):
+        with patch.object(
+            dropbox_integration,
+            "dropbox_rpc",
+            return_value={"entries": [{".tag": "folder", "name": "05 Mockups"}]},
+        ) as rpc:
+            entries = dropbox_integration.list_folder(
+                "access-token",
+                "/Sports Cave OS Assets",
+            )
+
+        self.assertEqual(entries[0]["name"], "05 Mockups")
+        endpoint, payload = rpc.call_args.args[1:3]
+        self.assertEqual(endpoint, "files/list_folder")
+        self.assertEqual(payload["path"], "/Sports Cave OS Assets")
+        self.assertFalse(payload["recursive"])
+        self.assertEqual(payload["limit"], 2000)
+
+    def test_temporary_link_helper_is_used_for_file_open(self):
+        metadata = {".tag": "file", "name": "collector.pdf"}
+        with patch.object(
+            dropbox_integration,
+            "get_file_metadata",
+            return_value=metadata,
+        ), patch.object(
+            dropbox_integration,
+            "get_temporary_link",
+            return_value="https://dropbox.test/temporary/collector.pdf",
+        ) as temporary_link:
+            result = dropbox_integration.file_open_details(
+                "access-token",
+                "/Sports Cave OS Assets/collector.pdf",
+            )
+
+        temporary_link.assert_called_once_with(
+            "access-token",
+            "/Sports Cave OS Assets/collector.pdf",
+        )
+        self.assertEqual(result["metadata"], metadata)
+        self.assertEqual(
+            result["temporary_link"],
+            "https://dropbox.test/temporary/collector.pdf",
+        )
+
+    def test_file_size_formatting_is_compact(self):
+        self.assertEqual(dropbox_integration.format_file_size(0), "0 B")
+        self.assertEqual(dropbox_integration.format_file_size(1536), "1.5 KB")
+        self.assertEqual(dropbox_integration.format_file_size(5 * 1024 * 1024), "5.0 MB")
+
     def test_metadata_normaliser_extracts_extension_and_actor(self):
         row = dropbox_integration.normalise_asset_metadata(
             dropbox_file_id="id:123",

@@ -5,8 +5,10 @@ from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
+import dropbox_integration
 import os_accounts
 import sc_auth
+import supabase_backend
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -154,15 +156,19 @@ class AccountAccessTests(unittest.TestCase):
         self.assertFalse(os_accounts.can_access_page(worker, "Accounts & Access"))
         self.assertFalse(os_accounts.can_access_page(worker, "Developer"))
 
-    def test_dropbox_can_be_assigned_to_staff_accounts(self):
+    def test_files_can_be_assigned_and_legacy_dropbox_permission_is_preserved(self):
         worker = {
             "role": "worker",
             "is_active": True,
             "page_permissions": ["dashboard", "dropbox"],
         }
 
-        self.assertIn("Dropbox", os_accounts.allowed_navigation_routes(worker))
+        self.assertIn("Files", os_accounts.allowed_navigation_routes(worker))
+        self.assertNotIn("Dropbox", os_accounts.allowed_navigation_routes(worker))
+        self.assertTrue(os_accounts.can_access_page(worker, "Files"))
         self.assertTrue(os_accounts.can_access_page(worker, "Dropbox"))
+        self.assertEqual(os_accounts.normalise_route("Dropbox"), "Files")
+        self.assertEqual(os_accounts.page_key_for_route("Dropbox"), "files")
 
     def test_blocked_worker_cannot_invoke_page_renderer(self):
         worker = {"role": "worker", "is_active": True, "page_permissions": ["dashboard"]}
@@ -268,7 +274,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertFalse(app_test.exception)
         self.assertIn("Access not approved", [title.value for title in app_test.title])
 
-    def test_blocked_worker_cannot_render_dropbox_page(self):
+    def test_blocked_worker_cannot_render_files_page(self):
         app_test = AppTest.from_file(str(ROOT / "app.py"))
         app_test.session_state["sports_cave_authenticated"] = True
         app_test.session_state["sports_cave_current_user"] = {
@@ -280,14 +286,14 @@ class AccountAccessTests(unittest.TestCase):
             "page_permissions": ["dashboard"],
         }
         app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
-        app_test.session_state["selected_page"] = "Dropbox"
+        app_test.session_state["selected_page"] = "Files"
 
         app_test.run(timeout=20)
 
         self.assertFalse(app_test.exception)
         self.assertIn("Access not approved", [title.value for title in app_test.title])
 
-    def test_admin_can_render_dropbox_setup_page_without_env_vars(self):
+    def test_admin_can_render_files_setup_page_without_env_vars(self):
         with patch.dict(
             "os.environ",
             {
@@ -308,14 +314,127 @@ class AccountAccessTests(unittest.TestCase):
                 "page_permissions": [],
             }
             app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
-            app_test.session_state["selected_page"] = "Dropbox"
+            app_test.session_state["selected_page"] = "Files"
 
             app_test.run(timeout=20)
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
-        self.assertIn("Dropbox", [title.value for title in app_test.title])
-        self.assertIn("Dropbox setup is not complete.", text)
+        self.assertIn("Files", [title.value for title in app_test.title])
+        self.assertIn("Files setup is not complete.", text)
+
+    def test_connected_worker_sees_files_browser_without_connection_controls(self):
+        root_entry = {
+            ".tag": "folder",
+            "name": dropbox_integration.DROPBOX_ROOT_FOLDER,
+            "path_display": "/Sports Cave OS Assets",
+        }
+        file_entry = {
+            ".tag": "file",
+            "name": "collector.pdf",
+            "path_display": "/Sports Cave OS Assets/collector.pdf",
+            "server_modified": "2026-07-22T01:30:00Z",
+            "size": 2048,
+        }
+
+        def list_folder(_token, path="", **_kwargs):
+            return [root_entry] if not path else [file_entry]
+
+        with patch.dict(
+            "os.environ",
+            {
+                "DROPBOX_APP_KEY": "app-key",
+                "DROPBOX_APP_SECRET": "app-secret",
+                "DROPBOX_REDIRECT_URI": "https://example.test/dropbox/callback",
+            },
+        ), patch.object(
+            supabase_backend,
+            "get_dropbox_connection_status",
+            return_value={"connected": True, "account_name": "Sports Cave"},
+        ), patch.object(
+            supabase_backend,
+            "get_dropbox_refresh_token",
+            return_value="refresh-token",
+        ), patch.object(
+            dropbox_integration,
+            "refresh_access_token",
+            return_value="access-token",
+        ), patch.object(
+            dropbox_integration,
+            "list_folder",
+            side_effect=list_folder,
+        ), patch.object(
+            dropbox_integration,
+            "file_open_details",
+            return_value={
+                "metadata": file_entry,
+                "temporary_link": "https://dropbox.test/temporary/collector.pdf",
+            },
+        ) as file_open_details:
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
+            app_test.session_state["sports_cave_current_user"] = {
+                "id": "worker-1",
+                "username": "worker",
+                "display_name": "Worker",
+                "role": "worker",
+                "timezone": os_accounts.WORKER_TIMEZONE,
+                "is_active": True,
+                "page_permissions": ["files"],
+            }
+            app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+            app_test.session_state["selected_page"] = "Files"
+            app_test.run(timeout=20)
+            next(button for button in app_test.button if button.label == "Open").click().run(
+                timeout=20
+            )
+
+        text = self._app_text(app_test)
+        button_labels = [button.label for button in app_test.button]
+        self.assertFalse(app_test.exception)
+        self.assertIn("Files", [title.value for title in app_test.title])
+        self.assertIn("collector.pdf", text)
+        self.assertIn("Open", button_labels)
+        self.assertNotIn("Test Connection", button_labels)
+        self.assertNotIn("Reconnect Files", text)
+        self.assertNotIn("Upload test", text)
+        file_open_details.assert_called_once_with(
+            "access-token",
+            "/Sports Cave OS Assets/collector.pdf",
+        )
+
+    def test_admin_disconnected_state_offers_connect_files(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DROPBOX_APP_KEY": "app-key",
+                "DROPBOX_APP_SECRET": "app-secret",
+                "DROPBOX_REDIRECT_URI": "https://example.test/dropbox/callback",
+            },
+        ), patch.object(
+            supabase_backend,
+            "get_dropbox_connection_status",
+            return_value={"connected": False},
+        ):
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
+            app_test.session_state["sports_cave_current_user"] = {
+                "id": "admin-1",
+                "username": "nathan",
+                "display_name": "Nathan",
+                "role": "admin",
+                "timezone": os_accounts.ADMIN_TIMEZONE,
+                "is_active": True,
+                "page_permissions": [],
+            }
+            app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+            app_test.session_state["selected_page"] = "Files"
+            app_test.run(timeout=20)
+
+        self.assertFalse(app_test.exception)
+        self.assertIn("Files are not connected.", self._app_text(app_test))
+        link_labels = [item.label for item in app_test.get("link_button")]
+        self.assertIn("Connect Files", link_labels)
 
     @staticmethod
     def _app_text(app_test):

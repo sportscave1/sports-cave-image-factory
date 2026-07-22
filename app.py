@@ -224,7 +224,6 @@ ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
     "ZIP_SAVE_DRIVE_FOLDER_URL",
     "https://drive.google.com/drive/folders/1FfXmTVuVGkD7PFhRjAtvPDZOn7Gpk3q_",
 ).strip()
-# File Hub hidden until PSD/Drive asset workflow is active.
 MENU_OPTIONS = [page["route"] for page in os_accounts.worker_assignable_pages()]
 SIDEBAR_NAV_LABELS = {
     page["route"]: page["label"] for page in os_accounts.PAGE_REGISTRY
@@ -2137,24 +2136,6 @@ def inject_styles():
             padding: 0.75rem 0.85rem;
         }
 
-        .sc-dropbox-status {
-            align-items: center;
-            background: #FFFFFF;
-            border: 1px solid #E3DDCF;
-            border-left: 3px solid var(--sc-gold);
-            border-radius: 8px;
-            display: flex;
-            gap: 0.6rem;
-            justify-content: space-between;
-            margin: 0.45rem 0 0.75rem;
-            padding: 0.62rem 0.72rem;
-        }
-
-        .sc-dropbox-status span {
-            color: #6C665D !important;
-            font-size: 0.82rem;
-        }
-
         .sc-task-card {
             background: #FFFFFF;
             border: 1px solid #E3DDCF;
@@ -2470,18 +2451,13 @@ def init_session_state():
     if "startup_shell_loaded" not in st.session_state:
         st.session_state.startup_shell_loaded = True
 
-    pending_page = st.session_state.pop("pending_page", None)
-    if pending_page == "Settings":
-        pending_page = "Developer"
-    if pending_page == "Marketing Factory":
-        pending_page = "Ads"
+    pending_page = os_accounts.normalise_route(st.session_state.pop("pending_page", None))
     if pending_page in ALL_PAGE_OPTIONS:
         st.session_state.selected_page = pending_page
 
-    if st.session_state.selected_page == "Settings":
-        st.session_state.selected_page = "Developer"
-    if st.session_state.selected_page == "Marketing Factory":
-        st.session_state.selected_page = "Ads"
+    st.session_state.selected_page = os_accounts.normalise_route(
+        st.session_state.selected_page
+    )
 
     if st.session_state.selected_page not in ALL_PAGE_OPTIONS:
         st.session_state.selected_page = "Dashboard"
@@ -5716,13 +5692,6 @@ def render_sidebar():
             st.session_state.selected_page = "Dashboard"
             st.rerun()
 
-    if st.session_state.selected_page == "Developer" and os_accounts.is_admin(user):
-        st.sidebar.divider()
-        st.sidebar.caption("File Hub hidden until PSD/Drive asset workflow is active.")
-        if st.sidebar.button("File Hub (Coming Soon)", use_container_width=True):
-            st.session_state.selected_page = "Files"
-            st.rerun()
-
     if os_accounts.is_admin(user):
         st.sidebar.divider()
         if st.sidebar.button(
@@ -6397,6 +6366,10 @@ def logout_app():
     st.session_state["selected_page"] = "Dashboard"
     st.session_state.pop("sports_cave_current_user", None)
     st.session_state.pop("sports_cave_admin_setup_required", None)
+    st.session_state.pop("files_access_token", None)
+    st.session_state.pop("files_connection_status", None)
+    st.session_state.pop("files_directory_cache", None)
+    st.session_state.pop("files_browser_path", None)
     clear_activity_actor()
     clear_auth_cookie()
     st.stop()
@@ -7223,7 +7196,7 @@ def _customer_certificate_vault_config_status():
 
 
 def _account_permission_fields(prefix, selected=()):
-    selected = set(selected or ())
+    selected = os_accounts.permission_keys({"page_permissions": selected or ()})
     chosen = []
     columns = st.columns(2)
     for index, page in enumerate(os_accounts.worker_assignable_pages()):
@@ -8113,10 +8086,6 @@ def _daily_execution_review_payload(prefix):
             "protected": protected,
         },
         "ratings": ratings,
-        "additional_items": [
-            {"task": "Moved toward $5M", "details": revenue, "completed": bool(revenue.strip())},
-            {"task": "Lesson", "details": lesson, "completed": bool(lesson.strip())},
-        ],
     }
 
 
@@ -8215,13 +8184,14 @@ def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
 
     with st.form(f"daily-execution-tasks::{sheet.get('id')}"):
         updated_tasks = []
+        updated_other_tasks = []
         header_cols = st.columns([2.2, 2.2, 1.1, 1.15])
         header_cols[0].markdown("**Task**")
         header_cols[1].markdown("**Details**")
         header_cols[2].markdown("**Time allocated**")
         header_cols[3].markdown("**Done / Couldn&apos;t finish**", unsafe_allow_html=True)
         for index, task in enumerate(sheet.get("top_tasks") or [], start=1):
-            st.markdown(f"**Task {index}**")
+            st.markdown(f"**MIP Task {index}**")
             cols = st.columns([2.2, 2.2, 1.1, 1.15])
             current_status = str(task.get("status") or "").strip()
             if not current_status and task.get("completed"):
@@ -8247,10 +8217,37 @@ def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
                     ),
                 }
             )
+        st.markdown("**Other tasks**")
+        for index, task in enumerate(sheet.get("additional_items") or [{"task": "", "details": "", "time_blocked": "", "status": ""}], start=1):
+            cols = st.columns([2.2, 2.2, 1.1, 1.15])
+            current_status = str(task.get("status") or "").strip()
+            if not current_status and task.get("completed"):
+                current_status = sports_cave_dashboard.DAILY_TASK_STATUS_DONE
+            status_options = ("", sports_cave_dashboard.DAILY_TASK_STATUS_DONE, sports_cave_dashboard.DAILY_TASK_STATUS_COULDNT_FINISH)
+            status_labels = {
+                "": "Open",
+                sports_cave_dashboard.DAILY_TASK_STATUS_DONE: "Done",
+                sports_cave_dashboard.DAILY_TASK_STATUS_COULDNT_FINISH: "Couldn't finish",
+            }
+            updated_other_tasks.append(
+                {
+                    "task": cols[0].text_input("Other task", value=task.get("task") or "", key=f"daily-other-task-title-{index}", label_visibility="collapsed"),
+                    "details": cols[1].text_input("Other task details", value=task.get("details") or "", key=f"daily-other-task-details-{index}", label_visibility="collapsed"),
+                    "time_blocked": cols[2].text_input("Other task time allocated", value=task.get("time_blocked") or "", key=f"daily-other-task-time-{index}", label_visibility="collapsed"),
+                    "status": cols[3].selectbox(
+                        "Other task done / couldn't finish",
+                        status_options,
+                        index=status_options.index(current_status) if current_status in status_options else 0,
+                        format_func=lambda value: status_labels.get(value, value),
+                        key=f"daily-other-task-status-{index}",
+                        label_visibility="collapsed",
+                    ),
+                }
+            )
         save_list = st.form_submit_button("Save List", use_container_width=True)
     if save_list:
         try:
-            sports_cave_dashboard.save_daily_execution_top_tasks(sheet.get("id"), updated_tasks)
+            sports_cave_dashboard.save_daily_execution_tasks(sheet.get("id"), updated_tasks, updated_other_tasks)
         except sports_cave_dashboard.DashboardStorageError:
             st.warning("List could not save right now.")
             return False
@@ -8622,8 +8619,10 @@ def render_lightweight_dashboard_page():
         unsafe_allow_html=True,
     )
     if os_accounts.is_admin(user):
+        render_active_alerts(events, today)
         render_daily_execution_panel(local_now, events, state)
-    render_active_alerts(events, today)
+    else:
+        render_active_alerts(events, today)
     render_todays_design_ideas(local_now, events)
     render_dashboard_tasks(state)
     if os_accounts.is_admin(user):
@@ -8636,8 +8635,6 @@ def page_uses_local_database(current_page):
     if current_page in {"Dashboard", "Products", "Edition Ops", "Orders", "Developer", "Settings"}:
         return False
     supabase_enabled = any(os.getenv(key, "").strip() for key in DATABASE_URL_ENV_KEYS)
-    if current_page in {"Files"}:
-        return True
     if not supabase_enabled and current_page in {
         "Products",
     }:
@@ -8697,127 +8694,318 @@ def _dropbox_handle_callback(user):
         )
         record_activity_log(
             "dropbox_connected",
-            "Dropbox",
-            "Dropbox connected",
+            "Files",
+            "Files connected",
             entity_type="dropbox_account",
             entity_id=saved.get("account_id", ""),
             metadata={"account_email": saved.get("account_email", "")},
         )
         st.session_state.pop("dropbox_oauth_state", None)
+        st.session_state.pop("files_access_token", None)
+        st.session_state.pop("files_connection_status", None)
+        st.session_state.pop("files_directory_cache", None)
+        st.session_state.pop("files_browser_path", None)
         with suppress(Exception):
             st.query_params.clear()
-        st.success("Dropbox connected.")
+        st.success("Files connected.")
     except Exception as error:
-        st.error(f"Dropbox connection failed: {error}")
+        st.error(f"Files connection failed: {error}")
 
 
-def render_dropbox_page():
+def _files_access_token(supabase, *, force=False):
+    cached = st.session_state.get("files_access_token") or {}
+    if (
+        not force
+        and cached.get("token")
+        and float(cached.get("expires_at") or 0) > time.monotonic()
+    ):
+        return cached["token"]
+    refresh_token = supabase.get_dropbox_refresh_token()
+    access_token = dropbox_integration.refresh_access_token(refresh_token)
+    st.session_state["files_access_token"] = {
+        "token": access_token,
+        "expires_at": time.monotonic() + 30 * 60,
+    }
+    return access_token
+
+
+def _files_connection_status(supabase, *, force=False):
+    cached = st.session_state.get("files_connection_status") or {}
+    if (
+        not force
+        and cached.get("loaded_at", 0) + 30 > time.monotonic()
+    ):
+        return dict(cached.get("status") or {})
+    status = dict(supabase.get_dropbox_connection_status() or {})
+    st.session_state["files_connection_status"] = {
+        "loaded_at": time.monotonic(),
+        "status": status,
+    }
+    return status
+
+
+def _files_directory_entries(access_token, path, *, force=False):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    cache = st.session_state.setdefault("files_directory_cache", {})
+    cached = cache.get(clean_path) or {}
+    if (
+        not force
+        and cached.get("loaded_at", 0) + 30 > time.monotonic()
+    ):
+        return list(cached.get("entries") or [])
+    entries = dropbox_integration.sort_folder_entries(
+        dropbox_integration.list_folder(access_token, clean_path)
+    )
+    cache[clean_path] = {"loaded_at": time.monotonic(), "entries": entries}
+    return entries
+
+
+def _files_initial_path(access_token):
+    root_entries = _files_directory_entries(access_token, "")
+    return dropbox_integration.preferred_browser_root(root_entries)
+
+
+def _files_parent_path(path):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    if not clean_path:
+        return ""
+    parts = clean_path.strip("/").split("/")
+    return "/" + "/".join(parts[:-1]) if len(parts) > 1 else ""
+
+
+def _files_modified_label(value, user):
+    clean_value = str(value or "").strip()
+    if not clean_value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(clean_value.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone_for_os_user(user)).strftime("%d %b %Y, %I:%M %p")
+    except (TypeError, ValueError):
+        return clean_value
+
+
+def _files_item_type(entry):
+    if str(entry.get(".tag") or "").casefold() == "folder":
+        return "Folder"
+    extension = Path(str(entry.get("name") or "")).suffix.lstrip(".").upper()
+    return extension or "File"
+
+
+def _render_files_open_dialog(access_token, entry):
+    name = str(entry.get("name") or "File")
+    path = entry.get("path_display") or entry.get("path_lower") or ""
+
+    def dialog_body():
+        try:
+            details = dropbox_integration.file_open_details(access_token, path)
+            link = details["temporary_link"]
+            extension = Path(name).suffix.casefold()
+            if extension in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+                st.image(link, caption=name, use_container_width=True)
+            elif extension == ".pdf":
+                st.caption("Open the PDF in your browser.")
+            else:
+                st.caption("Open or download this file from Dropbox.")
+            if hasattr(st, "link_button"):
+                st.link_button("Open file", link, use_container_width=True)
+            else:
+                st.markdown(f"[Open file]({link})")
+        except Exception as error:
+            st.error(f"This file could not be opened: {error}")
+
+    if hasattr(st, "dialog"):
+        st.dialog(name)(dialog_body)()
+    else:
+        with st.expander(name, expanded=True):
+            dialog_body()
+
+
+def _render_files_breadcrumb(current_path):
+    parts = [part for part in current_path.strip("/").split("/") if part]
+    labels = ["Files", *parts]
+    paths = [""]
+    for index in range(len(parts)):
+        paths.append("/" + "/".join(parts[: index + 1]))
+    st.caption(" / ".join(labels))
+    columns = st.columns([max(1, min(len(label), 4)) for label in labels])
+    for index, (column, label, path) in enumerate(zip(columns, labels, paths)):
+        if column.button(
+            label,
+            key=f"files-crumb-{index}-{path}",
+            use_container_width=True,
+            disabled=path == current_path,
+        ):
+            st.session_state["files_browser_path"] = path
+            st.rerun()
+
+
+def _render_files_browser(access_token, user):
+    if "files_browser_path" not in st.session_state:
+        st.session_state["files_browser_path"] = _files_initial_path(access_token)
+    current_path = dropbox_integration.normalize_dropbox_path(
+        st.session_state.get("files_browser_path")
+    )
+    st.session_state["files_browser_path"] = current_path
+
+    _render_files_breadcrumb(current_path)
+    controls = st.columns([0.8, 0.8, 4.4])
+    if controls[0].button(
+        "Back",
+        key="files-back",
+        use_container_width=True,
+        disabled=not current_path,
+    ):
+        st.session_state["files_browser_path"] = _files_parent_path(current_path)
+        st.rerun()
+    if controls[1].button("Refresh", key="files-refresh", use_container_width=True):
+        st.session_state.setdefault("files_directory_cache", {}).pop(current_path, None)
+        st.rerun()
+    search = controls[2].text_input(
+        "Filter current folder",
+        key="files-current-folder-search",
+        placeholder="Search this folder",
+        label_visibility="collapsed",
+    ).strip().casefold()
+
+    try:
+        entries = _files_directory_entries(access_token, current_path)
+    except Exception as error:
+        st.info("This folder could not be loaded right now.")
+        st.caption(str(error))
+        return
+    if search:
+        entries = [
+            entry
+            for entry in entries
+            if search in str(entry.get("name") or "").casefold()
+        ]
+
+    header = st.columns([0.75, 3.6, 1.6, 1, 0.8])
+    for column, label in zip(header, ("Type", "Name", "Modified", "Size", "")):
+        column.markdown(f"**{label}**")
+    if not entries:
+        st.markdown(
+            '<div class="sc-empty-note">No files or folders found.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    file_to_open = None
+    for index, entry in enumerate(entries):
+        tag = str(entry.get(".tag") or "").casefold()
+        path = dropbox_integration.normalize_dropbox_path(
+            entry.get("path_display") or entry.get("path_lower") or ""
+        )
+        columns = st.columns([0.75, 3.6, 1.6, 1, 0.8])
+        columns[0].caption(_files_item_type(entry))
+        columns[1].write(str(entry.get("name") or "Untitled"))
+        columns[2].caption(_files_modified_label(entry.get("server_modified"), user))
+        columns[3].caption(
+            "" if tag == "folder" else dropbox_integration.format_file_size(entry.get("size"))
+        )
+        if columns[4].button(
+            "Open",
+            key=f"files-open-{index}-{path}",
+            use_container_width=True,
+        ):
+            if tag == "folder":
+                st.session_state["files_browser_path"] = path
+                st.rerun()
+            else:
+                file_to_open = entry
+        st.divider()
+    if file_to_open:
+        _render_files_open_dialog(access_token, file_to_open)
+
+
+def render_files_page():
     user = current_os_user()
-    if not os_accounts.can_access_page(user, "Dropbox"):
+    if not os_accounts.can_access_page(user, "Files"):
         st.title("Access not approved")
         st.caption("This page is not available for your account.")
         return
 
-    st.title("Dropbox")
-    st.caption("Connect Sports Cave Dropbox and test asset access.")
+    st.title("Files")
+    if os_accounts.is_admin(user):
+        _dropbox_handle_callback(user)
 
     missing = dropbox_integration.missing_config_keys()
     if missing:
-        st.warning("Dropbox setup is not complete.")
-        st.caption("Required Render env vars: " + ", ".join(missing))
+        if os_accounts.is_admin(user):
+            st.warning("Files setup is not complete.")
+            st.caption("Required Render env vars: " + ", ".join(missing))
+        else:
+            st.info("Files are not available right now. Please ask an admin.")
         return
-
-    _dropbox_handle_callback(user)
 
     supabase = importlib.import_module("supabase_backend")
     status = {}
     status_error = ""
     try:
-        status = supabase.get_dropbox_connection_status()
+        status = _files_connection_status(supabase)
     except Exception as error:
         status_error = str(error)
 
     connected = bool(status.get("connected"))
-    status_label = "Connected" if connected else "Not connected"
-    st.markdown(
-        f"""
-        <div class="sc-dashboard-card sc-dropbox-status">
-            <strong>{html.escape(status_label)}</strong>
-            <span>{html.escape(status.get("account_name") or status.get("account_email") or "Sports Cave Dropbox")}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
     if status_error:
-        st.info("Dropbox storage is not ready yet. Check Supabase setup and try again.")
+        st.info("Files are not available right now. Please try again shortly.")
+        return
+
+    if not connected:
+        st.markdown(
+            '<div class="sc-empty-note"><strong>Files are not connected.</strong></div>',
+            unsafe_allow_html=True,
+        )
+        if not os_accounts.is_admin(user):
+            st.caption("Please ask an admin to connect Files.")
+            return
+        try:
+            connect_url = _prepare_dropbox_connect_url()
+            if hasattr(st, "link_button"):
+                st.link_button("Connect Files", connect_url, use_container_width=False)
+            else:
+                st.markdown(f"[Connect Files]({connect_url})")
+        except Exception as error:
+            st.error(f"Files connection link could not be created: {error}")
+        return
 
     try:
-        connect_url = _prepare_dropbox_connect_url()
-        connect_label = "Reconnect Dropbox" if connected else "Connect Dropbox"
-        if hasattr(st, "link_button"):
-            st.link_button(connect_label, connect_url, use_container_width=True)
-        else:
-            st.markdown(f"[{connect_label}]({connect_url})")
+        access_token = _files_access_token(supabase)
     except Exception as error:
-        st.error(f"Dropbox connection link could not be created: {error}")
+        st.info("Files could not connect right now.")
+        if os_accounts.is_admin(user):
+            st.caption(str(error))
+        return
 
-    if connected and st.button("Test Connection", use_container_width=True):
-        try:
-            refresh_token = supabase.get_dropbox_refresh_token()
-            access_token = dropbox_integration.refresh_access_token(refresh_token)
-            account = dropbox_integration.get_current_account(access_token)
-            dropbox_integration.ensure_folder_structure(access_token)
-            saved = supabase.save_dropbox_connection(
-                refresh_token,
-                account,
-                actor=_activity_actor_for_user(user),
-            )
-            st.success("Dropbox connection works.")
-            if saved.get("account_email"):
-                st.caption(saved["account_email"])
-        except Exception as error:
-            st.error(f"Dropbox test failed: {error}")
+    _render_files_browser(access_token, user)
 
-    st.subheader("Upload test")
-    folder_options = list(dropbox_integration.folder_options())
-    asset_type = st.selectbox(
-        "Asset folder",
-        [key for key, _ in folder_options],
-        format_func=lambda key: dict(folder_options).get(key, key),
-    )
-    uploaded = st.file_uploader("Choose one file", key="dropbox-test-upload")
-    if st.button("Upload to Dropbox", use_container_width=True, disabled=not connected or uploaded is None):
-        try:
-            refresh_token = supabase.get_dropbox_refresh_token()
-            access_token = dropbox_integration.refresh_access_token(refresh_token)
-            dropbox_integration.ensure_folder_structure(access_token)
-            data = uploaded.getvalue()
-            path = dropbox_integration.dropbox_upload_path(asset_type, uploaded.name)
-            result = dropbox_integration.upload_file(access_token, path, data)
-            metadata = dropbox_integration.normalise_asset_metadata(
-                dropbox_file_id=result.get("id"),
-                dropbox_path=result.get("path_display") or result.get("path_lower") or path,
-                name=result.get("name") or uploaded.name,
-                size=result.get("size") or len(data),
-                asset_type=asset_type,
-                uploaded_by_user_name=user.get("display_name") or user.get("username"),
-                uploaded_by_user_email=user.get("email"),
-            )
-            saved_asset = supabase.save_dropbox_asset_metadata(metadata)
-            record_activity_log(
-                "dropbox_upload",
-                "Dropbox",
-                f"Dropbox test upload completed: {saved_asset.get('name') or uploaded.name}",
-                entity_type="dropbox_asset",
-                entity_id=str(saved_asset.get("id") or result.get("id") or ""),
-                metadata={"dropbox_path": saved_asset.get("dropbox_path") or path, "asset_type": asset_type},
-            )
-            st.success("Upload saved to Dropbox.")
-            st.caption(f"{saved_asset.get('name') or uploaded.name} - {saved_asset.get('dropbox_path') or path}")
-            if saved_asset.get("dropbox_file_id") or result.get("id"):
-                st.caption(f"File ID: {saved_asset.get('dropbox_file_id') or result.get('id')}")
-        except Exception as error:
-            st.error(f"Dropbox upload failed: {error}")
+    if os_accounts.is_admin(user):
+        with st.expander("Connection settings", expanded=False):
+            account_label = status.get("account_name") or status.get("account_email") or "Connected"
+            st.caption(str(account_label))
+            settings_columns = st.columns(2)
+            try:
+                connect_url = _prepare_dropbox_connect_url()
+                settings_columns[0].link_button(
+                    "Reconnect Files",
+                    connect_url,
+                    use_container_width=True,
+                )
+            except Exception as error:
+                settings_columns[0].caption(f"Reconnect unavailable: {error}")
+            if settings_columns[1].button(
+                "Test Connection",
+                key="files-test-connection",
+                use_container_width=True,
+            ):
+                try:
+                    test_token = _files_access_token(supabase, force=True)
+                    account = dropbox_integration.get_current_account(test_token)
+                    st.success("Connection works.")
+                    if account.get("email"):
+                        st.caption(account["email"])
+                except Exception as error:
+                    st.error(f"Connection test failed: {error}")
 
 
 def render_selected_page(current_page):
@@ -8833,8 +9021,8 @@ def render_selected_page(current_page):
         render_lightweight_dashboard_page()
     elif current_page == "Accounts & Access":
         render_accounts_access_page()
-    elif current_page == "Dropbox":
-        render_dropbox_page()
+    elif current_page == "Files":
+        render_files_page()
     elif current_page == "Products":
         render_placeholder_page("Products", "Full product sync is paused. Use Edition Ops for product edition fields.")
     elif current_page == "Mockups":
@@ -8863,8 +9051,6 @@ def render_selected_page(current_page):
         os_route_pages().render_persistence_check_page()
     elif current_page == "Product Uploads":
         render_product_uploads_page()
-    elif current_page == "Files":
-        os_route_pages().render_files_page()
     elif current_page in {"Ads", "Marketing Factory"}:
         get_ads_page().render_page()
     elif current_page in {"Settings", "Developer"}:
@@ -8892,8 +9078,12 @@ def main():
         return
 
     set_activity_actor(_activity_actor_for_user(current_os_user()))
-    if _dropbox_oauth_pending() and os_accounts.can_access_page(current_os_user(), "Dropbox"):
-        st.session_state.selected_page = "Dropbox"
+    if (
+        _dropbox_oauth_pending()
+        and os_accounts.is_admin(current_os_user())
+        and os_accounts.can_access_page(current_os_user(), "Files")
+    ):
+        st.session_state.selected_page = "Files"
 
     log_startup_stage("SIDEBAR START")
     render_sidebar()

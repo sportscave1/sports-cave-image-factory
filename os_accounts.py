@@ -42,7 +42,7 @@ PAGE_REGISTRY = (
         "label": "VA Training",
         "worker_assignable": True,
     },
-    {"key": "dropbox", "route": "Dropbox", "label": "Dropbox", "worker_assignable": True},
+    {"key": "files", "route": "Files", "label": "Files", "worker_assignable": True},
     {
         "key": "accounts_access",
         "route": "Accounts & Access",
@@ -50,7 +50,6 @@ PAGE_REGISTRY = (
         "worker_assignable": False,
     },
     {"key": "developer", "route": "Developer", "label": "Developer", "worker_assignable": False},
-    {"key": "files", "route": "Files", "label": "Files", "worker_assignable": False},
     {"key": "products", "route": "Products", "label": "Products", "worker_assignable": False},
     {
         "key": "product_assets",
@@ -77,7 +76,9 @@ PAGE_REGISTRY = (
 PAGE_ALIASES = {
     "Settings": "Developer",
     "Marketing Factory": "Ads",
+    "Dropbox": "Files",
 }
+PAGE_KEY_ALIASES = {"dropbox": "files"}
 PAGE_BY_KEY = {page["key"]: page for page in PAGE_REGISTRY}
 PAGE_BY_ROUTE = {page["route"]: page for page in PAGE_REGISTRY}
 DATABASE_URL_ENV_KEYS = (
@@ -119,6 +120,11 @@ def page_key_for_route(route):
     return page["key"] if page else ""
 
 
+def normalise_page_key(page_key):
+    clean_key = str(page_key or "").strip()
+    return PAGE_KEY_ALIASES.get(clean_key, clean_key)
+
+
 def worker_assignable_pages():
     return tuple(page for page in PAGE_REGISTRY if page["worker_assignable"])
 
@@ -134,9 +140,9 @@ def timezone_for_user(user):
 
 def permission_keys(user):
     return {
-        str(key or "").strip()
+        normalise_page_key(key)
         for key in (user or {}).get("page_permissions", ())
-        if str(key or "").strip()
+        if normalise_page_key(key)
     }
 
 
@@ -149,7 +155,7 @@ def can_access_page(user, route_or_key):
         return False
     if is_admin(user):
         return True
-    page = PAGE_BY_KEY.get(str(route_or_key or "").strip())
+    page = PAGE_BY_KEY.get(normalise_page_key(route_or_key))
     if page is None:
         page = PAGE_BY_ROUTE.get(normalise_route(route_or_key))
     if not page or not page.get("worker_assignable"):
@@ -372,7 +378,13 @@ class PostgresAccountStore:
     @staticmethod
     def _replace_permissions(cur, user_id, page_keys):
         valid_keys = {page["key"] for page in worker_assignable_pages()}
-        selected = sorted({str(key) for key in page_keys or () if str(key) in valid_keys})
+        selected = sorted(
+            {
+                normalise_page_key(key)
+                for key in page_keys or ()
+                if normalise_page_key(key) in valid_keys
+            }
+        )
         cur.execute("DELETE FROM os_user_page_permissions WHERE user_id=%s", (str(user_id),))
         for page_key in selected:
             cur.execute(
