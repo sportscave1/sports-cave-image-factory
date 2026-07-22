@@ -392,7 +392,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertFalse(app_test.exception)
         self.assertIn("Access not approved", [title.value for title in app_test.title])
 
-    def test_admin_can_render_files_setup_page_without_env_vars(self):
+    def test_admin_without_server_credentials_sees_clean_files_unavailable(self):
         with patch.dict(
             "os.environ",
             {
@@ -421,25 +421,22 @@ class AccountAccessTests(unittest.TestCase):
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
-        self.assertIn("Files", [title.value for title in app_test.title])
-        self.assertIn("Files setup is not complete.", text)
+        self.assertIn("Files unavailable", text)
+        self.assertNotIn("Connection settings", text)
 
     def test_files_page_uses_server_refresh_token_without_connect_step(self):
-        root_entry = {
+        root_metadata = {
             ".tag": "folder",
             "name": dropbox_integration.DROPBOX_ROOT_FOLDER,
-            "path_display": "/Sports Cave OS Assets",
+            "path_display": "/Sportscave Team Folder",
         }
         file_entry = {
             ".tag": "file",
             "name": "collector.pdf",
-            "path_display": "/Sports Cave OS Assets/collector.pdf",
+            "path_display": "/Sportscave Team Folder/collector.pdf",
             "server_modified": "2026-07-22T01:30:00Z",
             "size": 2048,
         }
-
-        def list_folder(_token, path="", **_kwargs):
-            return [root_entry] if not path else [file_entry]
 
         with patch.dict(
             "os.environ",
@@ -460,8 +457,12 @@ class AccountAccessTests(unittest.TestCase):
             },
         ) as resolve_server_auth, patch.object(
             dropbox_integration,
+            "find_team_folder",
+            return_value=root_metadata["path_display"],
+        ) as find_team_folder, patch.object(
+            dropbox_integration,
             "list_folder",
-            side_effect=list_folder,
+            return_value=[file_entry],
         ), patch.object(
             dropbox_integration,
             "file_open_details",
@@ -484,27 +485,218 @@ class AccountAccessTests(unittest.TestCase):
             app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
             app_test.session_state["selected_page"] = "Files"
             app_test.run(timeout=20)
-            next(button for button in app_test.button if button.label == "Open").click().run(
-                timeout=20
-            )
+            opening_labels = [button.label for button in app_test.button]
+            self.assertIn("Sportscave Team Folder", opening_labels)
+            self.assertNotIn("Back", opening_labels)
+            self.assertNotIn("Refresh", opening_labels)
+            next(
+                button for button in app_test.button
+                if button.label == "Sportscave Team Folder"
+            ).click().run(timeout=20)
+            next(
+                button for button in app_test.button
+                if "collector.pdf" in button.label
+            ).click().run(timeout=20)
 
         text = self._app_text(app_test)
         button_labels = [button.label for button in app_test.button]
         self.assertFalse(app_test.exception)
-        self.assertIn("Files", [title.value for title in app_test.title])
-        self.assertIn("collector.pdf", text)
-        self.assertIn("Open", button_labels)
+        self.assertTrue(any("collector.pdf" in label for label in button_labels))
+        self.assertNotIn("Open", button_labels)
         self.assertNotIn("Connect Files", button_labels)
         self.assertNotIn("Test Connection", button_labels)
         self.assertNotIn("Reconnect Files", text)
+        self.assertNotIn("Connection settings", text)
         self.assertNotIn("Upload test", text)
         resolve_server_auth.assert_called()
+        find_team_folder.assert_called()
         file_open_details.assert_called_once_with(
             "access-token",
-            "/Sports Cave OS Assets/collector.pdf",
+            "/Sportscave Team Folder/collector.pdf",
         )
 
-    def test_admin_missing_refresh_token_shows_setup_message_not_blank_page(self):
+    def test_files_browses_subfolders_with_breadcrumb_and_empty_folder_state(self):
+        root_path = "/Sportscave Team Folder"
+        mockups_path = f"{root_path}/05 Mockups"
+        folder_entry = {
+            ".tag": "folder",
+            "name": "05 Mockups",
+            "path_display": mockups_path,
+        }
+
+        def list_folder(_token, path="", **_kwargs):
+            return [folder_entry] if path == root_path else []
+
+        with patch.dict(
+            "os.environ",
+            {
+                "DROPBOX_APP_KEY": "app-key",
+                "DROPBOX_APP_SECRET": "app-secret",
+                "DROPBOX_REFRESH_TOKEN": "server-refresh-token",
+                "DROPBOX_ACCESS_TOKEN": "",
+            },
+        ), patch.object(
+            dropbox_integration,
+            "resolve_server_auth",
+            return_value={
+                "access_token": "shared-access-token",
+                "source": "refresh_token",
+                "account": {"email": "hello@sportscave.com.au"},
+            },
+        ), patch.object(
+            dropbox_integration,
+            "find_team_folder",
+            return_value=root_path,
+        ), patch.object(
+            dropbox_integration,
+            "list_folder",
+            side_effect=list_folder,
+        ):
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
+            app_test.session_state["sports_cave_current_user"] = {
+                "id": "worker-1",
+                "username": "reina",
+                "display_name": "Reina",
+                "role": "worker",
+                "timezone": os_accounts.WORKER_TIMEZONE,
+                "is_active": True,
+                "page_permissions": ["files"],
+            }
+            app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+            app_test.session_state["selected_page"] = "Files"
+            app_test.run(timeout=20)
+
+            self.assertEqual(app_test.text_input, [])
+            self.assertNotIn("Back", [button.label for button in app_test.button])
+            self.assertNotIn("Refresh", [button.label for button in app_test.button])
+            next(
+                button for button in app_test.button
+                if button.label == "Sportscave Team Folder"
+            ).click().run(timeout=20)
+            next(
+                button for button in app_test.button
+                if "05 Mockups" in button.label
+            ).click().run(timeout=20)
+
+            self.assertIn("This folder is empty.", self._app_text(app_test))
+            breadcrumb_labels = [button.label for button in app_test.button]
+            self.assertIn("Files", breadcrumb_labels)
+            self.assertIn("Sportscave Team Folder", breadcrumb_labels)
+            self.assertIn("05 Mockups", breadcrumb_labels)
+            next(
+                button for button in app_test.button
+                if button.label == "Sportscave Team Folder"
+            ).click().run(timeout=20)
+
+        self.assertTrue(
+            any("05 Mockups" in button.label for button in app_test.button)
+        )
+        self.assertFalse(app_test.exception)
+
+    def test_missing_team_folder_reports_scope_problem_only_to_admin(self):
+        with patch.dict(
+            "os.environ",
+            {
+                "DROPBOX_APP_KEY": "app-key",
+                "DROPBOX_APP_SECRET": "app-secret",
+                "DROPBOX_REFRESH_TOKEN": "server-refresh-token",
+            },
+        ), patch.object(
+            dropbox_integration,
+            "resolve_server_auth",
+            return_value={
+                "access_token": "access-token",
+                "source": "refresh_token",
+                "account": {"email": "hello@sportscave.com.au"},
+            },
+        ), patch.object(
+            dropbox_integration,
+            "find_team_folder",
+            side_effect=dropbox_integration.DropboxFolderAccessError(
+                "folder not visible",
+                reason="not_visible",
+            ),
+        ):
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
+            app_test.session_state["sports_cave_current_user"] = {
+                "id": "admin-1",
+                "username": "nathan",
+                "display_name": "Nathan",
+                "role": "admin",
+                "timezone": os_accounts.ADMIN_TIMEZONE,
+                "is_active": True,
+                "page_permissions": [],
+            }
+            app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+            app_test.session_state["selected_page"] = "Files"
+            app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertIn("Files unavailable", text)
+        self.assertIn("App Folder access", text)
+        self.assertIn("Full Dropbox access", text)
+        self.assertNotIn("Connection settings", text)
+
+    def test_admin_and_approved_va_use_the_same_server_dropbox_root(self):
+        root_path = "/Sportscave Team Folder"
+        users = (
+            {
+                "id": "admin-1",
+                "username": "nathan",
+                "display_name": "Nathan",
+                "role": "admin",
+                "timezone": os_accounts.ADMIN_TIMEZONE,
+                "is_active": True,
+                "page_permissions": [],
+            },
+            {
+                "id": "worker-1",
+                "username": "reina",
+                "display_name": "Reina",
+                "role": "worker",
+                "timezone": os_accounts.WORKER_TIMEZONE,
+                "is_active": True,
+                "page_permissions": ["files"],
+            },
+        )
+        with patch.dict(
+            "os.environ",
+            {
+                "DROPBOX_APP_KEY": "app-key",
+                "DROPBOX_APP_SECRET": "app-secret",
+                "DROPBOX_REFRESH_TOKEN": "shared-refresh-token",
+            },
+        ), patch.object(
+            dropbox_integration,
+            "resolve_server_auth",
+            return_value={
+                "access_token": "shared-access-token",
+                "source": "refresh_token",
+                "account": {"email": "hello@sportscave.com.au"},
+            },
+        ) as resolve_auth, patch.object(
+            dropbox_integration,
+            "find_team_folder",
+            return_value=root_path,
+        ) as find_root:
+            rendered = []
+            for user in users:
+                app_test = AppTest.from_file(str(ROOT / "app.py"))
+                app_test.session_state["sports_cave_authenticated"] = True
+                app_test.session_state["sports_cave_current_user"] = user
+                app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+                app_test.session_state["selected_page"] = "Files"
+                app_test.run(timeout=20)
+                rendered.append([button.label for button in app_test.button])
+
+        self.assertEqual(resolve_auth.call_count, 2)
+        self.assertEqual(find_root.call_count, 2)
+        self.assertTrue(all("Sportscave Team Folder" in labels for labels in rendered))
+
+    def test_admin_missing_refresh_token_shows_clean_failure_not_blank_page(self):
         with patch.dict(
             "os.environ",
             {
@@ -532,13 +724,13 @@ class AccountAccessTests(unittest.TestCase):
 
         self.assertFalse(app_test.exception)
         text = self._app_text(app_test)
-        self.assertIn("Files setup is not complete.", text)
-        self.assertIn("DROPBOX_REFRESH_TOKEN or DROPBOX_ACCESS_TOKEN", text)
+        self.assertIn("Files unavailable", text)
+        self.assertNotIn("DROPBOX_REFRESH_TOKEN", text)
         self.assertNotIn("This page failed to load", text)
         link_labels = [item.label for item in app_test.get("link_button")]
         self.assertNotIn("Connect Files", link_labels)
 
-    def test_invalid_server_refresh_token_shows_helpful_error(self):
+    def test_invalid_server_refresh_token_shows_clean_error(self):
         with patch.dict(
             "os.environ",
             {
@@ -569,16 +761,16 @@ class AccountAccessTests(unittest.TestCase):
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
-        self.assertIn("Files could not connect right now.", text)
+        self.assertIn("Files unavailable", text)
         self.assertNotIn("invalid_grant", text)
         self.assertNotIn("bad-refresh-token", text)
         self.assertNotIn("This page failed to load", text)
 
-    def test_admin_sees_access_token_fallback_warning_and_files_browser(self):
+    def test_admin_access_token_fallback_still_loads_without_technical_warning(self):
         file_entry = {
             ".tag": "file",
             "name": "collector.pdf",
-            "path_display": "/Sports Cave OS Assets/collector.pdf",
+            "path_display": "/Sportscave Team Folder/collector.pdf",
             "server_modified": "2026-07-22T01:30:00Z",
             "size": 2048,
         }
@@ -599,6 +791,10 @@ class AccountAccessTests(unittest.TestCase):
                 "source": "access_token",
                 "account": {"email": "files@sportscave.test"},
             },
+        ), patch.object(
+            dropbox_integration,
+            "find_team_folder",
+            return_value="/Sportscave Team Folder",
         ), patch.object(
             dropbox_integration,
             "list_folder",
@@ -617,23 +813,22 @@ class AccountAccessTests(unittest.TestCase):
             }
             app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
             app_test.session_state["selected_page"] = "Files"
-            app_test.session_state["files_browser_path"] = "/Sports Cave OS Assets"
+            app_test.session_state["files_browser_path"] = "/Sportscave Team Folder"
             app_test.run(timeout=20)
 
         text = self._app_text(app_test)
+        button_labels = [button.label for button in app_test.button]
         self.assertFalse(app_test.exception)
-        self.assertIn("collector.pdf", text)
-        self.assertIn(
-            "Using temporary Dropbox access token. Refresh token recommended.",
-            text,
-        )
+        self.assertTrue(any("collector.pdf" in label for label in button_labels))
+        self.assertNotIn("temporary Dropbox access token", text)
         self.assertNotIn("Reconnect Files", text)
+        self.assertNotIn("Connection settings", text)
 
     def test_staff_access_token_fallback_has_no_token_warning(self):
         file_entry = {
             ".tag": "file",
             "name": "collector.pdf",
-            "path_display": "/Sports Cave OS Assets/collector.pdf",
+            "path_display": "/Sportscave Team Folder/collector.pdf",
             "server_modified": "2026-07-22T01:30:00Z",
             "size": 2048,
         }
@@ -656,6 +851,10 @@ class AccountAccessTests(unittest.TestCase):
             },
         ), patch.object(
             dropbox_integration,
+            "find_team_folder",
+            return_value="/Sportscave Team Folder",
+        ), patch.object(
+            dropbox_integration,
             "list_folder",
             return_value=[file_entry],
         ):
@@ -672,12 +871,13 @@ class AccountAccessTests(unittest.TestCase):
             }
             app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
             app_test.session_state["selected_page"] = "Files"
-            app_test.session_state["files_browser_path"] = "/Sports Cave OS Assets"
+            app_test.session_state["files_browser_path"] = "/Sportscave Team Folder"
             app_test.run(timeout=20)
 
         text = self._app_text(app_test)
+        button_labels = [button.label for button in app_test.button]
         self.assertFalse(app_test.exception)
-        self.assertIn("collector.pdf", text)
+        self.assertTrue(any("collector.pdf" in label for label in button_labels))
         self.assertNotIn("temporary Dropbox access token", text)
         self.assertNotIn("refresh token", text.casefold())
         self.assertNotIn("Connection settings", text)

@@ -2139,6 +2139,95 @@ def inject_styles():
             padding: 0.75rem 0.85rem;
         }
 
+        .st-key-files-team-folder-open {
+            margin: 2rem 0 0 0.2rem;
+            max-width: 230px;
+        }
+
+        .st-key-files-team-folder-open button {
+            align-items: center;
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            border-radius: 6px !important;
+            box-shadow: none !important;
+            color: #171717 !important;
+            display: flex;
+            flex-direction: column;
+            font-size: 0.96rem;
+            font-weight: 540;
+            gap: 0.35rem;
+            height: 155px;
+            justify-content: center;
+            line-height: 1.25;
+            padding: 0.65rem;
+            white-space: normal;
+        }
+
+        .st-key-files-team-folder-open button::before {
+            content: "📁";
+            display: block;
+            font-size: 4.9rem;
+            line-height: 1;
+        }
+
+        .st-key-files-team-folder-open button:hover {
+            background: #EAF3FC !important;
+            border-color: #B7D6F2 !important;
+            color: #171717 !important;
+        }
+
+        [class*="st-key-files-crumb-"] button {
+            background: transparent !important;
+            border: 0 !important;
+            border-radius: 4px !important;
+            box-shadow: none !important;
+            color: #3A3A3A !important;
+            font-size: 0.82rem;
+            font-weight: 520;
+            min-height: 2rem;
+            padding: 0.2rem 0.4rem;
+        }
+
+        [class*="st-key-files-crumb-"] button:hover {
+            background: #EDF4FA !important;
+            color: #111111 !important;
+        }
+
+        [class*="st-key-files-crumb-"] button:disabled {
+            background: transparent !important;
+            border: 0 !important;
+            color: #171717 !important;
+            opacity: 1 !important;
+        }
+
+        [class*="st-key-files-entry-"] button {
+            background: #FFFFFF !important;
+            border: 1px solid transparent !important;
+            border-radius: 5px !important;
+            box-shadow: none !important;
+            color: #171717 !important;
+            font-size: 0.86rem;
+            font-weight: 520;
+            justify-content: flex-start;
+            line-height: 1.25;
+            min-height: 4.8rem;
+            padding: 0.7rem;
+            text-align: left;
+            white-space: normal;
+        }
+
+        [class*="st-key-files-entry-"] button:hover {
+            background: #EAF3FC !important;
+            border-color: #B7D6F2 !important;
+            color: #171717 !important;
+        }
+
+        .sc-files-empty {
+            color: #6A6A6A;
+            font-size: 0.88rem;
+            padding: 2rem 0.35rem;
+        }
+
         .sc-task-card {
             background: #FFFFFF;
             border: 1px solid #E3DDCF;
@@ -8773,7 +8862,7 @@ def _dropbox_handle_callback(user):
         refresh_token = token_data["refresh_token"]
         access_token = dropbox_integration.refresh_access_token(refresh_token)
         account = dropbox_integration.get_current_account(access_token)
-        dropbox_integration.ensure_folder_structure(access_token)
+        dropbox_integration.find_team_folder(access_token)
         supabase = importlib.import_module("supabase_backend")
         saved = supabase.save_dropbox_connection(
             refresh_token,
@@ -8792,6 +8881,7 @@ def _dropbox_handle_callback(user):
         st.session_state.pop("files_access_token", None)
         st.session_state.pop("files_connection_status", None)
         st.session_state.pop("files_directory_cache", None)
+        st.session_state.pop("files_team_root", None)
         st.session_state.pop("files_browser_path", None)
         with suppress(Exception):
             st.query_params.clear()
@@ -8892,17 +8982,20 @@ def _files_directory_entries(access_token, path, *, force=False):
     return entries
 
 
-def _files_initial_path(access_token):
-    root_entries = _files_directory_entries(access_token, "")
-    return dropbox_integration.preferred_browser_root(root_entries)
-
-
-def _files_parent_path(path):
-    clean_path = dropbox_integration.normalize_dropbox_path(path)
-    if not clean_path:
-        return ""
-    parts = clean_path.strip("/").split("/")
-    return "/" + "/".join(parts[:-1]) if len(parts) > 1 else ""
+def _files_team_root(access_token, *, force=False):
+    cached = st.session_state.get("files_team_root") or {}
+    if (
+        not force
+        and cached.get("path")
+        and cached.get("loaded_at", 0) + 60 > time.monotonic()
+    ):
+        return str(cached["path"])
+    root_path = dropbox_integration.find_team_folder(access_token)
+    st.session_state["files_team_root"] = {
+        "path": root_path,
+        "loaded_at": time.monotonic(),
+    }
+    return root_path
 
 
 def _files_modified_label(value, user):
@@ -8916,11 +9009,17 @@ def _files_modified_label(value, user):
         return clean_value
 
 
-def _files_item_type(entry):
+def _files_item_icon(entry):
     if str(entry.get(".tag") or "").casefold() == "folder":
-        return "Folder"
-    extension = Path(str(entry.get("name") or "")).suffix.lstrip(".").upper()
-    return extension or "File"
+        return "📁"
+    extension = Path(str(entry.get("name") or "")).suffix.casefold()
+    if extension in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+        return "🖼️"
+    if extension == ".pdf":
+        return "📕"
+    if extension in {".zip", ".rar", ".7z"}:
+        return "🗜️"
+    return "📄"
 
 
 def _render_files_open_dialog(access_token, entry):
@@ -8952,99 +9051,86 @@ def _render_files_open_dialog(access_token, entry):
             dialog_body()
 
 
-def _render_files_breadcrumb(current_path):
-    parts = [part for part in current_path.strip("/").split("/") if part]
-    labels = ["Files", *parts]
-    paths = [""]
-    for index in range(len(parts)):
-        paths.append("/" + "/".join(parts[: index + 1]))
-    st.caption(" / ".join(labels))
-    columns = st.columns([max(1, min(len(label), 4)) for label in labels])
-    for index, (column, label, path) in enumerate(zip(columns, labels, paths)):
+def _render_files_breadcrumb(current_path, root_path):
+    items = dropbox_integration.breadcrumb_items(current_path, root_path)
+    columns = st.columns([max(0.65, min(len(label) / 5, 3.2)) for label, _ in items])
+    for index, (column, (label, path)) in enumerate(zip(columns, items)):
         if column.button(
             label,
-            key=f"files-crumb-{index}-{path}",
+            key=f"files-crumb-{index}-{hashlib.sha1(path.encode('utf-8')).hexdigest()[:10]}",
             use_container_width=True,
             disabled=path == current_path,
         ):
-            st.session_state["files_browser_path"] = path
+            if path:
+                st.session_state["files_browser_path"] = path
+            else:
+                st.session_state.pop("files_browser_path", None)
             st.rerun()
 
 
-def _render_files_browser(access_token, user):
-    if "files_browser_path" not in st.session_state:
-        st.session_state["files_browser_path"] = _files_initial_path(access_token)
+def _render_files_landing(root_path):
+    if st.button(
+        dropbox_integration.DROPBOX_TEAM_FOLDER,
+        key="files-team-folder-open",
+        use_container_width=False,
+    ):
+        st.session_state["files_browser_path"] = root_path
+        st.rerun()
+
+
+def _render_files_browser(access_token, user, root_path):
+    raw_path = st.session_state.get("files_browser_path")
+    if not raw_path:
+        _render_files_landing(root_path)
+        return
     current_path = dropbox_integration.normalize_dropbox_path(
-        st.session_state.get("files_browser_path")
+        raw_path
     )
+    if not dropbox_integration.path_is_within_root(current_path, root_path):
+        st.session_state.pop("files_browser_path", None)
+        _render_files_landing(root_path)
+        return
     st.session_state["files_browser_path"] = current_path
 
-    _render_files_breadcrumb(current_path)
-    controls = st.columns([0.8, 0.8, 4.4])
-    if controls[0].button(
-        "Back",
-        key="files-back",
-        use_container_width=True,
-        disabled=not current_path,
-    ):
-        st.session_state["files_browser_path"] = _files_parent_path(current_path)
-        st.rerun()
-    if controls[1].button("Refresh", key="files-refresh", use_container_width=True):
-        st.session_state.setdefault("files_directory_cache", {}).pop(current_path, None)
-        st.rerun()
-    search = controls[2].text_input(
-        "Filter current folder",
-        key="files-current-folder-search",
-        placeholder="Search this folder",
-        label_visibility="collapsed",
-    ).strip().casefold()
+    _render_files_breadcrumb(current_path, root_path)
 
     try:
         entries = _files_directory_entries(access_token, current_path)
     except Exception:
         st.info("This folder could not be loaded right now.")
         return
-    if search:
-        entries = [
-            entry
-            for entry in entries
-            if search in str(entry.get("name") or "").casefold()
-        ]
-
-    header = st.columns([0.75, 3.6, 1.6, 1, 0.8])
-    for column, label in zip(header, ("Type", "Name", "Modified", "Size", "")):
-        column.markdown(f"**{label}**")
     if not entries:
         st.markdown(
-            '<div class="sc-empty-note">No files or folders found.</div>',
+            '<div class="sc-files-empty">This folder is empty.</div>',
             unsafe_allow_html=True,
         )
         return
 
     file_to_open = None
+    grid = st.columns(4)
     for index, entry in enumerate(entries):
         tag = str(entry.get(".tag") or "").casefold()
         path = dropbox_integration.normalize_dropbox_path(
             entry.get("path_display") or entry.get("path_lower") or ""
         )
-        columns = st.columns([0.75, 3.6, 1.6, 1, 0.8])
-        columns[0].caption(_files_item_type(entry))
-        columns[1].write(str(entry.get("name") or "Untitled"))
-        columns[2].caption(_files_modified_label(entry.get("server_modified"), user))
-        columns[3].caption(
-            "" if tag == "folder" else dropbox_integration.format_file_size(entry.get("size"))
-        )
-        if columns[4].button(
-            "Open",
-            key=f"files-open-{index}-{path}",
-            use_container_width=True,
-        ):
-            if tag == "folder":
-                st.session_state["files_browser_path"] = path
-                st.rerun()
-            else:
-                file_to_open = entry
-        st.divider()
+        name = str(entry.get("name") or "Untitled")
+        key_digest = hashlib.sha1(path.encode("utf-8")).hexdigest()[:12]
+        with grid[index % len(grid)]:
+            if st.button(
+                f"{_files_item_icon(entry)}  {name}",
+                key=f"files-entry-{tag}-{key_digest}",
+                use_container_width=True,
+            ):
+                if tag == "folder":
+                    st.session_state["files_browser_path"] = path
+                    st.rerun()
+                else:
+                    file_to_open = entry
+            modified = _files_modified_label(entry.get("server_modified"), user)
+            size = "" if tag == "folder" else dropbox_integration.format_file_size(entry.get("size"))
+            meta = " · ".join(value for value in (modified, size) if value)
+            if meta:
+                st.caption(meta)
     if file_to_open:
         _render_files_open_dialog(access_token, file_to_open)
 
@@ -9056,7 +9142,6 @@ def render_files_page():
         st.caption("This page is not available for your account.")
         return
 
-    st.title("Files")
     if os_accounts.is_admin(user):
         _dropbox_handle_callback(user)
 
@@ -9067,57 +9152,27 @@ def render_files_page():
     try:
         access_token = _files_access_token(supabase)
     except Exception:
-        if os_accounts.is_admin(user):
-            config = dropbox_integration.dropbox_config()
-            has_server_token = bool(config.get("refresh_token") or config.get("access_token"))
-            if has_server_token:
-                st.info("Files could not connect right now.")
-            else:
-                st.warning("Files setup is not complete.")
-            with st.expander("Connection settings", expanded=False):
-                if has_server_token:
-                    st.caption("Server Dropbox credentials could not be verified.")
-                else:
-                    st.caption("Add DROPBOX_REFRESH_TOKEN or DROPBOX_ACCESS_TOKEN in Render.")
-                st.caption("OAuth reconnect is available only as a manual fallback.")
-                try:
-                    connect_url = _prepare_dropbox_connect_url()
-                    if hasattr(st, "link_button"):
-                        st.link_button("Reconnect Files", connect_url, use_container_width=True)
-                    else:
-                        st.markdown(f"[Reconnect Files]({connect_url})")
-                except Exception:
-                    st.caption("Reconnect is unavailable until OAuth settings are complete.")
-        else:
-            st.info("Files unavailable")
+        st.info("Files unavailable")
         return
 
-    status = _files_server_status()
-    if os_accounts.is_admin(user) and status.get("mode") == "access_token":
-        st.warning("Using temporary Dropbox access token. Refresh token recommended.")
+    try:
+        root_path = _files_team_root(access_token)
+    except dropbox_integration.DropboxFolderAccessError as error:
+        st.info("Files unavailable")
+        if os_accounts.is_admin(user):
+            if error.reason == "permission":
+                st.caption("The connected Dropbox app does not have permission to browse files.")
+            else:
+                st.caption(
+                    "Sportscave Team Folder is not visible to this Dropbox app. "
+                    "If the app uses App Folder access, change it to Full Dropbox access and reconnect."
+                )
+        return
+    except Exception:
+        st.info("Files unavailable")
+        return
 
-    _render_files_browser(access_token, user)
-
-    if os_accounts.is_admin(user):
-        with st.expander("Connection settings", expanded=False):
-            st.caption(status.get("message") or "Connected using server refresh token")
-            root_label = dropbox_integration.configured_root_path()
-            st.caption(f"Root: {root_label or '/'}")
-            account_label = status.get("account_name") or status.get("account_email") or "Connected"
-            st.caption(str(account_label))
-            if st.button(
-                "Test Connection",
-                key="files-test-connection",
-                use_container_width=True,
-            ):
-                try:
-                    test_token = _files_access_token(supabase, force=True)
-                    account = dropbox_integration.get_current_account(test_token)
-                    st.success("Connection works.")
-                    if account.get("email"):
-                        st.caption(account["email"])
-                except Exception:
-                    st.error("Connection test failed. Please check the Render credentials.")
+    _render_files_browser(access_token, user, root_path)
 
 
 def render_selected_page(current_page):

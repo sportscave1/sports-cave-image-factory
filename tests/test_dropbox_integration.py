@@ -188,7 +188,7 @@ class DropboxIntegrationTests(unittest.TestCase):
     def test_configured_root_path_defaults_and_can_be_overridden(self):
         self.assertEqual(
             dropbox_integration.configured_root_path({"root_path": ""}),
-            "/Sports Cave OS Assets",
+            "/Sportscave Team Folder",
         )
         self.assertEqual(
             dropbox_integration.configured_root_path({"root_path": "/Team Files"}),
@@ -209,10 +209,10 @@ class DropboxIntegrationTests(unittest.TestCase):
         self.assertIn("state=state-1", url)
         self.assertIn("redirect_uri=https%3A%2F%2Fexample.test%2Fdropbox%2Fcallback", url)
 
-    def test_upload_path_uses_selected_app_folder(self):
+    def test_upload_path_uses_selected_team_folder(self):
         path = dropbox_integration.dropbox_upload_path("research_images", "hero.jpg")
 
-        self.assertEqual(path, "/Sports Cave OS Assets/09 Research Images/hero.jpg")
+        self.assertEqual(path, "/Sportscave Team Folder/09 Research Images/hero.jpg")
 
     def test_paths_are_normalized_for_dropbox(self):
         self.assertEqual(
@@ -257,6 +257,129 @@ class DropboxIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["path"], "/Sports Cave OS Assets")
         self.assertFalse(payload["recursive"])
         self.assertEqual(payload["limit"], 2000)
+
+    def test_list_folder_uses_dropbox_pagination_without_recursive_scan(self):
+        first_page = {
+            "entries": [{".tag": "folder", "name": "01 Artwork"}],
+            "has_more": True,
+            "cursor": "cursor-1",
+        }
+        second_page = {
+            "entries": [{".tag": "file", "name": "collector.pdf"}],
+            "has_more": False,
+        }
+        with patch.object(
+            dropbox_integration,
+            "dropbox_rpc",
+            side_effect=[first_page, second_page],
+        ) as rpc:
+            entries = dropbox_integration.list_folder(
+                "access-token",
+                "/Sportscave Team Folder",
+                max_entries=10,
+            )
+
+        self.assertEqual([entry["name"] for entry in entries], ["01 Artwork", "collector.pdf"])
+        self.assertEqual(rpc.call_args_list[0].args[1], "files/list_folder")
+        self.assertFalse(rpc.call_args_list[0].args[2]["recursive"])
+        self.assertEqual(rpc.call_args_list[1].args[1], "files/list_folder/continue")
+        self.assertEqual(rpc.call_args_list[1].args[2], {"cursor": "cursor-1"})
+
+    def test_find_team_folder_resolves_real_dropbox_metadata(self):
+        metadata = {
+            ".tag": "folder",
+            "name": "Sportscave Team Folder",
+            "path_display": "/Sportscave Team Folder",
+        }
+        with patch.object(
+            dropbox_integration,
+            "get_file_metadata",
+            return_value=metadata,
+        ) as get_metadata, patch.object(
+            dropbox_integration,
+            "list_folder",
+        ) as list_folder:
+            path = dropbox_integration.find_team_folder("access-token")
+
+        self.assertEqual(path, "/Sportscave Team Folder")
+        get_metadata.assert_called_once_with("access-token", "/Sportscave Team Folder")
+        list_folder.assert_not_called()
+
+    def test_find_team_folder_can_match_display_case_from_root_listing(self):
+        with patch.object(
+            dropbox_integration,
+            "get_file_metadata",
+            side_effect=dropbox_integration.DropboxApiError("path/not_found/"),
+        ), patch.object(
+            dropbox_integration,
+            "list_folder",
+            return_value=[
+                {
+                    ".tag": "folder",
+                    "name": "SPORTSCAVE TEAM FOLDER",
+                    "path_display": "/SPORTSCAVE TEAM FOLDER",
+                }
+            ],
+        ):
+            path = dropbox_integration.find_team_folder("access-token")
+
+        self.assertEqual(path, "/SPORTSCAVE TEAM FOLDER")
+
+    def test_missing_team_folder_reports_possible_app_folder_restriction(self):
+        with patch.object(
+            dropbox_integration,
+            "get_file_metadata",
+            side_effect=dropbox_integration.DropboxApiError("path/not_found/"),
+        ), patch.object(dropbox_integration, "list_folder", return_value=[]):
+            with self.assertRaises(dropbox_integration.DropboxFolderAccessError) as raised:
+                dropbox_integration.find_team_folder("access-token")
+
+        self.assertEqual(raised.exception.reason, "not_visible")
+        self.assertIn("App Folder access", str(raised.exception))
+
+    def test_team_folder_permission_error_is_distinct_from_empty_folder(self):
+        with patch.object(
+            dropbox_integration,
+            "get_file_metadata",
+            side_effect=dropbox_integration.DropboxApiError("path/no_permission/"),
+        ), patch.object(
+            dropbox_integration,
+            "list_folder",
+            side_effect=dropbox_integration.DropboxApiError("missing_scope/files.metadata.read"),
+        ):
+            with self.assertRaises(dropbox_integration.DropboxFolderAccessError) as raised:
+                dropbox_integration.find_team_folder("access-token")
+
+        self.assertEqual(raised.exception.reason, "permission")
+        self.assertIn("permission", str(raised.exception).casefold())
+
+    def test_breadcrumbs_stay_inside_team_folder(self):
+        items = dropbox_integration.breadcrumb_items(
+            "/Sportscave Team Folder/05 Mockups/Final",
+            "/Sportscave Team Folder",
+        )
+
+        self.assertEqual(
+            items,
+            (
+                ("Files", ""),
+                ("Sportscave Team Folder", "/Sportscave Team Folder"),
+                ("05 Mockups", "/Sportscave Team Folder/05 Mockups"),
+                ("Final", "/Sportscave Team Folder/05 Mockups/Final"),
+            ),
+        )
+        self.assertTrue(
+            dropbox_integration.path_is_within_root(
+                "/Sportscave Team Folder/05 Mockups",
+                "/Sportscave Team Folder",
+            )
+        )
+        self.assertFalse(
+            dropbox_integration.path_is_within_root(
+                "/Other Folder",
+                "/Sportscave Team Folder",
+            )
+        )
 
     def test_temporary_link_helper_is_used_for_file_open(self):
         metadata = {".tag": "file", "name": "collector.pdf"}

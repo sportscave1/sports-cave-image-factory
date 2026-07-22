@@ -9,7 +9,10 @@ DROPBOX_AUTHORIZE_URL = "https://www.dropbox.com/oauth2/authorize"
 DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token"
 DROPBOX_API_URL = "https://api.dropboxapi.com/2"
 DROPBOX_CONTENT_URL = "https://content.dropboxapi.com/2"
-DROPBOX_ROOT_FOLDER = "Sports Cave OS Assets"
+DROPBOX_TEAM_FOLDER = "Sportscave Team Folder"
+# Kept as the public root constant for older callers while the Files browser now
+# points at the real shared team folder.
+DROPBOX_ROOT_FOLDER = DROPBOX_TEAM_FOLDER
 DROPBOX_REFRESH_TOKEN_ENV = "DROPBOX_REFRESH_TOKEN"
 DROPBOX_ACCESS_TOKEN_ENV = "DROPBOX_ACCESS_TOKEN"
 DROPBOX_ROOT_PATH_ENV = "DROPBOX_ROOT_PATH"
@@ -34,6 +37,14 @@ class DropboxConfigError(RuntimeError):
 
 class DropboxApiError(RuntimeError):
     pass
+
+
+class DropboxFolderAccessError(DropboxApiError):
+    """The configured shared folder is outside the app's visible Dropbox root."""
+
+    def __init__(self, message, *, reason="not_visible"):
+        super().__init__(message)
+        self.reason = reason
 
 
 def dropbox_config():
@@ -244,11 +255,16 @@ def list_folder(access_token, path="", *, max_entries=2000):
         },
     )
     entries = list(response.get("entries") or [])
+    seen_cursors = set()
     while response.get("has_more") and len(entries) < limit:
+        cursor = str(response.get("cursor") or "").strip()
+        if not cursor or cursor in seen_cursors:
+            break
+        seen_cursors.add(cursor)
         response = dropbox_rpc(
             access_token,
             "files/list_folder/continue",
-            {"cursor": response.get("cursor")},
+            {"cursor": cursor},
         )
         entries.extend(response.get("entries") or [])
     return entries[:limit]
@@ -313,6 +329,101 @@ def preferred_browser_root(entries):
                 entry.get("path_display") or entry.get("path_lower") or configured_root
             )
     return configured_root
+
+
+def _is_missing_path_error(error):
+    message = str(error or "").casefold()
+    return any(
+        marker in message
+        for marker in (
+            "not_found",
+            "not found",
+            "path/not_folder",
+            "path/no_permission",
+            "insufficient_permissions",
+        )
+    )
+
+
+def _is_permission_error(error):
+    message = str(error or "").casefold()
+    return any(
+        marker in message
+        for marker in ("no_permission", "insufficient_permissions", "missing_scope")
+    )
+
+
+def find_team_folder(access_token, config=None):
+    """Resolve the configured team folder to real Dropbox folder metadata."""
+    configured_path = configured_root_path(config)
+    configured_name = configured_path.strip("/").split("/")[-1]
+    try:
+        metadata = get_file_metadata(access_token, configured_path)
+    except DropboxApiError as error:
+        if not _is_missing_path_error(error):
+            raise
+        metadata = {}
+
+    if metadata:
+        if str(metadata.get(".tag") or "").casefold() != "folder":
+            raise DropboxFolderAccessError(
+                f"{configured_name} exists in Dropbox but is not a folder.",
+                reason="not_folder",
+            )
+        return normalize_dropbox_path(
+            metadata.get("path_display") or metadata.get("path_lower") or configured_path
+        )
+
+    # Dropbox paths are case-insensitive, but a root listing also handles older
+    # folder names whose display casing differs from the configured path.
+    if configured_path.count("/") == 1:
+        try:
+            root_entries = list_folder(access_token, "")
+        except DropboxApiError as error:
+            if _is_permission_error(error):
+                raise DropboxFolderAccessError(
+                    "The Dropbox app does not have permission to browse files.",
+                    reason="permission",
+                ) from error
+            raise
+        for entry in root_entries:
+            if (
+                str(entry.get(".tag") or "").casefold() == "folder"
+                and str(entry.get("name") or "").casefold() == configured_name.casefold()
+            ):
+                return normalize_dropbox_path(
+                    entry.get("path_display") or entry.get("path_lower") or configured_path
+                )
+
+    raise DropboxFolderAccessError(
+        (
+            f"{configured_name} is not visible to this Dropbox app. "
+            "The app may be restricted to App Folder access."
+        ),
+        reason="not_visible",
+    )
+
+
+def path_is_within_root(path, root_path):
+    clean_path = normalize_dropbox_path(path).casefold()
+    clean_root = normalize_dropbox_path(root_path).casefold()
+    return bool(clean_root and (clean_path == clean_root or clean_path.startswith(clean_root + "/")))
+
+
+def breadcrumb_items(current_path, root_path):
+    """Return Files plus root-relative breadcrumb labels and paths."""
+    clean_current = normalize_dropbox_path(current_path)
+    clean_root = normalize_dropbox_path(root_path)
+    if not path_is_within_root(clean_current, clean_root):
+        return (("Files", ""),)
+
+    root_parts = [part for part in clean_root.strip("/").split("/") if part]
+    current_parts = [part for part in clean_current.strip("/").split("/") if part]
+    items = [("Files", "")]
+    for index in range(len(root_parts) - 1, len(current_parts)):
+        path = "/" + "/".join(current_parts[: index + 1])
+        items.append((current_parts[index], path))
+    return tuple(items)
 
 
 def file_open_details(access_token, path):
