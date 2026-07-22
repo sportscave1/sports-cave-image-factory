@@ -109,9 +109,9 @@ class FakeDashboardBackend:
             "timezone": timezone_name,
             "status": "active",
             "top_tasks": [
-                {"task": "", "why": "", "time_blocked": "", "completed": False},
-                {"task": "", "why": "", "time_blocked": "", "completed": False},
-                {"task": "", "why": "", "time_blocked": "", "completed": False},
+                {"task": "", "why": "", "time_blocked": "", "completed": False, "status": ""},
+                {"task": "", "why": "", "time_blocked": "", "completed": False, "status": ""},
+                {"task": "", "why": "", "time_blocked": "", "completed": False, "status": ""},
             ],
             "additional_items": [],
             "no_grey_zone": {},
@@ -138,7 +138,8 @@ class FakeDashboardBackend:
         for sheet in self.daily_sheets:
             if sheet["id"] == sheet_id:
                 sheet["top_tasks"][index]["completed"] = completed
-                self._activity_row("daily_execution_mip_completed", f"Daily MIP completed: {sheet['top_tasks'][index]['task']}")
+                sheet["top_tasks"][index]["status"] = "done" if completed else ""
+                self._activity_row("daily_execution_mip_completed", f"Daily task completed: {sheet['top_tasks'][index]['task']}")
                 return dict(sheet)
         return {}
 
@@ -443,6 +444,29 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(sports_cave_dashboard.daily_execution_completed_count(sheet), 1)
         self.assertFalse(sports_cave_dashboard.daily_execution_all_mips_complete(sheet))
 
+    def test_daily_execution_task_statuses_count_as_complete(self):
+        sheet = {
+            "top_tasks": [
+                {"task": "One", "status": "done", "completed": True},
+                {"task": "Two", "status": "couldnt_finish", "completed": True},
+                {"task": "Three", "status": "", "completed": False},
+            ]
+        }
+
+        self.assertEqual(sports_cave_dashboard.daily_execution_completed_count(sheet), 2)
+        self.assertFalse(sports_cave_dashboard.daily_execution_all_tasks_complete(sheet))
+
+    def test_daily_execution_old_done_records_still_count_as_complete(self):
+        sheet = {
+            "top_tasks": [
+                {"task": "One", "completed": True},
+                {"task": "Two", "completed": True},
+                {"task": "Three", "completed": True},
+            ]
+        }
+
+        self.assertTrue(sports_cave_dashboard.daily_execution_all_tasks_complete(sheet))
+
     def test_daily_execution_all_mips_complete_permits_review(self):
         sheet = {
             "top_tasks": [
@@ -453,6 +477,49 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         }
 
         self.assertTrue(sports_cave_dashboard.daily_execution_all_mips_complete(sheet))
+
+    def test_daily_execution_panel_has_today_catchup_and_tomorrow_list_controls(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        panel_source = source[
+            source.index("def render_daily_execution_panel") :
+            source.index("\n\ndef render_task_group")
+        ]
+
+        self.assertIn("Daily Execution", panel_source)
+        self.assertIn("Create Today's List", panel_source)
+        self.assertIn("Create Tomorrow's List", panel_source)
+        self.assertIn("Tomorrow&apos;s list is ready.", panel_source)
+        self.assertIn('key="daily-execution-create-tomorrow-list"', panel_source)
+        self.assertNotIn("Generate Tomorrow's Execution Prompt", panel_source)
+        self.assertNotIn("Create Today's Sheet", panel_source)
+
+    def test_daily_execution_create_sheet_does_not_duplicate_same_date(self):
+        backend = FakeDashboardBackend()
+        user = {"id": "admin-1", "display_name": "Nathan"}
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            first = sports_cave_dashboard.create_daily_execution_sheet(user, date(2026, 7, 22), "Australia/Sydney")
+            second = sports_cave_dashboard.create_daily_execution_sheet(user, date(2026, 7, 22), "Australia/Sydney")
+
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(len(backend.daily_sheets), 1)
+
+    def test_daily_execution_panel_task_column_labels_are_business_terms(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        panel_source = source[
+            source.index("def render_daily_execution_panel") :
+            source.index("\n\ndef render_task_group")
+        ]
+
+        self.assertIn("**Task**", panel_source)
+        self.assertIn("**Details**", panel_source)
+        self.assertIn("**Time allocated**", panel_source)
+        self.assertIn("**Done / Couldn&apos;t finish**", panel_source)
+        self.assertIn("Save List", panel_source)
+        self.assertIn("Complete today's tasks to unlock review.", panel_source)
+        self.assertIn("Today's list has no tasks yet.", panel_source)
+        self.assertNotIn("Save MIPs", panel_source)
+        self.assertNotIn("MIP {index}", panel_source)
 
     def test_daily_execution_review_saves_ratings_and_reflections(self):
         backend = FakeDashboardBackend()

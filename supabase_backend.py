@@ -3245,7 +3245,7 @@ def _daily_execution_sheet_from_row(row):
 
 
 def _default_daily_top_tasks():
-    return [{"task": "", "why": "", "time_blocked": "", "completed": False} for _ in range(3)]
+    return [{"task": "", "why": "", "time_blocked": "", "completed": False, "status": ""} for _ in range(3)]
 
 
 def get_daily_execution_sheet(user_id, sheet_date):
@@ -3349,6 +3349,7 @@ def set_daily_execution_mip_completed(sheet_id, index, completed):
             task = dict(tasks[safe_index] or {})
             was_complete = bool(task.get("completed"))
             task["completed"] = bool(completed)
+            task["status"] = "done" if task["completed"] else ""
             tasks[safe_index] = task
             cur.execute(
                 """
@@ -3368,12 +3369,12 @@ def set_daily_execution_mip_completed(sheet_id, index, completed):
                     entity_type="daily_execution_sheet",
                     entity_id=str(sheet_id or "").strip(),
                     new_value={
-                        "message": f"Daily MIP completed: {task.get('task')}",
+                        "message": f"Daily task completed: {task.get('task')}",
                         "page": "Dashboard",
-                        "action_type": "daily_execution_mip_completed",
+                        "action_type": "daily_execution_task_completed",
                         "metadata": {"task": task.get("task") or "", "index": safe_index},
                     },
-                    reason=f"Daily MIP completed: {task.get('task')}",
+                    reason=f"Daily task completed: {task.get('task')}",
                     actor=str(row.get("user_name") or "sports_cave_os"),
                     source="Dashboard",
                 )

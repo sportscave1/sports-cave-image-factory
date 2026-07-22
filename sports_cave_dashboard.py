@@ -255,6 +255,9 @@ def complete_design_task_for_upload(task_id, task_text, mockup_scope, *, metadat
 DAILY_EXECUTION_TITLE = "Daily Task Execution Sheet - The 5 Million Dollar Man"
 DAILY_EXECUTION_STATUS_ACTIVE = "active"
 DAILY_EXECUTION_STATUS_COMPLETED = "completed"
+DAILY_TASK_STATUS_DONE = "done"
+DAILY_TASK_STATUS_COULDNT_FINISH = "couldnt_finish"
+DAILY_TASK_FINISHED_STATUSES = (DAILY_TASK_STATUS_DONE, DAILY_TASK_STATUS_COULDNT_FINISH)
 DAILY_RATING_FIELDS = (
     "Focus",
     "Attention",
@@ -268,7 +271,7 @@ DAILY_RATING_FIELDS = (
 
 def _blank_top_tasks():
     return [
-        {"task": "", "why": "", "time_blocked": "", "completed": False}
+        {"task": "", "why": "", "time_blocked": "", "completed": False, "status": ""}
         for _ in range(3)
     ]
 
@@ -281,16 +284,21 @@ def _normalise_top_tasks(items):
     rows = []
     for item in list(items or [])[:3]:
         item = dict(item or {})
+        status = _compact_text(item.get("status") or "").casefold()
+        if status not in DAILY_TASK_FINISHED_STATUSES:
+            status = DAILY_TASK_STATUS_DONE if bool(item.get("completed")) else ""
+        completed = status in DAILY_TASK_FINISHED_STATUSES
         rows.append(
             {
                 "task": _compact_text(item.get("task") or item.get("title") or ""),
                 "why": _compact_text(item.get("why") or item.get("outcome") or item.get("details") or ""),
                 "time_blocked": _compact_text(item.get("time_blocked") or item.get("time") or ""),
-                "completed": bool(item.get("completed")),
+                "completed": completed,
+                "status": status,
             }
         )
     while len(rows) < 3:
-        rows.append({"task": "", "why": "", "time_blocked": "", "completed": False})
+        rows.append({"task": "", "why": "", "time_blocked": "", "completed": False, "status": ""})
     return rows
 
 
@@ -451,15 +459,25 @@ def list_daily_execution_sheets(user, start_date, end_date, *, limit=10):
 
 
 def daily_execution_completed_count(sheet):
-    return sum(1 for task in (sheet or {}).get("top_tasks") or [] if task.get("task") and task.get("completed"))
+    return sum(1 for task in (sheet or {}).get("top_tasks") or [] if task.get("task") and daily_execution_task_finished(task))
 
 
 def daily_execution_filled_task_count(sheet):
     return sum(1 for task in (sheet or {}).get("top_tasks") or [] if task.get("task"))
 
 
-def daily_execution_all_mips_complete(sheet):
+def daily_execution_task_finished(task):
+    task = dict(task or {})
+    status = _compact_text(task.get("status") or "").casefold()
+    return status in DAILY_TASK_FINISHED_STATUSES or bool(task.get("completed"))
+
+
+def daily_execution_all_tasks_complete(sheet):
     return daily_execution_filled_task_count(sheet) == 3 and daily_execution_completed_count(sheet) == 3
+
+
+def daily_execution_all_mips_complete(sheet):
+    return daily_execution_all_tasks_complete(sheet)
 
 
 def daily_execution_alerts(sheet, local_now, *, user_name="Nathan"):
@@ -471,9 +489,9 @@ def daily_execution_alerts(sheet, local_now, *, user_name="Nathan"):
     filled = daily_execution_filled_task_count(sheet)
     complete = daily_execution_completed_count(sheet)
     if filled == 0:
-        alerts.append("Today's execution sheet has no MIP tasks yet.")
+        alerts.append("Today's list has no tasks yet.")
     if local_now.hour >= 15 and complete < 2:
-        alerts.append("Past 3pm: fewer than 2/3 MIPs are complete.")
+        alerts.append("Past 3pm: fewer than 2/3 tasks are complete.")
     if local_now.hour >= 19 and sheet.get("status") != DAILY_EXECUTION_STATUS_COMPLETED:
         alerts.append("Past 7pm: Daily Review is still open.")
     return alerts
@@ -485,8 +503,8 @@ def _sheet_summary(sheet):
     lines = [f"- {sheet.get('sheet_date')}: {sheet.get('status')}"]
     for index, task in enumerate(sheet.get("top_tasks") or [], start=1):
         if task.get("task"):
-            marker = "done" if task.get("completed") else "open"
-            lines.append(f"  MIP {index}: {task.get('task')} ({marker}) - {task.get('why') or 'No outcome noted'}")
+            marker = task.get("status") or ("done" if task.get("completed") else "open")
+            lines.append(f"  Task {index}: {task.get('task')} ({marker}) - {task.get('why') or 'No details noted'}")
     if sheet.get("daily_summary"):
         lines.append(f"  Summary: {_compact_text(sheet.get('daily_summary'))}")
     if sheet.get("tomorrow_intention"):
@@ -541,13 +559,13 @@ def build_tomorrow_execution_prompt(
     activity_entries,
     upcoming_events,
 ):
-    incomplete_mips = []
+    incomplete_tasks = []
     for task in (today_sheet or {}).get("top_tasks") or []:
-        if task.get("task") and not task.get("completed"):
-            incomplete_mips.append(f"- {task.get('task')} - {task.get('why') or 'No outcome noted'}")
+        if task.get("task") and not daily_execution_task_finished(task):
+            incomplete_tasks.append(f"- {task.get('task')} - {task.get('why') or 'No details noted'}")
     calendar_summary = _event_summary(upcoming_events or [])
     week_summary = "\n".join(_sheet_summary(sheet) for sheet in (week_sheets or [])[:7]) or "- No recent execution sheets loaded."
-    incomplete_text = "\n".join(incomplete_mips) if incomplete_mips else "- No incomplete MIPs from today."
+    incomplete_text = "\n".join(incomplete_tasks) if incomplete_tasks else "- No incomplete tasks from today."
     return f"""You are Nathan's Sports Cave 12 Week Year execution coach.
 
 Your job is to review the latest Sports Cave OS data and build tomorrow's execution plan.
@@ -556,7 +574,7 @@ Primary goal:
 Move Sports Cave toward $5,000,000 revenue through daily focused execution.
 
 Use the data below:
-- Today's completed and incomplete MIP tasks
+- Today's completed and incomplete tasks
 - Yesterday's execution sheet
 - Last 7 days of execution patterns
 - Activity Log
@@ -573,12 +591,12 @@ Identify:
 3. What is noise
 4. What matters most for revenue
 5. What must be protected tomorrow
-6. The top 3 Mission-Critical Tasks for tomorrow
+6. The top 3 tasks for tomorrow
 7. The small supporting tasks that keep momentum moving
 8. The one task that would make tomorrow a win even if everything else fails
 
 Create tomorrow's Daily Execution Sheet with:
-- Top 3 Mission-Critical Tasks
+- Top 3 tasks
 - Why each task matters
 - Suggested time block
 - Additional small tasks
@@ -589,8 +607,8 @@ Create tomorrow's Daily Execution Sheet with:
 Rules:
 - Prioritise revenue, product uploads, ads, mockups, customer/order issues, website improvements, and bottlenecks.
 - Do not overload the day.
-- Pick only 3 true MIPs.
-- Small tasks must support the MIPs.
+- Pick only 3 true priority tasks.
+- Small tasks must support the priority tasks.
 - If yesterday's same task was avoided, call it out.
 - If something is a distraction, say so.
 - Keep Nathan moving toward the 12 Week Year and $5M target.
@@ -600,7 +618,7 @@ SPORTS CAVE OS DATA
 Today's sheet:
 {_sheet_summary(today_sheet)}
 
-Incomplete MIPs:
+Incomplete tasks:
 {incomplete_text}
 
 Yesterday's sheet:
@@ -711,7 +729,8 @@ _ACTIVITY_LABELS = {
     "dashboard_task_completed": "Task completed",
     "daily_execution_completed": "Daily Review completed",
     "daily_execution_created": "Daily sheet created",
-    "daily_execution_mip_completed": "Daily MIP completed",
+    "daily_execution_mip_completed": "Daily task completed",
+    "daily_execution_task_completed": "Daily task completed",
     "design_prompt_saved": "Design prompt saved",
     "edition_product_updated": "Edition updated",
     "edition_updated": "Edition updated",
