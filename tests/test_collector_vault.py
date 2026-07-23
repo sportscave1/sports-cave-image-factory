@@ -616,6 +616,22 @@ class CollectorVaultApiTests(unittest.TestCase):
         self.assertNotIn("detail", response.json())
         self.assertIn("error", response.json())
 
+    def test_collector_api_exposes_only_short_deployment_revision(self):
+        revision = "12997c6fa76a1d25863816a77000c24e44e987b3"
+        with patch.dict(
+            os.environ,
+            {"RENDER_GIT_COMMIT": revision},
+            clear=False,
+        ):
+            response = TestClient(self.app).get(
+                "/api/collector-vault/bootstrap"
+            )
+        self.assertEqual(
+            response.headers["x-sports-cave-revision"],
+            revision[:12],
+        )
+        self.assertNotIn(revision, response.text)
+
     def test_bootstrap_loads_collection_when_optional_frame_table_is_missing(self):
         class MissingFrameTableError(RuntimeError):
             sqlstate = "42P01"

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from urllib.parse import quote
 
 import requests
@@ -28,6 +29,13 @@ def _cors_headers():
 def _json(payload, status_code=200):
     headers = _cors_headers()
     headers["Cache-Control"] = "no-store"
+    revision = str(
+        os.getenv("RENDER_GIT_COMMIT")
+        or os.getenv("GIT_COMMIT")
+        or ""
+    ).strip()
+    if revision:
+        headers["X-Sports-Cave-Revision"] = revision[:12]
     return JSONResponse(payload, status_code=status_code, headers=headers)
 
 
