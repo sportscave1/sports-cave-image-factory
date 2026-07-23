@@ -28,10 +28,14 @@ class CustomerCertificateVaultTests(unittest.TestCase):
             "write_orders",
             "read_products",
             "write_products",
+            "read_files",
+            "write_files",
             "customer_read_customers",
             "customer_read_orders",
         ):
             self.assertIn(scope, scopes)
+        self.assertNotIn("read_images", scopes)
+        self.assertNotIn("write_images", scopes)
 
     def test_customer_account_extension_enables_authenticated_backend_access(self):
         source = (
