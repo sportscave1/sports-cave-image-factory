@@ -175,11 +175,61 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertIn("collectCertificates(orderNodes, customer)", source)
         self.assertIn("View Certificate", source)
         self.assertIn("Download PDF", source)
-        self.assertIn("Your collection is waiting.", source)
+        self.assertIn("Your collection is waiting", source)
         self.assertNotIn("CollectorVaultRedesign", source)
         self.assertNotIn("review_prompt", source)
         self.assertNotIn("frame_product", source)
         self.assertNotIn("/api/collector-vault/bootstrap", source)
+
+    def test_phase_one_gallery_is_compact_premium_and_responsive(self):
+        source = EXTENSION.read_text(encoding="utf-8")
+        for removed in (
+            "Your Sports Cave Collector Vault",
+            "Collector Record",
+            "Latest addition",
+            "Active Collector",
+            "Verified Sports Cave Record",
+            "Numbered Collector Release",
+        ):
+            self.assertNotIn(removed, source)
+        self.assertIn('heading="My Collection"', source)
+        self.assertIn("authenticatedEditionLabel(certificates.length)", source)
+        self.assertIn('gridTemplateColumns="minmax(0, 1200px)"', source)
+        self.assertGreaterEqual(
+            source.count("repeat(auto-fit, minmax(min(100%"),
+            3,
+        )
+        self.assertIn('background="subdued"', source)
+        self.assertIn('objectFit="contain"', source)
+        self.assertIn('loading={eager ? "eager" : "lazy"}', source)
+        card = source[
+            source.index("function CertificateCard"):
+            source.index("function CertificatePreview")
+        ]
+        self.assertEqual(card.count('variant="primary"'), 1)
+        self.assertIn("View Certificate", card)
+        self.assertIn("Download PDF", card)
+        self.assertIn("Download Print", card)
+
+    def test_phase_one_viewer_uses_native_modal_and_existing_asset_urls(self):
+        source = EXTENSION.read_text(encoding="utf-8")
+        viewer = source[source.index("function CertificateViewer"):]
+        self.assertIn('id={modalId}', viewer)
+        self.assertIn('accessibilityLabel={`Certificate viewer for ${title}`}', viewer)
+        self.assertIn('size="max"', viewer)
+        self.assertIn("onAfterHide={onClose}", viewer)
+        self.assertIn('command="--hide"', viewer)
+        self.assertIn("certificate.certificate_preview_image_url", source)
+        self.assertIn("certificate.certificate_pdf_url", viewer)
+        self.assertIn("certificate.certificate_print_jpg_url", viewer)
+        self.assertIn("Download Certificate", viewer)
+        self.assertIn("Close", viewer)
+        self.assertNotIn("Order It Framed", source)
+        self.assertNotIn("Leave a Review", source)
+        self.assertNotIn("Judge.me", source)
+        self.assertNotIn("review_prompt", source)
+        self.assertNotIn("frame_product", source)
+        self.assertNotIn("/api/collector-vault/", source)
 
     def test_redesign_is_retained_but_not_the_production_module(self):
         production = EXTENSION.read_text(encoding="utf-8")
