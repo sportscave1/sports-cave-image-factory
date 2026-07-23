@@ -18,8 +18,8 @@ import {
 } from "./vault-utils.js";
 
 const DEFAULT_API_BASE_URL = "https://sports-cave-image-factory.onrender.com";
-const FRAME_PRODUCT_QUERY = `query CollectorVaultFrameProduct($handle: String!) {
-  product(handle: $handle) {
+const FRAME_PRODUCT_QUERY = `query CollectorVaultFrameProduct($id: ID!) {
+  product(id: $id) {
     id
     handle
     title
@@ -85,19 +85,20 @@ function CollectorVault() {
   useEffect(() => {
     let mounted = true;
     async function loadFrameProduct() {
-      if (!frameConfig?.available || !frameConfig.handle) {
+      if (!frameConfig?.available || !frameConfig.product_id) {
         setFrameVariant(null);
         return;
       }
       try {
         const response = /** @type {any} */ (await api.query(FRAME_PRODUCT_QUERY, {
-          variables: {handle: frameConfig.handle},
+          variables: {id: frameConfig.product_id},
         }));
         const product = response?.data?.product;
         const variant = chooseFrameVariant(
           product,
           frameConfig.variant_id,
-          frameConfig.handle,
+          "",
+          frameConfig.product_id,
         );
         if (mounted) setFrameVariant(variant);
       } catch (_error) {

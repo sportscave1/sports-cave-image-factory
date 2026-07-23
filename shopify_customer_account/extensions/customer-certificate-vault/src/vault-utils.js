@@ -54,8 +54,14 @@ export function chooseFrameVariant(
   product,
   configuredVariantId,
   expectedHandle = "framed-collector-certificate",
+  expectedProductId = "",
 ) {
-  if (!product || product.handle !== expectedHandle || !product.availableForSale) return null;
+  if (
+    !product
+    || (expectedHandle && product.handle !== expectedHandle)
+    || (expectedProductId && product.id !== expectedProductId)
+    || !product.availableForSale
+  ) return null;
   const variants = product.variants?.nodes || [];
   const selected = configuredVariantId
     ? variants.find((variant) => variant.id === configuredVariantId)

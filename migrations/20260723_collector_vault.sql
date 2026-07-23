@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS collector_frame_requests (
     frame_product_id TEXT NOT NULL,
     frame_variant_id TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'cart_created', 'ordered', 'failed', 'cancelled')),
     storefront_cart_id TEXT,
     checkout_url TEXT,
     framed_shopify_order_id TEXT,
@@ -49,13 +50,14 @@ CREATE TABLE IF NOT EXISTS collector_reviews (
     judge_me_product_id TEXT,
     rating SMALLINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
     review_title TEXT,
-    review_body TEXT NOT NULL,
+    review_body TEXT NOT NULL DEFAULT '',
     photo_bucket TEXT,
     photo_object_key TEXT,
     photo_mime_type TEXT,
     judge_me_review_id TEXT,
     judge_me_verification_status TEXT,
-    status TEXT NOT NULL DEFAULT 'submitting',
+    status TEXT NOT NULL DEFAULT 'submitting'
+        CHECK (status IN ('submitting', 'submitted', 'failed')),
     last_error TEXT,
     submitted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -69,10 +71,42 @@ CREATE INDEX IF NOT EXISTS idx_collector_reviews_customer_created
 CREATE INDEX IF NOT EXISTS idx_collector_reviews_status
     ON collector_reviews(status, updated_at DESC);
 
+ALTER TABLE collector_reviews
+    ALTER COLUMN review_body SET DEFAULT '';
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'collector_frame_requests_status_check'
+          AND conrelid = 'collector_frame_requests'::regclass
+    ) THEN
+        ALTER TABLE collector_frame_requests
+            ADD CONSTRAINT collector_frame_requests_status_check
+            CHECK (status IN ('pending', 'cart_created', 'ordered', 'failed', 'cancelled'))
+            NOT VALID;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'collector_reviews_status_check'
+          AND conrelid = 'collector_reviews'::regclass
+    ) THEN
+        ALTER TABLE collector_reviews
+            ADD CONSTRAINT collector_reviews_status_check
+            CHECK (status IN ('submitting', 'submitted', 'failed'))
+            NOT VALID;
+    END IF;
+END
+$$;
+
 ALTER TABLE collector_frame_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE collector_reviews ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON collector_frame_requests FROM anon, authenticated;
+REVOKE ALL ON collector_reviews FROM anon, authenticated;
 
 COMMENT ON TABLE collector_frame_requests IS
     'Server-only fulfilment links between an owned certificate and a framed-certificate Shopify line.';
 COMMENT ON TABLE collector_reviews IS
-    'Server-only Judge.me review submission state for delivered, customer-owned purchases.';
+    'Server-only Judge.me submission state; review content is transmitted directly and is not retained.';

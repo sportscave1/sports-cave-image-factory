@@ -103,6 +103,13 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertIn("frameRequest.checkout_url", source)
         self.assertIn("Continue to secure checkout", source)
 
+    def test_frame_product_lookup_uses_stable_shopify_gid(self):
+        source = EXTENSION.read_text(encoding="utf-8")
+        self.assertIn("query CollectorVaultFrameProduct($id: ID!)", source)
+        self.assertIn("product(id: $id)", source)
+        self.assertIn("variables: {id: frameConfig.product_id}", source)
+        self.assertNotIn("product(handle: $handle)", source)
+
     def test_mobile_layout_uses_wrapping_grids_and_touch_targets(self):
         source = EXTENSION.read_text(encoding="utf-8")
         self.assertGreaterEqual(source.count("repeat(auto-fit, minmax(min(100%"), 2)
@@ -123,7 +130,12 @@ class CustomerCertificateVaultTests(unittest.TestCase):
             / "src"
             / "vault-utils.js"
         ).read_text(encoding="utf-8"))
-        for secret in ("JUDGEME_PRIVATE_API_TOKEN", "SUPABASE_SERVICE_ROLE_KEY", "SHOPIFY_CLIENT_SECRET"):
+        for secret in (
+            "JUDGEME_PRIVATE_API_TOKEN",
+            "JUDGEME_PUBLIC_API_TOKEN",
+            "SUPABASE_SERVICE_ROLE_KEY",
+            "SHOPIFY_CLIENT_SECRET",
+        ):
             self.assertNotIn(secret, source)
 
     def test_existing_account_navigation_is_left_to_shopify_host(self):

@@ -24,6 +24,9 @@ CUSTOMER_B = "gid://shopify/Customer/202"
 SHOP_DOMAIN = "sports-cave.myshopify.com"
 CLIENT_ID = "collector-vault-client"
 SECRET = "collector-vault-test-secret"
+FRAME_PRODUCT_ID = "gid://shopify/Product/10332579103027"
+FRAME_VARIANT_ID = "gid://shopify/ProductVariant/53700496261427"
+FRAME_SKU = "SC-FCC-A4-BLK"
 
 
 def _segment(value):
@@ -69,6 +72,47 @@ def _certificate_row(customer=CUSTOMER_A):
         "purchase_date": "2026-06-29T10:00:00Z",
         "certificate_pdf_url": "https://cdn.example.com/certificate.pdf",
         "certificate_preview_image_url": "https://cdn.example.com/preview.png",
+    }
+
+
+def _frame_environment():
+    return {
+        "FRAMED_CERTIFICATE_PRODUCT_ID": FRAME_PRODUCT_ID,
+        "FRAMED_CERTIFICATE_VARIANT_ID": FRAME_VARIANT_ID,
+        "FRAMED_CERTIFICATE_PRODUCT_HANDLE": "framed-collector-certificate",
+    }
+
+
+def _frame_product_payload(*, status="ACTIVE", published=True, variant_available=True):
+    return {
+        "product": {
+            "id": FRAME_PRODUCT_ID,
+            "title": "Framed Collector Certificate",
+            "handle": "framed-collector-certificate",
+            "status": status,
+            "onlineStoreUrl": (
+                "https://www.sportscaveshop.com/products/framed-collector-certificate"
+                if published
+                else None
+            ),
+            "tracksInventory": False,
+            "variants": {
+                "nodes": [
+                    {
+                        "id": FRAME_VARIANT_ID,
+                        "sku": FRAME_SKU,
+                        "availableForSale": variant_available,
+                        "inventoryItem": {"tracked": False},
+                        "contextualPricing": {
+                            "price": {
+                                "amount": "99.0",
+                                "currencyCode": "AUD",
+                            }
+                        },
+                    }
+                ]
+            },
+        }
     }
 
 
@@ -183,6 +227,8 @@ class CollectorVaultEligibilityTests(unittest.TestCase):
                 {
                     "COLLECTOR_VAULT_ASSET_SIGNING_SECRET": SECRET,
                     "JUDGEME_PRIVATE_API_TOKEN": "private-test-token",
+                    "JUDGEME_PUBLIC_API_TOKEN": "public-test-token",
+                    "JUDGEME_SHOP_DOMAIN": SHOP_DOMAIN,
                 },
                 clear=False,
             ),
@@ -213,6 +259,8 @@ class CollectorVaultEligibilityTests(unittest.TestCase):
                 {
                     "COLLECTOR_VAULT_ASSET_SIGNING_SECRET": SECRET,
                     "JUDGEME_PRIVATE_API_TOKEN": "private-test-token",
+                    "JUDGEME_PUBLIC_API_TOKEN": "public-test-token",
+                    "JUDGEME_SHOP_DOMAIN": SHOP_DOMAIN,
                 },
                 clear=False,
             ),
@@ -230,6 +278,8 @@ class CollectorVaultEligibilityTests(unittest.TestCase):
                 {
                     "COLLECTOR_VAULT_ASSET_SIGNING_SECRET": SECRET,
                     "JUDGEME_PRIVATE_API_TOKEN": "private-test-token",
+                    "JUDGEME_PUBLIC_API_TOKEN": "public-test-token",
+                    "JUDGEME_SHOP_DOMAIN": SHOP_DOMAIN,
                 },
                 clear=False,
             ),
@@ -279,6 +329,173 @@ class CollectorVaultEligibilityTests(unittest.TestCase):
         self.assertTrue(first["gid://shopify/Order/44"])
         self.assertEqual(first, second)
         request.assert_called_once()
+
+
+class CollectorVaultReadinessTests(unittest.TestCase):
+    def setUp(self):
+        collector_vault._FRAME_PRODUCT_CACHE.clear()
+
+    def test_dedicated_signing_secret_is_required(self):
+        with patch.dict(
+            os.environ,
+            {
+                "SHOPIFY_CLIENT_SECRET": "shopify-session-test-secret",
+                "COLLECTOR_VAULT_ASSET_SIGNING_SECRET": "",
+            },
+            clear=True,
+        ):
+            with self.assertRaises(collector_vault.CollectorVaultUnavailableError):
+                collector_vault._asset_signing_secret()
+
+    def test_readiness_reports_configuration_states_without_values(self):
+        configured = {
+            **_frame_environment(),
+            "COLLECTOR_VAULT_ASSET_SIGNING_SECRET": SECRET,
+            "JUDGEME_PRIVATE_API_TOKEN": "private-test-token",
+            "JUDGEME_PUBLIC_API_TOKEN": "public-test-token",
+            "JUDGEME_SHOP_DOMAIN": SHOP_DOMAIN,
+        }
+        with (
+            patch.dict(os.environ, configured, clear=True),
+            patch.object(
+                collector_vault,
+                "get_frame_product",
+                return_value={
+                    "state": "framed_product_draft",
+                    "available": False,
+                },
+            ),
+        ):
+            readiness = collector_vault.collector_vault_readiness(
+                check_shopify=True
+            )
+        self.assertEqual(readiness["judge_me_state"], "judge_me_configured")
+        self.assertEqual(
+            readiness["framed_product_state"],
+            "framed_product_draft",
+        )
+        self.assertEqual(
+            readiness["signing_state"],
+            "signing_secret_configured",
+        )
+        self.assertEqual(
+            readiness["backend_state"],
+            "collector_vault_backend_ready",
+        )
+        self.assertNotIn("private-test-token", json.dumps(readiness))
+        self.assertNotIn(SECRET, json.dumps(readiness))
+
+    def test_readiness_reports_missing_configuration(self):
+        with patch.dict(os.environ, {}, clear=True):
+            readiness = collector_vault.collector_vault_readiness()
+        self.assertEqual(readiness["judge_me_state"], "judge_me_not_configured")
+        self.assertEqual(
+            readiness["framed_product_state"],
+            "framed_product_not_configured",
+        )
+        self.assertEqual(readiness["signing_state"], "signing_secret_missing")
+        self.assertEqual(
+            readiness["backend_state"],
+            "collector_vault_backend_not_ready",
+        )
+
+    def test_frame_product_uses_configured_product_gid_and_verifies_variant(self):
+        with (
+            patch.dict(os.environ, _frame_environment(), clear=True),
+            patch.object(
+                collector_vault.shopify_sync,
+                "graphql_request",
+                return_value=(_frame_product_payload(), "2026-04"),
+            ) as request,
+        ):
+            product = collector_vault.get_frame_product(force=True)
+        query = request.call_args.args[0]
+        variables = request.call_args.kwargs["variables"]
+        self.assertIn("product(id: $id)", query)
+        self.assertEqual(variables["id"], FRAME_PRODUCT_ID)
+        self.assertEqual(product["product_id"], FRAME_PRODUCT_ID)
+        self.assertEqual(product["variant_id"], FRAME_VARIANT_ID)
+        self.assertEqual(product["sku"], FRAME_SKU)
+        self.assertEqual(product["state"], "ready_for_purchase")
+        self.assertEqual(
+            product["contextual_price"],
+            {"amount": "99.0", "currency_code": "AUD"},
+        )
+        self.assertFalse(product["inventory_tracked"])
+
+    def test_frame_product_handle_rename_keeps_stable_product_identity(self):
+        payload = _frame_product_payload()
+        payload["product"]["handle"] = "framed-collector-certificate-renamed"
+        with (
+            patch.dict(os.environ, _frame_environment(), clear=True),
+            patch.object(
+                collector_vault.shopify_sync,
+                "graphql_request",
+                return_value=(payload, "2026-04"),
+            ),
+        ):
+            product = collector_vault.get_frame_product(force=True)
+        self.assertEqual(product["product_id"], FRAME_PRODUCT_ID)
+        self.assertEqual(product["state"], "ready_for_purchase")
+        self.assertEqual(
+            product["handle"],
+            "framed-collector-certificate-renamed",
+        )
+
+    def test_frame_product_draft_unpublished_and_unavailable_states_are_hidden(self):
+        scenarios = [
+            (_frame_product_payload(status="DRAFT"), "framed_product_draft"),
+            (
+                _frame_product_payload(published=False),
+                "framed_product_not_published",
+            ),
+            (
+                _frame_product_payload(variant_available=False),
+                "framed_variant_unavailable",
+            ),
+        ]
+        for payload, expected_state in scenarios:
+            with self.subTest(expected_state=expected_state):
+                collector_vault._FRAME_PRODUCT_CACHE.clear()
+                with (
+                    patch.dict(os.environ, _frame_environment(), clear=True),
+                    patch.object(
+                        collector_vault.shopify_sync,
+                        "graphql_request",
+                        return_value=(payload, "2026-04"),
+                    ),
+                ):
+                    product = collector_vault.get_frame_product(force=True)
+                self.assertEqual(product["state"], expected_state)
+                self.assertFalse(product["available"])
+
+    def test_handle_lookup_is_discovery_fallback_not_purchase_identity(self):
+        fallback_environment = {
+            "FRAMED_CERTIFICATE_VARIANT_ID": FRAME_VARIANT_ID,
+            "FRAMED_CERTIFICATE_PRODUCT_HANDLE": "framed-collector-certificate",
+        }
+        with (
+            patch.dict(os.environ, fallback_environment, clear=True),
+            patch.object(
+                collector_vault.shopify_sync,
+                "graphql_request",
+                return_value=(
+                    {
+                        "products": {
+                            "nodes": [_frame_product_payload()["product"]]
+                        }
+                    },
+                    "2026-04",
+                ),
+            ) as request,
+        ):
+            product = collector_vault.get_frame_product(force=True)
+        self.assertIn("products(first: 2", request.call_args.args[0])
+        self.assertEqual(
+            product["state"],
+            "framed_product_not_configured",
+        )
+        self.assertFalse(product["available"])
 
 
 class CollectorVaultReviewTests(unittest.TestCase):
@@ -339,6 +556,7 @@ class CollectorVaultReviewTests(unittest.TestCase):
                 os.environ,
                 {
                     "JUDGEME_PRIVATE_API_TOKEN": "private-token",
+                    "JUDGEME_PUBLIC_API_TOKEN": "public-token",
                     "JUDGEME_SHOP_DOMAIN": SHOP_DOMAIN,
                 },
                 clear=False,
@@ -359,6 +577,7 @@ class CollectorVaultReviewTests(unittest.TestCase):
             )
         self.assertEqual(captured["json"]["id"], "55")
         self.assertNotIn("product_title", captured["json"])
+        self.assertNotIn("public-token", json.dumps(captured["json"]))
         self.assertEqual(result["review_id"], "88")
 
     def test_review_text_is_plain_text_safe(self):
@@ -449,6 +668,55 @@ class CollectorVaultImplementationTests(unittest.TestCase):
         self.assertLess(verify_index, claim_index)
         self.assertLess(claim_index, background_index)
         self.assertIn("collector_vault.process_framed_order_paid(payload)", source)
+
+    def test_framed_order_ignores_request_reference_on_wrong_variant(self):
+        payload = {
+            "id": 9001,
+            "name": "#9001",
+            "customer": {"id": 101},
+            "line_items": [
+                {
+                    "variant_id": 999,
+                    "properties": [
+                        {
+                            "name": "_sports_cave_frame_request",
+                            "value": "fb09c2cf-1a8d-4bd9-9f50-c71d6300fd15",
+                        }
+                    ],
+                }
+            ],
+        }
+        with (
+            patch.dict(os.environ, _frame_environment(), clear=True),
+            patch.object(collector_vault.supabase_backend, "connect") as connect,
+        ):
+            result = collector_vault.process_framed_order_paid(payload)
+        self.assertEqual(result, {"updated": 0})
+        connect.assert_not_called()
+
+    def test_migration_keeps_collector_tables_server_only(self):
+        source = (ROOT / "migrations" / "20260723_collector_vault.sql").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            "REVOKE ALL ON collector_frame_requests FROM anon, authenticated",
+            source,
+        )
+        self.assertIn(
+            "REVOKE ALL ON collector_reviews FROM anon, authenticated",
+            source,
+        )
+
+    def test_review_content_is_not_persisted_in_submission_state(self):
+        source = (
+            Path(collector_vault.__file__).read_text(encoding="utf-8")
+        )
+        reserve_source = source[
+            source.index("def _reserve_review_submission"):
+            source.index("def _upload_review_photo")
+        ]
+        self.assertIn("review_body=''", reserve_source)
+        self.assertNotIn("body, existing.get", reserve_source)
 
 
 if __name__ == "__main__":

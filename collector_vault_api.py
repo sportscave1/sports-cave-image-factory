@@ -1,4 +1,5 @@
 import json
+import logging
 from urllib.parse import quote
 
 import requests
@@ -11,6 +12,7 @@ from services import r2_storage
 
 MAX_JSON_BODY_BYTES = 9 * 1024 * 1024
 REQUEST_MARKER = "customer-account-extension"
+LOGGER = logging.getLogger(__name__)
 
 
 def _cors_headers():
@@ -29,7 +31,15 @@ def _json(payload, status_code=200):
     return JSONResponse(payload, status_code=status_code, headers=headers)
 
 
-def _error_response(error):
+def _error_response(error, operation):
+    status_code = getattr(error, "status_code", 500)
+    LOGGER.error(
+        "Collector Vault request failed operation=%s error_type=%s status=%s",
+        operation,
+        type(error).__name__,
+        status_code,
+        exc_info=status_code >= 500,
+    )
     if isinstance(error, collector_vault.CollectorVaultError):
         return _json(
             {"ok": False, "error": error.public_message},
@@ -75,7 +85,7 @@ async def collector_vault_bootstrap(request: Request):
         payload = collector_vault.build_vault_payload(session["shopify_customer_id"])
         return _json({"ok": True, **payload})
     except Exception as error:
-        return _error_response(error)
+        return _error_response(error, "bootstrap")
 
 
 async def collector_vault_event(request: Request):
@@ -95,7 +105,7 @@ async def collector_vault_event(request: Request):
         )
         return _json({"ok": True})
     except Exception as error:
-        return _error_response(error)
+        return _error_response(error, "event")
 
 
 async def collector_vault_frame_request(request: Request):
@@ -114,7 +124,7 @@ async def collector_vault_frame_request(request: Request):
         )
         return _json({"ok": True, **result})
     except Exception as error:
-        return _error_response(error)
+        return _error_response(error, "frame_request")
 
 
 async def collector_vault_frame_cart_created(request: Request):
@@ -132,7 +142,7 @@ async def collector_vault_frame_cart_created(request: Request):
         )
         return _json({"ok": True, **result})
     except Exception as error:
-        return _error_response(error)
+        return _error_response(error, "frame_cart_created")
 
 
 async def collector_vault_review_submit(request: Request):
@@ -152,7 +162,7 @@ async def collector_vault_review_submit(request: Request):
         )
         return _json({"ok": True, **result})
     except Exception as error:
-        return _error_response(error)
+        return _error_response(error, "review_submit")
 
 
 def _content_disposition(asset):
@@ -208,7 +218,7 @@ async def collector_vault_asset(request: Request):
             headers=headers,
         )
     except Exception as error:
-        return _error_response(error)
+        return _error_response(error, "asset")
 
 
 COLLECTOR_VAULT_ROUTES = (

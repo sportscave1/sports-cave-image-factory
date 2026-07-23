@@ -62,23 +62,26 @@ allocation, and certificate-generation tables are unchanged.
 
 ## Framed Certificate Product
 
-Create one active Shopify product:
+Configure one Shopify product:
 
 - Title: `Framed Collector Certificate`
 - Handle: `framed-collector-certificate`
-- One variant: premium black frame, A4 landscape
+- One variant: premium black frame, A4 landscape, SKU `SC-FCC-A4-BLK`
 - Real Shopify price and inventory/availability configuration
 
 Configure:
 
 ```text
+FRAMED_CERTIFICATE_PRODUCT_ID=gid://shopify/Product/...
 FRAMED_CERTIFICATE_PRODUCT_HANDLE=framed-collector-certificate
 FRAMED_CERTIFICATE_VARIANT_ID=gid://shopify/ProductVariant/...
 ```
 
-The offer is intentionally hidden if the product or safe variant mapping cannot
-be resolved. Price and currency are fetched contextually through Shopify at
-render time; checkout remains authoritative.
+The product and variant GIDs are authoritative; the handle is discovery-only.
+The offer is intentionally hidden while the product is Draft, unpublished,
+unavailable, or the safe variant/SKU mapping cannot be resolved. Price and
+currency are fetched contextually through Shopify at render time; checkout
+remains authoritative.
 
 ## Judge.me
 
@@ -86,6 +89,7 @@ Configure the existing Judge.me account:
 
 ```text
 JUDGEME_PRIVATE_API_TOKEN=...
+JUDGEME_PUBLIC_API_TOKEN=...
 JUDGEME_SHOP_DOMAIN=your-store.myshopify.com
 ```
 

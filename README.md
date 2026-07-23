@@ -172,13 +172,14 @@ Collector Vault environment:
 # Required by the Collector Vault API
 COLLECTOR_VAULT_ASSET_SIGNING_SECRET=long-random-secret
 
-# Framed offer. Handle defaults to the value below.
+# Framed offer. Stable GIDs are the purchase identity; handle is discovery-only.
+FRAMED_CERTIFICATE_PRODUCT_ID=gid://shopify/Product/...
 FRAMED_CERTIFICATE_PRODUCT_HANDLE=framed-collector-certificate
-# Required when the product has more than one variant; recommended always.
 FRAMED_CERTIFICATE_VARIANT_ID=gid://shopify/ProductVariant/...
 
-# Judge.me private server integration
+# Judge.me server integration
 JUDGEME_PRIVATE_API_TOKEN=...
+JUDGEME_PUBLIC_API_TOKEN=...
 JUDGEME_SHOP_DOMAIN=your-store.myshopify.com
 # Optional; defaults to https://judge.me/api/v1
 JUDGEME_API_BASE_URL=https://judge.me/api/v1
@@ -190,11 +191,12 @@ The existing Supabase, R2, Shopify Admin, and Shopify client-secret environment
 variables remain required. Never place Judge.me, Shopify Admin, Supabase service
 role, or R2 credentials in the customer account extension.
 
-The framed product must be an active Shopify product with handle
-`framed-collector-certificate`, one A4 landscape black-frame variant, a real
-market-aware Shopify price, and the intended availability/inventory settings.
-The offer stays hidden if the product is absent, ambiguous, unavailable, or not
-the configured variant.
+The framed product must be active and published to the storefront before the
+offer appears. The configured product and variant GIDs are authoritative; the
+handle is only a discovery fallback. The selected variant must use SKU
+`SC-FCC-A4-BLK` and Shopify must return a contextual price and availability.
+The offer stays hidden while the product is Draft, unpublished, unavailable,
+missing, or does not contain the configured variant and SKU.
 
 Judge.me review requests are server-side and are shown only for an owned order
 whose Shopify fulfillment history contains a real `DELIVERED` event. The public

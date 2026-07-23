@@ -38,6 +38,7 @@ test("contextual Shopify money is unambiguous without redundant decimals", () =>
 
 test("frame variant must match configured handle, id and availability", () => {
   const product = {
+    id: "gid://shopify/Product/10",
     handle: "framed-collector-certificate",
     availableForSale: true,
     variants: {
@@ -52,7 +53,30 @@ test("frame variant must match configured handle, id and availability", () => {
     },
   };
   assert.equal(
-    chooseFrameVariant(product, "gid://shopify/ProductVariant/2")?.id,
+    chooseFrameVariant(
+      product,
+      "gid://shopify/ProductVariant/2",
+      "framed-collector-certificate",
+      "gid://shopify/Product/10",
+    )?.id,
+    "gid://shopify/ProductVariant/2",
+  );
+  assert.equal(
+    chooseFrameVariant(
+      product,
+      "gid://shopify/ProductVariant/2",
+      "framed-collector-certificate",
+      "gid://shopify/Product/11",
+    ),
+    null,
+  );
+  assert.equal(
+    chooseFrameVariant(
+      {...product, handle: "framed-collector-certificate-renamed"},
+      "gid://shopify/ProductVariant/2",
+      "",
+      "gid://shopify/Product/10",
+    )?.id,
     "gid://shopify/ProductVariant/2",
   );
   assert.equal(chooseFrameVariant(product, "gid://shopify/ProductVariant/1"), null);
