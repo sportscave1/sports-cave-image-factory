@@ -96,6 +96,9 @@ SHOPIFY_MIRROR_METAFIELD_KEYS = (
 SHOPIFY_RETRY_STATUSES = {
     "needs sync",
     "needs_shopify_sync",
+    "pending",
+    "pending configuration",
+    "never synced",
     "shopify mirror failed",
     "shopify mirror pending",
     "saved locally",
@@ -528,7 +531,11 @@ def _row_from_supabase_product(product):
     if mirror_status.casefold() == "failed":
         sync_status = "needs_shopify_sync"
         sync_error = str(product.get("last_metafield_error") or "")
-    elif mirror_status.casefold() in {"pending", "never synced"}:
+    elif mirror_status.casefold() in {
+        "pending",
+        "pending configuration",
+        "never synced",
+    }:
         sync_status = "needs_shopify_sync"
     row = {
         "edition_product_id": product.get("id") or product.get("edition_product_id") or "",
@@ -1442,7 +1449,14 @@ def _save_changed_rows(edited_rows=None, source_rows=None):
         for row in dirty_rows
         if _stable_row_key(row)
     }
-    rows_to_save = list(dirty_rows_by_key.values())
+    pending_rows_by_key = {
+        _stable_row_key(row): _normalise_row(row, preserve_derived=False)
+        for row in _pending_shopify_sync_rows(rows)
+        if _stable_row_key(row)
+    }
+    rows_to_save_by_key = dict(pending_rows_by_key)
+    rows_to_save_by_key.update(dirty_rows_by_key)
+    rows_to_save = list(rows_to_save_by_key.values())
     dirty_keys_for_log = sorted(dirty_rows_by_key)
     st.session_state["edition_ops_last_dirty_count"] = len(dirty_keys_for_log)
     st.session_state["edition_ops_last_dirty_keys"] = dirty_keys_for_log
@@ -1450,7 +1464,7 @@ def _save_changed_rows(edited_rows=None, source_rows=None):
         f"PERF Edition Ops save dirty_count={len(dirty_keys_for_log)} dirty_keys={','.join(dirty_keys_for_log[:12])}",
         flush=True,
     )
-    if not dirty_rows_by_key:
+    if not rows_to_save:
         st.session_state[NOTICE_KEY] = "No changes to save."
         st.session_state[NOTICE_LEVEL_KEY] = "warning"
         return
@@ -1491,6 +1505,7 @@ def _save_changed_rows(edited_rows=None, source_rows=None):
                 {
                     "row_key": _stable_row_key(normalised),
                     "edition_product_id": normalised.get("edition_product_id"),
+                    "shopify_product_gid": normalised.get("shopify_product_gid"),
                     "handle": normalised.get("handle"),
                     "edition_name": normalised.get("edition_label"),
                     "edition_total": normalised.get("edition_total"),
@@ -1564,9 +1579,8 @@ def _save_changed_rows(edited_rows=None, source_rows=None):
             continue
         if key in dirty_keys and key not in supabase_saved_keys:
             continue
-        if key in dirty_keys:
-            mirror_rows.append(_normalise_row(row, preserve_derived=False))
-            mirror_keys.add(key)
+        mirror_rows.append(_normalise_row(row, preserve_derived=False))
+        mirror_keys.add(key)
 
     mirror_success_keys = set()
     if mirror_rows:
@@ -1632,7 +1646,15 @@ def _save_changed_rows(edited_rows=None, source_rows=None):
             if key in supabase_saved_keys
         )
         suffix = f" {lower_warning_text}" if lower_warning_text else ""
-        st.session_state[NOTICE_KEY] = f"Supabase saved, Shopify mirror failed / retry needed for {len(shopify_errors)} product(s).{suffix}"
+        affected = ", ".join(
+            _product_label(row)
+            for row in mirror_rows
+            if _stable_row_key(row) in shopify_errors
+        )
+        st.session_state[NOTICE_KEY] = (
+            "Edition Ops saved but Shopify sync failed"
+            f" for {affected or f'{len(shopify_errors)} product(s)'}. Retry is available.{suffix}"
+        )
         st.session_state[NOTICE_LEVEL_KEY] = "warning"
     elif manual_lower_warnings:
         warnings = []
@@ -1642,7 +1664,16 @@ def _save_changed_rows(edited_rows=None, source_rows=None):
         st.session_state[NOTICE_KEY] = f"Saved {len(supabase_saved_keys)} Edition Ops change(s). " + " ".join(warnings)
         st.session_state[NOTICE_LEVEL_KEY] = "warning"
     else:
-        st.session_state[NOTICE_KEY] = f"Saved {len(supabase_saved_keys)} Edition Ops change(s)."
+        saved_count = len(supabase_saved_keys)
+        repaired_count = len(mirror_success_keys - supabase_saved_keys)
+        if saved_count:
+            st.session_state[NOTICE_KEY] = (
+                f"Saved to Edition Ops and Shopify: {saved_count} product(s)."
+            )
+        else:
+            st.session_state[NOTICE_KEY] = (
+                f"Shopify sync completed: {repaired_count} product(s)."
+            )
         st.session_state[NOTICE_LEVEL_KEY] = "success"
 
 
@@ -2086,28 +2117,58 @@ def _render_save_changes_button(slot, *, disabled):
     st.rerun()
 
 
+def _format_new_product_pull_summary(result):
+    result = result or {}
+    added = int(result.get("new_products_inserted") or 0)
+    updated = int(result.get("existing_products_updated") or 0)
+    errors = list(result.get("errors") or [])
+    if errors:
+        return (
+            f"{added} new product(s) added \u00b7 {updated} renamed product(s) updated "
+            f"\u00b7 {len(errors)} issue(s)"
+        )
+    if not added and not updated:
+        return "No new products found."
+    return f"{added} new product(s) added \u00b7 {updated} renamed product(s) updated"
+
+
+def _render_pull_new_products_button(target, backend):
+    button_target = target if target is not None and hasattr(target, "button") else st
+    if not button_target.button(
+        "Pull New Products",
+        type="primary",
+        use_container_width=True,
+        disabled=not backend,
+        key="edition-ops-pull-new-products",
+    ):
+        return
+    try:
+        with st.spinner("Checking Shopify for new products..."):
+            if not hasattr(backend, "sync_new_shopify_products_to_edition_ops"):
+                raise ValueError("New-product sync is not available.")
+            config = shopify_sync.get_config()
+            if not config.get("configured"):
+                raise ValueError("Shopify is not configured.")
+            result = backend.sync_new_shopify_products_to_edition_ops(config=config)
+            _reload_products_from_supabase()
+            st.session_state[NOTICE_KEY] = _format_new_product_pull_summary(result)
+            st.session_state[NOTICE_LEVEL_KEY] = (
+                "warning" if result.get("errors") else "success"
+            )
+    except Exception as error:
+        st.session_state[NOTICE_KEY] = (
+            f"Pull New Products failed: {error}. The current catalogue is unchanged."
+        )
+        st.session_state[NOTICE_LEVEL_KEY] = "error"
+    st.rerun()
+
+
 def _render_advanced_controls(backend, rows):
     if not hasattr(st, "expander"):
         return
     with st.expander("Advanced", expanded=False):
-        if st.button(
-            "Load Sync Diagnostics",
-            key="edition-ops-load-sync-diagnostics",
-            use_container_width=True,
-        ):
-            diagnostic_started = time.perf_counter()
-            print("PERF Edition Ops diagnostics start", flush=True)
-            _render_product_sync_diagnostics(backend, rows)
-            print(
-                "PERF Edition Ops diagnostics done "
-                f"duration_ms={int((time.perf_counter() - diagnostic_started) * 1000)}",
-                flush=True,
-            )
-        else:
-            st.caption("Sync diagnostics load only when requested.")
-        st.caption("Refreshes the complete lightweight Shopify catalogue and safely reconciles product renames.")
         action_cols = st.columns([1, 1, 1, 1])
-        if action_cols[0].button("Refresh Shopify Catalogue", use_container_width=True, disabled=not backend):
+        if action_cols[0].button("Refresh Complete Catalogue", use_container_width=True, disabled=not backend):
             sync_completed = False
             try:
                 with st.spinner("Refreshing the complete Shopify catalogue..."):
@@ -2212,7 +2273,6 @@ def render_page():
     started = time.perf_counter()
     _ensure_state()
     st.title("Edition Ops")
-    st.caption("Manage edition limits, next numbers, and active limited-edition products.")
     print("PERF Edition Ops render start", flush=True)
 
     load_started = time.perf_counter()
@@ -2231,11 +2291,6 @@ def render_page():
     load_error = str(st.session_state.get(LOAD_ERROR_KEY) or "")
     load_diagnostic = dict(st.session_state.get(LOAD_DIAGNOSTIC_KEY) or {})
 
-    if meta.get("cached"):
-        st.caption("Source: cached Supabase snapshot")
-    else:
-        st.caption("Source: Supabase ledger")
-    st.caption(f"Last refreshed: {_format_time(meta.get('last_refreshed_from_shopify'))}")
     if load_error:
         if meta.get("cached"):
             st.warning(f"{load_error} Showing the last successfully loaded cached display.")
@@ -2248,18 +2303,21 @@ def render_page():
                 st.caption(f"Exception: {load_diagnostic.get('exception_class') or 'Unavailable'}")
                 st.caption(f"Duration: {int(load_diagnostic.get('duration_ms') or 0)} ms")
 
-    _render_notice()
-
     warnings = st.session_state.get(IMPORT_WARNINGS_KEY) or []
     for warning in warnings:
         st.warning(warning)
     st.session_state[IMPORT_WARNINGS_KEY] = []
 
-    summary_slot = st.empty() if hasattr(st, "empty") else None
-    advanced_slot = st.empty() if hasattr(st, "empty") else None
+    top_cols = st.columns([4, 1]) if hasattr(st, "columns") else [None, None]
+    source_label = "cached snapshot" if meta.get("cached") else "Supabase"
+    _slot_caption(
+        top_cols[0],
+        f"{len(rows)} products \u00b7 Synced {_format_time(meta.get('last_refreshed_from_shopify'))} \u00b7 {source_label}",
+    )
+    _render_pull_new_products_button(top_cols[1], backend)
+    _render_notice()
 
     if rows:
-        st.caption("Unticking Enabled archives the edition and sets remaining to 0.")
         current_rows = _mark_current_changes(rows, originals)
         st.session_state[ROWS_KEY] = current_rows
         st.session_state[EDITOR_ROWS_KEY] = deepcopy(current_rows)
@@ -2267,7 +2325,7 @@ def render_page():
         changed_rows = _changed_rows(current_rows, originals)
         retry_rows = _pending_shopify_sync_rows(current_rows)
         rows_to_save = _rows_to_save(current_rows, originals)
-        _slot_caption(summary_slot, _edition_ops_summary(current_rows, changed_rows, retry_rows))
+        st.caption(_edition_ops_summary(current_rows, changed_rows, retry_rows))
         visible_rows, selected_product = _editor_visible_rows(current_rows)
         editor_rows = [_editor_payload(row) for row in visible_rows]
         editor_started = time.perf_counter()
@@ -2280,7 +2338,7 @@ def render_page():
             save_clicked = st.form_submit_button(
                 "Save Changes",
                 type="primary",
-                use_container_width=True,
+                use_container_width=False,
                 disabled=not backend or not bool(current_rows),
                 key="edition-ops-save-changes",
             )
@@ -2317,11 +2375,7 @@ def render_page():
             changed_rows = _changed_rows(current_rows, originals)
             retry_rows = _pending_shopify_sync_rows(current_rows)
             rows_to_save = _rows_to_save(current_rows, originals)
-        if advanced_slot is not None and hasattr(advanced_slot, "container"):
-            with advanced_slot.container():
-                _render_advanced_controls(backend, current_rows)
-        else:
-            _render_advanced_controls(backend, current_rows)
+        _render_advanced_controls(backend, current_rows)
 
         errors = {row["product_title"]: row["sync_error"] for row in current_rows if row.get("sync_error")}
         if errors:
@@ -2329,12 +2383,8 @@ def render_page():
             for product_title, message in errors.items():
                 st.caption(f"{product_title}: {message}")
     else:
-        _slot_caption(summary_slot, _edition_ops_summary([], [], []))
-        if advanced_slot is not None and hasattr(advanced_slot, "container"):
-            with advanced_slot.container():
-                _render_advanced_controls(backend, [])
-        else:
-            _render_advanced_controls(backend, [])
+        st.caption(_edition_ops_summary([], [], []))
+        _render_advanced_controls(backend, [])
         if not load_error:
             st.info("No products loaded yet. Products are added by Shopify webhooks or Advanced sync.")
 

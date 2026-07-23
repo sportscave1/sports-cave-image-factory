@@ -51,6 +51,7 @@ LAST_PRODUCT_WEBHOOK_ERROR_KEY = "last_product_webhook_error"
 PRODUCT_INCREMENTAL_SYNC_STATE_KEY = "shopify_products_incremental_sync"
 NEW_PRODUCT_DISCOVERY_SYNC_STATE_KEY = "shopify_new_product_discovery"
 NEW_PRODUCT_DISCOVERY_PAGE_SIZE = 50
+NEW_PRODUCT_DISCOVERY_MAX_PAGES = 4
 SYNC_LOOKBACK_BUFFER_KEY = "sync_lookback_buffer_minutes"
 DEFAULT_SYNC_LOOKBACK_BUFFER_MINUTES = 10
 DEFAULT_PRODUCT_SYNC_LOOKBACK_HOURS = 48
@@ -4476,9 +4477,14 @@ def _insert_edition_product_from_shopify(cur, fields):
             shopify_product_id, shopify_product_gid, shopify_handle, product_title,
             edition_total, next_edition_number, last_assigned_edition, sold_count, remaining_count,
             edition_status, edition_name, active, is_active, sold_out, is_sold_out,
-            featured_image_url, raw, synced_at, updated_at
+            featured_image_url, raw, metafields_sync_status, last_metafield_error,
+            synced_at, updated_at
         )
-        VALUES (%s, %s, %s, %s, 100, 1, 0, 0, 100, 'limited_release', %s, TRUE, TRUE, FALSE, FALSE, %s, %s::jsonb, now(), now())
+        VALUES (
+            %s, %s, %s, %s, 100, 1, 0, 0, 100, 'limited_release', %s,
+            TRUE, TRUE, FALSE, FALSE, %s, %s::jsonb,
+            'Pending configuration', '', now(), now()
+        )
         RETURNING shopify_handle
         """,
         (
@@ -4737,6 +4743,10 @@ def _read_new_product_discovery_state(cur):
         ),
         "latest_shopify_product_created_at": value.get("latest_shopify_product_created_at") or "",
         "latest_shopify_product_id": value.get("latest_shopify_product_id") or "",
+        "continuation_cursor": value.get("continuation_cursor") or "",
+        "continuation_created_after": value.get("continuation_created_after") or "",
+        "continuation_latest_created_at": value.get("continuation_latest_created_at") or "",
+        "continuation_latest_product_id": value.get("continuation_latest_product_id") or "",
         "last_attempt_at": row.get("last_attempt_at") or "",
         "status": row.get("status") or "",
         "error_message": row.get("error_message") or "",
@@ -4753,14 +4763,22 @@ def _write_new_product_discovery_state_with_cursor(
     successful_at=None,
     latest_product_created_at=None,
     latest_product_id=None,
+    continuation_cursor=None,
+    continuation_created_after=None,
+    continuation_latest_created_at=None,
+    continuation_latest_product_id=None,
     error_message="",
 ):
     previous_state = dict(previous_state or {})
     payload = {
+        **dict(summary or {}),
         "last_successful_new_product_sync_at": previous_state.get("last_successful_new_product_sync_at") or "",
         "latest_shopify_product_created_at": previous_state.get("latest_shopify_product_created_at") or "",
         "latest_shopify_product_id": previous_state.get("latest_shopify_product_id") or "",
-        **dict(summary or {}),
+        "continuation_cursor": previous_state.get("continuation_cursor") or "",
+        "continuation_created_after": previous_state.get("continuation_created_after") or "",
+        "continuation_latest_created_at": previous_state.get("continuation_latest_created_at") or "",
+        "continuation_latest_product_id": previous_state.get("continuation_latest_product_id") or "",
     }
     if successful_at:
         payload["last_successful_new_product_sync_at"] = _datetime_to_setting(successful_at)
@@ -4768,6 +4786,14 @@ def _write_new_product_discovery_state_with_cursor(
         payload["latest_shopify_product_created_at"] = str(latest_product_created_at or "")
     if latest_product_id is not None:
         payload["latest_shopify_product_id"] = str(latest_product_id or "")
+    if continuation_cursor is not None:
+        payload["continuation_cursor"] = str(continuation_cursor or "")
+    if continuation_created_after is not None:
+        payload["continuation_created_after"] = str(continuation_created_after or "")
+    if continuation_latest_created_at is not None:
+        payload["continuation_latest_created_at"] = str(continuation_latest_created_at or "")
+    if continuation_latest_product_id is not None:
+        payload["continuation_latest_product_id"] = str(continuation_latest_product_id or "")
     cur.execute(
         """
         INSERT INTO app_sync_state(key, value, last_success_at, last_attempt_at, status, error_message, updated_at)
@@ -4911,9 +4937,14 @@ def _insert_edition_product_if_missing(cur, product):
             shopify_product_id, shopify_product_gid, shopify_handle, product_title,
             edition_total, next_edition_number, last_assigned_edition, sold_count, remaining_count,
             edition_status, edition_name, active, is_active, sold_out, is_sold_out,
-            featured_image_url, raw, synced_at, updated_at
+            featured_image_url, raw, metafields_sync_status, last_metafield_error,
+            synced_at, updated_at
         )
-        VALUES (%s, %s, %s, %s, 100, 1, 0, 0, 100, 'limited_release', %s, TRUE, TRUE, FALSE, FALSE, %s, %s::jsonb, now(), now())
+        VALUES (
+            %s, %s, %s, %s, 100, 1, 0, 0, 100, 'limited_release', %s,
+            TRUE, TRUE, FALSE, FALSE, %s, %s::jsonb,
+            'Pending configuration', '', now(), now()
+        )
         ON CONFLICT DO NOTHING
         RETURNING id, shopify_product_id, shopify_handle, product_title,
                   edition_total, next_edition_number, edition_name
@@ -5031,13 +5062,33 @@ def _finish_new_product_discovery_state(
                     if summary.get("watermark_advanced")
                     else None
                 ),
+                continuation_cursor=(
+                    summary.get("continuation_cursor")
+                    if "continuation_cursor" in summary
+                    else None
+                ),
+                continuation_created_after=(
+                    summary.get("continuation_created_after")
+                    if "continuation_created_after" in summary
+                    else None
+                ),
+                continuation_latest_created_at=(
+                    summary.get("continuation_latest_created_at")
+                    if "continuation_latest_created_at" in summary
+                    else None
+                ),
+                continuation_latest_product_id=(
+                    summary.get("continuation_latest_product_id")
+                    if "continuation_latest_product_id" in summary
+                    else None
+                ),
                 error_message=error_message,
             )
         conn.commit()
 
 
 def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None):
-    """Pull one newest-first Shopify page and insert only immutable IDs missing from Edition Ops."""
+    """Incrementally reconcile newest products until a known immutable-ID boundary."""
     started = time.perf_counter()
     attempted_at = utc_now_datetime()
     config = dict(config or shopify_sync.get_config())
@@ -5053,84 +5104,130 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
         "shopify_metafields_failed_pending": 0,
         "errors": [],
         "variant_sync_errors": [],
-        "shopify_discovery_requests": 1,
-        "maximum_products_fetched": NEW_PRODUCT_DISCOVERY_PAGE_SIZE,
+        "shopify_discovery_requests": 0,
+        "maximum_products_fetched": (
+            NEW_PRODUCT_DISCOVERY_PAGE_SIZE * NEW_PRODUCT_DISCOVERY_MAX_PAGES
+        ),
         "watermark_advanced": False,
         "latest_shopify_product_created_at": "",
         "latest_shopify_product_id": "",
-        "stop_condition": "one_bounded_newest_products_page",
+        "stop_condition": "",
         "duration_seconds": 0.0,
     }
     try:
         existing_rows, previous_state = _start_new_product_discovery(attempted_at)
-        created_after = previous_state.get("latest_shopify_product_created_at") or ""
-        page = shopify_sync.fetch_newest_products_for_edition_ops(
-            created_after=created_after,
-            page_size=NEW_PRODUCT_DISCOVERY_PAGE_SIZE,
-            config=config,
+        created_after = (
+            previous_state.get("continuation_created_after")
+            or previous_state.get("latest_shopify_product_created_at")
+            or ""
         )
-        products = list(page.get("products") or [])[:NEW_PRODUCT_DISCOVERY_PAGE_SIZE]
-        summary["products_fetched"] = len(products)
-        summary["products_checked"] = len(products)
-        summary["shopify_query"] = page.get("query") or ""
-        if progress_callback:
-            progress_callback(len(products))
-
-        classification = _classify_new_shopify_products(products, existing_rows)
-        missing_products = classification.get("missing_products") or []
-        summary["existing_products_skipped"] = int(classification.get("existing_products_skipped") or 0)
-        discovery_errors = list(classification.get("errors") or [])
-        summary["errors"].extend(discovery_errors)
-
-        insert_result = _insert_new_product_candidates(missing_products)
-        inserted_handles = insert_result.get("inserted_handles") or []
-        summary["new_products_inserted"] = int(insert_result.get("new_products_inserted") or 0)
-        summary["existing_products_skipped"] += int(insert_result.get("concurrent_skips") or 0)
-
-        if inserted_handles:
-            try:
-                mirror_result = sync_product_edition_metafields_for_handles(
-                    inserted_handles,
-                    config=config,
-                    ensure_schema_first=False,
+        existing_ids = {
+            candidate
+            for row in existing_rows
+            for value in (row.get("shopify_product_id"), row.get("shopify_product_gid"))
+            for candidate in _shopify_id_candidates("Product", value)
+        }
+        products = []
+        seen_product_ids = set()
+        after = str(previous_state.get("continuation_cursor") or "").strip()
+        complete_boundary = False
+        last_page = {}
+        for page_number in range(NEW_PRODUCT_DISCOVERY_MAX_PAGES):
+            page = shopify_sync.fetch_newest_products_for_edition_ops(
+                created_after=created_after,
+                after=after,
+                page_size=NEW_PRODUCT_DISCOVERY_PAGE_SIZE,
+                config=config,
+            )
+            last_page = page
+            summary["shopify_discovery_requests"] += 1
+            summary["shopify_query"] = page.get("query") or ""
+            page_products = list(page.get("products") or [])[:NEW_PRODUCT_DISCOVERY_PAGE_SIZE]
+            page_has_unknown = False
+            page_has_known = False
+            for product in page_products:
+                canonical_id = canonical_shopify_id(
+                    product.get("shopify_product_id")
+                    or product.get("shopify_product_gid")
+                    or product.get("id")
                 )
-                summary["shopify_metafields_pushed"] = int(mirror_result.get("synced") or 0)
-                failed = int(mirror_result.get("failed") or mirror_result.get("skipped") or 0)
-                if not failed:
-                    failed = max(len(inserted_handles) - summary["shopify_metafields_pushed"], 0)
-                summary["shopify_metafields_failed_pending"] = failed
-                summary["errors"].extend(mirror_result.get("errors") or [])
-                summary["product_metafield_mirror"] = mirror_result
-            except Exception as mirror_error:
-                summary["shopify_metafields_failed_pending"] = len(inserted_handles)
-                summary["errors"].append(str(mirror_error))
-                for handle in inserted_handles:
-                    try:
-                        _mark_product_metafields_sync(
-                            handle,
-                            {
-                                "shopify_handle": handle,
-                                "edition_name": DEFAULT_EDITION_NAME,
-                                "edition_total": 100,
-                                "next_edition_number": 1,
-                                "last_assigned_edition": 0,
-                                "sold_count": 0,
-                                "remaining_count": 100,
-                                "edition_status": "limited_release",
-                                "edition_display_text": format_edition_display_number(1, 100),
-                                "is_sold_out": False,
-                            },
-                            "Failed",
-                            str(mirror_error),
-                        )
-                    except Exception:
-                        pass
+                if not canonical_id or canonical_id in seen_product_ids:
+                    continue
+                seen_product_ids.add(canonical_id)
+                products.append(product)
+                candidates = set(_shopify_product_identity_candidates(product))
+                if candidates & existing_ids:
+                    page_has_known = True
+                else:
+                    page_has_unknown = True
+            summary["products_fetched"] = len(products)
+            summary["products_checked"] = len(products)
+            if progress_callback:
+                progress_callback(len(products))
+            if not page.get("has_next_page"):
+                summary["stop_condition"] = "final_incremental_page"
+                complete_boundary = True
+                summary["continuation_cursor"] = ""
+                summary["continuation_created_after"] = ""
+                summary["continuation_latest_created_at"] = ""
+                summary["continuation_latest_product_id"] = ""
+                break
+            if page_has_known and not page_has_unknown:
+                summary["stop_condition"] = "known_product_boundary"
+                complete_boundary = True
+                summary["continuation_cursor"] = ""
+                summary["continuation_created_after"] = ""
+                summary["continuation_latest_created_at"] = ""
+                summary["continuation_latest_product_id"] = ""
+                break
+            after = str(page.get("end_cursor") or "").strip()
+            if not after:
+                summary["stop_condition"] = "missing_shopify_cursor"
+                break
+            if page_number + 1 == NEW_PRODUCT_DISCOVERY_MAX_PAGES:
+                summary["stop_condition"] = "bounded_page_limit"
+                summary["continuation_cursor"] = after
+                summary["continuation_created_after"] = created_after
+
+        upsert_summary = upsert_shopify_products_to_edition_products(
+            products,
+            source="new_product_pull",
+            config=config,
+            sync_inserted_metafields=False,
+            sync_variants=False,
+        )
+        summary.update(
+            {
+                "new_products_inserted": int(
+                    upsert_summary.get("new_products_inserted") or 0
+                ),
+                "existing_products_updated": int(
+                    upsert_summary.get("existing_products_updated") or 0
+                ),
+                "existing_products_skipped": int(
+                    upsert_summary.get("existing_products_skipped") or 0
+                ),
+                "variant_sync_errors": list(
+                    upsert_summary.get("variant_sync_errors") or []
+                ),
+            }
+        )
+        summary["errors"].extend(upsert_summary.get("errors") or [])
 
         page_created_at, page_product_id = _new_product_page_watermark(products)
-        safe_to_advance = bool(page_created_at) and (
-            not page.get("has_next_page")
-            or not missing_products
-        ) and not discovery_errors
+        prior_scan_created_at = previous_state.get("continuation_latest_created_at") or ""
+        prior_scan_product_id = previous_state.get("continuation_latest_product_id") or ""
+        if complete_boundary and prior_scan_created_at:
+            page_created_at = prior_scan_created_at
+            page_product_id = prior_scan_product_id
+        elif not complete_boundary and page_created_at:
+            summary["continuation_latest_created_at"] = (
+                prior_scan_created_at or page_created_at
+            )
+            summary["continuation_latest_product_id"] = (
+                prior_scan_product_id or page_product_id
+            )
+        safe_to_advance = bool(page_created_at) and complete_boundary and not summary["errors"]
         if safe_to_advance:
             summary["watermark_advanced"] = True
             summary["latest_shopify_product_created_at"] = page_created_at
@@ -5138,8 +5235,8 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
         else:
             summary["latest_shopify_product_created_at"] = previous_state.get("latest_shopify_product_created_at") or ""
             summary["latest_shopify_product_id"] = previous_state.get("latest_shopify_product_id") or ""
-            if page.get("has_next_page") and missing_products:
-                summary["stop_condition"] = "page_limit_reached_watermark_held_for_safety"
+            if last_page.get("has_next_page") and not complete_boundary:
+                summary["stop_condition"] = summary["stop_condition"] or "bounded_page_limit"
 
         successful_at = utc_now_datetime()
         summary["duration_seconds"] = round(time.perf_counter() - started, 3)
@@ -5233,7 +5330,7 @@ def reconcile_all_shopify_products_to_edition_ops(config=None, progress_callback
             active_draft_products,
             source="manual_sync",
             config=config,
-            sync_inserted_metafields=True,
+            sync_inserted_metafields=False,
             sync_variants=False,
         )
         summary.update(
@@ -6247,8 +6344,39 @@ def update_edition_products_batch(rows, reason="Manual edition edit"):
     with connect() as conn:
         with conn.cursor() as cur:
             for row in rows or []:
-                handle = str((row or {}).get("handle") or (row or {}).get("shopify_handle") or "").strip()
-                key = str((row or {}).get("row_key") or (row or {}).get("edition_product_id") or handle or "")
+                source = row or {}
+                handle = str(source.get("handle") or source.get("shopify_handle") or "").strip()
+                edition_product_id = str(source.get("edition_product_id") or "").strip()
+                product_gid = _shopify_gid(
+                    "Product",
+                    source.get("shopify_product_gid")
+                    or source.get("shopify_product_id")
+                    or "",
+                )
+                key = str(source.get("row_key") or edition_product_id or product_gid or handle or "")
+                if edition_product_id or product_gid:
+                    cur.execute(
+                        """
+                        SELECT shopify_handle
+                        FROM edition_products
+                        WHERE (%s <> '' AND id::text = %s)
+                           OR (%s <> '' AND (shopify_product_id = %s OR shopify_product_gid = %s))
+                        ORDER BY CASE WHEN id::text = %s THEN 0 ELSE 1 END
+                        LIMIT 1
+                        """,
+                        (
+                            edition_product_id,
+                            edition_product_id,
+                            product_gid,
+                            product_gid,
+                            product_gid,
+                            edition_product_id,
+                        ),
+                    )
+                    fetchone = getattr(cur, "fetchone", None)
+                    matched = fetchone() if callable(fetchone) else {}
+                    matched = matched or {}
+                    handle = str(matched.get("shopify_handle") or handle).strip()
                 cur.execute("SAVEPOINT edition_ops_batch_row")
                 try:
                     row_reason = str((row or {}).get("reason") or reason or "Manual edition edit")
@@ -7293,7 +7421,10 @@ def sync_edition_ops_metafields_for_rows(
                     "edition_enabled": payload.get("edition_enabled"),
                     "edition_total": payload.get("edition_total"),
                     "edition_next_number": payload.get("edition_next_number"),
+                    "edition_sold_count": payload.get("edition_sold_count"),
                     "edition_remaining": payload.get("edition_remaining"),
+                    "edition_status": payload.get("edition_status"),
+                    "edition_label": payload.get("edition_label"),
                 },
             }
         )
@@ -14454,7 +14585,7 @@ def process_product_create_webhook(payload, webhook_id, topic="products/create",
             [product],
             source="webhook",
             config=config,
-            sync_inserted_metafields=True,
+            sync_inserted_metafields=False,
             metafield_ensure_schema_first=False,
             raise_on_apply_errors=True,
         )

@@ -50,16 +50,21 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         insert_result=None,
         mirror_result=None,
     ):
-        insert_result = insert_result or {
-            "inserted_handles": [],
-            "new_products_inserted": 0,
-            "concurrent_skips": 0,
-        }
-        mirror_result = mirror_result or {
-            "attempted": len(insert_result.get("inserted_handles") or []),
-            "synced": len(insert_result.get("inserted_handles") or []),
-            "failed": 0,
+        classification = supabase_backend._classify_new_shopify_products(
+            products,
+            existing_rows or [],
+        )
+        inserted = int((insert_result or {}).get("new_products_inserted") or 0)
+        if insert_result is None:
+            inserted = len(classification.get("missing_products") or [])
+        upsert_result = {
+            "new_products_inserted": inserted,
+            "existing_products_updated": 0,
+            "existing_products_skipped": int(
+                classification.get("existing_products_skipped") or 0
+            ) + int((insert_result or {}).get("concurrent_skips") or 0),
             "errors": [],
+            "variant_sync_errors": [],
         }
         with patch.object(
             supabase_backend,
@@ -75,12 +80,11 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
             },
         ) as fetch, patch.object(
             supabase_backend,
-            "_insert_new_product_candidates",
-            return_value=insert_result,
+            "upsert_shopify_products_to_edition_products",
+            return_value=upsert_result,
         ) as insert, patch.object(
             supabase_backend,
             "sync_product_edition_metafields_for_handles",
-            return_value=mirror_result,
         ) as mirror, patch.object(
             supabase_backend,
             "_finish_new_product_discovery_state",
@@ -97,10 +101,11 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         self.assertEqual(result["new_products_inserted"], 0)
         self.assertEqual(result["existing_products_skipped"], 1)
         fetch.assert_called_once()
-        insert.assert_called_once_with([])
+        self.assertEqual(insert.call_args.args[0], [product])
+        self.assertFalse(insert.call_args.kwargs["sync_inserted_metafields"])
         mirror.assert_not_called()
 
-    def test_one_new_product_is_inserted_and_mirrored_once(self):
+    def test_one_new_product_is_inserted_pending_configuration(self):
         result, _, insert, mirror, _ = self._run_pull(
             [_shopify_product(2)],
             insert_result={
@@ -110,9 +115,10 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
             },
         )
         self.assertEqual(result["new_products_inserted"], 1)
-        self.assertEqual(result["shopify_metafields_pushed"], 1)
+        self.assertEqual(result["shopify_metafields_pushed"], 0)
         self.assertEqual(insert.call_args.args[0][0]["shopify_product_id"], "gid://shopify/Product/2")
-        mirror.assert_called_once_with(["product-2"], config=CONFIG, ensure_schema_first=False)
+        self.assertFalse(insert.call_args.kwargs["sync_inserted_metafields"])
+        mirror.assert_not_called()
 
     def test_several_new_products_and_same_title_use_distinct_ids(self):
         products = [
@@ -137,18 +143,113 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         )
         self.assertEqual(result["products_fetched"], 50)
         self.assertEqual(result["existing_products_skipped"], 50)
-        self.assertEqual(result["maximum_products_fetched"], 50)
+        self.assertEqual(result["maximum_products_fetched"], 200)
         fetch.assert_called_once()
         self.assertEqual(fetch.call_args.kwargs["page_size"], 50)
-        insert.assert_called_once_with([])
+        self.assertEqual(len(insert.call_args.args[0]), 50)
+        mirror.assert_not_called()
+
+    def test_more_than_fifty_new_products_follow_cursor_until_final_page(self):
+        first_page = [_shopify_product(index) for index in range(1, 51)]
+        second_page = [_shopify_product(index) for index in range(51, 61)]
+        with patch.object(
+            supabase_backend,
+            "_start_new_product_discovery",
+            return_value=([], {}),
+        ), patch.object(
+            supabase_backend.shopify_sync,
+            "fetch_newest_products_for_edition_ops",
+            side_effect=[
+                {
+                    "products": first_page,
+                    "has_next_page": True,
+                    "end_cursor": "cursor-50",
+                    "query": "newest",
+                },
+                {
+                    "products": second_page,
+                    "has_next_page": False,
+                    "end_cursor": "cursor-60",
+                    "query": "newest",
+                },
+            ],
+        ) as fetch, patch.object(
+            supabase_backend,
+            "upsert_shopify_products_to_edition_products",
+            return_value={
+                "new_products_inserted": 60,
+                "existing_products_updated": 0,
+                "existing_products_skipped": 0,
+                "errors": [],
+                "variant_sync_errors": [],
+            },
+        ) as upsert, patch.object(
+            supabase_backend,
+            "_finish_new_product_discovery_state",
+        ):
+            result = supabase_backend.sync_new_shopify_products_to_edition_ops(
+                config=CONFIG
+            )
+
+        self.assertEqual(result["products_fetched"], 60)
+        self.assertEqual(result["new_products_inserted"], 60)
+        self.assertEqual(result["shopify_discovery_requests"], 2)
+        self.assertEqual(fetch.call_args_list[1].kwargs["after"], "cursor-50")
+        self.assertEqual(len(upsert.call_args.args[0]), 60)
+        self.assertFalse(upsert.call_args.kwargs["sync_inserted_metafields"])
+
+    def test_bounded_scan_resumes_from_saved_cursor(self):
+        resumed_product = _shopify_product(
+            201,
+            created_at="2026-07-14T00:01:00Z",
+        )
+        state = {
+            "continuation_cursor": "cursor-200",
+            "continuation_created_after": "",
+            "continuation_latest_created_at": "2026-07-14T03:00:00Z",
+            "continuation_latest_product_id": "gid://shopify/Product/1",
+        }
+        result, fetch, upsert, mirror, _ = self._run_pull(
+            [resumed_product],
+            state=state,
+            has_next_page=False,
+            insert_result={
+                "inserted_handles": ["product-201"],
+                "new_products_inserted": 1,
+                "concurrent_skips": 0,
+            },
+        )
+
+        self.assertEqual(fetch.call_args.kwargs["after"], "cursor-200")
+        self.assertEqual(
+            result["latest_shopify_product_created_at"],
+            "2026-07-14T03:00:00Z",
+        )
+        self.assertEqual(
+            result["latest_shopify_product_id"],
+            "gid://shopify/Product/1",
+        )
+        self.assertEqual(len(upsert.call_args.args[0]), 1)
         mirror.assert_not_called()
 
     def test_button_pressed_twice_only_inserts_on_first_press(self):
         product = _shopify_product(6)
         contexts = [([], {}), ([_existing_product(6)], {})]
-        inserts = [
-            {"inserted_handles": ["product-6"], "new_products_inserted": 1, "concurrent_skips": 0},
-            {"inserted_handles": [], "new_products_inserted": 0, "concurrent_skips": 0},
+        upserts = [
+            {
+                "new_products_inserted": 1,
+                "existing_products_updated": 0,
+                "existing_products_skipped": 0,
+                "errors": [],
+                "variant_sync_errors": [],
+            },
+            {
+                "new_products_inserted": 0,
+                "existing_products_updated": 0,
+                "existing_products_skipped": 1,
+                "errors": [],
+                "variant_sync_errors": [],
+            },
         ]
         with patch.object(
             supabase_backend,
@@ -160,8 +261,8 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
             return_value={"products": [product], "has_next_page": False, "query": "newest"},
         ), patch.object(
             supabase_backend,
-            "_insert_new_product_candidates",
-            side_effect=inserts,
+            "upsert_shopify_products_to_edition_products",
+            side_effect=upserts,
         ) as insert, patch.object(
             supabase_backend,
             "sync_product_edition_metafields_for_handles",
@@ -176,7 +277,7 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         self.assertEqual(second["new_products_inserted"], 0)
         self.assertEqual(second["existing_products_skipped"], 1)
         self.assertEqual(insert.call_count, 2)
-        mirror.assert_called_once()
+        mirror.assert_not_called()
 
     def test_webhook_race_is_counted_as_skip_and_never_mirrored(self):
         class RaceCursor:
@@ -256,42 +357,16 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         self.assertEqual(classified["missing_products"], [])
         self.assertEqual(classified["existing_products_skipped"], 1)
 
-    def test_metafield_failure_keeps_insert_and_marks_only_new_product_pending(self):
-        product = _shopify_product(10)
-        with patch.object(
-            supabase_backend,
-            "_start_new_product_discovery",
-            return_value=([], {}),
-        ), patch.object(
-            supabase_backend.shopify_sync,
-            "fetch_newest_products_for_edition_ops",
-            return_value={"products": [product], "has_next_page": False, "query": "newest"},
-        ), patch.object(
-            supabase_backend,
-            "_insert_new_product_candidates",
-            return_value={
-                "inserted_handles": ["product-10"],
-                "new_products_inserted": 1,
-                "concurrent_skips": 0,
-            },
-        ), patch.object(
-            supabase_backend,
-            "sync_product_edition_metafields_for_handles",
-            side_effect=RuntimeError("Shopify unavailable"),
-        ), patch.object(
-            supabase_backend,
-            "_mark_product_metafields_sync",
-        ) as mark, patch.object(
-            supabase_backend,
-            "_finish_new_product_discovery_state",
-        ) as finish:
-            result = supabase_backend.sync_new_shopify_products_to_edition_ops(config=CONFIG)
-        self.assertEqual(result["new_products_inserted"], 1)
-        self.assertEqual(result["shopify_metafields_failed_pending"], 1)
-        mark.assert_called_once()
-        self.assertEqual(mark.call_args.args[0], "product-10")
-        self.assertEqual(mark.call_args.args[1]["next_edition_number"], 1)
-        self.assertEqual(finish.call_args.kwargs["status"], "complete_with_warnings")
+    def test_import_stays_pending_until_user_saves_configuration(self):
+        insertion_source = inspect.getsource(
+            supabase_backend._insert_edition_product_from_shopify
+        )
+        self.assertIn("'Pending configuration'", insertion_source)
+        pull_source = inspect.getsource(
+            supabase_backend.sync_new_shopify_products_to_edition_ops
+        )
+        self.assertIn("sync_inserted_metafields=False", pull_source)
+        self.assertNotIn("sync_product_edition_metafields_for_handles(", pull_source)
 
     def test_existing_edition_counters_and_state_never_enter_write_path(self):
         existing = _existing_product(
@@ -307,7 +382,7 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
             existing_rows=[existing],
         )
         self.assertEqual(result["existing_products_skipped"], 1)
-        insert.assert_called_once_with([])
+        self.assertEqual(insert.call_args.args[0][0]["shopify_product_id"], existing["shopify_product_id"])
         mirror.assert_not_called()
         insertion_source = inspect.getsource(supabase_backend._insert_edition_product_if_missing)
         self.assertIn("100, 1, 0, 0, 100", insertion_source)
@@ -389,12 +464,15 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         ui_source = inspect.getsource(edition_ops._render_advanced_controls)
         normal_pull_source = inspect.getsource(supabase_backend.sync_new_shopify_products_to_edition_ops)
         reconciliation_source = inspect.getsource(supabase_backend.reconcile_all_shopify_products_to_edition_ops)
-        self.assertIn('"Refresh Shopify Catalogue"', ui_source)
+        self.assertIn('"Refresh Complete Catalogue"', ui_source)
+        self.assertNotIn("Load Sync Diagnostics", ui_source)
         self.assertIn("backend.reconcile_all_shopify_products_to_edition_ops", ui_source)
         self.assertIn('"Full Product Reconciliation"', ui_source)
         self.assertIn("reconciliation_confirmed = st.checkbox", ui_source)
         self.assertIn("disabled=not backend or not reconciliation_confirmed", ui_source)
         self.assertNotIn("iter_catalog_pages", normal_pull_source)
+        self.assertIn("NEW_PRODUCT_DISCOVERY_MAX_PAGES", normal_pull_source)
+        self.assertIn("sync_inserted_metafields=False", normal_pull_source)
         self.assertIn("fetch_edition_ops_active_products", reconciliation_source)
 
     def test_zero_and_one_new_product_paths_complete_quickly_with_mocked_io(self):

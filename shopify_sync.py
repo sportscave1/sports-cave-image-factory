@@ -554,8 +554,8 @@ query EditionOpsActiveProducts($first: Int!, $after: String, $query: String) {
 
 
 NEWEST_PRODUCTS_DISCOVERY_QUERY = """
-query SportsCaveNewestProducts($first: Int!, $query: String) {
-  products(first: $first, query: $query, sortKey: CREATED_AT, reverse: true) {
+query SportsCaveNewestProducts($first: Int!, $after: String, $query: String) {
+  products(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
@@ -565,16 +565,6 @@ query SportsCaveNewestProducts($first: Int!, $query: String) {
       status
       createdAt
       updatedAt
-      onlineStoreUrl
-      media(first: 1) {
-        nodes {
-          ... on MediaImage {
-            id
-            alt
-            image { url width height }
-          }
-        }
-      }
     }
   }
 }
@@ -759,7 +749,10 @@ EDITION_OPS_SAVE_METAFIELD_KEYS = (
     "edition_enabled",
     "edition_total",
     "edition_next_number",
+    "edition_sold_count",
     "edition_remaining",
+    "edition_status",
+    "edition_label",
 )
 SHOPIFY_METAFIELDS_SET_LIMIT = 25
 
@@ -2188,11 +2181,12 @@ def fetch_edition_ops_active_products(
 def fetch_newest_products_for_edition_ops(
     *,
     created_after="",
+    after="",
     page_size=50,
     config=None,
     request_post=None,
 ):
-    """Fetch one lightweight, newest-first product page for Edition Ops discovery."""
+    """Fetch one metadata-only, newest-first product page for Edition Ops discovery."""
     config = config or get_config()
     first = min(max(int(page_size or 50), 1), 50)
     search_parts = ["(status:active OR status:draft)"]
@@ -2203,7 +2197,7 @@ def fetch_newest_products_for_edition_ops(
     search = " ".join(search_parts)
     data, served_version = graphql_request(
         NEWEST_PRODUCTS_DISCOVERY_QUERY,
-        variables={"first": first, "query": search},
+        variables={"first": first, "after": after or None, "query": search},
         config=config,
         request_post=request_post,
     )
@@ -2288,34 +2282,8 @@ def limited_edition_metafield_inputs(product_id, values):
 
 
 def edition_ops_save_metafield_inputs(product_id, values):
-    owner_id = shopify_gid("Product", product_id)
-    if not owner_id:
-        raise ShopifyAPIError("Shopify product ID is missing.")
-
-    def edition_input(key, metafield_type, value):
-        return _metafield_input(owner_id, key, metafield_type, value)
-
-    edition_total = max(
-        _parse_int_metafield(values.get("edition_total"), LIMITED_EDITION_DEFAULTS["edition_total"]),
-        1,
-    )
-    edition_next_number = max(
-        _parse_int_metafield(values.get("edition_next_number"), LIMITED_EDITION_DEFAULTS["edition_next_number"]),
-        1,
-    )
-    derived_remaining = calculate_limited_edition_remaining(edition_total, edition_next_number)
-    edition_remaining = (
-        _parse_int_metafield(values.get("edition_remaining"), derived_remaining)
-        if "edition_remaining" in values
-        else derived_remaining
-    )
-    edition_remaining = max(edition_remaining, 0)
-    return [
-        edition_input("edition_enabled", "boolean", _bool_value(values.get("edition_enabled"))),
-        edition_input("edition_total", "number_integer", edition_total),
-        edition_input("edition_next_number", "number_integer", edition_next_number),
-        edition_input("edition_remaining", "number_integer", edition_remaining),
-    ]
+    """Build the complete canonical storefront payload for an Edition Ops save."""
+    return limited_edition_metafield_inputs(product_id, values)
 
 
 def save_limited_edition_metafields(product_id, values, config=None, request_post=None):
@@ -2354,6 +2322,24 @@ def sync_edition_ops_save_metafields_for_products(
 
     fields_per_product = max(len(EDITION_OPS_SAVE_METAFIELD_KEYS), 1)
     products_per_batch = max(1, SHOPIFY_METAFIELDS_SET_LIMIT // fields_per_product)
+
+    def set_and_confirm(inputs):
+        response = metafields_set(inputs, config=config, request_post=request_post)
+        returned = response.get("metafields") or []
+        expected_values = sorted(
+            (item.get("key"), item.get("type"), str(item.get("value")))
+            for item in inputs
+        )
+        returned_values = sorted(
+            (item.get("key"), item.get("type"), str(item.get("value")))
+            for item in returned
+        )
+        if returned_values != expected_values:
+            raise ShopifyAPIError(
+                "Shopify did not confirm every Edition Ops metafield value."
+            )
+        return response
+
     for index in range(0, len(rows), products_per_batch):
         chunk = rows[index : index + products_per_batch]
         inputs = []
@@ -2361,7 +2347,7 @@ def sync_edition_ops_save_metafields_for_products(
             inputs.extend(edition_ops_save_metafield_inputs(row["shopify_product_id"], row))
 
         try:
-            metafields_set(inputs, config=config, request_post=request_post)
+            set_and_confirm(inputs)
             for row in chunk:
                 results.append(
                     {
@@ -2376,10 +2362,11 @@ def sync_edition_ops_save_metafields_for_products(
         except Exception as batch_error:
             for row in chunk:
                 try:
-                    metafields_set(
-                        edition_ops_save_metafield_inputs(row["shopify_product_id"], row),
-                        config=config,
-                        request_post=request_post,
+                    set_and_confirm(
+                        edition_ops_save_metafield_inputs(
+                            row["shopify_product_id"],
+                            row,
+                        )
                     )
                     results.append(
                         {

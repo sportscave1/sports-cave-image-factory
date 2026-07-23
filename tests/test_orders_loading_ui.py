@@ -1761,8 +1761,10 @@ class EditionOpsUiTests(unittest.TestCase):
         render_page = source[source.index("def render_page():") :]
 
         self.assertIn('st.title("Edition Ops")', render_page)
-        self.assertIn("Manage edition limits, next numbers, and active limited-edition products.", render_page)
-        self.assertIn("Source: Supabase ledger", render_page)
+        self.assertIn("Pull New Products", source)
+        self.assertIn('source_label = "cached snapshot" if meta.get("cached") else "Supabase"', render_page)
+        self.assertNotIn("Manage edition limits, next numbers, and active limited-edition products.", render_page)
+        self.assertNotIn("Load Sync Diagnostics", source)
         self.assertIn("_cached_supabase_products_snapshot", source)
         self.assertIn("_invalidate_edition_ops_cache", source)
         self.assertNotIn("Supabase connected", render_page)
@@ -2055,7 +2057,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(fake_backend.shopify_calls, 1)
         self.assertEqual(fake_backend.saved_rows[0]["next_edition_number"], 10)
         self.assertEqual(fake_backend.mirrored_rows[0]["edition_next_number"], 10)
-        self.assertIn(("Save Changes", {"type": "primary", "use_container_width": True, "disabled": False, "key": "edition-ops-save-changes"}), fake_st.buttons)
+        self.assertIn(("Save Changes", {"type": "primary", "use_container_width": False, "disabled": False, "key": "edition-ops-save-changes"}), fake_st.buttons)
 
     def test_orders_page_open_renders_snapshot_without_shopify_or_allocation_work(self):
         class FakeContainer:
@@ -3748,7 +3750,70 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertEqual(len(saved_batches[0]), 1)
         self.assertEqual(saved_batches[0][0]["row_key"], "edition_product:101")
         self.assertEqual(saved_batches[0][0]["next_edition_number"], 43)
-        self.assertIn("Supabase saved, Shopify mirror failed / retry needed", fake_st.session_state[edition_ops.NOTICE_KEY])
+        self.assertIn("Edition Ops saved but Shopify sync failed", fake_st.session_state[edition_ops.NOTICE_KEY])
+        self.assertIn("Retry is available", fake_st.session_state[edition_ops.NOTICE_KEY])
+
+    def test_pending_import_syncs_to_shopify_without_a_dirty_edit(self):
+        pending = edition_ops._normalise_row(
+            {
+                "edition_product_id": "101",
+                "shopify_product_gid": "gid://shopify/Product/1",
+                "product_title": "New Wall Art",
+                "handle": "new-wall-art",
+                "edition_enabled": True,
+                "edition_total": 100,
+                "edition_next_number": 1,
+                "sync_status": "needs_shopify_sync",
+            }
+        )
+        fake_st = SimpleNamespace(
+            session_state={
+                edition_ops.ROWS_KEY: [pending],
+                edition_ops.ORIGINAL_ROWS_KEY: [dict(pending)],
+                edition_ops.NOTICE_KEY: "",
+                edition_ops.NOTICE_LEVEL_KEY: "success",
+            }
+        )
+        mirrored = []
+        fake_backend = SimpleNamespace(
+            update_edition_products_batch=Mock(
+                side_effect=AssertionError("Unchanged pending rows must not rewrite Supabase.")
+            ),
+            sync_edition_ops_metafields_for_rows=lambda rows, **kwargs: (
+                mirrored.extend(rows)
+                or {
+                    "results": [
+                        {
+                            "row_key": "edition_product:101",
+                            "handle": "new-wall-art",
+                            "status": "updated",
+                        }
+                    ]
+                }
+            ),
+        )
+
+        with patch.object(edition_ops, "st", fake_st), patch.object(
+            edition_ops, "_configured_supabase_backend", return_value=fake_backend
+        ), patch.object(
+            edition_ops.shopify_sync,
+            "get_config",
+            return_value={"configured": True},
+        ), patch.object(
+            edition_ops, "_write_snapshot"
+        ), patch.object(
+            edition_ops, "_invalidate_edition_ops_cache"
+        ), patch.object(
+            edition_ops, "_clear_editor_state"
+        ), patch.object(
+            edition_ops, "_bump_editor_version"
+        ):
+            edition_ops._save_changed_rows()
+
+        self.assertEqual(len(mirrored), 1)
+        self.assertEqual(mirrored[0]["shopify_product_gid"], "gid://shopify/Product/1")
+        self.assertNotIn("No changes to save", fake_st.session_state[edition_ops.NOTICE_KEY])
+        self.assertIn("Shopify sync completed", fake_st.session_state[edition_ops.NOTICE_KEY])
 
     def test_save_changed_rows_archives_when_enabled_is_unchecked(self):
         original = edition_ops._normalise_row(

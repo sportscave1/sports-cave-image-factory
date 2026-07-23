@@ -2413,16 +2413,26 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertEqual(len(requests_seen[1]["variables"]["metafields"]), 21)
         self.assertEqual(len(requests_seen[2]["variables"]["metafields"]), 7)
 
-    def test_edition_ops_save_metafields_updates_only_required_keys_in_batches(self):
+    def test_edition_ops_save_metafields_updates_complete_canonical_keys_in_batches(self):
         requests_seen = []
 
         def fake_post(*args, **kwargs):
             requests_seen.append(kwargs["json"])
+            inputs = kwargs["json"]["variables"]["metafields"]
             return FakeResponse(
                 {
                     "data": {
                         "metafieldsSet": {
-                            "metafields": [],
+                            "metafields": [
+                                {
+                                    "id": f"gid://shopify/Metafield/{index}",
+                                    "namespace": item["namespace"],
+                                    "key": item["key"],
+                                    "type": item["type"],
+                                    "value": item["value"],
+                                }
+                                for index, item in enumerate(inputs, 1)
+                            ],
                             "userErrors": [],
                         }
                     }
@@ -2450,15 +2460,74 @@ class ShopifySyncClientTests(unittest.TestCase):
 
         self.assertEqual(result["synced"], 7)
         self.assertEqual(result["failed"], 0)
-        self.assertEqual(len(requests_seen), 2)
-        self.assertEqual(len(requests_seen[0]["variables"]["metafields"]), 24)
-        self.assertEqual(len(requests_seen[1]["variables"]["metafields"]), 4)
+        self.assertEqual(len(requests_seen), 3)
+        self.assertEqual(len(requests_seen[0]["variables"]["metafields"]), 21)
+        self.assertEqual(len(requests_seen[1]["variables"]["metafields"]), 21)
+        self.assertEqual(len(requests_seen[2]["variables"]["metafields"]), 7)
         keys = {
             metafield["key"]
             for request in requests_seen
             for metafield in request["variables"]["metafields"]
         }
         self.assertEqual(keys, set(shopify_sync.EDITION_OPS_SAVE_METAFIELD_KEYS))
+
+    def test_edition_ops_save_surfaces_graphql_top_level_errors(self):
+        def fake_post(*args, **kwargs):
+            return FakeResponse({"errors": [{"message": "Access denied"}]})
+
+        result = shopify_sync.sync_edition_ops_save_metafields_for_products(
+            [
+                {
+                    "shopify_product_id": "gid://shopify/Product/1",
+                    "handle": "product-1",
+                    "edition_enabled": True,
+                    "edition_total": 100,
+                    "edition_next_number": 50,
+                }
+            ],
+            config=self.config,
+            request_post=fake_post,
+        )
+
+        self.assertEqual(result["synced"], 0)
+        self.assertEqual(result["failed"], 1)
+        self.assertIn("Access denied", result["results"][0]["message"])
+
+    def test_edition_ops_save_surfaces_metafields_set_user_errors(self):
+        def fake_post(*args, **kwargs):
+            return FakeResponse(
+                {
+                    "data": {
+                        "metafieldsSet": {
+                            "metafields": [],
+                            "userErrors": [
+                                {
+                                    "field": ["metafields", "0", "value"],
+                                    "message": "Value is invalid",
+                                }
+                            ],
+                        }
+                    }
+                }
+            )
+
+        result = shopify_sync.sync_edition_ops_save_metafields_for_products(
+            [
+                {
+                    "shopify_product_id": "gid://shopify/Product/1",
+                    "handle": "product-1",
+                    "edition_enabled": True,
+                    "edition_total": 100,
+                    "edition_next_number": 50,
+                }
+            ],
+            config=self.config,
+            request_post=fake_post,
+        )
+
+        self.assertEqual(result["synced"], 0)
+        self.assertEqual(result["failed"], 1)
+        self.assertIn("Value is invalid", result["results"][0]["message"])
 
     def test_edition_ops_metafield_definition_check_and_create_missing(self):
         requests_seen = []
@@ -3061,7 +3130,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         shared_upsert.assert_called_once()
         self.assertEqual(shared_upsert.call_args.args[0], [product])
         self.assertEqual(shared_upsert.call_args.kwargs["source"], "manual_sync")
-        self.assertTrue(shared_upsert.call_args.kwargs["sync_inserted_metafields"])
+        self.assertFalse(shared_upsert.call_args.kwargs["sync_inserted_metafields"])
         self.assertFalse(shared_upsert.call_args.kwargs["sync_variants"])
         self.assertIsNone(fetch_catalogue.call_args.kwargs["max_products"])
         self.assertEqual(fetch_catalogue.call_args.kwargs["page_size"], 250)
@@ -3394,8 +3463,8 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             )
 
         self.assertEqual(result["new_products_inserted"], 1)
-        self.assertEqual(result["shopify_metafields_pushed"], 1)
-        mirror.assert_called_once_with(["new-wall-art"], config=self.config, ensure_schema_first=False)
+        self.assertEqual(result["shopify_metafields_pushed"], 0)
+        mirror.assert_not_called()
 
     def test_product_create_webhook_existing_product_is_not_duplicated(self):
         class FakeCursor:
@@ -3512,7 +3581,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         self.assertNotIn("sold_count", actions[0]["fields"])
         self.assertNotIn("remaining_count", actions[0]["fields"])
 
-    def test_product_create_webhook_metafield_failure_keeps_supabase_row_and_marks_failed(self):
+    def test_product_create_webhook_leaves_new_row_pending_configuration(self):
         class FakeCursor:
             def __enter__(self):
                 return self
@@ -3580,15 +3649,9 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
 
         self.assertEqual(result["new_products_inserted"], 1)
         self.assertEqual(result["shopify_metafields_pushed"], 0)
-        self.assertEqual(result["shopify_metafields_failed_pending"], 1)
-        self.assertIn("Shopify unavailable", "\n".join(result["errors"]))
-        mark_failed.assert_called_once()
-        failed_payload = mark_failed.call_args.args[1]
-        self.assertEqual(failed_payload["next_edition_number"], 1)
-        self.assertEqual(failed_payload["edition_total"], 100)
-        self.assertEqual(failed_payload["sold_count"], 0)
-        self.assertEqual(failed_payload["remaining_count"], 100)
-        self.assertEqual(failed_payload["edition_status"], "limited_release")
+        self.assertEqual(result["shopify_metafields_failed_pending"], 0)
+        self.assertEqual(result["errors"], [])
+        mark_failed.assert_not_called()
 
     def test_product_create_webhook_does_not_call_order_allocation_or_certificate_helpers(self):
         class FakeCursor:
@@ -3678,7 +3741,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
     @patch.object(supabase_backend, "finish_sync_run")
     @patch.object(supabase_backend, "start_sync_run", return_value="run-1")
     @patch.object(supabase_backend, "ensure_schema")
-    def test_full_reconciliation_metafield_failure_does_not_rollback_supabase_product_insert(
+    def test_full_reconciliation_leaves_new_product_pending_configuration(
         self,
         _ensure_schema,
         _start_sync_run,
@@ -3752,8 +3815,8 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
 
         self.assertEqual(result["new_products_inserted"], 1)
         self.assertEqual(result["shopify_metafields_pushed"], 0)
-        self.assertEqual(result["shopify_metafields_failed_pending"], 1)
-        metafield_sync.assert_called_once_with(["new-wall-art"], config=self.config)
+        self.assertEqual(result["shopify_metafields_failed_pending"], 0)
+        metafield_sync.assert_not_called()
 
     def test_shopify_metafield_mirror_preview_reads_without_writing(self):
         payload = {
