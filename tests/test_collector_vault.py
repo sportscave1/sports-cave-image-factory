@@ -616,6 +616,109 @@ class CollectorVaultApiTests(unittest.TestCase):
         self.assertNotIn("detail", response.json())
         self.assertIn("error", response.json())
 
+    def test_bootstrap_loads_collection_when_optional_frame_table_is_missing(self):
+        class MissingFrameTableError(RuntimeError):
+            sqlstate = "42P01"
+
+        class Cursor:
+            def __init__(self, *, rows=None, error=None):
+                self.rows = list(rows or [])
+                self.error = error
+                self.query = ""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, query, _params):
+                self.query = str(query)
+                if self.error:
+                    raise self.error
+
+            def fetchall(self):
+                return list(self.rows)
+
+        class Connection:
+            def __init__(self, cursor):
+                self._cursor = cursor
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return self._cursor
+
+        base_cursor = Cursor(rows=[_certificate_row()])
+        frame_cursor = Cursor(error=MissingFrameTableError("relation is missing"))
+        connections = [
+            Connection(base_cursor),
+            Connection(frame_cursor),
+        ]
+        with (
+            patch.dict(
+                os.environ,
+                {"COLLECTOR_VAULT_ASSET_SIGNING_SECRET": SECRET},
+                clear=True,
+            ),
+            patch.object(
+                collector_vault,
+                "verify_shopify_session_token",
+                return_value={"shopify_customer_id": CUSTOMER_A},
+            ),
+            patch.object(
+                collector_vault.supabase_backend,
+                "is_configured",
+                return_value=True,
+            ),
+            patch.object(
+                collector_vault.supabase_backend,
+                "connect",
+                side_effect=connections,
+            ),
+            patch.object(collector_vault, "get_frame_product") as frame_product,
+        ):
+            response = TestClient(self.app).get(
+                "/api/collector-vault/bootstrap",
+                headers={"Authorization": "Bearer signed-customer-token"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["certificates"]), 1)
+        self.assertFalse(response.json()["frame_product"]["available"])
+        self.assertNotIn("collector_frame_requests", base_cursor.query)
+        self.assertIn("collector_frame_requests", frame_cursor.query)
+        frame_product.assert_not_called()
+
+    def test_bootstrap_reports_core_certificate_query_failure_as_recoverable(self):
+        with (
+            patch.object(
+                collector_vault,
+                "verify_shopify_session_token",
+                return_value={"shopify_customer_id": CUSTOMER_A},
+            ),
+            patch.object(
+                collector_vault,
+                "_list_owned_certificates_with_capabilities",
+                side_effect=collector_vault.CollectorVaultDataError(
+                    "certificate query failed"
+                ),
+            ),
+        ):
+            response = TestClient(self.app).get(
+                "/api/collector-vault/bootstrap",
+                headers={"Authorization": "Bearer signed-customer-token"},
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json()["error"],
+            "Your collection could not be loaded. Please try again.",
+        )
+        self.assertNotIn("certificate query failed", response.text)
+
     def test_post_requires_csrf_marker_and_signed_session(self):
         response = TestClient(self.app).post(
             "/api/collector-vault/events",
@@ -638,6 +741,66 @@ class CollectorVaultApiTests(unittest.TestCase):
         self.assertIn("filename*=UTF-8''Andr%C3%A9", header)
         self.assertNotIn("\r", header)
         self.assertNotIn("\n", header)
+
+
+class CollectorVaultBootstrapResilienceTests(unittest.TestCase):
+    def test_missing_review_table_hides_prompt_without_failing_collection(self):
+        class MissingReviewTableError(RuntimeError):
+            sqlstate = "42P01"
+
+        row = _certificate_row()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "COLLECTOR_VAULT_ASSET_SIGNING_SECRET": SECRET,
+                    "JUDGEME_PRIVATE_API_TOKEN": "private-test-token",
+                    "JUDGEME_PUBLIC_API_TOKEN": "public-test-token",
+                    "JUDGEME_SHOP_DOMAIN": SHOP_DOMAIN,
+                },
+                clear=True,
+            ),
+            patch.object(
+                collector_vault,
+                "delivery_statuses",
+                return_value={"gid://shopify/Order/44": True},
+            ) as delivery_statuses,
+            patch.object(
+                collector_vault,
+                "_reviewed_keys",
+                side_effect=MissingReviewTableError("relation is missing"),
+            ),
+        ):
+            prompt = collector_vault.review_prompt([row], CUSTOMER_A)
+        self.assertIsNone(prompt)
+        delivery_statuses.assert_not_called()
+
+    def test_missing_optional_preview_does_not_hide_certificate(self):
+        row = _certificate_row()
+        row["certificate_preview_image_url"] = ""
+        with patch.dict(
+            os.environ,
+            {"COLLECTOR_VAULT_ASSET_SIGNING_SECRET": SECRET},
+            clear=True,
+        ):
+            certificates = collector_vault._public_certificate_rows([row])
+        self.assertEqual(len(certificates), 1)
+        self.assertEqual(certificates[0]["preview_url"], "")
+        self.assertTrue(certificates[0]["pdf_url"])
+
+    def test_one_malformed_certificate_does_not_fail_valid_collection(self):
+        valid = _certificate_row()
+        malformed = {**_certificate_row(), "certificate_row_id": "not-an-id"}
+        with patch.dict(
+            os.environ,
+            {"COLLECTOR_VAULT_ASSET_SIGNING_SECRET": SECRET},
+            clear=True,
+        ):
+            certificates = collector_vault._public_certificate_rows(
+                [malformed, valid]
+            )
+        self.assertEqual(len(certificates), 1)
+        self.assertEqual(certificates[0]["product_title"], "The Mountain Chooses")
 
 
 class CollectorVaultImplementationTests(unittest.TestCase):

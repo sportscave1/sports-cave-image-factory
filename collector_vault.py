@@ -101,6 +101,11 @@ class CollectorVaultUnavailableError(CollectorVaultError):
     public_message = "This service is temporarily unavailable. Please try again."
 
 
+class CollectorVaultDataError(CollectorVaultError):
+    status_code = 503
+    public_message = "Your collection could not be loaded. Please try again."
+
+
 def _b64url_decode(value):
     text = str(value or "").strip()
     padding = "=" * (-len(text) % 4)
@@ -300,6 +305,30 @@ def _require_database():
         raise CollectorVaultUnavailableError("Supabase is not configured.")
 
 
+def _database_error_sqlstate(error):
+    return str(
+        getattr(error, "sqlstate", "")
+        or getattr(error, "pgcode", "")
+        or ""
+    ).strip()
+
+
+def _int_value(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _log_optional_feature_unavailable(feature, error):
+    LOGGER.warning(
+        "Collector Vault optional feature unavailable feature=%s error_type=%s sqlstate=%s",
+        feature,
+        type(error).__name__,
+        _database_error_sqlstate(error) or "unknown",
+    )
+
+
 def _row_customer_id(row):
     return str(
         row.get("order_customer_id")
@@ -399,62 +428,116 @@ def _iso_value(value):
     return str(value)
 
 
-def list_owned_certificates(shopify_customer_id):
+def _latest_frame_request_state(rows, owner_hash):
+    certificate_row_ids = sorted(
+        {
+            _int_value(row.get("certificate_row_id"))
+            for row in rows
+            if _int_value(row.get("certificate_row_id")) > 0
+        }
+    )
+    if not certificate_row_ids:
+        return {}, True
+    try:
+        with supabase_backend.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (certificate_row_id)
+                           certificate_row_id, status, request_reference
+                    FROM collector_frame_requests
+                    WHERE customer_hash=%s
+                      AND certificate_row_id = ANY(%s)
+                    ORDER BY certificate_row_id, created_at DESC
+                    """,
+                    (owner_hash, certificate_row_ids),
+                )
+                frame_rows = cur.fetchall() or []
+    except Exception as error:
+        _log_optional_feature_unavailable("frame_requests", error)
+        return {}, False
+    return {
+        _int_value(row.get("certificate_row_id")): dict(row)
+        for row in frame_rows
+        if _int_value(row.get("certificate_row_id")) > 0
+    }, True
+
+
+def _list_owned_certificates_with_capabilities(shopify_customer_id):
     _require_database()
     candidates = customer_id_candidates(shopify_customer_id)
-    with supabase_backend.connect() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT
-                    c.id AS certificate_row_id,
-                    c.shopify_customer_id AS certificate_customer_id,
-                    eo.shopify_customer_id AS edition_customer_id,
-                    o.customer_id AS order_customer_id,
-                    c.shopify_order_id,
-                    COALESCE(NULLIF(c.shopify_order_name, ''), NULLIF(o.order_name, '')) AS shopify_order_name,
-                    c.shopify_line_item_id,
-                    COALESCE(NULLIF(c.shopify_product_id, ''), NULLIF(eo.shopify_product_id, ''), NULLIF(li.shopify_product_id, '')) AS shopify_product_id,
-                    COALESCE(NULLIF(c.shopify_variant_id, ''), NULLIF(eo.shopify_variant_id, ''), NULLIF(li.raw_json->>'shopify_variant_id', '')) AS shopify_variant_id,
-                    COALESCE(NULLIF(c.product_handle, ''), NULLIF(c.shopify_handle, ''), NULLIF(eo.product_handle, ''), NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AS product_handle,
-                    COALESCE(NULLIF(c.product_title, ''), NULLIF(eo.product_title, ''), NULLIF(li.product_title, '')) AS product_title,
-                    COALESCE(NULLIF(c.variant_title, ''), NULLIF(eo.variant_title, ''), NULLIF(li.variant_title, '')) AS variant_title,
-                    c.certificate_id, c.edition_number,
-                    COALESCE(c.edition_limit, c.edition_total, eo.edition_total, 100) AS edition_limit,
-                    c.purchase_date, o.processed_at,
-                    c.certificate_pdf_url, c.certificate_file_url, c.shopify_file_url,
-                    c.certificate_print_jpg_url, c.certificate_preview_image_url,
-                    c.certificate_r2_bucket, c.certificate_r2_key,
-                    c.certificate_preview_r2_bucket, c.certificate_preview_r2_key,
-                    o.customer_name, o.customer_email,
-                    latest_frame.status AS frame_status,
-                    latest_frame.request_reference AS frame_request_reference
-                FROM certificates c
-                JOIN shopify_orders o
-                  ON regexp_replace(COALESCE(o.shopify_order_id, ''), '^.*/', '')
-                   = regexp_replace(COALESCE(c.shopify_order_id, ''), '^.*/', '')
-                LEFT JOIN edition_orders eo
-                  ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
-                LEFT JOIN shopify_order_lines li
-                  ON li.shopify_line_item_id = c.shopify_line_item_id
-                LEFT JOIN LATERAL (
-                    SELECT status, request_reference
-                    FROM collector_frame_requests frame_request
-                    WHERE frame_request.certificate_row_id=c.id
-                      AND frame_request.customer_hash=%s
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                ) latest_frame ON TRUE
-                WHERE o.customer_id = ANY(%s)
-                  AND (COALESCE(c.shopify_customer_id, '') = '' OR c.shopify_customer_id = ANY(%s))
-                  AND (COALESCE(eo.shopify_customer_id, '') = '' OR eo.shopify_customer_id = ANY(%s))
-                  AND COALESCE(c.certificate_status, c.status, '') NOT IN ('Deleted', 'Cancelled')
-                ORDER BY COALESCE(c.purchase_date, o.processed_at, c.created_at) DESC NULLS LAST,
-                         c.id DESC
-                """,
-                (customer_hash(shopify_customer_id), candidates, candidates, candidates),
-            )
-            rows = cur.fetchall() or []
+    try:
+        with supabase_backend.connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        c.id AS certificate_row_id,
+                        c.shopify_customer_id AS certificate_customer_id,
+                        eo.shopify_customer_id AS edition_customer_id,
+                        o.customer_id AS order_customer_id,
+                        c.shopify_order_id,
+                        COALESCE(NULLIF(c.shopify_order_name, ''), NULLIF(o.order_name, '')) AS shopify_order_name,
+                        c.shopify_line_item_id,
+                        COALESCE(NULLIF(c.shopify_product_id, ''), NULLIF(eo.shopify_product_id, ''), NULLIF(li.shopify_product_id, '')) AS shopify_product_id,
+                        COALESCE(NULLIF(c.shopify_variant_id, ''), NULLIF(eo.shopify_variant_id, ''), NULLIF(li.raw_json->>'shopify_variant_id', '')) AS shopify_variant_id,
+                        COALESCE(NULLIF(c.product_handle, ''), NULLIF(c.shopify_handle, ''), NULLIF(eo.product_handle, ''), NULLIF(eo.shopify_handle, ''), NULLIF(li.shopify_handle, '')) AS product_handle,
+                        COALESCE(NULLIF(c.product_title, ''), NULLIF(eo.product_title, ''), NULLIF(li.product_title, '')) AS product_title,
+                        COALESCE(NULLIF(c.variant_title, ''), NULLIF(eo.variant_title, ''), NULLIF(li.variant_title, '')) AS variant_title,
+                        c.certificate_id, c.edition_number,
+                        COALESCE(c.edition_limit, c.edition_total, eo.edition_total, 100) AS edition_limit,
+                        c.purchase_date, o.processed_at,
+                        c.certificate_pdf_url, c.certificate_file_url, c.shopify_file_url,
+                        c.certificate_print_jpg_url, c.certificate_preview_image_url,
+                        c.certificate_r2_bucket, c.certificate_r2_key,
+                        c.certificate_preview_r2_bucket, c.certificate_preview_r2_key,
+                        o.customer_name, o.customer_email
+                    FROM certificates c
+                    JOIN shopify_orders o
+                      ON regexp_replace(COALESCE(o.shopify_order_id, ''), '^.*/', '')
+                       = regexp_replace(COALESCE(c.shopify_order_id, ''), '^.*/', '')
+                    LEFT JOIN edition_orders eo
+                      ON COALESCE(c.related_edition_order_id::text, c.edition_order_id::text) = eo.id::text
+                    LEFT JOIN shopify_order_lines li
+                      ON li.shopify_line_item_id = c.shopify_line_item_id
+                    WHERE o.customer_id = ANY(%s)
+                      AND (COALESCE(c.shopify_customer_id, '') = '' OR c.shopify_customer_id = ANY(%s))
+                      AND (COALESCE(eo.shopify_customer_id, '') = '' OR eo.shopify_customer_id = ANY(%s))
+                      AND COALESCE(c.certificate_status, c.status, '') NOT IN ('Deleted', 'Cancelled')
+                    ORDER BY COALESCE(c.purchase_date, o.processed_at, c.created_at) DESC NULLS LAST,
+                             c.id DESC
+                    """,
+                    (candidates, candidates, candidates),
+                )
+                rows = [dict(row) for row in (cur.fetchall() or [])]
+    except CollectorVaultError:
+        raise
+    except Exception as error:
+        LOGGER.error(
+            "Collector Vault certificate read failed error_type=%s sqlstate=%s",
+            type(error).__name__,
+            _database_error_sqlstate(error) or "unknown",
+            exc_info=True,
+        )
+        raise CollectorVaultDataError("Certificate ownership query failed.") from error
+
+    frame_state, frame_requests_available = _latest_frame_request_state(
+        rows,
+        customer_hash(shopify_customer_id),
+    )
+    for row in rows:
+        state = frame_state.get(_int_value(row.get("certificate_row_id")), {})
+        row["frame_status"] = str(state.get("status") or "")
+        row["frame_request_reference"] = str(
+            state.get("request_reference") or ""
+        )
+    return rows, {"frame_requests": frame_requests_available}
+
+
+def list_owned_certificates(shopify_customer_id):
+    rows, _capabilities = _list_owned_certificates_with_capabilities(
+        shopify_customer_id
+    )
     return rows
 
 
@@ -977,11 +1060,15 @@ def _reviewed_keys(owner_hash):
 def review_prompt(rows, shopify_customer_id):
     if not rows or not _judgeme_configured():
         return None
+    try:
+        reviewed = _reviewed_keys(customer_hash(shopify_customer_id))
+    except Exception as error:
+        _log_optional_feature_unavailable("reviews", error)
+        return None
     statuses = delivery_statuses(
         [row.get("shopify_order_id") for row in rows],
         shopify_customer_id,
     )
-    reviewed = _reviewed_keys(customer_hash(shopify_customer_id))
     for row in rows:
         order_id = _canonical_gid("Order", row.get("shopify_order_id"))
         product_id = _canonical_gid("Product", row.get("shopify_product_id"))
@@ -992,7 +1079,14 @@ def review_prompt(rows, shopify_customer_id):
         judge_product = lookup_judgeme_product(product_id)
         if not judge_product:
             return None
-        public = _certificate_public_row(row)
+        try:
+            public = _certificate_public_row(row)
+        except Exception as error:
+            LOGGER.warning(
+                "Collector Vault review candidate was malformed error_type=%s",
+                type(error).__name__,
+            )
+            continue
         review_ref = _signed_token(
             {
                 "purpose": "review",
@@ -1012,11 +1106,40 @@ def review_prompt(rows, shopify_customer_id):
     return None
 
 
+def _public_certificate_rows(rows):
+    certificates = []
+    skipped = 0
+    for row in rows:
+        try:
+            certificates.append(_certificate_public_row(row))
+        except Exception as error:
+            skipped += 1
+            LOGGER.error(
+                "Collector Vault certificate serialization failed error_type=%s",
+                type(error).__name__,
+                exc_info=True,
+            )
+    if rows and not certificates:
+        raise CollectorVaultDataError("No certificate rows could be serialized.")
+    if skipped:
+        LOGGER.warning(
+            "Collector Vault omitted malformed certificate rows count=%s",
+            skipped,
+        )
+    return certificates
+
+
 def build_vault_payload(shopify_customer_id):
-    rows = list_owned_certificates(shopify_customer_id)
-    frame_product = get_frame_product()
+    rows, capabilities = _list_owned_certificates_with_capabilities(
+        shopify_customer_id
+    )
+    frame_product = (
+        get_frame_product()
+        if capabilities.get("frame_requests")
+        else {"available": False}
+    )
     return {
-        "certificates": [_certificate_public_row(row) for row in rows],
+        "certificates": _public_certificate_rows(rows),
         "review_prompt": review_prompt(rows, shopify_customer_id),
         "frame_product": {
             "available": bool(frame_product.get("available")),

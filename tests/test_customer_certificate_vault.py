@@ -99,6 +99,12 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertIn('status === "error"', source)
         self.assertIn("certificates.length === 0", source)
 
+    def test_collection_retry_starts_a_new_bootstrap_request(self):
+        source = EXTENSION.read_text(encoding="utf-8")
+        self.assertIn("setRetryKey((value) => value + 1)", source)
+        self.assertIn("[apiBaseUrl, retryKey]", source)
+        self.assertIn('"/api/collector-vault/bootstrap"', source)
+
     def test_frame_checkout_clicks_are_guarded_and_idempotent(self):
         source = EXTENSION.read_text(encoding="utf-8")
         self.assertIn('frameState.status === "adding"', source)
