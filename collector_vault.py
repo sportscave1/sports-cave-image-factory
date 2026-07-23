@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -24,7 +25,6 @@ from services import r2_storage
 
 
 API_BASE_PATH = "/api/collector-vault"
-FRAME_PRODUCT_HANDLE = "framed-collector-certificate"
 FRAME_PRODUCT_SKU = "SC-FCC-A4-BLK"
 FRAME_PRODUCT_DEFAULT_COUNTRY = "AU"
 SESSION_TOKEN_LEEWAY_SECONDS = 30
@@ -70,6 +70,32 @@ _DELIVERY_CACHE = {}
 _FRAME_PRODUCT_CACHE = {}
 _JUDGEME_PRODUCT_CACHE = {}
 LOGGER = logging.getLogger(__name__)
+
+
+class _ProductInclusionParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._active = False
+        self._parts = []
+        self.items = []
+
+    def handle_starttag(self, tag, _attrs):
+        if str(tag).lower() == "li":
+            self._active = True
+            self._parts = []
+
+    def handle_data(self, data):
+        if self._active:
+            self._parts.append(str(data))
+
+    def handle_endtag(self, tag):
+        if str(tag).lower() != "li" or not self._active:
+            return
+        value = " ".join("".join(self._parts).split())
+        if value:
+            self.items.append(value[:180])
+        self._active = False
+        self._parts = []
 
 
 class CollectorVaultError(RuntimeError):
@@ -651,8 +677,10 @@ query CollectorVaultFrameProductById($id: ID!, $country: CountryCode!) {
     id
     title
     handle
+    descriptionHtml
     status
     onlineStoreUrl
+    featuredImage { url altText width height }
     tracksInventory
     variants(first: 20) {
       nodes {
@@ -669,35 +697,8 @@ query CollectorVaultFrameProductById($id: ID!, $country: CountryCode!) {
 }
 """
 
-FRAME_PRODUCT_BY_HANDLE_QUERY = """
-query CollectorVaultFrameProductByHandle($query: String!, $country: CountryCode!) {
-  products(first: 2, query: $query) {
-    nodes {
-      id
-      title
-      handle
-      status
-      onlineStoreUrl
-      tracksInventory
-      variants(first: 20) {
-        nodes {
-          id
-          sku
-          availableForSale
-          inventoryItem { tracked }
-          contextualPricing(context: {country: $country}) {
-            price { amount currencyCode }
-          }
-        }
-      }
-    }
-  }
-}
-"""
-
-
 def _frame_product_handle():
-    return str(os.getenv("FRAMED_CERTIFICATE_PRODUCT_HANDLE") or FRAME_PRODUCT_HANDLE).strip()
+    return str(os.getenv("FRAMED_CERTIFICATE_PRODUCT_HANDLE") or "").strip()
 
 
 def _configured_frame_product_id():
@@ -724,37 +725,18 @@ def _frame_product_environment_ready():
     )
 
 
-def _frame_product_from_response(data, configured_product_id):
-    if configured_product_id:
-        return dict(data.get("product") or {})
-    matches = [
-        product
-        for product in ((data.get("products") or {}).get("nodes") or [])
-        if str(product.get("handle") or "") == _frame_product_handle()
-    ]
-    return dict(matches[0]) if len(matches) == 1 else {}
-
-
 def _frame_product_state(product, configured_product_id, configured_variant_id):
     if not _frame_product_environment_ready():
         return "framed_product_not_configured"
     if not product:
         return "framed_product_not_found"
     product_id = _canonical_gid("Product", product.get("id"))
-    if configured_product_id and product_id != configured_product_id:
-        return "framed_product_not_found"
+    product_handle = str(product.get("handle") or "").strip()
     if (
-        not configured_product_id
-        and str(product.get("handle") or "") != _frame_product_handle()
+        product_id != configured_product_id
+        or product_handle != _frame_product_handle()
     ):
-        return "framed_product_not_found"
-    status = str(product.get("status") or "").strip().upper()
-    if status == "DRAFT":
-        return "framed_product_draft"
-    if status != "ACTIVE":
-        return "framed_product_unavailable"
-    if not str(product.get("onlineStoreUrl") or "").strip():
-        return "framed_product_not_published"
+        return "framed_product_identity_mismatch"
     variants = (product.get("variants") or {}).get("nodes") or []
     selected = next(
         (
@@ -765,17 +747,46 @@ def _frame_product_state(product, configured_product_id, configured_variant_id):
         ),
         {},
     )
-    if not selected:
-        return "framed_variant_unavailable"
+    if not selected or str(selected.get("sku") or "").strip() != FRAME_PRODUCT_SKU:
+        return "framed_product_identity_mismatch"
+    status = str(product.get("status") or "").strip().upper()
+    if status == "DRAFT":
+        return "framed_product_draft"
+    if status != "ACTIVE":
+        return "framed_product_unavailable"
+    if not str(product.get("onlineStoreUrl") or "").strip():
+        return "framed_product_not_published"
     price = (selected.get("contextualPricing") or {}).get("price") or {}
     if (
-        str(selected.get("sku") or "").strip() != FRAME_PRODUCT_SKU
-        or not selected.get("availableForSale")
+        not selected.get("availableForSale")
         or not str(price.get("amount") or "").strip()
         or not str(price.get("currencyCode") or "").strip()
     ):
         return "framed_variant_unavailable"
     return "ready_for_purchase"
+
+
+def _frame_product_inclusions(product):
+    parser = _ProductInclusionParser()
+    try:
+        parser.feed(str(product.get("descriptionHtml") or ""))
+        parser.close()
+    except Exception:
+        return []
+    return parser.items[:3]
+
+
+def _frame_product_image(product):
+    image = dict(product.get("featuredImage") or {})
+    url = str(image.get("url") or "").strip()
+    if not url.startswith("https://"):
+        return None
+    return {
+        "url": url,
+        "alt_text": str(image.get("altText") or "").strip(),
+        "width": int(image.get("width") or 0),
+        "height": int(image.get("height") or 0),
+    }
 
 
 def get_frame_product(*, force=False):
@@ -793,7 +804,7 @@ def get_frame_product(*, force=False):
         cached = _FRAME_PRODUCT_CACHE.get(cache_key)
         if not force and cached and cached["expires_at"] > now_value:
             return dict(cached["value"])
-    if not handle or not configured_variant:
+    if not _frame_product_environment_ready():
         value = {
             "state": "framed_product_not_configured",
             "available": False,
@@ -805,21 +816,12 @@ def get_frame_product(*, force=False):
             }
         return value
     try:
-        if configured_product:
-            query = FRAME_PRODUCT_BY_ID_QUERY
-            variables = {
+        data, _served_version = shopify_sync.graphql_request(
+            FRAME_PRODUCT_BY_ID_QUERY,
+            variables={
                 "id": configured_product,
                 "country": _frame_product_country(),
-            }
-        else:
-            query = FRAME_PRODUCT_BY_HANDLE_QUERY
-            variables = {
-                "query": f"handle:{handle}",
-                "country": _frame_product_country(),
-            }
-        data, _served_version = shopify_sync.graphql_request(
-            query,
-            variables=variables,
+            },
         )
     except Exception as error:
         LOGGER.warning(
@@ -831,7 +833,7 @@ def get_frame_product(*, force=False):
             "available": False,
         }
     else:
-        product = _frame_product_from_response(data, configured_product)
+        product = dict(data.get("product") or {})
         state = _frame_product_state(
             product,
             configured_product,
@@ -854,6 +856,9 @@ def get_frame_product(*, force=False):
             "state": state,
             "product_id": _canonical_gid("Product", product.get("id")),
             "handle": str(product.get("handle") or ""),
+            "title": str(product.get("title") or "").strip(),
+            "image": _frame_product_image(product),
+            "inclusions": _frame_product_inclusions(product),
             "variant_id": _canonical_gid(
                 "ProductVariant",
                 selected_variant.get("id"),
@@ -1205,6 +1210,23 @@ def build_vault_payload(shopify_customer_id):
         if secure_assets_available and capabilities.get("frame_requests")
         else {"available": False}
     )
+    frame_payload = {
+        "available": bool(frame_product.get("available")),
+    }
+    if frame_payload["available"]:
+        frame_payload.update(
+            {
+                "product_id": frame_product.get("product_id") or "",
+                "handle": frame_product.get("handle") or "",
+                "title": frame_product.get("title") or "",
+                "image": frame_product.get("image"),
+                "inclusions": list(frame_product.get("inclusions") or [])[:3],
+                "variant_id": frame_product.get("variant_id") or "",
+                "contextual_price": dict(
+                    frame_product.get("contextual_price") or {}
+                ),
+            }
+        )
     return {
         "certificates": _public_certificate_rows(
             rows,
@@ -1215,12 +1237,7 @@ def build_vault_payload(shopify_customer_id):
             if secure_assets_available
             else None
         ),
-        "frame_product": {
-            "available": bool(frame_product.get("available")),
-            "product_id": frame_product.get("product_id") or "",
-            "handle": frame_product.get("handle") or _frame_product_handle(),
-            "variant_id": frame_product.get("variant_id") or "",
-        },
+        "frame_product": frame_payload,
     }
 
 

@@ -95,6 +95,15 @@ def _frame_product_payload(*, status="ACTIVE", published=True, variant_available
             "id": FRAME_PRODUCT_ID,
             "title": "Framed Collector Certificate",
             "handle": "framed-collector-certificate",
+            "descriptionHtml": (
+                "<p>Frame the proof.</p>"
+                "<ul>"
+                "<li>Premium black frame</li>"
+                "<li>A4 landscape format</li>"
+                "<li>Professionally printed and installed</li>"
+                "<li>Ready to hang</li>"
+                "</ul>"
+            ),
             "status": status,
             "onlineStoreUrl": (
                 "https://www.sportscaveshop.com/products/framed-collector-certificate"
@@ -102,6 +111,12 @@ def _frame_product_payload(*, status="ACTIVE", published=True, variant_available
                 else None
             ),
             "tracksInventory": False,
+            "featuredImage": {
+                "url": "https://cdn.shopify.com/frame.jpg",
+                "altText": "Framed Collector Certificate",
+                "width": 1200,
+                "height": 900,
+            },
             "variants": {
                 "nodes": [
                     {
@@ -465,6 +480,19 @@ class CollectorVaultReadinessTests(unittest.TestCase):
         self.assertEqual(product["product_id"], FRAME_PRODUCT_ID)
         self.assertEqual(product["variant_id"], FRAME_VARIANT_ID)
         self.assertEqual(product["sku"], FRAME_SKU)
+        self.assertEqual(product["title"], "Framed Collector Certificate")
+        self.assertEqual(
+            product["image"]["url"],
+            "https://cdn.shopify.com/frame.jpg",
+        )
+        self.assertEqual(
+            product["inclusions"],
+            [
+                "Premium black frame",
+                "A4 landscape format",
+                "Professionally printed and installed",
+            ],
+        )
         self.assertEqual(product["state"], "ready_for_purchase")
         self.assertEqual(
             product["contextual_price"],
@@ -472,7 +500,7 @@ class CollectorVaultReadinessTests(unittest.TestCase):
         )
         self.assertFalse(product["inventory_tracked"])
 
-    def test_frame_product_handle_rename_keeps_stable_product_identity(self):
+    def test_frame_product_identity_mismatch_is_never_substituted(self):
         payload = _frame_product_payload()
         payload["product"]["handle"] = "framed-collector-certificate-renamed"
         with (
@@ -485,11 +513,52 @@ class CollectorVaultReadinessTests(unittest.TestCase):
         ):
             product = collector_vault.get_frame_product(force=True)
         self.assertEqual(product["product_id"], FRAME_PRODUCT_ID)
-        self.assertEqual(product["state"], "ready_for_purchase")
+        self.assertEqual(product["state"], "framed_product_identity_mismatch")
+        self.assertFalse(product["available"])
         self.assertEqual(
             product["handle"],
             "framed-collector-certificate-renamed",
         )
+
+    def test_frame_product_accepts_numeric_config_and_normalizes_to_gids(self):
+        environment = {
+            "FRAMED_CERTIFICATE_PRODUCT_ID": FRAME_PRODUCT_ID.rsplit("/", 1)[-1],
+            "FRAMED_CERTIFICATE_VARIANT_ID": FRAME_VARIANT_ID.rsplit("/", 1)[-1],
+            "FRAMED_CERTIFICATE_PRODUCT_HANDLE": "framed-collector-certificate",
+        }
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(
+                collector_vault.shopify_sync,
+                "graphql_request",
+                return_value=(_frame_product_payload(), "2026-04"),
+            ) as request,
+        ):
+            product = collector_vault.get_frame_product(force=True)
+        self.assertEqual(
+            request.call_args.kwargs["variables"]["id"],
+            FRAME_PRODUCT_ID,
+        )
+        self.assertEqual(product["product_id"], FRAME_PRODUCT_ID)
+        self.assertEqual(product["variant_id"], FRAME_VARIANT_ID)
+        self.assertTrue(product["available"])
+
+    def test_frame_product_variant_must_belong_to_configured_product(self):
+        payload = _frame_product_payload()
+        payload["product"]["variants"]["nodes"][0]["id"] = (
+            "gid://shopify/ProductVariant/999"
+        )
+        with (
+            patch.dict(os.environ, _frame_environment(), clear=True),
+            patch.object(
+                collector_vault.shopify_sync,
+                "graphql_request",
+                return_value=(payload, "2026-04"),
+            ),
+        ):
+            product = collector_vault.get_frame_product(force=True)
+        self.assertEqual(product["state"], "framed_product_identity_mismatch")
+        self.assertFalse(product["available"])
 
     def test_frame_product_draft_unpublished_and_unavailable_states_are_hidden(self):
         scenarios = [
@@ -528,23 +597,15 @@ class CollectorVaultReadinessTests(unittest.TestCase):
             patch.object(
                 collector_vault.shopify_sync,
                 "graphql_request",
-                return_value=(
-                    {
-                        "products": {
-                            "nodes": [_frame_product_payload()["product"]]
-                        }
-                    },
-                    "2026-04",
-                ),
             ) as request,
         ):
             product = collector_vault.get_frame_product(force=True)
-        self.assertIn("products(first: 2", request.call_args.args[0])
         self.assertEqual(
             product["state"],
             "framed_product_not_configured",
         )
         self.assertFalse(product["available"])
+        request.assert_not_called()
 
 
 class CollectorVaultReviewTests(unittest.TestCase):
@@ -960,6 +1021,77 @@ class CollectorVaultBootstrapResilienceTests(unittest.TestCase):
 
 
 class CollectorVaultImplementationTests(unittest.TestCase):
+    def test_render_declares_frame_product_variables_without_values(self):
+        source = (ROOT / "render.yaml").read_text(encoding="utf-8")
+        for name in (
+            "FRAMED_CERTIFICATE_PRODUCT_HANDLE",
+            "FRAMED_CERTIFICATE_PRODUCT_ID",
+            "FRAMED_CERTIFICATE_VARIANT_ID",
+        ):
+            self.assertEqual(source.count(f"key: {name}"), 2)
+        self.assertGreaterEqual(source.count("sync: false"), 6)
+        self.assertNotIn("gid://shopify/Product/", source)
+        self.assertNotIn("gid://shopify/ProductVariant/", source)
+
+    def test_bootstrap_exposes_only_verified_frame_product_presentation(self):
+        frame_product = {
+            "available": True,
+            "product_id": FRAME_PRODUCT_ID,
+            "handle": "framed-collector-certificate",
+            "title": "Framed Collector Certificate",
+            "image": {
+                "url": "https://cdn.shopify.com/frame.jpg",
+                "alt_text": "Framed Collector Certificate",
+            },
+            "inclusions": [
+                "Premium black frame",
+                "A4 landscape format",
+                "Professionally printed and installed",
+                "Ready to hang",
+            ],
+            "variant_id": FRAME_VARIANT_ID,
+            "contextual_price": {
+                "amount": "99.0",
+                "currency_code": "AUD",
+            },
+        }
+        with (
+            patch.object(
+                collector_vault,
+                "_list_owned_certificates_with_capabilities",
+                return_value=(
+                    [_certificate_row()],
+                    {"secure_assets": True, "frame_requests": True},
+                ),
+            ),
+            patch.object(
+                collector_vault,
+                "get_frame_product",
+                return_value=frame_product,
+            ),
+            patch.object(collector_vault, "review_prompt", return_value=None),
+            patch.object(
+                collector_vault,
+                "_public_certificate_rows",
+                return_value=[],
+            ),
+        ):
+            payload = collector_vault.build_vault_payload(CUSTOMER_A)
+        self.assertTrue(payload["frame_product"]["available"])
+        self.assertEqual(
+            payload["frame_product"]["title"],
+            "Framed Collector Certificate",
+        )
+        self.assertEqual(
+            payload["frame_product"]["image"]["url"],
+            "https://cdn.shopify.com/frame.jpg",
+        )
+        self.assertEqual(len(payload["frame_product"]["inclusions"]), 3)
+        self.assertEqual(
+            payload["frame_product"]["variant_id"],
+            FRAME_VARIANT_ID,
+        )
+
     def test_migration_is_additive_server_only_and_idempotent(self):
         source = (ROOT / "migrations" / "20260723_collector_vault.sql").read_text(
             encoding="utf-8"

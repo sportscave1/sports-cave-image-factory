@@ -6,6 +6,13 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python sports_cave_server.py
     healthCheckPath: /_stcore/health
+    envVars:
+      - key: FRAMED_CERTIFICATE_PRODUCT_HANDLE
+        sync: false
+      - key: FRAMED_CERTIFICATE_PRODUCT_ID
+        sync: false
+      - key: FRAMED_CERTIFICATE_VARIANT_ID
+        sync: false
   - type: web
     name: sports-cave-os-webhooks
     runtime: python
@@ -13,3 +20,10 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python webhook_server.py
     healthCheckPath: /healthz
+    envVars:
+      - key: FRAMED_CERTIFICATE_PRODUCT_HANDLE
+        sync: false
+      - key: FRAMED_CERTIFICATE_PRODUCT_ID
+        sync: false
+      - key: FRAMED_CERTIFICATE_VARIANT_ID
+        sync: false

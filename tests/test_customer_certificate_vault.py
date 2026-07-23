@@ -72,7 +72,7 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         card = source[source.index("function CertificateCard"):source.index("function CertificateMenu")]
         self.assertEqual(card.count('variant="primary"'), 1)
         self.assertIn("View Certificate", card)
-        self.assertIn("Order It Framed", card)
+        self.assertIn("Display It Framed", card)
         self.assertNotIn("certificate.certificate_id", card)
         details = source[
             source.index("function CertificateDetailsModal"):
@@ -86,9 +86,10 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertIn('const modalId = "certificate-viewer"', source)
         self.assertIn("Certificate viewer for", source)
         self.assertIn("Download Certificate", source)
-        self.assertIn("Frame the proof.", source)
-        self.assertIn("Premium black frame", source)
-        self.assertIn("A4 landscape", source)
+        self.assertIn("<s-heading>{product.title}</s-heading>", source)
+        self.assertIn("product.image?.url", source)
+        self.assertIn("product.inclusions", source)
+        self.assertIn("Purchase Framed Certificate", source)
         self.assertIn("Continue to secure checkout", source)
         self.assertIn('id={modalId}', source)
         self.assertIn("Submit review", source)
@@ -119,12 +120,16 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertIn("frameRequest.checkout_url", source)
         self.assertIn("Continue to secure checkout", source)
 
-    def test_frame_product_lookup_uses_stable_shopify_gid(self):
+    def test_frame_product_presentation_comes_only_from_verified_backend_payload(self):
         source = REDESIGN_EXTENSION.read_text(encoding="utf-8")
-        self.assertIn("query CollectorVaultFrameProduct($id: ID!)", source)
-        self.assertIn("product(id: $id)", source)
-        self.assertIn("variables: {id: frameConfig.product_id}", source)
-        self.assertNotIn("product(handle: $handle)", source)
+        self.assertIn(
+            "const frameProduct = frameConfig?.available ? frameConfig : null",
+            source,
+        )
+        self.assertIn("frameProduct.variant_id", source)
+        self.assertIn("frameProduct?.contextual_price", source)
+        self.assertNotIn("FRAME_PRODUCT_QUERY", source)
+        self.assertNotIn("api.query(FRAME_PRODUCT_QUERY", source)
 
     def test_mobile_layout_uses_wrapping_grids_and_touch_targets(self):
         source = REDESIGN_EXTENSION.read_text(encoding="utf-8")
@@ -312,7 +317,8 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         production = EXTENSION.read_text(encoding="utf-8")
         redesign = REDESIGN_EXTENSION.read_text(encoding="utf-8")
         self.assertIn("/api/collector-vault/bootstrap", redesign)
-        self.assertIn("Frame the proof.", redesign)
+        self.assertIn("Purchase Framed Certificate", redesign)
+        self.assertIn("product.image?.url", redesign)
         self.assertIn("Submit review", redesign)
         self.assertNotIn("/api/collector-vault/bootstrap", production)
 
