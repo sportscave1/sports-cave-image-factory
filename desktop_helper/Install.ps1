@@ -32,7 +32,7 @@ New-ItemProperty -Path $protocolKey -Name "URL Protocol" -Value "" -PropertyType
 $commandKey = Join-Path $protocolKey "shell\open\command"
 New-Item -Path $commandKey -Force | Out-Null
 $helperPath = Join-Path $installRoot "SportsCaveFilesHelper.ps1"
-$command = '"' + (Join-Path $PSHOME "powershell.exe") + '" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $helperPath + '" "%1"'
+$command = '"' + (Join-Path $PSHOME "powershell.exe") + '" -WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $helperPath + '" "%1"'
 Set-Item -Path $commandKey -Value $command
 
 Write-Host "Sports Cave desktop helper installed."

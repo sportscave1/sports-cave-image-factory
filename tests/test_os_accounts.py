@@ -628,7 +628,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertFalse(app_test.exception)
         self.assertIn("collector-art.psd", text)
         self.assertIn("Adobe Photoshop", text)
-        self.assertIn("Use Open with the Sports Cave desktop helper", text)
+        self.assertIn("Use Open to launch Adobe Photoshop", text)
         self.assertIn("Download", text)
         self.assertNotIn("Download and open", text)
 
@@ -884,6 +884,10 @@ class AccountAccessTests(unittest.TestCase):
         ]
         self.assertNotIn("#D4A54C", navigation_css)
         self.assertNotIn("#E1B23D", navigation_css)
+        self.assertIn('.st-key-files-navigation-row div[data-testid="stButton"] button', navigation_css)
+        self.assertIn('.st-key-files-address-bar div[data-testid="stButton"] button', navigation_css)
+        self.assertIn("st-key-files-row-native-photoshop-", files_css)
+        self.assertIn('content: "PS"', files_css)
 
     def test_files_header_is_removed_only_in_the_files_workspace(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")

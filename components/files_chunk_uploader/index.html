@@ -211,7 +211,7 @@
     <script>
       const CHUNK_BYTES = 8 * 1024 * 1024;
       const MAX_CONCURRENT = 2;
-      const MAX_THUMBNAIL_CONCURRENT = 3;
+      const MAX_THUMBNAIL_CONCURRENT = 4;
       const MAX_CLIENT_THUMBNAILS = 128;
       const state = {
         args: {},
@@ -241,10 +241,6 @@
         thumbnailControllers: new Set(),
         thumbnailInFlight: new Set(),
         thumbnailFolder: "",
-        desktopHandoffTimer: 0,
-        desktopHandoffObserved: false,
-        desktopAttempt: 0,
-        desktopHandoffCleanup: null,
       };
       const shell = document.getElementById("shell");
       const uploads = document.getElementById("uploads");
@@ -355,68 +351,17 @@
       }
 
       function closeDesktopHelperNotice() {
-        window.clearTimeout(state.desktopHandoffTimer);
-        if (state.desktopHandoffCleanup) state.desktopHandoffCleanup();
-        state.desktopHandoffCleanup = null;
         let parentDocument;
         try { parentDocument = window.parent.document; } catch (_) { return; }
         const notice = parentDocument.querySelector(".sc-files-helper-notice");
         if (notice) notice.remove();
       }
 
-      function showDesktopHelperNotice(item) {
-        let parentDocument;
-        try { parentDocument = window.parent.document; } catch (_) { return; }
-        closeDesktopHelperNotice();
-        const notice = parentDocument.createElement("div");
-        notice.className = "sc-files-helper-notice";
-        notice.setAttribute("role", "status");
-        const message = parentDocument.createElement("span");
-        message.textContent = "Sports Cave desktop helper is required if this file did not open.";
-        notice.appendChild(message);
-        if (item && item.preview_supported) {
-          const preview = parentDocument.createElement("button");
-          preview.type = "button";
-          preview.textContent = "Preview";
-          preview.onclick = () => {
-            closeDesktopHelperNotice();
-            emitTarget("preview_requested", item);
-          };
-          notice.appendChild(preview);
-        }
-        const install = parentDocument.createElement("a");
-        install.href = "/api/files-desktop-helper";
-        install.textContent = "Install desktop helper";
-        install.setAttribute("download", "Sports-Cave-Files-Desktop-Helper.zip");
-        notice.appendChild(install);
-        const close = parentDocument.createElement("button");
-        close.type = "button";
-        close.textContent = "Close";
-        close.onclick = closeDesktopHelperNotice;
-        notice.appendChild(close);
-        parentDocument.body.appendChild(notice);
-      }
-
       function invokeDesktopHelper(item, { kind="file" } = {}) {
         if (!item || !item.desktop_relative_path) {
-          showDesktopHelperNotice(item);
           return;
         }
         closeDesktopHelperNotice();
-        state.desktopHandoffObserved = false;
-        const attempt = ++state.desktopAttempt;
-        const markHandoff = () => {
-          if (attempt === state.desktopAttempt) state.desktopHandoffObserved = true;
-        };
-        const visibilityHandler = () => {
-          if (window.parent.document.hidden) markHandoff();
-        };
-        window.parent.addEventListener("blur", markHandoff, { once: true });
-        window.parent.document.addEventListener("visibilitychange", visibilityHandler);
-        state.desktopHandoffCleanup = () => {
-          window.parent.removeEventListener("blur", markHandoff);
-          window.parent.document.removeEventListener("visibilitychange", visibilityHandler);
-        };
         const protocolUrl = `sports-cave-files://open?path=${encodeURIComponent(item.desktop_relative_path)}&kind=${encodeURIComponent(kind)}`;
         const protocolLink = window.parent.document.createElement("a");
         protocolLink.hidden = true;
@@ -425,13 +370,6 @@
         window.parent.document.body.appendChild(protocolLink);
         protocolLink.click();
         protocolLink.remove();
-        state.desktopHandoffTimer = window.setTimeout(() => {
-          if (state.desktopHandoffCleanup) state.desktopHandoffCleanup();
-          state.desktopHandoffCleanup = null;
-          if (attempt === state.desktopAttempt && !state.desktopHandoffObserved) {
-            showDesktopHelperNotice(item);
-          }
-        }, 1350);
       }
 
       function openItem(item) {
@@ -870,7 +808,7 @@
             state.thumbnailQueue.push({ row: record.target, item, key, folder: state.thumbnailFolder });
           });
           drainThumbnailQueue();
-        }, { root, rootMargin: "48px 0px", threshold: 0.01 });
+        }, { root, rootMargin: "192px 0px", threshold: 0.01 });
         rows.forEach((row, index) => {
           if (items[index] && items[index].thumbnail_url) state.thumbnailObserver.observe(row);
         });

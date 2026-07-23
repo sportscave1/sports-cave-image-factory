@@ -2199,7 +2199,9 @@ def inject_styles():
             min-width: 0;
         }
 
-        .st-key-files-navigation-row button {
+        .st-key-files-navigation-row button,
+        .st-key-files-navigation-row div[data-testid="stButton"] button,
+        .st-key-files-navigation-row .stButton > button {
             background: #FFFFFF !important;
             background-color: #FFFFFF !important;
             border: 1px solid transparent !important;
@@ -2212,21 +2214,41 @@ def inject_styles():
             white-space: nowrap !important;
         }
 
-        .st-key-files-navigation-row button:hover:not(:disabled) {
+        .st-key-files-navigation-row button *,
+        .st-key-files-navigation-row div[data-testid="stButton"] button *,
+        .st-key-files-navigation-row .stButton > button * {
+            color: inherit !important;
+            -webkit-text-fill-color: currentColor !important;
+            fill: currentColor !important;
+            stroke: currentColor !important;
+        }
+
+        .st-key-files-navigation-row button:hover:not(:disabled),
+        .st-key-files-navigation-row div[data-testid="stButton"] button:hover:not(:disabled),
+        .st-key-files-navigation-row .stButton > button:hover:not(:disabled) {
             background: #EAF2F8 !important;
             background-color: #EAF2F8 !important;
             border-color: #D1DFE9 !important;
         }
 
         .st-key-files-navigation-row button:active:not(:disabled),
-        .st-key-files-navigation-row button[aria-pressed="true"] {
+        .st-key-files-navigation-row button[aria-pressed="true"],
+        .st-key-files-navigation-row div[data-testid="stButton"] button:active:not(:disabled),
+        .st-key-files-navigation-row div[data-testid="stButton"] button[aria-pressed="true"],
+        .st-key-files-navigation-row .stButton > button:active:not(:disabled),
+        .st-key-files-navigation-row .stButton > button[aria-pressed="true"] {
             background: #DCECF7 !important;
             background-color: #DCECF7 !important;
             border-color: #B7D1E3 !important;
             color: #202124 !important;
         }
 
-        .st-key-files-navigation-row button:disabled {
+        .st-key-files-navigation-row button:disabled,
+        .st-key-files-navigation-row div[data-testid="stButton"] button:disabled,
+        .st-key-files-navigation-row .stButton > button:disabled {
+            background: #FFFFFF !important;
+            background-color: #FFFFFF !important;
+            border-color: transparent !important;
             color: #A6ABB0 !important;
             opacity: 0.72;
         }
@@ -2259,7 +2281,12 @@ def inject_styles():
             min-width: 0;
         }
 
-        .st-key-files-address-bar button {
+        .st-key-files-address-bar button,
+        .st-key-files-address-bar div[data-testid="stButton"] button,
+        .st-key-files-address-bar .stButton > button {
+            background: transparent !important;
+            background-color: transparent !important;
+            border: 1px solid transparent !important;
             border-radius: 3px !important;
             color: #25282C !important;
             font-size: 0.76rem !important;
@@ -2271,13 +2298,34 @@ def inject_styles():
             text-overflow: ellipsis;
         }
 
-        .st-key-files-address-bar button p {
+        .st-key-files-address-bar button:hover:not(:disabled),
+        .st-key-files-address-bar div[data-testid="stButton"] button:hover:not(:disabled),
+        .st-key-files-address-bar .stButton > button:hover:not(:disabled) {
+            background: #EAF2F8 !important;
+            background-color: #EAF2F8 !important;
+            border-color: #D1DFE9 !important;
+        }
+
+        .st-key-files-address-bar button *,
+        .st-key-files-address-bar div[data-testid="stButton"] button *,
+        .st-key-files-address-bar .stButton > button * {
+            color: inherit !important;
+            -webkit-text-fill-color: currentColor !important;
+            fill: currentColor !important;
+            stroke: currentColor !important;
+        }
+
+        .st-key-files-address-bar button p,
+        .st-key-files-address-bar div[data-testid="stButton"] button p,
+        .st-key-files-address-bar .stButton > button p {
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
 
-        .st-key-files-address-bar button::after {
+        .st-key-files-address-bar button::after,
+        .st-key-files-address-bar div[data-testid="stButton"] button::after,
+        .st-key-files-address-bar .stButton > button::after {
             color: #777C82;
             content: "chevron_right";
             font-family: "Material Symbols Rounded";
@@ -2722,6 +2770,32 @@ def inject_styles():
 
         div[class*="st-key-files-row-native-"].sc-files-thumbnail-loaded [data-testid="stColumn"]:first-child [data-testid="stIconMaterial"] {
             display: none !important;
+        }
+
+        div[class*="st-key-files-row-native-photoshop-"] [data-testid="stColumn"]:first-child [data-testid="stIconMaterial"],
+        div[class*="st-key-files-row-native-selected-photoshop-"] [data-testid="stColumn"]:first-child [data-testid="stIconMaterial"] {
+            display: none !important;
+        }
+
+        div[class*="st-key-files-row-native-photoshop-"] [data-testid="stColumn"]:first-child button::before,
+        div[class*="st-key-files-row-native-selected-photoshop-"] [data-testid="stColumn"]:first-child button::before {
+            align-items: center;
+            background: #001E36;
+            border: 1px solid #2BA8FF;
+            border-radius: 3px;
+            color: #31A8FF !important;
+            content: "PS";
+            display: inline-flex;
+            flex: 0 0 36px;
+            font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+            font-size: 0.68rem;
+            font-weight: 800;
+            height: 36px;
+            justify-content: center;
+            letter-spacing: 0;
+            margin-right: 0.45rem;
+            width: 36px;
+            -webkit-text-fill-color: #31A8FF !important;
         }
 
         .sc-files-helper-notice {
@@ -10182,8 +10256,8 @@ def _dropbox_handle_callback(user):
         st.error("Files connection failed. Please try again.")
 
 
-FILES_DIRECTORY_CACHE_SECONDS = 90
-FILES_DIRECTORY_CACHE_LIMIT = 32
+FILES_DIRECTORY_CACHE_SECONDS = 180
+FILES_DIRECTORY_CACHE_LIMIT = 64
 FILES_TEAM_ROOT_CACHE_SECONDS = 15 * 60
 FILES_CHUNK_COMPONENT_DIR = BASE_DIR / "components" / "files_chunk_uploader"
 
@@ -10369,7 +10443,9 @@ def _files_item_kind(entry):
         return "video"
     if extension in {".zip", ".rar", ".7z"}:
         return "archive"
-    if extension in {".psd", ".psb", ".ai", ".indd", ".eps"}:
+    if extension in {".psd", ".psb"}:
+        return "photoshop"
+    if extension in {".ai", ".indd", ".eps"}:
         return "design"
     return "file"
 
@@ -10672,6 +10748,7 @@ def _files_row_icon(kind):
         "sheet": ":material/table:",
         "video": ":material/movie:",
         "archive": ":material/folder_zip:",
+        "photoshop": ":material/image:",
         "design": ":material/draw:",
     }.get(kind, ":material/draft:")
 
@@ -10761,10 +10838,7 @@ def _files_interaction_rows(entries, root_path=""):
         )
         revision = str((entry or {}).get("rev") or (entry or {}).get("content_hash") or "")
         extension = Path(name).suffix.casefold()
-        thumbnail_supported = extension in {
-            ".bmp", ".gif", ".jpeg", ".jpg", ".mov", ".mp4", ".pdf",
-            ".png", ".psb", ".psd", ".tif", ".tiff", ".webm", ".webp",
-        }
+        thumbnail_supported = extension in {".jpg", ".jpeg", ".png"}
         rows.append(
             {
                 "path": path,
@@ -10893,7 +10967,7 @@ def _render_files_preview(access_token, user, root_path, preview_path):
         st.markdown(
             '<div class="sc-files-preview-note">'
             f'This format is normally opened with {html.escape(application)}. '
-            'Use Open with the Sports Cave desktop helper, inspect the file details '
+            f'Use Open to launch {html.escape(application)}, inspect the file details '
             'here, or deliberately download a local copy.'
             '</div>',
             unsafe_allow_html=True,

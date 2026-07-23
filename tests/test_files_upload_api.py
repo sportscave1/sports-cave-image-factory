@@ -749,31 +749,61 @@ class FilesChunkUploaderSourceTests(unittest.TestCase):
         self.assertIn('/api/files-delete', delete_handler)
         self.assertIn('emitCommand("delete_completed"', delete_handler)
 
-    def test_desktop_open_uses_only_relative_protocol_path_and_has_safe_fallback(self):
+    def test_desktop_open_uses_only_relative_protocol_path_without_banner(self):
         component = self.component_source
         open_handler = component[
-            component.index("function showDesktopHelperNotice") : component.index("function render()")
+            component.index("function invokeDesktopHelper") : component.index("function render()")
         ]
 
         self.assertIn("item.desktop_relative_path", open_handler)
         self.assertIn("sports-cave-files://open?path=", open_handler)
         self.assertNotIn("item.path}", open_handler)
-        self.assertIn("Sports Cave desktop helper is required", open_handler)
-        self.assertIn('/api/files-desktop-helper', open_handler)
-        self.assertIn('emitTarget("preview_requested", item)', open_handler)
+        self.assertIn("protocolLink.click()", open_handler)
+        self.assertNotIn("Sports Cave desktop helper is required", open_handler)
+        self.assertNotIn('/api/files-desktop-helper', open_handler)
+        self.assertNotIn('emitTarget("preview_requested", item)', open_handler)
         self.assertNotIn("/api/files-download", open_handler)
 
     def test_thumbnail_loading_is_viewport_lazy_bounded_and_non_blocking(self):
         component = self.component_source
 
         self.assertIn("new window.parent.IntersectionObserver", component)
-        self.assertIn('rootMargin: "48px 0px"', component)
-        self.assertIn("const MAX_THUMBNAIL_CONCURRENT = 3", component)
+        self.assertIn('rootMargin: "192px 0px"', component)
+        self.assertIn("const MAX_THUMBNAIL_CONCURRENT = 4", component)
         self.assertIn("state.thumbnailActive < MAX_THUMBNAIL_CONCURRENT", component)
         self.assertIn("setupLazyThumbnails(rows, items)", component)
         self.assertIn("thumbnail_url", component)
         self.assertIn("thumbnail_key", self.app_source)
         self.assertNotIn("get_temporary_link", component)
+
+    def test_psd_rows_use_photoshop_badge_without_thumbnail_fetch(self):
+        item_kind = self.app_source[
+            self.app_source.index("def _files_item_kind") : self.app_source.index(
+                "\n\ndef _files_type_label"
+            )
+        ]
+        interaction_rows = self.app_source[
+            self.app_source.index("def _files_interaction_rows") : self.app_source.index(
+                "\n\ndef _files_preview_kind"
+            )
+        ]
+        thumbnail_block = interaction_rows[
+            interaction_rows.index("thumbnail_supported = extension in")
+            : interaction_rows.index("rows.append")
+        ]
+        files_css = self.app_source[
+            self.app_source.index(".st-key-files-explorer") : self.app_source.index(
+                ".sc-task-card"
+            )
+        ]
+
+        self.assertIn('return "photoshop"', item_kind)
+        self.assertIn('"photoshop": ":material/image:"', self.app_source)
+        self.assertIn('thumbnail_supported = extension in {".jpg", ".jpeg", ".png"}', thumbnail_block)
+        self.assertNotIn(".psd", thumbnail_block)
+        self.assertNotIn(".psb", thumbnail_block)
+        self.assertIn("st-key-files-row-native-photoshop-", files_css)
+        self.assertIn('content: "PS"', files_css)
 
     def test_thumbnail_clicks_keep_row_selection_and_open_contract(self):
         component = self.component_source
