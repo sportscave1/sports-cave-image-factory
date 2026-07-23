@@ -10,10 +10,11 @@ It stores no Dropbox credentials and runs only for the current Windows user.
 3. Select the locally synced `Sportscave Team Folder` when prompted.
 4. Restart the browser.
 
-PSD and PSB files prefer Adobe Photoshop. Other files use their Windows default
-application. The helper accepts only safe relative paths inside the approved folder.
-Dropbox Desktop must be installed and signed in. Opening an online-only placeholder
-asks Dropbox Desktop to hydrate the file before the associated application reads it.
+PSD and PSB files prefer Adobe Photoshop, AI files prefer Adobe Illustrator, and
+other files use their Windows default application. The helper accepts only safe
+relative paths inside the approved folder. Dropbox Desktop must be installed and
+signed in. The helper reads the first byte before launch so Dropbox hydrates an
+online-only placeholder before the associated application receives it.
 
 ## Uninstall
 

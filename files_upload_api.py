@@ -1,5 +1,6 @@
 import os
 import io
+import mimetypes
 import secrets
 import threading
 import time
@@ -7,10 +8,11 @@ import zipfile
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from urllib.parse import quote
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from activity_log import record_activity_log
 import dropbox_integration
@@ -22,7 +24,18 @@ FILES_UPLOAD_CHUNK_BYTES = 8 * 1024 * 1024
 FILES_UPLOAD_SESSION_SECONDS = 6 * 60 * 60
 FILES_THUMBNAIL_CACHE_SECONDS = 30 * 60
 FILES_THUMBNAIL_CACHE_LIMIT = 256
+FILES_DIRECTORY_CACHE_SECONDS = 3 * 60
+FILES_DIRECTORY_CACHE_LIMIT = 64
 DESKTOP_HELPER_DIR = Path(__file__).resolve().parent / "desktop_helper"
+MACOS_DESKTOP_HELPER_DIR = Path(__file__).resolve().parent / "desktop_helper_macos"
+FILES_WINDOW_FILE = (
+    Path(__file__).resolve().parent / "components" / "files_window" / "index.html"
+)
+FILES_IMAGE_VIEWER_FILE = (
+    Path(__file__).resolve().parent / "components" / "files_image_viewer" / "index.html"
+)
+FILES_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+FILES_IMAGE_PREVIEW_MAX_BYTES = 100 * 1024 * 1024
 
 
 class FilesUploadError(RuntimeError):
@@ -273,6 +286,46 @@ _DROPBOX_CONTEXT = {}
 _DROPBOX_CONTEXT_LOCK = threading.Lock()
 _THUMBNAIL_CACHE = {}
 _THUMBNAIL_CACHE_LOCK = threading.Lock()
+_DIRECTORY_CACHE = {}
+_DIRECTORY_CACHE_LOCK = threading.Lock()
+
+
+def invalidate_directory_cache(*paths):
+    clean_paths = set()
+    for path in paths:
+        with suppress(Exception):
+            clean_paths.add(dropbox_integration.normalize_dropbox_path(path).casefold())
+    with _DIRECTORY_CACHE_LOCK:
+        if not clean_paths:
+            _DIRECTORY_CACHE.clear()
+            return
+        for key in list(_DIRECTORY_CACHE):
+            if str(key).casefold() in clean_paths:
+                _DIRECTORY_CACHE.pop(key, None)
+
+
+def _directory_entries(access_token, path, *, force=False):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    now = time.monotonic()
+    with _DIRECTORY_CACHE_LOCK:
+        cached = _DIRECTORY_CACHE.get(clean_path) or {}
+        if not force and cached.get("expires_at", 0) > now:
+            return list(cached.get("entries") or ())
+    entries = dropbox_integration.sort_folder_entries(
+        dropbox_integration.list_folder(access_token, clean_path)
+    )
+    with _DIRECTORY_CACHE_LOCK:
+        _DIRECTORY_CACHE[clean_path] = {
+            "entries": list(entries),
+            "expires_at": now + FILES_DIRECTORY_CACHE_SECONDS,
+        }
+        while len(_DIRECTORY_CACHE) > FILES_DIRECTORY_CACHE_LIMIT:
+            oldest = min(
+                _DIRECTORY_CACHE,
+                key=lambda key: _DIRECTORY_CACHE[key].get("expires_at", 0),
+            )
+            _DIRECTORY_CACHE.pop(oldest, None)
+    return list(entries)
 
 
 def invalidate_thumbnail_cache(*paths):
@@ -409,6 +462,150 @@ def _validated_delete_paths(paths, current_path, root_path):
     return selected
 
 
+def _validated_current_folder(path, root_path):
+    try:
+        clean_root = dropbox_integration.normalize_dropbox_path(root_path)
+        clean_path = dropbox_integration.normalize_dropbox_path(path)
+    except (TypeError, ValueError) as error:
+        raise FilesUploadError("This folder is not available.", status_code=403) from error
+    if not clean_path:
+        clean_path = clean_root
+    if not dropbox_integration.path_is_within_root(clean_path, clean_root):
+        raise FilesUploadError("This folder is not available.", status_code=403)
+    return clean_path
+
+
+def _validated_item_in_folder(path, current_path, root_path):
+    clean_folder = _validated_current_folder(current_path, root_path)
+    try:
+        clean_path = dropbox_integration.normalize_dropbox_path(path)
+    except (TypeError, ValueError) as error:
+        raise FilesUploadError("This item is not available.", status_code=403) from error
+    clean_root = dropbox_integration.normalize_dropbox_path(root_path)
+    if (
+        not clean_path
+        or clean_path.casefold() == clean_root.casefold()
+        or not dropbox_integration.path_is_within_root(clean_path, clean_root)
+    ):
+        raise FilesUploadError("This item is not available.", status_code=403)
+    if clean_path.rsplit("/", 1)[0].casefold() != clean_folder.casefold():
+        raise FilesUploadError("This item is not in the open folder.", status_code=403)
+    return clean_path, clean_folder
+
+
+def _validated_relative_path(relative_path, root_path):
+    raw = str(relative_path or "")
+    if (
+        not raw
+        or raw != raw.strip()
+        or raw.startswith(("/", "\\"))
+        or "\\" in raw
+        or ":" in raw
+        or "\x00" in raw
+    ):
+        raise FilesUploadError("This file is not available.", status_code=403)
+    parts = raw.split("/")
+    if any(not part or part in {".", ".."} for part in parts):
+        raise FilesUploadError("This file is not available.", status_code=403)
+    clean_root = dropbox_integration.normalize_dropbox_path(root_path)
+    try:
+        clean_path = dropbox_integration.normalize_dropbox_path(f"{clean_root}/{raw}")
+    except (TypeError, ValueError) as error:
+        raise FilesUploadError("This file is not available.", status_code=403) from error
+    if not dropbox_integration.path_is_within_root(clean_path, clean_root):
+        raise FilesUploadError("This file is not available.", status_code=403)
+    return clean_path
+
+
+def _file_kind(name, tag):
+    if str(tag or "").casefold() == "folder":
+        return "folder"
+    extension = PurePosixPath(str(name or "")).suffix.casefold()
+    if extension in {".psd", ".psb"}:
+        return "photoshop"
+    if extension in FILES_IMAGE_EXTENSIONS:
+        return "image"
+    if extension == ".pdf":
+        return "pdf"
+    if extension in {".doc", ".docx", ".txt", ".rtf", ".md"}:
+        return "document"
+    if extension in {".xls", ".xlsx", ".csv"}:
+        return "sheet"
+    if extension in {".mp4", ".webm", ".mov", ".m4v", ".avi"}:
+        return "video"
+    if extension in {".zip", ".rar", ".7z"}:
+        return "archive"
+    if extension in {".ai", ".indd", ".eps"}:
+        return "design"
+    return "file"
+
+
+def _file_type_label(name, tag):
+    if str(tag or "").casefold() == "folder":
+        return "File folder"
+    extension = PurePosixPath(str(name or "")).suffix.lstrip(".").upper()
+    labels = {
+        "JPG": "JPEG image",
+        "JPEG": "JPEG image",
+        "PNG": "PNG image",
+        "WEBP": "WebP image",
+        "GIF": "GIF image",
+        "PDF": "PDF document",
+        "DOC": "Word document",
+        "DOCX": "Word document",
+        "TXT": "Text document",
+        "XLS": "Excel worksheet",
+        "XLSX": "Excel worksheet",
+        "CSV": "CSV file",
+        "PSD": "Adobe Photoshop document",
+        "PSB": "Adobe Photoshop large document",
+        "AI": "Adobe Illustrator artwork",
+        "INDD": "Adobe InDesign document",
+        "MP4": "MP4 video",
+        "WEBM": "WebM video",
+        "MOV": "QuickTime video",
+        "ZIP": "Compressed folder",
+    }
+    return labels.get(extension, f"{extension} file" if extension else "File")
+
+
+def _public_file_item(entry, root_path):
+    entry = dict(entry or {})
+    tag = str(entry.get(".tag") or "file").casefold()
+    name = str(entry.get("name") or "Untitled")
+    path = dropbox_integration.normalize_dropbox_path(
+        entry.get("path_display") or entry.get("path_lower") or ""
+    )
+    clean_root = dropbox_integration.normalize_dropbox_path(root_path)
+    if not path or not dropbox_integration.path_is_within_root(path, clean_root):
+        return None
+    relative_path = path[len(clean_root) :].lstrip("/")
+    extension = PurePosixPath(name).suffix.casefold()
+    thumbnail_supported = tag != "folder" and extension in {".jpg", ".jpeg", ".png"}
+    revision = str(entry.get("rev") or entry.get("content_hash") or "")
+    item = {
+        "id": path,
+        "path": path,
+        "desktop_relative_path": relative_path,
+        "name": name,
+        "tag": tag,
+        "kind": _file_kind(name, tag),
+        "extension": extension.lstrip("."),
+        "type": _file_type_label(name, tag),
+        "size": int(entry.get("size") or 0) if tag != "folder" else 0,
+        "size_label": "" if tag == "folder" else dropbox_integration.format_file_size(entry.get("size")),
+        "modified": str(entry.get("server_modified") or ""),
+        "status": "Online",
+        "protected": path.casefold() == clean_root.casefold(),
+    }
+    if thumbnail_supported:
+        item["thumbnail_url"] = (
+            f"/api/files-thumbnail?path={quote(path, safe='')}&rev={quote(revision, safe='')}"
+        )
+        item["thumbnail_key"] = f"{path}|{revision}"
+    return item
+
+
 def _same_origin(request):
     origin = str(request.headers.get("origin") or "").strip()
     if not origin:
@@ -420,7 +617,7 @@ async def _json_body(request):
     try:
         return dict(await request.json())
     except Exception as error:
-        raise FilesUploadError("Upload request is invalid.") from error
+        raise FilesUploadError("Files request is invalid.") from error
 
 
 async def _bounded_chunk(request):
@@ -453,9 +650,246 @@ def _response_error(error):
             status_code=error.status_code,
         )
     return JSONResponse(
-        {"ok": False, "code": "upload_unavailable", "message": "Upload is unavailable right now."},
+        {"ok": False, "code": "files_unavailable", "message": "Files is unavailable right now."},
         status_code=503,
     )
+
+
+def _activity_actor(user):
+    return (
+        str((user or {}).get("display_name") or "").strip()
+        or str((user or {}).get("email") or "").strip()
+        or str((user or {}).get("username") or "").strip()
+        or "Sports Cave"
+    )
+
+
+async def files_window_page(request: Request):
+    """Serve the standalone Files application to an approved signed-in user."""
+    try:
+        await run_in_threadpool(_request_user, request)
+        source = await run_in_threadpool(FILES_WINDOW_FILE.read_text, encoding="utf-8")
+        return HTMLResponse(
+            source,
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "same-origin",
+            },
+        )
+    except Exception as error:
+        if isinstance(error, FilesUploadError):
+            return HTMLResponse(
+                "<!doctype html><title>Files unavailable</title>"
+                "<p style='font:14px Segoe UI,sans-serif;padding:24px'>"
+                "Files access is not approved for this account.</p>",
+                status_code=error.status_code,
+                headers={"Cache-Control": "no-store"},
+            )
+        return HTMLResponse(
+            "<!doctype html><title>Files unavailable</title>"
+            "<p style='font:14px Segoe UI,sans-serif;padding:24px'>"
+            "Files could not be opened right now.</p>",
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+
+
+async def files_image_viewer_page(request: Request):
+    """Serve the standalone image viewer to an approved signed-in user."""
+    try:
+        await run_in_threadpool(_request_user, request)
+        source = await run_in_threadpool(FILES_IMAGE_VIEWER_FILE.read_text, encoding="utf-8")
+        return HTMLResponse(
+            source,
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "same-origin",
+            },
+        )
+    except Exception as error:
+        status = error.status_code if isinstance(error, FilesUploadError) else 503
+        return HTMLResponse(
+            "<!doctype html><title>Image unavailable</title>"
+            "<p style='font:14px Segoe UI,sans-serif;padding:24px'>"
+            "This image could not be opened.</p>",
+            status_code=status,
+            headers={"Cache-Control": "no-store"},
+        )
+
+
+async def list_files(request: Request):
+    """Return metadata only for one approved Dropbox folder."""
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Files request is not allowed.", status_code=403)
+        user = await run_in_threadpool(_request_user, request)
+        context = await run_in_threadpool(_dropbox_context)
+        current_path = _validated_current_folder(
+            request.query_params.get("path") or context["root_path"],
+            context["root_path"],
+        )
+        force = str(request.query_params.get("refresh") or "").casefold() in {"1", "true"}
+        try:
+            entries = await run_in_threadpool(
+                _directory_entries,
+                context["access_token"],
+                current_path,
+                force=force,
+            )
+        except Exception:
+            context = await run_in_threadpool(_dropbox_context, force=True)
+            current_path = _validated_current_folder(current_path, context["root_path"])
+            entries = await run_in_threadpool(
+                _directory_entries,
+                context["access_token"],
+                current_path,
+                force=True,
+            )
+        items = [
+            item
+            for item in (
+                _public_file_item(entry, context["root_path"])
+                for entry in entries
+            )
+            if item
+        ]
+        return JSONResponse(
+            {
+                "ok": True,
+                "root_path": context["root_path"],
+                "root_name": context["root_path"].rsplit("/", 1)[-1],
+                "current_path": current_path,
+                "items": items,
+                "can_delete": bool(os_accounts.can_delete_files(user)),
+                "cached_for_seconds": FILES_DIRECTORY_CACHE_SECONDS,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as error:
+        return _response_error(error)
+
+
+async def create_files_folder(request: Request):
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Folder request is not allowed.", status_code=403)
+        user = await run_in_threadpool(_request_user, request)
+        payload = await _json_body(request)
+        context = await run_in_threadpool(_dropbox_context)
+        folder_name = str(payload.get("name") or "").strip()
+        if not folder_name:
+            raise FilesUploadError("Enter a folder name.", code="invalid_name")
+        try:
+            dropbox_integration.sanitize_path_component(folder_name)
+        except ValueError as error:
+            raise FilesUploadError(
+                "Enter a valid folder name.",
+                code="invalid_name",
+            ) from error
+        current_path = _validated_current_folder(
+            payload.get("current_path"),
+            context["root_path"],
+        )
+        try:
+            metadata = await run_in_threadpool(
+                dropbox_integration.create_folder,
+                context["access_token"],
+                current_path,
+                folder_name,
+                conflict=payload.get("conflict") or "cancel",
+            )
+        except dropbox_integration.DropboxConflictError as error:
+            raise FilesUploadError(
+                "A file or folder already uses this name.",
+                status_code=409,
+                code="name_conflict",
+            ) from error
+        if not metadata:
+            raise FilesUploadError(
+                "A file or folder already uses this name.",
+                status_code=409,
+                code="name_conflict",
+            )
+        created_path = dropbox_integration.normalize_dropbox_path(
+            metadata.get("path_display") or metadata.get("path_lower") or ""
+        )
+        invalidate_directory_cache(current_path)
+        await run_in_threadpool(
+            record_activity_log,
+            "files_folder_created",
+            "Files",
+            f"Folder created: {metadata.get('name') or folder_name}",
+            entity_type="dropbox_folder",
+            entity_id=created_path,
+            actor=_activity_actor(user),
+        )
+        return JSONResponse(
+            {
+                "ok": True,
+                "item": _public_file_item(metadata, context["root_path"]),
+            }
+        )
+    except Exception as error:
+        return _response_error(error)
+
+
+async def rename_files_item(request: Request):
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Rename request is not allowed.", status_code=403)
+        user = await run_in_threadpool(_request_user, request)
+        payload = await _json_body(request)
+        context = await run_in_threadpool(_dropbox_context)
+        new_name = str(payload.get("name") or "").strip()
+        if not new_name:
+            raise FilesUploadError("Enter a new name.", code="invalid_name")
+        try:
+            dropbox_integration.sanitize_path_component(new_name)
+        except ValueError as error:
+            raise FilesUploadError("Enter a valid name.", code="invalid_name") from error
+        old_path, current_path = _validated_item_in_folder(
+            payload.get("path"),
+            payload.get("current_path"),
+            context["root_path"],
+        )
+        try:
+            metadata = await run_in_threadpool(
+                dropbox_integration.rename_path,
+                context["access_token"],
+                old_path,
+                new_name,
+                root_path=context["root_path"],
+            )
+        except dropbox_integration.DropboxConflictError as error:
+            raise FilesUploadError(
+                "A file or folder already uses this name.",
+                status_code=409,
+                code="name_conflict",
+            ) from error
+        new_path = dropbox_integration.normalize_dropbox_path(
+            metadata.get("path_display") or metadata.get("path_lower") or ""
+        )
+        invalidate_directory_cache(current_path, old_path, new_path)
+        invalidate_thumbnail_cache(old_path, new_path)
+        await run_in_threadpool(
+            record_activity_log,
+            "files_item_renamed",
+            "Files",
+            f"Renamed {old_path.rsplit('/', 1)[-1]} to {metadata.get('name') or new_name}",
+            entity_type="dropbox_item",
+            entity_id=new_path,
+            actor=_activity_actor(user),
+        )
+        return JSONResponse(
+            {
+                "ok": True,
+                "item": _public_file_item(metadata, context["root_path"]),
+            }
+        )
+    except Exception as error:
+        return _response_error(error)
 
 
 async def start_files_upload(request: Request):
@@ -502,6 +936,7 @@ async def append_files_upload_chunk(request: Request):
                 request.headers.get("x-upload-secret"),
             )
             invalidate_thumbnail_cache(context["destination"])
+            invalidate_directory_cache(context["destination"].rsplit("/", 1)[0])
             actor = (
                 str(context["user"].get("display_name") or "").strip()
                 or str(context["user"].get("email") or "").strip()
@@ -560,7 +995,12 @@ async def download_file(request: Request):
             raise FilesUploadError("Download request is not allowed.", status_code=403)
         await run_in_threadpool(_request_user, request)
         context = await run_in_threadpool(_dropbox_context)
-        path = dropbox_integration.normalize_dropbox_path(request.query_params.get("path") or "")
+        relative_path = request.query_params.get("relative_path")
+        path = (
+            _validated_relative_path(relative_path, context["root_path"])
+            if relative_path is not None
+            else dropbox_integration.normalize_dropbox_path(request.query_params.get("path") or "")
+        )
         if not path or not dropbox_integration.path_is_within_root(path, context["root_path"]):
             raise FilesUploadError("This file is not available.", status_code=403)
         link = await run_in_threadpool(
@@ -575,6 +1015,93 @@ async def download_file(request: Request):
         return _response_error(error)
 
 
+async def image_preview(request: Request):
+    """Proxy one approved image from Dropbox without exposing credentials or cloud paths."""
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Preview request is not allowed.", status_code=403)
+        await run_in_threadpool(_request_user, request)
+        context = await run_in_threadpool(_dropbox_context)
+        path = _validated_relative_path(
+            request.query_params.get("path"),
+            context["root_path"],
+        )
+        extension = PurePosixPath(path).suffix.casefold()
+        if extension not in FILES_IMAGE_EXTENSIONS:
+            raise FilesUploadError("This preview is not available.", status_code=404)
+        metadata = await run_in_threadpool(
+            dropbox_integration.get_file_metadata,
+            context["access_token"],
+            path,
+        )
+        if str(metadata.get(".tag") or "file").casefold() == "folder":
+            raise FilesUploadError("This preview is not available.", status_code=404)
+        if int(metadata.get("size") or 0) > FILES_IMAGE_PREVIEW_MAX_BYTES:
+            raise FilesUploadError(
+                "This image is too large for browser preview. Open it in the desktop app instead.",
+                status_code=413,
+            )
+        _metadata, content = await run_in_threadpool(
+            dropbox_integration.get_file_bytes,
+            context["access_token"],
+            path,
+        )
+        media_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        return Response(
+            content,
+            media_type=media_type,
+            headers={
+                "Cache-Control": "private, max-age=300",
+                "Content-Disposition": "inline",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    except Exception as error:
+        return _response_error(error)
+
+
+async def image_folder_items(request: Request):
+    """Return root-relative image navigation metadata for one approved folder."""
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Preview request is not allowed.", status_code=403)
+        await run_in_threadpool(_request_user, request)
+        context = await run_in_threadpool(_dropbox_context)
+        folder_value = request.query_params.get("folder")
+        folder_path = (
+            context["root_path"]
+            if folder_value in {None, ""}
+            else _validated_relative_path(folder_value, context["root_path"])
+        )
+        entries = await run_in_threadpool(
+            _directory_entries,
+            context["access_token"],
+            folder_path,
+        )
+        clean_root = dropbox_integration.normalize_dropbox_path(context["root_path"])
+        images = []
+        for entry in entries:
+            if str(entry.get(".tag") or "file").casefold() == "folder":
+                continue
+            path = dropbox_integration.normalize_dropbox_path(
+                entry.get("path_display") or entry.get("path_lower") or ""
+            )
+            if (
+                PurePosixPath(path).suffix.casefold() in FILES_IMAGE_EXTENSIONS
+                and dropbox_integration.path_is_within_root(path, clean_root)
+                and path.rsplit("/", 1)[0].casefold() == folder_path.casefold()
+            ):
+                images.append(
+                    {
+                        "path": path[len(clean_root) :].lstrip("/"),
+                        "name": str(entry.get("name") or PurePosixPath(path).name),
+                    }
+                )
+        return JSONResponse({"ok": True, "images": images}, headers={"Cache-Control": "no-store"})
+    except Exception as error:
+        return _response_error(error)
+
+
 async def file_thumbnail(request: Request):
     """Serve a cached, tiny Dropbox thumbnail to an approved Files user."""
     try:
@@ -585,6 +1112,8 @@ async def file_thumbnail(request: Request):
         path = dropbox_integration.normalize_dropbox_path(request.query_params.get("path") or "")
         if not path or not dropbox_integration.path_is_within_root(path, context["root_path"]):
             raise FilesUploadError("This preview is not available.", status_code=403)
+        if PurePosixPath(path).suffix.casefold() not in {".jpg", ".jpeg", ".png"}:
+            raise FilesUploadError("This preview is not available.", status_code=404)
         content = await run_in_threadpool(
             _thumbnail_bytes,
             context["access_token"],
@@ -603,27 +1132,41 @@ async def file_thumbnail(request: Request):
 
 
 async def desktop_helper_package(request: Request):
-    """Download the credential-free Windows helper package on explicit request."""
+    """Download a credential-free helper package for the requested desktop platform."""
     try:
         if not _same_origin(request):
             raise FilesUploadError("Helper request is not allowed.", status_code=403)
         await run_in_threadpool(_request_user, request)
+        platform = str(request.query_params.get("platform") or "windows").casefold()
+        is_macos = platform in {"mac", "macos", "darwin"}
+        helper_dir = MACOS_DESKTOP_HELPER_DIR if is_macos else DESKTOP_HELPER_DIR
+        names = (
+            ("Install.command", "SportsCaveFilesHelper.py", "Uninstall.command", "README.md")
+            if is_macos
+            else ("Install.cmd", "Install.ps1", "SportsCaveFilesHelper.ps1", "Uninstall.ps1", "README.md")
+        )
         package = io.BytesIO()
         with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for name in (
-                "Install.cmd",
-                "Install.ps1",
-                "SportsCaveFilesHelper.ps1",
-                "Uninstall.ps1",
-                "README.md",
-            ):
-                source = DESKTOP_HELPER_DIR / name
-                archive.writestr(name, source.read_bytes())
+            for name in names:
+                source = helper_dir / name
+                if is_macos:
+                    info = zipfile.ZipInfo(name)
+                    info.create_system = 3
+                    mode = 0o755 if name.endswith((".command", ".py")) else 0o644
+                    info.external_attr = (0o100000 | mode) << 16
+                    archive.writestr(info, source.read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
+                else:
+                    archive.writestr(name, source.read_bytes())
+        filename = (
+            "Sports-Cave-Files-Desktop-Helper-macOS.zip"
+            if is_macos
+            else "Sports-Cave-Files-Desktop-Helper.zip"
+        )
         return Response(
             package.getvalue(),
             media_type="application/zip",
             headers={
-                "Content-Disposition": 'attachment; filename="Sports-Cave-Files-Desktop-Helper.zip"',
+                "Content-Disposition": f'attachment; filename="{filename}"',
                 "Cache-Control": "no-store",
             },
         )
@@ -664,6 +1207,7 @@ async def delete_files(request: Request):
                     }
                 )
         if successful:
+            invalidate_directory_cache(payload.get("current_path"))
             actor = (
                 str(user.get("display_name") or "").strip()
                 or str(user.get("email") or "").strip()
@@ -697,11 +1241,18 @@ async def delete_files(request: Request):
 
 
 FILES_UPLOAD_ROUTES = (
+    ("/files-window", files_window_page, ("GET",)),
+    ("/files-image-viewer", files_image_viewer_page, ("GET",)),
+    ("/api/files-list", list_files, ("GET",)),
+    ("/api/files-folder", create_files_folder, ("POST",)),
+    ("/api/files-rename", rename_files_item, ("POST",)),
     ("/api/files-upload/start", start_files_upload, ("POST",)),
     ("/api/files-upload/chunk", append_files_upload_chunk, ("POST",)),
     ("/api/files-upload/status", files_upload_status, ("GET",)),
     ("/api/files-upload/remove", remove_files_upload, ("POST",)),
     ("/api/files-download", download_file, ("GET",)),
+    ("/api/files-image-preview", image_preview, ("GET",)),
+    ("/api/files-image-items", image_folder_items, ("GET",)),
     ("/api/files-thumbnail", file_thumbnail, ("GET",)),
     ("/api/files-desktop-helper", desktop_helper_package, ("GET",)),
     ("/api/files-delete", delete_files, ("POST",)),

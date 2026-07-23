@@ -72,6 +72,49 @@ function Find-Photoshop {
     return $null
 }
 
+function Find-Illustrator {
+    $registryPaths = @(
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths\Illustrator.exe",
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\App Paths\Illustrator.exe"
+    )
+    foreach ($registryPath in $registryPaths) {
+        try {
+            $candidate = (Get-ItemProperty -LiteralPath $registryPath -ErrorAction Stop)."(default)"
+            if ($candidate -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+                return [System.IO.Path]::GetFullPath($candidate)
+            }
+        } catch {}
+    }
+    $adobeRoot = Join-Path ${env:ProgramFiles} "Adobe"
+    if (Test-Path -LiteralPath $adobeRoot -PathType Container) {
+        $candidate = Get-ChildItem -LiteralPath $adobeRoot -Directory -Filter "Adobe Illustrator *" -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName "Support Files\Contents\Windows\Illustrator.exe" } |
+            Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+            Select-Object -First 1
+        if ($candidate) { return [System.IO.Path]::GetFullPath($candidate) }
+    }
+    return $null
+}
+
+function Request-FileHydration([string]$Path) {
+    $stream = $null
+    try {
+        $stream = [System.IO.File]::Open(
+            $Path,
+            [System.IO.FileMode]::Open,
+            [System.IO.FileAccess]::Read,
+            [System.IO.FileShare]::ReadWrite
+        )
+        $buffer = New-Object byte[] 1
+        [void]$stream.Read($buffer, 0, 1)
+    } catch {
+        throw "This file could not be made available locally. Check Dropbox Desktop sync and try again."
+    } finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
 try {
     $uri = [System.Uri]$ProtocolUri
     if (-not $uri.IsAbsoluteUri -or $uri.Scheme -ne "sports-cave-files" -or $uri.Host -ne "open") {
@@ -129,10 +172,19 @@ try {
         exit 0
     }
 
+    Request-FileHydration $target
+
     if ($extension -in @(".psd", ".psb")) {
         $photoshop = Find-Photoshop
         if ($photoshop) {
             Start-Process -FilePath $photoshop -ArgumentList ('"' + $target + '"') -ErrorAction Stop
+            exit 0
+        }
+    }
+    if ($extension -eq ".ai") {
+        $illustrator = Find-Illustrator
+        if ($illustrator) {
+            Start-Process -FilePath $illustrator -ArgumentList ('"' + $target + '"') -ErrorAction Stop
             exit 0
         }
     }

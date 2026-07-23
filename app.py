@@ -2139,6 +2139,28 @@ def inject_styles():
             padding: 0.75rem 0.85rem;
         }
 
+        .st-key-files-window-launcher-slot {
+            margin: 0;
+            padding: 0;
+        }
+
+        .sc-files-window-launcher-label {
+            clip: rect(0, 0, 0, 0);
+            clip-path: inset(50%);
+            height: 1px;
+            overflow: hidden;
+            position: absolute;
+            white-space: nowrap;
+            width: 1px;
+        }
+
+        .st-key-files-window-launcher-slot iframe {
+            border: 0;
+            display: block;
+            min-height: 38px;
+            width: 100%;
+        }
+
         .st-key-files-explorer {
             color: #202124;
             font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
@@ -6950,6 +6972,17 @@ def render_sidebar():
     )
     for page in allowed_menu_options:
         button_label = SIDEBAR_NAV_LABELS.get(page, page)
+        if page == "Files":
+            st.sidebar.markdown(
+                '<span class="sc-files-window-launcher-label">Files</span>',
+                unsafe_allow_html=True,
+            )
+            with st.sidebar.container(key="files-window-launcher-slot"):
+                _files_window_launcher_component()(
+                    key="files-window-launcher",
+                    default=None,
+                )
+            continue
         if st.sidebar.button(
             button_label,
             key=f"sidebar-nav::{page}",
@@ -10260,6 +10293,15 @@ FILES_DIRECTORY_CACHE_SECONDS = 180
 FILES_DIRECTORY_CACHE_LIMIT = 64
 FILES_TEAM_ROOT_CACHE_SECONDS = 15 * 60
 FILES_CHUNK_COMPONENT_DIR = BASE_DIR / "components" / "files_chunk_uploader"
+FILES_WINDOW_LAUNCHER_COMPONENT_DIR = BASE_DIR / "components" / "files_window_launcher"
+
+
+@lru_cache(maxsize=1)
+def _files_window_launcher_component():
+    return get_components_module().declare_component(
+        "files_window_launcher",
+        path=str(FILES_WINDOW_LAUNCHER_COMPONENT_DIR),
+    )
 
 
 @lru_cache(maxsize=1)

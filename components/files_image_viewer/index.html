@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>Sports Cave Image Viewer</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+        font-size: 14px;
+        --surface: #242424;
+        --surface-hover: #383838;
+        --border: #454545;
+        --text: #f5f5f5;
+        --muted: #b7b7b7;
+        --accent: #60aee8;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; overflow: hidden; }
+      body { background: #171717; color: var(--text); }
+      button { color: inherit; font: inherit; }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+      .viewer { display: grid; grid-template-rows: 42px minmax(0, 1fr) 30px; height: 100dvh; min-height: 0; }
+      .toolbar {
+        align-items: center;
+        background: var(--surface);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        gap: 3px;
+        min-width: 0;
+        padding: 4px 7px;
+      }
+      .tool {
+        align-items: center;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 4px;
+        display: inline-flex;
+        height: 32px;
+        justify-content: center;
+        min-width: 32px;
+        padding: 0 8px;
+      }
+      .tool:hover:not(:disabled) { background: var(--surface-hover); border-color: #505050; }
+      .tool:active:not(:disabled) { background: #454545; }
+      .tool:disabled { color: #777; }
+      .icon { font-size: 19px; line-height: 1; }
+      .separator { background: var(--border); height: 22px; margin: 0 3px; width: 1px; }
+      .file-name { font-weight: 600; margin-left: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .toolbar-spacer { flex: 1; }
+      .text-tool { gap: 6px; white-space: nowrap; }
+      .stage { cursor: default; min-height: 0; overflow: hidden; position: relative; touch-action: none; user-select: none; }
+      .stage.pannable { cursor: grab; }
+      .stage.panning { cursor: grabbing; }
+      .image {
+        display: none;
+        left: 50%;
+        max-height: none;
+        max-width: none;
+        pointer-events: none;
+        position: absolute;
+        top: 50%;
+        transform-origin: center center;
+        will-change: transform;
+      }
+      .state {
+        align-items: center;
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        inset: 0;
+        justify-content: center;
+        padding: 30px;
+        position: absolute;
+        text-align: center;
+      }
+      .state.error { color: #ffb4ab; }
+      .spinner { animation: spin .8s linear infinite; border: 3px solid #555; border-top-color: var(--accent); border-radius: 50%; height: 28px; width: 28px; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .status {
+        align-items: center;
+        background: #202020;
+        border-top: 1px solid #393939;
+        color: var(--muted);
+        display: flex;
+        font-size: 12px;
+        justify-content: space-between;
+        min-width: 0;
+        padding: 0 10px;
+      }
+      .status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .helper-panel {
+        align-items: center;
+        background: #2c2c2c;
+        border: 1px solid #575757;
+        border-radius: 5px;
+        bottom: 42px;
+        box-shadow: 0 8px 26px rgba(0,0,0,.4);
+        display: none;
+        flex-wrap: wrap;
+        gap: 7px;
+        left: 50%;
+        max-width: calc(100vw - 24px);
+        padding: 9px;
+        position: fixed;
+        transform: translateX(-50%);
+        z-index: 20;
+      }
+      .helper-panel.visible { display: flex; }
+      .helper-panel strong { margin-right: 4px; }
+      .helper-action { background: #3a3a3a; border: 1px solid #666; border-radius: 4px; height: 29px; padding: 0 9px; }
+      .helper-action:hover { background: #484848; }
+      .sr-only { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0,0,0,0); }
+      @media (max-width: 700px) {
+        .tool-label { display: none; }
+        .text-tool { padding: 0 7px; }
+        .file-name { font-size: 13px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="viewer">
+      <div class="toolbar" role="toolbar" aria-label="Image controls">
+        <button class="tool" id="previousButton" type="button" title="Previous image" aria-label="Previous image"><span class="icon">&#8249;</span></button>
+        <button class="tool" id="nextButton" type="button" title="Next image" aria-label="Next image"><span class="icon">&#8250;</span></button>
+        <span class="separator" aria-hidden="true"></span>
+        <button class="tool" id="zoomOutButton" type="button" title="Zoom out" aria-label="Zoom out"><span class="icon">&#8722;</span></button>
+        <button class="tool" id="zoomInButton" type="button" title="Zoom in" aria-label="Zoom in"><span class="icon">+</span></button>
+        <button class="tool text-tool" id="fitButton" type="button" title="Fit to screen"><span class="icon">&#9635;</span><span class="tool-label">Fit</span></button>
+        <button class="tool text-tool" id="actualButton" type="button" title="Actual size"><span class="icon">1:1</span><span class="tool-label">Actual</span></button>
+        <span class="separator" aria-hidden="true"></span>
+        <button class="tool" id="rotateLeftButton" type="button" title="Rotate left" aria-label="Rotate left"><span class="icon">&#8634;</span></button>
+        <button class="tool" id="rotateRightButton" type="button" title="Rotate right" aria-label="Rotate right"><span class="icon">&#8635;</span></button>
+        <div class="file-name" id="fileName"></div>
+        <div class="toolbar-spacer"></div>
+        <button class="tool text-tool" id="downloadButton" type="button" title="Download"><span class="icon">&#8681;</span><span class="tool-label">Download</span></button>
+        <button class="tool text-tool" id="desktopButton" type="button" title="Open in desktop app"><span class="icon">&#8599;</span><span class="tool-label">Desktop app</span></button>
+        <button class="tool" id="closeButton" type="button" title="Close" aria-label="Close"><span class="icon">&#215;</span></button>
+      </div>
+      <section class="stage" id="stage" aria-live="polite">
+        <img class="image" id="image" alt="">
+        <div class="state" id="loadingState"><span class="spinner"></span><span>Loading image...</span></div>
+        <div class="state error" id="errorState" hidden><strong>Image could not be opened.</strong><span id="errorText"></span></div>
+      </section>
+      <footer class="status"><span id="dimensions">Loading...</span><span id="zoomStatus"></span></footer>
+    </main>
+    <a class="sr-only" id="protocolLink" href="#" tabindex="-1">Open in desktop app</a>
+    <iframe class="sr-only" id="downloadFrame" title="Download"></iframe>
+    <aside class="helper-panel" id="helperPanel" aria-live="polite">
+      <strong>File didn't open?</strong>
+      <button class="helper-action" id="checkHelperButton" type="button">Check desktop helper</button>
+      <button class="helper-action" id="installHelperButton" type="button">Reinstall helper</button>
+      <button class="helper-action" id="downloadInsteadButton" type="button">Download instead</button>
+    </aside>
+    <script>
+      const IMAGE_VIEWER_MESSAGE = "sports-cave-image-viewer-open";
+      const elements = Object.fromEntries([
+        "previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton",
+        "rotateLeftButton", "rotateRightButton", "fileName", "downloadButton", "desktopButton", "closeButton",
+        "stage", "image", "loadingState", "errorState", "errorText", "dimensions", "zoomStatus", "protocolLink",
+        "downloadFrame", "helperPanel", "checkHelperButton", "installHelperButton", "downloadInsteadButton"
+      ].map(id => [id, document.getElementById(id)]));
+      const query = new URLSearchParams(location.search);
+      const state = {
+        path: query.get("path") || "",
+        folder: query.get("folder") || "",
+        name: query.get("name") || "",
+        images: [],
+        index: -1,
+        naturalWidth: 0,
+        naturalHeight: 0,
+        scale: 1,
+        fitScale: 1,
+        rotation: 0,
+        panX: 0,
+        panY: 0,
+        pointer: null,
+        objectUrl: "",
+        controller: null,
+        helperTimer: 0,
+        sizingMode: "fit",
+      };
+
+      function isMac() {
+        return /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+      }
+
+      function helperPackageUrl() {
+        return `/api/files-desktop-helper?platform=${isMac() ? "macos" : "windows"}`;
+      }
+
+      function fileNameFromPath(path) {
+        const parts = String(path || "").split("/");
+        return parts[parts.length - 1] || "Image";
+      }
+
+      function currentName() {
+        return state.name || fileNameFromPath(state.path);
+      }
+
+      function applyTransform() {
+        elements.image.style.transform = `translate(-50%, -50%) translate(${state.panX}px, ${state.panY}px) rotate(${state.rotation}deg) scale(${state.scale})`;
+        elements.zoomStatus.textContent = `${Math.round(state.scale * 100)}%`;
+        const pannable = state.scale > state.fitScale + 0.01 || Math.abs(state.rotation % 180) === 90;
+        elements.stage.classList.toggle("pannable", pannable);
+      }
+
+      function calculateFitScale() {
+        if (!state.naturalWidth || !state.naturalHeight) return 1;
+        const rotated = Math.abs(state.rotation % 180) === 90;
+        const width = rotated ? state.naturalHeight : state.naturalWidth;
+        const height = rotated ? state.naturalWidth : state.naturalHeight;
+        return Math.min(
+          Math.max(40, elements.stage.clientWidth - 40) / width,
+          Math.max(40, elements.stage.clientHeight - 40) / height,
+          1
+        );
+      }
+
+      function fitToScreen() {
+        state.sizingMode = "fit";
+        state.fitScale = calculateFitScale();
+        state.scale = state.fitScale;
+        state.panX = 0;
+        state.panY = 0;
+        applyTransform();
+      }
+
+      function actualSize() {
+        state.sizingMode = "actual";
+        state.scale = 1;
+        state.panX = 0;
+        state.panY = 0;
+        applyTransform();
+      }
+
+      function zoomBy(multiplier) {
+        state.sizingMode = "custom";
+        state.scale = Math.max(0.05, Math.min(12, state.scale * multiplier));
+        applyTransform();
+      }
+
+      function setLoading() {
+        elements.loadingState.hidden = false;
+        elements.errorState.hidden = true;
+        elements.image.style.display = "none";
+        elements.dimensions.textContent = "Loading...";
+      }
+
+      function setError(message) {
+        elements.loadingState.hidden = true;
+        elements.errorState.hidden = false;
+        elements.errorText.textContent = String(message || "Try again or open it in the desktop app.");
+        elements.image.style.display = "none";
+        elements.dimensions.textContent = "Preview unavailable";
+      }
+
+      async function loadImage(path, { folder = state.folder, name = "", replaceHistory = true } = {}) {
+        const relativePath = String(path || "");
+        if (!relativePath) { setError("The image path is missing."); return; }
+        state.path = relativePath;
+        state.folder = String(folder || "");
+        state.name = String(name || fileNameFromPath(relativePath));
+        state.rotation = 0;
+        state.panX = 0;
+        state.panY = 0;
+        elements.fileName.textContent = state.name;
+        elements.fileName.title = state.name;
+        document.title = `${state.name} - Sports Cave Image Viewer`;
+        setLoading();
+        if (replaceHistory) {
+          const params = new URLSearchParams({ path: state.path, folder: state.folder, name: state.name });
+          history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
+        }
+        if (state.controller) state.controller.abort();
+        state.controller = new AbortController();
+        if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+        state.objectUrl = "";
+        try {
+          const response = await fetch(`/api/files-image-preview?path=${encodeURIComponent(state.path)}`, {
+            credentials: "same-origin",
+            signal: state.controller.signal,
+          });
+          if (!response.ok) {
+            let message = "The image preview is unavailable.";
+            try { message = (await response.json()).message || message; } catch (_) {}
+            throw new Error(message);
+          }
+          state.objectUrl = URL.createObjectURL(await response.blob());
+          elements.image.src = state.objectUrl;
+          await elements.image.decode();
+          state.naturalWidth = elements.image.naturalWidth;
+          state.naturalHeight = elements.image.naturalHeight;
+          elements.image.style.width = `${state.naturalWidth}px`;
+          elements.image.style.height = `${state.naturalHeight}px`;
+          elements.image.alt = state.name;
+          elements.image.style.display = "block";
+          elements.loadingState.hidden = true;
+          elements.errorState.hidden = true;
+          elements.dimensions.textContent = `${state.naturalWidth} x ${state.naturalHeight} pixels`;
+          fitToScreen();
+          syncNavigation();
+        } catch (error) {
+          if (error.name !== "AbortError") setError(error.message);
+        }
+      }
+
+      async function loadFolderImages() {
+        try {
+          const response = await fetch(`/api/files-image-items?folder=${encodeURIComponent(state.folder)}`, { credentials: "same-origin" });
+          const payload = await response.json();
+          if (!response.ok || payload.ok === false) throw new Error(payload.message || "Image navigation is unavailable.");
+          state.images = Array.from(payload.images || []);
+          state.index = state.images.findIndex(item => item.path === state.path);
+        } catch (_) {
+          state.images = [{ path: state.path, name: currentName() }];
+          state.index = 0;
+        }
+        syncNavigation();
+      }
+
+      function syncNavigation() {
+        elements.previousButton.disabled = state.index <= 0;
+        elements.nextButton.disabled = state.index < 0 || state.index >= state.images.length - 1;
+      }
+
+      function moveImage(offset) {
+        const next = state.images[state.index + offset];
+        if (!next) return;
+        state.index += offset;
+        loadImage(next.path, { name: next.name });
+      }
+
+      function startDownload() {
+        elements.downloadFrame.src = `/api/files-download?relative_path=${encodeURIComponent(state.path)}&download=${Date.now()}`;
+      }
+
+      function showHelperPanel() {
+        elements.helperPanel.classList.add("visible");
+      }
+
+      function invokeDesktopHelper() {
+        if (!state.path) return;
+        elements.helperPanel.classList.remove("visible");
+        window.clearTimeout(state.helperTimer);
+        elements.protocolLink.href = `sports-cave-files://open?path=${encodeURIComponent(state.path)}&kind=file`;
+        elements.protocolLink.click();
+        state.helperTimer = window.setTimeout(showHelperPanel, 3000);
+      }
+
+      function installHelper() {
+        elements.downloadFrame.src = `${helperPackageUrl()}&download=${Date.now()}`;
+      }
+
+      elements.previousButton.onclick = () => moveImage(-1);
+      elements.nextButton.onclick = () => moveImage(1);
+      elements.zoomOutButton.onclick = () => zoomBy(1 / 1.2);
+      elements.zoomInButton.onclick = () => zoomBy(1.2);
+      elements.fitButton.onclick = fitToScreen;
+      elements.actualButton.onclick = actualSize;
+      elements.rotateLeftButton.onclick = () => { state.rotation -= 90; fitToScreen(); };
+      elements.rotateRightButton.onclick = () => { state.rotation += 90; fitToScreen(); };
+      elements.downloadButton.onclick = startDownload;
+      elements.desktopButton.onclick = invokeDesktopHelper;
+      elements.closeButton.onclick = () => window.close();
+      elements.checkHelperButton.onclick = invokeDesktopHelper;
+      elements.installHelperButton.onclick = installHelper;
+      elements.downloadInsteadButton.onclick = startDownload;
+
+      elements.stage.addEventListener("wheel", event => {
+        event.preventDefault();
+        zoomBy(event.deltaY < 0 ? 1.12 : 1 / 1.12);
+      }, { passive: false });
+      elements.stage.addEventListener("pointerdown", event => {
+        if (event.button !== 0 || elements.image.style.display === "none") return;
+        state.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, panX: state.panX, panY: state.panY };
+        elements.stage.setPointerCapture(event.pointerId);
+        elements.stage.classList.add("panning");
+      });
+      elements.stage.addEventListener("pointermove", event => {
+        if (!state.pointer || state.pointer.id !== event.pointerId) return;
+        state.panX = state.pointer.panX + event.clientX - state.pointer.x;
+        state.panY = state.pointer.panY + event.clientY - state.pointer.y;
+        applyTransform();
+      });
+      const stopPanning = event => {
+        if (state.pointer && state.pointer.id === event.pointerId) state.pointer = null;
+        elements.stage.classList.remove("panning");
+      };
+      elements.stage.addEventListener("pointerup", stopPanning);
+      elements.stage.addEventListener("pointercancel", stopPanning);
+      window.addEventListener("resize", () => {
+        state.fitScale = calculateFitScale();
+        if (state.sizingMode === "fit") fitToScreen();
+      });
+      window.addEventListener("message", event => {
+        if (event.origin !== location.origin || !event.data || event.data.type !== IMAGE_VIEWER_MESSAGE) return;
+        loadImage(event.data.path, { folder: event.data.folder, name: event.data.name });
+        loadFolderImages();
+        window.focus();
+      });
+      window.addEventListener("keydown", event => {
+        if (event.key === "Escape") window.close();
+        else if (event.key === "ArrowLeft") moveImage(-1);
+        else if (event.key === "ArrowRight") moveImage(1);
+        else if (event.key === "+" || event.key === "=") zoomBy(1.2);
+        else if (event.key === "-") zoomBy(1 / 1.2);
+        else if (event.key === "0") fitToScreen();
+      });
+      window.addEventListener("beforeunload", () => {
+        if (state.controller) state.controller.abort();
+        if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
+      });
+
+      loadImage(state.path, { folder: state.folder, name: state.name, replaceHistory: false });
+      loadFolderImages();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; overflow: hidden; }
+      body { font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif; }
+      button {
+        align-items: center;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        color: #202124;
+        cursor: default;
+        display: flex;
+        font: 400 14px/1 "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+        height: 38px;
+        padding: 0 12px;
+        text-align: left;
+        width: 100%;
+      }
+      button:hover { background: #e9eaec; border-color: #dcdee1; }
+      button:active { background: #dfe1e4; }
+      button:focus-visible { outline: 2px solid #0f6cbd; outline-offset: -2px; }
+      #status {
+        color: #8a2d24;
+        display: none;
+        font-size: 11px;
+        line-height: 1.25;
+        padding: 5px 8px 0;
+      }
+      body.blocked #status { display: block; }
+    </style>
+  </head>
+  <body>
+    <button id="launcher" type="button">Files</button>
+    <div id="status" role="alert">The browser blocked the popup. Select Open Files window to try again.</div>
+    <script>
+      const FILES_WINDOW_NAME = "sports-cave-files";
+      const button = document.getElementById("launcher");
+
+      function send(type, data) {
+        window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, data || {}), "*");
+      }
+
+      function setHeight(height) {
+        send("streamlit:setFrameHeight", { height });
+      }
+
+      function filesWindowFeatures() {
+        const parentWindow = window.parent;
+        const width = Math.min(1250, Math.max(760, Number(parentWindow.screen.availWidth || 1250) - 80));
+        const height = Math.min(800, Math.max(600, Number(parentWindow.screen.availHeight || 800) - 80));
+        const left = Math.max(0, Math.round((Number(parentWindow.screen.availWidth || width) - width) / 2));
+        const top = Math.max(0, Math.round((Number(parentWindow.screen.availHeight || height) - height) / 2));
+        return `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+      }
+
+      function openFilesWindow() {
+        const parentWindow = window.parent;
+        let filesWindow = parentWindow.__sportsCaveFilesWindow;
+        if (filesWindow && !filesWindow.closed) {
+          filesWindow.focus();
+          return;
+        }
+        filesWindow = parentWindow.open("", FILES_WINDOW_NAME, filesWindowFeatures());
+        if (!filesWindow) {
+          document.body.classList.add("blocked");
+          button.textContent = "Open Files window";
+          setHeight(78);
+          return;
+        }
+        parentWindow.__sportsCaveFilesWindow = filesWindow;
+        document.body.classList.remove("blocked");
+        button.textContent = "Files";
+        setHeight(38);
+        try {
+          if (filesWindow.location.pathname !== "/files-window") {
+            filesWindow.location.replace("/files-window");
+          }
+        } catch (_) {
+          filesWindow.location = "/files-window";
+        }
+        filesWindow.focus();
+      }
+
+      button.addEventListener("click", openFilesWindow);
+      send("streamlit:componentReady", { apiVersion: 1 });
+      setHeight(38);
+    </script>
+  </body>
+</html>
