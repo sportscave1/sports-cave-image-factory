@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "shopify app dev",
     "deploy": "shopify app deploy",
-    "validate": "shopify app validate"
+    "validate": "shopify app validate",
+    "test:vault": "node --no-warnings --test extensions/customer-certificate-vault/src/vault-utils.test.mjs"
   },
   "dependencies": {
     "@preact/signals": "^2.9.2",

@@ -144,22 +144,64 @@ The storefront snippet lives at
 
 ## Customer Certificate Vault
 
-The customer account certificate vault reads certificate ownership from Shopify
-order metafield `sports_cave.certificates_json`. Certificate PDFs, lightweight
-preview images, and print-quality JPG assets are stored in Shopify Files/CDN and
-mirrored into that order metafield for the logged-in customer's own orders.
+The customer account Collector Vault is a full-page Shopify Customer Account UI
+extension backed by the Sports Cave OS API. The API joins the existing Supabase
+order, edition, and certificate ledger in one ownership-scoped query. It returns
+only short-lived signed certificate references and signed asset URLs. Shopify
+customer session JWTs are verified server-side before any collection, review, or
+framing action.
 
 Customer Account API access requires:
 
 - `customer_read_customers`
 - `customer_read_orders`
 - `[extensions.capabilities] api_access = true`
+- `[extensions.capabilities] network_access = true`
 
-The print/preview certificate image upload path also requires Admin API image
-file scopes:
+The extension's `api_base_url` setting defaults to the production Sports Cave OS
+service. External network access must be approved for the extension in the
+Shopify Partner Dashboard when the new app version is released.
 
-- `read_images`
-- `write_images`
+Apply `migrations/20260723_collector_vault.sql` before releasing the extension.
+The migration adds server-only framed-request and review-submission tables,
+enables RLS, and does not rewrite existing certificate or edition data.
+
+Collector Vault environment:
+
+```text
+# Required by the Collector Vault API
+COLLECTOR_VAULT_ASSET_SIGNING_SECRET=long-random-secret
+
+# Framed offer. Handle defaults to the value below.
+FRAMED_CERTIFICATE_PRODUCT_HANDLE=framed-collector-certificate
+# Required when the product has more than one variant; recommended always.
+FRAMED_CERTIFICATE_VARIANT_ID=gid://shopify/ProductVariant/...
+
+# Judge.me private server integration
+JUDGEME_PRIVATE_API_TOKEN=...
+JUDGEME_SHOP_DOMAIN=your-store.myshopify.com
+# Optional; defaults to https://judge.me/api/v1
+JUDGEME_API_BASE_URL=https://judge.me/api/v1
+# Optional; defaults to 6 MiB
+COLLECTOR_VAULT_REVIEW_PHOTO_MAX_BYTES=6291456
+```
+
+The existing Supabase, R2, Shopify Admin, and Shopify client-secret environment
+variables remain required. Never place Judge.me, Shopify Admin, Supabase service
+role, or R2 credentials in the customer account extension.
+
+The framed product must be an active Shopify product with handle
+`framed-collector-certificate`, one A4 landscape black-frame variant, a real
+market-aware Shopify price, and the intended availability/inventory settings.
+The offer stays hidden if the product is absent, ambiguous, unavailable, or not
+the configured variant.
+
+Judge.me review requests are server-side and are shown only for an owned order
+whose Shopify fulfillment history contains a real `DELIVERED` event. The public
+Judge.me API does not let API-created reviews force a verified-buyer badge;
+Sports Cave still validates ownership and delivery before submission. Configure
+Judge.me's existing review-request email timing to delivered date plus seven
+days in its dashboard. Do not enable a second Sports Cave email flow.
 
 Matching rules:
 

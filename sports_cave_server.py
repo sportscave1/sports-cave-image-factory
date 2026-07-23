@@ -3,12 +3,13 @@ import os
 from starlette.routing import Route
 from streamlit.web.server.starlette import App
 
+from collector_vault_api import COLLECTOR_VAULT_ROUTES
 from files_upload_api import FILES_UPLOAD_ROUTES
 
 
 routes = [
     Route(path, endpoint, methods=list(methods))
-    for path, endpoint, methods in FILES_UPLOAD_ROUTES
+    for path, endpoint, methods in (*FILES_UPLOAD_ROUTES, *COLLECTOR_VAULT_ROUTES)
 ]
 app = App("app.py", routes=routes)
 

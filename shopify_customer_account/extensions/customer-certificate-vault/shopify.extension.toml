@@ -12,3 +12,12 @@ module = "./src/MySportsCaveCollection.jsx"
 
 [extensions.capabilities]
 api_access = true
+network_access = true
+
+[extensions.settings]
+
+[[extensions.settings.fields]]
+key = "api_base_url"
+type = "single_line_text_field"
+name = "Collector Vault API URL"
+description = "Sports Cave OS application URL used for authenticated Collector Vault requests."

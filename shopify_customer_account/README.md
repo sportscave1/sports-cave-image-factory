@@ -1,133 +1,121 @@
 # Sports Cave Customer Account Extension
 
-Customer Certificate Vault V1 lives in this Shopify Customer Account UI Extension.
-It is separate from the Streamlit Sports Cave OS runtime and does not use
-Supabase or any customer-facing backend.
+The `customer-certificate-vault` extension provides the Sports Cave Collector
+Vault as a Shopify Customer Account full page.
 
-## What It Reads
+## Architecture
 
-The extension reads the logged-in customer's own orders through Shopify's
-Customer Account API:
+- Shopify owns customer sign-in and issues the extension session token.
+- The extension sends that token to the Sports Cave OS Collector Vault API.
+- The API verifies signature, expiry, audience, shop, and customer subject.
+- Supabase remains the source of truth for orders, editions, certificates,
+  framed requests, and review-submission state.
+- Certificate previews and downloads use short-lived signed proxy URLs.
+- Shopify Storefront API supplies contextual frame price, currency,
+  availability, cart creation, and checkout.
+- Shopify Admin API is used server-side for stable product/variant validation
+  and confirmed delivery events.
+- Judge.me private API credentials remain on the server.
 
-```graphql
-customer {
-  id
-  orders(first: 50, reverse: true) {
-    nodes {
-      id
-      name
-      processedAt
-      metafield(namespace: "sports_cave", key: "certificates_json") {
-        type
-        jsonValue
-        value
-      }
-    }
-  }
-}
-```
-
-The source of truth is the Shopify order metafield:
-
-- namespace: `sports_cave`
-- key: `certificates_json`
-- type: `json`
-
-The extension does not accept customer IDs, order IDs, emails, or line item IDs
-from frontend input. Shopify scopes the query to the currently authenticated
-customer.
+The browser never receives Shopify Admin credentials, Judge.me private tokens,
+Supabase service-role credentials, R2 credentials, permanent private asset URLs,
+customer email addresses, or local storage paths.
 
 ## Required Access
 
-The Shopify app config must request these Customer Account API scopes:
+The app retains the existing Admin and Customer Account scopes, including:
 
+- `read_customers`
+- `read_orders`
+- `read_products`
 - `customer_read_customers`
 - `customer_read_orders`
 
-These are separate from Admin API scopes such as `read_customers` and
-`read_orders`. Keep `[extensions.capabilities] api_access = true` in
-`extensions/customer-certificate-vault/shopify.extension.toml`.
+The extension requires:
 
-This extension reads Shopify order metafields directly and does not call a
-Sports Cave OS or Supabase endpoint, so `network_access` is not enabled.
-Certificate PDFs, lightweight preview images, and print-quality JPG files are
-stored in Shopify Files/CDN; the extension only reads the mirrored order
-metafield metadata and opens the CDN asset URLs.
+```toml
+[extensions.capabilities]
+api_access = true
+network_access = true
+```
 
-The certificate image asset upload path also needs these Admin API scopes:
+Shopify must approve external network access for the released extension version.
+Set `api_base_url` in the checkout and accounts editor only when it differs from
+the production default.
 
-- `read_images`
-- `write_images`
+## Database
 
-## Store Setup Verified
+Apply:
 
-Live Admin API check on 2026-06-23:
+```text
+migrations/20260723_collector_vault.sql
+```
 
-- shop: `Sports Cave`
-- myshopify domain: `sportscave-nb.myshopify.com`
-- customer account version: `NEW_CUSTOMER_ACCOUNTS`
-- customer account URL: `https://account.sportscaveshop.com`
-- login links visible: `true`
+This additive migration creates:
 
-## Local Development
+- `collector_frame_requests`
+- `collector_reviews`
 
-Link this folder to the real Shopify Partner app before deploying:
+Both tables have RLS enabled and no browser-facing policy. They are accessed by
+the existing trusted server connection. Existing certificate, order, edition,
+allocation, and certificate-generation tables are unchanged.
+
+## Framed Certificate Product
+
+Create one active Shopify product:
+
+- Title: `Framed Collector Certificate`
+- Handle: `framed-collector-certificate`
+- One variant: premium black frame, A4 landscape
+- Real Shopify price and inventory/availability configuration
+
+Configure:
+
+```text
+FRAMED_CERTIFICATE_PRODUCT_HANDLE=framed-collector-certificate
+FRAMED_CERTIFICATE_VARIANT_ID=gid://shopify/ProductVariant/...
+```
+
+The offer is intentionally hidden if the product or safe variant mapping cannot
+be resolved. Price and currency are fetched contextually through Shopify at
+render time; checkout remains authoritative.
+
+## Judge.me
+
+Configure the existing Judge.me account:
+
+```text
+JUDGEME_PRIVATE_API_TOKEN=...
+JUDGEME_SHOP_DOMAIN=your-store.myshopify.com
+```
+
+The API maps reviews by stable Shopify product ID, checks customer ownership,
+requires a Shopify `DELIVERED` fulfillment event, blocks duplicate submissions,
+rate limits retries, and validates/re-encodes JPG, PNG, and WebP photos before
+temporary private upload.
+
+Judge.me's public API cannot force an API-created review to carry its verified
+badge. The Sports Cave API still enforces verified purchase and delivery. Keep
+Judge.me's own review-request email as the only email system and set it to
+delivered date plus seven days in the Judge.me dashboard.
+
+## Local Checks
 
 ```bash
 cd shopify_customer_account
-shopify app config link
-shopify app dev
+npm run test:vault
+shopify app config validate --json
+shopify app build
 ```
 
-If Shopify CLI asks to update `client_id` or app URLs in `shopify.app.toml`,
-accept the generated local changes. Do not commit secrets.
+The full-page extension must be added to the customer account menu as
+`My Collection` in Shopify's checkout and accounts editor.
 
-## Deploy
+## Platform Boundary
 
-```bash
-cd shopify_customer_account
-npm install
-shopify app deploy
-```
-
-The app needs customer/order access suitable for reading the logged-in
-customer's order history and order metafields. Protected customer data access
-must be approved in Shopify before the extension can go live.
-
-After any scope change:
-
-1. Release a new Shopify app version.
-2. Confirm the app scopes include `customer_read_customers` and `customer_read_orders`.
-3. Approve/update the new permissions in Shopify Admin.
-4. If access denied persists, uninstall/reinstall the app after the new version is released.
-5. Test the customer account preview with a certificate order.
-6. Confirm the certificate card appears and certificate links open in a new tab.
-
-## Navigation
-
-After deploy:
-
-1. Open Shopify Admin.
-2. Go to **Settings > Customer accounts**.
-3. Open the checkout and accounts editor.
-4. Add the full-page extension to the customer account header menu.
-5. Use menu label: `My Collection`.
-6. Page title shown by the extension: `My Collection`.
-
-Shopify's full-page extension flow prompts for customer account menu placement
-when the extension is added.
-
-## QA Checklist
-
-- Customer with one certificate sees one certificate.
-- Customer with multiple orders sees multiple certificates.
-- Quantity 2 order shows two certificate cards from the same order metafield.
-- Customer cannot see another customer's certificates because the query is
-  scoped by Shopify customer authentication.
-- Customer with no certificates sees the empty state.
-- Missing preview image shows the premium preview placeholder.
-- Missing or non-ready PDF shows `Certificate processing`.
-- Mobile uses stacked Shopify UI extension components.
-- Failure in this extension does not affect storefront, product page widget,
-  Orders, edition allocation, certificate generation, or Shopify Files upload.
-- No secrets, tokens, API keys, or Supabase access are in frontend code.
+Shopify renders full-page extensions inside its native customer-account shell.
+The extension cannot remove, restyle, or access the host account sidebar/header
+DOM. Navigation and visual branding outside the extension must be configured in
+Shopify's customer-account editor. Inside the page, the Collector Vault uses
+Shopify's native accessible components, responsive layout, modal focus handling,
+and merchant branding tokens.

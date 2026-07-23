@@ -140,6 +140,17 @@ def _process_orders_paid_background(payload, webhook_id, topic):
             topic,
             claim_event=False,
         )
+        try:
+            import collector_vault
+
+            collector_vault.process_framed_order_paid(payload)
+        except Exception as frame_error:
+            _webhook_log(
+                "framed_certificate_order_update_failed",
+                webhook_id=webhook_id,
+                topic=topic,
+                error=str(frame_error),
+            )
     except Exception as error:
         _webhook_log("webhook_background_processing_failed", webhook_id=webhook_id, topic=topic, error=str(error))
 

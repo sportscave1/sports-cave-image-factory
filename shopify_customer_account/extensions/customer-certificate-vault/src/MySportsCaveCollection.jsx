@@ -1,432 +1,884 @@
 /** @jsxImportSource preact */
+/// <reference types="@shopify/ui-extensions/customer-account.page.render" />
 import "@shopify/ui-extensions/preact";
 import {render} from "preact";
-import {useEffect, useMemo, useState} from "preact/hooks";
+import {useEffect, useMemo, useRef, useState} from "preact/hooks";
+import {useApi} from "@shopify/ui-extensions/customer-account/preact";
 
-const API_VERSION = "2026-04";
-const SHOP_LATEST_DROPS_URL = "https://www.sportscaveshop.com";
+import {
+  chooseFrameVariant,
+  collectionSubheading,
+  editionLabel,
+  fileFromDropEvent,
+  formatFramePrice,
+  frameCartInput,
+  inputValue,
+  isAllowedReviewPhoto,
+  purchaseDateLabel,
+} from "./vault-utils.js";
 
-const CERTIFICATES_QUERY = `query SportsCaveCustomerCertificates {
-  customer {
+const DEFAULT_API_BASE_URL = "https://sports-cave-image-factory.onrender.com";
+const FRAME_PRODUCT_QUERY = `query CollectorVaultFrameProduct($handle: String!) {
+  product(handle: $handle) {
     id
-    orders(first: 50, reverse: true) {
+    handle
+    title
+    availableForSale
+    featuredImage { url altText width height }
+    variants(first: 10) {
       nodes {
         id
-        name
-        processedAt
-        metafield(namespace: "sports_cave", key: "certificates_json") {
-          type
-          jsonValue
-          value
-        }
+        availableForSale
+        price { amount currencyCode }
       }
     }
   }
 }`;
+const CART_CREATE_MUTATION = `mutation CollectorVaultCartCreate($input: CartInput!) {
+  cartCreate(input: $input) {
+    cart { id checkoutUrl }
+    userErrors { field message }
+  }
+}`;
 
 export default function extension() {
-  render(<Extension />, document.body);
+  render(<CollectorVault />, document.body);
 }
 
-function Extension() {
+function CollectorVault() {
+  const api = useApi();
   const [status, setStatus] = useState("loading");
   const [certificates, setCertificates] = useState([]);
+  const [reviewPrompt, setReviewPrompt] = useState(null);
+  const [frameConfig, setFrameConfig] = useState(null);
+  const [frameVariant, setFrameVariant] = useState(null);
+  const [selectedCertificate, setSelectedCertificate] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [retryKey, setRetryKey] = useState(0);
+  const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  const apiBaseUrl = useMemo(() => configuredApiBaseUrl(api), [api]);
 
   useEffect(() => {
     let mounted = true;
-
-    async function loadCertificates() {
+    async function load() {
+      setStatus("loading");
       try {
-        const response = await fetch(
-          `shopify://customer-account/api/${API_VERSION}/graphql.json`,
-          {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({query: CERTIFICATES_QUERY}),
-          },
-        );
-        const payload = await response.json();
-        if (payload.errors?.length) {
-          throw new Error(customerSafeErrorMessage(payload.errors));
-        }
-        const customer = payload.data?.customer || {};
-        const orderNodes = customer.orders?.nodes || [];
-        const rows = collectCertificates(orderNodes, customer);
-        if (mounted) {
-          setCertificates(rows);
-          setStatus("ready");
-        }
+        const payload = await vaultRequest(api, apiBaseUrl, "/api/collector-vault/bootstrap");
+        if (!mounted) return;
+        setCertificates(Array.isArray(payload.certificates) ? payload.certificates : []);
+        setReviewPrompt(payload.review_prompt || null);
+        setFrameConfig(payload.frame_product || null);
+        setStatus("ready");
+        await logEvent(api, apiBaseUrl, "collection_viewed", dailyEventKey("collection-viewed"));
       } catch (error) {
-        if (mounted) {
-          setErrorMessage(customerSafeErrorMessage(error));
-          setStatus("error");
-        }
+        if (!mounted) return;
+        setErrorMessage(customerMessage(error));
+        setStatus("error");
       }
     }
-
-    loadCertificates();
-
+    load();
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [apiBaseUrl, retryKey]);
 
-  const summary = useMemo(() => collectionSummary(certificates), [certificates]);
+  useEffect(() => {
+    let mounted = true;
+    async function loadFrameProduct() {
+      if (!frameConfig?.available || !frameConfig.handle) {
+        setFrameVariant(null);
+        return;
+      }
+      try {
+        const response = /** @type {any} */ (await api.query(FRAME_PRODUCT_QUERY, {
+          variables: {handle: frameConfig.handle},
+        }));
+        const product = response?.data?.product;
+        const variant = chooseFrameVariant(
+          product,
+          frameConfig.variant_id,
+          frameConfig.handle,
+        );
+        if (mounted) setFrameVariant(variant);
+      } catch (_error) {
+        if (mounted) setFrameVariant(null);
+      }
+    }
+    loadFrameProduct();
+    return () => {
+      mounted = false;
+    };
+  }, [api, frameConfig]);
+
+  const openCertificate = (certificate) => {
+    setSelectedCertificate(certificate);
+    logEvent(api, apiBaseUrl, "certificate_opened", eventKeyForCertificate("opened", certificate));
+  };
 
   return (
-    <s-page
-      heading="My Collection"
-      subheading="Your numbered Sports Cave collector certificates."
-    >
-      <VaultIntro />
-      {status === "loading" ? <LoadingState /> : null}
-      {status === "error" ? <ErrorState message={errorMessage} /> : null}
+    <s-page heading="My Collection" subheading={collectionSubheading(certificates.length)}>
+      {status === "loading" ? <LoadingGallery /> : null}
+      {status === "error" ? (
+        <ErrorState message={errorMessage} onRetry={() => setRetryKey((value) => value + 1)} />
+      ) : null}
       {status === "ready" && certificates.length === 0 ? <EmptyState /> : null}
       {status === "ready" && certificates.length > 0 ? (
-        <s-stack gap="base">
-          <CollectorSummary summary={summary} />
-          {certificates.map((certificate) => (
-            <CertificateCard key={certificate.key} certificate={certificate} />
-          ))}
+        <s-stack gap="large">
+          {reviewPrompt && !reviewSubmitted ? (
+            <ReviewPrompt
+              prompt={reviewPrompt}
+              api={api}
+              apiBaseUrl={apiBaseUrl}
+              onSubmitted={() => {
+                setReviewSubmitted(true);
+                setReviewPrompt(null);
+              }}
+            />
+          ) : null}
+          {reviewSubmitted ? (
+            <s-banner tone="success" heading="Review submitted ✓">
+              Thank you. Your review was sent to Judge.me and may be awaiting moderation.
+            </s-banner>
+          ) : null}
+          <s-grid
+            gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 360px), 1fr))"
+            gap="base"
+            alignItems="start"
+          >
+            {certificates.map((certificate, index) => (
+              <CertificateCard
+                key={certificate.reference}
+                certificate={certificate}
+                index={index}
+                onOpen={openCertificate}
+                api={api}
+                apiBaseUrl={apiBaseUrl}
+                frameVariant={frameVariant}
+              />
+            ))}
+          </s-grid>
         </s-stack>
       ) : null}
+      <CertificateViewer
+        certificate={selectedCertificate}
+        frameVariant={frameVariant}
+        api={api}
+        apiBaseUrl={apiBaseUrl}
+        onFrameStatus={(reference, frameStatus, requestReference) => {
+          setCertificates((items) => items.map((item) => (
+            item.reference === reference
+              ? {...item, frame_status: frameStatus, frame_request_reference: requestReference}
+              : item
+          )));
+        }}
+      />
     </s-page>
   );
 }
 
-function VaultIntro() {
+function LoadingGallery() {
   return (
-    <s-section heading="Your Sports Cave Collector Vault">
-      <s-stack gap="base">
-        <s-text>
-          Every numbered release in your collection is recorded here with its official certificate of authenticity.
-        </s-text>
-        <s-stack direction="inline" gap="small">
-          <s-badge tone="neutral">Numbered Collector Release</s-badge>
-          <s-badge tone="neutral">Official Certificate</s-badge>
-          <s-badge tone="neutral">Verified Sports Cave Record</s-badge>
-        </s-stack>
-      </s-stack>
-    </s-section>
-  );
-}
-
-function LoadingState() {
-  return (
-    <s-section>
-      <s-stack direction="inline" gap="base" alignItems="center">
-        <s-spinner size="base" accessibilityLabel="Loading certificates"></s-spinner>
-        <s-text>Loading your collector vault...</s-text>
-      </s-stack>
-    </s-section>
+    <s-grid gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 360px), 1fr))" gap="base">
+      {[0, 1, 2, 3].map((index) => (
+        <s-box key={index} padding="base" border="base" borderRadius="base">
+          <s-stack gap="base">
+            <s-box minBlockSize="220px" background="subdued" borderRadius="base"></s-box>
+            <s-skeleton-paragraph></s-skeleton-paragraph>
+            <s-skeleton-paragraph></s-skeleton-paragraph>
+          </s-stack>
+        </s-box>
+      ))}
+    </s-grid>
   );
 }
 
 function EmptyState() {
   return (
-    <s-section heading="Your collection is waiting.">
+    <s-section heading="Your collection is waiting">
       <s-stack gap="base">
         <s-text>
-          When you purchase a numbered Sports Cave release, your certificate of authenticity will appear here.
+          Numbered Sports Cave certificates appear here when their certificate assets are ready.
         </s-text>
-        <s-link href={SHOP_LATEST_DROPS_URL} target="_blank">
-          Shop Latest Drops
-        </s-link>
+        <s-button href="https://www.sportscaveshop.com" target="_blank">
+          Shop latest releases
+        </s-button>
       </s-stack>
     </s-section>
   );
 }
 
-function ErrorState({message}) {
+function ErrorState({message, onRetry}) {
   return (
-    <s-banner heading="Certificates unavailable" tone="critical">
-      {message || "Certificate vault permissions are still being updated. Please try again shortly."}
+    <s-banner heading="Collection unavailable" tone="critical">
+      <s-stack gap="base">
+        <s-text>{message}</s-text>
+        <s-button onClick={onRetry}>Try again</s-button>
+      </s-stack>
     </s-banner>
   );
 }
 
-function CollectorSummary({summary}) {
-  return (
-    <s-section heading="Collector Record">
-      <s-grid gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))" gap="base">
-        <SummaryTile label="Certificates owned" value={String(summary.certificateCount)} />
-        <SummaryTile label="Numbered releases" value={String(summary.releaseCount)} />
-        <SummaryTile label="Latest edition" value={summary.latestEdition || "-"} />
-        <SummaryTile label="Collector status" value="Active Collector" />
-      </s-grid>
-      {summary.latestProduct ? (
-        <s-text color="subdued">Latest addition: {summary.latestProduct}</s-text>
-      ) : null}
-    </s-section>
-  );
-}
-
-function SummaryTile({label, value}) {
+function CertificateCard({certificate, index, onOpen, api, apiBaseUrl, frameVariant}) {
+  const menuId = `certificate-menu-${index}`;
+  const frameAvailable = Boolean(frameVariant && certificate.frame_status !== "ordered");
   return (
     <s-box padding="base" border="base" borderRadius="base" background="subdued">
-      <s-stack gap="small-200">
-        <s-text color="subdued">{label}</s-text>
-        <s-text type="strong">{value}</s-text>
+      <s-stack gap="base">
+        <s-clickable
+          accessibilityLabel={`View certificate for ${certificate.product_title}`}
+          command="--show"
+          commandFor="certificate-viewer"
+          onClick={() => onOpen(certificate)}
+          borderRadius="base"
+          minBlockSize="220px"
+        >
+          {certificate.preview_url ? (
+            <s-image
+              src={absoluteAssetUrl(apiBaseUrl, certificate.preview_url)}
+              alt={`Certificate for ${certificate.product_title}`}
+              aspectRatio="16/9"
+              objectFit="contain"
+              loading="lazy"
+              sizes="(min-width: 760px) 50vw, 100vw"
+            ></s-image>
+          ) : (
+            <s-box minBlockSize="220px" padding="large" background="base" borderRadius="base">
+              <s-text color="subdued">Certificate preview is processing.</s-text>
+            </s-box>
+          )}
+        </s-clickable>
+        <s-stack gap="small-400">
+          <s-heading>{certificate.product_title}</s-heading>
+          <s-text type="strong">{editionLabel(certificate)}</s-text>
+          <s-text color="subdued">
+            {purchaseDateLabel(certificate.purchase_date, api.i18n.formatDate)}
+          </s-text>
+        </s-stack>
+        <s-stack direction="inline" gap="small" alignItems="center" justifyContent="space-between">
+          <s-button
+            variant="primary"
+            command="--show"
+            commandFor="certificate-viewer"
+            onClick={() => onOpen(certificate)}
+          >
+            View Certificate
+          </s-button>
+          {certificate.frame_status === "ordered" ? (
+            <s-badge tone="neutral" icon="check">Framed certificate ordered</s-badge>
+          ) : frameAvailable ? (
+            <s-button
+              variant="secondary"
+              command="--show"
+              commandFor="certificate-viewer"
+              onClick={() => {
+                onOpen(certificate);
+                logEvent(api, apiBaseUrl, "frame_offer_viewed", eventKeyForCertificate("frame-viewed", certificate));
+              }}
+            >
+              Order It Framed
+            </s-button>
+          ) : null}
+          <s-clickable
+            accessibilityLabel={`More certificate actions for ${certificate.product_title}`}
+            command="--show"
+            commandFor={menuId}
+            padding="small"
+            minBlockSize="44px"
+            minInlineSize="44px"
+          >
+            <s-icon type="menu-horizontal"></s-icon>
+          </s-clickable>
+          <CertificateMenu
+            id={menuId}
+            certificate={certificate}
+            api={api}
+            apiBaseUrl={apiBaseUrl}
+            detailsModalId={`certificate-details-${index}`}
+          />
+        </s-stack>
+        <CertificateDetailsModal certificate={certificate} id={`certificate-details-${index}`} />
       </s-stack>
     </s-box>
   );
 }
 
-function CertificateCard({certificate}) {
-  const hasPdf = Boolean(certificate.certificate_pdf_url);
-  const hasPrint = Boolean(certificate.certificate_print_jpg_url);
-  const hasPreview = Boolean(certificate.certificate_preview_image_url);
+function CertificateMenu({id, certificate, api, apiBaseUrl, detailsModalId}) {
+  return (
+    <s-menu id={id} accessibilityLabel={`Actions for ${certificate.product_title}`}>
+      {certificate.pdf_url ? (
+        <s-button
+          href={absoluteAssetUrl(apiBaseUrl, certificate.pdf_url)}
+          target="_blank"
+          onClick={() => logEvent(
+            api,
+            apiBaseUrl,
+            "certificate_downloaded",
+            eventKeyForCertificate("downloaded", certificate),
+          )}
+        >
+          Download PDF
+        </s-button>
+      ) : null}
+      {certificate.print_url ? (
+        <s-button
+          href={absoluteAssetUrl(apiBaseUrl, certificate.print_url)}
+          target="_blank"
+          onClick={() => logEvent(
+            api,
+            apiBaseUrl,
+            "certificate_printed",
+            eventKeyForCertificate("printed", certificate),
+          )}
+        >
+          Print certificate
+        </s-button>
+      ) : null}
+      <s-button command="--show" commandFor={detailsModalId}>
+        Certificate details
+      </s-button>
+    </s-menu>
+  );
+}
+
+function CertificateDetailsModal({certificate, id}) {
+  return (
+    <s-modal
+      id={id}
+      heading="Certificate details"
+      accessibilityLabel={`Certificate details for ${certificate.product_title}`}
+      size="small"
+    >
+      <s-stack gap="base">
+        <Detail label="Order number" value={certificate.order_name} />
+        <s-stack gap="small-100">
+          <s-text color="subdued">Certificate ID</s-text>
+          <s-stack direction="inline" gap="small" alignItems="center">
+            <s-text>{certificate.certificate_id || "Unavailable"}</s-text>
+            {certificate.certificate_id ? (
+              <s-clipboard-item text={certificate.certificate_id}></s-clipboard-item>
+            ) : null}
+          </s-stack>
+        </s-stack>
+      </s-stack>
+      <s-button slot="primary-action" command="--hide" commandFor={id}>Close</s-button>
+    </s-modal>
+  );
+}
+
+function CertificateViewer({certificate, frameVariant, api, apiBaseUrl, onFrameStatus}) {
+  const [frameState, setFrameState] = useState({status: "idle", message: "", checkoutUrl: ""});
+  const framePrice = formatFramePrice(frameVariant?.price, api.i18n.formatNumber);
+  const modalId = "certificate-viewer";
+
+  useEffect(() => {
+    setFrameState({status: "idle", message: "", checkoutUrl: ""});
+  }, [certificate?.reference]);
+
+  if (!certificate) {
+    return (
+      <s-modal id={modalId} heading="Certificate" size="max">
+        <s-text>Choose a certificate to view it.</s-text>
+        <s-button slot="primary-action" command="--hide" commandFor={modalId}>Close</s-button>
+      </s-modal>
+    );
+  }
+
+  const orderFrame = async (allowRepeat = false) => {
+    if (!frameVariant || frameState.status === "adding") return;
+    setFrameState({status: "adding", message: "Preparing your framed certificate...", checkoutUrl: ""});
+    try {
+      const idempotencyKey = allowRepeat
+        ? `repeat-${Date.now()}`
+        : `certificate-${stableReferencePart(certificate.reference)}`;
+      const frameRequest = await vaultRequest(
+        api,
+        apiBaseUrl,
+        "/api/collector-vault/frame/request",
+        {
+          method: "POST",
+          body: {
+            certificate_reference: certificate.reference,
+            frame_variant_id: frameVariant.id,
+            idempotency_key: idempotencyKey,
+            allow_repeat: allowRepeat,
+          },
+        },
+      );
+      if (frameRequest.status === "ordered" && !allowRepeat) {
+        setFrameState({
+          status: "ordered",
+          message: "Your framed certificate has already been ordered.",
+          checkoutUrl: "",
+        });
+        onFrameStatus(certificate.reference, "ordered", frameRequest.request_reference);
+        return;
+      }
+      if (frameRequest.checkout_url) {
+        setFrameState({
+          status: "ready",
+          message: "Your secure Shopify checkout is ready.",
+          checkoutUrl: frameRequest.checkout_url,
+        });
+        return;
+      }
+      const cartPayload = await api.query(CART_CREATE_MUTATION, {
+        variables: {input: frameCartInput(frameVariant.id, String(frameRequest.request_reference))},
+      });
+      const cartResult = cartPayload?.data?.cartCreate;
+      const cartError = cartResult?.userErrors?.[0]?.message;
+      if (cartError || !cartResult?.cart?.checkoutUrl) {
+        throw new Error(cartError || "Shopify checkout could not be created.");
+      }
+      await vaultRequest(api, apiBaseUrl, "/api/collector-vault/frame/cart-created", {
+        method: "POST",
+        body: {
+          request_reference: frameRequest.request_reference,
+          cart_id: cartResult.cart.id,
+          checkout_url: cartResult.cart.checkoutUrl,
+        },
+      });
+      onFrameStatus(certificate.reference, "cart_created", frameRequest.request_reference);
+      setFrameState({
+        status: "ready",
+        message: "Your secure Shopify checkout is ready.",
+        checkoutUrl: cartResult.cart.checkoutUrl,
+      });
+    } catch (error) {
+      setFrameState({status: "error", message: customerMessage(error), checkoutUrl: ""});
+    }
+  };
 
   return (
-    <s-box padding="base" border="base" borderRadius="base" background="subdued">
-      <s-stack gap="base">
-        <s-stack direction="inline" gap="small">
-          <s-badge tone="neutral">Numbered Collector Release</s-badge>
-          <s-badge tone="neutral">Official Certificate</s-badge>
-          <s-badge tone="neutral">Verified Sports Cave Record</s-badge>
-        </s-stack>
-
-        <s-grid gridTemplateColumns="repeat(auto-fit, minmax(260px, 1fr))" gap="base">
-          <s-stack gap="base">
-            <s-stack gap="small-400">
-              <s-heading>{certificate.product_title || "Sports Cave limited edition"}</s-heading>
-              {certificate.variant_title ? <s-text color="subdued">{certificate.variant_title}</s-text> : null}
-            </s-stack>
-
-            <s-grid gridTemplateColumns="repeat(auto-fit, minmax(150px, 1fr))" gap="base">
-              <CertificateDetail label="Edition" value={certificate.edition_display} />
-              <CertificateDetail label="Order" value={certificate.shopify_order_name} />
-              <CertificateDetail label="Purchased" value={certificate.purchase_date_display} />
-              <CertificateIdDetail value={certificate.certificate_id} />
-            </s-grid>
+    <s-modal
+      id={modalId}
+      heading={certificate.product_title}
+      accessibilityLabel={`Certificate viewer for ${certificate.product_title}`}
+      size="max"
+      padding="base"
+      onAfterShow={() => {
+        if (frameVariant) {
+          logEvent(
+            api,
+            apiBaseUrl,
+            "frame_offer_viewed",
+            eventKeyForCertificate("frame-modal", certificate),
+          );
+        }
+      }}
+    >
+      <s-grid
+        gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 320px), 1fr))"
+        gap="large"
+        alignItems="start"
+      >
+        <s-box background="subdued" padding="base" borderRadius="base">
+          {certificate.preview_url ? (
+            <s-image
+              src={absoluteAssetUrl(apiBaseUrl, certificate.preview_url)}
+              alt={`Certificate for ${certificate.product_title}`}
+              aspectRatio="16/9"
+              objectFit="contain"
+              loading="eager"
+              sizes="75vw"
+            ></s-image>
+          ) : (
+            <s-box minBlockSize="360px" padding="large">
+              <s-text color="subdued">Certificate preview is processing.</s-text>
+            </s-box>
+          )}
+        </s-box>
+        <s-stack gap="large">
+          <s-stack gap="small-400">
+            <s-heading>{certificate.product_title}</s-heading>
+            <s-text type="strong">{editionLabel(certificate)}</s-text>
+            <s-text color="subdued">
+              {purchaseDateLabel(certificate.purchase_date, api.i18n.formatDate)}
+            </s-text>
+            <s-text color="subdued">Order {certificate.order_name}</s-text>
           </s-stack>
+          {certificate.pdf_url ? (
+            <s-button
+              variant="primary"
+              href={absoluteAssetUrl(apiBaseUrl, certificate.pdf_url)}
+              target="_blank"
+              onClick={() => logEvent(
+                api,
+                apiBaseUrl,
+                "certificate_downloaded",
+                eventKeyForCertificate("viewer-download", certificate),
+              )}
+            >
+              Download Certificate
+            </s-button>
+          ) : (
+            <s-badge tone="neutral">Certificate file processing</s-badge>
+          )}
+          <ViewerSecondaryMenu certificate={certificate} api={api} apiBaseUrl={apiBaseUrl} />
+          {frameVariant ? (
+            <FrameOffer
+              certificate={certificate}
+              price={framePrice}
+              state={frameState}
+              onAdd={() => orderFrame(false)}
+              onOrderAnother={() => orderFrame(true)}
+            />
+          ) : null}
+        </s-stack>
+      </s-grid>
+      <s-button slot="primary-action" command="--hide" commandFor={modalId}>
+        Close
+      </s-button>
+    </s-modal>
+  );
+}
 
-          <s-stack gap="base">
-            {hasPreview ? (
-              <s-image
-                src={certificate.certificate_preview_image_url}
-                alt={`Certificate preview for ${certificate.product_title || "Sports Cave artwork"}`}
-                aspectRatio="16/9"
-                objectFit="cover"
-                loading="lazy"
-              ></s-image>
-            ) : (
-              <s-box padding="base" border="base" borderRadius="base">
-                <s-stack gap="small-200">
-                  <s-text type="strong">Certificate preview coming soon</s-text>
-                  <s-text color="subdued">Your official PDF certificate is still available below.</s-text>
-                </s-stack>
-              </s-box>
+function ViewerSecondaryMenu({certificate, api, apiBaseUrl}) {
+  return (
+    <s-stack direction="inline" gap="small" alignItems="center">
+      <s-clickable
+        accessibilityLabel="More certificate actions"
+        command="--show"
+        commandFor="viewer-actions"
+        padding="small"
+        minBlockSize="44px"
+        minInlineSize="44px"
+      >
+        <s-icon type="menu-horizontal"></s-icon>
+      </s-clickable>
+      <s-menu id="viewer-actions" accessibilityLabel="Certificate actions">
+        {certificate.print_url ? (
+          <s-button
+            href={absoluteAssetUrl(apiBaseUrl, certificate.print_url)}
+            target="_blank"
+            onClick={() => logEvent(
+              api,
+              apiBaseUrl,
+              "certificate_printed",
+              eventKeyForCertificate("viewer-print", certificate),
             )}
-          </s-stack>
-        </s-grid>
+          >
+            Print certificate
+          </s-button>
+        ) : null}
+        <s-button command="--show" commandFor="viewer-details">
+          Certificate details
+        </s-button>
+      </s-menu>
+      <CertificateDetailsModal certificate={certificate} id="viewer-details" />
+    </s-stack>
+  );
+}
 
-        <s-stack direction="inline" gap="base">
-          {hasPdf ? (
-            <CertificateAssetButton href={certificate.certificate_pdf_url} label="View Certificate" variant="primary" />
-          ) : null}
-          {hasPrint ? (
-            <CertificateAssetButton href={certificate.certificate_print_jpg_url} label="Download Print Certificate" />
-          ) : null}
-          {hasPdf ? (
-            <CertificateAssetButton href={certificate.certificate_pdf_url} label="Download PDF" />
-          ) : null}
-          {!hasPdf ? <s-badge tone="neutral">Certificate processing</s-badge> : null}
+function FrameOffer({certificate, price, state, onAdd, onOrderAnother}) {
+  const ordered = certificate.frame_status === "ordered" || state.status === "ordered";
+  return (
+    <s-box padding="base" border="base" borderRadius="base">
+      <s-stack gap="base">
+        <s-stack gap="small-400">
+          <s-heading>Framed Collector Certificate</s-heading>
+          <s-text type="strong">Frame the proof.</s-text>
+          <s-text>
+            Receive your official certificate for {editionLabel(certificate)} professionally printed,
+            framed and ready to display.
+          </s-text>
         </s-stack>
-
-        {(hasPdf || hasPrint) ? (
-          <s-text color="subdued">Opens in a new tab. Use your browser save or download option to print.</s-text>
+        <s-stack gap="small-200">
+          <s-text>Premium black frame</s-text>
+          <s-text>A4 landscape</s-text>
+          <s-text>Printed and ready to hang</s-text>
+        </s-stack>
+        {state.checkoutUrl ? (
+          <s-button variant="primary" href={state.checkoutUrl} target="_blank">
+            Continue to secure checkout
+          </s-button>
+        ) : ordered ? (
+          <s-stack gap="small">
+            <s-badge tone="neutral" icon="check">Framed certificate ordered</s-badge>
+            <s-button variant="secondary" onClick={onOrderAnother} loading={state.status === "adding"}>
+              Order another
+            </s-button>
+          </s-stack>
+        ) : (
+          <s-button variant="primary" onClick={onAdd} loading={state.status === "adding"}>
+            Add Framed Certificate — {price}
+          </s-button>
+        )}
+        {state.message ? (
+          <s-text color={state.status === "error" ? "base" : "subdued"}>{state.message}</s-text>
         ) : null}
       </s-stack>
     </s-box>
   );
 }
 
-function CertificateAssetButton({href, label, variant = "secondary"}) {
-  if (variant === "primary") {
-    return (
-      <s-button href={href} target="_blank" variant="primary">
-        {label}
-      </s-button>
-    );
-  }
+function ReviewPrompt({prompt, api, apiBaseUrl, onSubmitted}) {
+  const [rating, setRating] = useState(0);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [photo, setPhoto] = useState(null);
+  const [photoError, setPhotoError] = useState("");
+  const [submitState, setSubmitState] = useState({status: "idle", message: ""});
+  const modalId = "collector-review-modal";
+  const readerRef = useRef(null);
+  const modalRef = useRef(null);
+
+  useEffect(() => {
+    logEvent(api, apiBaseUrl, "review_prompt_viewed", dailyEventKey("review-prompt"));
+    return () => {
+      if (readerRef.current?.readyState === 1) readerRef.current.abort();
+    };
+  }, [apiBaseUrl]);
+
+  const chooseRating = (value) => {
+    setRating(value);
+    logEvent(api, apiBaseUrl, "review_started", dailyEventKey(`review-started-${value}`));
+  };
+
+  const handlePhoto = (event) => {
+    const file = fileFromDropEvent(event);
+    const validation = isAllowedReviewPhoto(file);
+    if (!validation.ok) {
+      setPhoto(null);
+      setPhotoError(validation.error);
+      return;
+    }
+    const reader = new FileReader();
+    readerRef.current = reader;
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      setPhoto({
+        name: file.name,
+        mime_type: file.type,
+        size: file.size,
+        base64: dataUrl.split(",", 2)[1] || "",
+        preview: dataUrl,
+      });
+      setPhotoError("");
+      logEvent(api, apiBaseUrl, "review_photo_added", dailyEventKey("review-photo"));
+    };
+    reader.onerror = () => setPhotoError("Photo could not be read.");
+    reader.readAsDataURL(file);
+  };
+
+  const submitReview = async () => {
+    if (!rating) {
+      setSubmitState({status: "error", message: "Choose a star rating."});
+      return;
+    }
+    if (body.trim().length < 10) {
+      setSubmitState({status: "error", message: "Review text must be at least 10 characters."});
+      return;
+    }
+    setSubmitState({status: "submitting", message: ""});
+    try {
+      await vaultRequest(api, apiBaseUrl, "/api/collector-vault/review", {
+        method: "POST",
+        body: {
+          review_reference: prompt.reference,
+          rating,
+          title,
+          body,
+          photo: photo ? {
+            mime_type: photo.mime_type,
+            filename: photo.name,
+            base64: photo.base64,
+          } : null,
+        },
+      });
+      setSubmitState({status: "submitted", message: "Review submitted ✓"});
+      onSubmitted();
+      modalRef.current?.hideOverlay();
+    } catch (error) {
+      setSubmitState({status: "error", message: customerMessage(error)});
+    }
+  };
 
   return (
-    <s-button href={href} target="_blank" variant="secondary">
-      {label}
-    </s-button>
+    <s-box padding="base" border="base" borderRadius="base">
+      <s-grid gridTemplateColumns="minmax(96px, 140px) minmax(0, 1fr)" gap="base" alignItems="center">
+        {prompt.thumbnail_url ? (
+          <s-image
+            src={absoluteAssetUrl(apiBaseUrl, prompt.thumbnail_url)}
+            alt={prompt.product_title}
+            aspectRatio="16/9"
+            objectFit="contain"
+            loading="lazy"
+          ></s-image>
+        ) : null}
+        <s-stack gap="small-400">
+          <s-heading>How does it look in your space?</s-heading>
+          <s-text color="subdued">
+            Share a quick review and help another fan see the real thing.
+          </s-text>
+          <s-text type="strong">{prompt.product_title}</s-text>
+          <StarRating rating={rating} onChange={chooseRating} modalId={modalId} />
+          <s-stack direction="inline" gap="small">
+            <s-button command="--show" commandFor={modalId} onClick={() => chooseRating(rating || 5)}>
+              Leave a Review
+            </s-button>
+            <s-button command="--show" commandFor={modalId}>
+              Add a Photo
+            </s-button>
+          </s-stack>
+        </s-stack>
+      </s-grid>
+      <s-modal
+        ref={modalRef}
+        id={modalId}
+        heading={`Review ${prompt.product_title}`}
+        accessibilityLabel={`Leave a review for ${prompt.product_title}`}
+        size="large"
+      >
+        <s-stack gap="base">
+          <StarRating rating={rating} onChange={chooseRating} />
+          <s-text-field
+            label="Review title (optional)"
+            value={title}
+            maxLength={120}
+            onInput={(event) => setTitle(inputValue(event))}
+          ></s-text-field>
+          <s-text-area
+            label="Your review"
+            value={body}
+            minLength={10}
+            maxLength={2000}
+            required
+            rows={5}
+            onInput={(event) => setBody(inputValue(event))}
+          ></s-text-area>
+          <s-drop-zone
+            label="Add a customer photo (optional)"
+            accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+            error={photoError}
+                onInput={handlePhoto}
+          ></s-drop-zone>
+          {photo ? (
+            <s-stack gap="small">
+              <s-image
+                src={photo.preview}
+                alt={`Selected review photo ${photo.name}`}
+                aspectRatio="16/9"
+                objectFit="contain"
+              ></s-image>
+              <s-stack direction="inline" gap="small" alignItems="center">
+                <s-text>{photo.name}</s-text>
+                <s-button onClick={() => setPhoto(null)}>Remove photo</s-button>
+              </s-stack>
+            </s-stack>
+          ) : null}
+          {submitState.message ? (
+            <s-banner tone={submitState.status === "error" ? "critical" : "success"}>
+              {submitState.message}
+            </s-banner>
+          ) : null}
+        </s-stack>
+        <s-button
+          slot="primary-action"
+          variant="primary"
+          onClick={submitReview}
+          loading={submitState.status === "submitting"}
+        >
+          Submit review
+        </s-button>
+        <s-button slot="secondary-actions" command="--hide" commandFor={modalId}>
+          Cancel
+        </s-button>
+      </s-modal>
+    </s-box>
   );
 }
 
-function CertificateDetail({label, value}) {
+function StarRating({rating, onChange, modalId = ""}) {
+  return (
+    <s-stack direction="inline" gap="small-200" alignItems="center">
+      {[1, 2, 3, 4, 5].map((value) => (
+        <s-clickable
+          key={value}
+          accessibilityLabel={`${value} star${value === 1 ? "" : "s"}`}
+          onClick={() => onChange(value)}
+          command={modalId ? "--show" : undefined}
+          commandFor={modalId || undefined}
+          padding="small"
+          minBlockSize="44px"
+          minInlineSize="44px"
+        >
+          <s-icon
+            type={value <= rating ? "star-filled" : "star"}
+            tone={value <= rating ? "warning" : "neutral"}
+          ></s-icon>
+        </s-clickable>
+      ))}
+    </s-stack>
+  );
+}
+
+function Detail({label, value}) {
   return (
     <s-stack gap="small-100">
       <s-text color="subdued">{label}</s-text>
-      <s-text type="strong">{value || "-"}</s-text>
+      <s-text>{value || "Unavailable"}</s-text>
     </s-stack>
   );
 }
 
-function CertificateIdDetail({value}) {
-  return (
-    <s-stack gap="small-100">
-      <s-text color="subdued">Certificate ID</s-text>
-      <s-stack direction="inline" gap="small" alignItems="center">
-        <s-text type="strong">{value || "-"}</s-text>
-        {value ? <s-clipboard-item text={value}></s-clipboard-item> : null}
-      </s-stack>
-    </s-stack>
-  );
+function configuredApiBaseUrl(api) {
+  const configured = String(api.settings?.value?.api_base_url || "").trim();
+  return (configured || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
 }
 
-function collectCertificates(orders, customer) {
-  const seen = new Set();
-  const rows = [];
-
-  for (const order of orders || []) {
-    const certificates = certificatesFromMetafield(order.metafield);
-    for (const certificate of certificates) {
-      const normalized = normalizeCertificate(certificate, order, customer);
-      if (!normalized) continue;
-      if (seen.has(normalized.key)) continue;
-      seen.add(normalized.key);
-      rows.push(normalized);
-    }
-  }
-
-  return rows;
-}
-
-function certificatesFromMetafield(metafield) {
-  if (!metafield) return [];
-  const raw = metafield.jsonValue ?? metafield.value;
-  const parsed = typeof raw === "string" ? parseJson(raw) : raw;
-  if (Array.isArray(parsed)) return parsed;
-  return Array.isArray(parsed?.certificates) ? parsed.certificates : [];
-}
-
-function normalizeCertificate(record, order, customer) {
-  if (!record || typeof record !== "object") return null;
-  if (!matchesContext(record.shopify_customer_id, customer?.id)) return null;
-  if (!matchesContext(record.shopify_order_id, order?.id)) return null;
-  const recordOrderName = stringValue(record.shopify_order_name || record.order_name);
-  if (recordOrderName && order?.name && recordOrderName !== order.name) return null;
-
-  const orderName = stringValue(recordOrderName || order.name);
-  const lineItemId = stringValue(record.shopify_line_item_id);
-  const editionNumber = positiveInt(record.edition_number);
-  const unitIndex = positiveInt(record.line_item_unit_index) || 1;
-  const certificateId = stringValue(record.certificate_id);
-  const pdfUrl = safeHttpsUrl(record.certificate_pdf_url || record.certificate_file_url || record.pdf_url);
-  const printUrl = safeHttpsUrl(record.certificate_print_jpg_url);
-  const previewUrl = safeHttpsUrl(record.certificate_preview_image_url);
-
-  return {
-    key: [
-      orderName,
-      lineItemId,
-      editionNumber || "",
-      unitIndex,
-      certificateId,
-    ].join("|"),
-    product_title: stringValue(record.product_title),
-    product_handle: stringValue(record.product_handle),
-    variant_title: stringValue(record.variant_title),
-    edition_display: editionDisplay(record),
-    certificate_id: certificateId,
-    shopify_order_name: orderName,
-    purchase_date: stringValue(record.purchase_date || record.created_at || order.processedAt),
-    purchase_date_display: dateDisplay(record.purchase_date || record.created_at || order.processedAt),
-    certificate_pdf_url: pdfUrl,
-    certificate_print_jpg_url: printUrl,
-    certificate_preview_image_url: previewUrl,
-  };
-}
-
-function collectionSummary(certificates) {
-  const releaseKeys = new Set();
-  for (const certificate of certificates || []) {
-    releaseKeys.add(certificate.product_handle || certificate.product_title || certificate.certificate_id);
-  }
-  const latest = (certificates || [])[0] || {};
-  return {
-    certificateCount: (certificates || []).length,
-    releaseCount: releaseKeys.size,
-    latestEdition: latest.edition_display || "",
-    latestProduct: latest.product_title || "",
-  };
-}
-
-function matchesContext(recordValue, contextValue) {
-  const recordText = stringValue(recordValue);
-  const contextText = stringValue(contextValue);
-  return !recordText || !contextText || recordText === contextText;
-}
-
-function parseJson(value) {
+async function vaultRequest(api, apiBaseUrl, path, options = {}) {
+  const token = await api.sessionToken.get();
+  const method = options.method || "GET";
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "X-Sports-Cave-Request": "customer-account-extension",
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  let payload = {};
   try {
-    return JSON.parse(value || "{}");
+    payload = await response.json();
   } catch (_error) {
-    return {};
+    payload = {};
   }
+  if (!response.ok || payload.ok === false) {
+    throw new Error(payload.error || "The request could not be completed.");
+  }
+  return payload;
 }
 
-function stringValue(value) {
-  return String(value || "").trim();
-}
-
-function positiveInt(value) {
-  const number = Number.parseInt(value, 10);
-  return Number.isFinite(number) && number > 0 ? number : 0;
-}
-
-function editionDisplay(record) {
-  const number = positiveInt(record.edition_number);
-  const total = positiveInt(record.edition_limit || record.edition_total);
-  if (number && total) return `#${String(number).padStart(3, "0")} / ${total}`;
-
-  const display = stringValue(record.display_edition || record.edition_display);
-  return display.includes("/") ? display.replace("/", " / ") : display;
-}
-
-function dateDisplay(value) {
-  const raw = stringValue(value);
-  if (!raw) return "";
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return raw;
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  }).format(date);
-}
-
-function safeHttpsUrl(value) {
-  const raw = stringValue(value);
-  if (!raw) return "";
+async function logEvent(api, apiBaseUrl, event, eventKey) {
   try {
-    const url = new URL(raw);
-    return url.protocol === "https:" ? raw : "";
+    await vaultRequest(api, apiBaseUrl, "/api/collector-vault/events", {
+      method: "POST",
+      body: {event, event_key: eventKey},
+    });
   } catch (_error) {
-    return "";
+    // Analytics must never interrupt certificate access.
   }
 }
 
-function customerSafeErrorMessage(error) {
-  const raw = Array.isArray(error)
-    ? error.map((item) => item?.message || "").join(" ")
-    : error instanceof Error
-      ? error.message
-      : stringValue(error);
-  const normalized = raw.toLowerCase();
-  if (
-    normalized.includes("access denied")
-    || normalized.includes("customer_read_customers")
-    || normalized.includes("customer_read_orders")
-    || normalized.includes("scope")
-  ) {
-    return "Certificate vault permissions are still being updated. Please try again shortly.";
-  }
-  return "We could not load your Sports Cave certificates. Please try again later.";
+function absoluteAssetUrl(apiBaseUrl, path) {
+  const raw = String(path || "");
+  return raw.startsWith("https://") ? raw : `${apiBaseUrl}${raw.startsWith("/") ? "" : "/"}${raw}`;
+}
+
+function eventKeyForCertificate(prefix, certificate) {
+  return `${prefix}:${stableReferencePart(certificate.reference)}`;
+}
+
+function stableReferencePart(reference) {
+  return String(reference || "").split(".", 1)[0].slice(-48);
+}
+
+function dailyEventKey(prefix) {
+  return `${prefix}:${new Date().toISOString().slice(0, 10)}`;
+}
+
+function customerMessage(error) {
+  const message = String(error?.message || "").trim();
+  return message || "We could not complete that request. Please try again.";
 }
