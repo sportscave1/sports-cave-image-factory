@@ -16,6 +16,7 @@ from certificate_logging import certificate_stage_log
 
 DEFAULT_API_VERSION = "2026-04"
 DEFAULT_PAGE_SIZE = 50
+EDITION_OPS_CATALOG_PAGE_SIZE = 250
 DEFAULT_MAX_PRODUCTS = 500
 DEFAULT_MAX_ORDERS = 250
 DEFAULT_EDITION_OPS_MAX_PRODUCTS = 500
@@ -545,9 +546,6 @@ query EditionOpsActiveProducts($first: Int!, $after: String, $query: String) {
             image { url }
           }
         }
-      }
-      metafields(first: 20, namespace: "sports_cave") {
-        nodes { namespace key type value }
       }
     }
   }
@@ -2104,15 +2102,20 @@ def fetch_limited_edition_products_page(after=None, search="", page_size=25, con
     }
 
 
-def fetch_edition_ops_active_products_page(after=None, page_size=50, config=None, request_post=None):
+def fetch_edition_ops_active_products_page(
+    after=None,
+    page_size=EDITION_OPS_CATALOG_PAGE_SIZE,
+    config=None,
+    request_post=None,
+):
     config = config or get_config()
-    first = min(max(int(page_size), 1), 50)
+    first = min(max(int(page_size), 1), EDITION_OPS_CATALOG_PAGE_SIZE)
     data, served_version = graphql_request(
         EDITION_OPS_ACTIVE_PRODUCTS_QUERY,
         variables={
             "first": first,
             "after": after or None,
-            "query": "status:active",
+            "query": "(status:active OR status:draft)",
         },
         config=config,
         request_post=request_post,
@@ -2129,28 +2132,56 @@ def fetch_edition_ops_active_products_page(after=None, page_size=50, config=None
     }
 
 
-def fetch_edition_ops_active_products(max_products=None, page_size=50, config=None, request_post=None):
+def fetch_edition_ops_active_products(
+    max_products=None,
+    page_size=EDITION_OPS_CATALOG_PAGE_SIZE,
+    config=None,
+    request_post=None,
+    progress_callback=None,
+):
     config = config or get_config()
-    limit = max(1, int(max_products if max_products is not None else config.get("edition_ops_max_products", DEFAULT_EDITION_OPS_MAX_PRODUCTS)))
+    limit = max(1, int(max_products)) if max_products is not None else None
+    requested_page_size = min(
+        max(int(page_size or EDITION_OPS_CATALOG_PAGE_SIZE), 1),
+        EDITION_OPS_CATALOG_PAGE_SIZE,
+    )
     after = None
     products = []
     served_version = config.get("api_version")
-    while len(products) < limit:
+    page_count = 0
+    seen_cursors = set()
+    complete = False
+    while limit is None or len(products) < limit:
+        remaining = limit - len(products) if limit is not None else requested_page_size
         page = fetch_edition_ops_active_products_page(
             after=after,
-            page_size=min(int(page_size or 50), limit - len(products)),
+            page_size=min(requested_page_size, remaining),
             config=config,
             request_post=request_post,
         )
-        products.extend(page.get("products") or [])
+        page_count += 1
+        page_products = page.get("products") or []
+        products.extend(page_products)
         served_version = page.get("api_version") or served_version
-        if not page.get("has_next_page") or not page.get("end_cursor"):
+        if progress_callback:
+            progress_callback(len(products))
+        if not page.get("has_next_page"):
+            complete = True
             break
-        after = page.get("end_cursor")
+        next_cursor = str(page.get("end_cursor") or "").strip()
+        if not next_cursor:
+            raise ShopifyAPIError("Shopify catalogue pagination stopped before the final page.")
+        if next_cursor in seen_cursors:
+            raise ShopifyAPIError("Shopify catalogue pagination returned a repeated cursor.")
+        seen_cursors.add(next_cursor)
+        after = next_cursor
+    selected_products = products if limit is None else products[:limit]
     return {
-        "products": products[:limit],
+        "products": selected_products,
         "api_version": served_version,
         "max_products": limit,
+        "page_count": page_count,
+        "complete": complete,
     }
 
 

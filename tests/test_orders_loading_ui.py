@@ -48,7 +48,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("backend.update_edition_product", source)
         self.assertIn("Save Changes", source)
         self.assertIn("_render_advanced_controls", render_source)
-        self.assertIn("backend.sync_new_shopify_products_to_edition_ops", source)
+        self.assertIn("backend.reconcile_all_shopify_products_to_edition_ops", source)
         self.assertNotIn("backend.sync_shopify_products_to_supabase", render_source)
         self.assertNotIn("Save Changed Rows", render_source)
         self.assertNotIn("Push Metafield", render_source)

@@ -36,13 +36,13 @@ SNAPSHOT_LOADED_KEY = "edition_ops_snapshot_loaded"
 LOADED_AT_KEY = "edition_ops_loaded_at"
 LOAD_ERROR_KEY = "edition_ops_load_error"
 LOAD_DIAGNOSTIC_KEY = "edition_ops_load_diagnostic"
-EDITOR_PAGE_SELECTION_KEY = "edition_ops_editor_page_selection"
-EDITOR_RENDERED_PAGE_KEY = "edition_ops_editor_rendered_page"
+EDITOR_PRODUCT_SELECTION_KEY = "edition_ops_editor_product_selection"
+EDITOR_RENDERED_SELECTION_KEY = "edition_ops_editor_rendered_selection"
 ORDERS_CACHE_VERSION_KEY = "orders-ledger-cache-version"
 EDITION_OPS_CACHE_VERSION_KEY = "edition-ops-ledger-cache-version"
 EDITION_OPS_CACHE_TTL_SECONDS = max(int(os.getenv("SUPABASE_EDITION_OPS_CACHE_TTL_SECONDS", "180")), 30)
-EDITION_OPS_PRODUCT_LIMIT = max(min(int(os.getenv("SUPABASE_EDITION_OPS_PRODUCT_LIMIT", "500")), 1000), 1)
-EDITION_OPS_EDITOR_PAGE_SIZE = max(min(int(os.getenv("EDITION_OPS_EDITOR_PAGE_SIZE", "50")), 100), 10)
+EDITION_OPS_PRODUCT_LIMIT = max(min(int(os.getenv("SUPABASE_EDITION_OPS_PRODUCT_LIMIT", "1000")), 1000), 1)
+ALL_PRODUCTS_SELECTION = "__all_products__"
 
 EDITABLE_FIELDS = (
     "edition_enabled",
@@ -354,12 +354,12 @@ def _stable_row_key(row):
     edition_product_id = _normalise_text(normalised.get("edition_product_id"))
     if edition_product_id:
         return f"edition_product:{edition_product_id}"
-    shopify_handle = _normalise_title(normalised.get("shopify_handle") or normalised.get("handle"))
-    if shopify_handle:
-        return f"handle:{shopify_handle}"
     shopify_product_gid = _normalise_text(normalised.get("shopify_product_gid"))
     if shopify_product_gid:
         return f"product_gid:{shopify_product_gid}"
+    shopify_handle = _normalise_title(normalised.get("shopify_handle") or normalised.get("handle"))
+    if shopify_handle:
+        return f"handle:{shopify_handle}"
     product_title = _normalise_title(normalised.get("product_title"))
     if product_title:
         return f"title:{product_title}"
@@ -425,13 +425,28 @@ def _cached_supabase_products_snapshot(cache_version):
     backend = _configured_supabase_backend()
     if not backend:
         return None
-    if hasattr(backend, "list_edition_products_read_only"):
-        products = backend.list_edition_products_read_only(
-            search="",
-            limit=EDITION_OPS_PRODUCT_LIMIT,
-        )
-    else:
-        products = backend.list_edition_products(search="", limit=EDITION_OPS_PRODUCT_LIMIT)
+    products = []
+    offset = 0
+    query_count = 0
+    while True:
+        if hasattr(backend, "list_edition_products_read_only"):
+            page = backend.list_edition_products_read_only(
+                search="",
+                limit=EDITION_OPS_PRODUCT_LIMIT,
+                offset=offset,
+            )
+        else:
+            page = backend.list_edition_products(
+                search="",
+                limit=EDITION_OPS_PRODUCT_LIMIT,
+                offset=offset,
+            )
+        page = list(page or [])
+        products.extend(page)
+        query_count += 1
+        if len(page) < EDITION_OPS_PRODUCT_LIMIT:
+            break
+        offset += EDITION_OPS_PRODUCT_LIMIT
     rows = [_row_from_supabase_product(product) for product in products or []]
     last_synced = max(
         (str(row.get("last_synced_at") or "") for row in rows),
@@ -440,10 +455,16 @@ def _cached_supabase_products_snapshot(cache_version):
     diagnostic = {}
     if hasattr(backend, "get_last_database_read_diagnostic"):
         diagnostic = backend.get_last_database_read_diagnostic()
+    diagnostic = {
+        **diagnostic,
+        "query_count": query_count,
+        "row_count": len(rows),
+        "complete_catalogue": True,
+    }
     print(
         "PERF Edition Ops snapshot "
         f"duration_ms={int((time.perf_counter() - started) * 1000)} "
-        f"rows={len(rows)} queries={int(diagnostic.get('query_count') or 1)}",
+        f"rows={len(rows)} queries={query_count}",
         flush=True,
     )
     return {
@@ -456,7 +477,7 @@ def _cached_supabase_products_snapshot(cache_version):
         "cached": False,
         "mirror_status": "",
         "database_read": diagnostic,
-        "limit": EDITION_OPS_PRODUCT_LIMIT,
+        "limit": len(rows),
     }
 
 
@@ -560,7 +581,7 @@ def _ensure_state():
     st.session_state.setdefault(LOADED_AT_KEY, "")
     st.session_state.setdefault(LOAD_ERROR_KEY, "")
     st.session_state.setdefault(LOAD_DIAGNOSTIC_KEY, {})
-    st.session_state.setdefault(EDITOR_RENDERED_PAGE_KEY, -1)
+    st.session_state.setdefault(EDITOR_RENDERED_SELECTION_KEY, "")
 
 
 def _bump_editor_version():
@@ -1109,7 +1130,7 @@ def _load_active_products_from_shopify():
         )
     backend = _configured_supabase_backend()
     if backend:
-        result = backend.sync_shopify_products_to_supabase(config=config, mode="incremental")
+        result = backend.reconcile_all_shopify_products_to_edition_ops(config=config)
         _invalidate_edition_ops_cache(bump_orders=True)
         snapshot = _load_supabase_snapshot() or {
             "rows": [],
@@ -1127,14 +1148,14 @@ def _load_active_products_from_shopify():
         }
         _write_snapshot(snapshot["rows"], snapshot["original_rows"], meta=st.session_state[META_KEY])
         st.session_state[NOTICE_KEY] = (
-            f"Synced products into Supabase. {result.get('products_seen', len(snapshot['rows']))} product(s) checked."
+            f"Refreshed the Shopify catalogue. {result.get('products_checked', len(snapshot['rows']))} product(s) checked."
         )
         _clear_editor_state()
         _bump_editor_version()
         return
     loaded = shopify_sync.fetch_edition_ops_active_products(
-        max_products=config.get("edition_ops_max_products", 500),
-        page_size=50,
+        max_products=None,
+        page_size=shopify_sync.EDITION_OPS_CATALOG_PAGE_SIZE,
         config=config,
     )
     refreshed_at = _now_iso()
@@ -1198,6 +1219,7 @@ def _format_shopify_product_sync_summary(result):
     message = " · ".join(
         (
             f"{int(result.get('new_products_inserted') or 0)} new products added",
+            f"{int(result.get('existing_products_updated') or 0)} product names or handles updated",
             f"{int(result.get('existing_products_skipped') or 0)} existing products skipped",
             f"{int(result.get('shopify_metafields_pushed') or 0)} metafield mirrors updated",
             f"{len(errors)} failures",
@@ -1874,31 +1896,40 @@ def _editor_payload(row):
     return {key: normalised.get(key) for key in keys}
 
 
-def _editor_page_rows(rows):
-    total_rows = len(rows)
-    page_count = max((total_rows + EDITION_OPS_EDITOR_PAGE_SIZE - 1) // EDITION_OPS_EDITOR_PAGE_SIZE, 1)
-    page_index = 0
-    if page_count > 1 and hasattr(st, "selectbox"):
-        labels = []
-        for index in range(page_count):
-            start = index * EDITION_OPS_EDITOR_PAGE_SIZE + 1
-            end = min((index + 1) * EDITION_OPS_EDITOR_PAGE_SIZE, total_rows)
-            labels.append(f"Products {start}-{end} of {total_rows}")
+def _editor_visible_rows(rows):
+    keyed_rows = {}
+    labels = {ALL_PRODUCTS_SELECTION: f"All products ({len(rows)})"}
+    for row in rows:
+        row_key = _stable_row_key(row)
+        if not row_key or row_key in keyed_rows:
+            continue
+        keyed_rows[row_key] = row
+        title = str(row.get("product_title") or "Untitled Product").strip()
+        handle = str(row.get("handle") or row.get("shopify_handle") or "").strip()
+        labels[row_key] = f"{title} ({handle})" if handle else title
+
+    options = [ALL_PRODUCTS_SELECTION, *keyed_rows]
+    selected = st.session_state.get(EDITOR_PRODUCT_SELECTION_KEY, ALL_PRODUCTS_SELECTION)
+    if selected not in options:
+        st.session_state[EDITOR_PRODUCT_SELECTION_KEY] = ALL_PRODUCTS_SELECTION
+    if hasattr(st, "selectbox"):
         selected = st.selectbox(
-            "Product rows",
-            labels,
-            key=EDITOR_PAGE_SELECTION_KEY,
-            label_visibility="collapsed",
+            "Find product",
+            options,
+            key=EDITOR_PRODUCT_SELECTION_KEY,
+            format_func=lambda value: labels.get(value, value),
+            help="Type a product title or handle to search the complete Shopify catalogue.",
         )
-        if selected in labels:
-            page_index = labels.index(selected)
-    previous_page = int(st.session_state.get(EDITOR_RENDERED_PAGE_KEY, -1))
-    if previous_page != page_index:
+    if selected not in options:
+        selected = ALL_PRODUCTS_SELECTION
+
+    previous_selection = st.session_state.get(EDITOR_RENDERED_SELECTION_KEY, "")
+    if previous_selection != selected:
         st.session_state.pop(EDITOR_KEY, None)
-        st.session_state[EDITOR_RENDERED_PAGE_KEY] = page_index
-    start = page_index * EDITION_OPS_EDITOR_PAGE_SIZE
-    end = min(start + EDITION_OPS_EDITOR_PAGE_SIZE, total_rows)
-    return rows[start:end], page_index, page_count
+        st.session_state[EDITOR_RENDERED_SELECTION_KEY] = selected
+    if selected == ALL_PRODUCTS_SELECTION:
+        return rows, selected
+    return [keyed_rows[selected]], selected
 
 
 def _column_config():
@@ -2074,18 +2105,18 @@ def _render_advanced_controls(backend, rows):
             )
         else:
             st.caption("Sync diagnostics load only when requested.")
-        st.caption("Checks only the newest Shopify products and adds products not already in Sports Cave OS.")
+        st.caption("Refreshes the complete lightweight Shopify catalogue and safely reconciles product renames.")
         action_cols = st.columns([1, 1, 1, 1])
-        if action_cols[0].button("Pull New Products", use_container_width=True, disabled=not backend):
+        if action_cols[0].button("Refresh Shopify Catalogue", use_container_width=True, disabled=not backend):
             sync_completed = False
             try:
-                with st.spinner("Checking the newest Shopify products..."):
-                    if not backend or not hasattr(backend, "sync_new_shopify_products_to_edition_ops"):
-                        raise ValueError("New-product pull is not available.")
+                with st.spinner("Refreshing the complete Shopify catalogue..."):
+                    if not backend or not hasattr(backend, "reconcile_all_shopify_products_to_edition_ops"):
+                        raise ValueError("Shopify catalogue refresh is not available.")
                     config = shopify_sync.get_config()
                     if not config.get("configured"):
                         raise ValueError("Shopify is not configured.")
-                    sync_result = backend.sync_new_shopify_products_to_edition_ops(config=config)
+                    sync_result = backend.reconcile_all_shopify_products_to_edition_ops(config=config)
                     st.session_state[MANUAL_PRODUCT_SYNC_RESULT_KEY] = sync_result
                     _reload_products_from_supabase()
                     st.session_state[NOTICE_KEY] = _format_shopify_product_sync_summary(sync_result)
@@ -2094,7 +2125,9 @@ def _render_advanced_controls(backend, rows):
                     st.session_state[NOTICE_LEVEL_KEY] = "warning" if sync_errors else "success"
                     sync_completed = True
             except Exception as error:
-                st.session_state[NOTICE_KEY] = f"Shopify new-product pull failed: {error}"
+                st.session_state[NOTICE_KEY] = (
+                    f"Shopify catalogue refresh failed: {error}. The previous catalogue is still available."
+                )
                 st.session_state[NOTICE_LEVEL_KEY] = "error"
             if sync_completed:
                 st.rerun()
@@ -2235,17 +2268,12 @@ def render_page():
         retry_rows = _pending_shopify_sync_rows(current_rows)
         rows_to_save = _rows_to_save(current_rows, originals)
         _slot_caption(summary_slot, _edition_ops_summary(current_rows, changed_rows, retry_rows))
-        page_rows, page_index, page_count = _editor_page_rows(current_rows)
-        editor_rows = [_editor_payload(row) for row in page_rows]
-        if page_count > 1:
-            st.caption(
-                f"Editing page {page_index + 1} of {page_count}. "
-                f"Each page is limited to {EDITION_OPS_EDITOR_PAGE_SIZE} products for stability."
-            )
+        visible_rows, selected_product = _editor_visible_rows(current_rows)
+        editor_rows = [_editor_payload(row) for row in visible_rows]
         editor_started = time.perf_counter()
         print(
             "PERF Edition Ops editor start "
-            f"rows={len(editor_rows)} total_rows={len(current_rows)} page={page_index + 1}",
+            f"rows={len(editor_rows)} total_rows={len(current_rows)} selection={selected_product}",
             flush=True,
         )
         with st.form("edition-ops-editor-form", clear_on_submit=False):
@@ -2283,7 +2311,7 @@ def render_page():
         )
         if save_clicked:
             with st.spinner("Saving..."):
-                _save_changed_rows(edited, source_rows=page_rows)
+                _save_changed_rows(edited, source_rows=visible_rows)
             _render_notice()
             current_rows = [_normalise_row(row) for row in st.session_state.get(ROWS_KEY, [])]
             changed_rows = _changed_rows(current_rows, originals)

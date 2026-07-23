@@ -2297,7 +2297,7 @@ class ShopifySyncClientTests(unittest.TestCase):
         self.assertTrue(product["edition"]["edition_enabled"])
         self.assertEqual(product["edition"]["remaining"], 5)
 
-    def test_edition_ops_active_products_are_active_only_and_lightweight(self):
+    def test_edition_ops_catalogue_products_are_active_or_draft_and_lightweight(self):
         requests_seen = []
 
         def fake_post(*args, **kwargs):
@@ -2361,16 +2361,16 @@ class ShopifySyncClientTests(unittest.TestCase):
         )
 
         request = requests_seen[0]
-        self.assertEqual(request["variables"]["query"], "status:active")
+        self.assertEqual(request["variables"]["query"], "(status:active OR status:draft)")
         self.assertEqual(request["variables"]["first"], 50)
         self.assertIn("sortKey: TITLE", request["query"])
         self.assertIn("onlineStoreUrl", request["query"])
-        self.assertIn('metafields(first: 20, namespace: "sports_cave")', request["query"])
+        self.assertNotIn("metafields(", request["query"])
         self.assertNotIn("variants(", request["query"])
         self.assertNotIn("collections(", request["query"])
         product = result["products"][0]
         self.assertEqual(product["online_store_url"], "https://sportscaveshop.com/products/all-rise-wall-art")
-        self.assertEqual(product["edition"]["remaining"], 48)
+        self.assertEqual(product["shopify_product_id"], "gid://shopify/Product/123")
 
     def test_edition_ops_sync_batches_three_products_per_metafields_set(self):
         requests_seen = []
@@ -3046,9 +3046,9 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             return_value={"last_successful_product_sync_at": "2026-07-01T00:00:00Z"},
         ), patch.object(
             supabase_backend.shopify_sync,
-            "iter_catalog_pages",
-            return_value=[{"products": [product]}],
-        ) as iter_catalog_pages, patch.object(
+            "fetch_edition_ops_active_products",
+            return_value={"products": [product], "page_count": 1, "complete": True},
+        ) as fetch_catalogue, patch.object(
             supabase_backend,
             "upsert_shopify_products_to_edition_products",
             return_value=upsert_result,
@@ -3062,7 +3062,9 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         self.assertEqual(shared_upsert.call_args.args[0], [product])
         self.assertEqual(shared_upsert.call_args.kwargs["source"], "manual_sync")
         self.assertTrue(shared_upsert.call_args.kwargs["sync_inserted_metafields"])
-        self.assertEqual(iter_catalog_pages.call_args.kwargs["search"], "(status:active OR status:draft)")
+        self.assertFalse(shared_upsert.call_args.kwargs["sync_variants"])
+        self.assertIsNone(fetch_catalogue.call_args.kwargs["max_products"])
+        self.assertEqual(fetch_catalogue.call_args.kwargs["page_size"], 250)
         self.assertEqual(result["new_products_inserted"], 1)
 
     def test_edition_ops_row_metafield_payload_calculates_sold_and_remaining(self):
@@ -3667,7 +3669,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
     @patch.object(supabase_backend, "sync_product_edition_metafields_for_handles")
     @patch.object(supabase_backend, "_apply_edition_product_incremental_plan")
     @patch.object(supabase_backend, "_candidate_edition_products_for_shopify_products", return_value=[])
-    @patch.object(supabase_backend.shopify_sync, "iter_catalog_pages")
+    @patch.object(supabase_backend.shopify_sync, "fetch_edition_ops_active_products")
     @patch.object(
         supabase_backend,
         "get_sync_state",
@@ -3682,7 +3684,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         _start_sync_run,
         _finish_sync_run,
         _get_sync_state,
-        iter_catalog_pages,
+        fetch_catalogue,
         _candidate_rows,
         apply_plan,
         metafield_sync,
@@ -3725,7 +3727,11 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
             "title": "New Wall Art",
             "status": "ACTIVE",
         }
-        iter_catalog_pages.return_value = [{"products": [product]}]
+        fetch_catalogue.return_value = {
+            "products": [product],
+            "page_count": 1,
+            "complete": True,
+        }
         apply_plan.return_value = {
             "new_products_inserted": 1,
             "existing_products_updated": 0,
@@ -3747,9 +3753,7 @@ class SupabaseProductSyncLogicTests(unittest.TestCase):
         self.assertEqual(result["new_products_inserted"], 1)
         self.assertEqual(result["shopify_metafields_pushed"], 0)
         self.assertEqual(result["shopify_metafields_failed_pending"], 1)
-        expected_config = dict(self.config)
-        expected_config["max_products"] = 1000
-        metafield_sync.assert_called_once_with(["new-wall-art"], config=expected_config)
+        metafield_sync.assert_called_once_with(["new-wall-art"], config=self.config)
 
     def test_shopify_metafield_mirror_preview_reads_without_writing(self):
         payload = {

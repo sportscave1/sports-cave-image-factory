@@ -4095,15 +4095,39 @@ def _product_sync_safe_fields(product):
 
 def _index_existing_edition_products(rows):
     by_id = {}
-    by_handle = {}
+    handle_rows = {}
+    legacy_handle_rows = {}
+    legacy_title_rows = {}
     for row in rows or []:
+        stable_candidates = {
+            candidate
+            for value in (row.get("shopify_product_id"), row.get("shopify_product_gid"))
+            for candidate in _shopify_id_candidates("Product", value)
+        }
         for value in (row.get("shopify_product_id"), row.get("shopify_product_gid")):
             for candidate in _shopify_id_candidates("Product", value):
                 by_id.setdefault(candidate, row)
         handle = str(row.get("shopify_handle") or "").strip()
         if handle:
-            by_handle.setdefault(handle.casefold(), row)
-    return by_id, by_handle
+            handle_rows.setdefault(handle.casefold(), []).append(row)
+            if not stable_candidates:
+                legacy_handle_rows.setdefault(handle.casefold(), []).append(row)
+        if not stable_candidates:
+            title_key = _normalize_product_title_key(row.get("product_title"))
+            if title_key:
+                legacy_title_rows.setdefault(title_key, []).append(row)
+
+    def unique_rows(index):
+        return {key: matches[0] for key, matches in index.items() if len(matches) == 1}
+
+    return {
+        "by_id": by_id,
+        "by_handle": unique_rows(handle_rows),
+        "legacy_by_handle": unique_rows(legacy_handle_rows),
+        "legacy_by_title": unique_rows(legacy_title_rows),
+        "ambiguous_legacy_handles": {key for key, matches in legacy_handle_rows.items() if len(matches) > 1},
+        "ambiguous_legacy_titles": {key for key, matches in legacy_title_rows.items() if len(matches) > 1},
+    }
 
 
 def _same_existing_product(left, right):
@@ -4151,7 +4175,11 @@ def _safe_existing_product_updates(existing, product, by_handle):
 
 
 def _plan_edition_product_incremental_sync(products, existing_rows):
-    by_id, by_handle = _index_existing_edition_products(existing_rows)
+    indexes = _index_existing_edition_products(existing_rows)
+    by_id = indexes["by_id"]
+    by_handle = indexes["by_handle"]
+    legacy_by_handle = indexes["legacy_by_handle"]
+    legacy_by_title = indexes["legacy_by_title"]
     actions = []
     seen_products = set()
     for product in products or []:
@@ -4171,8 +4199,44 @@ def _plan_edition_product_incremental_sync(products, existing_rows):
                 break
         match_type = "shopify_product_id" if existing else ""
         if not existing and handle:
-            existing = by_handle.get(handle.casefold())
+            handle_key = handle.casefold()
+            if handle_key in indexes["ambiguous_legacy_handles"]:
+                actions.append(
+                    {
+                        "action": "error",
+                        "product": product,
+                        "error": f"Legacy handle {handle} matches more than one edition product; no records were merged.",
+                    }
+                )
+                continue
+            existing = legacy_by_handle.get(handle_key)
             match_type = "handle" if existing else ""
+            if not existing and by_handle.get(handle_key):
+                actions.append(
+                    {
+                        "action": "error",
+                        "product": product,
+                        "error": f"Handle {handle} belongs to a different Shopify product ID; no records were merged.",
+                    }
+                )
+                continue
+
+        title_key = _normalize_product_title_key(product.get("title"))
+        if not existing and title_key:
+            if title_key in indexes["ambiguous_legacy_titles"]:
+                actions.append(
+                    {
+                        "action": "error",
+                        "product": product,
+                        "error": (
+                            f"Legacy title {product.get('title') or 'Untitled Shopify Product'} matches more than one "
+                            "edition product; no records were merged."
+                        ),
+                    }
+                )
+                continue
+            existing = legacy_by_title.get(title_key)
+            match_type = "exact_title_migration" if existing else ""
 
         if not existing:
             safe = _product_sync_safe_fields(product)
@@ -4376,7 +4440,14 @@ def _candidate_edition_products_for_shopify_products(cur, products):
         }
     )
     handles = sorted({str(product.get("handle") or "").strip() for product in products or [] if str(product.get("handle") or "").strip()})
-    if not product_ids and not handles:
+    titles = sorted(
+        {
+            str(product.get("title") or "").strip().lower()
+            for product in products or []
+            if str(product.get("title") or "").strip()
+        }
+    )
+    if not product_ids and not handles and not titles:
         return []
     cur.execute(
         """
@@ -4385,9 +4456,14 @@ def _candidate_edition_products_for_shopify_products(cur, products):
         WHERE ep.shopify_product_id = ANY(%s)
            OR ep.shopify_product_gid = ANY(%s)
            OR ep.shopify_handle = ANY(%s)
+           OR (
+                COALESCE(ep.shopify_product_id, '') = ''
+                AND COALESCE(ep.shopify_product_gid, '') = ''
+                AND LOWER(BTRIM(COALESCE(ep.product_title, ''))) = ANY(%s)
+           )
         FOR UPDATE
         """,
-        (product_ids, product_ids, handles),
+        (product_ids, product_ids, handles, titles),
     )
     return cur.fetchall()
 
@@ -4449,10 +4525,37 @@ def _update_existing_edition_product_safe_fields(cur, existing, updates):
         """,
         values,
     )
-    return bool(cur.rowcount)
+    updated = bool(cur.rowcount)
+    if not updated:
+        return False
+
+    run_updates = {}
+    if existing.get("id"):
+        run_updates["edition_product_id"] = existing.get("id")
+    product_id = updates.get("shopify_product_id") or updates.get("shopify_product_gid")
+    if product_id:
+        run_updates["shopify_product_id"] = product_id
+    if updates.get("shopify_handle"):
+        run_updates["shopify_handle"] = updates["shopify_handle"]
+    if updates.get("product_title"):
+        run_updates["product_title"] = updates["product_title"]
+    if run_updates:
+        run_assignments = [f"{key}=%s" for key in run_updates]
+        run_values = list(run_updates.values())
+        run_values.extend((existing.get("id"), existing.get("shopify_handle")))
+        cur.execute(
+            f"""
+            UPDATE edition_runs
+            SET {", ".join(run_assignments)}, updated_at=now()
+            WHERE edition_product_id=%s
+               OR (edition_product_id IS NULL AND shopify_handle=%s)
+            """,
+            run_values,
+        )
+    return True
 
 
-def _apply_edition_product_incremental_plan(cur, actions):
+def _apply_edition_product_incremental_plan(cur, actions, *, sync_variants=True):
     summary = {
         "new_products_inserted": 0,
         "existing_products_updated": 0,
@@ -4465,15 +4568,19 @@ def _apply_edition_product_incremental_plan(cur, actions):
     for action in actions or []:
         product = action.get("product") or {}
         try:
-            _upsert_shopify_product_display_row(cur, product)
-            try:
-                cur.execute("SAVEPOINT shopify_variant_product_sync")
-                _upsert_shopify_variants_for_product(cur, product)
-                cur.execute("RELEASE SAVEPOINT shopify_variant_product_sync")
-            except Exception as variant_error:
-                cur.execute("ROLLBACK TO SAVEPOINT shopify_variant_product_sync")
-                cur.execute("RELEASE SAVEPOINT shopify_variant_product_sync")
-                summary["variant_sync_errors"].append(f"{product.get('handle') or product.get('title')}: {variant_error}")
+            if action.get("action") in {"insert", "update"}:
+                _upsert_shopify_product_display_row(cur, product)
+                if sync_variants:
+                    try:
+                        cur.execute("SAVEPOINT shopify_variant_product_sync")
+                        _upsert_shopify_variants_for_product(cur, product)
+                        cur.execute("RELEASE SAVEPOINT shopify_variant_product_sync")
+                    except Exception as variant_error:
+                        cur.execute("ROLLBACK TO SAVEPOINT shopify_variant_product_sync")
+                        cur.execute("RELEASE SAVEPOINT shopify_variant_product_sync")
+                        summary["variant_sync_errors"].append(
+                            f"{product.get('handle') or product.get('title')}: {variant_error}"
+                        )
 
             if action.get("action") == "insert":
                 handle = _insert_edition_product_from_shopify(cur, action.get("fields") or {})
@@ -4506,6 +4613,7 @@ def upsert_shopify_products_to_edition_products(
     sync_inserted_metafields=False,
     metafield_ensure_schema_first=None,
     raise_on_apply_errors=False,
+    sync_variants=True,
 ):
     """Shared Shopify product -> edition_products upsert path.
 
@@ -4533,7 +4641,14 @@ def upsert_shopify_products_to_edition_products(
         with conn.cursor() as cur:
             existing_rows = _candidate_edition_products_for_shopify_products(cur, active_draft_products)
             actions = _plan_edition_product_incremental_sync(active_draft_products, existing_rows)
-            apply_summary = _apply_edition_product_incremental_plan(cur, actions)
+            if sync_variants:
+                apply_summary = _apply_edition_product_incremental_plan(cur, actions)
+            else:
+                apply_summary = _apply_edition_product_incremental_plan(
+                    cur,
+                    actions,
+                    sync_variants=False,
+                )
         conn.commit()
 
     summary.update(
@@ -5066,10 +5181,9 @@ def sync_new_shopify_products_to_edition_ops(config=None, progress_callback=None
 
 
 def reconcile_all_shopify_products_to_edition_ops(config=None, progress_callback=None):
-    """Explicit full-catalog reconciliation; never used by normal Edition Ops loading."""
+    """Fetch and atomically reconcile the complete Edition Ops Shopify catalogue."""
     ensure_schema()
     config = dict(config or shopify_sync.get_config())
-    config["max_products"] = max(int(config.get("max_products") or 0), 1000)
     attempted_at = utc_now_datetime()
     run_id = start_sync_run("shopify_products_incremental_sync")
     products_seen = 0
@@ -5086,6 +5200,7 @@ def reconcile_all_shopify_products_to_edition_ops(config=None, progress_callback
         "variant_sync_errors": [],
         "sync_from": "",
         "shopify_query": "",
+        "shopify_pages": 0,
     }
     try:
         with connect() as conn:
@@ -5102,20 +5217,24 @@ def reconcile_all_shopify_products_to_edition_ops(config=None, progress_callback
         summary["sync_from"] = ""
         summary["shopify_query"] = search
 
-        for page in shopify_sync.iter_catalog_pages(search=search, page_size=50, config=config):
-            page_products = page.get("products") or []
-            products_seen += len(page_products)
-            active_draft_products.extend([product for product in page_products if _active_or_draft_product(product)])
-            if progress_callback:
-                progress_callback(products_seen)
+        catalogue = shopify_sync.fetch_edition_ops_active_products(
+            max_products=None,
+            page_size=shopify_sync.EDITION_OPS_CATALOG_PAGE_SIZE,
+            config=config,
+            progress_callback=progress_callback,
+        )
+        active_draft_products = list(catalogue.get("products") or [])
+        products_seen = len(active_draft_products)
         summary["products_fetched"] = products_seen
         summary["products_checked"] = len(active_draft_products)
+        summary["shopify_pages"] = int(catalogue.get("page_count") or 0)
 
         upsert_summary = upsert_shopify_products_to_edition_products(
             active_draft_products,
             source="manual_sync",
             config=config,
             sync_inserted_metafields=True,
+            sync_variants=False,
         )
         summary.update(
             {
@@ -5238,7 +5357,10 @@ def _ensure_active_edition_runs_for_products(cur):
           AND NOT EXISTS (
               SELECT 1
               FROM edition_runs er
-              WHERE er.shopify_handle = ep.shopify_handle
+              WHERE (
+                        er.edition_product_id = ep.id
+                        OR (er.edition_product_id IS NULL AND er.shopify_handle = ep.shopify_handle)
+                    )
                 AND er.status IN ('{ACTIVE_RUN_STATUS}', '{SOLD_OUT_RUN_STATUS}', '{INACTIVE_RUN_STATUS}')
           )
         """
@@ -5256,11 +5378,17 @@ def _ensure_active_edition_runs_for_products(cur):
             is_sold_out=(er.status='{SOLD_OUT_RUN_STATUS}'),
             updated_at=now()
         FROM edition_runs er
-        WHERE er.shopify_handle=ep.shopify_handle
+        WHERE (
+                er.edition_product_id=ep.id
+                OR (er.edition_product_id IS NULL AND er.shopify_handle=ep.shopify_handle)
+              )
           AND er.id = (
               SELECT er2.id
               FROM edition_runs er2
-              WHERE er2.shopify_handle=ep.shopify_handle
+              WHERE (
+                      er2.edition_product_id=ep.id
+                      OR (er2.edition_product_id IS NULL AND er2.shopify_handle=ep.shopify_handle)
+                    )
                 AND er2.status IN ('{ACTIVE_RUN_STATUS}', '{SOLD_OUT_RUN_STATUS}', '{INACTIVE_RUN_STATUS}')
               ORDER BY CASE
                   WHEN er2.id = ep.active_edition_run_id THEN 0
@@ -5281,7 +5409,10 @@ def _active_run_lateral_sql():
         LEFT JOIN LATERAL (
             SELECT er.*
             FROM edition_runs er
-            WHERE er.shopify_handle=ep.shopify_handle
+            WHERE (
+                    er.edition_product_id=ep.id
+                    OR (er.edition_product_id IS NULL AND er.shopify_handle=ep.shopify_handle)
+                  )
               AND (
                   er.id=ep.active_edition_run_id
                   OR (
@@ -5684,17 +5815,25 @@ def list_edition_products_read_only(search="", limit=500, offset=0):
             LIMIT %s OFFSET %s
         ),
         selected_orders AS (
-            SELECT eo.shopify_handle, eo.edition_run_id, eo.edition_number
+            SELECT selected.shopify_handle AS current_shopify_handle,
+                   eo.edition_run_id,
+                   eo.edition_number
             FROM edition_orders eo
             JOIN selected_products selected
               ON selected.shopify_handle = eo.shopify_handle
+              OR selected.active_edition_run_id = eo.edition_run_id
+              OR (
+                   COALESCE(selected.shopify_product_id, '') <> ''
+                   AND regexp_replace(selected.shopify_product_id, '^gid://shopify/Product/', '', 'i')
+                       = regexp_replace(COALESCE(eo.shopify_product_id, ''), '^gid://shopify/Product/', '', 'i')
+              )
         ),
         handle_totals AS (
-            SELECT shopify_handle,
+            SELECT current_shopify_handle AS shopify_handle,
                    COUNT(*) AS sold_count,
                    COALESCE(MAX(edition_number), 0) AS max_assigned
             FROM selected_orders
-            GROUP BY shopify_handle
+            GROUP BY current_shopify_handle
         ),
         run_totals AS (
             SELECT edition_run_id,

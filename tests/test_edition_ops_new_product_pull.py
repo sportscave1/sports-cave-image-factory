@@ -361,7 +361,7 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         self.assertNotIn("metafields(", captured["query"])
         self.assertTrue(result["has_next_page"])
 
-    def test_normal_page_load_makes_no_shopify_call_and_editor_stays_at_fifty(self):
+    def test_normal_page_load_makes_no_shopify_call_and_editor_has_complete_catalogue(self):
         rows = [_product(index) for index in range(1, 121)]
         fake_st = _FakeStreamlit(
             {
@@ -383,20 +383,19 @@ class EditionOpsNewProductPullTests(unittest.TestCase):
         ):
             edition_ops.render_page()
         backend.sync_new_shopify_products_to_edition_ops.assert_not_called()
-        self.assertEqual(edition_ops.EDITION_OPS_EDITOR_PAGE_SIZE, 50)
-        self.assertEqual(len(fake_st.editor_payloads[0]), 50)
+        self.assertEqual(len(fake_st.editor_payloads[0]), 120)
 
-    def test_full_reconciliation_is_separate_confirmation_gated_and_not_in_normal_pull(self):
+    def test_manual_refresh_uses_complete_reconciliation_and_recovery_action_stays_gated(self):
         ui_source = inspect.getsource(edition_ops._render_advanced_controls)
         normal_pull_source = inspect.getsource(supabase_backend.sync_new_shopify_products_to_edition_ops)
         reconciliation_source = inspect.getsource(supabase_backend.reconcile_all_shopify_products_to_edition_ops)
-        self.assertIn('"Pull New Products"', ui_source)
-        self.assertIn("Checks only the newest Shopify products", ui_source)
+        self.assertIn('"Refresh Shopify Catalogue"', ui_source)
+        self.assertIn("backend.reconcile_all_shopify_products_to_edition_ops", ui_source)
         self.assertIn('"Full Product Reconciliation"', ui_source)
         self.assertIn("reconciliation_confirmed = st.checkbox", ui_source)
         self.assertIn("disabled=not backend or not reconciliation_confirmed", ui_source)
         self.assertNotIn("iter_catalog_pages", normal_pull_source)
-        self.assertIn("iter_catalog_pages", reconciliation_source)
+        self.assertIn("fetch_edition_ops_active_products", reconciliation_source)
 
     def test_zero_and_one_new_product_paths_complete_quickly_with_mocked_io(self):
         zero_started = time.perf_counter()
