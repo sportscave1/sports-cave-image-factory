@@ -7,6 +7,7 @@ import {useEffect, useMemo, useRef, useState} from "preact/hooks";
 import {useApi} from "@shopify/ui-extensions/customer-account/preact";
 
 import {
+  chooseFrameVariant,
   collectionSubheading,
   editionLabel,
   fileFromDropEvent,
@@ -18,6 +19,22 @@ import {
 } from "./vault-utils.js";
 
 const DEFAULT_API_BASE_URL = "https://sports-cave-image-factory.onrender.com";
+const FRAME_PRODUCT_QUERY = `query CollectorVaultFrameProduct($id: ID!) {
+  product(id: $id) {
+    id
+    handle
+    title
+    availableForSale
+    featuredImage { url altText width height }
+    variants(first: 10) {
+      nodes {
+        id
+        availableForSale
+        price { amount currencyCode }
+      }
+    }
+  }
+}`;
 const CART_CREATE_MUTATION = `mutation CollectorVaultCartCreate($input: CartInput!) {
   cartCreate(input: $input) {
     cart { id checkoutUrl }
@@ -35,6 +52,7 @@ function CollectorVault() {
   const [certificates, setCertificates] = useState([]);
   const [reviewPrompt, setReviewPrompt] = useState(null);
   const [frameConfig, setFrameConfig] = useState(null);
+  const [frameVariant, setFrameVariant] = useState(null);
   const [selectedCertificate, setSelectedCertificate] = useState(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [retryKey, setRetryKey] = useState(0);
@@ -65,7 +83,34 @@ function CollectorVault() {
     };
   }, [apiBaseUrl, retryKey]);
 
-  const frameProduct = frameConfig?.available ? frameConfig : null;
+  useEffect(() => {
+    let mounted = true;
+    async function loadFrameProduct() {
+      if (!frameConfig?.available || !frameConfig.product_id) {
+        setFrameVariant(null);
+        return;
+      }
+      try {
+        const response = /** @type {any} */ (await api.query(FRAME_PRODUCT_QUERY, {
+          variables: {id: frameConfig.product_id},
+        }));
+        const product = response?.data?.product;
+        const variant = chooseFrameVariant(
+          product,
+          frameConfig.variant_id,
+          "",
+          frameConfig.product_id,
+        );
+        if (mounted) setFrameVariant(variant);
+      } catch (_error) {
+        if (mounted) setFrameVariant(null);
+      }
+    }
+    loadFrameProduct();
+    return () => {
+      mounted = false;
+    };
+  }, [api, frameConfig]);
 
   const openCertificate = (certificate) => {
     setSelectedCertificate(certificate);
@@ -110,7 +155,7 @@ function CollectorVault() {
                 onOpen={openCertificate}
                 api={api}
                 apiBaseUrl={apiBaseUrl}
-                frameProduct={frameProduct}
+                frameVariant={frameVariant}
               />
             ))}
           </s-grid>
@@ -118,7 +163,7 @@ function CollectorVault() {
       ) : null}
       <CertificateViewer
         certificate={selectedCertificate}
-        frameProduct={frameProduct}
+        frameVariant={frameVariant}
         api={api}
         apiBaseUrl={apiBaseUrl}
         onFrameStatus={(reference, frameStatus, requestReference) => {
@@ -175,9 +220,9 @@ function ErrorState({message, onRetry}) {
   );
 }
 
-function CertificateCard({certificate, index, onOpen, api, apiBaseUrl, frameProduct}) {
+function CertificateCard({certificate, index, onOpen, api, apiBaseUrl, frameVariant}) {
   const menuId = `certificate-menu-${index}`;
-  const frameAvailable = Boolean(frameProduct && certificate.frame_status !== "ordered");
+  const frameAvailable = Boolean(frameVariant && certificate.frame_status !== "ordered");
   return (
     <s-box padding="base" border="base" borderRadius="base" background="subdued">
       <s-stack gap="base">
@@ -232,7 +277,7 @@ function CertificateCard({certificate, index, onOpen, api, apiBaseUrl, frameProd
                 logEvent(api, apiBaseUrl, "frame_offer_viewed", eventKeyForCertificate("frame-viewed", certificate));
               }}
             >
-              Display It Framed
+              Order It Framed
             </s-button>
           ) : null}
           <s-clickable
@@ -322,9 +367,9 @@ function CertificateDetailsModal({certificate, id}) {
   );
 }
 
-function CertificateViewer({certificate, frameProduct, api, apiBaseUrl, onFrameStatus}) {
+function CertificateViewer({certificate, frameVariant, api, apiBaseUrl, onFrameStatus}) {
   const [frameState, setFrameState] = useState({status: "idle", message: "", checkoutUrl: ""});
-  const framePrice = formatFramePrice(frameProduct?.contextual_price, api.i18n.formatNumber);
+  const framePrice = formatFramePrice(frameVariant?.price, api.i18n.formatNumber);
   const modalId = "certificate-viewer";
 
   useEffect(() => {
@@ -341,7 +386,7 @@ function CertificateViewer({certificate, frameProduct, api, apiBaseUrl, onFrameS
   }
 
   const orderFrame = async (allowRepeat = false) => {
-    if (!frameProduct || frameState.status === "adding") return;
+    if (!frameVariant || frameState.status === "adding") return;
     setFrameState({status: "adding", message: "Preparing your framed certificate...", checkoutUrl: ""});
     try {
       const idempotencyKey = allowRepeat
@@ -355,7 +400,7 @@ function CertificateViewer({certificate, frameProduct, api, apiBaseUrl, onFrameS
           method: "POST",
           body: {
             certificate_reference: certificate.reference,
-            frame_variant_id: frameProduct.variant_id,
+            frame_variant_id: frameVariant.id,
             idempotency_key: idempotencyKey,
             allow_repeat: allowRepeat,
           },
@@ -379,12 +424,7 @@ function CertificateViewer({certificate, frameProduct, api, apiBaseUrl, onFrameS
         return;
       }
       const cartPayload = await api.query(CART_CREATE_MUTATION, {
-        variables: {
-          input: frameCartInput(
-            frameProduct.variant_id,
-            String(frameRequest.request_reference),
-          ),
-        },
+        variables: {input: frameCartInput(frameVariant.id, String(frameRequest.request_reference))},
       });
       const cartResult = cartPayload?.data?.cartCreate;
       const cartError = cartResult?.userErrors?.[0]?.message;
@@ -418,7 +458,7 @@ function CertificateViewer({certificate, frameProduct, api, apiBaseUrl, onFrameS
       size="max"
       padding="base"
       onAfterShow={() => {
-        if (frameProduct) {
+        if (frameVariant) {
           logEvent(
             api,
             apiBaseUrl,
@@ -476,10 +516,9 @@ function CertificateViewer({certificate, frameProduct, api, apiBaseUrl, onFrameS
             <s-badge tone="neutral">Certificate file processing</s-badge>
           )}
           <ViewerSecondaryMenu certificate={certificate} api={api} apiBaseUrl={apiBaseUrl} />
-          {frameProduct ? (
+          {frameVariant ? (
             <FrameOffer
               certificate={certificate}
-              product={frameProduct}
               price={framePrice}
               state={frameState}
               onAdd={() => orderFrame(false)}
@@ -532,32 +571,24 @@ function ViewerSecondaryMenu({certificate, api, apiBaseUrl}) {
   );
 }
 
-function FrameOffer({certificate, product, price, state, onAdd, onOrderAnother}) {
+function FrameOffer({certificate, price, state, onAdd, onOrderAnother}) {
   const ordered = certificate.frame_status === "ordered" || state.status === "ordered";
-  const inclusions = Array.isArray(product.inclusions) ? product.inclusions.slice(0, 3) : [];
   return (
     <s-box padding="base" border="base" borderRadius="base">
       <s-stack gap="base">
-        {product.image?.url ? (
-          <s-image
-            src={product.image.url}
-            alt={product.image.alt_text || `${product.title} product image`}
-            aspectRatio="4/3"
-            objectFit="contain"
-            loading="lazy"
-            sizes="(min-width: 760px) 30vw, 100vw"
-          ></s-image>
-        ) : null}
         <s-stack gap="small-400">
-          <s-heading>{product.title}</s-heading>
+          <s-heading>Framed Collector Certificate</s-heading>
+          <s-text type="strong">Frame the proof.</s-text>
+          <s-text>
+            Receive your official certificate for {editionLabel(certificate)} professionally printed,
+            framed and ready to display.
+          </s-text>
         </s-stack>
-        {inclusions.length ? (
-          <s-stack gap="small-200">
-            {inclusions.map((inclusion) => (
-              <s-text key={inclusion}>{inclusion}</s-text>
-            ))}
-          </s-stack>
-        ) : null}
+        <s-stack gap="small-200">
+          <s-text>Premium black frame</s-text>
+          <s-text>A4 landscape</s-text>
+          <s-text>Printed and ready to hang</s-text>
+        </s-stack>
         {state.checkoutUrl ? (
           <s-button variant="primary" href={state.checkoutUrl} target="_blank">
             Continue to secure checkout
@@ -571,7 +602,7 @@ function FrameOffer({certificate, product, price, state, onAdd, onOrderAnother})
           </s-stack>
         ) : (
           <s-button variant="primary" onClick={onAdd} loading={state.status === "adding"}>
-            Purchase Framed Certificate — {price}
+            Add Framed Certificate — {price}
           </s-button>
         )}
         {state.message ? (

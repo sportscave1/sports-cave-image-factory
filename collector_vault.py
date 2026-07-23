@@ -756,6 +756,8 @@ def _frame_product_state(product, configured_product_id, configured_variant_id):
         return "framed_product_unavailable"
     if not str(product.get("onlineStoreUrl") or "").strip():
         return "framed_product_not_published"
+    if not _frame_product_image(product):
+        return "framed_product_image_missing"
     price = (selected.get("contextualPricing") or {}).get("price") or {}
     if (
         not selected.get("availableForSale")

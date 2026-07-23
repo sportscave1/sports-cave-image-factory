@@ -12,3 +12,4 @@ module = "./src/MySportsCaveCollection.jsx"
 
 [extensions.capabilities]
 api_access = true
+network_access = true

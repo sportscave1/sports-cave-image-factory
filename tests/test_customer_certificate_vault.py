@@ -38,7 +38,7 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertNotIn("read_images", scopes)
         self.assertNotIn("write_images", scopes)
 
-    def test_customer_account_extension_uses_shopify_auth_without_external_network(self):
+    def test_customer_account_extension_allows_isolated_framed_offer_network(self):
         source = (
             ROOT
             / "shopify_customer_account"
@@ -48,7 +48,7 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn('target = "customer-account.page.render"', source)
         self.assertRegex(source, r"(?m)^\s*api_access\s*=\s*true\s*$")
-        self.assertNotRegex(source, r"(?m)^\s*network_access\s*=\s*true\s*$")
+        self.assertRegex(source, r"(?m)^\s*network_access\s*=\s*true\s*$")
         self.assertNotIn('key = "api_base_url"', source)
 
     def test_gallery_removes_old_dashboard_clutter(self):
@@ -72,7 +72,7 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         card = source[source.index("function CertificateCard"):source.index("function CertificateMenu")]
         self.assertEqual(card.count('variant="primary"'), 1)
         self.assertIn("View Certificate", card)
-        self.assertIn("Display It Framed", card)
+        self.assertIn("Order It Framed", card)
         self.assertNotIn("certificate.certificate_id", card)
         details = source[
             source.index("function CertificateDetailsModal"):
@@ -86,10 +86,10 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertIn('const modalId = "certificate-viewer"', source)
         self.assertIn("Certificate viewer for", source)
         self.assertIn("Download Certificate", source)
-        self.assertIn("<s-heading>{product.title}</s-heading>", source)
-        self.assertIn("product.image?.url", source)
-        self.assertIn("product.inclusions", source)
-        self.assertIn("Purchase Framed Certificate", source)
+        self.assertIn("Frame the proof.", source)
+        self.assertIn("Premium black frame", source)
+        self.assertIn("A4 landscape", source)
+        self.assertIn("Add Framed Certificate", source)
         self.assertIn("Continue to secure checkout", source)
         self.assertIn('id={modalId}', source)
         self.assertIn("Submit review", source)
@@ -103,14 +103,21 @@ class CustomerCertificateVaultTests(unittest.TestCase):
 
     def test_collection_retry_starts_a_new_customer_account_request(self):
         source = EXTENSION.read_text(encoding="utf-8")
+        certificate_loader = source[
+            source.index("async function loadCertificates"):
+            source.index("const firstCertificate")
+        ]
         self.assertIn("setRetryKey((value) => value + 1)", source)
         self.assertIn("[retryKey]", source)
         self.assertIn(
             "shopify://customer-account/api/${API_VERSION}/graphql.json",
-            source,
+            certificate_loader,
         )
-        self.assertNotIn("/api/collector-vault/bootstrap", source)
-        self.assertNotIn("api.sessionToken.get()", source)
+        self.assertNotIn("/api/collector-vault/bootstrap", certificate_loader)
+        self.assertNotIn("api.sessionToken.get()", certificate_loader)
+        viewer = source[source.index("function CertificateViewer"):]
+        self.assertIn("/api/collector-vault/bootstrap", viewer)
+        self.assertIn("api.sessionToken.get()", viewer)
 
     def test_frame_checkout_clicks_are_guarded_and_idempotent(self):
         source = REDESIGN_EXTENSION.read_text(encoding="utf-8")
@@ -120,16 +127,11 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertIn("frameRequest.checkout_url", source)
         self.assertIn("Continue to secure checkout", source)
 
-    def test_frame_product_presentation_comes_only_from_verified_backend_payload(self):
+    def test_dormant_redesign_uses_its_original_product_lookup(self):
         source = REDESIGN_EXTENSION.read_text(encoding="utf-8")
-        self.assertIn(
-            "const frameProduct = frameConfig?.available ? frameConfig : null",
-            source,
-        )
-        self.assertIn("frameProduct.variant_id", source)
-        self.assertIn("frameProduct?.contextual_price", source)
-        self.assertNotIn("FRAME_PRODUCT_QUERY", source)
-        self.assertNotIn("api.query(FRAME_PRODUCT_QUERY", source)
+        self.assertIn("FRAME_PRODUCT_QUERY", source)
+        self.assertIn("api.query(FRAME_PRODUCT_QUERY", source)
+        self.assertIn("chooseFrameVariant", source)
 
     def test_mobile_layout_uses_wrapping_grids_and_touch_targets(self):
         source = REDESIGN_EXTENSION.read_text(encoding="utf-8")
@@ -183,8 +185,12 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertIn("Your collection is waiting", source)
         self.assertNotIn("CollectorVaultRedesign", source)
         self.assertNotIn("review_prompt", source)
-        self.assertNotIn("frame_product", source)
-        self.assertNotIn("/api/collector-vault/bootstrap", source)
+        certificate_loader = source[
+            source.index("async function loadCertificates"):
+            source.index("const firstCertificate")
+        ]
+        self.assertNotIn("frame_product", certificate_loader)
+        self.assertNotIn("/api/collector-vault/bootstrap", certificate_loader)
 
     def test_phase_one_gallery_is_compact_premium_and_responsive(self):
         source = EXTENSION.read_text(encoding="utf-8")
@@ -234,8 +240,40 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertNotIn("Leave a Review", viewer)
         self.assertNotIn("Judge.me", source)
         self.assertNotIn("review_prompt", source)
-        self.assertNotIn("frame_product", source)
-        self.assertNotIn("/api/collector-vault/", source)
+        self.assertIn("Display It Framed", viewer)
+        self.assertIn("Add Framed Certificate", viewer)
+        self.assertIn("product.image?.url", viewer)
+        self.assertIn("product.inclusions", viewer)
+        self.assertIn("/api/collector-vault/bootstrap", viewer)
+        self.assertIn("/api/collector-vault/frame/request", viewer)
+        self.assertIn("/api/collector-vault/frame/cart-created", viewer)
+        self.assertIn('frameOffer.status === "loading"', viewer)
+        self.assertIn("frameCartInput(", viewer)
+
+    def test_live_viewer_loads_verified_frame_offer_without_blocking_open(self):
+        source = EXTENSION.read_text(encoding="utf-8")
+        card = source[
+            source.index("function CertificateCard"):
+            source.index("function CertificatePreview")
+        ]
+        viewer = source[
+            source.index("function CertificateViewer"):
+            source.index("function editionLabel")
+        ]
+        self.assertIn('command="--show"', card)
+        self.assertIn('commandFor="certificate-viewer"', card)
+        self.assertIn("onClick={() => onOpen(certificate)}", card)
+        self.assertNotIn("/api/collector-vault/", card)
+        self.assertIn("payload.frame_product", viewer)
+        self.assertIn("matchingFrameCertificate(", viewer)
+        self.assertIn("product.image?.url", viewer)
+        self.assertIn("<s-heading>{product.title}</s-heading>", viewer)
+        self.assertIn("product.contextual_price", viewer)
+        self.assertIn("product.inclusions", viewer)
+        self.assertIn("certificate_reference: frameOffer.certificateReference", viewer)
+        self.assertIn("frame_variant_id: product.variant_id", viewer)
+        self.assertNotRegex(viewer, r"gid://shopify/(Product|ProductVariant)/\d+")
+        self.assertNotRegex(viewer, r"AU\$\d+")
 
     def test_review_banner_is_a_static_secure_external_link(self):
         source = EXTENSION.read_text(encoding="utf-8")
@@ -317,10 +355,11 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         production = EXTENSION.read_text(encoding="utf-8")
         redesign = REDESIGN_EXTENSION.read_text(encoding="utf-8")
         self.assertIn("/api/collector-vault/bootstrap", redesign)
-        self.assertIn("Purchase Framed Certificate", redesign)
-        self.assertIn("product.image?.url", redesign)
+        self.assertIn("Frame the proof.", redesign)
         self.assertIn("Submit review", redesign)
-        self.assertNotIn("/api/collector-vault/bootstrap", production)
+        self.assertIn("/api/collector-vault/bootstrap", production)
+        self.assertIn("Display It Framed", production)
+        self.assertNotIn("CollectorVaultRedesign", production)
 
 
 if __name__ == "__main__":

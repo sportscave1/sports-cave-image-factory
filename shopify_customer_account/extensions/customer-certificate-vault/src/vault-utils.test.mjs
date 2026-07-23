@@ -34,6 +34,7 @@ test("contextual Shopify money is unambiguous without redundant decimals", () =>
   assert.equal(formatFramePrice({amount: "99.00", currencyCode: "AUD"}, number), "AU$99");
   assert.equal(formatFramePrice({amount: "99.50", currencyCode: "USD"}, number), "US$99.50");
   assert.equal(formatFramePrice({amount: "80", currencyCode: "GBP"}, number), "£80");
+  assert.equal(formatFramePrice({amount: "99.00", currency_code: "AUD"}, number), "AU$99");
 });
 
 test("frame variant must match configured handle, id and availability", () => {

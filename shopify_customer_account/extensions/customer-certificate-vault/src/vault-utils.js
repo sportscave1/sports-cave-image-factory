@@ -27,7 +27,9 @@ export function purchaseDateLabel(value, formatter) {
 
 export function formatFramePrice(money, formatNumber) {
   const amount = Number(money?.amount);
-  const currency = String(money?.currencyCode || "").toUpperCase();
+  const currency = String(
+    money?.currencyCode || money?.currency_code || "",
+  ).toUpperCase();
   if (!Number.isFinite(amount) || !currency) return "";
   const digits = Number.isInteger(amount) ? 0 : 2;
   const number = formatNumber

@@ -3,18 +3,27 @@
 import "@shopify/ui-extensions/preact";
 import {render} from "preact";
 import {useEffect, useState} from "preact/hooks";
+import {useApi} from "@shopify/ui-extensions/customer-account/preact";
 
 import {
   collectCertificates,
   customerSafeErrorMessage,
 } from "./legacy-certificate-utils.js";
 import {attachPurchasedArtwork} from "./collection-artwork-utils.js";
+import {formatFramePrice, frameCartInput} from "./vault-utils.js";
 
 export const COLLECTOR_VAULT_REDESIGN_ENABLED = false;
 
 const API_VERSION = "2026-04";
+const DEFAULT_API_BASE_URL = "https://sports-cave-image-factory.onrender.com";
 const SHOP_LATEST_DROPS_URL = "https://www.sportscaveshop.com";
 const REVIEWS_PAGE_URL = "https://www.sportscaveshop.com/pages/reviews";
+const CART_CREATE_MUTATION = `mutation SportsCaveFramedCertificateCart($input: CartInput!) {
+  cartCreate(input: $input) {
+    cart { id checkoutUrl }
+    userErrors { field message }
+  }
+}`;
 const CERTIFICATES_QUERY = `query SportsCaveCustomerCertificates {
   customer {
     id
@@ -53,11 +62,13 @@ export default function extension() {
 }
 
 function Extension() {
+  const api = useApi();
   const [status, setStatus] = useState("loading");
   const [certificates, setCertificates] = useState([]);
   const [errorMessage, setErrorMessage] = useState("");
   const [retryKey, setRetryKey] = useState(0);
   const [selectedCertificate, setSelectedCertificate] = useState(null);
+  const apiBaseUrl = configuredApiBaseUrl(api);
 
   useEffect(() => {
     let mounted = true;
@@ -155,6 +166,8 @@ function Extension() {
       </s-grid>
       <CertificateViewer
         certificate={selectedCertificate}
+        api={api}
+        apiBaseUrl={apiBaseUrl}
         onClose={() => setSelectedCertificate(null)}
       />
     </s-page>
@@ -473,9 +486,164 @@ function CertificatePreview({certificate, eager = false}) {
   );
 }
 
-function CertificateViewer({certificate, onClose}) {
+function CertificateViewer({certificate, api, apiBaseUrl, onClose}) {
   const modalId = "certificate-viewer";
   const title = certificate?.product_title || "Certificate";
+  const [frameOffer, setFrameOffer] = useState({
+    status: "idle",
+    product: null,
+    certificateReference: "",
+  });
+  const [checkoutState, setCheckoutState] = useState({
+    status: "idle",
+    message: "",
+    checkoutUrl: "",
+  });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setCheckoutState({status: "idle", message: "", checkoutUrl: ""});
+    if (!certificate) {
+      setFrameOffer({
+        status: "idle",
+        product: null,
+        certificateReference: "",
+      });
+      return () => controller.abort();
+    }
+
+    setFrameOffer({
+      status: "loading",
+      product: null,
+      certificateReference: "",
+    });
+    async function loadFrameOffer() {
+      try {
+        const payload = await vaultRequest(
+          api,
+          apiBaseUrl,
+          "/api/collector-vault/bootstrap",
+          {signal: controller.signal},
+        );
+        if (controller.signal.aborted) return;
+        const ownedCertificate = matchingFrameCertificate(
+          payload.certificates,
+          certificate,
+        );
+        const product = payload.frame_product;
+        if (
+          !ownedCertificate?.reference
+          || !product?.available
+          || !product?.variant_id
+        ) {
+          setFrameOffer({
+            status: "unavailable",
+            product: null,
+            certificateReference: "",
+          });
+          return;
+        }
+        setFrameOffer({
+          status: "ready",
+          product,
+          certificateReference: ownedCertificate.reference,
+        });
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        setFrameOffer({
+          status: "error",
+          product: null,
+          certificateReference: "",
+        });
+      }
+    }
+    loadFrameOffer();
+    return () => controller.abort();
+  }, [api, apiBaseUrl, certificate?.key]);
+
+  const addFramedCertificate = async () => {
+    if (
+      frameOffer.status !== "ready"
+      || checkoutState.status === "adding"
+    ) {
+      return;
+    }
+    const product = frameOffer.product;
+    setCheckoutState({
+      status: "adding",
+      message: "Preparing secure checkout...",
+      checkoutUrl: "",
+    });
+    try {
+      const request = await vaultRequest(
+        api,
+        apiBaseUrl,
+        "/api/collector-vault/frame/request",
+        {
+          method: "POST",
+          body: {
+            certificate_reference: frameOffer.certificateReference,
+            frame_variant_id: product.variant_id,
+            idempotency_key: frameIdempotencyKey(certificate),
+            allow_repeat: false,
+          },
+        },
+      );
+      if (request.status === "ordered") {
+        setCheckoutState({
+          status: "ordered",
+          message: "Your framed certificate has already been ordered.",
+          checkoutUrl: "",
+        });
+        return;
+      }
+      if (request.checkout_url) {
+        setCheckoutState({
+          status: "ready",
+          message: "Your secure checkout is ready.",
+          checkoutUrl: request.checkout_url,
+        });
+        return;
+      }
+      const cartPayload = await api.query(CART_CREATE_MUTATION, {
+        variables: {
+          input: frameCartInput(
+            product.variant_id,
+            String(request.request_reference),
+          ),
+        },
+      });
+      const cartResult = cartPayload?.data?.cartCreate;
+      const cartError = cartResult?.userErrors?.[0]?.message;
+      if (cartError || !cartResult?.cart?.checkoutUrl) {
+        throw new Error(cartError || "Shopify checkout could not be created.");
+      }
+      await vaultRequest(
+        api,
+        apiBaseUrl,
+        "/api/collector-vault/frame/cart-created",
+        {
+          method: "POST",
+          body: {
+            request_reference: request.request_reference,
+            cart_id: cartResult.cart.id,
+            checkout_url: cartResult.cart.checkoutUrl,
+          },
+        },
+      );
+      setCheckoutState({
+        status: "ready",
+        message: "Your secure checkout is ready.",
+        checkoutUrl: cartResult.cart.checkoutUrl,
+      });
+    } catch (_error) {
+      setCheckoutState({
+        status: "error",
+        message: "Framed checkout is temporarily unavailable.",
+        checkoutUrl: "",
+      });
+    }
+  };
 
   return (
     <s-modal
@@ -524,6 +692,25 @@ function CertificateViewer({certificate, onClose}) {
                 </s-button>
               ) : null}
             </s-grid>
+            {frameOffer.status === "loading" ? (
+              <s-stack direction="inline" gap="small" alignItems="center">
+                <s-spinner
+                  size="small"
+                  accessibilityLabel="Loading framed certificate offer"
+                ></s-spinner>
+                <s-text color="subdued">
+                  Loading display options...
+                </s-text>
+              </s-stack>
+            ) : null}
+            {frameOffer.status === "ready" ? (
+              <FramedCertificateOffer
+                product={frameOffer.product}
+                checkoutState={checkoutState}
+                onAdd={addFramedCertificate}
+                formatNumber={api.i18n.formatNumber}
+              />
+            ) : null}
           </s-stack>
         </s-grid>
       ) : (
@@ -551,6 +738,81 @@ function CertificateViewer({certificate, onClose}) {
   );
 }
 
+function FramedCertificateOffer({
+  product,
+  checkoutState,
+  onAdd,
+  formatNumber,
+}) {
+  const price = formatFramePrice(
+    product.contextual_price,
+    formatNumber,
+  );
+  const inclusions = Array.isArray(product.inclusions)
+    ? product.inclusions.slice(0, 3)
+    : [];
+
+  return (
+    <s-box
+      padding="base"
+      border="base"
+      borderRadius="base"
+      background="subdued"
+    >
+      <s-stack gap="base">
+        <s-heading>Display It Framed</s-heading>
+        {product.image?.url ? (
+          <s-image
+            src={product.image.url}
+            alt={product.image.alt_text || `${product.title} product image`}
+            aspectRatio="4/3"
+            objectFit="contain"
+            loading="lazy"
+            sizes="(min-width: 760px) 30vw, 100vw"
+          ></s-image>
+        ) : null}
+        <s-heading>{product.title}</s-heading>
+        {inclusions.length ? (
+          <s-stack gap="small-200">
+            {inclusions.map((inclusion) => (
+              <s-text key={inclusion}>{inclusion}</s-text>
+            ))}
+          </s-stack>
+        ) : null}
+        {checkoutState.checkoutUrl ? (
+          <s-button
+            variant="primary"
+            href={checkoutState.checkoutUrl}
+            target="_blank"
+          >
+            Continue to Secure Checkout
+          </s-button>
+        ) : checkoutState.status === "ordered" ? (
+          <s-badge tone="neutral" icon="check">
+            Framed certificate ordered
+          </s-badge>
+        ) : (
+          <s-button
+            variant="primary"
+            onClick={onAdd}
+            loading={checkoutState.status === "adding"}
+          >
+            Add Framed Certificate — {price}
+          </s-button>
+        )}
+        {checkoutState.message ? (
+          <s-text color={checkoutState.status === "error"
+            ? "base"
+            : "subdued"}
+          >
+            {checkoutState.message}
+          </s-text>
+        ) : null}
+      </s-stack>
+    </s-box>
+  );
+}
+
 function editionLabel(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -561,4 +823,71 @@ function editionLabel(value) {
   return raw.toLowerCase().startsWith("edition")
     ? raw
     : `Edition ${raw}`;
+}
+
+function configuredApiBaseUrl(api) {
+  const configured = String(api.settings?.value?.api_base_url || "").trim();
+  return (configured || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
+}
+
+function matchingFrameCertificate(items, certificate) {
+  const certificateId = String(certificate?.certificate_id || "").trim();
+  const orderName = String(certificate?.shopify_order_name || "").trim();
+  if (!certificateId) return null;
+  const matches = (Array.isArray(items) ? items : []).filter((item) => (
+    String(item?.certificate_id || "").trim() === certificateId
+    && (
+      !orderName
+      || String(item?.order_name || "").trim() === orderName
+    )
+  ));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function frameIdempotencyKey(certificate) {
+  const source = String(
+    certificate?.key
+    || `${certificate?.shopify_order_name}|${certificate?.certificate_id}`,
+  );
+  let hash = 2166136261;
+  for (let index = 0; index < source.length; index += 1) {
+    hash ^= source.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `frame-${(hash >>> 0).toString(16)}`;
+}
+
+async function vaultRequest(api, apiBaseUrl, path, options = {}) {
+  const method = options.method || "GET";
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const token = await api.sessionToken.get();
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      method,
+      signal: options.signal,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-Sports-Cave-Request": "customer-account-extension",
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch (_error) {
+      payload = {};
+    }
+    if (response.status === 401 && attempt === 0) continue;
+    if (!response.ok || payload.ok === false) {
+      throw Object.assign(
+        new Error("The framed certificate request could not be completed."),
+        {status: response.status},
+      );
+    }
+    return payload;
+  }
+  throw Object.assign(
+    new Error("The framed certificate request could not be authenticated."),
+    {status: 401},
+  );
 }

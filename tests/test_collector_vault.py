@@ -568,6 +568,16 @@ class CollectorVaultReadinessTests(unittest.TestCase):
                 "framed_product_not_published",
             ),
             (
+                {
+                    **_frame_product_payload(),
+                    "product": {
+                        **_frame_product_payload()["product"],
+                        "featuredImage": None,
+                    },
+                },
+                "framed_product_image_missing",
+            ),
+            (
                 _frame_product_payload(variant_available=False),
                 "framed_variant_unavailable",
             ),
