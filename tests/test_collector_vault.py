@@ -34,7 +34,13 @@ def _segment(value):
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
-def _session_token(*, customer=CUSTOMER_A, expires_in=300, audience=CLIENT_ID):
+def _session_token(
+    *,
+    customer=CUSTOMER_A,
+    expires_in=300,
+    audience=CLIENT_ID,
+    secret=SECRET,
+):
     now = int(time.time())
     header = _segment({"alg": "HS256", "typ": "JWT"})
     payload = _segment(
@@ -48,7 +54,7 @@ def _session_token(*, customer=CUSTOMER_A, expires_in=300, audience=CLIENT_ID):
         }
     )
     signature = hmac.new(
-        SECRET.encode("utf-8"),
+        secret.encode("utf-8"),
         f"{header}.{payload}".encode("ascii"),
         hashlib.sha256,
     ).digest()
@@ -126,6 +132,34 @@ class CollectorVaultAuthenticationTests(unittest.TestCase):
         )
         self.assertEqual(result["shopify_customer_id"], CUSTOMER_A)
         self.assertEqual(result["shop_domain"], SHOP_DOMAIN)
+
+    def test_shopify_shpss_app_secret_is_used_for_session_tokens(self):
+        prefixed_secret = "shpss_collector-vault-test-secret"
+        with (
+            patch.dict(
+                os.environ,
+                {"SHOPIFY_CLIENT_SECRET": prefixed_secret},
+                clear=True,
+            ),
+            patch.object(
+                collector_vault.shopify_sync,
+                "get_config",
+                return_value={"store_domain": SHOP_DOMAIN},
+            ),
+        ):
+            result = collector_vault.verify_shopify_session_token(
+                _session_token(secret=prefixed_secret),
+                audience=CLIENT_ID,
+            )
+        self.assertEqual(result["shopify_customer_id"], CUSTOMER_A)
+
+    def test_shopify_admin_access_token_is_not_used_as_session_secret(self):
+        with patch.dict(
+            os.environ,
+            {"SHOPIFY_CLIENT_SECRET": "shpat_not-a-shared-secret"},
+            clear=True,
+        ):
+            self.assertEqual(collector_vault._session_token_secrets(), [])
 
     def test_expired_wrong_audience_and_tampered_tokens_are_rejected(self):
         scenarios = [
@@ -350,6 +384,8 @@ class CollectorVaultReadinessTests(unittest.TestCase):
     def test_readiness_reports_configuration_states_without_values(self):
         configured = {
             **_frame_environment(),
+            "SHOPIFY_CLIENT_ID": CLIENT_ID,
+            "SHOPIFY_CLIENT_SECRET": "shpss_readiness-test-secret",
             "COLLECTOR_VAULT_ASSET_SIGNING_SECRET": SECRET,
             "JUDGEME_PRIVATE_API_TOKEN": "private-test-token",
             "JUDGEME_PUBLIC_API_TOKEN": "public-test-token",
@@ -365,6 +401,11 @@ class CollectorVaultReadinessTests(unittest.TestCase):
                     "available": False,
                 },
             ),
+            patch.object(
+                collector_vault.supabase_backend,
+                "is_configured",
+                return_value=True,
+            ),
         ):
             readiness = collector_vault.collector_vault_readiness(
                 check_shopify=True
@@ -377,6 +418,14 @@ class CollectorVaultReadinessTests(unittest.TestCase):
         self.assertEqual(
             readiness["signing_state"],
             "signing_secret_configured",
+        )
+        self.assertEqual(
+            readiness["session_auth_state"],
+            "shopify_session_auth_configured",
+        )
+        self.assertEqual(
+            readiness["database_state"],
+            "collector_vault_database_configured",
         )
         self.assertEqual(
             readiness["backend_state"],
@@ -615,6 +664,15 @@ class CollectorVaultApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 401)
         self.assertNotIn("detail", response.json())
         self.assertIn("error", response.json())
+        self.assertEqual(
+            response.json()["error_code"],
+            "customer_authentication_failed",
+        )
+        self.assertEqual(
+            response.headers["x-sports-cave-error-code"],
+            "customer_authentication_failed",
+        )
+        self.assertTrue(response.headers["x-sports-cave-request-id"])
 
     def test_collector_api_exposes_only_short_deployment_revision(self):
         revision = "12997c6fa76a1d25863816a77000c24e44e987b3"
@@ -631,6 +689,51 @@ class CollectorVaultApiTests(unittest.TestCase):
             revision[:12],
         )
         self.assertNotIn(revision, response.text)
+
+    def test_bootstrap_accepts_production_style_shopify_app_secret(self):
+        prefixed_secret = "shpss_collector-vault-production-style-secret"
+        payload = {
+            "certificates": [
+                {
+                    "reference": "opaque",
+                    "product_title": "The Mountain Chooses",
+                }
+            ],
+            "review_prompt": None,
+            "frame_product": {"available": False},
+        }
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "SHOPIFY_CLIENT_ID": CLIENT_ID,
+                    "SHOPIFY_CLIENT_SECRET": prefixed_secret,
+                },
+                clear=True,
+            ),
+            patch.object(
+                collector_vault.shopify_sync,
+                "get_config",
+                return_value={"store_domain": SHOP_DOMAIN},
+            ),
+            patch.object(
+                collector_vault,
+                "build_vault_payload",
+                return_value=payload,
+            ) as build_payload,
+        ):
+            response = TestClient(self.app).get(
+                "/api/collector-vault/bootstrap",
+                headers={
+                    "Authorization": (
+                        f"Bearer {_session_token(secret=prefixed_secret)}"
+                    )
+                },
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["certificates"], payload["certificates"])
+        self.assertTrue(response.headers["x-sports-cave-request-id"])
+        build_payload.assert_called_once_with(CUSTOMER_A)
 
     def test_bootstrap_loads_collection_when_optional_frame_table_is_missing(self):
         class MissingFrameTableError(RuntimeError):
@@ -729,9 +832,18 @@ class CollectorVaultApiTests(unittest.TestCase):
                 headers={"Authorization": "Bearer signed-customer-token"},
             )
         self.assertEqual(response.status_code, 503)
+        self.assertTrue(
+            response.json()["error"].startswith(
+                "Your collection could not be loaded. Please try again. Reference "
+            )
+        )
         self.assertEqual(
-            response.json()["error"],
-            "Your collection could not be loaded. Please try again.",
+            response.json()["error_code"],
+            "collection_data_unavailable",
+        )
+        self.assertEqual(
+            response.headers["x-sports-cave-error-code"],
+            "collection_data_unavailable",
         )
         self.assertNotIn("certificate query failed", response.text)
 
@@ -801,8 +913,36 @@ class CollectorVaultBootstrapResilienceTests(unittest.TestCase):
         ):
             certificates = collector_vault._public_certificate_rows([row])
         self.assertEqual(len(certificates), 1)
-        self.assertEqual(certificates[0]["preview_url"], "")
+        self.assertIsNone(certificates[0]["preview_url"])
         self.assertTrue(certificates[0]["pdf_url"])
+
+    def test_missing_signing_secret_returns_metadata_and_disables_optional_features(self):
+        row = _certificate_row()
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(
+                collector_vault,
+                "_list_owned_certificates_with_capabilities",
+                return_value=(
+                    [row],
+                    {"secure_assets": False, "frame_requests": False},
+                ),
+            ),
+            patch.object(collector_vault, "review_prompt") as review_prompt,
+            patch.object(collector_vault, "get_frame_product") as frame_product,
+        ):
+            payload = collector_vault.build_vault_payload(CUSTOMER_A)
+        self.assertEqual(len(payload["certificates"]), 1)
+        certificate = payload["certificates"][0]
+        self.assertEqual(certificate["product_title"], "The Mountain Chooses")
+        self.assertIsNone(certificate["preview_url"])
+        self.assertIsNone(certificate["pdf_url"])
+        self.assertIsNone(certificate["print_url"])
+        self.assertTrue(certificate["reference"].startswith("metadata-"))
+        self.assertIsNone(payload["review_prompt"])
+        self.assertFalse(payload["frame_product"]["available"])
+        review_prompt.assert_not_called()
+        frame_product.assert_not_called()
 
     def test_one_malformed_certificate_does_not_fail_valid_collection(self):
         valid = _certificate_row()

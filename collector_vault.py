@@ -75,35 +75,47 @@ LOGGER = logging.getLogger(__name__)
 class CollectorVaultError(RuntimeError):
     status_code = 400
     public_message = "The request could not be completed."
+    error_code = "request_failed"
+
+    def __init__(self, message="", *, error_code=None):
+        super().__init__(message)
+        if error_code:
+            self.error_code = str(error_code)
 
 
 class CollectorVaultAuthenticationError(CollectorVaultError):
     status_code = 401
     public_message = "Your customer session has expired. Please refresh and sign in again."
+    error_code = "customer_authentication_failed"
 
 
 class CollectorVaultAuthorizationError(CollectorVaultError):
     status_code = 403
     public_message = "That item is not available in this collection."
+    error_code = "customer_authorization_failed"
 
 
 class CollectorVaultNotFoundError(CollectorVaultError):
     status_code = 404
     public_message = "That item could not be found."
+    error_code = "record_not_found"
 
 
 class CollectorVaultConflictError(CollectorVaultError):
     status_code = 409
+    error_code = "request_conflict"
 
 
 class CollectorVaultUnavailableError(CollectorVaultError):
     status_code = 503
     public_message = "This service is temporarily unavailable. Please try again."
+    error_code = "service_unavailable"
 
 
 class CollectorVaultDataError(CollectorVaultError):
     status_code = 503
     public_message = "Your collection could not be loaded. Please try again."
+    error_code = "collection_data_unavailable"
 
 
 def _b64url_decode(value):
@@ -162,7 +174,7 @@ def _session_token_secrets():
         "SHOPIFY_WEBHOOK_SECRET",
     ):
         value = str(os.getenv(name) or "").strip()
-        if value and not value.startswith(("shpat_", "shpca_", "shppa_", "shpss_")):
+        if value and not value.startswith(("shpat_", "shpca_", "shppa_")):
             values.append(value)
     return list(dict.fromkeys(values))
 
@@ -171,7 +183,19 @@ def _asset_signing_secret():
     configured = str(os.getenv("COLLECTOR_VAULT_ASSET_SIGNING_SECRET") or "").strip()
     if configured:
         return configured
-    raise CollectorVaultUnavailableError("Collector Vault signing is not configured.")
+    raise CollectorVaultUnavailableError(
+        "Collector Vault signing is not configured.",
+        error_code="asset_signing_not_configured",
+    )
+
+
+def _asset_signing_configured():
+    return bool(
+        str(
+            os.getenv("COLLECTOR_VAULT_ASSET_SIGNING_SECRET")
+            or ""
+        ).strip()
+    )
 
 
 def verify_shopify_session_token(token, *, now=None, secret_candidates=None, audience=None, shop_domain=None):
@@ -191,7 +215,10 @@ def verify_shopify_session_token(token, *, now=None, secret_candidates=None, aud
     received_signature = _b64url_decode(signature_segment)
     candidates = list(secret_candidates if secret_candidates is not None else _session_token_secrets())
     if not candidates:
-        raise CollectorVaultUnavailableError("Shopify app authentication is not configured.")
+        raise CollectorVaultUnavailableError(
+            "Shopify app authentication is not configured.",
+            error_code="shopify_session_secret_not_configured",
+        )
     if not any(
         hmac.compare_digest(
             hmac.new(str(candidate).encode("utf-8"), signing_input, hashlib.sha256).digest(),
@@ -302,7 +329,10 @@ def customer_hash(customer_id):
 
 def _require_database():
     if not supabase_backend.is_configured():
-        raise CollectorVaultUnavailableError("Supabase is not configured.")
+        raise CollectorVaultUnavailableError(
+            "Supabase is not configured.",
+            error_code="database_not_configured",
+        )
 
 
 def _database_error_sqlstate(error):
@@ -379,27 +409,41 @@ def _certificate_filename(row, kind):
     return f"{title} - Edition {edition:03d} - {suffix}"
 
 
-def _certificate_public_row(row):
+def _certificate_public_row(row, *, include_secure_assets=True):
     record_id = int(row.get("certificate_row_id") or 0)
-    owner_hash = customer_hash(_row_customer_id(row))
-    certificate_ref = _signed_token(
-        {"purpose": "certificate", "certificate_row_id": record_id, "customer_hash": owner_hash},
-        ttl_seconds=CERTIFICATE_REFERENCE_TTL_SECONDS,
+    if record_id <= 0:
+        raise ValueError("Certificate row ID is invalid.")
+    owner_hash = ""
+    metadata_identity = (
+        f"{_row_customer_id(row)}:{record_id}".encode("utf-8")
+    )
+    certificate_ref = (
+        f"metadata-{hashlib.sha256(metadata_identity).hexdigest()[:32]}"
     )
     assets = {}
-    for kind in ("preview", "pdf", "print"):
-        if not _asset_reference(row, kind):
-            continue
-        token = _signed_token(
+    if include_secure_assets:
+        owner_hash = customer_hash(_row_customer_id(row))
+        certificate_ref = _signed_token(
             {
-                "purpose": "asset",
+                "purpose": "certificate",
                 "certificate_row_id": record_id,
                 "customer_hash": owner_hash,
-                "kind": kind,
             },
-            ttl_seconds=ASSET_TOKEN_TTL_SECONDS,
+            ttl_seconds=CERTIFICATE_REFERENCE_TTL_SECONDS,
         )
-        assets[kind] = f"{API_BASE_PATH}/asset?token={token}"
+        for kind in ("preview", "pdf", "print"):
+            if not _asset_reference(row, kind):
+                continue
+            token = _signed_token(
+                {
+                    "purpose": "asset",
+                    "certificate_row_id": record_id,
+                    "customer_hash": owner_hash,
+                    "kind": kind,
+                },
+                ttl_seconds=ASSET_TOKEN_TTL_SECONDS,
+            )
+            assets[kind] = f"{API_BASE_PATH}/asset?token={token}"
     return {
         "reference": certificate_ref,
         "product_title": str(row.get("product_title") or "Sports Cave limited edition").strip(),
@@ -412,9 +456,9 @@ def _certificate_public_row(row):
         "certificate_id": str(row.get("certificate_id") or "").strip(),
         "order_name": str(row.get("shopify_order_name") or "").strip(),
         "purchase_date": _iso_value(row.get("purchase_date") or row.get("processed_at")),
-        "preview_url": assets.get("preview") or "",
-        "pdf_url": assets.get("pdf") or "",
-        "print_url": assets.get("print") or "",
+        "preview_url": assets.get("preview"),
+        "pdf_url": assets.get("pdf"),
+        "print_url": assets.get("print"),
         "frame_status": str(row.get("frame_status") or "").strip(),
         "frame_request_reference": str(row.get("frame_request_reference") or "").strip(),
     }
@@ -521,17 +565,24 @@ def _list_owned_certificates_with_capabilities(shopify_customer_id):
         )
         raise CollectorVaultDataError("Certificate ownership query failed.") from error
 
-    frame_state, frame_requests_available = _latest_frame_request_state(
-        rows,
-        customer_hash(shopify_customer_id),
-    )
+    secure_assets_available = _asset_signing_configured()
+    if secure_assets_available:
+        frame_state, frame_requests_available = _latest_frame_request_state(
+            rows,
+            customer_hash(shopify_customer_id),
+        )
+    else:
+        frame_state, frame_requests_available = {}, False
     for row in rows:
         state = frame_state.get(_int_value(row.get("certificate_row_id")), {})
         row["frame_status"] = str(state.get("status") or "")
         row["frame_request_reference"] = str(
             state.get("request_reference") or ""
         )
-    return rows, {"frame_requests": frame_requests_available}
+    return rows, {
+        "frame_requests": frame_requests_available,
+        "secure_assets": secure_assets_available,
+    }
 
 
 def list_owned_certificates(shopify_customer_id):
@@ -838,9 +889,9 @@ def collector_vault_readiness(*, check_shopify=False, force=False):
         str(os.getenv("JUDGEME_PUBLIC_API_TOKEN") or "").strip()
     )
     judge_domain = bool(_judgeme_shop_domain())
-    signing_ready = bool(
-        str(os.getenv("COLLECTOR_VAULT_ASSET_SIGNING_SECRET") or "").strip()
-    )
+    signing_ready = _asset_signing_configured()
+    session_auth_ready = bool(_session_token_secrets()) and bool(_app_client_id())
+    database_ready = supabase_backend.is_configured()
     frame_configured = _frame_product_environment_ready()
     frame_product = (
         get_frame_product(force=force)
@@ -869,9 +920,19 @@ def collector_vault_readiness(*, check_shopify=False, force=False):
             if signing_ready
             else "signing_secret_missing"
         ),
+        "session_auth_state": (
+            "shopify_session_auth_configured"
+            if session_auth_ready
+            else "shopify_session_auth_not_configured"
+        ),
+        "database_state": (
+            "collector_vault_database_configured"
+            if database_ready
+            else "collector_vault_database_not_configured"
+        ),
         "backend_state": (
             "collector_vault_backend_ready"
-            if signing_ready and judge_configured and frame_configured
+            if session_auth_ready and database_ready
             else "collector_vault_backend_not_ready"
         ),
     }
@@ -1106,12 +1167,17 @@ def review_prompt(rows, shopify_customer_id):
     return None
 
 
-def _public_certificate_rows(rows):
+def _public_certificate_rows(rows, *, include_secure_assets=True):
     certificates = []
     skipped = 0
     for row in rows:
         try:
-            certificates.append(_certificate_public_row(row))
+            certificates.append(
+                _certificate_public_row(
+                    row,
+                    include_secure_assets=include_secure_assets,
+                )
+            )
         except Exception as error:
             skipped += 1
             LOGGER.error(
@@ -1133,14 +1199,22 @@ def build_vault_payload(shopify_customer_id):
     rows, capabilities = _list_owned_certificates_with_capabilities(
         shopify_customer_id
     )
+    secure_assets_available = bool(capabilities.get("secure_assets"))
     frame_product = (
         get_frame_product()
-        if capabilities.get("frame_requests")
+        if secure_assets_available and capabilities.get("frame_requests")
         else {"available": False}
     )
     return {
-        "certificates": _public_certificate_rows(rows),
-        "review_prompt": review_prompt(rows, shopify_customer_id),
+        "certificates": _public_certificate_rows(
+            rows,
+            include_secure_assets=secure_assets_available,
+        ),
+        "review_prompt": (
+            review_prompt(rows, shopify_customer_id)
+            if secure_assets_available
+            else None
+        ),
         "frame_product": {
             "available": bool(frame_product.get("available")),
             "product_id": frame_product.get("product_id") or "",

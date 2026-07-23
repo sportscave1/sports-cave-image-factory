@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import uuid
 from urllib.parse import quote
 
 import requests
@@ -21,14 +22,22 @@ def _cors_headers():
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Authorization, Content-Type, X-Sports-Cave-Request",
         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Expose-Headers": (
+            "X-Sports-Cave-Error-Code, X-Sports-Cave-Request-Id, "
+            "X-Sports-Cave-Revision"
+        ),
         "Access-Control-Max-Age": "600",
         "Vary": "Origin",
     }
 
 
-def _json(payload, status_code=200):
+def _json(payload, status_code=200, *, request_id="", error_code=""):
     headers = _cors_headers()
     headers["Cache-Control"] = "no-store"
+    if request_id:
+        headers["X-Sports-Cave-Request-Id"] = request_id
+    if error_code:
+        headers["X-Sports-Cave-Error-Code"] = error_code
     revision = str(
         os.getenv("RENDER_GIT_COMMIT")
         or os.getenv("GIT_COMMIT")
@@ -39,23 +48,57 @@ def _json(payload, status_code=200):
     return JSONResponse(payload, status_code=status_code, headers=headers)
 
 
-def _error_response(error, operation):
+def _request_id():
+    return uuid.uuid4().hex[:16]
+
+
+def _error_response(error, operation, *, request_id=""):
+    request_id = request_id or _request_id()
     status_code = getattr(error, "status_code", 500)
+    error_code = str(
+        getattr(error, "error_code", "")
+        or "internal_server_error"
+    )
     LOGGER.error(
-        "Collector Vault request failed operation=%s error_type=%s status=%s",
+        (
+            "Collector Vault request failed operation=%s error_type=%s "
+            "status=%s error_code=%s request_id=%s"
+        ),
         operation,
         type(error).__name__,
         status_code,
+        error_code,
+        request_id,
         exc_info=status_code >= 500,
     )
     if isinstance(error, collector_vault.CollectorVaultError):
+        public_message = error.public_message
+        if error.status_code >= 500:
+            public_message = f"{public_message} Reference {request_id}."
         return _json(
-            {"ok": False, "error": error.public_message},
+            {
+                "ok": False,
+                "error": public_message,
+                "error_code": error_code,
+                "request_id": request_id,
+            },
             status_code=error.status_code,
+            request_id=request_id,
+            error_code=error_code,
         )
     return _json(
-        {"ok": False, "error": "The Collector Vault is temporarily unavailable."},
+        {
+            "ok": False,
+            "error": (
+                "The Collector Vault is temporarily unavailable. "
+                f"Reference {request_id}."
+            ),
+            "error_code": error_code,
+            "request_id": request_id,
+        },
         status_code=500,
+        request_id=request_id,
+        error_code=error_code,
     )
 
 
@@ -88,12 +131,22 @@ async def collector_vault_options(_request):
 async def collector_vault_bootstrap(request: Request):
     if request.method == "OPTIONS":
         return await collector_vault_options(request)
+    request_id = _request_id()
     try:
         session = _session(request)
         payload = collector_vault.build_vault_payload(session["shopify_customer_id"])
-        return _json({"ok": True, **payload})
+        certificate_count = len(payload.get("certificates") or [])
+        LOGGER.info(
+            "Collector Vault bootstrap completed status=200 certificate_count=%s request_id=%s",
+            certificate_count,
+            request_id,
+        )
+        return _json(
+            {"ok": True, **payload},
+            request_id=request_id,
+        )
     except Exception as error:
-        return _error_response(error, "bootstrap")
+        return _error_response(error, "bootstrap", request_id=request_id)
 
 
 async def collector_vault_event(request: Request):
