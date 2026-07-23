@@ -130,10 +130,10 @@ class EditionOpsUiTests(unittest.TestCase):
         ]
         prodigi_page += inspect.getsource(os_pages._render_prodigi_dispatch_result)
 
-        self.assertIn("Prodigi Dispatch Log", prodigi_page)
-        self.assertIn("Search an order, confirm the Prodigi checks, then save it to the dispatch log.", prodigi_page)
-        self.assertIn("Open Prodigi Dashboard", prodigi_page)
-        self.assertIn("Prodigi Reference", prodigi_page)
+        self.assertIn("Fulfilment Dispatch Log", prodigi_page)
+        self.assertIn("Search an order, confirm the fulfilment checks, then save it to the dispatch log.", prodigi_page)
+        self.assertIn("Open Fulfilment Dashboard", prodigi_page)
+        self.assertIn("Fulfilment Reference", prodigi_page)
         self.assertIn("prodigi_reference_table_html", prodigi_page)
         self.assertIn("Enter Shopify Order #", prodigi_page)
         self.assertIn('placeholder="#"', prodigi_page)
@@ -143,14 +143,14 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("_prodigi_order_line_table(matches, existing_dispatch_rows, selected_id)", prodigi_page)
         self.assertIn("_prodigi_selected_line_summary(selected_row)", prodigi_page)
         self.assertIn("QA checklist", prodigi_page)
-        self.assertIn("Prodigi product/variant", prodigi_page)
-        self.assertIn("Does the Prodigi product/variant exactly match", prodigi_page)
+        self.assertIn("Fulfilment product/variant", prodigi_page)
+        self.assertIn("Does the Fulfilment product/variant exactly match", prodigi_page)
         self.assertIn("Artwork upload quality", prodigi_page)
-        self.assertIn("Has the final artwork been uploaded to Prodigi in excellent print quality?", prodigi_page)
+        self.assertIn("Has the final artwork been uploaded to fulfilment in excellent print quality?", prodigi_page)
         self.assertIn("Artwork crop / orientation", prodigi_page)
         self.assertIn("Is the artwork crop, orientation, and full image preview correct?", prodigi_page)
         self.assertIn("Frame colour", prodigi_page)
-        self.assertIn("Does the Prodigi size match the Shopify size", prodigi_page)
+        self.assertIn("Does the Fulfilment size match the Shopify size", prodigi_page)
         self.assertIn("Is shipping set correctly to", prodigi_page)
         self.assertIn("Final error check", prodigi_page)
         self.assertIn("Save Issue", prodigi_page)
@@ -171,7 +171,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Dispatch rows saved", prodigi_page)
         self.assertIn("prodigi_find_order_rows_from_cache", prodigi_page)
         self.assertIn("prodigi_load_dispatch_rows", prodigi_page)
-        self.assertIn("Expected Prodigi code", source)
+        self.assertIn("Expected Fulfilment code", source)
         self.assertNotIn("Copy Prodigi Variant", prodigi_page)
         self.assertIn("Prodigi Shopify fetch skipped on initial load", prodigi_page)
         self.assertIn("Prodigi full order snapshot skipped on initial load", prodigi_page)
@@ -359,15 +359,15 @@ class EditionOpsUiTests(unittest.TestCase):
                 "Sports Cave Variant",
                 "Sports Cave Frame",
                 "Sports Cave Size",
-                "Prodigi Product",
-                "Prodigi Code",
-                "Prodigi Frame Colour",
+                "Fulfilment Product",
+                "Fulfilment Code",
+                "Fulfilment Frame Colour",
             },
         )
-        self.assertIn("GLOBAL-CFP-A1", {row["Prodigi Code"] for row in rows})
-        self.assertIn("GLOBAL-FAP-A4", {row["Prodigi Code"] for row in rows})
+        self.assertIn("GLOBAL-CFP-A1", {row["Fulfilment Code"] for row in rows})
+        self.assertIn("GLOBAL-FAP-A4", {row["Fulfilment Code"] for row in rows})
         self.assertEqual(
-            next(row for row in rows if row["Sports Cave Frame"] == "Oak" and row["Sports Cave Size"].startswith("L "))["Prodigi Frame Colour"],
+            next(row for row in rows if row["Sports Cave Frame"] == "Oak" and row["Sports Cave Size"].startswith("L "))["Fulfilment Frame Colour"],
             "Natural",
         )
         self.assertIn("prodigi-code-cell", os_pages.prodigi_reference_table_html(rows))
@@ -474,7 +474,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         self.assertIn("Shopify Order #: #SC2843", copied)
         self.assertIn("Edition #: #050", copied)
-        self.assertIn("Prodigi Code: GLOBAL-CFP-A2", copied)
+        self.assertIn("Fulfilment Code: GLOBAL-CFP-A2", copied)
         self.assertIn("Classic Frame, EMA 200gsm Fine Art Print", copied)
         self.assertIn("Shipping: US Standard Tracked Shipping", copied)
 
@@ -1113,7 +1113,7 @@ class EditionOpsUiTests(unittest.TestCase):
             "final_check": "Yes",
         }
 
-        self.assertIn("Prodigi variant not confirmed", os_pages.prodigi_dispatch_blockers(row, answers))
+        self.assertIn("Fulfilment variant not confirmed", os_pages.prodigi_dispatch_blockers(row, answers))
 
     def test_prodigi_submission_blocks_missing_code_and_duplicate_submit(self):
         missing = os_pages.prodigi_tracker_row_from_order(
@@ -1144,7 +1144,7 @@ class EditionOpsUiTests(unittest.TestCase):
             },
         )
 
-        self.assertIn("Missing Prodigi code", os_pages.prodigi_submission_blockers(missing))
+        self.assertIn("Missing Fulfilment code", os_pages.prodigi_submission_blockers(missing))
         self.assertIn("Already submitted", os_pages.prodigi_submission_blockers(submitted))
         result = os_pages.apply_prodigi_bulk_action([submitted], [submitted["row_id"]], "submitted")
         self.assertTrue(result["errors"])
@@ -1176,7 +1176,7 @@ class EditionOpsUiTests(unittest.TestCase):
             [
                 "Edition QA",
                 "Certificate QA",
-                "Prodigi QA",
+                "Fulfilment QA",
                 "Shipping QA",
                 "Submission QA",
                 "Tracking / Shopify Fulfilment QA",
@@ -1480,7 +1480,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Generate + Upload Certificate", top_actions)
         self.assertIn("Reupload Certificate", top_actions)
         self.assertIn("Open Certificate", top_actions)
-        self.assertIn("Start Prodigi QA", top_actions)
+        self.assertIn("Start Fulfilment QA", top_actions)
         self.assertNotIn("Check New Paid Orders", top_actions)
         self.assertNotIn("Backfill Latest Paid", top_actions)
         self.assertNotIn("Backfill latest paid orders", top_actions)
@@ -1583,7 +1583,7 @@ class EditionOpsUiTests(unittest.TestCase):
             "Generate + Upload Certificate",
             "Reupload Certificate",
             "Open Certificate",
-            "Start Prodigi QA",
+            "Start Fulfilment QA",
         ):
             self.assertIn(label, top_actions)
 

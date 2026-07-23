@@ -16,7 +16,7 @@ ACTIVITY_LOG_CAPABILITY = "view_activity_log"
 PAGE_REGISTRY = (
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
     {"key": "orders", "route": "Orders", "label": "Orders", "worker_assignable": True},
-    {"key": "prodigi", "route": "Prodigi", "label": "Prodigi", "worker_assignable": True},
+    {"key": "prodigi", "route": "Prodigi", "label": "Fulfilment", "worker_assignable": True},
     {"key": "edition_ops", "route": "Edition Ops", "label": "Edition Ops", "worker_assignable": True},
     {"key": "mockups", "route": "Mockups", "label": "Mockups", "worker_assignable": True},
     {

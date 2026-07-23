@@ -128,7 +128,7 @@ class OrdersProdigiLoadingRepairTests(unittest.TestCase):
 
         self.assertNotIn("log_app_error", loader_source)
         self.assertIn("raise_on_error", loader_source)
-        self.assertIn("Prodigi orders could not be loaded. Please retry.", page_source)
+        self.assertIn("Fulfilment orders could not be loaded. Please retry.", page_source)
         self.assertIn('st.button("Retry"', page_source)
         self.assertIn('st.form("prodigi-dispatch-log-search-form"', page_source)
 

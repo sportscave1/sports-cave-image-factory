@@ -1154,7 +1154,7 @@ def build_shopify_edition_filters(
         "Final Editions": "sp.edition_status = 'Final Editions'",
         "Sold Out": "sp.edition_status = 'Sold Out'",
         "Missing PSD": "COALESCE(NULLIF(sp.psd_file_url, ''), NULLIF(p.psd_file_url, '')) IS NULL",
-        "Missing Prodigi": "COALESCE(NULLIF(sp.prodigi_url, ''), NULLIF(p.prodigi_product_url, '')) IS NULL",
+        "Missing Fulfilment": "COALESCE(NULLIF(sp.prodigi_url, ''), NULLIF(p.prodigi_product_url, '')) IS NULL",
     }
     if edition_filter in edition_filters:
         clauses.append(edition_filters[edition_filter])
@@ -2354,7 +2354,7 @@ def get_optional_readiness_items(product):
         ("Product upload ZIP URL added", bool(product.get("product_upload_zip_url"))),
         ("Certificate folder URL added", bool(product.get("certificate_folder_url"))),
         ("Ads/social folder URL added", bool(product.get("ads_social_folder_url"))),
-        ("Prodigi ID added", bool(product.get("prodigi_product_id"))),
+        ("Fulfilment ID added", bool(product.get("prodigi_product_id"))),
         ("Shopify admin URL added", bool(product.get("shopify_admin_url"))),
         ("Live product URL added", bool(product.get("live_product_url"))),
     )

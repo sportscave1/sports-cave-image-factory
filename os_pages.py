@@ -47,7 +47,7 @@ _PRODIGI_LOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="p
 QUICK_LINKS = (
     ("shopify_admin_url", "Open Shopify Admin"),
     ("live_product_url", "Open Live Product Page"),
-    ("prodigi_product_url", "Open Prodigi Product"),
+    ("prodigi_product_url", "Open Fulfilment Product"),
     ("google_drive_root_folder_url", "Open Root Drive Folder"),
 )
 
@@ -395,7 +395,7 @@ PRODIGI_GOOGLE_SHEET_HEADERS = (
     "Edition No.",
     "Frame",
     "Size",
-    "Prodigi Product Option",
+    "Fulfilment Product Option",
     "Shipping",
     "Status",
     "Notes",
@@ -419,9 +419,9 @@ def prodigi_reference_rows():
             "Sports Cave Variant": row["sports_cave_variant"],
             "Sports Cave Frame": row["sports_cave_frame"],
             "Sports Cave Size": row["sports_cave_size"],
-            "Prodigi Product": row["prodigi_product"],
-            "Prodigi Code": row["prodigi_code"],
-            "Prodigi Frame Colour": row["prodigi_frame_colour"],
+            "Fulfilment Product": row["prodigi_product"],
+            "Fulfilment Code": row["prodigi_code"],
+            "Fulfilment Frame Colour": row["prodigi_frame_colour"],
         }
         for row in PRODIGI_REFERENCE_MAPPINGS
     ]
@@ -612,7 +612,7 @@ def prodigi_required_confirmation_question(row):
         suffix = "No frame"
     else:
         suffix = f"Frame colour: {frame_colour or '-'}"
-    return f"Is the selected Prodigi variant exactly {code} - {product}, {suffix}?"
+    return f"Is the selected Fulfilment variant exactly {code} - {product}, {suffix}?"
 
 
 def prodigi_shopify_variant_label(row):
@@ -626,22 +626,22 @@ def prodigi_shopify_variant_label(row):
 def prodigi_variant_copy_text(row):
     return "\n".join(
         [
-            f"Expected Prodigi variant: {row.get('prodigi_product_name') or ''}",
-            f"Prodigi code: {row.get('prodigi_product_code') or row.get('prodigi_code') or ''}",
+            f"Expected Fulfilment variant: {row.get('prodigi_product_name') or ''}",
+            f"Fulfilment code: {row.get('prodigi_product_code') or row.get('prodigi_code') or ''}",
             f"Frame colour: {row.get('prodigi_frame_colour') or row.get('prodigi_frame') or ''}",
         ]
     )
 
 
 def prodigi_reference_table_html(rows):
-    headers = ("Sports Cave Variant", "Sports Cave Frame", "Sports Cave Size", "Prodigi Product", "Prodigi Code", "Prodigi Frame Colour")
+    headers = ("Sports Cave Variant", "Sports Cave Frame", "Sports Cave Size", "Fulfilment Product", "Fulfilment Code", "Fulfilment Frame Colour")
     header_html = "".join(f"<th>{html.escape(header)}</th>" for header in headers)
     body_rows = []
     for row in rows:
         cells = []
         for header in headers:
             value = html.escape(str(row.get(header) or ""))
-            class_name = "prodigi-code-cell" if header == "Prodigi Code" else ""
+            class_name = "prodigi-code-cell" if header == "Fulfilment Code" else ""
             cells.append(f'<td class="{class_name}">{value}</td>')
         body_rows.append("<tr>" + "".join(cells) + "</tr>")
     return f"""
@@ -655,10 +655,14 @@ def prodigi_reference_table_html(rows):
         position: sticky;
         top: 0;
         background: #151515;
-        color: #f5efe2;
+        color: #ffffff !important;
         text-align: left;
         padding: 0.55rem 0.6rem;
         border-bottom: 1px solid rgba(218, 179, 92, 0.35);
+      }}
+      .prodigi-reference-table thead th,
+      .prodigi-reference-table thead th * {{
+        color: #ffffff !important;
       }}
       .prodigi-reference-table td {{
         color: #efe9dd;
@@ -811,9 +815,9 @@ def prodigi_submission_blockers(row):
     if not _prodigi_clean(row.get("size")):
         blockers.append("Missing size")
     if not _prodigi_clean(row.get("prodigi_size")):
-        blockers.append("Missing Prodigi size")
+        blockers.append("Missing Fulfilment size")
     if not _prodigi_clean(row.get("prodigi_code")):
-        blockers.append("Missing Prodigi code")
+        blockers.append("Missing Fulfilment code")
     if not _prodigi_clean(row.get("shipping_method")):
         blockers.append("Missing shipping method")
     if not _prodigi_int(row.get("edition_number"), 0):
@@ -874,7 +878,7 @@ def prodigi_progress_checks(row):
     return {
         "Edition": bool(_prodigi_int(row.get("edition_number"), 0)),
         "Cert": _prodigi_certificate_uploaded(row),
-        "Prodigi": bool(row.get("prodigi_size") and row.get("prodigi_product_option") and row.get("prodigi_code")),
+        "Fulfilment": bool(row.get("prodigi_size") and row.get("prodigi_product_option") and row.get("prodigi_code")),
         "Shipping": bool(_prodigi_clean(row.get("shipping_method"))),
         "Submitted": _prodigi_submitted(row),
         "Tracking": _prodigi_tracking_exists(row),
@@ -893,7 +897,7 @@ def prodigi_manual_submit_blockers(row):
     if not _prodigi_bool(row.get("frame_colour_checked")):
         blockers.append("Frame colour not checked")
     if not _prodigi_bool(row.get("prodigi_option_checked")):
-        blockers.append("Prodigi option not checked")
+        blockers.append("Fulfilment option not checked")
     if not _prodigi_bool(row.get("shipping_checked")):
         blockers.append("Shipping not checked")
     if not _prodigi_bool(row.get("submitted_confirmed")):
@@ -904,7 +908,7 @@ def prodigi_manual_submit_blockers(row):
 def prodigi_fulfillment_blockers(row):
     blockers = []
     if not _prodigi_submitted(row):
-        blockers.append("Not submitted to Prodigi")
+        blockers.append("Not submitted to Fulfilment")
     if not _prodigi_tracking_exists(row):
         blockers.append("Tracking missing")
     if not _prodigi_certificate_uploaded(row):
@@ -1083,10 +1087,10 @@ def prodigi_copy_details(row):
         f"Edition #: #{_prodigi_int(row.get('edition_number'), 0):03d}" if _prodigi_int(row.get("edition_number"), 0) else "Edition #:",
         f"Frame: {row.get('frame') or ''}",
         f"Size: {row.get('size') or ''}",
-        f"Prodigi Size: {row.get('prodigi_size') or ''}",
-        f"Prodigi Product: {row.get('prodigi_product_name') or prodigi_product_option_display(row)}",
-        f"Prodigi Code: {row.get('prodigi_product_code') or row.get('prodigi_code') or ''}",
-        f"Prodigi Frame Colour: {row.get('prodigi_frame_colour') or row.get('prodigi_frame') or ''}",
+        f"Fulfilment Size: {row.get('prodigi_size') or ''}",
+        f"Fulfilment Product: {row.get('prodigi_product_name') or prodigi_product_option_display(row)}",
+        f"Fulfilment Code: {row.get('prodigi_product_code') or row.get('prodigi_code') or ''}",
+        f"Fulfilment Frame Colour: {row.get('prodigi_frame_colour') or row.get('prodigi_frame') or ''}",
         f"Shipping: {row.get('shipping_method') or ''}",
     ]
     return "\n".join(lines)
@@ -2362,12 +2366,12 @@ def product_form_fields(prefix, product=None):
             key=f"{prefix}-shopify-id",
         )
         prodigi_product_id = st.text_input(
-            "Prodigi product ID",
+            "Fulfilment product ID",
             value=product.get("prodigi_product_id", ""),
             key=f"{prefix}-prodigi-id",
         )
         prodigi_product_url = st.text_input(
-            "Prodigi product URL",
+            "Fulfilment product URL",
             value=product.get("prodigi_product_url", ""),
             key=f"{prefix}-prodigi-url",
         )
@@ -2418,7 +2422,7 @@ def product_form_fields(prefix, product=None):
             key=f"{prefix}-drive-root",
         )
         prodigi_notes = st.text_area(
-            "Prodigi notes",
+            "Fulfilment notes",
             value=product.get("prodigi_notes", ""),
             key=f"{prefix}-prodigi-notes",
             height=90,
@@ -2489,7 +2493,7 @@ def render_product_row(product):
                 for value in (
                     product.get("readiness_status"),
                     product.get("overall_asset_readiness"),
-                    f"Prodigi {product.get('prodigi_status')}",
+                    f"Fulfilment {product.get('prodigi_status')}",
                     product.get("shopify_sync_status"),
                 )
             ),
@@ -2888,16 +2892,16 @@ def render_file_hub(product):
 
 
 def render_prodigi_mapping(product):
-    st.subheader("Prodigi Mapping")
+    st.subheader("Fulfilment Mapping")
     st.markdown(
         status_badge("Connected" if product.get("prodigi_product_id") else "Missing"),
         unsafe_allow_html=True,
     )
     with st.form(f"prodigi-form-{product['id']}"):
-        prodigi_id = st.text_input("Prodigi Product ID", value=product.get("prodigi_product_id") or "")
-        prodigi_url = st.text_input("Prodigi Product URL", value=product.get("prodigi_product_url") or "")
-        prodigi_notes = st.text_area("Prodigi notes", value=product.get("prodigi_notes") or "", height=110)
-        submitted = st.form_submit_button("Save Prodigi Mapping", type="primary")
+        prodigi_id = st.text_input("Fulfilment Product ID", value=product.get("prodigi_product_id") or "")
+        prodigi_url = st.text_input("Fulfilment Product URL", value=product.get("prodigi_product_url") or "")
+        prodigi_notes = st.text_area("Fulfilment notes", value=product.get("prodigi_notes") or "", height=110)
+        submitted = st.form_submit_button("Save Fulfilment Mapping", type="primary")
     if submitted:
         db.update_product_fields(
             product["id"],
@@ -3402,10 +3406,10 @@ def render_prodigi_option_card(frame_label, frame_colour, size_option, is_unfram
 
     with st.container(border=True):
         st.markdown(f"**{shopify_variant}**")
-        st.caption(f"Shopify size {size_option['shopify_size']} = Prodigi size {size_option['prodigi_size']} • {size_option['dimensions']}")
-        st.markdown("**Prodigi product name**")
+        st.caption(f"Shopify size {size_option['shopify_size']} = Fulfilment size {size_option['prodigi_size']} • {size_option['dimensions']}")
+        st.markdown("**Fulfilment product name**")
         st.write(product_name)
-        st.markdown("**Prodigi product code**")
+        st.markdown("**Fulfilment product code**")
         st.code(product_code, language=None)
         st.markdown("**Frame colour to select**")
         st.write(frame_note)
@@ -3418,19 +3422,19 @@ def render_prodigi_option_card(frame_label, frame_colour, size_option, is_unfram
 
 
 def render_prodigi_page_legacy():
-    st.title("Prodigi")
+    st.title("Fulfilment")
     st.caption(
-        "Simple Sports Cave-to-Prodigi matching. Copy the exact product name and product code, then double-check the frame and size before sending the order to production."
+        "Simple Sports Cave-to-fulfilment matching. Copy the exact product name and product code, then double-check the frame and size before sending the order to production."
     )
 
-    st.link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
+    st.link_button("Open Fulfilment Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
     st.markdown(
-        "**Prodigi support for errors or warranty:** "
+        "**Fulfilment support for errors or warranty:** "
         f"[{PRODIGI_SUPPORT_EMAIL}](mailto:{PRODIGI_SUPPORT_EMAIL})"
     )
 
     st.info(
-        "Quick check: XL = A1, L = A2, M = A3, S = A4. Oak on Sports Cave = Natural in Prodigi. "
+        "Quick check: XL = A1, L = A2, M = A3, S = A4. Oak on Sports Cave = Natural in fulfilment. "
         "Framed orders use Classic Frame. Unframed orders use Fine Art Paper."
     )
 
@@ -3440,7 +3444,7 @@ def render_prodigi_page_legacy():
         with column:
             with st.container(border=True):
                 st.markdown(f"### {size_option['shopify_size']}")
-                st.caption(f"Prodigi size {size_option['prodigi_size']}")
+                st.caption(f"Fulfilment size {size_option['prodigi_size']}")
                 st.write(size_option["dimensions"])
 
     st.subheader("2. Frame map")
@@ -3449,10 +3453,10 @@ def render_prodigi_page_legacy():
         with column:
             with st.container(border=True):
                 st.markdown(f"### {shopify_frame}")
-                st.caption(f"Prodigi frame colour: {prodigi_frame}")
+                st.caption(f"Fulfilment frame colour: {prodigi_frame}")
                 st.write(prodigi_note)
 
-    st.subheader("3. Exact Prodigi options")
+    st.subheader("3. Exact Fulfilment options")
     tabs = st.tabs(["Black", "Oak", "White", "Unframed"])
     frame_tabs = (
         ("Black", "Black", False),
@@ -3473,7 +3477,7 @@ def render_prodigi_page_legacy():
 
     with st.container(border=True):
         st.markdown("**Final check before production**")
-        st.write("1. Match the Shopify size to the Prodigi size: XL=A1, L=A2, M=A3, S=A4.")
+        st.write("1. Match the Shopify size to the Fulfilment size: XL=A1, L=A2, M=A3, S=A4.")
         st.write("2. Match the frame colour: Black, Natural, White, or Unframed.")
         st.write("3. Copy the exact product name or code from the matching card.")
         st.write("4. Check the order one more time before sending it to production.")
@@ -3550,14 +3554,14 @@ def prodigi_checklist_sections(row):
             ],
         ),
         (
-            "Prodigi QA",
+            "Fulfilment QA",
             [
                 ("Shopify variant mapped correctly", bool(row.get("frame") and row.get("size")), "auto"),
                 ("Frame colour checked", _prodigi_bool(row.get("frame_colour_checked")), "manual"),
                 ("Size checked", bool(row.get("size")), "auto"),
-                ("Prodigi size checked", bool(row.get("prodigi_size")), "auto"),
-                ("Prodigi product option checked", _prodigi_bool(row.get("prodigi_option_checked")), "manual"),
-                ("Prodigi code checked", bool(row.get("prodigi_code")), "auto"),
+                ("Fulfilment size checked", bool(row.get("prodigi_size")), "auto"),
+                ("Fulfilment product option checked", _prodigi_bool(row.get("prodigi_option_checked")), "manual"),
+                ("Fulfilment code checked", bool(row.get("prodigi_code")), "auto"),
             ],
         ),
         (
@@ -3571,9 +3575,9 @@ def prodigi_checklist_sections(row):
         (
             "Submission QA",
             [
-                ("Submitted to Prodigi", _prodigi_submitted(row), "auto"),
-                ("Date sent to Prodigi", bool(row.get("date_sent_to_prodigi")), "auto"),
-                ("Prodigi order ID added if available", bool(row.get("prodigi_order_id")) or _prodigi_submitted(row), "auto"),
+                ("Submitted to Fulfilment", _prodigi_submitted(row), "auto"),
+                ("Date sent to Fulfilment", bool(row.get("date_sent_to_prodigi")), "auto"),
+                ("Fulfilment order ID added if available", bool(row.get("prodigi_order_id")) or _prodigi_submitted(row), "auto"),
                 ("Submission manually confirmed", _prodigi_bool(row.get("submitted_confirmed")), "manual"),
             ],
         ),
@@ -3598,7 +3602,7 @@ def _render_prodigi_checklist_dialog(rows):
         st.session_state["prodigi-checklist-row-id"] = ""
         return rows
 
-    @st.dialog(f"Prodigi QA Checklist: {row.get('shopify_order_name') or 'Order'}", width="large")
+    @st.dialog(f"Fulfilment QA Checklist: {row.get('shopify_order_name') or 'Order'}", width="large")
     def _checklist_dialog():
         st.caption(row.get("product_title") or "")
         st.write(prodigi_progress_text(row))
@@ -3616,7 +3620,7 @@ def _render_prodigi_checklist_dialog(rows):
                         "Certificate product title checked": "certificate_product_checked",
                         "Certificate edition number checked": "certificate_edition_checked",
                         "Frame colour checked": "frame_colour_checked",
-                        "Prodigi product option checked": "prodigi_option_checked",
+                        "Fulfilment product option checked": "prodigi_option_checked",
                         "Express/standard checked": "shipping_checked",
                         "Submission manually confirmed": "submitted_confirmed",
                     }.get(label)
@@ -3634,7 +3638,7 @@ def _render_prodigi_checklist_dialog(rows):
                     )
 
         prodigi_order_id = st.text_input(
-            "Prodigi order ID",
+            "Fulfilment order ID",
             value=row.get("prodigi_order_id") or "",
             key=f"prodigi-checklist-order-id-{safe_filename_part(row_id)}",
         )
@@ -3724,9 +3728,9 @@ PRODIGI_DISPATCH_REQUIRED_FIELDS = (
 PRODIGI_DISPATCH_REASON_LABELS = {
     "certificate": "Certificate not uploaded",
     "artwork_upload": "Artwork quality not confirmed",
-    "product_option": "Prodigi variant not confirmed",
+    "product_option": "Fulfilment variant not confirmed",
     "frame": "Frame mismatch",
-    "size": "Prodigi variant mismatch",
+    "size": "Fulfilment variant mismatch",
     "edition_number": "Edition number mismatch",
     "shipping": "Shipping not confirmed",
     "sent_to_production": "Not sent to production",
@@ -4131,7 +4135,7 @@ def _render_prodigi_loading_fragment():
         status = _consume_prodigi_dispatch_load()
         if status == "loading":
             with st.container(border=True):
-                st.info("Loading Prodigi orders...")
+                st.info("Loading Fulfilment orders...")
             return
         st.rerun()
 
@@ -4236,7 +4240,7 @@ def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None, en
     event_key = _prodigi_activity_event_key(action_type, saved) if completed_status else ""
     record_activity_log(
         action_type,
-        "Prodigi",
+        "Fulfilment",
         message,
         entity_type="order",
         entity_id=saved.get("row_id") or "",
@@ -4349,7 +4353,7 @@ def prodigi_dispatch_table_records(rows):
                 "Product": row.get("product_title") or "",
                 "Edition #": f"#{edition_number:03d}" if edition_number else "",
                 "Variant": row.get("shopify_variant_title") or row.get("variant_title") or "",
-                "Prodigi Code": row.get("prodigi_product_code") or row.get("prodigi_code") or "",
+                "Fulfilment Code": row.get("prodigi_product_code") or row.get("prodigi_code") or "",
                 "QA Status": qa_status,
                 "Certificate Status": row.get("certificate_status") or ("Uploaded" if _prodigi_certificate_uploaded(row) else ""),
                 "Notes": row.get("notes") or row.get("qa_notes") or row.get("issue_reason") or "",
@@ -4417,7 +4421,7 @@ def prodigi_dispatch_blockers(row, answers):
     if not row.get("size"):
         blockers.append("Missing size")
     if not row.get("prodigi_product_option") or not row.get("prodigi_code") or not row.get("prodigi_size"):
-        blockers.append("Missing Prodigi mapping")
+        blockers.append("Missing Fulfilment mapping")
     if not row.get("shipping_method"):
         blockers.append("Missing shipping method")
 
@@ -4558,7 +4562,7 @@ def _prodigi_order_line_table(matches, existing_dispatch_rows, selected_id):
         "Product",
         "Edition #",
         "Variant",
-        "Expected Prodigi Code",
+        "Expected Fulfilment Code",
         "Shipping",
         "QA Status",
     )
@@ -4605,7 +4609,7 @@ def _prodigi_selected_line_summary(row):
         columns[3].write(_prodigi_edition_label(row))
         columns[4].caption("Shopify variant")
         columns[4].write(prodigi_shopify_variant_label(row) or "-")
-        columns[5].caption("Expected Prodigi code")
+        columns[5].caption("Expected Fulfilment code")
         columns[5].write(row.get("prodigi_code") or row.get("prodigi_product_code") or "-")
 
 
@@ -4625,13 +4629,13 @@ def _prodigi_qa_step(number, title, question, *, key, default=False, helper_text
 def render_prodigi_page():
     page_started = time.perf_counter()
     _prodigi_log_timing("page start", page_started)
-    st.title("Prodigi Dispatch Log")
-    st.caption("Search an order, confirm the Prodigi checks, then save it to the dispatch log.")
-    st.link_button("Open Prodigi Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
+    st.title("Fulfilment Dispatch Log")
+    st.caption("Search an order, confirm the fulfilment checks, then save it to the dispatch log.")
+    st.link_button("Open Fulfilment Dashboard", PRODIGI_DASHBOARD_URL, use_container_width=False)
     print("Prodigi Shopify fetch skipped on initial load")
     print("Prodigi full order snapshot skipped on initial load")
 
-    with st.expander("Prodigi Reference", expanded=False):
+    with st.expander("Fulfilment Reference", expanded=False):
         st.markdown(prodigi_reference_table_html(prodigi_reference_rows()), unsafe_allow_html=True)
         st.caption(f"Support: {PRODIGI_SUPPORT_EMAIL}")
 
@@ -4704,8 +4708,8 @@ def render_prodigi_page():
         }
         product_confirmed, product_notes = _prodigi_qa_step(
             1,
-            "Prodigi product/variant",
-            f"Does the Prodigi product/variant exactly match {expected_code}?",
+            "Fulfilment product/variant",
+            f"Does the Fulfilment product/variant exactly match {expected_code}?",
             helper_text=expected_variant,
             default=bool(stored_confirmation["confirmed"] and has_mapping) or default_answers.get("product_option") == "Yes",
             note_default=stored_confirmation["notes"],
@@ -4717,7 +4721,7 @@ def render_prodigi_page():
         upload_confirmed, upload_notes = _prodigi_qa_step(
             2,
             "Artwork upload quality",
-            "Has the final artwork been uploaded to Prodigi in excellent print quality?",
+            "Has the final artwork been uploaded to fulfilment in excellent print quality?",
             default=default_answers.get("artwork_upload") == "Yes",
             key=f"prodigi-dispatch-qa-upload-{row_key}",
         )
@@ -4744,7 +4748,7 @@ def render_prodigi_page():
         size_confirmed, size_notes = _prodigi_qa_step(
             5,
             "Size",
-            f"Does the Prodigi size match the Shopify size {shopify_size}?",
+            f"Does the Fulfilment size match the Shopify size {shopify_size}?",
             default=default_answers.get("size") == "Yes",
             key=f"prodigi-dispatch-qa-size-{row_key}",
         )
@@ -4776,9 +4780,9 @@ def render_prodigi_page():
         blockers = prodigi_dispatch_blockers(selected_row, qa_answers)
         line_blockers = []
         if not has_mapping:
-            line_blockers.append(f"{selected_row.get('product_title') or 'Line'}: missing Prodigi mapping")
+            line_blockers.append(f"{selected_row.get('product_title') or 'Line'}: missing Fulfilment mapping")
         if qa_answers.get("product_option") != "Yes":
-            line_blockers.append(f"{selected_row.get('product_title') or 'Line'}: exact Prodigi variant not confirmed")
+            line_blockers.append(f"{selected_row.get('product_title') or 'Line'}: exact Fulfilment variant not confirmed")
         if not final_confirmed:
             line_blockers.append("Final confirmation required")
         completion_blockers = list(dict.fromkeys(blockers + line_blockers))
@@ -4922,7 +4926,7 @@ def render_prodigi_page():
         table_rows = list(st.session_state.get(PRODIGI_DISPATCH_ROWS_KEY) or [])
         load_error = str(st.session_state.get(PRODIGI_DISPATCH_ERROR_KEY) or "")
         if load_error:
-            st.error("Prodigi orders could not be loaded. Please retry.")
+            st.error("Fulfilment orders could not be loaded. Please retry.")
             if st.button("Retry", key="prodigi-dispatch-load-retry", use_container_width=False):
                 _start_prodigi_dispatch_load(selected_log_view, active_log_search, 50, force=True)
                 st.rerun()
@@ -5453,7 +5457,7 @@ def render_supabase_limited_editions_page():
     header = st.columns([0.52, 2.0, 1.05, 0.62, 0.72, 0.62, 0.72, 0.78, 1.2, 1.2, 0.82, 0.7])
     for column, label in zip(
         header,
-        ("Art", "Product", "Handle", "Total", "Latest", "Next", "Remaining", "Status", "PSD", "Prodigi", "Shopify", "Save"),
+        ("Art", "Product", "Handle", "Total", "Latest", "Next", "Remaining", "Status", "PSD", "Fulfilment", "Shopify", "Save"),
     ):
         column.markdown(f"**{label}**")
     status_options = {
@@ -5530,14 +5534,14 @@ def render_supabase_limited_editions_page():
         if psd_value.strip():
             columns[8].link_button("Open PSD", psd_value.strip(), use_container_width=True)
         prodigi_value = columns[9].text_input(
-            "Prodigi URL",
+            "Fulfilment URL",
             value=prodigi_url,
-            placeholder="Prodigi link",
+            placeholder="Fulfilment link",
             key=f"{key_base}-prodigi",
             label_visibility="collapsed",
         )
         if prodigi_value.strip():
-            columns[9].link_button("Open Prodigi", prodigi_value.strip(), use_container_width=True)
+            columns[9].link_button("Open Fulfilment", prodigi_value.strip(), use_container_width=True)
         with columns[10]:
             if product.get("admin_url"):
                 st.link_button("Shopify", product["admin_url"], use_container_width=True)
@@ -5586,7 +5590,7 @@ def render_supabase_limited_editions_page():
                         "prodigi_link",
                         prodigi_value.strip(),
                         "Limited Editions row edit",
-                        asset_name="Prodigi",
+                        asset_name="Fulfilment",
                         is_primary=True,
                     )
                 bump_supabase_cache_version("limited")
@@ -6150,13 +6154,13 @@ def _order_prodigi_summary(line_items):
         seen.add(token)
         urls.append(url)
     if not urls:
-        return {"url": "", "label": "No Prodigi", "title": "Prodigi link missing"}
+        return {"url": "", "label": "No Fulfilment", "title": "Fulfilment link missing"}
     if len(urls) == 1:
-        return {"url": urls[0], "label": "Open Prodigi", "title": "Open Prodigi link"}
+        return {"url": urls[0], "label": "Open Fulfilment", "title": "Open Fulfilment link"}
     return {
         "url": urls[0],
-        "label": f"Prodigi x{len(urls)}",
-        "title": f"Open the first of {len(urls)} Prodigi links on this order",
+        "label": f"Fulfilment x{len(urls)}",
+        "title": f"Open the first of {len(urls)} Fulfilment links on this order",
     }
 
 
@@ -7039,7 +7043,7 @@ def _render_compact_orders_feed(order_summaries):
     header = st.columns([0.72, 0.74, 0.96, 1.44, 1.12, 0.82, 0.86, 0.62, 0.66, 0.82], gap="small")
     for column, label in zip(
         header,
-        ("Order", "Date", "Customer", "Product", "Variant", "Edition", "Certificate", "PSD", "Prodigi", "Status"),
+        ("Order", "Date", "Customer", "Product", "Variant", "Edition", "Certificate", "PSD", "Fulfilment", "Status"),
     ):
         marker = '<span class="sc-order-header-marker"></span>' if label == "Order" else ""
         column.markdown(f'{marker}<div class="sc-order-stream-header">{label}</div>', unsafe_allow_html=True)
@@ -7088,11 +7092,11 @@ def _render_compact_orders_feed(order_summaries):
             columns[7].markdown('<span class="sc-order-muted-pill">No PSD</span>', unsafe_allow_html=True)
         if prodigi_url:
             columns[8].markdown(
-                f'<a class="sc-order-link-pill" href="{html.escape(prodigi_url, quote=True)}" target="_blank" rel="noreferrer">{html.escape(str(prodigi.get("label") or "Prodigi"))}</a>',
+                f'<a class="sc-order-link-pill" href="{html.escape(prodigi_url, quote=True)}" target="_blank" rel="noreferrer">{html.escape(str(prodigi.get("label") or "Fulfilment"))}</a>',
                 unsafe_allow_html=True,
             )
         else:
-            columns[8].markdown('<span class="sc-order-muted-pill">No Prodigi</span>', unsafe_allow_html=True)
+            columns[8].markdown('<span class="sc-order-muted-pill">No Fulfilment</span>', unsafe_allow_html=True)
         status_label = str(item.get("status_label") or "Saved")
         status_class = re.sub(r"[^a-z0-9]+", "-", status_label.lower()).strip("-")
         columns[9].markdown(
@@ -7296,7 +7300,7 @@ def _render_shopify_style_cached_orders_table(order_summaries):
         "Edition",
         "Certificate",
         "PSD",
-        "Prodigi",
+        "Fulfilment",
         "Shopify",
     )
     widths = [0.9, 1.15, 1.75, 1.15, 0.95, 0.95, 0.75, 0.85, 1.05]
@@ -7358,7 +7362,7 @@ def _render_shopify_style_cached_orders_table(order_summaries):
             prodigi_url = str(prodigi.get("url") or "").strip()
             with columns[7]:
                 if prodigi_url:
-                    st.link_button("Open Prodigi", prodigi_url, use_container_width=True)
+                    st.link_button("Open Fulfilment", prodigi_url, use_container_width=True)
                 else:
                     st.badge("Missing", color="gray")
 
@@ -8797,7 +8801,7 @@ def render_r2_storage_panel():
 
 def render_product_assets_page():
     st.title("Product Assets")
-    st.caption("Store Google Drive, PSD, certificate, mockup, Shopify CDN, and Prodigi links by Shopify handle.")
+    st.caption("Store Google Drive, PSD, certificate, mockup, Shopify CDN, and fulfilment links by Shopify handle.")
     if not supabase_backend.is_configured():
         st.warning("Shared product asset storage is not connected right now. Existing saved asset links are not changed.")
         return
@@ -8855,7 +8859,7 @@ def render_product_assets_page():
             key="supabase-asset-type",
         )
         asset_name = st.text_input("Asset name", placeholder="Optional file/folder name")
-        asset_url = st.text_input("Asset URL", placeholder="Paste the Google Drive, Shopify CDN, or Prodigi link")
+        asset_url = st.text_input("Asset URL", placeholder="Paste the Google Drive, Shopify CDN, or fulfilment link")
         google_drive_file_id = st.text_input("Google Drive file ID", placeholder="Optional Drive file/folder ID")
         notes = st.text_input("Notes", placeholder="Optional VA notes")
         if st.button("Save Asset Link", type="primary", use_container_width=True):
@@ -11367,7 +11371,7 @@ def render_settings_page(app_version, database_path, password_status):
                 st.markdown("**Reset all edition counters to 0 sold**")
                 st.caption(
                     "Sets every active product/run to Next #1 and Latest sent 0. "
-                    "Historical orders, certificates, totals, PSD links, and Prodigi links are kept."
+                    "Historical orders, certificates, totals, PSD links, and fulfilment links are kept."
                 )
                 edition_reset_confirm = st.text_input(
                     "Type RESET EDITIONS to enable this reset",

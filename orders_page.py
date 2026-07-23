@@ -457,7 +457,7 @@ def _display_prodigi_status(value):
     if lowered in {"ready to send", "submitted"}:
         return "In progress"
     if lowered in {"submitted to prodigi", "in production", "awaiting tracking", "shipped"}:
-        return "Sent to Prodigi"
+        return "Sent to Fulfilment"
     if lowered == "fulfilled in shopify":
         return "Complete"
     return status
@@ -510,7 +510,7 @@ def _prodigi_label(row):
 
 def _can_start_prodigi(row):
     status = _prodigi_label(row)
-    return status in {"Ready to dispatch", "Not started", "In progress", "Sent to Prodigi", "Complete", "Issue"}
+    return status in {"Ready to dispatch", "Not started", "In progress", "Sent to Fulfilment", "Complete", "Issue"}
 
 
 def _allocation_numbers(allocation):
@@ -2038,7 +2038,7 @@ def _column_config():
         "variant": st.column_config.TextColumn("Variant", width="small"),
         "shipping": st.column_config.TextColumn("Shipping", width="small"),
         "date": st.column_config.TextColumn("Date", width="small"),
-        "prodigi": st.column_config.TextColumn("Prodigi", width="small"),
+        "prodigi": st.column_config.TextColumn("Fulfilment", width="small"),
     }
 
 
@@ -2103,7 +2103,7 @@ def _render_top_actions(rows, duplicate_diagnostics=None):
     else:
         action_cols[3].button("Open Certificate", use_container_width=True, disabled=True)
     if action_cols[4].button(
-        "Start Prodigi QA",
+        "Start Fulfilment QA",
         use_container_width=True,
         disabled=not can_dispatch,
     ):

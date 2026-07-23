@@ -206,7 +206,7 @@ ASSET_LABELS = {
     "unframed_image": "Unframed Image",
     "lifestyle_image": "Lifestyle Image",
     "shopify_cdn_file": "Shopify CDN File",
-    "prodigi_link": "Prodigi",
+    "prodigi_link": "Fulfilment",
 }
 
 
@@ -9786,7 +9786,7 @@ def apply_limited_edition_import_rows(rows, *, create_missing_from_shopify=False
                             handle,
                             "prodigi_link",
                             parsed["prodigi_link"],
-                            asset_name="Prodigi",
+                            asset_name="Fulfilment",
                             notes="Imported from Limited Edition CSV",
                         )
                     result["rows_updated"] += 1
@@ -16312,7 +16312,7 @@ def list_orders(search="", sort="Date newest", status_filter="All", limit=250):
         "Historical": f"COALESCE(li.assignment_status, '') = '{HISTORICAL_ORDER_STATUS}' AND eo.id IS NULL",
         "Certificates missing": "eo.id IS NOT NULL AND c.id IS NULL",
         "PSD missing": "COALESCE(COALESCE(eo.shopify_handle, li.shopify_handle), '') <> '' AND COALESCE(NULLIF(psd.asset_url, ''), NULLIF(psd.google_drive_file_url, ''), '') = ''",
-        "Prodigi missing": "COALESCE(COALESCE(eo.shopify_handle, li.shopify_handle), '') <> '' AND COALESCE(NULLIF(prodigi.asset_url, ''), NULLIF(prodigi.google_drive_file_url, ''), '') = ''",
+        "Fulfilment missing": "COALESCE(COALESCE(eo.shopify_handle, li.shopify_handle), '') <> '' AND COALESCE(NULLIF(prodigi.asset_url, ''), NULLIF(prodigi.google_drive_file_url, ''), '') = ''",
         "Errors": "COALESCE(li.assignment_status, '') IN ('Error', 'Product Not Found', 'Needs Edition Setup', 'Sold Out')",
     }
     selected_status_clause = status_clauses.get(str(status_filter or "").strip())
