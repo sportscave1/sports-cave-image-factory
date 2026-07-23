@@ -8,11 +8,13 @@ import {
   collectCertificates,
   customerSafeErrorMessage,
 } from "./legacy-certificate-utils.js";
+import {attachPurchasedArtwork} from "./collection-artwork-utils.js";
 
 export const COLLECTOR_VAULT_REDESIGN_ENABLED = false;
 
 const API_VERSION = "2026-04";
 const SHOP_LATEST_DROPS_URL = "https://www.sportscaveshop.com";
+const REVIEWS_PAGE_URL = "https://www.sportscaveshop.com/pages/reviews";
 const CERTIFICATES_QUERY = `query SportsCaveCustomerCertificates {
   customer {
     id
@@ -21,6 +23,21 @@ const CERTIFICATES_QUERY = `query SportsCaveCustomerCertificates {
         id
         name
         processedAt
+        lineItems(first: 100) {
+          nodes {
+            id
+            name
+            productId
+            variantId
+            sku
+            image {
+              url
+              altText
+              width
+              height
+            }
+          }
+        }
         metafield(namespace: "sports_cave", key: "certificates_json") {
           type
           jsonValue
@@ -82,7 +99,11 @@ function Extension() {
         const responseData = Reflect.get(payload, "data") || {};
         const customer = responseData.customer || {};
         const orderNodes = customer.orders?.nodes || [];
-        const rows = collectCertificates(orderNodes, customer);
+        const rows = attachPurchasedArtwork(
+          collectCertificates(orderNodes, customer),
+          orderNodes,
+          customer,
+        );
         if (mounted) {
           setCertificates(rows);
           setStatus("ready");
@@ -101,12 +122,10 @@ function Extension() {
     };
   }, [retryKey]);
 
-  const subheading = status === "ready"
-    ? authenticatedEditionLabel(certificates.length)
-    : "Your authenticated Sports Cave certificates.";
+  const firstCertificate = certificates[0] || null;
 
   return (
-    <s-page heading="My Collection" subheading={subheading}>
+    <s-page>
       <s-grid
         gridTemplateColumns="minmax(0, 1200px)"
         justifyContent="center"
@@ -119,6 +138,9 @@ function Extension() {
               message={errorMessage}
               onRetry={() => setRetryKey((value) => value + 1)}
             />
+          ) : null}
+          {status === "ready" ? (
+            <ReviewBanner certificate={firstCertificate} />
           ) : null}
           {status === "ready" && certificates.length === 0 ? (
             <EmptyState />
@@ -139,8 +161,86 @@ function Extension() {
   );
 }
 
-function authenticatedEditionLabel(count) {
-  return `${count} authenticated ${count === 1 ? "edition" : "editions"}`;
+function ReviewBanner({certificate}) {
+  const thumbnailUrl = certificate?.purchased_image_url
+    || certificate?.certificate_preview_image_url;
+  const thumbnailAlt = certificate?.purchased_image_url
+    ? certificate.purchased_image_alt
+    : `Certificate preview for ${
+      certificate?.product_title || "Sports Cave certificate"
+    }`;
+  const hasThumbnail = Boolean(thumbnailUrl);
+
+  return (
+    <s-box
+      padding="base"
+      border="base"
+      borderRadius="base"
+      background="subdued"
+    >
+      <s-grid
+        gridTemplateColumns="repeat(auto-fit, minmax(min(100%, 420px), 1fr))"
+        gap="base"
+        alignItems="center"
+      >
+        <s-grid
+          gridTemplateColumns={hasThumbnail
+            ? "96px minmax(0, 1fr)"
+            : "minmax(0, 1fr)"}
+          gap="base"
+          alignItems="center"
+        >
+          {hasThumbnail ? (
+            <s-box
+              background="base"
+              border="base"
+              borderRadius="small"
+              overflow="hidden"
+            >
+              <s-image
+                src={thumbnailUrl}
+                alt={thumbnailAlt}
+                aspectRatio="1/1"
+                objectFit="contain"
+                loading="lazy"
+                sizes="96px"
+              ></s-image>
+            </s-box>
+          ) : null}
+          <s-stack gap="small-400">
+            <s-heading>How does it look in your space?</s-heading>
+            <s-text color="subdued">
+              Share a quick review and help another fan see the real thing.
+            </s-text>
+            <s-box accessibilityVisibility="hidden">
+              <s-stack direction="inline" gap="small-200">
+                {[1, 2, 3, 4, 5].map((star) => (
+                  <s-icon
+                    key={star}
+                    type="star"
+                    tone="warning"
+                  ></s-icon>
+                ))}
+              </s-stack>
+            </s-box>
+          </s-stack>
+        </s-grid>
+        <s-stack
+          direction="inline"
+          justifyContent="end"
+          alignItems="center"
+        >
+          <s-link
+            href={REVIEWS_PAGE_URL}
+            target="_blank"
+            accessibilityLabel="Leave a review on Sports Cave"
+          >
+            Leave a Review
+          </s-link>
+        </s-stack>
+      </s-grid>
+    </s-box>
+  );
 }
 
 function LoadingState() {

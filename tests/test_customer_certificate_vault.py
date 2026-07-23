@@ -192,8 +192,9 @@ class CustomerCertificateVaultTests(unittest.TestCase):
             "Numbered Collector Release",
         ):
             self.assertNotIn(removed, source)
-        self.assertIn('heading="My Collection"', source)
-        self.assertIn("authenticatedEditionLabel(certificates.length)", source)
+        self.assertIn("<s-page>", source)
+        self.assertNotIn('heading="My Collection"', source)
+        self.assertNotIn("authenticatedEditionLabel", source)
         self.assertIn('gridTemplateColumns="minmax(0, 1200px)"', source)
         self.assertGreaterEqual(
             source.count("repeat(auto-fit, minmax(min(100%"),
@@ -225,11 +226,87 @@ class CustomerCertificateVaultTests(unittest.TestCase):
         self.assertIn("Download Certificate", viewer)
         self.assertIn("Close", viewer)
         self.assertNotIn("Order It Framed", source)
-        self.assertNotIn("Leave a Review", source)
+        self.assertNotIn("Leave a Review", viewer)
         self.assertNotIn("Judge.me", source)
         self.assertNotIn("review_prompt", source)
         self.assertNotIn("frame_product", source)
         self.assertNotIn("/api/collector-vault/", source)
+
+    def test_review_banner_is_a_static_secure_external_link(self):
+        source = EXTENSION.read_text(encoding="utf-8")
+        banner = source[
+            source.index("function ReviewBanner"):
+            source.index("function LoadingState")
+        ]
+        self.assertIn("How does it look in your space?", banner)
+        self.assertIn(
+            "Share a quick review and help another fan see the real thing.",
+            banner,
+        )
+        self.assertIn(
+            'const REVIEWS_PAGE_URL = "https://www.sportscaveshop.com/pages/reviews";',
+            source,
+        )
+        self.assertIn("href={REVIEWS_PAGE_URL}", banner)
+        self.assertIn('target="_blank"', banner)
+        self.assertIn(
+            'accessibilityLabel="Leave a review on Sports Cave"',
+            banner,
+        )
+        self.assertIn('accessibilityVisibility="hidden"', banner)
+        self.assertIn("[1, 2, 3, 4, 5].map", banner)
+        self.assertIn('type="star"', banner)
+        self.assertIn('tone="warning"', banner)
+        self.assertIn('objectFit="contain"', banner)
+        self.assertIn('loading="lazy"', banner)
+        self.assertIn("certificate?.purchased_image_url", banner)
+        self.assertIn("certificate?.certificate_preview_image_url", banner)
+        self.assertLess(
+            source.index("<ReviewBanner"),
+            source.index("<CertificateGallery"),
+        )
+        self.assertNotIn("api.sessionToken", banner)
+        self.assertNotIn("fetch(", banner)
+        self.assertNotIn("/api/", banner)
+
+    def test_review_thumbnail_uses_authenticated_line_item_artwork_only(self):
+        source = EXTENSION.read_text(encoding="utf-8")
+        query = source[
+            source.index("const CERTIFICATES_QUERY"):
+            source.index("function Extension")
+        ]
+        for field in (
+            "lineItems(first: 100)",
+            "productId",
+            "variantId",
+            "sku",
+            "image {",
+            "url",
+            "altText",
+            "width",
+            "height",
+        ):
+            self.assertIn(field, query)
+        self.assertIn("attachPurchasedArtwork(", source)
+        self.assertIn("collectCertificates(orderNodes, customer)", source)
+        self.assertNotIn("overflowX", source)
+
+        card = source[
+            source.index("function CertificateCard"):
+            source.index("function CertificatePreview")
+        ]
+        self.assertIn("<CertificatePreview", card)
+        self.assertNotIn("purchased_image_url", card)
+        for action in ("View Certificate", "Download PDF", "Download Print"):
+            self.assertIn(action, card)
+        gallery = source[
+            source.index("function CertificateGallery"):
+            source.index("function CertificateCard")
+        ]
+        self.assertIn(
+            'minmax(min(100%, 320px), 1fr)',
+            gallery,
+        )
 
     def test_redesign_is_retained_but_not_the_production_module(self):
         production = EXTENSION.read_text(encoding="utf-8")
