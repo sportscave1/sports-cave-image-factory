@@ -53,6 +53,15 @@ def json_request(path, payload):
     )
 
 
+async def response_bytes(response):
+    if hasattr(response, "body"):
+        return bytes(response.body)
+    chunks = []
+    async for chunk in response.body_iterator:
+        chunks.append(bytes(chunk))
+    return b"".join(chunks)
+
+
 class FilesWindowApiTests(unittest.TestCase):
     def setUp(self):
         self.user = {
@@ -64,6 +73,7 @@ class FilesWindowApiTests(unittest.TestCase):
             "page_permissions": ["files"],
         }
         files_upload_api._DIRECTORY_CACHE.clear()
+        files_upload_api.DRAG_DOWNLOAD_MANAGER._records.clear()
 
     def test_standalone_page_requires_files_access_and_serves_no_streamlit_shell(self):
         request = get_request("/files-window")
@@ -198,17 +208,20 @@ class FilesWindowApiTests(unittest.TestCase):
             files_upload_api.dropbox_integration,
             "get_file_metadata",
             return_value={".tag": "file", "size": 7},
-        ) as metadata, patch.object(
+        ), patch.object(
             files_upload_api.dropbox_integration,
-            "get_file_bytes",
-            return_value=({".tag": "file"}, b"PNGDATA"),
+            "get_file_response",
+            return_value=(
+                {".tag": "file", "size": 7},
+                type("Upstream", (), {"content": b"PNGDATA", "close": lambda self: None})(),
+            ),
         ) as download:
             response = asyncio.run(files_upload_api.image_preview(request))
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.body, b"PNGDATA")
+        self.assertEqual(asyncio.run(response_bytes(response)), b"PNGDATA")
         self.assertEqual(response.media_type, "image/png")
-        metadata.assert_called_once_with("secret-token", full_path)
+        self.assertEqual(response.headers["content-length"], "7")
         download.assert_called_once_with("secret-token", full_path)
 
         for invalid in ("../outside.png", "/absolute.png", "C:/Windows/file.png", "Artwork.psd"):
@@ -217,7 +230,7 @@ class FilesWindowApiTests(unittest.TestCase):
                 files_upload_api,
                 "_dropbox_context",
                 return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
-            ), patch.object(files_upload_api.dropbox_integration, "get_file_bytes") as original:
+            ), patch.object(files_upload_api.dropbox_integration, "get_file_response") as original:
                 denied_response = asyncio.run(files_upload_api.image_preview(denied))
             self.assertIn(denied_response.status_code, {403, 404})
             original.assert_not_called()
@@ -393,6 +406,246 @@ class FilesWindowApiTests(unittest.TestCase):
         self.assertEqual(routes["/api/files-image-preview"], ("GET",))
         self.assertEqual(routes["/api/files-image-items"], ("GET",))
         self.assertEqual(routes["/api/files-delete"], ("POST",))
+        self.assertEqual(routes["/api/files-paste"], ("POST",))
+        self.assertEqual(routes["/api/files-drag-token"], ("POST",))
+        self.assertEqual(routes["/api/files-drag/{token}"], ("GET",))
+
+    def test_transfer_validation_rejects_traversal_outside_root_and_folder_descendants(self):
+        sources, destination = files_upload_api._validated_transfer_paths(
+            ["Source/One.jpg", "Source/Two.png"],
+            "Destination",
+            TEAM_ROOT,
+        )
+        self.assertEqual(
+            sources,
+            [f"{TEAM_ROOT}/Source/One.jpg", f"{TEAM_ROOT}/Source/Two.png"],
+        )
+        self.assertEqual(destination, f"{TEAM_ROOT}/Destination")
+        for paths, target in (
+            (["../outside.jpg"], "Destination"),
+            (["Source"], "Source"),
+            (["Source"], "Source/Nested"),
+            (["C:/Windows/file.jpg"], "Destination"),
+        ):
+            with self.subTest(paths=paths, target=target):
+                with self.assertRaises(files_upload_api.FilesUploadError):
+                    files_upload_api._validated_transfer_paths(paths, target, TEAM_ROOT)
+
+    def test_copy_and_multi_item_move_use_dropbox_server_side_operations(self):
+        source_metadata = {
+            f"{TEAM_ROOT}/Source/One.jpg": {".tag": "file", "name": "One.jpg"},
+            f"{TEAM_ROOT}/Source/Folder": {".tag": "folder", "name": "Folder"},
+        }
+        copy_request = json_request(
+            "/api/files-paste",
+            {
+                "paths": ["Source/One.jpg"],
+                "destination": "Destination",
+                "operation": "copy",
+                "conflict": "prompt",
+            },
+        )
+        with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "token", "root_path": TEAM_ROOT},
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "get_file_metadata",
+            side_effect=lambda _token, path: source_metadata[path],
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "get_metadata_if_exists",
+            return_value=None,
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "copy_path",
+            return_value={
+                ".tag": "file",
+                "name": "One.jpg",
+                "path_display": f"{TEAM_ROOT}/Destination/One.jpg",
+                "size": 4,
+            },
+        ) as copy_path, patch.object(files_upload_api, "record_activity_log"):
+            copy_response = asyncio.run(files_upload_api.paste_files(copy_request))
+
+        self.assertEqual(copy_response.status_code, 200)
+        self.assertEqual(len(json.loads(copy_response.body)["successful"]), 1)
+        copy_path.assert_called_once_with(
+            "token",
+            f"{TEAM_ROOT}/Source/One.jpg",
+            f"{TEAM_ROOT}/Destination/One.jpg",
+            root_path=TEAM_ROOT,
+        )
+
+        move_request = json_request(
+            "/api/files-paste",
+            {
+                "paths": ["Source/One.jpg", "Source/Folder"],
+                "destination": "Destination",
+                "operation": "move",
+                "conflict": "prompt",
+            },
+        )
+        with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "token", "root_path": TEAM_ROOT},
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "get_file_metadata",
+            side_effect=lambda _token, path: source_metadata[path],
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "get_metadata_if_exists",
+            return_value=None,
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "move_path",
+            side_effect=lambda _token, _source, target, **_kwargs: {
+                ".tag": "folder" if target.endswith("/Folder") else "file",
+                "name": target.rsplit("/", 1)[-1],
+                "path_display": target,
+            },
+        ) as move_path, patch.object(files_upload_api, "record_activity_log"):
+            move_response = asyncio.run(files_upload_api.paste_files(move_request))
+
+        move_payload = json.loads(move_response.body)
+        self.assertEqual(len(move_payload["successful"]), 2)
+        self.assertFalse(move_payload["failed"])
+        self.assertEqual(move_path.call_count, 2)
+
+    def test_paste_conflicts_require_choice_and_keep_both_starts_at_two(self):
+        source = f"{TEAM_ROOT}/Source/image.jpg"
+        destination = f"{TEAM_ROOT}/Destination"
+        with patch.object(
+            files_upload_api.dropbox_integration,
+            "get_file_metadata",
+            return_value={".tag": "file", "name": "image.jpg"},
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "get_metadata_if_exists",
+            return_value={".tag": "file", "name": "image.jpg"},
+        ):
+            with self.assertRaises(files_upload_api.FilesUploadError) as caught:
+                files_upload_api._paste_plan(
+                    "token", [source], destination, operation="copy", conflict="prompt"
+                )
+        self.assertEqual(caught.exception.code, "paste_conflict")
+        self.assertEqual(caught.exception.details["conflicts"][0]["name"], "image.jpg")
+
+        with patch.object(
+            files_upload_api.dropbox_integration,
+            "path_exists",
+            side_effect=[True, False],
+        ):
+            kept = files_upload_api.dropbox_integration.windows_numbered_path(
+                "token", f"{destination}/image.jpg"
+            )
+        self.assertEqual(kept, f"{destination}/image (3).jpg")
+
+    def test_drag_tokens_expire_and_stream_original_filename_mime_and_content(self):
+        record = files_upload_api.DRAG_DOWNLOAD_MANAGER.issue(
+            path=f"{TEAM_ROOT}/Images/O'Neal & Jünger.jpg",
+            name="O'Neal & Jünger.jpg",
+            media_type="image/jpeg",
+            size=8,
+            user_id="worker-1",
+            now=100,
+        )
+        with self.assertRaises(files_upload_api.FilesUploadError) as caught:
+            files_upload_api.DRAG_DOWNLOAD_MANAGER.consume(
+                record.token,
+                now=100 + files_upload_api.FILES_DRAG_TOKEN_SECONDS,
+            )
+        self.assertEqual(caught.exception.code, "drag_expired")
+
+        record = files_upload_api.DRAG_DOWNLOAD_MANAGER.issue(
+            path=f"{TEAM_ROOT}/Images/O'Neal & Jünger.jpg",
+            name="O'Neal & Jünger.jpg",
+            media_type="image/jpeg",
+            size=8,
+            user_id="worker-1",
+        )
+        request = files_upload_api.Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": f"/api/files-drag/{record.token}",
+                "path_params": {"token": record.token},
+                "query_string": b"",
+                "headers": [],
+                "scheme": "https",
+                "server": ("sports-cave.test", 443),
+            }
+        )
+        upstream = type(
+            "Upstream",
+            (),
+            {
+                "iter_content": lambda self, chunk_size: iter((b"ORIGINAL",)),
+                "close": lambda self: setattr(self, "closed", True),
+                "closed": False,
+            },
+        )()
+        with patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "token", "root_path": TEAM_ROOT},
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "get_file_response",
+            return_value=({"size": 8}, upstream),
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "delete_path_recoverable",
+        ) as delete_source:
+            response = asyncio.run(files_upload_api.drag_file(request))
+            content = asyncio.run(response_bytes(response))
+
+        self.assertEqual(content, b"ORIGINAL")
+        self.assertEqual(response.media_type, "image/jpeg")
+        self.assertIn("attachment", response.headers["content-disposition"])
+        self.assertIn("O%27Neal%20%26%20J%C3%BCnger.jpg", response.headers["content-disposition"])
+        self.assertTrue(upstream.closed)
+        delete_source.assert_not_called()
+
+    def test_drag_token_creation_revalidates_relative_paths_and_exposes_no_cloud_secret(self):
+        relative = "Images/O'Neal & J\u00fcnger.jpg"
+        request = json_request("/api/files-drag-token", {"paths": [relative]})
+        with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "get_file_metadata",
+            return_value={
+                ".tag": "file",
+                "name": "O'Neal & J\u00fcnger.jpg",
+                "size": 123,
+            },
+        ) as metadata:
+            response = asyncio.run(files_upload_api.create_drag_tokens(request))
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["downloads"][0]["name"], "O'Neal & J\u00fcnger.jpg")
+        self.assertEqual(payload["downloads"][0]["media_type"], "image/jpeg")
+        self.assertTrue(payload["downloads"][0]["url"].startswith("/api/files-drag/"))
+        self.assertNotIn("secret-token", response.body.decode("utf-8"))
+        self.assertNotIn(TEAM_ROOT, response.body.decode("utf-8"))
+        metadata.assert_called_once_with("secret-token", f"{TEAM_ROOT}/{relative}")
+
+        denied = json_request("/api/files-drag-token", {"paths": ["../outside.jpg"]})
+        with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
+        ), patch.object(files_upload_api.dropbox_integration, "get_file_metadata") as denied_metadata:
+            denied_response = asyncio.run(files_upload_api.create_drag_tokens(denied))
+        self.assertEqual(denied_response.status_code, 403)
+        denied_metadata.assert_not_called()
 
 
 class FilesWindowInteractionContractTests(unittest.TestCase):
@@ -440,7 +693,12 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         open_block = self.client[self.client.index("function desktopApplication") : self.client.index("function startDownload")]
         self.assertIn('item.kind === "photoshop"', open_block)
         self.assertIn('return "Photoshop"', open_block)
-        self.assertIn("sports-cave-files://open?path=", open_block)
+        self.assertIn('"sports-cave-photoshop"', open_block)
+        self.assertIn('"sports-cave-files"', open_block)
+        self.assertIn("function desktopProtocolScheme", open_block)
+        self.assertIn("function isWindowsPlatform()", open_block)
+        self.assertIn("return /Win/i.test(platform)", open_block)
+        self.assertIn("const protocolUrl = `${scheme}://open?path=", open_block)
         self.assertIn("item.desktop_relative_path", open_block)
         self.assertNotIn("/api/files-download", open_block)
         self.assertIn("Opening in ${application}...", open_block)
@@ -453,7 +711,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
     def test_every_standard_open_action_uses_the_authoritative_open_item(self):
         self.assertEqual(self.client.count("function openItem(item)"), 1)
         self.assertIn("elements.openButton.onclick = () => openItem(selectedItems()[0])", self.client)
-        self.assertIn('{ label: "Open", action: () => openItem(item) }', self.client)
+        self.assertIn('{ label: "Open", disabled: !single, action: () => openItem(item) }', self.client)
         self.assertIn('if (event.key === "Enter")', self.client)
         item_handler = self.client[self.client.index("function createItemElement") : self.client.index("function detailCell")]
         self.assertIn("openItem(item)", item_handler)
@@ -540,6 +798,73 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('elements.stage.addEventListener("pointermove"', self.viewer)
         for control in ("previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton", "rotateLeftButton", "rotateRightButton", "downloadButton", "desktopButton", "closeButton"):
             self.assertIn(f'id="{control}"', self.viewer)
+
+    def test_viewer_has_no_stale_loading_overlay_and_streams_directly_into_image(self):
+        self.assertNotIn("Image could not be opened", self.viewer)
+        self.assertNotIn("Loading image", self.viewer)
+        self.assertNotIn('class="spinner"', self.viewer)
+        self.assertNotIn("response.blob()", self.viewer)
+        self.assertNotIn("URL.createObjectURL", self.viewer)
+        self.assertIn('decoding="async"', self.viewer)
+        self.assertIn('fetchpriority="high"', self.viewer)
+        self.assertIn("const generation = ++state.loadGeneration", self.viewer)
+        self.assertIn('elements.image.src = `/api/files-image-preview?path=', self.viewer)
+        self.assertIn('elements.image.style.display = "block"', self.viewer)
+        self.assertIn("if (generation !== state.loadGeneration) return", self.viewer)
+
+    def test_cut_copy_paste_context_menus_keyboard_and_session_persistence(self):
+        self.assertIn('const CLIPBOARD_KEY = "sports-cave-files-clipboard-v1"', self.client)
+        self.assertIn("sessionStorage.getItem(CLIPBOARD_KEY)", self.client)
+        self.assertIn("sessionStorage.setItem(CLIPBOARD_KEY", self.client)
+        self.assertIn("function setFilesClipboard(mode", self.client)
+        self.assertIn("function pasteFiles(conflict", self.client)
+        self.assertIn('apiJson("/api/files-paste"', self.client)
+        self.assertIn('operation === "move" && successful.length', self.client)
+        self.assertIn("const movedPaths = new Set", self.client)
+        self.assertIn("Failed items remain in the clipboard", self.client)
+        self.assertIn("Skipped items remain in the clipboard", self.client)
+        self.assertIn(".file-item.cut-pending", self.client)
+        for label in ("Cut", "Copy", "Paste"):
+            self.assertIn(f'label: "{label}"', self.client)
+        for choice in ("Skip", "Keep both", "Replace"):
+            self.assertIn(f'choice("{choice}"', self.client)
+        self.assertIn("event.target.matches(\"input, textarea, select, [contenteditable='true']\")", self.client)
+        self.assertIn('shortcut && key === "c"', self.client)
+        self.assertIn('shortcut && key === "x"', self.client)
+        self.assertIn('shortcut && key === "v"', self.client)
+        self.assertIn('event.key === "Delete"', self.client)
+        self.assertIn('event.key === "F2"', self.client)
+
+    def test_external_drag_prepares_only_selection_and_supplies_real_file_and_download_url(self):
+        self.assertIn("function prepareExternalDrag(items, key)", self.client)
+        self.assertIn('apiJson("/api/files-drag-token"', self.client)
+        self.assertIn("items.map(item => item.desktop_relative_path)", self.client)
+        self.assertIn("files.push(new File([blob], download.name", self.client)
+        self.assertIn("event.dataTransfer.items.add(file)", self.client)
+        self.assertIn('event.dataTransfer.setData(\n            "DownloadURL"', self.client)
+        self.assertIn('event.dataTransfer.setData("text/uri-list"', self.client)
+        self.assertIn('event.dataTransfer.effectAllowed = "copy"', self.client)
+        self.assertIn('event.dataTransfer.dropEffect = "copy"', self.client)
+        self.assertIn('showToast("Preparing file..."', self.client)
+        self.assertIn('showToast("Ready to drag"', self.client)
+        self.assertIn("state.suppressClickUntil", self.client)
+        self.assertIn("createDragGhost(item, items.length)", self.client)
+        drag_block = self.client[
+            self.client.index("function externalDragItems") :
+            self.client.index("function showItemContextMenu")
+        ]
+        self.assertNotIn("/api/files-delete", drag_block)
+        self.assertNotIn("operation: \"move\"", drag_block)
+
+    def test_copy_and_cut_also_request_native_windows_file_clipboard(self):
+        block = self.client[
+            self.client.index("function invokeDesktopClipboard") :
+            self.client.index("function invokeDesktopHelper")
+        ]
+        self.assertIn("sports-cave-files://clipboard?paths=", block)
+        self.assertIn("encodeURIComponent(JSON.stringify(paths))", block)
+        self.assertIn('effect === "move" ? "move" : "copy"', block)
+        self.assertIn('mode === "cut" ? "move" : "copy"', self.client)
 
 
 if __name__ == "__main__":

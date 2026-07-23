@@ -147,6 +147,59 @@ class AccountAccessTests(unittest.TestCase):
             )
         )
 
+    def test_activity_log_capability_defaults_off_for_workers_and_on_for_admin(self):
+        admin = {"role": "admin", "is_active": True, "page_permissions": []}
+        worker = {
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["dashboard"],
+        }
+
+        self.assertTrue(os_accounts.can_view_activity_log(admin))
+        self.assertFalse(os_accounts.can_view_activity_log(worker))
+        self.assertTrue(
+            os_accounts.can_view_activity_log(
+                {
+                    **worker,
+                    "page_permissions": ["dashboard", os_accounts.ACTIVITY_LOG_CAPABILITY],
+                }
+            )
+        )
+        self.assertFalse(
+            os_accounts.can_view_activity_log(
+                {
+                    **worker,
+                    "page_permissions": [os_accounts.ACTIVITY_LOG_CAPABILITY],
+                }
+            )
+        )
+
+    def test_activity_log_capability_is_accepted_by_permission_storage(self):
+        class RecordingCursor:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, parameters):
+                self.calls.append((sql, parameters))
+
+        cursor = RecordingCursor()
+        selected = os_accounts.PostgresAccountStore._replace_permissions(
+            cursor,
+            "worker-1",
+            ["dashboard", os_accounts.ACTIVITY_LOG_CAPABILITY, "not-a-permission"],
+        )
+
+        self.assertEqual(
+            selected,
+            ["dashboard", os_accounts.ACTIVITY_LOG_CAPABILITY],
+        )
+        self.assertTrue(
+            any(
+                parameters == ("worker-1", os_accounts.ACTIVITY_LOG_CAPABILITY)
+                for _, parameters in cursor.calls
+            )
+        )
+
     def test_first_admin_bootstrap_does_not_duplicate_user(self):
         store = FakeAccountStore()
 
@@ -1325,6 +1378,38 @@ class AccountAccessTests(unittest.TestCase):
         self.assertNotIn("Daily Task Execution Sheet", text)
         self.assertNotIn("Activity log", text)
         self.assertNotIn("dashboard-activity-view", text)
+
+    def test_worker_home_renders_activity_log_when_admin_approves_it(self):
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = {
+            "id": "worker-1",
+            "username": "worker",
+            "display_name": "Maria",
+            "role": "worker",
+            "timezone": os_accounts.WORKER_TIMEZONE,
+            "is_active": True,
+            "page_permissions": ["dashboard", os_accounts.ACTIVITY_LOG_CAPABILITY],
+        }
+        app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+
+        app_test.run(timeout=20)
+
+        text = self._app_text(app_test)
+        self.assertFalse(app_test.exception)
+        self.assertIn("Activity log", text)
+        self.assertNotIn("Daily Task Execution Sheet", text)
+
+    def test_accounts_access_exposes_activity_log_permission_tick(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        permission_source = source[
+            source.index("def _account_permission_fields") :
+            source.index("\n\ndef render_accounts_access_page")
+        ]
+
+        self.assertIn('"View activity log"', permission_source)
+        self.assertIn("os_accounts.ACTIVITY_LOG_CAPABILITY", permission_source)
 
     def test_admin_home_still_renders_activity_log(self):
         app_test = AppTest.from_file(str(ROOT / "app.py"))

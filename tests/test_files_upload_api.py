@@ -514,6 +514,7 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
         self.assertGreater(len(response.body), 100)
         with zipfile.ZipFile(io.BytesIO(response.body)) as package:
             self.assertIn("Install.cmd", package.namelist())
+            self.assertIn("PhotoshopProtocolLauncher.cs", package.namelist())
             self.assertIn("SportsCaveFilesHelper.ps1", package.namelist())
 
 

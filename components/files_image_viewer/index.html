@@ -65,21 +65,6 @@
         transform-origin: center center;
         will-change: transform;
       }
-      .state {
-        align-items: center;
-        color: var(--muted);
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-        inset: 0;
-        justify-content: center;
-        padding: 30px;
-        position: absolute;
-        text-align: center;
-      }
-      .state.error { color: #ffb4ab; }
-      .spinner { animation: spin .8s linear infinite; border: 3px solid #555; border-top-color: var(--accent); border-radius: 50%; height: 28px; width: 28px; }
-      @keyframes spin { to { transform: rotate(360deg); } }
       .status {
         align-items: center;
         background: #202020;
@@ -140,12 +125,10 @@
         <button class="tool text-tool" id="desktopButton" type="button" title="Open in desktop app"><span class="icon">&#8599;</span><span class="tool-label">Desktop app</span></button>
         <button class="tool" id="closeButton" type="button" title="Close" aria-label="Close"><span class="icon">&#215;</span></button>
       </div>
-      <section class="stage" id="stage" aria-live="polite">
-        <img class="image" id="image" alt="">
-        <div class="state" id="loadingState"><span class="spinner"></span><span>Loading image...</span></div>
-        <div class="state error" id="errorState" hidden><strong>Image could not be opened.</strong><span id="errorText"></span></div>
+      <section class="stage" id="stage">
+        <img class="image" id="image" alt="" decoding="async" fetchpriority="high">
       </section>
-      <footer class="status"><span id="dimensions">Loading...</span><span id="zoomStatus"></span></footer>
+      <footer class="status"><span id="dimensions"></span><span id="zoomStatus"></span></footer>
     </main>
     <a class="sr-only" id="protocolLink" href="#" tabindex="-1">Open in desktop app</a>
     <iframe class="sr-only" id="downloadFrame" title="Download"></iframe>
@@ -160,7 +143,7 @@
       const elements = Object.fromEntries([
         "previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton",
         "rotateLeftButton", "rotateRightButton", "fileName", "downloadButton", "desktopButton", "closeButton",
-        "stage", "image", "loadingState", "errorState", "errorText", "dimensions", "zoomStatus", "protocolLink",
+        "stage", "image", "dimensions", "zoomStatus", "protocolLink",
         "downloadFrame", "helperPanel", "checkHelperButton", "installHelperButton", "downloadInsteadButton"
       ].map(id => [id, document.getElementById(id)]));
       const query = new URLSearchParams(location.search);
@@ -178,8 +161,7 @@
         panX: 0,
         panY: 0,
         pointer: null,
-        objectUrl: "",
-        controller: null,
+        loadGeneration: 0,
         helperTimer: 0,
         sizingMode: "fit",
       };
@@ -243,24 +225,16 @@
         applyTransform();
       }
 
-      function setLoading() {
-        elements.loadingState.hidden = false;
-        elements.errorState.hidden = true;
+      function clearImage() {
         elements.image.style.display = "none";
-        elements.dimensions.textContent = "Loading...";
+        elements.dimensions.textContent = "";
+        elements.zoomStatus.textContent = "";
       }
 
-      function setError(message) {
-        elements.loadingState.hidden = true;
-        elements.errorState.hidden = false;
-        elements.errorText.textContent = String(message || "Try again or open it in the desktop app.");
-        elements.image.style.display = "none";
-        elements.dimensions.textContent = "Preview unavailable";
-      }
-
-      async function loadImage(path, { folder = state.folder, name = "", replaceHistory = true } = {}) {
+      function loadImage(path, { folder = state.folder, name = "", replaceHistory = true } = {}) {
         const relativePath = String(path || "");
-        if (!relativePath) { setError("The image path is missing."); return; }
+        if (!relativePath) { clearImage(); return; }
+        const generation = ++state.loadGeneration;
         state.path = relativePath;
         state.folder = String(folder || "");
         state.name = String(name || fileNameFromPath(relativePath));
@@ -270,42 +244,28 @@
         elements.fileName.textContent = state.name;
         elements.fileName.title = state.name;
         document.title = `${state.name} - Sports Cave Image Viewer`;
-        setLoading();
+        clearImage();
         if (replaceHistory) {
           const params = new URLSearchParams({ path: state.path, folder: state.folder, name: state.name });
           history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
         }
-        if (state.controller) state.controller.abort();
-        state.controller = new AbortController();
-        if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
-        state.objectUrl = "";
-        try {
-          const response = await fetch(`/api/files-image-preview?path=${encodeURIComponent(state.path)}`, {
-            credentials: "same-origin",
-            signal: state.controller.signal,
-          });
-          if (!response.ok) {
-            let message = "The image preview is unavailable.";
-            try { message = (await response.json()).message || message; } catch (_) {}
-            throw new Error(message);
-          }
-          state.objectUrl = URL.createObjectURL(await response.blob());
-          elements.image.src = state.objectUrl;
-          await elements.image.decode();
+        elements.image.onload = () => {
+          if (generation !== state.loadGeneration) return;
           state.naturalWidth = elements.image.naturalWidth;
           state.naturalHeight = elements.image.naturalHeight;
           elements.image.style.width = `${state.naturalWidth}px`;
           elements.image.style.height = `${state.naturalHeight}px`;
           elements.image.alt = state.name;
           elements.image.style.display = "block";
-          elements.loadingState.hidden = true;
-          elements.errorState.hidden = true;
           elements.dimensions.textContent = `${state.naturalWidth} x ${state.naturalHeight} pixels`;
           fitToScreen();
           syncNavigation();
-        } catch (error) {
-          if (error.name !== "AbortError") setError(error.message);
-        }
+        };
+        elements.image.onerror = () => {
+          if (generation !== state.loadGeneration) return;
+          clearImage();
+        };
+        elements.image.src = `/api/files-image-preview?path=${encodeURIComponent(state.path)}`;
       }
 
       async function loadFolderImages() {
@@ -410,10 +370,7 @@
         else if (event.key === "-") zoomBy(1 / 1.2);
         else if (event.key === "0") fitToScreen();
       });
-      window.addEventListener("beforeunload", () => {
-        if (state.controller) state.controller.abort();
-        if (state.objectUrl) URL.revokeObjectURL(state.objectUrl);
-      });
+      window.addEventListener("beforeunload", () => { state.loadGeneration += 1; });
 
       loadImage(state.path, { folder: state.folder, name: state.name, replaceHistory: false });
       loadFolderImages();

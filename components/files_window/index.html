@@ -234,6 +234,7 @@
       .file-item:hover { background: #f0f6fa; border-color: #dbe8f1; }
       .file-item.selected { background: var(--accent-selected); border-color: #9cc7e4; }
       .file-item.focused { box-shadow: inset 0 0 0 1px var(--accent); }
+      .file-item.cut-pending { opacity: 0.45; }
       .item-checkbox {
         accent-color: var(--accent);
         height: 16px;
@@ -365,6 +366,27 @@
         z-index: 30;
       }
       .drop-overlay.visible { display: flex; }
+      .drag-ghost {
+        align-items: center;
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid #9db7ca;
+        border-radius: 5px;
+        box-shadow: 0 5px 16px rgba(0, 0, 0, 0.2);
+        color: #202124;
+        display: flex;
+        font-size: 12px;
+        gap: 7px;
+        left: -1000px;
+        max-width: 230px;
+        min-height: 46px;
+        padding: 6px 9px;
+        pointer-events: none;
+        position: fixed;
+        top: -1000px;
+        z-index: 100;
+      }
+      .drag-ghost .file-icon { height: 34px; width: 34px; }
+      .drag-ghost-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .menu {
         background: #fff;
         border: 1px solid #d3d6d9;
@@ -392,6 +414,14 @@
         width: 100%;
       }
       .menu-button .check { color: var(--accent); display: inline-block; width: 14px; }
+      .menu-icon {
+        color: #353a3f;
+        display: inline-flex;
+        font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif;
+        font-size: 15px;
+        justify-content: center;
+        width: 18px;
+      }
       .menu-button .arrow { color: #6c7176; margin-left: auto; }
       .menu-separator { background: #e6e7e9; height: 1px; margin: 4px; }
       .menu-label { color: #747a80; font-size: 11px; padding: 5px 9px 3px; text-transform: uppercase; }
@@ -573,6 +603,7 @@
 
     <script>
       const STORAGE_KEY = "sports-cave-files-state-v2";
+      const CLIPBOARD_KEY = "sports-cave-files-clipboard-v1";
       const CHUNK_BYTES = 8 * 1024 * 1024;
       const MAX_UPLOAD_CONCURRENT = 2;
       const MAX_THUMBNAIL_CONCURRENT = 4;
@@ -592,6 +623,17 @@
       function restoredState() {
         try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") || {}; }
         catch (_) { return {}; }
+      }
+
+      function restoredClipboard() {
+        try {
+          const value = JSON.parse(sessionStorage.getItem(CLIPBOARD_KEY) || "null");
+          return value && ["copy", "cut"].includes(value.mode) && Array.isArray(value.items)
+            ? value
+            : { mode: "", items: [] };
+        } catch (_) {
+          return { mode: "", items: [] };
+        }
       }
 
       const restored = restoredState();
@@ -632,6 +674,13 @@
         uploadActive: 0,
         uploadRefreshTimer: 0,
         uploadConflict: restored.uploadConflict || "cancel",
+        clipboard: restoredClipboard(),
+        clipboardBusy: false,
+        dragPrepared: null,
+        dragPreparing: null,
+        outboundDrag: false,
+        suppressClickUntil: 0,
+        dragGhost: null,
       };
 
       function persistState() {
@@ -656,6 +705,13 @@
         history.replaceState(null, "", `${location.pathname}?${params.toString()}`);
       }
 
+      function persistClipboard() {
+        try {
+          if (state.clipboard.items.length) sessionStorage.setItem(CLIPBOARD_KEY, JSON.stringify(state.clipboard));
+          else sessionStorage.removeItem(CLIPBOARD_KEY);
+        } catch (_) {}
+      }
+
       function currentSearch() {
         return String(state.searchByPath[state.currentPath] || "");
       }
@@ -669,6 +725,8 @@
             error.code = payload.code || "files_error";
             error.status = response.status;
             error.offset = payload.offset;
+            error.conflicts = Array.from(payload.conflicts || []);
+            error.payload = payload;
             throw error;
           }
           return payload;
@@ -779,6 +837,7 @@
         row.setAttribute("role", "option");
         row.setAttribute("aria-label", `${item.name}, ${item.type}`);
         row.tabIndex = item.path === state.focusedPath ? 0 : -1;
+        row.draggable = item.tag !== "folder";
 
         const checkbox = document.createElement("input");
         checkbox.type = "checkbox";
@@ -817,6 +876,11 @@
         }
 
         row.addEventListener("click", event => {
+          if (Date.now() < state.suppressClickUntil) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
           if (event.detail > 1 || event.target === checkbox) return;
           if (event.ctrlKey || event.metaKey) selectByIndex(index, { toggle: true });
           else if (event.shiftKey) selectByIndex(index, { range: true });
@@ -833,6 +897,8 @@
           showItemContextMenu(item, event.clientX, event.clientY);
         });
         row.addEventListener("keydown", event => handleItemKeydown(event, item, index));
+        row.addEventListener("dragstart", event => handleExternalDragStart(event, item, index));
+        row.addEventListener("dragend", finishExternalDrag);
         return row;
       }
 
@@ -887,7 +953,12 @@
       function renderStatus() {
         const visible = visibleItems().length;
         elements.itemCount.textContent = currentSearch() ? `${visible} of ${state.items.length} items` : `${state.items.length} item${state.items.length === 1 ? "" : "s"}`;
-        elements.selectionCount.textContent = state.selection.size ? `${state.selection.size} selected` : "";
+        const clipboardCount = state.clipboard.items.length;
+        elements.selectionCount.textContent = state.selection.size
+          ? `${state.selection.size} selected`
+          : (clipboardCount
+            ? `${clipboardCount} item${clipboardCount === 1 ? "" : "s"} ${state.clipboard.mode === "cut" ? "ready to move" : "copied"}`
+            : "");
       }
 
       function selectedItems() {
@@ -900,6 +971,10 @@
           const selected = state.selection.has(row.dataset.path);
           row.classList.toggle("selected", selected);
           row.classList.toggle("focused", row.dataset.path === state.focusedPath);
+          row.classList.toggle(
+            "cut-pending",
+            state.clipboard.mode === "cut" && state.clipboard.items.some(item => item.path === row.dataset.path)
+          );
           row.setAttribute("aria-selected", selected ? "true" : "false");
           row.tabIndex = row.dataset.path === state.focusedPath ? 0 : -1;
           const checkbox = row.querySelector(".item-checkbox");
@@ -1055,6 +1130,30 @@
           : "Open in Windows File Explorer";
       }
 
+      function isWindowsPlatform() {
+        const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || "";
+        return /Win/i.test(platform);
+      }
+
+      function desktopProtocolScheme(item, kind) {
+        return isWindowsPlatform() && kind === "file" && item.kind === "photoshop"
+          ? "sports-cave-photoshop"
+          : "sports-cave-files";
+      }
+
+      function invokeDesktopClipboard(items, effect) {
+        if (!isWindowsPlatform()) return;
+        const paths = Array.from(items || []).map(item => String(item.relative_path || "")).filter(Boolean);
+        if (!paths.length) return;
+        const protocolUrl = `sports-cave-files://clipboard?paths=${encodeURIComponent(JSON.stringify(paths))}&effect=${effect === "move" ? "move" : "copy"}`;
+        if (protocolUrl.length > 30000) {
+          showToast("Select fewer items for the Windows clipboard.", { kind: "error", duration: 5000 });
+          return;
+        }
+        elements.protocolLink.href = protocolUrl;
+        elements.protocolLink.click();
+      }
+
       function invokeDesktopHelper(item, kind = "file") {
         const relativePath = String(item.desktop_relative_path || "");
         if (!relativePath) {
@@ -1067,7 +1166,8 @@
         }
         const application = kind === "folder" ? "your desktop file manager" : desktopApplication(item);
         showToast(`Opening in ${application}...`, { duration: 2400 });
-        const protocolUrl = `sports-cave-files://open?path=${encodeURIComponent(relativePath)}&kind=${encodeURIComponent(kind)}`;
+        const scheme = desktopProtocolScheme(item, kind);
+        const protocolUrl = `${scheme}://open?path=${encodeURIComponent(relativePath)}&kind=${encodeURIComponent(kind)}`;
         state.helperItem = item;
         elements.helperPanel.classList.remove("visible");
         elements.protocolLink.href = protocolUrl;
@@ -1230,9 +1330,12 @@
           const check = document.createElement("span");
           check.className = "check";
           check.textContent = definition.checked ? "\u2713" : "";
+          const icon = document.createElement("span");
+          icon.className = "menu-icon";
+          icon.textContent = definition.icon || "";
           const label = document.createElement("span");
           label.textContent = definition.label;
-          button.append(check, label);
+          button.append(check, icon, label);
           if (definition.submenu) {
             const arrow = document.createElement("span");
             arrow.className = "arrow";
@@ -1334,15 +1437,277 @@
         showToast(`Upload conflict: ${conflict.replace("_", " ")}`, { duration: 1800 });
       }
 
+      function clipboardPayload(items) {
+        return items.map(item => ({
+          path: String(item.path || ""),
+          relative_path: String(item.desktop_relative_path || ""),
+          name: String(item.name || ""),
+          tag: String(item.tag || "file"),
+          kind: String(item.kind || "file"),
+          size: Number(item.size || 0),
+          extension: String(item.extension || ""),
+        })).filter(item => item.relative_path);
+      }
+
+      function setFilesClipboard(mode, items = selectedItems()) {
+        const chosen = clipboardPayload(items);
+        if (!chosen.length || !["copy", "cut"].includes(mode)) return;
+        state.clipboard = { mode, items: chosen, createdAt: Date.now() };
+        persistClipboard();
+        updateSelectionUi();
+        invokeDesktopClipboard(chosen, mode === "cut" ? "move" : "copy");
+        const count = chosen.length;
+        showToast(
+          mode === "cut"
+            ? `${count} item${count === 1 ? "" : "s"} ready to move`
+            : `${count} item${count === 1 ? "" : "s"} copied`,
+          { kind: "success", duration: 2200 }
+        );
+      }
+
+      function clearFilesClipboard() {
+        state.clipboard = { mode: "", items: [] };
+        persistClipboard();
+        updateSelectionUi();
+      }
+
+      function canPasteHere() {
+        if (state.clipboardBusy || !state.clipboard.items.length || !state.currentPath) return false;
+        const destination = relativeFolderPath().toLocaleLowerCase();
+        if (state.clipboard.items.some(item => {
+          const source = item.relative_path.toLocaleLowerCase();
+          return item.tag === "folder" && (destination === source || destination.startsWith(`${source}/`));
+        })) return false;
+        if (state.clipboard.mode === "cut") {
+          const movable = state.clipboard.items.some(item => {
+            const sourceParent = item.relative_path.includes("/")
+              ? item.relative_path.slice(0, item.relative_path.lastIndexOf("/"))
+              : "";
+            return sourceParent.toLocaleLowerCase() !== destination;
+          });
+          if (!movable) return false;
+        }
+        return true;
+      }
+
+      async function pasteFiles(conflict = "prompt") {
+        if (!canPasteHere()) return;
+        const operation = state.clipboard.mode === "cut" ? "move" : "copy";
+        state.clipboardBusy = true;
+        closeMenus();
+        showToast("Pasting items...", { duration: 1800 });
+        try {
+          const payload = await apiJson("/api/files-paste", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              paths: state.clipboard.items.map(item => item.relative_path),
+              destination: relativeFolderPath(),
+              operation,
+              conflict,
+            }),
+          });
+          const successful = Array.from(payload.successful || []);
+          const failed = Array.from(payload.failed || []);
+          const skipped = Array.from(payload.skipped || []);
+          if (operation === "move" && successful.length) {
+            const movedPaths = new Set(successful.map(item => String(item.source_path || "").toLocaleLowerCase()));
+            state.clipboard.items = state.clipboard.items.filter(
+              item => !movedPaths.has(String(item.path || "").toLocaleLowerCase())
+            );
+            if (state.clipboard.items.length) {
+              persistClipboard();
+              updateSelectionUi();
+            } else {
+              clearFilesClipboard();
+            }
+          }
+          const folderName = state.currentPath.split("/").filter(Boolean).pop() || state.rootName;
+          if (failed.length) {
+            showToast(`Pasted ${successful.length}; ${failed.length} failed. Failed items remain in the clipboard.`, { kind: "error", duration: 6000 });
+          } else if (skipped.length && successful.length) {
+            showToast(`Pasted ${successful.length}; ${skipped.length} skipped. Skipped items remain in the clipboard.`, { duration: 4500 });
+          } else if (skipped.length && !successful.length) {
+            showToast("No items were pasted.", { duration: 3000 });
+          } else {
+            showToast(`${operation === "move" ? "Moved" : "Copied"} to ${folderName}`, { kind: "success", duration: 2400 });
+          }
+          await navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
+        } catch (error) {
+          if (error.code === "paste_conflict" && error.conflicts.length) showPasteConflictDialog(error.conflicts);
+          else showToast(error.message, { kind: "error", duration: 6000 });
+        } finally {
+          state.clipboardBusy = false;
+          updateSelectionUi();
+        }
+      }
+
+      function showPasteConflictDialog(conflicts) {
+        openModal(modal => {
+          const count = conflicts.length;
+          modalHeading(
+            modal,
+            `${count} item${count === 1 ? "" : "s"} already exist`,
+            "Choose what to do with items that have the same name."
+          );
+          const list = document.createElement("div");
+          list.className = "delete-list";
+          conflicts.forEach(item => {
+            const row = document.createElement("div");
+            row.textContent = item.name;
+            list.appendChild(row);
+          });
+          modal.appendChild(list);
+          const actions = document.createElement("div");
+          actions.className = "modal-actions";
+          const choice = (label, policy, className = "dialog-button") => {
+            const button = document.createElement("button");
+            button.type = "button";
+            button.className = className;
+            button.textContent = label;
+            button.onclick = () => { closeModal(); pasteFiles(policy); };
+            return button;
+          };
+          const cancel = choice("Cancel", "", "dialog-button");
+          cancel.onclick = closeModal;
+          actions.append(
+            cancel,
+            choice("Skip", "skip"),
+            choice("Keep both", "keep_both"),
+            choice("Replace", "replace", "dialog-button danger")
+          );
+          modal.appendChild(actions);
+        });
+      }
+
+      function externalDragItems(item, index) {
+        if (!state.selection.has(item.path)) setSingleSelection(item.path, index);
+        return selectedItems().filter(selected => selected.tag !== "folder");
+      }
+
+      function externalDragKey(items) {
+        return items.map(item => `${item.desktop_relative_path}|${item.size}`).join("\n");
+      }
+
+      async function prepareExternalDrag(items, key) {
+        if (state.dragPreparing && state.dragPreparing.key === key) return state.dragPreparing.promise;
+        showToast("Preparing file...", { duration: 3000 });
+        const promise = (async () => {
+          const payload = await apiJson("/api/files-drag-token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ paths: items.map(item => item.desktop_relative_path) }),
+          });
+          const downloads = Array.from(payload.downloads || []);
+          const files = [];
+          let preparedBytes = 0;
+          const maxFileBytes = 50 * 1024 * 1024;
+          const maxTotalBytes = 100 * 1024 * 1024;
+          for (const download of downloads) {
+            const size = Number(download.size || 0);
+            if (size > maxFileBytes || preparedBytes + size > maxTotalBytes) continue;
+            const response = await fetch(download.url, { credentials: "same-origin" });
+            if (!response.ok) continue;
+            const blob = await response.blob();
+            files.push(new File([blob], download.name, {
+              type: download.media_type || blob.type || "application/octet-stream",
+              lastModified: Date.now(),
+            }));
+            preparedBytes += blob.size;
+          }
+          state.dragPrepared = {
+            key,
+            downloads,
+            files,
+            expiresAt: Date.now() + 90 * 1000,
+          };
+          showToast("Ready to drag", { kind: "success", duration: 2200 });
+          return state.dragPrepared;
+        })();
+        state.dragPreparing = { key, promise };
+        try {
+          return await promise;
+        } catch (error) {
+          showToast(error.message || "This file could not be prepared.", { kind: "error", duration: 5000 });
+          return null;
+        } finally {
+          if (state.dragPreparing && state.dragPreparing.key === key) state.dragPreparing = null;
+        }
+      }
+
+      function createDragGhost(item, count) {
+        if (state.dragGhost) state.dragGhost.remove();
+        const ghost = document.createElement("div");
+        ghost.className = "drag-ghost";
+        const icon = document.createElement("span");
+        icon.className = "file-icon";
+        icon.innerHTML = itemIcon(item);
+        const label = document.createElement("span");
+        label.className = "drag-ghost-label";
+        label.textContent = count > 1 ? `${count} items` : item.name;
+        ghost.append(icon, label);
+        document.body.appendChild(ghost);
+        state.dragGhost = ghost;
+        return ghost;
+      }
+
+      function handleExternalDragStart(event, item, index) {
+        const items = externalDragItems(item, index);
+        if (!items.length || !event.dataTransfer) {
+          event.preventDefault();
+          return;
+        }
+        const key = externalDragKey(items);
+        const prepared = state.dragPrepared;
+        if (!prepared || prepared.key !== key || prepared.expiresAt <= Date.now()) {
+          event.preventDefault();
+          state.suppressClickUntil = Date.now() + 600;
+          prepareExternalDrag(items, key);
+          return;
+        }
+        state.outboundDrag = true;
+        state.suppressClickUntil = Date.now() + 600;
+        event.dataTransfer.clearData();
+        event.dataTransfer.effectAllowed = "copy";
+        event.dataTransfer.dropEffect = "copy";
+        prepared.files.forEach(file => {
+          try { event.dataTransfer.items.add(file); } catch (_) {}
+        });
+        const urls = prepared.downloads.map(download => new URL(download.url, location.origin).href);
+        const primary = prepared.downloads[0];
+        if (primary) {
+          const safeName = String(primary.name || "download").replaceAll(":", "_");
+          event.dataTransfer.setData(
+            "DownloadURL",
+            `${primary.media_type || "application/octet-stream"}:${safeName}:${urls[0]}`
+          );
+        }
+        if (urls.length) event.dataTransfer.setData("text/uri-list", urls.join("\r\n"));
+        const ghost = createDragGhost(item, items.length);
+        event.dataTransfer.setDragImage(ghost, 22, 22);
+      }
+
+      function finishExternalDrag() {
+        state.outboundDrag = false;
+        if (state.dragGhost) state.dragGhost.remove();
+        state.dragGhost = null;
+      }
+
       function showItemContextMenu(item, x, y) {
         const chosen = selectedItems();
         const single = chosen.length === 1;
         const canDelete = state.canDelete && chosen.length > 0 && chosen.every(selected => !selected.protected);
+        const allFiles = chosen.length > 0 && chosen.every(selected => selected.tag !== "folder");
         if (item.kind === "folder") {
           showMenu([
-            { label: "Open", action: () => openItem(item) },
+            { label: "Open", disabled: !single, action: () => openItem(item) },
             { label: desktopFileManagerLabel(), action: () => invokeDesktopHelper(item, "folder") },
             menuDivider(),
+            { label: "Cut", icon: "\uE8C6", action: () => setFilesClipboard("cut", chosen) },
+            { label: "Copy", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
+            { label: "Paste", icon: "\uE77F", disabled: !canPasteHere(), action: () => pasteFiles() },
+            menuDivider(),
+            { label: "Download", disabled: !allFiles, action: () => startDownload(chosen) },
             { label: "Rename", disabled: !single, action: () => showRenameDialog(item) },
             { label: "Delete", disabled: !canDelete, action: showDeleteDialog },
             menuDivider(),
@@ -1351,14 +1716,18 @@
           ], x, y);
         } else {
           const definitions = [
-            { label: "Open", action: () => openItem(item) },
+            { label: "Open", disabled: !single, action: () => openItem(item) },
           ];
           if (item.kind === "image") {
             definitions.push({ label: "Open in desktop app", action: () => invokeDesktopHelper(item, "file") });
           }
           definitions.push(
-            { label: "Download", action: () => startDownload(chosen.length ? chosen : [item]) },
             menuDivider(),
+            { label: "Cut", icon: "\uE8C6", action: () => setFilesClipboard("cut", chosen) },
+            { label: "Copy", icon: "\uE8C8", action: () => setFilesClipboard("copy", chosen) },
+            { label: "Paste", icon: "\uE77F", disabled: !canPasteHere(), action: () => pasteFiles() },
+            menuDivider(),
+            { label: "Download", action: () => startDownload(chosen.length ? chosen : [item]) },
             { label: "Rename", disabled: !single, action: () => showRenameDialog(item) },
             { label: "Delete", disabled: !canDelete, action: showDeleteDialog },
             menuDivider(),
@@ -1371,6 +1740,8 @@
 
       function showEmptyContextMenu(x, y) {
         showMenu([
+          { label: "Paste", icon: "\uE77F", disabled: !canPasteHere(), action: () => pasteFiles() },
+          menuDivider(),
           { label: "New folder", action: showNewFolderDialog },
           { label: "Upload", action: () => elements.filesInput.click() },
           { label: "Refresh", action: () => navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true }) },
@@ -1889,7 +2260,7 @@
       }
 
       function hasExternalFiles(event) {
-        return Boolean(event.dataTransfer && Array.from(event.dataTransfer.types || []).includes("Files"));
+        return Boolean(!state.outboundDrag && event.dataTransfer && Array.from(event.dataTransfer.types || []).includes("Files"));
       }
 
       function handleItemKeydown(event, item, index) {
@@ -2010,7 +2381,7 @@
         if (!event.target.closest(".menu") && !event.target.closest("#uploadButton, #sortButton, #viewButton, #moreButton")) closeMenus();
       }, true);
       document.addEventListener("keydown", event => {
-        const typing = event.target.matches && event.target.matches("input, textarea, select");
+        const typing = event.target.matches && event.target.matches("input, textarea, select, [contenteditable='true']");
         if (event.key === "Escape") {
           event.preventDefault();
           if (elements.modalBackdrop.classList.contains("open")) closeModal();
@@ -2019,7 +2390,18 @@
           return;
         }
         if (typing) return;
-        if ((event.altKey && event.key === "ArrowLeft") || event.key === "Backspace") {
+        const shortcut = (event.ctrlKey || event.metaKey) && !event.altKey;
+        const key = event.key.toLocaleLowerCase();
+        if (shortcut && key === "c" && state.selection.size) {
+          event.preventDefault();
+          setFilesClipboard("copy");
+        } else if (shortcut && key === "x" && state.selection.size) {
+          event.preventDefault();
+          setFilesClipboard("cut");
+        } else if (shortcut && key === "v" && canPasteHere()) {
+          event.preventDefault();
+          pasteFiles();
+        } else if ((event.altKey && event.key === "ArrowLeft") || event.key === "Backspace") {
           event.preventDefault();
           navigateBack();
         } else if (event.altKey && event.key === "ArrowRight") {
@@ -2054,6 +2436,7 @@
       window.addEventListener("beforeunload", () => {
         stopThumbnailLoading();
         state.thumbnailCache.forEach(url => URL.revokeObjectURL(url));
+        finishExternalDrag();
       });
 
       async function initialise() {

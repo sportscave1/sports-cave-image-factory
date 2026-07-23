@@ -8524,6 +8524,14 @@ def _account_permission_fields(prefix, selected=()):
             help="Allow this worker to move Files items to Dropbox Deleted Files.",
         ):
             chosen.append(os_accounts.FILES_DELETE_CAPABILITY)
+    with columns[0]:
+        if st.checkbox(
+            "View activity log",
+            value=os_accounts.ACTIVITY_LOG_CAPABILITY in selected,
+            key=f"{prefix}::{os_accounts.ACTIVITY_LOG_CAPABILITY}",
+            help="Allow this worker to see the Activity log on Home.",
+        ):
+            chosen.append(os_accounts.ACTIVITY_LOG_CAPABILITY)
     return chosen
 
 
@@ -9886,7 +9894,7 @@ def _activity_table_html(records):
 
 
 def render_activity_log(local_now, *, show_denied=True):
-    if not os_accounts.is_admin(current_os_user()):
+    if not os_accounts.can_view_activity_log(current_os_user()):
         if show_denied:
             st.title("Access not approved")
             st.caption("This page is not available for your account.")
@@ -10200,8 +10208,9 @@ def render_lightweight_dashboard_page():
         render_active_alerts(events, today)
     render_todays_design_ideas(local_now, events)
     render_dashboard_tasks(state)
-    if os_accounts.is_admin(user):
+    if os_accounts.can_view_activity_log(user):
         render_activity_log(local_now)
+    if os_accounts.is_admin(user):
         render_daily_execution_archive(local_now)
         render_sports_sales_calendar(events, local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import threading
 import time
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlencode
@@ -439,15 +440,21 @@ def get_thumbnail_bytes(access_token, path, *, size="w64h64"):
 
 def get_file_bytes(access_token, path):
     """Download one Dropbox file into server memory for an authenticated response."""
+    metadata, response = get_file_response(access_token, path)
+    content = bytes(getattr(response, "content", b"") or b"")
+    if not content:
+        raise DropboxApiError("Dropbox file preview is unavailable.")
+    return metadata, content
+
+
+def get_file_response(access_token, path):
+    """Open one Dropbox download response without buffering it in application memory."""
     clean_path = normalize_dropbox_path(path)
     try:
         metadata, response = team_space_client(access_token).files_download(clean_path)
     except Exception as error:
         raise _dropbox_error(error, "Dropbox file preview is unavailable.") from error
-    content = bytes(getattr(response, "content", b"") or b"")
-    if not content:
-        raise DropboxApiError("Dropbox file preview is unavailable.")
-    return _metadata_to_dict(metadata), content
+    return _metadata_to_dict(metadata), response
 
 
 def get_file_metadata(access_token, path):
@@ -726,6 +733,19 @@ def numbered_path(access_token, path, *, max_attempts=999):
     for index in range(1, max(2, int(max_attempts or 999)) + 1):
         candidate_name = f"{stem} ({index}){suffix}"
         candidate = normalize_dropbox_path(f"{parent}/{candidate_name}")
+        if not path_exists(access_token, candidate):
+            return candidate
+    raise DropboxConflictError("A free Dropbox filename could not be found.")
+
+
+def windows_numbered_path(access_token, path, *, max_attempts=999):
+    """Return the first available Windows-style keep-both path, starting at (2)."""
+    clean_path = normalize_dropbox_path(path)
+    parent, _, name = clean_path.rpartition("/")
+    suffix = PurePosixPath(name).suffix
+    stem = name[: -len(suffix)] if suffix else name
+    for index in range(2, max(3, int(max_attempts or 999)) + 1):
+        candidate = normalize_dropbox_path(f"{parent}/{stem} ({index}){suffix}")
         if not path_exists(access_token, candidate):
             return candidate
     raise DropboxConflictError("A free Dropbox filename could not be found.")
@@ -1060,6 +1080,73 @@ def rename_path(access_token, path, new_name, *, root_path=None):
         raise _dropbox_error(error, "Dropbox item could not be renamed.") from error
     metadata = getattr(result, "metadata", result)
     return _metadata_to_dict(metadata)
+
+
+def copy_path(access_token, source_path, destination_path, *, root_path):
+    clean_root = normalize_dropbox_path(root_path)
+    source = normalize_dropbox_path(source_path)
+    destination = normalize_dropbox_path(destination_path)
+    if (
+        source.casefold() == clean_root.casefold()
+        or not path_is_within_root(source, clean_root)
+        or not path_is_within_root(destination, clean_root)
+    ):
+        raise ValueError("This copy is outside the shared Files folder.")
+    try:
+        result = team_space_client(access_token).files_copy_v2(
+            source,
+            destination,
+            autorename=False,
+            allow_shared_folder=False,
+        )
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox item could not be copied.") from error
+    return _metadata_to_dict(getattr(result, "metadata", result))
+
+
+def move_path(access_token, source_path, destination_path, *, root_path):
+    clean_root = normalize_dropbox_path(root_path)
+    source = normalize_dropbox_path(source_path)
+    destination = normalize_dropbox_path(destination_path)
+    if (
+        source.casefold() == clean_root.casefold()
+        or not path_is_within_root(source, clean_root)
+        or not path_is_within_root(destination, clean_root)
+    ):
+        raise ValueError("This move is outside the shared Files folder.")
+    try:
+        result = team_space_client(access_token).files_move_v2(
+            source,
+            destination,
+            autorename=False,
+            allow_shared_folder=False,
+        )
+    except Exception as error:
+        raise _dropbox_error(error, "Dropbox item could not be moved.") from error
+    return _metadata_to_dict(getattr(result, "metadata", result))
+
+
+def replace_path(access_token, source_path, destination_path, *, operation, root_path):
+    """Copy or move over an existing path while retaining a recoverable backup."""
+    clean_root = normalize_dropbox_path(root_path)
+    source = normalize_dropbox_path(source_path)
+    destination = normalize_dropbox_path(destination_path)
+    if source.casefold() == destination.casefold():
+        raise DropboxConflictError("The source and destination are the same item.")
+    backup = normalize_dropbox_path(
+        f"{destination}.sports-cave-replaced-{time.time_ns()}"
+    )
+    move_path(access_token, destination, backup, root_path=clean_root)
+    transfer = move_path if str(operation).casefold() == "move" else copy_path
+    try:
+        metadata = transfer(access_token, source, destination, root_path=clean_root)
+    except Exception:
+        with suppress(Exception):
+            move_path(access_token, backup, destination, root_path=clean_root)
+        raise
+    with suppress(Exception):
+        delete_path_recoverable(access_token, backup, root_path=clean_root)
+    return metadata
 
 
 def delete_path_recoverable(access_token, path, *, root_path):

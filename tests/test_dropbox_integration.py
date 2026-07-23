@@ -924,6 +924,108 @@ class DropboxIntegrationTests(unittest.TestCase):
         self.assertIn("jpeg", repr(call.kwargs["format"]))
         temporary_link.assert_not_called()
 
+    def test_windows_keep_both_starts_at_two_and_preserves_extension(self):
+        with patch.object(
+            dropbox_integration,
+            "path_exists",
+            side_effect=[True, False],
+        ) as exists:
+            result = dropbox_integration.windows_numbered_path(
+                "token",
+                "/Sportscave Team Folder/Images/final.jpg",
+            )
+
+        self.assertEqual(result, "/Sportscave Team Folder/Images/final (3).jpg")
+        self.assertEqual(exists.call_args_list[0].args[1], "/Sportscave Team Folder/Images/final (2).jpg")
+
+    def test_copy_and_move_use_dropbox_server_side_operations_for_files_and_folders(self):
+        client = MagicMock()
+        client.files_copy_v2.return_value = SimpleNamespace(
+            metadata={".tag": "folder", "name": "Campaign"}
+        )
+        client.files_move_v2.return_value = SimpleNamespace(
+            metadata={".tag": "file", "name": "final.jpg"}
+        )
+        root = "/Sportscave Team Folder"
+        with patch.object(dropbox_integration, "team_space_client", return_value=client):
+            copied = dropbox_integration.copy_path(
+                "token",
+                f"{root}/Source/Campaign",
+                f"{root}/Destination/Campaign",
+                root_path=root,
+            )
+            moved = dropbox_integration.move_path(
+                "token",
+                f"{root}/Source/final.jpg",
+                f"{root}/Destination/final.jpg",
+                root_path=root,
+            )
+
+        self.assertEqual(copied[".tag"], "folder")
+        self.assertEqual(moved["name"], "final.jpg")
+        client.files_copy_v2.assert_called_once_with(
+            f"{root}/Source/Campaign",
+            f"{root}/Destination/Campaign",
+            autorename=False,
+            allow_shared_folder=False,
+        )
+        client.files_move_v2.assert_called_once_with(
+            f"{root}/Source/final.jpg",
+            f"{root}/Destination/final.jpg",
+            autorename=False,
+            allow_shared_folder=False,
+        )
+
+    def test_copy_and_move_reject_root_or_outside_paths_before_dropbox(self):
+        client = MagicMock()
+        root = "/Sportscave Team Folder"
+        with patch.object(dropbox_integration, "team_space_client", return_value=client):
+            for operation in (dropbox_integration.copy_path, dropbox_integration.move_path):
+                with self.subTest(operation=operation.__name__), self.assertRaises(ValueError):
+                    operation(
+                        "token",
+                        root,
+                        f"{root}/Destination/root",
+                        root_path=root,
+                    )
+                with self.subTest(operation=operation.__name__), self.assertRaises(ValueError):
+                    operation(
+                        "token",
+                        f"{root}/Source/file.jpg",
+                        "/Outside/file.jpg",
+                        root_path=root,
+                    )
+        client.files_copy_v2.assert_not_called()
+        client.files_move_v2.assert_not_called()
+
+    def test_replace_restores_existing_destination_when_transfer_fails(self):
+        root = "/Sportscave Team Folder"
+        source = f"{root}/Source/final.jpg"
+        destination = f"{root}/Destination/final.jpg"
+        backup = f"{destination}.sports-cave-replaced-123"
+        with patch.object(dropbox_integration.time, "time_ns", return_value=123), patch.object(
+            dropbox_integration,
+            "move_path",
+            side_effect=[{"path_display": backup}, {"path_display": destination}],
+        ) as move_path, patch.object(
+            dropbox_integration,
+            "copy_path",
+            side_effect=RuntimeError("copy failed"),
+        ), patch.object(dropbox_integration, "delete_path_recoverable") as delete_backup:
+            with self.assertRaisesRegex(RuntimeError, "copy failed"):
+                dropbox_integration.replace_path(
+                    "token",
+                    source,
+                    destination,
+                    operation="copy",
+                    root_path=root,
+                )
+
+        self.assertEqual(move_path.call_count, 2)
+        self.assertEqual(move_path.call_args_list[0].args[1:3], (destination, backup))
+        self.assertEqual(move_path.call_args_list[1].args[1:3], (backup, destination))
+        delete_backup.assert_not_called()
+
     def test_file_size_formatting_is_compact(self):
         self.assertEqual(dropbox_integration.format_file_size(0), "0 B")
         self.assertEqual(dropbox_integration.format_file_size(1536), "1.5 KB")

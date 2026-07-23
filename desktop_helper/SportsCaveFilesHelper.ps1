@@ -115,17 +115,63 @@ function Request-FileHydration([string]$Path) {
     }
 }
 
+function Resolve-SafeTarget([string]$Root, [string]$RelativePath) {
+    if ([string]::IsNullOrWhiteSpace($RelativePath) -or [System.IO.Path]::IsPathRooted($RelativePath) -or $RelativePath.Contains(":")) {
+        throw "The requested path is not allowed."
+    }
+    $segments = $RelativePath.Replace("/", "\").Split("\", [System.StringSplitOptions]::RemoveEmptyEntries)
+    if (-not $segments.Count -or @($segments | Where-Object { $_ -in @(".", "..") }).Count) {
+        throw "The requested path is not allowed."
+    }
+    $target = [System.IO.Path]::GetFullPath((Join-Path $Root ($segments -join "\")))
+    $rootPrefix = $Root + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $target.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The requested path is outside the approved Dropbox folder."
+    }
+    if (-not (Test-Path -LiteralPath $target)) {
+        throw "This file is not available locally yet. Check Dropbox Desktop sync and try again."
+    }
+    return $target
+}
+
+function Set-FilesClipboard([string[]]$Paths, [string]$Effect) {
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+    $fileList = New-Object System.Collections.Specialized.StringCollection
+    $fileList.AddRange([string[]]$Paths)
+    $data = New-Object System.Windows.Forms.DataObject
+    $data.SetFileDropList($fileList)
+    $effectValue = if ($Effect -eq "move") { [uint32]2 } else { [uint32]1 }
+    $effectBytes = [System.BitConverter]::GetBytes($effectValue)
+    $effectStream = New-Object System.IO.MemoryStream
+    $effectStream.Write($effectBytes, 0, $effectBytes.Length)
+    $effectStream.Position = 0
+    $data.SetData("Preferred DropEffect", $false, $effectStream)
+    [System.Windows.Forms.Clipboard]::SetDataObject($data, $true)
+}
+
 try {
     $uri = [System.Uri]$ProtocolUri
-    if (-not $uri.IsAbsoluteUri -or $uri.Scheme -ne "sports-cave-files" -or $uri.Host -ne "open") {
+    if (-not $uri.IsAbsoluteUri -or
+        $uri.Scheme -notin @("sports-cave-files", "sports-cave-photoshop") -or
+        $uri.Host -notin @("open", "clipboard") -or
+        ($uri.Scheme -eq "sports-cave-photoshop" -and $uri.Host -ne "open")) {
         throw "Unsupported request."
     }
     $query = Read-ProtocolQuery $uri
-    if (-not $query.ContainsKey("path") -or @($query.Keys | Where-Object { $_ -notin @("path", "kind") }).Count) {
-        throw "Unsupported request."
-    }
-    if ($query.ContainsKey("kind") -and $query.kind -notin @("file", "folder")) {
-        throw "Unsupported request."
+    if ($uri.Host -eq "open") {
+        if (-not $query.ContainsKey("path") -or @($query.Keys | Where-Object { $_ -notin @("path", "kind") }).Count) {
+            throw "Unsupported request."
+        }
+        if ($query.ContainsKey("kind") -and $query.kind -notin @("file", "folder")) {
+            throw "Unsupported request."
+        }
+    } else {
+        if (-not $query.ContainsKey("paths") -or @($query.Keys | Where-Object { $_ -notin @("paths", "effect") }).Count) {
+            throw "Unsupported request."
+        }
+        if ($query.ContainsKey("effect") -and $query.effect -notin @("copy", "move")) {
+            throw "Unsupported request."
+        }
     }
 
     $configPath = Join-Path $PSScriptRoot "config.json"
@@ -138,29 +184,45 @@ try {
         throw "The configured Sportscave Team Folder is unavailable. Check Dropbox Desktop."
     }
 
-    $relative = [string]$query.path
-    if ([string]::IsNullOrWhiteSpace($relative) -or [System.IO.Path]::IsPathRooted($relative) -or $relative.Contains(":")) {
-        throw "The requested path is not allowed."
-    }
-    $segments = $relative.Replace("/", "\").Split("\", [System.StringSplitOptions]::RemoveEmptyEntries)
-    if (-not $segments.Count -or @($segments | Where-Object { $_ -in @(".", "..") }).Count) {
-        throw "The requested path is not allowed."
-    }
-    $target = [System.IO.Path]::GetFullPath((Join-Path $root ($segments -join "\")))
-    $rootPrefix = $root + [System.IO.Path]::DirectorySeparatorChar
-    if (-not $target.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-        throw "The requested path is outside the approved Dropbox folder."
-    }
-    if (-not (Test-Path -LiteralPath $target)) {
-        throw "This file is not available locally yet. Check Dropbox Desktop sync and try again."
+    if ($uri.Host -eq "clipboard") {
+        try {
+            $decodedPaths = ConvertFrom-Json -InputObject ([string]$query.paths)
+            $relativePaths = @($decodedPaths)
+        } catch {
+            throw "The clipboard request is invalid."
+        }
+        if (-not $relativePaths.Count -or $relativePaths.Count -gt 100) {
+            throw "Select between 1 and 100 items for the Windows clipboard."
+        }
+        $targets = @()
+        foreach ($relativePath in $relativePaths) {
+            $targetPath = Resolve-SafeTarget $root ([string]$relativePath)
+            if (-not (Test-Path -LiteralPath $targetPath -PathType Container)) {
+                Request-FileHydration $targetPath
+            }
+            $targets += $targetPath
+        }
+        if ($ValidateOnly) {
+            $targets | Write-Output
+            exit 0
+        }
+        $clipboardEffect = if ($query.ContainsKey("effect")) { [string]$query.effect } else { "copy" }
+        Set-FilesClipboard ([string[]]$targets) $clipboardEffect
+        exit 0
     }
 
+    $target = Resolve-SafeTarget $root ([string]$query.path)
+
     $isFolder = Test-Path -LiteralPath $target -PathType Container
+    $extension = ""
     if (-not $isFolder) {
         $extension = [System.IO.Path]::GetExtension($target).ToLowerInvariant()
         if ($blockedExtensions -contains $extension) {
             throw "This file type cannot be opened by the Sports Cave helper."
         }
+    }
+    if ($uri.Scheme -eq "sports-cave-photoshop" -and ($isFolder -or $extension -notin @(".psd", ".psb"))) {
+        throw "The Photoshop action only supports PSD and PSB files."
     }
     if ($ValidateOnly) {
         Write-Output $target
