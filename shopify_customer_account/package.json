@@ -6,7 +6,7 @@
     "dev": "shopify app dev",
     "deploy": "shopify app deploy",
     "validate": "shopify app validate",
-    "test:vault": "node --no-warnings --test extensions/customer-certificate-vault/src/vault-utils.test.mjs"
+    "test:vault": "node --no-warnings --test extensions/customer-certificate-vault/src/vault-utils.test.mjs extensions/customer-certificate-vault/src/legacy-certificate-utils.test.mjs"
   },
   "dependencies": {
     "@preact/signals": "^2.9.2",
