@@ -303,7 +303,21 @@
         z-index: 5;
       }
       .details-header.visible { display: grid; }
-      .details-header span { align-items: center; border-right: 1px solid #e5e6e8; display: flex; padding: 0 8px; }
+      .details-header > span { align-items: center; border-right: 1px solid #e5e6e8; display: flex; padding: 0 8px; }
+      .details-sort-button {
+        align-items: center;
+        background: transparent;
+        border: 0;
+        color: inherit;
+        display: inline-flex;
+        gap: 5px;
+        height: 100%;
+        padding: 0;
+        text-align: left;
+        width: 100%;
+      }
+      .details-sort-button:hover { color: #202124; }
+      .sort-arrow { color: #6f757a; font-size: 11px; min-width: 10px; }
       .items.view-details { border: 1px solid var(--border); border-top: 0; min-height: auto; }
       .view-details .file-item {
         align-items: center;
@@ -320,6 +334,11 @@
       .view-details .file-icon { height: 32px; width: 32px; }
       .view-details .item-name { display: block; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
       .detail-cell { color: #42464a; min-width: 0; overflow: hidden; padding: 0 8px; text-overflow: ellipsis; white-space: nowrap; }
+      .detail-modified {
+        color: #6a7076;
+        font-variant-numeric: tabular-nums;
+        line-height: 42px;
+      }
       .empty-state, .loading-state {
         align-items: center;
         color: var(--muted);
@@ -425,6 +444,27 @@
       .menu-button .arrow { color: #6c7176; margin-left: auto; }
       .menu-separator { background: #e6e7e9; height: 1px; margin: 4px; }
       .menu-label { color: #747a80; font-size: 11px; padding: 5px 9px 3px; text-transform: uppercase; }
+      .file-tooltip {
+        background: #fffff4;
+        border: 1px solid #8d8d8d;
+        box-shadow: 2px 3px 8px rgba(0, 0, 0, 0.16);
+        color: #202124;
+        display: none;
+        font-size: 12px;
+        line-height: 1.35;
+        max-width: min(340px, calc(100vw - 16px));
+        padding: 6px 8px;
+        pointer-events: none;
+        position: fixed;
+        z-index: 210;
+      }
+      .file-tooltip.visible { display: block; }
+      .file-tooltip-name {
+        font-weight: 600;
+        margin-bottom: 3px;
+        overflow-wrap: anywhere;
+      }
+      .file-tooltip-line { white-space: nowrap; }
       .modal-backdrop {
         align-items: center;
         background: rgba(25, 30, 35, 0.28);
@@ -539,6 +579,10 @@
         .command-bar { overflow-x: auto; }
         .items.view-medium { grid-template-columns: repeat(auto-fill, minmax(122px, 1fr)); }
       }
+      @media (max-width: 560px) {
+        .details-header, .view-details .file-item { grid-template-columns: 30px minmax(150px, 1fr) 156px; }
+        .details-header > span:nth-child(6), .view-details .detail-size { display: none; }
+      }
     </style>
   </head>
   <body>
@@ -575,7 +619,7 @@
       <div class="results-shell" id="resultsShell">
         <div class="results" id="results" tabindex="0" aria-label="Files in current folder">
           <div class="details-header" id="detailsHeader" aria-hidden="true">
-            <span></span><span>Name</span><span>Status</span><span>Date modified</span><span>Type</span><span>Size</span>
+            <span></span><span>Name</span><span>Status</span><span><button class="details-sort-button" id="dateModifiedHeader" type="button" aria-label="Sort by date modified">Date modified <span class="sort-arrow" id="modifiedSortArrow" aria-hidden="true"></span></button></span><span>Type</span><span>Size</span>
           </div>
           <div class="items view-medium" id="items" role="listbox" aria-multiselectable="true"></div>
         </div>
@@ -587,6 +631,7 @@
     <input id="filesInput" type="file" multiple hidden>
     <input id="folderInput" type="file" multiple webkitdirectory directory hidden>
     <div class="menu" id="menu" role="menu"></div>
+    <div class="file-tooltip" id="fileTooltip" role="tooltip" aria-hidden="true"></div>
     <div class="modal-backdrop" id="modalBackdrop"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
     <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastText"></span><button id="toastAction" type="button"></button></div>
     <a class="sr-only" id="protocolLink" href="#" tabindex="-1">Open in desktop app</a>
@@ -615,9 +660,9 @@
       const elements = Object.fromEntries([
         "backButton", "forwardButton", "upButton", "refreshButton", "breadcrumbs", "searchInput", "searchClear",
         "openButton", "newButton", "uploadButton", "downloadButton", "renameButton", "deleteButton", "sortButton", "viewButton", "moreButton",
-        "results", "resultsShell", "detailsHeader", "items", "dropOverlay", "itemCount", "selectionCount", "filesInput", "folderInput",
+        "results", "resultsShell", "detailsHeader", "dateModifiedHeader", "modifiedSortArrow", "items", "dropOverlay", "itemCount", "selectionCount", "filesInput", "folderInput",
         "menu", "modalBackdrop", "modal", "toast", "toastText", "toastAction", "protocolLink", "helperPanel", "checkHelperButton",
-        "installHelperButton", "downloadInsteadButton", "uploadPanel", "uploadRows", "uploadTitle", "uploadClose"
+        "installHelperButton", "downloadInsteadButton", "uploadPanel", "uploadRows", "uploadTitle", "uploadClose", "fileTooltip"
       ].map(id => [id, document.getElementById(id)]));
 
       function restoredState() {
@@ -642,6 +687,7 @@
         rootPath: "",
         rootName: "Sportscave Team Folder",
         currentPath: query.get("path") || String(restored.currentPath || ""),
+        timeZone: "UTC",
         back: Array.isArray(restored.back) ? restored.back.slice(-30) : [],
         forward: Array.isArray(restored.forward) ? restored.forward.slice(-30) : [],
         view: VIEW_MODES.includes(query.get("view")) ? query.get("view") : (VIEW_MODES.includes(restored.view) ? restored.view : "medium"),
@@ -681,6 +727,9 @@
         outboundDrag: false,
         suppressClickUntil: 0,
         dragGhost: null,
+        tooltipTimer: 0,
+        tooltipItem: null,
+        tooltipPointer: { x: 0, y: 0 },
       };
 
       function persistState() {
@@ -746,11 +795,110 @@
         return `files-item-${(hash >>> 0).toString(16)}`;
       }
 
-      function formatDate(value) {
-        if (!value) return "";
+      function formatDate(value, { includeZone = false } = {}) {
+        if (!value) return "-";
         const date = new Date(value);
-        if (Number.isNaN(date.getTime())) return String(value);
-        return new Intl.DateTimeFormat(undefined, { day: "2-digit", month: "2-digit", year: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+        if (Number.isNaN(date.getTime())) return "-";
+        let formatter;
+        try {
+          formatter = new Intl.DateTimeFormat("en-AU", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: state.timeZone,
+            ...(includeZone ? { timeZoneName: "short" } : {}),
+          });
+        } catch (_) {
+          formatter = new Intl.DateTimeFormat("en-AU", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+            hour: "numeric",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: "UTC",
+            ...(includeZone ? { timeZoneName: "short" } : {}),
+          });
+        }
+        const parts = Object.fromEntries(
+          formatter.formatToParts(date)
+            .filter(part => part.type !== "literal")
+            .map(part => [part.type, part.value])
+        );
+        const base = `${parts.day} ${parts.month} ${parts.year}, ${parts.hour}:${parts.minute} ${String(parts.dayPeriod || "").toUpperCase()}`;
+        if (!includeZone) return base;
+        const zone = state.timeZone === "Asia/Manila" ? "PHT" : String(parts.timeZoneName || "UTC");
+        return `${base} ${zone}`;
+      }
+
+      function hideFileTooltip() {
+        window.clearTimeout(state.tooltipTimer);
+        state.tooltipTimer = 0;
+        state.tooltipItem = null;
+        elements.fileTooltip.classList.remove("visible");
+        elements.fileTooltip.setAttribute("aria-hidden", "true");
+        elements.fileTooltip.replaceChildren();
+      }
+
+      function positionFileTooltip() {
+        if (!elements.fileTooltip.classList.contains("visible")) return;
+        const offset = 14;
+        const bounds = elements.fileTooltip.getBoundingClientRect();
+        const left = Math.max(6, Math.min(state.tooltipPointer.x + offset, window.innerWidth - bounds.width - 6));
+        const preferredTop = state.tooltipPointer.y + offset;
+        const top = preferredTop + bounds.height <= window.innerHeight - 6
+          ? preferredTop
+          : Math.max(6, state.tooltipPointer.y - bounds.height - 8);
+        elements.fileTooltip.style.left = `${left}px`;
+        elements.fileTooltip.style.top = `${top}px`;
+      }
+
+      function showFileTooltip(item) {
+        if (!item || state.loading) return;
+        elements.fileTooltip.replaceChildren();
+        const name = document.createElement("div");
+        name.className = "file-tooltip-name";
+        name.textContent = item.name;
+        elements.fileTooltip.appendChild(name);
+        const lines = [];
+        if (item.tag === "folder") {
+          lines.push(`Item type: ${item.tooltip_type || "File folder"}`);
+          if (item.latest_activity) {
+            lines.push(`Latest known activity: ${item.latest_activity_tooltip_label || formatDate(item.latest_activity, { includeZone: true })}`);
+          }
+        } else {
+          lines.push(`Item type: ${item.tooltip_type || item.type || "File"}`);
+          lines.push(`Date modified: ${item.modified_tooltip_label || formatDate(item.modified, { includeZone: true })}`);
+          lines.push(`Size: ${item.tooltip_size_label || item.size_label || "0 B"}`);
+          const dimensions = item.kind === "image" ? item.dimensions : null;
+          const width = Number(dimensions && dimensions.width);
+          const height = Number(dimensions && dimensions.height);
+          if (width > 0 && height > 0) lines.push(`Dimensions: ${width} \u00d7 ${height}`);
+        }
+        lines.forEach(text => {
+          const line = document.createElement("div");
+          line.className = "file-tooltip-line";
+          line.textContent = text;
+          elements.fileTooltip.appendChild(line);
+        });
+        state.tooltipItem = item;
+        elements.fileTooltip.classList.add("visible");
+        elements.fileTooltip.setAttribute("aria-hidden", "false");
+        positionFileTooltip();
+      }
+
+      function scheduleFileTooltip(item, event) {
+        hideFileTooltip();
+        state.tooltipPointer = { x: event.clientX, y: event.clientY };
+        state.tooltipTimer = window.setTimeout(() => showFileTooltip(item), 600);
+      }
+
+      function moveFileTooltip(event) {
+        state.tooltipPointer = { x: event.clientX, y: event.clientY };
+        positionFileTooltip();
       }
 
       function showToast(message, { kind = "", duration = 3200, actionLabel = "", action = null } = {}) {
@@ -794,7 +942,14 @@
           if (left.tag !== right.tag) return left.tag === "folder" ? -1 : 1;
           let a;
           let b;
-          if (state.sortKey === "modified") { a = Date.parse(left.modified || 0) || 0; b = Date.parse(right.modified || 0) || 0; }
+          if (state.sortKey === "modified") {
+            a = Date.parse(left.modified || "");
+            b = Date.parse(right.modified || "");
+            const aValid = Number.isFinite(a);
+            const bValid = Number.isFinite(b);
+            if (aValid !== bValid) return aValid ? -1 : 1;
+            if (!aValid && !bValid) return String(left.name).localeCompare(String(right.name), undefined, { numeric: true, sensitivity: "base" });
+          }
           else if (state.sortKey === "size") { a = Number(left.size || 0); b = Number(right.size || 0); }
           else if (state.sortKey === "type") { a = left.type; b = right.type; }
           else { a = left.name; b = right.name; }
@@ -854,7 +1009,6 @@
         const name = document.createElement("span");
         name.className = "item-name";
         name.textContent = item.name;
-        name.title = item.name;
 
         if (state.view === "details") {
           const nameCell = document.createElement("span");
@@ -864,17 +1018,21 @@
             checkbox,
             nameCell,
             detailCell(item.status, "detail-status"),
-            detailCell(formatDate(item.modified), "detail-modified"),
+            detailCell(item.modified_label || formatDate(item.modified), "detail-modified"),
             detailCell(item.type, "detail-type"),
             detailCell(item.size_label, "detail-size")
           );
         } else {
           row.append(checkbox, icon, name);
           if (state.view === "list") {
-            row.append(detailCell(formatDate(item.modified), "item-secondary"), detailCell(item.size_label, "item-secondary"));
+            row.append(detailCell(item.modified_label || formatDate(item.modified), "item-secondary"), detailCell(item.size_label, "item-secondary"));
           }
         }
 
+        row.addEventListener("mouseenter", event => scheduleFileTooltip(item, event));
+        row.addEventListener("mousemove", moveFileTooltip);
+        row.addEventListener("mouseleave", hideFileTooltip);
+        row.addEventListener("mousedown", hideFileTooltip);
         row.addEventListener("click", event => {
           if (Date.now() < state.suppressClickUntil) {
             event.preventDefault();
@@ -891,13 +1049,17 @@
         });
         row.addEventListener("dblclick", event => { event.preventDefault(); event.stopPropagation(); });
         row.addEventListener("contextmenu", event => {
+          hideFileTooltip();
           event.preventDefault();
           event.stopPropagation();
           if (!state.selection.has(item.path)) setSingleSelection(item.path, index);
           showItemContextMenu(item, event.clientX, event.clientY);
         });
         row.addEventListener("keydown", event => handleItemKeydown(event, item, index));
-        row.addEventListener("dragstart", event => handleExternalDragStart(event, item, index));
+        row.addEventListener("dragstart", event => {
+          hideFileTooltip();
+          handleExternalDragStart(event, item, index);
+        });
         row.addEventListener("dragend", finishExternalDrag);
         return row;
       }
@@ -905,16 +1067,26 @@
       function detailCell(text, className) {
         const cell = document.createElement("span");
         cell.className = `detail-cell ${className || ""}`;
-        cell.textContent = text || "";
-        cell.title = text || "";
+        cell.textContent = text || "-";
         return cell;
       }
 
+      function renderModifiedSortHeader() {
+        const active = state.sortKey === "modified";
+        elements.modifiedSortArrow.textContent = active ? (state.sortDir === "desc" ? "\u2193" : "\u2191") : "";
+        elements.dateModifiedHeader.setAttribute("aria-pressed", active ? "true" : "false");
+        elements.dateModifiedHeader.title = active
+          ? `Date modified, ${state.sortDir === "desc" ? "newest first" : "oldest first"}`
+          : "Sort by date modified";
+      }
+
       function renderItems() {
+        hideFileTooltip();
         stopThumbnailLoading();
         elements.items.className = `items view-${state.view}`;
         elements.detailsHeader.classList.toggle("visible", state.view === "details");
         elements.detailsHeader.setAttribute("aria-hidden", state.view === "details" ? "false" : "true");
+        renderModifiedSortHeader();
         elements.items.replaceChildren();
         if (state.loading) {
           const loading = document.createElement("div");
@@ -1063,6 +1235,7 @@
           state.rootPath = String(payload.root_path || "");
           state.rootName = String(payload.root_name || "Files");
           state.currentPath = String(payload.current_path || state.rootPath);
+          state.timeZone = String(payload.timezone || "UTC");
           state.items = Array.from(payload.items || []);
           state.canDelete = Boolean(payload.can_delete);
           state.loading = false;
@@ -1390,7 +1563,11 @@
 
       function sortMenuDefinitions() {
         return [
-          ...Object.entries(SORT_LABELS).map(([key, label]) => ({ label, checked: state.sortKey === key, action: () => setSort(key, state.sortDir) })),
+          ...Object.entries(SORT_LABELS)
+            .filter(([key]) => key !== "modified")
+            .map(([key, label]) => ({ label, checked: state.sortKey === key, action: () => setSort(key, state.sortDir) })),
+          { label: "Date modified \u2014 newest first", checked: state.sortKey === "modified" && state.sortDir === "desc", action: () => setSort("modified", "desc") },
+          { label: "Date modified \u2014 oldest first", checked: state.sortKey === "modified" && state.sortDir === "asc", action: () => setSort("modified", "asc") },
           menuDivider(),
           { label: "Ascending", checked: state.sortDir === "asc", action: () => setSort(state.sortKey, "asc") },
           { label: "Descending", checked: state.sortDir === "desc", action: () => setSort(state.sortKey, "desc") },
@@ -1420,7 +1597,10 @@
         renderItems();
         renderStatus();
         persistState();
-        showToast(`Sorted by ${SORT_LABELS[key]}, ${direction === "asc" ? "ascending" : "descending"}`, { duration: 1800 });
+        const directionLabel = key === "modified"
+          ? (direction === "desc" ? "newest first" : "oldest first")
+          : (direction === "asc" ? "ascending" : "descending");
+        showToast(`Sorted by ${SORT_LABELS[key]}, ${directionLabel}`, { duration: 1800 });
       }
 
       function setView(view) {
@@ -2294,6 +2474,10 @@
       elements.deleteButton.onclick = showDeleteDialog;
       elements.uploadButton.onclick = event => { const bounds = event.currentTarget.getBoundingClientRect(); showMenu(uploadMenuDefinitions(), bounds.left, bounds.bottom + 3); };
       elements.sortButton.onclick = event => { const bounds = event.currentTarget.getBoundingClientRect(); showMenu(sortMenuDefinitions(), bounds.left, bounds.bottom + 3); };
+      elements.dateModifiedHeader.onclick = () => {
+        const direction = state.sortKey === "modified" && state.sortDir === "desc" ? "asc" : "desc";
+        setSort("modified", direction);
+      };
       elements.viewButton.onclick = event => { const bounds = event.currentTarget.getBoundingClientRect(); showMenu(viewMenuDefinitions(), bounds.left, bounds.bottom + 3); };
       elements.moreButton.onclick = event => {
         const chosen = selectedItems();
@@ -2338,6 +2522,7 @@
       elements.results.addEventListener("click", event => {
         if (!event.target.closest(".file-item")) clearSelection();
       });
+      elements.results.addEventListener("scroll", hideFileTooltip, { passive: true });
       elements.results.addEventListener("contextmenu", event => {
         event.preventDefault();
         if (!event.target.closest(".file-item")) {
@@ -2378,6 +2563,7 @@
       });
 
       document.addEventListener("pointerdown", event => {
+        hideFileTooltip();
         if (!event.target.closest(".menu") && !event.target.closest("#uploadButton, #sortButton, #viewButton, #moreButton")) closeMenus();
       }, true);
       document.addEventListener("keydown", event => {
@@ -2434,10 +2620,12 @@
       });
 
       window.addEventListener("beforeunload", () => {
+        hideFileTooltip();
         stopThumbnailLoading();
         state.thumbnailCache.forEach(url => URL.revokeObjectURL(url));
         finishExternalDrag();
       });
+      window.addEventListener("blur", hideFileTooltip);
 
       async function initialise() {
         document.title = "Sports Cave Files";

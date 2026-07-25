@@ -69,6 +69,7 @@ class FilesWindowApiTests(unittest.TestCase):
             "username": "worker",
             "display_name": "Worker",
             "role": "worker",
+            "timezone": "Asia/Manila",
             "is_active": True,
             "page_permissions": ["files"],
         }
@@ -133,10 +134,144 @@ class FilesWindowApiTests(unittest.TestCase):
         self.assertEqual(payload["items"][0]["name"], "O'Neal & J\u00fcnger.psd")
         self.assertEqual(payload["items"][0]["desktop_relative_path"], "Designs & Uploads/O'Neal & J\u00fcnger.psd")
         self.assertEqual(payload["items"][0]["kind"], "photoshop")
+        self.assertEqual(payload["items"][0]["modified"], "2026-07-23T00:10:00Z")
+        self.assertEqual(payload["items"][0]["modified_label"], "23 Jul 2026, 8:10 AM")
+        self.assertEqual(payload["items"][0]["modified_tooltip_label"], "23 Jul 2026, 8:10 AM PHT")
+        self.assertEqual(payload["timezone"], "Asia/Manila")
         self.assertNotIn("thumbnail_url", payload["items"][0])
         self.assertIn("thumbnail_url", payload["items"][1])
         self.assertNotIn("secret-token", response.body.decode("utf-8"))
         directory.assert_called_once_with("secret-token", path, force=False)
+
+    def test_timestamp_formatting_converts_to_configured_timezone_and_handles_missing_values(self):
+        value = "2026-07-25T02:41:00Z"
+        self.assertEqual(
+            files_upload_api._format_files_timestamp(value, "Asia/Manila"),
+            "25 Jul 2026, 10:41 AM",
+        )
+        self.assertEqual(
+            files_upload_api._format_files_timestamp(
+                value,
+                "Asia/Manila",
+                include_zone=True,
+            ),
+            "25 Jul 2026, 10:41 AM PHT",
+        )
+        self.assertEqual(
+            files_upload_api._format_files_timestamp(value, "Australia/Sydney"),
+            "25 Jul 2026, 12:41 PM",
+        )
+        self.assertEqual(files_upload_api._format_files_timestamp("", "Asia/Manila"), "-")
+        self.assertEqual(files_upload_api._format_files_timestamp("not-a-date", "Asia/Manila"), "-")
+
+    def test_tooltip_metadata_uses_cached_dimensions_only_and_omits_folder_modified_time(self):
+        image = files_upload_api._public_file_item(
+            {
+                ".tag": "file",
+                "name": "Campaign.png",
+                "path_display": f"{TEAM_ROOT}/Campaign.png",
+                "server_modified": "2026-07-25T02:41:00Z",
+                "size": 2_107_392,
+                "dimensions": {"width": 1448, "height": 1086},
+            },
+            TEAM_ROOT,
+            timezone_name="Asia/Manila",
+        )
+        image_without_dimensions = files_upload_api._public_file_item(
+            {
+                ".tag": "file",
+                "name": "Preview.jpg",
+                "path_display": f"{TEAM_ROOT}/Preview.jpg",
+                "server_modified": "2026-07-25T02:41:00Z",
+                "size": 10,
+            },
+            TEAM_ROOT,
+            timezone_name="Asia/Manila",
+        )
+        document = files_upload_api._public_file_item(
+            {
+                ".tag": "file",
+                "name": "Brief.pdf",
+                "path_display": f"{TEAM_ROOT}/Brief.pdf",
+                "server_modified": "invalid",
+                "size": 512,
+                "dimensions": {"width": 99, "height": 88},
+            },
+            TEAM_ROOT,
+            timezone_name="Asia/Manila",
+        )
+        folder = files_upload_api._public_file_item(
+            {
+                ".tag": "folder",
+                "name": "Approved",
+                "path_display": f"{TEAM_ROOT}/Approved",
+                "server_modified": "2026-07-25T02:41:00Z",
+            },
+            TEAM_ROOT,
+            timezone_name="Asia/Manila",
+        )
+        folder_with_activity = files_upload_api._public_file_item(
+            {
+                ".tag": "folder",
+                "name": "Archive",
+                "path_display": f"{TEAM_ROOT}/Archive",
+                "latest_known_activity": "2026-07-25T02:41:00Z",
+            },
+            TEAM_ROOT,
+            timezone_name="Asia/Manila",
+        )
+
+        self.assertEqual(image["tooltip_type"], "PNG File")
+        self.assertEqual(image["tooltip_size_label"], "2.01 MB")
+        self.assertEqual(image["dimensions"], {"width": 1448, "height": 1086})
+        self.assertNotIn("dimensions", image_without_dimensions)
+        self.assertEqual(document["modified_label"], "-")
+        self.assertNotIn("dimensions", document)
+        self.assertEqual(folder["tooltip_type"], "File folder")
+        self.assertEqual(folder["modified"], "")
+        self.assertEqual(folder["modified_label"], "-")
+        self.assertEqual(folder["latest_activity"], "")
+        self.assertEqual(
+            folder_with_activity["latest_activity_tooltip_label"],
+            "25 Jul 2026, 10:41 AM PHT",
+        )
+
+    def test_listing_many_rows_does_not_fetch_per_row_metadata_or_thumbnails(self):
+        entries = [
+            {
+                ".tag": "file",
+                "name": f"Image {index}.png",
+                "path_display": f"{TEAM_ROOT}/Image {index}.png",
+                "server_modified": f"2026-07-25T02:{index:02d}:00Z",
+                "size": index + 1,
+                "rev": f"rev-{index}",
+            }
+            for index in range(20)
+        ]
+        request = get_request("/api/files-list", {"path": TEAM_ROOT})
+        with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
+        ), patch.object(
+            files_upload_api,
+            "_directory_entries",
+            return_value=entries,
+        ) as directory, patch.object(
+            files_upload_api.dropbox_integration,
+            "get_file_metadata",
+        ) as metadata, patch.object(
+            files_upload_api,
+            "_thumbnail_bytes",
+        ) as thumbnail:
+            response = asyncio.run(files_upload_api.list_files(request))
+
+        payload = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(payload["items"]), 20)
+        directory.assert_called_once_with("secret-token", TEAM_ROOT, force=False)
+        metadata.assert_not_called()
+        thumbnail.assert_not_called()
 
     def test_psd_and_psb_are_metadata_only_and_thumbnail_endpoint_rejects_them(self):
         for extension in ("psd", "psb"):
@@ -745,6 +880,46 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("currentPath: state.currentPath", self.client)
         self.assertIn("searchByPath: state.searchByPath", self.client)
         self.assertIn("history.replaceState", self.client)
+
+    def test_date_modified_sort_and_timezone_formatting_use_raw_utc_metadata(self):
+        sort_block = self.client[
+            self.client.index("function visibleItems") :
+            self.client.index("function renderBreadcrumbs")
+        ]
+        self.assertIn('Date.parse(left.modified || "")', sort_block)
+        self.assertIn('Date.parse(right.modified || "")', sort_block)
+        self.assertIn("if (left.tag !== right.tag)", sort_block)
+        self.assertIn('left.tag === "folder" ? -1 : 1', sort_block)
+        self.assertIn('Date modified \\u2014 newest first', self.client)
+        self.assertIn('Date modified \\u2014 oldest first', self.client)
+        self.assertIn('setSort("modified", "desc")', self.client)
+        self.assertIn('setSort("modified", "asc")', self.client)
+        self.assertIn("elements.dateModifiedHeader.onclick", self.client)
+        self.assertIn('state.sortKey === "modified" && state.sortDir === "desc" ? "asc" : "desc"', self.client)
+        self.assertIn('timeZone: state.timeZone', self.client)
+        self.assertIn('state.timeZone = String(payload.timezone || "UTC")', self.client)
+        self.assertIn('parts.day} ${parts.month} ${parts.year}, ${parts.hour}:${parts.minute}', self.client)
+
+    def test_delayed_tooltip_uses_existing_item_metadata_without_fetching(self):
+        tooltip_block = self.client[
+            self.client.index("function hideFileTooltip") :
+            self.client.index("function showToast")
+        ]
+        self.assertIn("window.setTimeout(() => showFileTooltip(item), 600)", tooltip_block)
+        self.assertIn('lines.push(`Item type:', tooltip_block)
+        self.assertIn('lines.push(`Date modified:', tooltip_block)
+        self.assertIn('lines.push(`Size:', tooltip_block)
+        self.assertIn('lines.push(`Dimensions:', tooltip_block)
+        self.assertIn("if (item.latest_activity)", tooltip_block)
+        self.assertNotIn("fetch(", tooltip_block)
+        item_handler = self.client[
+            self.client.index("function createItemElement") :
+            self.client.index("function detailCell")
+        ]
+        for event_name in ("mouseenter", "mousemove", "mouseleave", "mousedown", "click", "contextmenu", "dragstart"):
+            self.assertIn(f'row.addEventListener("{event_name}"', item_handler)
+        self.assertIn("pointer-events: none", self.client)
+        self.assertIn("elements.results.addEventListener(\"scroll\", hideFileTooltip", self.client)
 
     def test_results_own_scroll_viewport_and_thumbnail_work_is_bounded(self):
         self.assertIn("grid-template-rows: auto auto auto minmax(0, 1fr) 27px", self.client)

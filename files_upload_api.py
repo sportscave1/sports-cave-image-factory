@@ -7,8 +7,10 @@ import time
 import zipfile
 from contextlib import suppress
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
@@ -707,7 +709,97 @@ def _file_type_label(name, tag):
     return labels.get(extension, f"{extension} file" if extension else "File")
 
 
-def _public_file_item(entry, root_path):
+def _files_timezone_name(user):
+    timezone_name = str(os_accounts.timezone_for_user(user or {}) or "").strip() or "UTC"
+    try:
+        ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return "UTC"
+    return timezone_name
+
+
+def _parse_dropbox_timestamp(value):
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        clean_value = str(value or "").strip()
+        if not clean_value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(clean_value.replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _utc_timestamp(value):
+    parsed = _parse_dropbox_timestamp(value)
+    if not parsed:
+        return ""
+    return parsed.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _format_files_timestamp(value, timezone_name, *, include_zone=False):
+    parsed = _parse_dropbox_timestamp(value)
+    if not parsed:
+        return "-"
+    try:
+        local_value = parsed.astimezone(ZoneInfo(str(timezone_name or "UTC")))
+    except (ZoneInfoNotFoundError, ValueError):
+        local_value = parsed
+        timezone_name = "UTC"
+    hour = local_value.strftime("%I").lstrip("0") or "0"
+    label = (
+        f"{local_value.day} {local_value.strftime('%b %Y')}, "
+        f"{hour}:{local_value.strftime('%M %p')}"
+    )
+    if not include_zone:
+        return label
+    zone_label = "PHT" if timezone_name == "Asia/Manila" else str(local_value.tzname() or "UTC")
+    return f"{label} {zone_label}"
+
+
+def _file_tooltip_type_label(name, tag):
+    if str(tag or "").casefold() == "folder":
+        return "File folder"
+    extension = PurePosixPath(str(name or "")).suffix.lstrip(".").upper()
+    return f"{extension} File" if extension else "File"
+
+
+def _tooltip_size_label(size):
+    value = max(0, int(size or 0))
+    units = ("B", "KB", "MB", "GB", "TB")
+    amount = float(value)
+    for unit in units:
+        if amount < 1024 or unit == units[-1]:
+            return f"{int(amount)} {unit}" if unit == "B" else f"{amount:.2f} {unit}"
+        amount /= 1024
+    return f"{value} B"
+
+
+def _cached_dimensions(entry):
+    dimensions = entry.get("dimensions")
+    if isinstance(dimensions, dict):
+        width = dimensions.get("width")
+        height = dimensions.get("height")
+    elif isinstance(dimensions, (list, tuple)) and len(dimensions) >= 2:
+        width, height = dimensions[:2]
+    else:
+        width = entry.get("image_width") or entry.get("thumbnail_width")
+        height = entry.get("image_height") or entry.get("thumbnail_height")
+    try:
+        width = int(width)
+        height = int(height)
+    except (TypeError, ValueError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return {"width": width, "height": height}
+
+
+def _public_file_item(entry, root_path, *, timezone_name="UTC"):
     entry = dict(entry or {})
     tag = str(entry.get(".tag") or "file").casefold()
     name = str(entry.get("name") or "Untitled")
@@ -721,6 +813,14 @@ def _public_file_item(entry, root_path):
     extension = PurePosixPath(name).suffix.casefold()
     thumbnail_supported = tag != "folder" and extension in {".jpg", ".jpeg", ".png"}
     revision = str(entry.get("rev") or entry.get("content_hash") or "")
+    modified = _utc_timestamp(entry.get("server_modified")) if tag != "folder" else ""
+    latest_activity = ""
+    if tag == "folder":
+        latest_activity = _utc_timestamp(
+            entry.get("latest_known_activity")
+            or entry.get("latest_activity")
+            or entry.get("activity_timestamp")
+        )
     item = {
         "id": path,
         "path": path,
@@ -732,10 +832,27 @@ def _public_file_item(entry, root_path):
         "type": _file_type_label(name, tag),
         "size": int(entry.get("size") or 0) if tag != "folder" else 0,
         "size_label": "" if tag == "folder" else dropbox_integration.format_file_size(entry.get("size")),
-        "modified": str(entry.get("server_modified") or ""),
+        "tooltip_size_label": "" if tag == "folder" else _tooltip_size_label(entry.get("size")),
+        "modified": modified,
+        "modified_label": _format_files_timestamp(modified, timezone_name),
+        "modified_tooltip_label": _format_files_timestamp(
+            modified,
+            timezone_name,
+            include_zone=True,
+        ),
+        "latest_activity": latest_activity,
+        "latest_activity_tooltip_label": _format_files_timestamp(
+            latest_activity,
+            timezone_name,
+            include_zone=True,
+        ),
+        "tooltip_type": _file_tooltip_type_label(name, tag),
         "status": "Online",
         "protected": path.casefold() == clean_root.casefold(),
     }
+    dimensions = _cached_dimensions(entry) if item["kind"] == "image" else None
+    if dimensions:
+        item["dimensions"] = dimensions
     if thumbnail_supported:
         item["thumbnail_url"] = (
             f"/api/files-thumbnail?path={quote(path, safe='')}&rev={quote(revision, safe='')}"
@@ -912,10 +1029,15 @@ async def list_files(request: Request):
                 current_path,
                 force=True,
             )
+        timezone_name = _files_timezone_name(user)
         items = [
             item
             for item in (
-                _public_file_item(entry, context["root_path"])
+                _public_file_item(
+                    entry,
+                    context["root_path"],
+                    timezone_name=timezone_name,
+                )
                 for entry in entries
             )
             if item
@@ -927,6 +1049,7 @@ async def list_files(request: Request):
                 "root_name": context["root_path"].rsplit("/", 1)[-1],
                 "current_path": current_path,
                 "items": items,
+                "timezone": timezone_name,
                 "can_delete": bool(os_accounts.can_delete_files(user)),
                 "cached_for_seconds": FILES_DIRECTORY_CACHE_SECONDS,
             },
