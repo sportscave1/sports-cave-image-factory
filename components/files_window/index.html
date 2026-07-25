@@ -235,16 +235,6 @@
       .file-item.selected { background: var(--accent-selected); border-color: #9cc7e4; }
       .file-item.focused { box-shadow: inset 0 0 0 1px var(--accent); }
       .file-item.cut-pending { opacity: 0.45; }
-      .item-checkbox {
-        accent-color: var(--accent);
-        height: 16px;
-        margin: 0;
-        position: absolute;
-        width: 16px;
-        z-index: 3;
-      }
-      .view-large .item-checkbox, .view-medium .item-checkbox { left: 7px; top: 7px; }
-      .file-item:not(:hover):not(.selected) .item-checkbox { opacity: 0.12; }
       .file-icon {
         align-items: center;
         display: flex;
@@ -281,12 +271,11 @@
         align-items: center;
         display: grid;
         gap: 7px;
-        grid-template-columns: 24px 34px minmax(0, 1fr);
+        grid-template-columns: 34px minmax(0, 1fr);
         height: 39px;
         padding: 2px 7px;
       }
-      .view-list .file-item { grid-template-columns: 24px 38px minmax(0, 1fr) 170px 100px; }
-      .view-small .item-checkbox, .view-list .item-checkbox { position: static; }
+      .view-list .file-item { grid-template-columns: 38px minmax(0, 1fr) 170px 100px; }
       .view-small .file-icon, .view-list .file-icon { height: 32px; width: 32px; }
       .view-small .item-name, .view-list .item-name { display: block; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
       .item-secondary { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -296,7 +285,7 @@
         color: #4c5156;
         display: none;
         font-size: 12px;
-        grid-template-columns: 34px minmax(250px, 1fr) 100px 180px 190px 100px;
+        grid-template-columns: minmax(250px, 1fr) 100px 180px 190px 100px;
         height: 34px;
         position: sticky;
         top: -8px;
@@ -325,11 +314,10 @@
         border-bottom: 1px solid #eef0f1;
         border-radius: 0;
         display: grid;
-        grid-template-columns: 34px minmax(250px, 1fr) 100px 180px 190px 100px;
+        grid-template-columns: minmax(250px, 1fr) 100px 180px 190px 100px;
         min-height: 42px;
       }
       .view-details .file-item:last-child { border-bottom: 0; }
-      .view-details .item-checkbox { justify-self: center; position: static; }
       .details-name { align-items: center; display: flex; gap: 8px; min-width: 0; padding: 3px 8px; }
       .view-details .file-icon { height: 32px; width: 32px; }
       .view-details .item-name { display: block; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
@@ -385,27 +373,6 @@
         z-index: 30;
       }
       .drop-overlay.visible { display: flex; }
-      .drag-ghost {
-        align-items: center;
-        background: rgba(255, 255, 255, 0.96);
-        border: 1px solid #9db7ca;
-        border-radius: 5px;
-        box-shadow: 0 5px 16px rgba(0, 0, 0, 0.2);
-        color: #202124;
-        display: flex;
-        font-size: 12px;
-        gap: 7px;
-        left: -1000px;
-        max-width: 230px;
-        min-height: 46px;
-        padding: 6px 9px;
-        pointer-events: none;
-        position: fixed;
-        top: -1000px;
-        z-index: 100;
-      }
-      .drag-ghost .file-icon { height: 34px; width: 34px; }
-      .drag-ghost-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .menu {
         background: #fff;
         border: 1px solid #d3d6d9;
@@ -569,8 +536,8 @@
         .address-row { grid-template-columns: auto minmax(180px, 1fr) minmax(160px, 260px); }
         .command span.command-label { display: none; }
         .command { padding: 0 8px; }
-        .details-header, .view-details .file-item { grid-template-columns: 34px minmax(220px, 1fr) 160px 100px; }
-        .details-header span:nth-child(3), .details-header span:nth-child(5), .view-details .detail-status, .view-details .detail-type { display: none; }
+        .details-header, .view-details .file-item { grid-template-columns: minmax(220px, 1fr) 160px 100px; }
+        .details-header > span:nth-child(2), .details-header > span:nth-child(4), .view-details .detail-status, .view-details .detail-type { display: none; }
       }
       @media (max-width: 680px) {
         .address-row { grid-template-columns: auto minmax(0, 1fr); }
@@ -580,8 +547,8 @@
         .items.view-medium { grid-template-columns: repeat(auto-fill, minmax(122px, 1fr)); }
       }
       @media (max-width: 560px) {
-        .details-header, .view-details .file-item { grid-template-columns: 30px minmax(150px, 1fr) 156px; }
-        .details-header > span:nth-child(6), .view-details .detail-size { display: none; }
+        .details-header, .view-details .file-item { grid-template-columns: minmax(150px, 1fr) 156px; }
+        .details-header > span:nth-child(5), .view-details .detail-size { display: none; }
       }
     </style>
   </head>
@@ -619,7 +586,7 @@
       <div class="results-shell" id="resultsShell">
         <div class="results" id="results" tabindex="0" aria-label="Files in current folder">
           <div class="details-header" id="detailsHeader" aria-hidden="true">
-            <span></span><span>Name</span><span>Status</span><span><button class="details-sort-button" id="dateModifiedHeader" type="button" aria-label="Sort by date modified">Date modified <span class="sort-arrow" id="modifiedSortArrow" aria-hidden="true"></span></button></span><span>Type</span><span>Size</span>
+            <span>Name</span><span>Status</span><span><button class="details-sort-button" id="dateModifiedHeader" type="button" aria-label="Sort by date modified">Date modified <span class="sort-arrow" id="modifiedSortArrow" aria-hidden="true"></span></button></span><span>Type</span><span>Size</span>
           </div>
           <div class="items view-medium" id="items" role="listbox" aria-multiselectable="true"></div>
         </div>
@@ -722,11 +689,9 @@
         uploadConflict: restored.uploadConflict || "cancel",
         clipboard: restoredClipboard(),
         clipboardBusy: false,
-        dragPrepared: null,
-        dragPreparing: null,
         outboundDrag: false,
+        outboundDragTimer: 0,
         suppressClickUntil: 0,
-        dragGhost: null,
         tooltipTimer: 0,
         tooltipItem: null,
         tooltipPointer: { x: 0, y: 0 },
@@ -992,16 +957,7 @@
         row.setAttribute("role", "option");
         row.setAttribute("aria-label", `${item.name}, ${item.type}`);
         row.tabIndex = item.path === state.focusedPath ? 0 : -1;
-        row.draggable = item.tag !== "folder";
-
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.className = "item-checkbox";
-        checkbox.setAttribute("aria-label", `Select ${item.name}`);
-        checkbox.addEventListener("click", event => {
-          event.stopPropagation();
-          selectByIndex(index, { toggle: !event.shiftKey, range: event.shiftKey });
-        });
+        row.draggable = isWindowsPlatform() && item.tag !== "folder";
 
         const icon = document.createElement("span");
         icon.className = "file-icon";
@@ -1015,7 +971,6 @@
           nameCell.className = "details-name";
           nameCell.append(icon, name);
           row.append(
-            checkbox,
             nameCell,
             detailCell(item.status, "detail-status"),
             detailCell(item.modified_label || formatDate(item.modified), "detail-modified"),
@@ -1023,7 +978,7 @@
             detailCell(item.size_label, "detail-size")
           );
         } else {
-          row.append(checkbox, icon, name);
+          row.append(icon, name);
           if (state.view === "list") {
             row.append(detailCell(item.modified_label || formatDate(item.modified), "item-secondary"), detailCell(item.size_label, "item-secondary"));
           }
@@ -1039,7 +994,7 @@
             event.stopPropagation();
             return;
           }
-          if (event.detail > 1 || event.target === checkbox) return;
+          if (event.detail > 1) return;
           if (event.ctrlKey || event.metaKey) selectByIndex(index, { toggle: true });
           else if (event.shiftKey) selectByIndex(index, { range: true });
           else {
@@ -1060,7 +1015,6 @@
           hideFileTooltip();
           handleExternalDragStart(event, item, index);
         });
-        row.addEventListener("dragend", finishExternalDrag);
         return row;
       }
 
@@ -1149,8 +1103,6 @@
           );
           row.setAttribute("aria-selected", selected ? "true" : "false");
           row.tabIndex = row.dataset.path === state.focusedPath ? 0 : -1;
-          const checkbox = row.querySelector(".item-checkbox");
-          if (checkbox) checkbox.checked = selected;
         });
         const chosen = selectedItems();
         const allFiles = chosen.length > 0 && chosen.every(item => item.tag !== "folder");
@@ -1765,112 +1717,36 @@
         return selectedItems().filter(selected => selected.tag !== "folder");
       }
 
-      function externalDragKey(items) {
-        return items.map(item => `${item.desktop_relative_path}|${item.size}`).join("\n");
-      }
-
-      async function prepareExternalDrag(items, key) {
-        if (state.dragPreparing && state.dragPreparing.key === key) return state.dragPreparing.promise;
-        showToast("Preparing file...", { duration: 3000 });
-        const promise = (async () => {
-          const payload = await apiJson("/api/files-drag-token", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ paths: items.map(item => item.desktop_relative_path) }),
-          });
-          const downloads = Array.from(payload.downloads || []);
-          const files = [];
-          let preparedBytes = 0;
-          const maxFileBytes = 50 * 1024 * 1024;
-          const maxTotalBytes = 100 * 1024 * 1024;
-          for (const download of downloads) {
-            const size = Number(download.size || 0);
-            if (size > maxFileBytes || preparedBytes + size > maxTotalBytes) continue;
-            const response = await fetch(download.url, { credentials: "same-origin" });
-            if (!response.ok) continue;
-            const blob = await response.blob();
-            files.push(new File([blob], download.name, {
-              type: download.media_type || blob.type || "application/octet-stream",
-              lastModified: Date.now(),
-            }));
-            preparedBytes += blob.size;
-          }
-          state.dragPrepared = {
-            key,
-            downloads,
-            files,
-            expiresAt: Date.now() + 90 * 1000,
-          };
-          showToast("Ready to drag", { kind: "success", duration: 2200 });
-          return state.dragPrepared;
-        })();
-        state.dragPreparing = { key, promise };
-        try {
-          return await promise;
-        } catch (error) {
-          showToast(error.message || "This file could not be prepared.", { kind: "error", duration: 5000 });
-          return null;
-        } finally {
-          if (state.dragPreparing && state.dragPreparing.key === key) state.dragPreparing = null;
-        }
-      }
-
-      function createDragGhost(item, count) {
-        if (state.dragGhost) state.dragGhost.remove();
-        const ghost = document.createElement("div");
-        ghost.className = "drag-ghost";
-        const icon = document.createElement("span");
-        icon.className = "file-icon";
-        icon.innerHTML = itemIcon(item);
-        const label = document.createElement("span");
-        label.className = "drag-ghost-label";
-        label.textContent = count > 1 ? `${count} items` : item.name;
-        ghost.append(icon, label);
-        document.body.appendChild(ghost);
-        state.dragGhost = ghost;
-        return ghost;
-      }
-
       function handleExternalDragStart(event, item, index) {
         const items = externalDragItems(item, index);
-        if (!items.length || !event.dataTransfer) {
+        if (!items.length || !isWindowsPlatform()) {
           event.preventDefault();
           return;
         }
-        const key = externalDragKey(items);
-        const prepared = state.dragPrepared;
-        if (!prepared || prepared.key !== key || prepared.expiresAt <= Date.now()) {
+        const paths = items.map(selected => String(selected.desktop_relative_path || "")).filter(Boolean);
+        if (!paths.length || paths.length > 100) {
           event.preventDefault();
-          state.suppressClickUntil = Date.now() + 600;
-          prepareExternalDrag(items, key);
+          return;
+        }
+        const protocolUrl = `sports-cave-files://drag?paths=${encodeURIComponent(JSON.stringify(paths))}&effect=copy`;
+        if (protocolUrl.length > 30000) {
+          event.preventDefault();
+          showToast("Select fewer items for Windows drag and drop.", { kind: "error", duration: 5000 });
           return;
         }
         state.outboundDrag = true;
+        window.clearTimeout(state.outboundDragTimer);
+        state.outboundDragTimer = window.setTimeout(finishExternalDrag, 30000);
         state.suppressClickUntil = Date.now() + 600;
-        event.dataTransfer.clearData();
-        event.dataTransfer.effectAllowed = "copy";
-        event.dataTransfer.dropEffect = "copy";
-        prepared.files.forEach(file => {
-          try { event.dataTransfer.items.add(file); } catch (_) {}
-        });
-        const urls = prepared.downloads.map(download => new URL(download.url, location.origin).href);
-        const primary = prepared.downloads[0];
-        if (primary) {
-          const safeName = String(primary.name || "download").replaceAll(":", "_");
-          event.dataTransfer.setData(
-            "DownloadURL",
-            `${primary.media_type || "application/octet-stream"}:${safeName}:${urls[0]}`
-          );
-        }
-        if (urls.length) event.dataTransfer.setData("text/uri-list", urls.join("\r\n"));
-        const ghost = createDragGhost(item, items.length);
-        event.dataTransfer.setDragImage(ghost, 22, 22);
+        elements.protocolLink.href = protocolUrl;
+        elements.protocolLink.click();
+        event.preventDefault();
       }
 
       function finishExternalDrag() {
+        window.clearTimeout(state.outboundDragTimer);
+        state.outboundDragTimer = 0;
         state.outboundDrag = false;
-        if (state.dragGhost) state.dragGhost.remove();
-        state.dragGhost = null;
       }
 
       function showItemContextMenu(item, x, y) {
@@ -2563,6 +2439,7 @@
       });
 
       document.addEventListener("pointerdown", event => {
+        if (state.outboundDrag) finishExternalDrag();
         hideFileTooltip();
         if (!event.target.closest(".menu") && !event.target.closest("#uploadButton, #sortButton, #viewButton, #moreButton")) closeMenus();
       }, true);
@@ -2626,6 +2503,12 @@
         finishExternalDrag();
       });
       window.addEventListener("blur", hideFileTooltip);
+      window.addEventListener("focus", () => {
+        if (!state.outboundDrag) return;
+        window.setTimeout(() => {
+          if (state.outboundDrag && document.hasFocus()) finishExternalDrag();
+        }, 750);
+      });
 
       async function initialise() {
         document.title = "Sports Cave Files";

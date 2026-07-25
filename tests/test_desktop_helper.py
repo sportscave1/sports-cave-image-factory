@@ -29,6 +29,9 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn('HKCU:\\Software\\Classes\\sports-cave-files', self.install_source)
         self.assertIn('HKCU:\\Software\\Classes\\sports-cave-photoshop', self.install_source)
         self.assertIn("RootPath = $DropboxRoot", self.install_source)
+        self.assertIn("HelperVersion = 2", self.install_source)
+        self.assertIn("$existingConfigPath", self.install_source)
+        self.assertIn("$existingRoot", self.install_source)
         self.assertIn("$env:LOCALAPPDATA", self.install_source)
         self.assertNotIn("HKLM:\\Software\\Classes\\sports-cave-files", self.install_source)
         self.assertIn("Remove-Item -LiteralPath $protocolKey", self.uninstall_source)
@@ -76,11 +79,32 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("SetFileDropList($fileList)", source)
         self.assertIn('SetData("Preferred DropEffect"', source)
         self.assertIn('if ($Effect -eq "move") { [uint32]2 } else { [uint32]1 }', source)
-        self.assertIn("[System.Windows.Forms.Clipboard]::SetDataObject($data, $true)", source)
+        self.assertIn("[System.Windows.Forms.Clipboard]::SetDataObject($payload.Data, $true)", source)
         self.assertIn("Request-FileHydration $targetPath", source)
         self.assertIn('$uri.Host -eq "clipboard"', source)
         self.assertIn('"paths", "effect"', source)
         self.assertIn(" -Sta -WindowStyle Hidden ", self.install_source)
+
+    def test_windows_drag_uses_native_copy_only_file_drop(self):
+        source = self.helper_source
+        self.assertIn('$uri.Host -notin @("open", "clipboard", "drag")', source)
+        self.assertIn('$uri.Host -eq "drag" -and $uri.Scheme -ne "sports-cave-files"', source)
+        self.assertIn("function Start-NativeFileDrag", source)
+        self.assertIn("[System.Threading.ApartmentState]::STA", source)
+        self.assertIn("[System.Windows.Forms.DataFormats]::FileDrop", source)
+        self.assertIn("$data.SetFileDropList($fileList)", source)
+        self.assertIn("$source.DoDragDrop(", source)
+        self.assertIn("[System.Windows.Forms.DragDropEffects]::Copy", source)
+        self.assertIn('Start-NativeFileDrag ([string[]]$targets)', source)
+        self.assertIn("Request-FileHydration $targetPath", source)
+        self.assertIn('$query.effect -ne "copy"', source)
+        native_drag = source[
+            source.index("function Start-NativeFileDrag") :
+            source.index("\ntry {", source.index("function Start-NativeFileDrag"))
+        ]
+        self.assertNotIn("Start-Process", native_drag)
+        self.assertNotIn("Remove-Item", native_drag)
+        self.assertNotIn('"move"', native_drag)
 
     def test_macos_helper_is_separate_root_scoped_and_uses_native_open(self):
         helper = (MAC_HELPER_DIR / "SportsCaveFilesHelper.py").read_text(encoding="utf-8")
@@ -142,6 +166,30 @@ class DesktopHelperWindowsValidationTests(unittest.TestCase):
         return subprocess.run(
             [
                 "powershell.exe",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(self.helper),
+                uri,
+                "-ValidateOnly",
+                "-NoDialog",
+            ],
+            capture_output=True,
+            encoding="utf-8",
+            text=True,
+            timeout=10,
+            check=False,
+        )
+
+    def validate_drag(self, relative_paths, effect="copy", scheme="sports-cave-files"):
+        encoded_paths = quote(json.dumps(relative_paths, ensure_ascii=False), safe="")
+        uri = f"{scheme}://drag?paths={encoded_paths}&effect={effect}"
+        return subprocess.run(
+            [
+                "powershell.exe",
+                "-Sta",
                 "-NoProfile",
                 "-NonInteractive",
                 "-ExecutionPolicy",
@@ -226,6 +274,53 @@ class DesktopHelperWindowsValidationTests(unittest.TestCase):
         denied = self.validate_clipboard(["../outside.txt"])
         self.assertNotEqual(denied.returncode, 0)
         self.assertIn("not allowed", denied.stderr.casefold())
+
+    def test_multi_item_native_drag_preserves_special_paths_and_is_copy_only(self):
+        first = self.dropbox_root / "Designs" / "O'Neal & All Rise.jpg"
+        second = self.dropbox_root / "Designs" / "J\u00fcrgen Final & Approved.webp"
+        first.write_bytes(b"one")
+        second.write_bytes(b"two")
+
+        result = self.validate_drag(
+            [
+                "Designs/O'Neal & All Rise.jpg",
+                "Designs/J\u00fcrgen Final & Approved.webp",
+            ]
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            [Path(line) for line in result.stdout.splitlines() if line.strip()],
+            [first, second],
+        )
+        move = self.validate_drag(["Designs/O'Neal & All Rise.jpg"], effect="move")
+        photoshop_scheme = self.validate_drag(
+            ["Designs/O'Neal & All Rise.jpg"],
+            scheme="sports-cave-photoshop",
+        )
+        self.assertNotEqual(move.returncode, 0)
+        self.assertNotEqual(photoshop_scheme.returncode, 0)
+        self.assertIn("unsupported", move.stderr.casefold())
+        self.assertIn("unsupported", photoshop_scheme.stderr.casefold())
+
+    def test_native_drag_rejects_traversal_absolute_paths_and_folders(self):
+        inside = self.dropbox_root / "Designs" / "Safe.png"
+        inside.write_bytes(b"safe")
+        outside = self.base / "outside.png"
+        outside.write_bytes(b"outside")
+
+        valid = self.validate_drag(["Designs/Safe.png"])
+        traversal = self.validate_drag(["../outside.png"])
+        absolute = self.validate_drag([str(outside)])
+        folder = self.validate_drag(["Designs"])
+
+        self.assertEqual(valid.returncode, 0, valid.stderr)
+        self.assertNotEqual(traversal.returncode, 0)
+        self.assertNotEqual(absolute.returncode, 0)
+        self.assertNotEqual(folder.returncode, 0)
+        self.assertIn("not allowed", traversal.stderr.casefold())
+        self.assertIn("not allowed", absolute.stderr.casefold())
+        self.assertIn("folders cannot be dragged", folder.stderr.casefold())
 
 
 if __name__ == "__main__":

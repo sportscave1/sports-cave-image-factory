@@ -134,27 +134,67 @@ function Resolve-SafeTarget([string]$Root, [string]$RelativePath) {
     return $target
 }
 
-function Set-FilesClipboard([string[]]$Paths, [string]$Effect) {
+function New-FileDropData([string[]]$Paths, [string]$Effect) {
     Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
     $fileList = New-Object System.Collections.Specialized.StringCollection
     $fileList.AddRange([string[]]$Paths)
     $data = New-Object System.Windows.Forms.DataObject
     $data.SetFileDropList($fileList)
+    if (-not $data.GetDataPresent([System.Windows.Forms.DataFormats]::FileDrop)) {
+        throw "Windows file-drop data could not be created."
+    }
     $effectValue = if ($Effect -eq "move") { [uint32]2 } else { [uint32]1 }
     $effectBytes = [System.BitConverter]::GetBytes($effectValue)
     $effectStream = New-Object System.IO.MemoryStream
     $effectStream.Write($effectBytes, 0, $effectBytes.Length)
     $effectStream.Position = 0
     $data.SetData("Preferred DropEffect", $false, $effectStream)
-    [System.Windows.Forms.Clipboard]::SetDataObject($data, $true)
+    return [PSCustomObject]@{
+        Data = $data
+        EffectStream = $effectStream
+    }
+}
+
+function Set-FilesClipboard([string[]]$Paths, [string]$Effect) {
+    $payload = New-FileDropData $Paths $Effect
+    [System.Windows.Forms.Clipboard]::SetDataObject($payload.Data, $true)
+}
+
+function Start-NativeFileDrag([string[]]$Paths) {
+    Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+    if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Threading.ApartmentState]::STA) {
+        throw "Windows file dragging requires STA mode. Reinstall the Sports Cave desktop helper."
+    }
+    $payload = New-FileDropData $Paths "copy"
+    $source = New-Object System.Windows.Forms.Form
+    $source.ShowInTaskbar = $false
+    $source.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
+    $source.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
+    $source.Location = [System.Windows.Forms.Cursor]::Position
+    $source.Opacity = 0
+    $source.Width = 1
+    $source.Height = 1
+    try {
+        $source.Show()
+        $source.Activate()
+        [System.Windows.Forms.Application]::DoEvents()
+        [void]$source.DoDragDrop(
+            $payload.Data,
+            [System.Windows.Forms.DragDropEffects]::Copy
+        )
+    } finally {
+        $source.Dispose()
+        $payload.EffectStream.Dispose()
+    }
 }
 
 try {
     $uri = [System.Uri]$ProtocolUri
     if (-not $uri.IsAbsoluteUri -or
         $uri.Scheme -notin @("sports-cave-files", "sports-cave-photoshop") -or
-        $uri.Host -notin @("open", "clipboard") -or
-        ($uri.Scheme -eq "sports-cave-photoshop" -and $uri.Host -ne "open")) {
+        $uri.Host -notin @("open", "clipboard", "drag") -or
+        ($uri.Scheme -eq "sports-cave-photoshop" -and $uri.Host -ne "open") -or
+        ($uri.Host -eq "drag" -and $uri.Scheme -ne "sports-cave-files")) {
         throw "Unsupported request."
     }
     $query = Read-ProtocolQuery $uri
@@ -165,11 +205,14 @@ try {
         if ($query.ContainsKey("kind") -and $query.kind -notin @("file", "folder")) {
             throw "Unsupported request."
         }
-    } else {
+    } elseif ($uri.Host -in @("clipboard", "drag")) {
         if (-not $query.ContainsKey("paths") -or @($query.Keys | Where-Object { $_ -notin @("paths", "effect") }).Count) {
             throw "Unsupported request."
         }
-        if ($query.ContainsKey("effect") -and $query.effect -notin @("copy", "move")) {
+        if ($uri.Host -eq "clipboard" -and $query.ContainsKey("effect") -and $query.effect -notin @("copy", "move")) {
+            throw "Unsupported request."
+        }
+        if ($uri.Host -eq "drag" -and $query.ContainsKey("effect") -and $query.effect -ne "copy") {
             throw "Unsupported request."
         }
     }
@@ -184,20 +227,24 @@ try {
         throw "The configured Sportscave Team Folder is unavailable. Check Dropbox Desktop."
     }
 
-    if ($uri.Host -eq "clipboard") {
+    if ($uri.Host -in @("clipboard", "drag")) {
         try {
             $decodedPaths = ConvertFrom-Json -InputObject ([string]$query.paths)
             $relativePaths = @($decodedPaths)
         } catch {
-            throw "The clipboard request is invalid."
+            throw "The file-transfer request is invalid."
         }
         if (-not $relativePaths.Count -or $relativePaths.Count -gt 100) {
-            throw "Select between 1 and 100 items for the Windows clipboard."
+            throw "Select between 1 and 100 items."
         }
         $targets = @()
         foreach ($relativePath in $relativePaths) {
             $targetPath = Resolve-SafeTarget $root ([string]$relativePath)
-            if (-not (Test-Path -LiteralPath $targetPath -PathType Container)) {
+            $isTargetFolder = Test-Path -LiteralPath $targetPath -PathType Container
+            if ($uri.Host -eq "drag" -and $isTargetFolder) {
+                throw "Folders cannot be dragged from Sports Cave Files."
+            }
+            if (-not $isTargetFolder) {
                 Request-FileHydration $targetPath
             }
             $targets += $targetPath
@@ -206,8 +253,12 @@ try {
             $targets | Write-Output
             exit 0
         }
-        $clipboardEffect = if ($query.ContainsKey("effect")) { [string]$query.effect } else { "copy" }
-        Set-FilesClipboard ([string[]]$targets) $clipboardEffect
+        if ($uri.Host -eq "clipboard") {
+            $clipboardEffect = if ($query.ContainsKey("effect")) { [string]$query.effect } else { "copy" }
+            Set-FilesClipboard ([string[]]$targets) $clipboardEffect
+        } else {
+            Start-NativeFileDrag ([string[]]$targets)
+        }
         exit 0
     }
 

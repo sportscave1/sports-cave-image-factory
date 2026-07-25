@@ -25,6 +25,16 @@ validated local Dropbox files on the Windows file clipboard. This allows Paste
 in Windows Explorer or on the Desktop, including multiple files and folders.
 Copy uses the Windows copy effect and Cut uses the Windows move effect.
 
+Dragging files out of Sports Cave Files uses the same helper to hydrate the
+selected local Dropbox files and start a genuine Windows `FileDrop` drag with a
+copy-only effect. Receiving applications get the local files themselves, not
+browser blobs, download links or path text. Multiple files and names containing
+spaces, apostrophes, ampersands or Unicode are supported.
+
+Run `Install.cmd` again to upgrade an existing installation. The installer
+reuses the previously approved Dropbox root when it is still available, replaces
+the helper script and refreshes the current-user protocol registration.
+
 ## Uninstall
 
 Run `%LOCALAPPDATA%\SportsCaveFilesHelper\Uninstall.ps1` with PowerShell.

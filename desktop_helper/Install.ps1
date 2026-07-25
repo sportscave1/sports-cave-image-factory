@@ -2,6 +2,7 @@ param([string]$DropboxRoot = "")
 
 $ErrorActionPreference = "Stop"
 $installRoot = Join-Path $env:LOCALAPPDATA "SportsCaveFilesHelper"
+$existingConfigPath = Join-Path $installRoot "config.json"
 $filesProtocolKey = "HKCU:\Software\Classes\sports-cave-files"
 $photoshopProtocolKey = "HKCU:\Software\Classes\sports-cave-photoshop"
 
@@ -26,6 +27,16 @@ function Register-Protocol(
     Set-Item -Path $commandKey -Value $Command
 }
 
+if ([string]::IsNullOrWhiteSpace($DropboxRoot) -and (Test-Path -LiteralPath $existingConfigPath -PathType Leaf)) {
+    try {
+        $existingConfig = Get-Content -LiteralPath $existingConfigPath -Raw | ConvertFrom-Json
+        $existingRoot = [string]$existingConfig.RootPath
+        if (-not [string]::IsNullOrWhiteSpace($existingRoot) -and (Test-Path -LiteralPath $existingRoot -PathType Container)) {
+            $DropboxRoot = $existingRoot
+        }
+    } catch {}
+}
+
 if ([string]::IsNullOrWhiteSpace($DropboxRoot)) {
     $shell = New-Object -ComObject Shell.Application
     $selection = $shell.BrowseForFolder(0, "Select your locally synced Sportscave Team Folder", 0x41, 0)
@@ -44,7 +55,11 @@ if (-not (Test-Path -LiteralPath $DropboxRoot -PathType Container)) {
 New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "SportsCaveFilesHelper.ps1") -Destination $installRoot -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Uninstall.ps1") -Destination $installRoot -Force
-@{ RootPath = $DropboxRoot; InstalledAt = (Get-Date).ToString("o") } |
+@{
+    RootPath = $DropboxRoot
+    InstalledAt = (Get-Date).ToString("o")
+    HelperVersion = 2
+} |
     ConvertTo-Json |
     Set-Content -LiteralPath (Join-Path $installRoot "config.json") -Encoding UTF8
 
@@ -66,4 +81,4 @@ Register-Protocol $photoshopProtocolKey "Open in Photoshop" "Photoshop" $photosh
 
 Write-Host "Sports Cave desktop helper installed."
 Write-Host "Approved folder: $DropboxRoot"
-Write-Host "Restart your browser before testing Open from Sports Cave OS."
+Write-Host "Restart your browser before testing Open, Copy or native drag from Sports Cave OS."

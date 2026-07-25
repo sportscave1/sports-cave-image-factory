@@ -74,7 +74,6 @@ class FilesWindowApiTests(unittest.TestCase):
             "page_permissions": ["files"],
         }
         files_upload_api._DIRECTORY_CACHE.clear()
-        files_upload_api.DRAG_DOWNLOAD_MANAGER._records.clear()
 
     def test_standalone_page_requires_files_access_and_serves_no_streamlit_shell(self):
         request = get_request("/files-window")
@@ -542,8 +541,8 @@ class FilesWindowApiTests(unittest.TestCase):
         self.assertEqual(routes["/api/files-image-items"], ("GET",))
         self.assertEqual(routes["/api/files-delete"], ("POST",))
         self.assertEqual(routes["/api/files-paste"], ("POST",))
-        self.assertEqual(routes["/api/files-drag-token"], ("POST",))
-        self.assertEqual(routes["/api/files-drag/{token}"], ("GET",))
+        self.assertNotIn("/api/files-drag-token", routes)
+        self.assertNotIn("/api/files-drag/{token}", routes)
 
     def test_transfer_validation_rejects_traversal_outside_root_and_folder_descendants(self):
         sources, destination = files_upload_api._validated_transfer_paths(
@@ -679,110 +678,6 @@ class FilesWindowApiTests(unittest.TestCase):
             )
         self.assertEqual(kept, f"{destination}/image (3).jpg")
 
-    def test_drag_tokens_expire_and_stream_original_filename_mime_and_content(self):
-        record = files_upload_api.DRAG_DOWNLOAD_MANAGER.issue(
-            path=f"{TEAM_ROOT}/Images/O'Neal & Jünger.jpg",
-            name="O'Neal & Jünger.jpg",
-            media_type="image/jpeg",
-            size=8,
-            user_id="worker-1",
-            now=100,
-        )
-        with self.assertRaises(files_upload_api.FilesUploadError) as caught:
-            files_upload_api.DRAG_DOWNLOAD_MANAGER.consume(
-                record.token,
-                now=100 + files_upload_api.FILES_DRAG_TOKEN_SECONDS,
-            )
-        self.assertEqual(caught.exception.code, "drag_expired")
-
-        record = files_upload_api.DRAG_DOWNLOAD_MANAGER.issue(
-            path=f"{TEAM_ROOT}/Images/O'Neal & Jünger.jpg",
-            name="O'Neal & Jünger.jpg",
-            media_type="image/jpeg",
-            size=8,
-            user_id="worker-1",
-        )
-        request = files_upload_api.Request(
-            {
-                "type": "http",
-                "method": "GET",
-                "path": f"/api/files-drag/{record.token}",
-                "path_params": {"token": record.token},
-                "query_string": b"",
-                "headers": [],
-                "scheme": "https",
-                "server": ("sports-cave.test", 443),
-            }
-        )
-        upstream = type(
-            "Upstream",
-            (),
-            {
-                "iter_content": lambda self, chunk_size: iter((b"ORIGINAL",)),
-                "close": lambda self: setattr(self, "closed", True),
-                "closed": False,
-            },
-        )()
-        with patch.object(
-            files_upload_api,
-            "_dropbox_context",
-            return_value={"access_token": "token", "root_path": TEAM_ROOT},
-        ), patch.object(
-            files_upload_api.dropbox_integration,
-            "get_file_response",
-            return_value=({"size": 8}, upstream),
-        ), patch.object(
-            files_upload_api.dropbox_integration,
-            "delete_path_recoverable",
-        ) as delete_source:
-            response = asyncio.run(files_upload_api.drag_file(request))
-            content = asyncio.run(response_bytes(response))
-
-        self.assertEqual(content, b"ORIGINAL")
-        self.assertEqual(response.media_type, "image/jpeg")
-        self.assertIn("attachment", response.headers["content-disposition"])
-        self.assertIn("O%27Neal%20%26%20J%C3%BCnger.jpg", response.headers["content-disposition"])
-        self.assertTrue(upstream.closed)
-        delete_source.assert_not_called()
-
-    def test_drag_token_creation_revalidates_relative_paths_and_exposes_no_cloud_secret(self):
-        relative = "Images/O'Neal & J\u00fcnger.jpg"
-        request = json_request("/api/files-drag-token", {"paths": [relative]})
-        with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
-            files_upload_api,
-            "_dropbox_context",
-            return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
-        ), patch.object(
-            files_upload_api.dropbox_integration,
-            "get_file_metadata",
-            return_value={
-                ".tag": "file",
-                "name": "O'Neal & J\u00fcnger.jpg",
-                "size": 123,
-            },
-        ) as metadata:
-            response = asyncio.run(files_upload_api.create_drag_tokens(request))
-
-        payload = json.loads(response.body)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(payload["downloads"][0]["name"], "O'Neal & J\u00fcnger.jpg")
-        self.assertEqual(payload["downloads"][0]["media_type"], "image/jpeg")
-        self.assertTrue(payload["downloads"][0]["url"].startswith("/api/files-drag/"))
-        self.assertNotIn("secret-token", response.body.decode("utf-8"))
-        self.assertNotIn(TEAM_ROOT, response.body.decode("utf-8"))
-        metadata.assert_called_once_with("secret-token", f"{TEAM_ROOT}/{relative}")
-
-        denied = json_request("/api/files-drag-token", {"paths": ["../outside.jpg"]})
-        with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
-            files_upload_api,
-            "_dropbox_context",
-            return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
-        ), patch.object(files_upload_api.dropbox_integration, "get_file_metadata") as denied_metadata:
-            denied_response = asyncio.run(files_upload_api.create_drag_tokens(denied))
-        self.assertEqual(denied_response.status_code, 403)
-        denied_metadata.assert_not_called()
-
-
 class FilesWindowInteractionContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -809,12 +704,13 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("continue", branch)
         self.assertNotIn("set_current_page", branch)
 
-    def test_one_click_open_checkbox_multi_select_and_keyboard_navigation_are_explicit(self):
+    def test_one_click_open_multi_select_and_keyboard_navigation_have_no_checkboxes(self):
         item_handler = self.client[self.client.index("function createItemElement") : self.client.index("function detailCell")]
         self.assertIn('row.addEventListener("click"', item_handler)
         self.assertIn("setSingleSelection(item.path, index)", item_handler)
         self.assertIn("openItem(item)", item_handler)
-        self.assertIn('checkbox.type = "checkbox"', item_handler)
+        self.assertNotIn("item-checkbox", self.client)
+        self.assertNotIn('document.createElement("input")', item_handler)
         self.assertIn("event.ctrlKey || event.metaKey", item_handler)
         self.assertIn("event.shiftKey", item_handler)
         self.assertIn('row.addEventListener("contextmenu"', item_handler)
@@ -937,6 +833,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('window.addEventListener("dragover"', self.client)
         self.assertIn('window.addEventListener("drop"', self.client)
         self.assertIn("event.preventDefault()", self.client)
+        self.assertIn("!state.outboundDrag", self.client)
         self.assertIn("droppedItems(event.dataTransfer)", self.client)
         self.assertIn("row.file.slice(row.uploaded, end)", self.client)
         self.assertIn("const CHUNK_BYTES = 8 * 1024 * 1024", self.client)
@@ -1010,26 +907,36 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('event.key === "Delete"', self.client)
         self.assertIn('event.key === "F2"', self.client)
 
-    def test_external_drag_prepares_only_selection_and_supplies_real_file_and_download_url(self):
-        self.assertIn("function prepareExternalDrag(items, key)", self.client)
-        self.assertIn('apiJson("/api/files-drag-token"', self.client)
-        self.assertIn("items.map(item => item.desktop_relative_path)", self.client)
-        self.assertIn("files.push(new File([blob], download.name", self.client)
-        self.assertIn("event.dataTransfer.items.add(file)", self.client)
-        self.assertIn('event.dataTransfer.setData(\n            "DownloadURL"', self.client)
-        self.assertIn('event.dataTransfer.setData("text/uri-list"', self.client)
-        self.assertIn('event.dataTransfer.effectAllowed = "copy"', self.client)
-        self.assertIn('event.dataTransfer.dropEffect = "copy"', self.client)
-        self.assertIn('showToast("Preparing file..."', self.client)
-        self.assertIn('showToast("Ready to drag"', self.client)
+    def test_external_drag_calls_native_helper_directly_without_browser_drag_emulation(self):
+        self.assertIn("function handleExternalDragStart(event, item, index)", self.client)
+        self.assertIn("items.map(selected => String(selected.desktop_relative_path", self.client)
+        self.assertIn("sports-cave-files://drag?paths=", self.client)
+        self.assertIn("encodeURIComponent(JSON.stringify(paths))", self.client)
+        self.assertIn("&effect=copy", self.client)
+        self.assertIn("elements.protocolLink.click()", self.client)
+        self.assertIn("event.preventDefault()", self.client)
         self.assertIn("state.suppressClickUntil", self.client)
-        self.assertIn("createDragGhost(item, items.length)", self.client)
+        for removed in (
+            "item-checkbox",
+            "drag-ghost",
+            "Preparing file...",
+            "Ready to drag",
+            "new File(",
+            "dataTransfer.items.add",
+            "DownloadURL",
+            "text/uri-list",
+            "/api/files-drag-token",
+        ):
+            self.assertNotIn(removed, self.client)
         drag_block = self.client[
             self.client.index("function externalDragItems") :
             self.client.index("function showItemContextMenu")
         ]
         self.assertNotIn("/api/files-delete", drag_block)
         self.assertNotIn("operation: \"move\"", drag_block)
+        self.assertNotIn("fetch(", drag_block)
+        self.assertIn("state.outboundDrag = true", drag_block)
+        self.assertIn("state.outboundDrag = false", drag_block)
 
     def test_copy_and_cut_also_request_native_windows_file_clipboard(self):
         block = self.client[

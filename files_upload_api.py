@@ -39,8 +39,6 @@ FILES_IMAGE_VIEWER_FILE = (
 FILES_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 FILES_IMAGE_PREVIEW_MAX_BYTES = 100 * 1024 * 1024
 FILES_STREAM_CHUNK_BYTES = 256 * 1024
-FILES_DRAG_TOKEN_SECONDS = 2 * 60
-FILES_DRAG_TOKEN_MAX_USES = 4
 
 
 class FilesUploadError(RuntimeError):
@@ -71,60 +69,6 @@ class ChunkUploadRecord:
     error: str = ""
     activity_recorded: bool = False
     operation_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
-
-
-@dataclass
-class DragDownloadRecord:
-    token: str
-    path: str
-    name: str
-    media_type: str
-    size: int
-    user_id: str
-    expires_at: float
-    uses: int = 0
-
-
-class DragDownloadManager:
-    def __init__(self):
-        self._records = {}
-        self._lock = threading.RLock()
-
-    def _cleanup(self, now=None):
-        current = time.monotonic() if now is None else float(now)
-        for token, record in list(self._records.items()):
-            if record.expires_at <= current or record.uses >= FILES_DRAG_TOKEN_MAX_USES:
-                self._records.pop(token, None)
-
-    def issue(self, *, path, name, media_type, size, user_id, now=None):
-        current = time.monotonic() if now is None else float(now)
-        record = DragDownloadRecord(
-            token=secrets.token_urlsafe(24),
-            path=str(path),
-            name=str(name),
-            media_type=str(media_type or "application/octet-stream"),
-            size=max(0, int(size or 0)),
-            user_id=str(user_id or ""),
-            expires_at=current + FILES_DRAG_TOKEN_SECONDS,
-        )
-        with self._lock:
-            self._cleanup(current)
-            self._records[record.token] = record
-        return record
-
-    def consume(self, token, *, now=None):
-        current = time.monotonic() if now is None else float(now)
-        with self._lock:
-            self._cleanup(current)
-            record = self._records.get(str(token or ""))
-            if not record or record.expires_at <= current:
-                raise FilesUploadError(
-                    "This drag file has expired. Prepare it again.",
-                    status_code=410,
-                    code="drag_expired",
-                )
-            record.uses += 1
-            return record
 
 
 class DropboxChunkUploadManager:
@@ -341,7 +285,6 @@ class DropboxChunkUploadManager:
 
 
 UPLOAD_MANAGER = DropboxChunkUploadManager()
-DRAG_DOWNLOAD_MANAGER = DragDownloadManager()
 _DROPBOX_CONTEXT = {}
 _DROPBOX_CONTEXT_LOCK = threading.Lock()
 _THUMBNAIL_CACHE = {}
@@ -1419,84 +1362,6 @@ async def file_thumbnail(request: Request):
         return Response(status_code=404)
 
 
-async def create_drag_tokens(request: Request):
-    """Issue short-lived opaque downloads for only the selected browser drag files."""
-    try:
-        if not _same_origin(request):
-            raise FilesUploadError("Drag request is not allowed.", status_code=403)
-        user = await run_in_threadpool(_request_user, request)
-        payload = await _json_body(request)
-        relative_paths = payload.get("paths")
-        if not isinstance(relative_paths, (list, tuple)) or not relative_paths:
-            raise FilesUploadError("Select at least one file.")
-        if len(relative_paths) > 20:
-            raise FilesUploadError("Select no more than 20 files for browser dragging.")
-        context = await run_in_threadpool(_dropbox_context)
-        downloads = []
-        for relative_path in relative_paths:
-            path = _validated_relative_path(relative_path, context["root_path"])
-            metadata = await run_in_threadpool(
-                dropbox_integration.get_file_metadata,
-                context["access_token"],
-                path,
-            )
-            if str(metadata.get(".tag") or "file").casefold() == "folder":
-                raise FilesUploadError("Folders cannot be dragged out through the browser.")
-            name = str(metadata.get("name") or PurePosixPath(path).name)
-            media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
-            record = DRAG_DOWNLOAD_MANAGER.issue(
-                path=path,
-                name=name,
-                media_type=media_type,
-                size=metadata.get("size") or 0,
-                user_id=user.get("id") or user.get("username") or "",
-            )
-            downloads.append(
-                {
-                    "token": record.token,
-                    "url": f"/api/files-drag/{record.token}",
-                    "name": record.name,
-                    "media_type": record.media_type,
-                    "size": record.size,
-                    "expires_in": FILES_DRAG_TOKEN_SECONDS,
-                }
-            )
-        return JSONResponse(
-            {"ok": True, "downloads": downloads},
-            headers={"Cache-Control": "no-store"},
-        )
-    except Exception as error:
-        return _response_error(error)
-
-
-async def drag_file(request: Request):
-    """Stream one opaque, short-lived drag file without exposing Dropbox credentials."""
-    try:
-        record = DRAG_DOWNLOAD_MANAGER.consume(request.path_params.get("token"))
-        context = await run_in_threadpool(_dropbox_context)
-        clean_path = dropbox_integration.normalize_dropbox_path(record.path)
-        if not dropbox_integration.path_is_within_root(clean_path, context["root_path"]):
-            raise FilesUploadError("This drag file is not available.", status_code=403)
-        metadata, upstream = await run_in_threadpool(
-            dropbox_integration.get_file_response,
-            context["access_token"],
-            clean_path,
-        )
-        size = int(metadata.get("size") or record.size or 0)
-        return StreamingResponse(
-            _stream_upstream_response(upstream),
-            media_type=record.media_type,
-            headers={
-                "Cache-Control": "private, no-store",
-                "Content-Disposition": _content_disposition("attachment", record.name),
-                "Content-Length": str(size),
-                "X-Content-Type-Options": "nosniff",
-            },
-        )
-    except Exception as error:
-        return _response_error(error)
-
-
 async def desktop_helper_package(request: Request):
     """Download a credential-free helper package for the requested desktop platform."""
     try:
@@ -1721,8 +1586,6 @@ FILES_UPLOAD_ROUTES = (
     ("/api/files-image-preview", image_preview, ("GET",)),
     ("/api/files-image-items", image_folder_items, ("GET",)),
     ("/api/files-thumbnail", file_thumbnail, ("GET",)),
-    ("/api/files-drag-token", create_drag_tokens, ("POST",)),
-    ("/api/files-drag/{token}", drag_file, ("GET",)),
     ("/api/files-desktop-helper", desktop_helper_package, ("GET",)),
     ("/api/files-delete", delete_files, ("POST",)),
     ("/api/files-paste", paste_files, ("POST",)),
