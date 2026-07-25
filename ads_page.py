@@ -2,12 +2,14 @@ import hashlib
 import html
 import json
 import re
+import secrets
 from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
 
 from activity_log import record_activity_log
+from ads_product_catalog import load_live_edition_product_rows
 
 
 CATEGORY_OPTIONS = [
@@ -288,6 +290,46 @@ META_AD_URL_PARAMETERS = (
     "&utm_content={{ad.name}}&utm_term={{adset.name}}&placement={{placement}}"
 )
 
+CAROUSEL_VISUAL_ROLES = {
+    "motorsport_carousel": (
+        "Product Identity",
+        "Race Or Moment",
+        "Legacy",
+        "Fan Ownership",
+        "Scarcity",
+    ),
+    "default": (
+        "Product Identity",
+        "Moment / Legacy",
+        "Emotional Hook",
+        "Fan Ownership",
+        "Scarcity",
+    ),
+}
+
+VISUAL_COUNTRY_DIRECTIONS = {
+    "Australia": (
+        "Use grounded contemporary Australian residential architecture, honest material texture "
+        "and natural Australian light. Do not use forced slang or novelty Australiana."
+    ),
+    "USA": (
+        "Use premium American residential scale and collector styling with believable proportions. "
+        "Do not turn the setting into a retail sports display."
+    ),
+    "UK": (
+        "Use a refined British period or contemporary interior as the product mood requires, with "
+        "credible local architecture and restrained natural light."
+    ),
+    "Canada": (
+        "Use authentic Canadian residential material warmth and light without assuming hockey or "
+        "adding stereotyped cabin styling."
+    ),
+    "New Zealand": (
+        "Use authentic New Zealand residential architecture, natural light and material restraint "
+        "without borrowing Australian identity language."
+    ),
+}
+
 COUNTRY_LANGUAGE_PROFILES = {
     "Australia": {
         "heading": "COUNTRY LANGUAGE AND LOCALISATION — AUSTRALIA",
@@ -357,7 +399,8 @@ COUNTRY_LANGUAGE_FALLBACK = {
 
 
 def _clean_product_name(product_name):
-    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", product_name or "").strip()
+    cleaned = re.sub(r"[\x00-\x1f\x7f]", " ", str(product_name or ""))
+    return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def _clean_product_url(product_url):
@@ -414,24 +457,50 @@ def _edition_ops_rows_from_local_snapshot(snapshot_path=EDITION_OPS_SNAPSHOT_PAT
     return rows if isinstance(rows, list) else []
 
 
-def load_edition_ops_product_name_options(snapshot_path=EDITION_OPS_SNAPSHOT_PATH):
+def load_edition_ops_product_name_options(
+    snapshot_path=EDITION_OPS_SNAPSHOT_PATH,
+    *,
+    live_loader=None,
+):
     rows = []
+    snapshot_path = Path(snapshot_path)
+    should_load_live = live_loader is not None or snapshot_path == EDITION_OPS_SNAPSHOT_PATH
+    if should_load_live:
+        loader = live_loader or load_live_edition_product_rows
+        try:
+            live_rows = loader()
+        except Exception:
+            live_rows = []
+        if isinstance(live_rows, list):
+            rows.extend(live_rows)
+
     session_rows = st.session_state.get(EDITION_OPS_ROWS_SESSION_KEY, [])
     if isinstance(session_rows, list):
         rows.extend(session_rows)
     rows.extend(_edition_ops_rows_from_local_snapshot(snapshot_path))
 
+    unique_rows = []
+    seen_rows = set()
+    for row in rows:
+        product_name = _product_name_from_edition_ops_row(row)
+        handle = _edition_ops_product_handle_from_row(row)
+        row_key = (product_name.casefold(), handle.casefold())
+        if row_key == ("", "") or row_key in seen_rows:
+            continue
+        unique_rows.append(row)
+        seen_rows.add(row_key)
+
     options = []
     seen = set()
     title_counts = {}
-    for row in rows:
+    for row in unique_rows:
         product_name = _product_name_from_edition_ops_row(row)
         if product_name:
             key = product_name.casefold()
             title_counts[key] = title_counts.get(key, 0) + 1
     duplicate_titles = {key for key, count in title_counts.items() if count > 1}
 
-    for row in rows:
+    for row in unique_rows:
         option_label = _edition_ops_product_option_label(row, duplicate_titles)
         key = option_label.casefold()
         if option_label and key not in seen:
@@ -606,6 +675,260 @@ def apply_meta_url_parameters_guidance(prompt):
     if "META URL PARAMETERS" in prompt:
         return prompt
     return f"{prompt.rstrip()}\n\n{build_meta_url_parameters_guidance()}"
+
+
+def build_product_lock_visual_rules():
+    return """PRODUCT LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT
+
+Use the uploaded Sports Cave product image as the exact reference.
+
+Keep the uploaded artwork and frame exactly the same.
+
+Do not redesign, repaint, redraw, replace, reinterpret or regenerate the artwork inside the frame.
+
+Do not change the athlete or subject, face, vehicle, uniform, livery, colours, text, badge, edition plate, plaque, signature, layout, crop, composition, frame colour, frame shape or landscape proportions.
+
+Do not blur, stretch, warp, bend, squash or distort the artwork or frame.
+
+The artwork must remain sharp, rectangular, correctly aligned and physically believable inside the frame.
+
+Do not generate a lookalike version of the artwork."""
+
+
+def build_frame_and_glass_visual_rules():
+    return """FRAME AND GLASS REALISM - INCLUDE IN EVERY RETURNED IMAGE PROMPT
+
+The black frame must appear to be a real premium framed product with:
+
+- realistic black timber or frame depth
+- sharp square corners
+- subtle physical texture
+- clean joins
+- correct landscape proportions
+- believable mounting hardware or wall placement
+- accurate perspective
+- correct scale for the room
+- real glass over the artwork
+- soft environmental reflections
+- subtle controlled glare
+- realistic highlight streaks
+- a natural shadow behind and below the frame
+- reflections consistent with the room's windows and lighting
+
+The glare must make the frame feel expensive and real without obscuring the artwork.
+
+The artwork must look mounted naturally. It must not look pasted onto the wall."""
+
+
+def build_room_realism_visual_rules():
+    return """DYNAMIC ROOM REALISM - INCLUDE IN EVERY RETURNED IMAGE PROMPT
+
+Create an interior that looks like real architectural and residential photography, not a glossy AI showroom render.
+
+The room must feel physically believable, premium but lived-in, masculine without becoming cliched, clean but not sterile, collector-worthy, subtly imperfect and appropriate for a discerning 30-50-year-old fan.
+
+Require believable residential proportions, plausible room depth, correct ceiling and wall geometry, straight vertical architecture, realistic furniture scale, natural furniture placement, genuinely textured materials, subtle signs that a real person lives there, realistic daylight and practical-light interaction, natural wall shadows, realistic floor and wall joins, controlled cinematic contrast and a natural interior-photography lens and perspective.
+
+Do not use an excessively wide or distorted camera angle, perfect artificial symmetry unless architecturally justified, an empty computer-generated showroom feeling or a repeated generic stock-room composition.
+
+Avoid warped walls, impossible windows, bent shelves, floating furniture, malformed lamps, unusable layouts, inconsistent reflections, duplicate objects, random decorative objects, fake luxury, plastic materials, oversized rooms with no believable function, excessive blur, overprocessed HDR, unrealistic orange lighting and any obvious AI-room appearance."""
+
+
+def build_sport_country_visual_adaptation(category, country):
+    category_label = _normalise_option_label(category) or "selected sport"
+    country_label = normalize_country_language_key(country) or _normalise_option_label(country) or "selected country"
+    angle = get_category_winner_angle(category)
+    category_mood = angle.get("emotion") or CATEGORY_COPY_CUES.get(category, CATEGORY_COPY_CUES["Other"])
+    country_direction = VISUAL_COUNTRY_DIRECTIONS.get(
+        country_label,
+        "Use credible residential architecture, natural light and materials appropriate to the selected country without stereotypes.",
+    )
+    return f"""SPORT AND COUNTRY VISUAL ADAPTATION - INCLUDE IN EVERY RETURNED IMAGE PROMPT
+
+Selected sport category: {category_label}
+Selected country: {country_label}
+
+Build the visual mood from the selected product title and its verified emotional meaning. A nostalgic title, rivalry, championship, tribute, comeback, record, iconic moment or modern achievement must not receive the same generic room direction.
+
+For {category_label}, express the atmosphere through architecture, materiality, restrained colour, wall finish, furniture tone, lighting, mood, composition, energy and the relationship between the room and the artwork. Relevant emotional territory: {category_mood}.
+
+Country direction: {country_direction}
+
+Do not create sporting atmosphere through obvious props. Do not add sports balls, bats, helmets, jerseys, trophies, figurines, toy cars, novelty signs, fake memorabilia, recognisable team logos, random athlete photographs, team-coloured clutter, extra framed sports art, retail display fixtures, fake collector items or neon signs unless an existing approved creative direction explicitly requires an extremely subtle one.
+
+Do not use forced slang, cultural stereotypes or novelty sport decor."""
+
+
+def get_carousel_visual_roles(template_key):
+    return CAROUSEL_VISUAL_ROLES.get(template_key, CAROUSEL_VISUAL_ROLES["default"])
+
+
+def build_carousel_visual_output_requirements(template_key):
+    roles = get_carousel_visual_roles(template_key)
+    schema = []
+    for index, role in enumerate(roles, start=1):
+        schema.extend(
+            [
+                f"Card {index} — [exact generated Card {index} headline]",
+                f"Matching description: [exact generated Card {index} description]",
+                f"Visual purpose: {role}",
+                "Image prompt: [one complete standalone image-generation prompt]",
+                "",
+            ]
+        )
+    schema_text = "\n".join(schema).rstrip()
+    return f"""CAROUSEL VISUAL STORY REQUIREMENTS
+
+After every existing Carousel copy, card, primary-text, CTA, setup and URL-parameter field, output exactly {CAROUSEL_CARD_COUNT} complete image-generation prompts. Map one prompt to each generated card in the existing approved order and role structure.
+
+Each prompt must be based on the selected product name, selected sport, selected country, the emotional meaning of that specific card, that card's exact generated headline, that card's exact generated description, its role and position in the overall story, the uploaded product artwork, and only verified product and scarcity information already permitted by the copy system.
+
+The five images must form one premium visual story, not five random mockups. Maintain compatible colour restraint, premium photographic quality, related lighting character, correct black-frame presentation and a shared Sports Cave collector tone without making the rooms identical.
+
+Privately develop a fresh visual concept from the selected product before writing the five prompts. Do not output that reasoning.
+
+Across the five prompts deliberately vary room type, architecture, wall finish, material palette, furniture style, lighting direction, time of day, camera height, camera distance, camera angle, artwork placement, emotional intensity, negative space, framing and composition, and how the room expresses the card's message.
+
+Do not merely recolour the same room. Do not default to a generic office, living room, man cave, collector room and close-up sequence.
+
+Treat this as a new creative run. Do not default to room combinations you have previously supplied for Sports Cave. Build a fresh set from the product title, sport, country, card copy and emotional story. Within this run, do not repeat a room type, wall treatment, principal furniture arrangement, lighting setup or camera composition.
+
+Normally do not place the card headline or description inside the image because Meta supplies those fields separately. Only include in-image card text if the existing approved campaign template explicitly requires it.
+
+Do not add prices, discounts, fake buttons, fake UI, watermarks or random copy.
+
+Every image prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, sport-and-country adaptation and relevant visual-story requirements inside every prompt. Never write "same as above", "use the previous room" or "keep the same settings".
+
+IMAGE PROMPTS — GENERATE IN THIS ORDER
+
+{schema_text}
+
+Return exactly these five image-prompt entries and no sixth prompt."""
+
+
+def build_instant_experience_visual_output_requirements(template_key):
+    if template_key == "baseball_instant_experience":
+        layout_rules = """Use the existing approved 06 - Instant Experience Cover Banner (Social) dimensions and aspect ratio from the Sports Cave Mockups template. Do not replace that approved banner format with a global square size.
+
+Use the uploaded framed artwork as the hero and preserve the existing banner's approved placement logic, safe areas and Meta-readable composition."""
+        scarcity_rules = """The Baseball Instant Experience template has an approved claim path. Use only the generated and verified campaign wording from that path. Do not add a different quantity, product fact or scarcity claim."""
+    else:
+        layout_rules = """Create a square 1024 x 1024 Sports Cave Instant Experience cover.
+
+Use the framed artwork as the hero across approximately the upper 60-68% and a luxury black scarcity panel across approximately the lower 32-40%.
+
+Use premium black, gold, ivory and charcoal styling, with a refined separation glow or controlled gold highlight. Use no more than three short text lines, preserve mobile-readable spacing and make it feel like a premium collector release rather than a cheap promotional banner."""
+        scarcity_rules = """Use the exact generated and verified campaign headline, supporting copy, scarcity wording and CTA. Never automatically claim "Limited to 100 worldwide" or any edition quantity unless it is confirmed by the existing approved-claim path, the supplied product information or visible artwork. When quantity is not verified, use only non-numeric scarcity wording already permitted by the copy system."""
+
+    return f"""INSTANT EXPERIENCE VISUAL REQUIREMENTS
+
+After every existing Instant Experience copy, headline, description, CTA, setup and URL-parameter field, output exactly one complete cover-image prompt. Do not output five prompts.
+
+Tailor the cover to the selected product name, selected sport, selected country, generated Instant Experience headline, generated supporting copy, approved scarcity claim, existing CTA, emotional theme and uploaded framed artwork. It must not be a generic reusable collector-room prompt.
+
+{layout_rules}
+
+{scarcity_rules}
+
+Never invent edition quantities, sale prices, discounts, signatures, logos, athlete names, achievements, dates, rivalries, product details or scarcity facts.
+
+The one cover prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, sport-and-country adaptation and cover-layout requirements inside it. Do not refer to shared rules elsewhere in the response.
+
+INSTANT EXPERIENCE COVER IMAGE PROMPT
+
+[one complete standalone cover-image prompt]
+
+Return exactly one cover-image prompt and no additional image prompts."""
+
+
+def build_single_image_video_visual_output_requirements():
+    return """SINGLE IMAGE / VIDEO VISUAL REQUIREMENTS
+
+Preserve the existing Single Image / Video route and output fields.
+
+Upgrade its existing creative brief into exactly one complete standalone creative prompt using the dynamic room-realism, product-lock, frame-and-glass and sport-and-country adaptation rules. Do not create a five-prompt Carousel sequence.
+
+Place this one enhanced creative prompt after every existing copy, headline, description, CTA, setup and URL-parameter field.
+
+CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO
+
+[one complete standalone image or video prompt]
+
+Return exactly one creative prompt."""
+
+
+def build_campaign_visual_output_contract(
+    product_name,
+    category,
+    country,
+    campaign_type,
+    *,
+    template_key=None,
+    variation_token="",
+):
+    product_name = _clean_product_name(product_name)
+    variation_token = _normalise_option_label(variation_token) or "standard"
+    if campaign_type == "Carousel":
+        campaign_requirements = build_carousel_visual_output_requirements(template_key)
+    elif campaign_type == "Instant Experience":
+        campaign_requirements = build_instant_experience_visual_output_requirements(template_key)
+    elif campaign_type == "Single Image / Video":
+        campaign_requirements = build_single_image_video_visual_output_requirements()
+    else:
+        return ""
+
+    return f"""MASTER RESPONSE AND VISUAL OUTPUT CONTRACT
+
+Selected product name: {product_name}
+Selected sport category: {category}
+Selected country: {country}
+Selected campaign type: {campaign_type}
+Creative variation token: {variation_token}
+
+Return the finished existing ad-copy output first, in its existing required schema and order. Preserve every existing copy field, card role, primary-text variation, headline, description, CTA, setup instruction, destination rule and URL parameter.
+
+Directly beneath that complete existing output, return the campaign-specific visual section required below.
+
+This response-order rule controls placement only. It does not replace, rewrite, weaken or omit any earlier approved copy instruction.
+
+If an earlier campaign schema already names an image prompt, cover prompt or creative prompt, treat that earlier section as specification for the single final visual section below. Move and upgrade that one visual field to the final position. Do not output a preliminary brief, duplicate visual field or second prompt. The final campaign-specific visual heading and prompt count below are authoritative.
+
+Do not repeat the research, explain decisions, show internal reasoning, provide rejected alternatives or give general creative advice. Return only the finished ad output followed by the finished visual prompt or prompts.
+
+Treat the creative variation token only as a cue for a fresh interpretation. Never display it in ad copy or inside an image.
+
+{build_product_lock_visual_rules()}
+
+{build_frame_and_glass_visual_rules()}
+
+{build_room_realism_visual_rules()}
+
+{build_sport_country_visual_adaptation(category, country)}
+
+{campaign_requirements}"""
+
+
+def apply_campaign_visual_output_contract(
+    prompt,
+    *,
+    product_name,
+    category,
+    country,
+    campaign_type,
+    template_key=None,
+    variation_token="",
+):
+    if not prompt or "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT" in prompt:
+        return prompt
+    contract = build_campaign_visual_output_contract(
+        product_name,
+        category,
+        country,
+        campaign_type,
+        template_key=template_key,
+        variation_token=variation_token,
+    )
+    return f"{prompt.rstrip()}\n\n{contract}" if contract else prompt
 
 
 def mask_protected_terms(text, protected_terms=()):
@@ -936,6 +1259,9 @@ def compose_final_ads_prompt(
     country,
     campaign_type,
     include_primary_text_variations=False,
+    product_name="",
+    template_key=None,
+    variation_token="",
 ):
     if not prompt:
         return prompt
@@ -946,7 +1272,18 @@ def compose_final_ads_prompt(
         category=category,
     )
     prompt = apply_country_language_guidance(prompt, country)
-    return apply_meta_url_parameters_guidance(prompt)
+    prompt = apply_meta_url_parameters_guidance(prompt)
+    if product_name:
+        prompt = apply_campaign_visual_output_contract(
+            prompt,
+            product_name=product_name,
+            category=category,
+            country=country,
+            campaign_type=campaign_type,
+            template_key=template_key,
+            variation_token=variation_token,
+        )
+    return prompt
 
 
 def build_motorsport_carousel_prompt(product_name, category, country, campaign_type):
@@ -1951,8 +2288,8 @@ The image prompt must instruct the image generator:
 - Top 60-68% of the image: framed artwork hero in a premium category-relevant collector setting.
 - Category setting: {category_setting}.
 - Bottom 32-40% of the image: black/gold CTA panel.
-- Panel main text: LIMITED TO 100 WORLDWIDE
-- Panel subtext: Once it sells out, it's gone.
+- Panel main text: use the strongest generated and verified scarcity wording. Use LIMITED TO 100 WORLDWIDE only when the edition quantity is confirmed by the approved claim path, supplied product information or visible artwork.
+- Panel subtext: use the generated supporting scarcity line. Once it sells out, it's gone. is permitted only when consistent with the approved copy.
 - Panel CTA: Claim Your Edition
 - Style: cinematic, premium, masculine, collector-focused.
 - No people unless the selected product/ad specifically asks for UGC.
@@ -2016,7 +2353,8 @@ FINAL QUALITY CHECK
 - Instant Experience Cover Prompt is present.
 - CTA guidance is present.
 - The cover prompt uses top 60-68% hero artwork and bottom 32-40% black/gold CTA panel.
-- The cover prompt includes LIMITED TO 100 WORLDWIDE, Once it sells out, it's gone, and Claim Your Edition.
+- The cover prompt includes Claim Your Edition and uses LIMITED TO 100 WORLDWIDE only when the quantity is verified.
+- The cover prompt may use Once it sells out, it's gone. only when it matches the approved generated copy.
 - Country wording is localised naturally.
 - No unsupported facts are invented."""
 
@@ -2285,7 +2623,19 @@ CTA GUIDANCE
 Claim Your Edition"""
 
 
-def build_ads_prompt(product_name, category, country, campaign_type, product_url=""):
+def build_visual_variation_token():
+    return secrets.token_hex(6)
+
+
+def build_ads_prompt(
+    product_name,
+    category,
+    country,
+    campaign_type,
+    product_url="",
+    *,
+    variation_token="",
+):
     template_key = get_template_key(category, campaign_type)
     if template_key == "motorsport_carousel":
         prompt = build_motorsport_carousel_prompt(product_name, category, country, campaign_type)
@@ -2333,6 +2683,9 @@ def build_ads_prompt(product_name, category, country, campaign_type, product_url
         country=country,
         campaign_type=campaign_type,
         include_primary_text_variations=campaign_type == "Carousel",
+        product_name=product_name,
+        template_key=template_key,
+        variation_token=variation_token,
     )
 
 
@@ -2380,13 +2733,29 @@ def record_ad_prompt_generated(product_name, category, country, campaign_type):
     )
 
 
-def render_supported_result(product_name, category, country, campaign_type, product_url=""):
+def render_supported_result(
+    product_name,
+    category,
+    country,
+    campaign_type,
+    product_url="",
+    *,
+    variation_token="",
+):
     render_generic_winner_pattern_note(category, campaign_type)
+    master_prompt = build_ads_prompt(
+        product_name,
+        category,
+        country,
+        campaign_type,
+        product_url=product_url,
+        variation_token=variation_token,
+    )
 
     if get_template_key(category, campaign_type) == "baseball_instant_experience":
         st.subheader("1. Copy this ChatGPT prompt")
         render_prompt_copy_button(
-            build_ads_prompt(product_name, category, country, campaign_type, product_url=product_url),
+            master_prompt,
             f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
         )
 
@@ -2398,7 +2767,7 @@ def render_supported_result(product_name, category, country, campaign_type, prod
     if campaign_type == "Instant Experience":
         st.subheader("1. Copy this ChatGPT prompt")
         render_prompt_copy_button(
-            build_ads_prompt(product_name, category, country, campaign_type, product_url=product_url),
+            master_prompt,
             f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
         )
 
@@ -2410,7 +2779,7 @@ def render_supported_result(product_name, category, country, campaign_type, prod
     if campaign_type == "Single Image / Video":
         st.subheader("1. Copy this ChatGPT prompt")
         render_prompt_copy_button(
-            build_ads_prompt(product_name, category, country, campaign_type, product_url=product_url),
+            master_prompt,
             f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
         )
 
@@ -2427,7 +2796,7 @@ def render_supported_result(product_name, category, country, campaign_type, prod
 
     st.subheader("2. Copy this ChatGPT prompt")
     render_prompt_copy_button(
-        build_ads_prompt(product_name, category, country, campaign_type, product_url=product_url),
+        master_prompt,
         f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
     )
 
@@ -2444,15 +2813,12 @@ def render_page():
 
     with st.expander("How to use", expanded=False):
         st.markdown(
-            "1. Enter the exact product name.\n"
-            "2. Choose the category, country and campaign type.\n"
-            "3. Select Submit.\n"
-            "4. Copy the generated ChatGPT prompt.\n"
-            "5. Open ChatGPT and attach the exact product image being advertised.\n"
-            "6. Paste the prompt so ChatGPT can analyse the artwork, title, subject, event and collector details.\n"
-            "7. Upload the five chosen mockups to Meta in the displayed order.\n"
-            "8. Add the five carousel headlines and descriptions.\n"
-            "9. Test the five primary-text variations separately."
+            "1. Enter the product and select the sport, country and campaign type.\n"
+            "2. Select Submit.\n"
+            "3. Upload the black-framed Sports Cave product WebP into ChatGPT.\n"
+            "4. Copy and paste the generated master prompt.\n"
+            "5. ChatGPT will return the ad copy first and the matching image prompt or prompts underneath.\n"
+            "6. Generate and upload the images in the displayed order."
         )
         st.warning(
             "Use the product name as the identity source. ChatGPT must not guess a person, event or achievement from the image."
@@ -2488,7 +2854,14 @@ def render_page():
         return
 
     record_ad_prompt_generated(product_name, category, country, campaign_type)
-    render_supported_result(product_name, category, country, campaign_type, product_url=product_url)
+    render_supported_result(
+        product_name,
+        category,
+        country,
+        campaign_type,
+        product_url=product_url,
+        variation_token=build_visual_variation_token(),
+    )
 
 
 render_ads_page = render_page

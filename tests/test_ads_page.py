@@ -46,6 +46,11 @@ def select_option(app_test, label, value):
     raise AssertionError(f"{label} selectbox was not rendered.")
 
 
+def visual_contract(prompt):
+    marker = "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT"
+    return prompt[prompt.index(marker) :]
+
+
 class AdsPageTests(unittest.TestCase):
     def test_visible_title_and_navigation_are_ads_only(self):
         app_test = run_ads_page()
@@ -1011,6 +1016,258 @@ PRIMARY TEXT VARIATIONS
         self.assertIn('filter_mode="fuzzy"', source)
         self.assertIn("EDITION_OPS_SNAPSHOT_PATH", source)
         self.assertNotIn("import edition_ops", source)
+
+    def test_edition_ops_dropdown_combines_live_catalogue_with_snapshot_fallback(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            snapshot_path = Path(temp_dir) / "edition_ops_products_snapshot.json"
+            snapshot_path.write_text(
+                json.dumps(
+                    {
+                        "rows": [
+                            {
+                                "product_title": "Snapshot Product",
+                                "shopify_handle": "snapshot-product",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            names = ads_page.load_edition_ops_product_name_options(
+                snapshot_path,
+                live_loader=lambda: [
+                    {
+                        "product_title": "Live Product",
+                        "product_handle": "live-product",
+                    },
+                    {
+                        "product_title": "Snapshot Product",
+                        "shopify_handle": "snapshot-product",
+                    },
+                ],
+            )
+
+        self.assertEqual(names, ["Live Product", "Snapshot Product"])
+
+    def test_carousel_visual_contract_has_exactly_five_card_matched_prompts(self):
+        prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            variation_token="carousel-test",
+        )
+        contract = visual_contract(prompt)
+        expected_roles = (
+            "Product Identity",
+            "Race Or Moment",
+            "Legacy",
+            "Fan Ownership",
+            "Scarcity",
+        )
+
+        self.assertEqual(contract.count("Image prompt:"), 5)
+        for index, role in enumerate(expected_roles, start=1):
+            self.assertIn(f"Card {index} — [exact generated Card {index} headline]", contract)
+            self.assertIn(f"Matching description: [exact generated Card {index} description]", contract)
+            self.assertIn(f"Visual purpose: {role}", contract)
+        self.assertIn("Return exactly these five image-prompt entries and no sixth prompt.", contract)
+
+    def test_generic_carousel_visual_contract_preserves_approved_generic_roles(self):
+        prompt = ads_page.build_ads_prompt(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Carousel",
+            variation_token="generic-carousel-test",
+        )
+        contract = visual_contract(prompt)
+
+        for role in (
+            "Product Identity",
+            "Moment / Legacy",
+            "Emotional Hook",
+            "Fan Ownership",
+            "Scarcity",
+        ):
+            self.assertIn(f"Visual purpose: {role}", contract)
+        self.assertNotIn("Visual purpose: Race Or Moment", contract)
+
+    def test_carousel_visual_contract_requires_distinct_coherent_standalone_rooms(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Six Laps Ahead",
+                "Motorsport",
+                "Australia",
+                "Carousel",
+                variation_token="room-test",
+            )
+        )
+
+        self.assertIn("The five images must form one premium visual story", contract)
+        self.assertIn("Do not merely recolour the same room.", contract)
+        self.assertIn("do not repeat a room type, wall treatment, principal furniture arrangement", contract)
+        self.assertIn("Every image prompt must be fully standalone.", contract)
+        self.assertIn('Never write "same as above"', contract)
+        self.assertIn("Normally do not place the card headline or description inside the image", contract)
+
+    def test_every_visual_contract_contains_product_frame_glass_and_room_realism(self):
+        for campaign_type in ("Carousel", "Instant Experience", "Single Image / Video"):
+            with self.subTest(campaign_type=campaign_type):
+                contract = visual_contract(
+                    ads_page.build_ads_prompt(
+                        "Collector Test Product",
+                        "Cricket",
+                        "New Zealand",
+                        campaign_type,
+                        variation_token="realism-test",
+                    )
+                )
+                self.assertIn("PRODUCT LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT", contract)
+                self.assertIn("Do not redesign, repaint, redraw, replace, reinterpret or regenerate", contract)
+                self.assertIn("FRAME AND GLASS REALISM - INCLUDE IN EVERY RETURNED IMAGE PROMPT", contract)
+                self.assertIn("real glass over the artwork", contract)
+                self.assertIn("DYNAMIC ROOM REALISM - INCLUDE IN EVERY RETURNED IMAGE PROMPT", contract)
+                self.assertIn("correct ceiling and wall geometry", contract)
+                self.assertIn("SPORT AND COUNTRY VISUAL ADAPTATION", contract)
+                self.assertIn("Selected country: New Zealand", contract)
+
+    def test_instant_experience_visual_contract_returns_one_tailored_cover_not_five(self):
+        prompt = ads_page.build_ads_prompt(
+            "fg",
+            "AFL",
+            "Australia",
+            "Instant Experience",
+            variation_token="instant-test",
+        )
+        contract = visual_contract(prompt)
+
+        self.assertEqual(contract.count("INSTANT EXPERIENCE COVER IMAGE PROMPT"), 1)
+        self.assertNotIn("IMAGE PROMPTS — GENERATE IN THIS ORDER", contract)
+        self.assertIn("output exactly one complete cover-image prompt", contract)
+        self.assertIn("square 1024 x 1024", contract)
+        self.assertIn("upper 60-68%", contract)
+        self.assertIn("lower 32-40%", contract)
+        self.assertIn("Never automatically claim", contract)
+        self.assertIn("Selected product name: fg", contract)
+        self.assertNotIn("Six Laps Ahead", contract)
+
+    def test_baseball_instant_experience_keeps_approved_banner_and_claim_path(self):
+        prompt = ads_page.build_ads_prompt(
+            "Shohei Ohtani 50/50 Season",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/ohtani-50-50",
+            variation_token="baseball-cover-test",
+        )
+        contract = visual_contract(prompt)
+
+        self.assertEqual(contract.count("INSTANT EXPERIENCE COVER IMAGE PROMPT"), 1)
+        self.assertIn("06 - Instant Experience Cover Banner (Social)", contract)
+        self.assertIn("Do not replace that approved banner format with a global square size.", contract)
+        self.assertIn("approved claim path", contract)
+        self.assertNotIn("Create a square 1024 x 1024", contract)
+        self.assertIn("SPORTS CAVE BASEBALL INSTANT EXPERIENCE AD", prompt)
+        self.assertIn("INSTANT EXPERIENCE SETUP", prompt)
+
+    def test_single_image_video_preserves_one_creative_prompt_route(self):
+        prompt = ads_page.build_ads_prompt(
+            "The Ashes Final Session",
+            "Cricket",
+            "UK",
+            "Single Image / Video",
+            variation_token="single-test",
+        )
+        contract = visual_contract(prompt)
+
+        self.assertIn("SPORTS CAVE CRICKET SINGLE IMAGE VIDEO WINNER PATTERN", prompt)
+        self.assertEqual(contract.count("CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO"), 1)
+        self.assertIn("Preserve the existing Single Image / Video route and output fields.", contract)
+        self.assertIn("Do not create a five-prompt Carousel sequence.", contract)
+        self.assertNotIn("IMAGE PROMPTS — GENERATE IN THIS ORDER", contract)
+
+    def test_master_contract_includes_selected_context_and_finished_output_order(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Six Laps Ahead",
+                "Motorsport",
+                "Canada",
+                "Carousel",
+                variation_token="context-test",
+            )
+        )
+
+        self.assertIn("Selected product name: Six Laps Ahead", contract)
+        self.assertIn("Selected sport category: Motorsport", contract)
+        self.assertIn("Selected country: Canada", contract)
+        self.assertIn("Selected campaign type: Carousel", contract)
+        self.assertIn("Creative variation token: context-test", contract)
+        self.assertIn("Return the finished existing ad-copy output first", contract)
+        self.assertIn("Directly beneath that complete existing output", contract)
+        self.assertIn("Do not output a preliminary brief, duplicate visual field or second prompt.", contract)
+        self.assertIn("The final campaign-specific visual heading and prompt count below are authoritative.", contract)
+        self.assertIn("Do not repeat the research", contract)
+
+    def test_product_name_is_collapsed_to_one_safe_prompt_line(self):
+        prompt = ads_page.build_ads_prompt(
+            '  Title <b>"quoted"</b> {value}\r\nSecond line  ',
+            "Golf",
+            "Canada",
+            "Single Image / Video",
+            variation_token="safe-title-test",
+        )
+
+        self.assertIn('Product name: Title <b>"quoted"</b> {value} Second line', prompt)
+        self.assertIn('Selected product name: Title <b>"quoted"</b> {value} Second line', prompt)
+        self.assertNotIn("{value}\r", prompt)
+        self.assertNotIn("{value}\n", prompt)
+
+    def test_visual_variation_tokens_are_fresh_and_non_sensitive(self):
+        first = ads_page.build_visual_variation_token()
+        second = ads_page.build_visual_variation_token()
+
+        self.assertNotEqual(first, second)
+        self.assertRegex(first, r"^[a-f0-9]{12}$")
+        self.assertRegex(second, r"^[a-f0-9]{12}$")
+
+    def test_copy_button_receives_one_combined_copy_and_visual_prompt(self):
+        prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            variation_token="clipboard-test",
+        )
+
+        with patch("ads_page.components.html") as render_html:
+            ads_page.render_prompt_copy_button(prompt, "combined-copy-test")
+
+        clipboard_html = render_html.call_args.args[0]
+        self.assertIn("SPORTS CAVE MOTORSPORT CAROUSEL AD", clipboard_html)
+        self.assertIn("MASTER RESPONSE AND VISUAL OUTPUT CONTRACT", clipboard_html)
+        self.assertIn("IMAGE PROMPTS", clipboard_html)
+        self.assertEqual(render_html.call_count, 1)
+
+    def test_ads_prompt_code_has_no_external_ai_api_path(self):
+        source = "\n".join(
+            [
+                (ROOT / "ads_page.py").read_text(encoding="utf-8"),
+                (ROOT / "ads_product_catalog.py").read_text(encoding="utf-8"),
+            ]
+        ).casefold()
+
+        for blocked in ("import openai", "from openai", "requests.post", "httpx", "urllib.request"):
+            self.assertNotIn(blocked, source)
+
+    def test_how_to_use_describes_one_master_prompt_and_matching_images(self):
+        source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
+
+        self.assertIn("Upload the black-framed Sports Cave product WebP into ChatGPT.", source)
+        self.assertIn("Copy and paste the generated master prompt.", source)
+        self.assertIn("ChatGPT will return the ad copy first and the matching image prompt or prompts underneath.", source)
+        self.assertIn("Generate and upload the images in the displayed order.", source)
 
     def test_supported_prompt_uses_copy_button_instead_of_visible_prompt_code(self):
         source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
