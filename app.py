@@ -4619,7 +4619,11 @@ def load_run_metadata(run_dir):
 
 def get_product_upload_prompt(metadata, update_existing=False):
     base_prompt = UPDATE_EXISTING_PRODUCT_PROMPT if update_existing else NEW_SHOPIFY_PRODUCT_PROMPT
-    return build_product_upload_prompt(base_prompt)
+    return build_product_upload_prompt(
+        base_prompt,
+        metadata=metadata,
+        update_existing=update_existing,
+    )
 
 
 PRODUCT_UPLOAD_ALT_TEXT_PROMPT = """Create unique commercial SEO image alt text for every Sports Cave Shopify product image supplied.
@@ -4782,6 +4786,269 @@ FINAL
 - Product remains unpublished until manually approved
 """
 
+
+PRODUCT_UPLOAD_MEDIA_PATCH_START = "MEDIA-UPLOAD RELIABILITY PATCH - MANDATORY"
+PRODUCT_UPLOAD_MEDIA_PATCH_END = "END MEDIA-UPLOAD RELIABILITY PATCH"
+
+PRODUCT_UPLOAD_MEDIA_RELIABILITY_SHARED = """STORAGE AND COMPLETION REQUIREMENT
+Dropbox is the only source of truth for product files. Use the connected Sports Cave Dropbox/Team Space root used by the OS Files page. Never hardcode a personal Dropbox path, expose a Dropbox token, or fall back to Google Drive.
+
+Treat every supplied Dropbox WebP expected by the unchanged product workflow as a mandatory product asset. Do not finish this workflow until every expected WebP is uploaded, successfully processed by Shopify, connected to the correct product and variants, and confirmed through a fresh Shopify read. A successful upload or assignment request is not proof of the final Shopify state.
+
+1. RESOLVE THE EXACT DROPBOX FILES
+- Open the exact selected product folder through the connected Dropbox integration.
+- Enumerate every supplied .webp file in that exact folder.
+- Use the latest Dropbox version of each file. Do not use an unchanged cache entry when Dropbox metadata shows that the file changed.
+- Fully download or hydrate every required file before upload.
+- Confirm that every file exists, is non-empty, has a valid WebP signature, decodes successfully, and can be read completely.
+- Preserve spaces, Unicode characters, apostrophes, ampersands, and hyphens in filenames and paths.
+- Do not silently skip an unreadable, unexpected, or ambiguously named file.
+- Do not use a similarly named product folder.
+- Do not use Google Drive.
+
+2. BUILD A COMPLETE INTERNAL IMAGE MANIFEST
+Before uploading, build an internal manifest with:
+- Exact Dropbox path.
+- Exact filename.
+- Product image role.
+- Gallery, lifestyle, detail, or variant-image classification.
+- Intended variant: Black, Oak, White, Unframed, or product-gallery only.
+- Existing Shopify media being replaced, when applicable.
+- New Shopify media ID after upload.
+- Processing status.
+- Final variant-assignment status.
+- Final verification result.
+
+Use the existing filename and folder conventions to map images. Filename matching may be case-insensitive, but final assignments must use actual Shopify product, media, and variant IDs. Never identify a frame colour only by visually guessing.
+
+If a required Black, Oak, White, or Unframed image is missing or ambiguous, stop media mutation, preserve all existing media, and report the exact missing or conflicting filenames. Generic lifestyle and detail images remain product-gallery media unless the unchanged prompt explicitly gives them another role.
+
+3. RESOLVE SHOPIFY VARIANTS WITH STABLE IDS
+- Read the product, option definitions, media, and all variants from Shopify before assigning media.
+- Locate the actual frame/style option by its real option name and values. Do not assume its position.
+- Match the actual Shopify option values for Black, Oak, White, and Unframed.
+- Use stable Shopify product, media, and variant IDs/GIDs. Never use array indexes, display order, or table position.
+- Assign the Black image to every applicable Black size variant.
+- Assign the Oak image to every applicable Oak size variant.
+- Assign the White image to every applicable White size variant.
+- Assign the Unframed image to every applicable Unframed size variant.
+- Never attach one frame colour's image to another frame colour.
+- Never attach a framed image to Unframed.
+- Never attach the Unframed image to Black, Oak, or White.
+- Never create duplicate Black, Oak, White, or Unframed assignments.
+
+4. UPLOAD EVERY SUPPLIED WEBP
+For every expected file:
+1. Retrieve the current file from Dropbox.
+2. Upload it through the existing supported Shopify media workflow.
+3. Capture the actual new Shopify media ID.
+4. Wait for Shopify processing.
+5. Re-read Shopify with bounded polling until the media is ready.
+6. Detect processing errors, missing media, and incorrect product ownership.
+7. Automatically retry temporary Dropbox, network, or Shopify failures with bounded retries and clear errors.
+8. Verify that the uploaded media exists on the intended product.
+
+Do not silently abandon an image after the first failed attempt. Do not report completion while an expected image is missing, processing, or failed.
+
+5. MAKE RETRIES IDEMPOTENT
+- Read current Shopify media before every retry.
+- Track media IDs returned during this operation.
+- Reuse verified media from this operation when safe.
+- Do not upload a duplicate merely because a previous attempt stopped during verification.
+- Detect and remove only confirmed duplicates created by this failed operation.
+- Do not identify replacement media by filename alone when old and new media share a filename.
+- Never remove existing media because its name merely resembles a supplied file.
+- Never remove unrelated lifestyle images, detail images, videos, or other product media.
+
+6. ASSIGN AND VERIFY ALL FOUR PRESENTATION VARIANTS
+After every new image is fully processed:
+- Attach the verified Black media ID to every Black size variant.
+- Attach the verified Oak media ID to every Oak size variant.
+- Attach the verified White media ID to every White size variant.
+- Attach the verified Unframed media ID to every Unframed size variant.
+- Preserve the gallery and featured-image order required by the unchanged prompt.
+- Re-read the product, media, and variants from Shopify.
+- Confirm that every applicable variant references the exact intended media ID.
+- Automatically repair each missing or incorrect association, then read Shopify again.
+
+Never treat a successful assignment request as final verification."""
+
+PRODUCT_UPLOAD_NEW_MEDIA_SEQUENCE = """NEW PRODUCT MEDIA SEQUENCE - MANDATORY ORDER
+1. Create or resolve the product using the unchanged existing workflow.
+2. Confirm all intended Shopify variants exist.
+3. Confirm Black, Oak, White, and Unframed variants are present where required.
+4. Resolve and validate every supplied Dropbox WebP.
+5. Upload every expected WebP.
+6. Wait for every image to become ready in Shopify.
+7. Assign Black, Oak, White, and Unframed images correctly across every applicable size.
+8. Verify the gallery, featured image, and all variant assignments through a fresh Shopify read.
+9. Automatically retry or repair anything missing.
+10. Report completion only after the final read-back passes.
+
+A product with missing media or incorrect variant images is incomplete."""
+
+PRODUCT_UPLOAD_EXISTING_MEDIA_SEQUENCE = """EXISTING PRODUCT REPLACEMENT SEQUENCE - MANDATORY ORDER
+1. Read and record the existing product media, gallery order, featured image, and variant-media assignments.
+2. Resolve and validate every supplied replacement WebP from Dropbox.
+3. Confirm the Black, Oak, White, and Unframed mappings.
+4. Upload all new media.
+5. Wait for every new Shopify image to become ready.
+6. Assign the new media to the correct variants across every applicable size.
+7. Verify all four presentation assignments through a fresh Shopify read.
+8. Verify the complete product gallery and featured-image order.
+9. Only after every previous check passes, remove the specific old media being replaced.
+10. Perform one final Shopify read confirming the old images are gone and every new image remains present and correctly assigned.
+
+Upload first, verify second, and delete old media last.
+
+If any new image fails to upload, process, or attach correctly:
+- Automatically retry and repair it where safe.
+- Keep the existing working product media.
+- Do not delete the existing Black, Oak, White, or Unframed images.
+- Do not leave the product with missing images.
+- Do not remove unrelated lifestyle images, detail images, videos, or media."""
+
+PRODUCT_UPLOAD_MEDIA_FINAL_VERIFICATION = """MANDATORY FINAL SHOPIFY READ-BACK
+Do not report success until a fresh Shopify read confirms:
+- Every expected Dropbox WebP is present on the correct product.
+- Every expected image is fully processed and ready.
+- No supplied image was silently skipped.
+- No unintended duplicate media remains.
+- The correct featured image is selected.
+- Gallery ordering matches the unchanged prompt.
+- Black variants use the Black image.
+- Oak variants use the Oak image.
+- White variants use the White image.
+- Unframed variants use the Unframed image.
+- No framed variant uses the Unframed image.
+- No Unframed variant uses a framed image.
+- For an Existing Product update, superseded images were removed only after verified replacement.
+- No unrelated Shopify media was changed or deleted.
+
+Return this completion table:
+
+| Dropbox file | Shopify media ID | Status | Image role | Intended variant | Assigned variant IDs | Verified |
+| ------------ | ---------------- | ------ | ---------- | ---------------- | -------------------- | -------- |
+
+If verification finds a missing upload or incorrect association, continue repairing it instead of asking the user to run the entire workflow again.
+
+If the issue cannot be repaired safely, identify the exact product, Dropbox file, Shopify media item, and affected variant. Never return a false success and never claim that an external service cannot fail."""
+
+
+def _product_upload_context_value(value, fallback):
+    clean = normalize_whitespace(value)
+    return clean or fallback
+
+
+def normalize_product_upload_source_context(metadata=None):
+    metadata = dict(metadata or {})
+    root_path = dropbox_integration.normalize_dropbox_path(
+        metadata.get("dropbox_root_path")
+        or metadata.get("dropbox_team_root")
+        or ""
+    )
+    folder_path = dropbox_integration.normalize_dropbox_path(
+        metadata.get("dropbox_product_folder")
+        or metadata.get("dropbox_folder_path")
+        or metadata.get("dropbox_path")
+        or ""
+    )
+    if root_path and folder_path and not dropbox_integration.path_is_within_root(
+        folder_path,
+        root_path,
+    ):
+        raise ValueError("The selected Dropbox product folder is outside the Sports Cave Files root.")
+    return {
+        "dropbox_root_path": root_path,
+        "dropbox_product_folder": folder_path,
+        "product_name": _product_upload_context_value(
+            metadata.get("product_name"),
+            "Not supplied - resolve from the exact selected folder and unchanged workflow.",
+        ),
+        "shopify_product_id": _product_upload_context_value(
+            metadata.get("shopify_product_id") or metadata.get("product_id"),
+            "Not supplied - resolve or capture the stable Shopify product ID before media assignment.",
+        ),
+        "shopify_product_gid": _product_upload_context_value(
+            metadata.get("shopify_product_gid"),
+            "Not supplied - resolve or capture the stable Shopify product GID before media assignment.",
+        ),
+        "shopify_handle": _product_upload_context_value(
+            metadata.get("shopify_handle") or metadata.get("product_handle"),
+            "Not supplied - resolve through the unchanged product workflow.",
+        ),
+    }
+
+
+def product_upload_media_reliability_patch(metadata=None, *, update_existing=False):
+    context = normalize_product_upload_source_context(metadata)
+    root_path = context["dropbox_root_path"] or (
+        "Resolve from the connected Sports Cave Files integration; do not hardcode it."
+    )
+    folder_path = context["dropbox_product_folder"] or (
+        "MISSING - open/select the exact product folder in Sports Cave Files before execution."
+    )
+    sequence = (
+        PRODUCT_UPLOAD_EXISTING_MEDIA_SEQUENCE
+        if update_existing
+        else PRODUCT_UPLOAD_NEW_MEDIA_SEQUENCE
+    )
+    return f"""{PRODUCT_UPLOAD_MEDIA_PATCH_START}
+
+SOURCE CONTEXT
+Dropbox root namespace: {json.dumps(root_path, ensure_ascii=False)}
+Selected Dropbox product folder: {json.dumps(folder_path, ensure_ascii=False)}
+Product name/context: {json.dumps(context["product_name"], ensure_ascii=False)}
+Shopify product ID: {json.dumps(context["shopify_product_id"], ensure_ascii=False)}
+Shopify product GID: {json.dumps(context["shopify_product_gid"], ensure_ascii=False)}
+Shopify handle: {json.dumps(context["shopify_handle"], ensure_ascii=False)}
+
+Do not place Dropbox access tokens, Shopify credentials, or other secrets in the prompt, manifest, logs, or completion table.
+
+{PRODUCT_UPLOAD_MEDIA_RELIABILITY_SHARED}
+
+{sequence}
+
+{PRODUCT_UPLOAD_MEDIA_FINAL_VERIFICATION}
+
+{PRODUCT_UPLOAD_MEDIA_PATCH_END}"""
+
+
+def remove_product_upload_media_reliability_patch(prompt_text):
+    prompt = str(prompt_text or "")
+    start = prompt.find(f"\n\n{PRODUCT_UPLOAD_MEDIA_PATCH_START}")
+    if start < 0:
+        start = prompt.find(PRODUCT_UPLOAD_MEDIA_PATCH_START)
+    if start < 0:
+        return prompt
+    end = prompt.find(PRODUCT_UPLOAD_MEDIA_PATCH_END, start)
+    if end < 0:
+        return prompt
+    end += len(PRODUCT_UPLOAD_MEDIA_PATCH_END)
+    return prompt[:start] + prompt[end:]
+
+
+def apply_product_upload_media_reliability_patch(
+    prompt_text,
+    metadata=None,
+    *,
+    update_existing=False,
+):
+    prompt = remove_product_upload_media_reliability_patch(prompt_text).strip()
+    patch = product_upload_media_reliability_patch(
+        metadata,
+        update_existing=update_existing,
+    )
+    appendix_marker = "\n\nADDITIONAL REQUIRED SUB-PROMPTS"
+    appendix_index = prompt.find(appendix_marker)
+    if appendix_index < 0:
+        return f"{prompt}\n\n{patch}".strip()
+    return (
+        f"{prompt[:appendix_index]}\n\n{patch}"
+        f"{prompt[appendix_index:]}"
+    ).strip()
+
+
 def product_upload_embedded_sections():
     return f"""ADDITIONAL REQUIRED SUB-PROMPTS
 Use these sections inside the product creation/update workflow. Do not run them as separate prompts unless the user explicitly asks.
@@ -4799,8 +5066,16 @@ FINAL QA CHECKLIST SUB-PROMPT
 """.strip()
 
 
-def build_product_upload_prompt(base_prompt):
-    return f"{str(base_prompt or '').strip()}\n\n{product_upload_embedded_sections()}".strip()
+def build_product_upload_prompt(base_prompt, *, metadata=None, update_existing=False):
+    existing_prompt = (
+        f"{str(base_prompt or '').strip()}\n\n"
+        f"{product_upload_embedded_sections()}"
+    ).strip()
+    return apply_product_upload_media_reliability_patch(
+        existing_prompt,
+        metadata,
+        update_existing=update_existing,
+    )
 
 
 def validate_uploaded_artwork(uploaded_file):
@@ -5310,11 +5585,20 @@ def render_copy_prompt_button(
     )
 
 
-def render_copyable_prompt(title, prompt_text, key, show_title=True, prompt_id=None):
+def render_copyable_prompt(
+    title,
+    prompt_text,
+    key,
+    show_title=True,
+    prompt_id=None,
+    prompt_transform=None,
+):
     prompt_id = prompt_id or prompt_edit_id("app", key)
     default_prompt_text = prompt_text
     prompt_record = current_prompt_record(prompt_id, default_prompt_text, title=title, module="app")
     prompt_text = (prompt_record.get("text") or "").strip()
+    if prompt_transform is not None:
+        prompt_text = str(prompt_transform(prompt_text) or "").strip()
 
     textarea_height = min(780, max(320, (prompt_text.count("\n") + 1) * 18 + 80))
     safe_text = html.escape(prompt_text)
@@ -7232,40 +7516,80 @@ def render_mockups_page():
         render_generation_result(st.session_state.last_generation_result)
 
 
+def current_product_upload_source_metadata():
+    result = st.session_state.get("last_generation_result")
+    result = dict(result) if isinstance(result, dict) else {}
+    root_cache = st.session_state.get("files_team_root")
+    root_cache = dict(root_cache) if isinstance(root_cache, dict) else {}
+    folder_path = str(st.session_state.get("files_browser_path") or "").strip()
+    if not folder_path:
+        with suppress(Exception):
+            query_path = st.query_params.get("files_path", "")
+            if isinstance(query_path, (list, tuple)):
+                query_path = query_path[0] if query_path else ""
+            folder_path = str(query_path or "").strip()
+    root_path = dropbox_integration.normalize_dropbox_path(root_cache.get("path") or "")
+    folder_path = dropbox_integration.normalize_dropbox_path(folder_path)
+    if root_path and (
+        folder_path.casefold() == root_path.casefold()
+        or not dropbox_integration.path_is_within_root(folder_path, root_path)
+    ):
+        folder_path = ""
+    return {
+        "dropbox_root_path": root_path,
+        "dropbox_product_folder": folder_path,
+        "product_name": result.get("product_name") or "",
+        "shopify_product_id": result.get("shopify_product_id") or "",
+        "shopify_product_gid": result.get("shopify_product_gid") or "",
+        "shopify_handle": result.get("shopify_handle") or result.get("product_handle") or "",
+    }
+
+
 def render_product_uploads_page():
     started = time.perf_counter()
     log_app_memory("Page load: Product Uploads")
     st.subheader("Shopify Prompt Tools")
     st.caption(
-        "Use this lightweight prompt page when you already have your Shopify upload images and HTML preview ready to drag into ChatGPT."
+        "Use this lightweight prompt page after selecting the exact Dropbox product folder in Sports Cave Files."
     )
 
     with st.expander("How to", expanded=False):
         st.markdown(
-            "1. Drag every WEBP file from your `shopify-uploads` folder into ChatGPT.\n"
-            "2. Drag the matching HTML preview into ChatGPT if you have it.\n"
-            "3. Copy either the new-product prompt or the update-existing-product prompt.\n"
-            "4. The image alt text, SEO meta tags, and final QA checklist instructions are already embedded inside both prompts.\n"
+            "1. Open the exact product folder in Sports Cave Files so its Dropbox path is selected.\n"
+            "2. Copy either the new-product prompt or the update-existing-product prompt.\n"
+            "3. Run the prompt with the connected Dropbox and Shopify integrations.\n"
+            "4. The media verification, image alt text, SEO meta tags, and final QA checklist instructions are already embedded inside both prompts.\n"
             "\n"
             "This page stays manual on purpose so it remains fast and lightweight on Render."
         )
 
     st.divider()
+    source_metadata = current_product_upload_source_metadata()
 
     render_copyable_prompt(
         "New Shopify Product Prompt",
-        get_product_upload_prompt({}, update_existing=False),
+        get_product_upload_prompt(source_metadata, update_existing=False),
         "new-shopify-product-prompt",
         prompt_id=prompt_edit_id("product-upload", "new-shopify-product"),
+        prompt_transform=lambda prompt: apply_product_upload_media_reliability_patch(
+            prompt,
+            source_metadata,
+            update_existing=False,
+        ),
     )
 
     st.divider()
 
     render_copyable_prompt(
         "Update Existing Product Prompt",
-        get_product_upload_prompt({}, update_existing=True),
+        get_product_upload_prompt(source_metadata, update_existing=True),
         "update-existing-shopify-product-prompt",
         prompt_id=prompt_edit_id("product-upload", "update-existing-shopify-product"),
+        prompt_transform=lambda prompt: apply_product_upload_media_reliability_patch(
+            prompt,
+            source_metadata,
+            update_existing=True,
+        ),
     )
     safe_startup_print(f"PERF Product Uploads total={(time.perf_counter() - started):.3f}s")
 
