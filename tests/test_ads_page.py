@@ -1,10 +1,12 @@
 import importlib
+import io
 import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
+from PIL import Image
 from streamlit.testing.v1 import AppTest
 
 import ads_page
@@ -49,6 +51,19 @@ def select_option(app_test, label, value):
 def visual_contract(prompt):
     marker = "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT"
     return prompt[prompt.index(marker) :]
+
+
+def square_png_bytes(color=(46, 76, 112)):
+    buffer = io.BytesIO()
+    Image.new("RGB", (96, 96), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def button_by_label(app_test, label):
+    for button in app_test.button:
+        if button.label == label:
+            return button
+    raise AssertionError(f"{label} button was not rendered.")
 
 
 class AdsPageTests(unittest.TestCase):
@@ -1050,6 +1065,31 @@ PRIMARY TEXT VARIATIONS
 
         self.assertEqual(names, ["Live Product", "Snapshot Product"])
 
+    def test_selected_edition_ops_product_id_is_persisted_with_generated_result(self):
+        with patch(
+            "ads_page.load_edition_ops_product_rows",
+            return_value=[
+                {
+                    "product_id": "product-123",
+                    "product_title": "Six Laps Ahead",
+                    "shopify_handle": "six-laps-ahead",
+                }
+            ],
+        ):
+            product_id = ads_page.resolve_edition_ops_product_id("Six Laps Ahead")
+        result = ads_page.build_ads_result_record(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            product_id=product_id,
+            variation_token="product-id-test",
+        )
+
+        self.assertEqual(result["product_id"], "product-123")
+        self.assertEqual(result["product_name"], "Six Laps Ahead")
+        self.assertEqual(result["variation_token"], "product-id-test")
+
     def test_carousel_visual_contract_has_exactly_five_card_matched_prompts(self):
         prompt = ads_page.build_ads_prompt(
             "Six Laps Ahead",
@@ -1111,6 +1151,41 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Every image prompt must be fully standalone.", contract)
         self.assertIn('Never write "same as above"', contract)
         self.assertIn("Normally do not place the card headline or description inside the image", contract)
+
+    def test_last_image_variation_lock_is_required_inside_every_carousel_prompt(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Six Laps Ahead",
+                "Motorsport",
+                "Australia",
+                "Carousel",
+                variation_token="last-image-test",
+            )
+        )
+
+        self.assertIn(
+            "LAST-IMAGE VARIATION LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT",
+            contract,
+        )
+        for instruction in (
+            "Analyze the uploaded Sports Cave product image.",
+            "previously generated image for this same product",
+            "noticeably different house and visual setting",
+            "new wall colour and wall material",
+            "new lighting direction",
+            "new camera height, camera distance and camera angle",
+            "Make the difference obvious at thumbnail size.",
+            "Never sacrifice the product lock",
+        ):
+            self.assertIn(instruction, contract)
+        self.assertEqual(
+            contract.count(
+                "Image prompt: [one complete standalone image-generation prompt that repeats the complete LAST-IMAGE VARIATION LOCK instructions]"
+            ),
+            5,
+        )
+        self.assertIn("No two cards may repeat the room type, house architecture", contract)
+        self.assertIn("time-of-day treatment, camera composition, camera height", contract)
 
     def test_every_visual_contract_contains_product_frame_glass_and_room_realism(self):
         for campaign_type in ("Carousel", "Instant Experience", "Single Image / Video"):
@@ -1290,10 +1365,10 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(
             [subheader.value for subheader in app_test.subheader],
             [
-                "1. Upload these five images",
-                "2. Copy this ChatGPT prompt",
-                "3. Build it in Meta",
-                "4. URL parameters",
+                "1. Copy this ChatGPT prompt",
+                "Generated Ad Images",
+                "2. Build it in Meta",
+                "3. URL parameters",
             ],
         )
         self.assertEqual(len(app_test.code), 1)
@@ -1317,6 +1392,123 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(app_test.code[0].value, ads_page.META_AD_URL_PARAMETERS)
         self.assertEqual(len(app_test.exception), 0)
 
+    def test_carousel_renders_five_slots_and_upload_state_survives_reruns(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Carousel")
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        self.assertEqual(
+            [uploader.label for uploader in app_test.file_uploader],
+            ["Carousel 1", "Carousel 2", "Carousel 3", "Carousel 4", "Carousel 5"],
+        )
+        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+        original_result = dict(app_test.session_state[ads_page.ADS_RESULT_STATE_KEY])
+        image = square_png_bytes()
+        for uploader in app_test.file_uploader:
+            uploader.set_value([(f"{uploader.label}.png", image, "image/png")])
+        app_test.run(timeout=30)
+
+        persisted_result = dict(app_test.session_state[ads_page.ADS_RESULT_STATE_KEY])
+        self.assertEqual(persisted_result["variation_token"], original_result["variation_token"])
+        self.assertEqual(persisted_result["master_prompt"], original_result["master_prompt"])
+        self.assertEqual(
+            len(app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]["slots"]),
+            5,
+        )
+        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
+        self.assertEqual(len(app_test.exception), 0)
+
+    def test_remove_and_replace_updates_carousel_save_readiness(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Carousel")
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+        image = square_png_bytes()
+        for uploader in app_test.file_uploader:
+            uploader.set_value([(f"{uploader.label}.png", image, "image/png")])
+        app_test.run(timeout=30)
+
+        button_by_label(app_test, "Remove").click().run(timeout=20)
+        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+        self.assertEqual(
+            len(app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]["slots"]),
+            4,
+        )
+        app_test.file_uploader[0].set_value(
+            [("Carousel 1 replacement.webp", image, "image/webp")]
+        )
+        app_test.run(timeout=30)
+        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
+        self.assertEqual(len(app_test.exception), 0)
+
+    def test_instant_experience_renders_exactly_one_upload_slot(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Final Whistle Glory")
+        select_option(app_test, "Category", "Football")
+        select_option(app_test, "Country", "UK")
+        select_option(app_test, "Campaign type", "Instant Experience")
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        self.assertEqual(
+            [uploader.label for uploader in app_test.file_uploader],
+            ["Instant Experience Image"],
+        )
+        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+        app_test.file_uploader[0].set_value(
+            [("instant.png", square_png_bytes(), "image/png")]
+        )
+        app_test.run(timeout=30)
+        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
+        self.assertEqual(len(app_test.exception), 0)
+
+    def test_invalid_generated_image_shows_inline_error_and_keeps_save_disabled(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Final Whistle Glory")
+        select_option(app_test, "Category", "Football")
+        select_option(app_test, "Country", "UK")
+        select_option(app_test, "Campaign type", "Instant Experience")
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        app_test.file_uploader[0].set_value(
+            [("broken.png", b"not an image", "image/png")]
+        )
+        app_test.run(timeout=20)
+
+        self.assertTrue(any("corrupt" in error.value for error in app_test.error))
+        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+        self.assertEqual(len(app_test.exception), 0)
+
+    def test_new_campaign_submit_resets_only_incompatible_ads_upload_state(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Carousel")
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+        app_test.file_uploader[0].set_value(
+            [("carousel-one.png", square_png_bytes(), "image/png")]
+        )
+        app_test.run(timeout=30)
+        old_context = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]["context_key"]
+
+        select_option(app_test, "Campaign type", "Instant Experience")
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        new_result = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]
+        new_workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
+        self.assertNotEqual(new_result["context_key"], old_context)
+        self.assertEqual(new_workflow["context_key"], new_result["context_key"])
+        self.assertEqual(new_workflow["slots"], {})
+        self.assertEqual(
+            [uploader.label for uploader in app_test.file_uploader],
+            ["Instant Experience Image"],
+        )
+
     def test_valid_category_campaign_country_combinations_never_have_insufficient_winner_data(self):
         for category in ads_page.SUPPORTED_AD_CATEGORIES:
             for campaign_type in ("Carousel", "Instant Experience", "Single Image / Video"):
@@ -1332,15 +1524,16 @@ PRIMARY TEXT VARIATIONS
                         self.assertNotEqual(prompt, "")
                         self.assertNotIn("Insufficient winner data", prompt)
 
-    def test_ads_page_source_has_no_external_backend_execution_path(self):
+    def test_ads_page_source_has_no_external_ai_or_shopify_execution_path(self):
         source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
         source_lower = source.casefold()
 
-        for blocked in ("supabase", "meta_ads_client", "openai", "requests", "analytics"):
+        for blocked in ("meta_ads_client", "openai", "requests.post", "httpx", "analytics"):
             self.assertNotIn(blocked, source_lower)
         self.assertNotIn("import shopify", source_lower)
         self.assertNotIn("from shopify", source_lower)
         self.assertNotIn("shopify_client", source_lower)
+        self.assertIn("dropbox_integration.upload_batch", source)
         self.assertNotIn("st.tabs", source)
         self.assertNotIn("st.metric", source)
         self.assertNotIn("saved packs", source_lower)

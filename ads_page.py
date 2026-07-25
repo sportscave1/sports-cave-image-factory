@@ -1,15 +1,20 @@
 import hashlib
 import html
 import json
+import logging
 import re
 import secrets
-from pathlib import Path
+import time
+from pathlib import Path, PurePosixPath
 
 import streamlit as st
 import streamlit.components.v1 as components
 
 from activity_log import record_activity_log
+import ads_image_workflow
 from ads_product_catalog import load_live_edition_product_rows
+import dropbox_integration
+import os_accounts
 
 
 CATEGORY_OPTIONS = [
@@ -50,6 +55,10 @@ EDITION_OPS_ROWS_SESSION_KEY = "edition_ops_rows"
 
 CAROUSEL_CARD_MAX_CHARACTERS = 17
 CAROUSEL_CARD_COUNT = 5
+ADS_RESULT_STATE_KEY = "ads_generated_result"
+ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
+ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
+ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
 
 BANNED_GENERIC_CAROUSEL_PHRASES = (
     "History Framed",
@@ -436,6 +445,18 @@ def _edition_ops_product_handle_from_row(row):
     )
 
 
+def _edition_ops_product_id_from_row(row):
+    if not isinstance(row, dict):
+        return ""
+    return _normalise_option_label(
+        row.get("product_id")
+        or row.get("Product ID")
+        or row.get("shopify_product_id")
+        or row.get("id")
+        or _edition_ops_product_handle_from_row(row)
+    )
+
+
 def _edition_ops_product_option_label(row, duplicate_titles=None):
     product_name = _product_name_from_edition_ops_row(row)
     handle = _edition_ops_product_handle_from_row(row)
@@ -457,7 +478,7 @@ def _edition_ops_rows_from_local_snapshot(snapshot_path=EDITION_OPS_SNAPSHOT_PAT
     return rows if isinstance(rows, list) else []
 
 
-def load_edition_ops_product_name_options(
+def load_edition_ops_product_rows(
     snapshot_path=EDITION_OPS_SNAPSHOT_PATH,
     *,
     live_loader=None,
@@ -489,6 +510,18 @@ def load_edition_ops_product_name_options(
             continue
         unique_rows.append(row)
         seen_rows.add(row_key)
+    return unique_rows
+
+
+def load_edition_ops_product_name_options(
+    snapshot_path=EDITION_OPS_SNAPSHOT_PATH,
+    *,
+    live_loader=None,
+):
+    unique_rows = load_edition_ops_product_rows(
+        snapshot_path,
+        live_loader=live_loader,
+    )
 
     options = []
     seen = set()
@@ -507,6 +540,24 @@ def load_edition_ops_product_name_options(
             options.append(option_label)
             seen.add(key)
     return options
+
+
+def resolve_edition_ops_product_id(product_name):
+    selected = _normalise_option_label(product_name)
+    if not selected:
+        return ""
+    rows = load_edition_ops_product_rows()
+    title_counts = {}
+    for row in rows:
+        title = _product_name_from_edition_ops_row(row)
+        if title:
+            title_counts[title.casefold()] = title_counts.get(title.casefold(), 0) + 1
+    duplicate_titles = {key for key, count in title_counts.items() if count > 1}
+    for row in rows:
+        option_label = _edition_ops_product_option_label(row, duplicate_titles)
+        if selected.casefold() == option_label.casefold():
+            return _edition_ops_product_id_from_row(row)
+    return ""
 
 
 def render_prompt_copy_button(prompt_text, key, label="Copy Prompt"):
@@ -734,6 +785,32 @@ Do not use an excessively wide or distorted camera angle, perfect artificial sym
 Avoid warped walls, impossible windows, bent shelves, floating furniture, malformed lamps, unusable layouts, inconsistent reflections, duplicate objects, random decorative objects, fake luxury, plastic materials, oversized rooms with no believable function, excessive blur, overprocessed HDR, unrealistic orange lighting and any obvious AI-room appearance."""
 
 
+def build_last_image_variation_visual_rules():
+    return """LAST-IMAGE VARIATION LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT
+
+Before choosing this visual setting:
+
+- Analyze the uploaded Sports Cave product image.
+- Inspect every previously generated image for this same product that is visible in the current ChatGPT conversation.
+- Identify the room types, houses, architecture, wall colours, wall materials, furniture layouts, lighting, time of day, camera angles, camera heights, camera distances, artwork placements and compositions already used.
+- Create a noticeably different house and visual setting from the recent images.
+- Use a new room type or architectural area.
+- Use a new wall colour and wall material.
+- Use a new principal furniture arrangement.
+- Use a new lighting direction and preferably a different time of day.
+- Use a new camera height, camera distance and camera angle.
+- Change the artwork's placement and surrounding negative space while keeping the supplied frame geometrically correct.
+- Make the difference obvious at thumbnail size.
+- Do not merely recolour the same room, move one item, shift the camera slightly or reuse a generic stock-room layout.
+- Continue conveying the exact emotional purpose of this card or campaign image.
+- Never sacrifice the product lock, artwork accuracy, frame proportions or glass realism to create variation.
+- Do not invent product facts or add unapproved sports props.
+
+If previous images for this product are unavailable in the conversation, create a fresh interpretation and ensure every image within the current run is strongly differentiated from the others.
+
+Repeat this complete LAST-IMAGE VARIATION LOCK inside the returned standalone image prompt. Do not refer to rules elsewhere in the response."""
+
+
 def build_sport_country_visual_adaptation(category, country):
     category_label = _normalise_option_label(category) or "selected sport"
     country_label = normalize_country_language_key(country) or _normalise_option_label(country) or "selected country"
@@ -772,7 +849,7 @@ def build_carousel_visual_output_requirements(template_key):
                 f"Card {index} — [exact generated Card {index} headline]",
                 f"Matching description: [exact generated Card {index} description]",
                 f"Visual purpose: {role}",
-                "Image prompt: [one complete standalone image-generation prompt]",
+                "Image prompt: [one complete standalone image-generation prompt that repeats the complete LAST-IMAGE VARIATION LOCK instructions]",
                 "",
             ]
         )
@@ -789,6 +866,8 @@ Privately develop a fresh visual concept from the selected product before writin
 
 Across the five prompts deliberately vary room type, architecture, wall finish, material palette, furniture style, lighting direction, time of day, camera height, camera distance, camera angle, artwork placement, emotional intensity, negative space, framing and composition, and how the room expresses the card's message.
 
+No two cards may repeat the room type, house architecture, wall treatment, wall colour family, main furniture layout, lighting setup, time-of-day treatment, camera composition, camera height or artwork placement.
+
 Do not merely recolour the same room. Do not default to a generic office, living room, man cave, collector room and close-up sequence.
 
 Treat this as a new creative run. Do not default to room combinations you have previously supplied for Sports Cave. Build a fresh set from the product title, sport, country, card copy and emotional story. Within this run, do not repeat a room type, wall treatment, principal furniture arrangement, lighting setup or camera composition.
@@ -797,7 +876,7 @@ Normally do not place the card headline or description inside the image because 
 
 Do not add prices, discounts, fake buttons, fake UI, watermarks or random copy.
 
-Every image prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, sport-and-country adaptation and relevant visual-story requirements inside every prompt. Never write "same as above", "use the previous room" or "keep the same settings".
+Every image prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, LAST-IMAGE VARIATION LOCK, sport-and-country adaptation and relevant visual-story requirements inside every prompt. Never write "same as above", "use the previous room" or "keep the same settings".
 
 IMAGE PROMPTS — GENERATE IN THIS ORDER
 
@@ -832,11 +911,11 @@ Tailor the cover to the selected product name, selected sport, selected country,
 
 Never invent edition quantities, sale prices, discounts, signatures, logos, athlete names, achievements, dates, rivalries, product details or scarcity facts.
 
-The one cover prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, sport-and-country adaptation and cover-layout requirements inside it. Do not refer to shared rules elsewhere in the response.
+The one cover prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, LAST-IMAGE VARIATION LOCK, sport-and-country adaptation and cover-layout requirements inside it. Do not refer to shared rules elsewhere in the response.
 
 INSTANT EXPERIENCE COVER IMAGE PROMPT
 
-[one complete standalone cover-image prompt]
+[one complete standalone cover-image prompt that repeats the complete LAST-IMAGE VARIATION LOCK instructions]
 
 Return exactly one cover-image prompt and no additional image prompts."""
 
@@ -846,13 +925,13 @@ def build_single_image_video_visual_output_requirements():
 
 Preserve the existing Single Image / Video route and output fields.
 
-Upgrade its existing creative brief into exactly one complete standalone creative prompt using the dynamic room-realism, product-lock, frame-and-glass and sport-and-country adaptation rules. Do not create a five-prompt Carousel sequence.
+Upgrade its existing creative brief into exactly one complete standalone creative prompt using the dynamic room-realism, product-lock, frame-and-glass, LAST-IMAGE VARIATION LOCK and sport-and-country adaptation rules. Do not create a five-prompt Carousel sequence.
 
 Place this one enhanced creative prompt after every existing copy, headline, description, CTA, setup and URL-parameter field.
 
 CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO
 
-[one complete standalone image or video prompt]
+[one complete standalone image or video prompt that repeats the complete LAST-IMAGE VARIATION LOCK instructions]
 
 Return exactly one creative prompt."""
 
@@ -902,6 +981,8 @@ Treat the creative variation token only as a cue for a fresh interpretation. Nev
 {build_frame_and_glass_visual_rules()}
 
 {build_room_realism_visual_rules()}
+
+{build_last_image_variation_visual_rules()}
 
 {build_sport_country_visual_adaptation(category, country)}
 
@@ -2715,8 +2796,13 @@ def render_product_name_input():
             placeholder="Example: Six Laps Ahead",
             accept_new_options=True,
             filter_mode="fuzzy",
+            key="ads_product_name",
         )
-    return st.text_input("Product name", placeholder="Example: Six Laps Ahead")
+    return st.text_input(
+        "Product name",
+        placeholder="Example: Six Laps Ahead",
+        key="ads_product_name",
+    )
 
 
 def record_ad_prompt_generated(product_name, category, country, campaign_type):
@@ -2733,24 +2819,687 @@ def record_ad_prompt_generated(product_name, category, country, campaign_type):
     )
 
 
-def render_supported_result(
+def current_ads_user():
+    user = st.session_state.get("sports_cave_current_user")
+    if user:
+        return dict(user)
+    if st.session_state.get("sports_cave_authenticated"):
+        return {
+            "id": "legacy-master-admin",
+            "display_name": "Sports Cave Admin",
+            "role": os_accounts.ROLE_ADMIN,
+            "timezone": os_accounts.ADMIN_TIMEZONE,
+            "page_permissions": [],
+            "legacy": True,
+        }
+    return {}
+
+
+def ads_result_context_key(product_id, product_name, category, country, campaign_type):
+    payload = json.dumps(
+        {
+            "product_id": str(product_id or ""),
+            "product_name": _clean_product_name(product_name),
+            "category": str(category or ""),
+            "country": str(country or ""),
+            "campaign_type": str(campaign_type or ""),
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
+
+
+def build_ads_result_record(
     product_name,
     category,
     country,
     campaign_type,
-    product_url="",
     *,
+    product_id="",
+    product_url="",
     variation_token="",
 ):
-    render_generic_winner_pattern_note(category, campaign_type)
+    clean_product_name = _clean_product_name(product_name)
+    clean_product_id = str(product_id or "").strip()
+    clean_variation_token = str(variation_token or "").strip() or build_visual_variation_token()
     master_prompt = build_ads_prompt(
-        product_name,
+        clean_product_name,
         category,
         country,
         campaign_type,
         product_url=product_url,
-        variation_token=variation_token,
+        variation_token=clean_variation_token,
     )
+    return {
+        "context_key": ads_result_context_key(
+            clean_product_id,
+            clean_product_name,
+            category,
+            country,
+            campaign_type,
+        ),
+        "product_id": clean_product_id,
+        "product_name": clean_product_name,
+        "category": str(category or ""),
+        "country": str(country or ""),
+        "campaign_type": str(campaign_type or ""),
+        "product_url": _clean_product_url(product_url),
+        "variation_token": clean_variation_token,
+        "master_prompt": master_prompt,
+        "generated_ad_output": master_prompt,
+    }
+
+
+def _new_ads_image_workflow(result):
+    user = current_ads_user()
+    timezone_name = os_accounts.timezone_for_user(user) if user else os_accounts.ADMIN_TIMEZONE
+    return {
+        "context_key": result["context_key"],
+        "campaign_type": result["campaign_type"],
+        "slots": {},
+        "widget_nonces": {},
+        "export_date": ads_image_workflow.account_iso_date(timezone_name),
+        "save_open": False,
+        "saving": False,
+        "destination_path": "",
+        "picker_path": "",
+        "outcomes": {},
+    }
+
+
+def _reset_ads_image_workflow(result):
+    current_context = str(result.get("context_key") or "")
+    for key in list(st.session_state):
+        if str(key).startswith("ads-image-upload::") and current_context not in str(key):
+            st.session_state.pop(key, None)
+    workflow = _new_ads_image_workflow(result)
+    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    return workflow
+
+
+def _ads_image_workflow(result):
+    workflow = st.session_state.get(ADS_IMAGE_STATE_KEY)
+    if not isinstance(workflow, dict) or workflow.get("context_key") != result.get("context_key"):
+        workflow = _new_ads_image_workflow(result)
+        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    return workflow
+
+
+def _slot_upload_key(result, workflow, slot_id):
+    nonce = int((workflow.get("widget_nonces") or {}).get(slot_id) or 0)
+    return f"ads-image-upload::{result['context_key']}::{slot_id}::{nonce}"
+
+
+def _remove_ads_image_slot(result, slot_id):
+    workflow = _ads_image_workflow(result)
+    has_other_saved = any(
+        outcome.get("status") == "saved"
+        for key, outcome in (workflow.get("outcomes") or {}).items()
+        if key != slot_id
+    )
+    workflow.setdefault("slots", {}).pop(slot_id, None)
+    workflow.setdefault("outcomes", {}).pop(slot_id, None)
+    nonces = workflow.setdefault("widget_nonces", {})
+    nonces[slot_id] = int(nonces.get(slot_id) or 0) + 1
+    workflow["save_open"] = False
+    if not has_other_saved:
+        workflow["destination_path"] = ""
+    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+
+
+def _process_ads_image_upload(result, workflow, slot, uploaded_file):
+    if uploaded_file is None:
+        return
+    source_bytes = uploaded_file.getvalue()
+    source_hash = ads_image_workflow.source_image_signature(source_bytes)
+    existing = (workflow.get("slots") or {}).get(slot["id"]) or {}
+    if existing.get("source_hash") == source_hash:
+        return
+    try:
+        processed = ads_image_workflow.optimize_meta_image(
+            source_bytes,
+            original_name=uploaded_file.name,
+        )
+        processed.update(
+            {
+                "slot_id": slot["id"],
+                "label": slot["label"],
+                "position": slot["position"],
+                "valid": True,
+                "error": "",
+            }
+        )
+    except ads_image_workflow.AdsImageValidationError as error:
+        processed = {
+            "slot_id": slot["id"],
+            "label": slot["label"],
+            "position": slot["position"],
+            "source_hash": source_hash,
+            "original_name": str(uploaded_file.name or "image"),
+            "valid": False,
+            "error": str(error),
+        }
+    workflow.setdefault("slots", {})[slot["id"]] = processed
+    outcomes = workflow.setdefault("outcomes", {})
+    has_other_saved = any(
+        outcome.get("status") == "saved"
+        for key, outcome in outcomes.items()
+        if key != slot["id"]
+    )
+    outcomes.pop(slot["id"], None)
+    workflow["save_open"] = False
+    if not has_other_saved:
+        workflow["destination_path"] = ""
+    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+
+
+def ads_images_ready(result, workflow=None):
+    workflow = workflow or _ads_image_workflow(result)
+    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    slots = workflow.get("slots") or {}
+    return bool(slot_specs) and all((slots.get(slot["id"]) or {}).get("valid") for slot in slot_specs)
+
+
+def _meta_output_filename(result, workflow, slot):
+    return ads_image_workflow.build_meta_image_filename(
+        result["product_name"],
+        result["campaign_type"],
+        position=slot["position"],
+        iso_date=workflow["export_date"],
+    )
+
+
+def _render_ads_image_slots(result, workflow):
+    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    if not slot_specs:
+        return
+    st.subheader("Generated Ad Images")
+    st.caption(
+        "Upload the images generated from the prompt above. They will be optimized and saved as individual Meta-ready files."
+    )
+    columns = st.columns(len(slot_specs))
+    for index, slot in enumerate(slot_specs):
+        with columns[index]:
+            with st.container(border=True, key=f"ads-image-slot::{result['context_key']}::{slot['id']}"):
+                st.markdown(f"**{slot['label']}**")
+                if result.get("campaign_type") == "Carousel" and index < len(IMAGE_ORDER):
+                    title, body = IMAGE_ORDER[index]
+                    st.caption(f"Card {index + 1}: {title}")
+                    st.caption(body)
+                uploaded_file = st.file_uploader(
+                    slot["label"],
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key=_slot_upload_key(result, workflow, slot["id"]),
+                    max_upload_size=20,
+                    label_visibility="collapsed",
+                )
+                _process_ads_image_upload(result, workflow, slot, uploaded_file)
+                saved_slot = (workflow.get("slots") or {}).get(slot["id"]) or {}
+                if saved_slot.get("valid"):
+                    st.image(saved_slot["data"], width="stretch")
+                    st.caption(
+                        f"1080 x 1080 JPEG | {saved_slot['output_size'] / (1024 * 1024):.2f} MB"
+                    )
+                    st.caption(_meta_output_filename(result, workflow, slot))
+                    outcome = (workflow.get("outcomes") or {}).get(slot["id"]) or {}
+                    if outcome.get("status") == "saved":
+                        st.success("Saved")
+                    elif outcome.get("status") == "failed":
+                        st.error(outcome.get("error") or "Upload failed.")
+                    if st.button(
+                        "Remove",
+                        icon=":material/delete:",
+                        key=f"ads-image-remove::{result['context_key']}::{slot['id']}",
+                        use_container_width=True,
+                    ):
+                        _remove_ads_image_slot(result, slot["id"])
+                        st.rerun()
+                    st.caption("Drop or browse for a replacement at any time.")
+                elif saved_slot.get("error"):
+                    st.error(saved_slot["error"])
+                    if st.button(
+                        "Remove",
+                        icon=":material/delete:",
+                        key=f"ads-image-remove-invalid::{result['context_key']}::{slot['id']}",
+                        use_container_width=True,
+                    ):
+                        _remove_ads_image_slot(result, slot["id"])
+                        st.rerun()
+
+
+def _ads_dropbox_connection():
+    cached = st.session_state.get("files_access_token") or {}
+    if cached.get("token") and float(cached.get("expires_at") or 0) > time.monotonic():
+        access_token = cached["token"]
+    else:
+        auth = dropbox_integration.resolve_server_auth()
+        access_token = auth["access_token"]
+        source = auth.get("source") or "refresh_token"
+        st.session_state["files_access_token"] = {
+            "token": access_token,
+            "source": source,
+            "expires_at": time.monotonic() + (25 * 60 if source == "refresh_token" else 5 * 60),
+        }
+    root_cache = st.session_state.get("files_team_root") or {}
+    if (
+        root_cache.get("path")
+        and float(root_cache.get("loaded_at") or 0) + 15 * 60 > time.monotonic()
+    ):
+        root_path = str(root_cache["path"])
+    else:
+        root_path = dropbox_integration.find_team_folder(access_token)
+        st.session_state["files_team_root"] = {
+            "path": root_path,
+            "loaded_at": time.monotonic(),
+        }
+    return access_token, root_path
+
+
+def _ads_directory_entries(access_token, path):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    cache = st.session_state.setdefault("files_directory_cache", {})
+    cached = cache.get(clean_path) or {}
+    if float(cached.get("loaded_at") or 0) + ADS_DIRECTORY_CACHE_SECONDS > time.monotonic():
+        return list(cached.get("entries") or ())
+    entries = dropbox_integration.sort_folder_entries(
+        dropbox_integration.list_folder(access_token, clean_path)
+    )
+    cache[clean_path] = {"loaded_at": time.monotonic(), "entries": entries}
+    return entries
+
+
+def _ads_clear_directory_cache(*paths):
+    cache = st.session_state.setdefault("files_directory_cache", {})
+    for path in paths:
+        cache.pop(dropbox_integration.normalize_dropbox_path(path), None)
+
+
+def _render_ads_folder_picker(access_token, root_path, result, workflow):
+    default_path = dropbox_integration.normalize_dropbox_path(
+        f"{root_path}/{ADS_PRODUCT_IMAGES_FOLDER}"
+    )
+    current_path = dropbox_integration.normalize_dropbox_path(
+        workflow.get("picker_path") or default_path
+    )
+    if not dropbox_integration.path_is_within_root(current_path, root_path):
+        current_path = default_path
+    dropbox_integration.ensure_folder_path(
+        access_token,
+        default_path,
+        root_path=root_path,
+    )
+    workflow["picker_path"] = current_path
+    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    folders = [
+        entry
+        for entry in _ads_directory_entries(access_token, current_path)
+        if str(entry.get(".tag") or "").casefold() == "folder"
+    ]
+
+    with st.container(key="ads-dropbox-picker"):
+        st.markdown('<div class="sc-mockups-dropbox-picker">', unsafe_allow_html=True)
+        breadcrumb = dropbox_integration.breadcrumb_items(current_path, root_path)
+        breadcrumb_columns = st.columns([1] * max(1, len(breadcrumb)))
+        for index, (label, path) in enumerate(breadcrumb):
+            target = root_path if not path else path
+            with breadcrumb_columns[index]:
+                if st.button(
+                    str(label),
+                    key=f"ads-picker-crumb::{result['context_key']}::{index}::{target}",
+                    use_container_width=True,
+                ):
+                    workflow["picker_path"] = target
+                    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+                    st.rerun()
+
+        if folders:
+            for folder in folders:
+                path = dropbox_integration.normalize_dropbox_path(
+                    folder.get("path_display") or folder.get("path_lower") or ""
+                )
+                if st.button(
+                    str(folder.get("name") or "Folder"),
+                    icon=":material/folder:",
+                    key=f"ads-picker-folder::{result['context_key']}::{path}",
+                    use_container_width=True,
+                ):
+                    workflow["picker_path"] = path
+                    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+                    st.rerun()
+        else:
+            st.caption("No subfolders here.")
+
+        with st.popover("New folder", icon=":material/create_new_folder:"):
+            folder_name = st.text_input(
+                "Folder name",
+                key=f"ads-picker-new-name::{result['context_key']}::{current_path}",
+            )
+            if st.button(
+                "Create",
+                key=f"ads-picker-new-submit::{result['context_key']}::{current_path}",
+                use_container_width=True,
+            ):
+                try:
+                    metadata = dropbox_integration.create_folder(
+                        access_token,
+                        current_path,
+                        folder_name,
+                        conflict="keep_both",
+                    )
+                    if metadata:
+                        _ads_clear_directory_cache(current_path)
+                        workflow["picker_path"] = str(
+                            metadata.get("path_display")
+                            or metadata.get("path_lower")
+                            or current_path
+                        )
+                        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+                        record_activity_log(
+                            "files_folder_created",
+                            "Ads",
+                            f"Folder created: {metadata.get('name') or folder_name}",
+                            entity_type="dropbox_folder",
+                            entity_id=workflow["picker_path"],
+                        )
+                        st.rerun()
+                except Exception as error:
+                    logging.warning("Ads destination folder creation failed: %s", error)
+                    st.warning("This folder could not be created.")
+        st.markdown("</div>", unsafe_allow_html=True)
+    return current_path
+
+
+def save_ads_images_to_dropbox(
+    access_token,
+    root_path,
+    destination,
+    result,
+    workflow,
+    *,
+    progress_callback=None,
+):
+    clean_root = dropbox_integration.normalize_dropbox_path(root_path)
+    clean_destination = dropbox_integration.normalize_dropbox_path(destination)
+    if not dropbox_integration.path_is_within_root(clean_destination, clean_root):
+        raise ValueError("The selected destination is outside the approved Files folder.")
+    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    outcomes = dict(workflow.get("outcomes") or {})
+    pending_slots = [
+        slot for slot in slot_specs if (outcomes.get(slot["id"]) or {}).get("status") != "saved"
+    ]
+    total = len(pending_slots)
+    for index, slot in enumerate(pending_slots, start=1):
+        slot_data = (workflow.get("slots") or {}).get(slot["id"]) or {}
+        if not slot_data.get("valid") or not slot_data.get("data"):
+            outcomes[slot["id"]] = {
+                "status": "failed",
+                "error": "A valid optimized image is required.",
+                "label": slot["label"],
+            }
+            continue
+        resolved_filename = ""
+        try:
+            filename = _meta_output_filename(result, workflow, slot)
+            proposed_path = dropbox_integration.join_upload_path(clean_destination, filename)
+            if dropbox_integration.get_metadata_if_exists(access_token, proposed_path):
+                proposed_path = dropbox_integration.windows_numbered_path(access_token, proposed_path)
+            resolved_filename = PurePosixPath(proposed_path).name
+
+            def on_upload_progress(_row_index, _row_total, _name, uploaded, file_total):
+                if progress_callback:
+                    progress_callback(index, total, slot["label"], uploaded, file_total)
+
+            upload_result = dropbox_integration.upload_batch(
+                access_token,
+                clean_destination,
+                [
+                    {
+                        "relative_path": resolved_filename,
+                        "data": slot_data["data"],
+                        "size": len(slot_data["data"]),
+                    }
+                ],
+                conflict="cancel",
+                progress_callback=on_upload_progress,
+            )
+            successes = list(upload_result.get("successes") or ())
+            failures = list(upload_result.get("failures") or ())
+            if successes:
+                metadata = dict(successes[0].get("metadata") or {})
+                saved_path = str(
+                    metadata.get("path_display")
+                    or metadata.get("path_lower")
+                    or proposed_path
+                )
+                outcomes[slot["id"]] = {
+                    "status": "saved",
+                    "label": slot["label"],
+                    "filename": resolved_filename,
+                    "path": saved_path,
+                    "metadata": metadata,
+                }
+            else:
+                outcomes[slot["id"]] = {
+                    "status": "failed",
+                    "label": slot["label"],
+                    "filename": resolved_filename,
+                    "error": str(
+                        (failures[0] if failures else {}).get("error") or "Upload failed."
+                    ),
+                }
+        except Exception as error:
+            outcomes[slot["id"]] = {
+                "status": "failed",
+                "label": slot["label"],
+                "filename": resolved_filename,
+                "error": str(error)[:300] or "Upload failed.",
+            }
+    return outcomes
+
+
+def _save_ads_upload_metadata(outcomes, user):
+    try:
+        import supabase_backend
+    except Exception:
+        return
+    for outcome in outcomes.values():
+        if outcome.get("status") != "saved":
+            continue
+        metadata = dict(outcome.get("metadata") or {})
+        if not metadata:
+            continue
+        try:
+            supabase_backend.save_dropbox_asset_metadata(
+                dropbox_integration.normalise_asset_metadata(
+                    dropbox_file_id=metadata.get("id"),
+                    dropbox_path=outcome.get("path"),
+                    name=metadata.get("name") or outcome.get("filename"),
+                    size=metadata.get("size"),
+                    asset_type="meta_ads",
+                    uploaded_by_user_name=str(
+                        user.get("display_name")
+                        or user.get("email")
+                        or user.get("username")
+                        or "sports_cave_os"
+                    ),
+                    uploaded_by_user_email=user.get("email") or "",
+                )
+            )
+        except Exception:
+            continue
+
+
+def _open_ads_files_folder(path):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    st.session_state["files_browser_path"] = clean_path
+    st.session_state.pop("files_preview_path", None)
+    st.session_state["current_page"] = "Files"
+    st.session_state["selected_page"] = "Files"
+    st.session_state["current_page_source"] = "ads-image-export"
+    try:
+        st.query_params["page"] = "files"
+        st.query_params["files_path"] = clean_path
+    except Exception:
+        pass
+    st.rerun()
+
+
+def _render_ads_image_save(result, workflow):
+    if not ads_image_workflow.campaign_image_slots(result.get("campaign_type")):
+        return
+    ready = ads_images_ready(result, workflow)
+    saved_count = sum(
+        1 for outcome in (workflow.get("outcomes") or {}).values() if outcome.get("status") == "saved"
+    )
+    required_count = len(ads_image_workflow.campaign_image_slots(result["campaign_type"]))
+    all_saved = saved_count == required_count
+    if not ready:
+        st.caption(f"{saved_count if saved_count else len([slot for slot in (workflow.get('slots') or {}).values() if slot.get('valid')])} of {required_count} images ready.")
+    if st.button(
+        "Save Images",
+        type="primary",
+        icon=":material/save:",
+        key=f"ads-images-save-open::{result['context_key']}",
+        disabled=not ready or bool(workflow.get("saving")) or all_saved,
+        use_container_width=True,
+    ):
+        workflow["save_open"] = True
+        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.rerun()
+    if not workflow.get("save_open"):
+        return
+
+    user = current_ads_user()
+    if not os_accounts.can_access_page(user, "Files"):
+        st.info("Files access is not approved for this account.")
+        return
+    try:
+        access_token, root_path = _ads_dropbox_connection()
+        locked_destination = str(workflow.get("destination_path") or "")
+        destination = locked_destination or _render_ads_folder_picker(
+            access_token,
+            root_path,
+            result,
+            workflow,
+        )
+    except Exception as error:
+        logging.warning("Ads Dropbox destination unavailable: %s", error)
+        st.info("Dropbox is unavailable right now.")
+        return
+
+    st.caption(f"Destination: {destination}")
+    failed_count = sum(
+        1 for outcome in (workflow.get("outcomes") or {}).values() if outcome.get("status") == "failed"
+    )
+    remaining_count = max(0, required_count - saved_count)
+    action_label = (
+        "All images saved"
+        if all_saved
+        else "Retry failed images"
+        if failed_count
+        else f"Save {remaining_count} {'image' if remaining_count == 1 else 'images'} here"
+    )
+    action_columns = st.columns([1, 1])
+    if action_columns[0].button(
+        action_label,
+        key=f"ads-images-save-confirm::{result['context_key']}",
+        disabled=bool(workflow.get("saving")) or all_saved,
+        use_container_width=True,
+    ):
+        workflow["saving"] = True
+        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        progress = st.progress(0, text="Saving Meta-ready images...")
+
+        def update_progress(index, total, label, uploaded, file_total):
+            file_fraction = uploaded / file_total if file_total else 1
+            overall = ((index - 1) + min(1, file_fraction)) / max(1, total)
+            progress.progress(min(1.0, overall), text=f"Saving {label}")
+
+        try:
+            workflow["destination_path"] = destination
+            previously_saved = {
+                slot_id
+                for slot_id, outcome in (workflow.get("outcomes") or {}).items()
+                if outcome.get("status") == "saved"
+            }
+            outcomes = save_ads_images_to_dropbox(
+                access_token,
+                root_path,
+                destination,
+                result,
+                workflow,
+                progress_callback=update_progress,
+            )
+            workflow["outcomes"] = outcomes
+            _save_ads_upload_metadata(
+                {
+                    slot_id: outcome
+                    for slot_id, outcome in outcomes.items()
+                    if slot_id not in previously_saved
+                },
+                user,
+            )
+            successful = [row for row in outcomes.values() if row.get("status") == "saved"]
+            failed = [row for row in outcomes.values() if row.get("status") == "failed"]
+            _ads_clear_directory_cache(destination)
+            record_activity_log(
+                "ad_images_saved",
+                "Ads",
+                f"Saved {len(successful)} Meta-ready images: {result['product_name']}",
+                entity_type="dropbox_folder",
+                entity_id=destination,
+                metadata={
+                    "count": len(successful),
+                    "failed_count": len(failed),
+                    "campaign_type": result["campaign_type"],
+                    "destination": destination,
+                    "files": [row.get("filename") for row in successful],
+                },
+            )
+        except Exception as error:
+            logging.warning("Ads image save failed: %s", error)
+            st.warning("The Meta-ready images could not be saved.")
+        finally:
+            progress.empty()
+            workflow["saving"] = False
+            st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.rerun()
+    if action_columns[1].button(
+        "Cancel",
+        key=f"ads-images-save-cancel::{result['context_key']}",
+        use_container_width=True,
+    ):
+        workflow["save_open"] = False
+        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.rerun()
+
+    outcomes = workflow.get("outcomes") or {}
+    successful = [row for row in outcomes.values() if row.get("status") == "saved"]
+    failed = [row for row in outcomes.values() if row.get("status") == "failed"]
+    if successful:
+        if failed:
+            st.warning(f"{len(successful)} of {required_count} images saved. {len(failed)} need attention.")
+        else:
+            st.success(f"{len(successful)} images saved to {workflow['destination_path']}.")
+        if st.button(
+            "Open folder",
+            icon=":material/folder_open:",
+            key=f"ads-images-open-folder::{result['context_key']}",
+        ):
+            _open_ads_files_folder(workflow["destination_path"])
+    for outcome in failed:
+        st.error(f"{outcome.get('label')}: {outcome.get('error') or 'Upload failed.'}")
+
+
+def render_supported_result(result):
+    product_name = result["product_name"]
+    category = result["category"]
+    country = result["country"]
+    campaign_type = result["campaign_type"]
+    render_generic_winner_pattern_note(category, campaign_type)
+    master_prompt = result["master_prompt"]
+    workflow = _ads_image_workflow(result)
 
     if get_template_key(category, campaign_type) == "baseball_instant_experience":
         st.subheader("1. Copy this ChatGPT prompt")
@@ -2759,6 +3508,8 @@ def render_supported_result(
             f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
         )
 
+        _render_ads_image_slots(result, workflow)
+        _render_ads_image_save(result, workflow)
         st.subheader("2. Build it in Meta")
         st.caption("Follow the INSTANT EXPERIENCE SETUP section inside the generated prompt.")
         render_meta_url_parameters_section(3)
@@ -2771,6 +3522,8 @@ def render_supported_result(
             f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
         )
 
+        _render_ads_image_slots(result, workflow)
+        _render_ads_image_save(result, workflow)
         st.subheader("2. Build it in Meta")
         st.caption("Use the Instant Experience cover prompt and CTA guidance inside the generated output.")
         render_meta_url_parameters_section(3)
@@ -2788,26 +3541,49 @@ def render_supported_result(
         render_meta_url_parameters_section(3)
         return
 
-    st.subheader("1. Upload these five images")
-    for index, (title, body) in enumerate(IMAGE_ORDER, start=1):
-        st.markdown(f"**Card {index} — {title}**")
-        st.caption(body)
-    st.caption("Upload them to Meta in this exact order before adding the carousel copy.")
-
-    st.subheader("2. Copy this ChatGPT prompt")
+    st.subheader("1. Copy this ChatGPT prompt")
     render_prompt_copy_button(
         master_prompt,
         f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
     )
 
-    st.subheader("3. Build it in Meta")
+    _render_ads_image_slots(result, workflow)
+    _render_ads_image_save(result, workflow)
+    st.caption("Upload them to Meta in this exact order before adding the carousel copy.")
+
+    st.subheader("2. Build it in Meta")
     for index, step in enumerate(META_BUILD_ORDER, start=1):
         st.markdown(f"{index}. {step}")
     st.caption("Review every fact before publishing. Remove anything that cannot be confirmed from the product or artwork.")
-    render_meta_url_parameters_section(4)
+    render_meta_url_parameters_section(3)
 
 
 def render_page():
+    st.markdown(
+        """
+        <style>
+        div[class*="st-key-ads-image-slot"] {
+            min-width: 0;
+        }
+        div[class*="st-key-ads-image-slot"] [data-testid="stFileUploaderDropzone"] {
+            min-height: 92px;
+            padding: 0.45rem;
+        }
+        .st-key-ads-dropbox-picker button {
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            border-radius: 4px !important;
+            box-shadow: none !important;
+            min-height: 30px !important;
+        }
+        .st-key-ads-dropbox-picker button:hover {
+            background: #EAF2F8 !important;
+            border-color: #C5D5E0 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.title("Ads")
     st.caption("Build Meta ad instructions from approved Sports Cave winner patterns.")
 
@@ -2828,40 +3604,77 @@ def render_page():
         product_name = render_product_name_input()
         category_col, country_col, campaign_col = st.columns(3)
         with category_col:
-            category = st.selectbox("Category", CATEGORY_OPTIONS)
+            category = st.selectbox("Category", CATEGORY_OPTIONS, key="ads_category")
         with country_col:
-            country = st.selectbox("Country", COUNTRY_OPTIONS)
+            country = st.selectbox("Country", COUNTRY_OPTIONS, key="ads_country")
         with campaign_col:
-            campaign_type = st.selectbox("Campaign type", CAMPAIGN_TYPE_OPTIONS)
+            campaign_type = st.selectbox(
+                "Campaign type",
+                CAMPAIGN_TYPE_OPTIONS,
+                key="ads_campaign_type",
+            )
         product_url = ""
         if get_template_key(category, campaign_type) == "baseball_instant_experience":
             product_url = st.text_input(
                 "Product page URL",
                 placeholder="https://sportscave.com.au/products/example",
+                key="ads_product_url",
             )
         submitted = st.form_submit_button("Submit", type="primary")
 
-    if not submitted:
-        return
+    result = st.session_state.get(ADS_RESULT_STATE_KEY)
+    if submitted:
+        validation_message = validate_ads_inputs(
+            product_name,
+            category,
+            country,
+            campaign_type,
+            product_url=product_url,
+        )
+        if validation_message:
+            st.warning(validation_message)
+        elif not get_winner_pattern_key(category, campaign_type):
+            render_insufficient_winner_data()
+        else:
+            product_id = resolve_edition_ops_product_id(product_name)
+            context_key = ads_result_context_key(
+                product_id,
+                product_name,
+                category,
+                country,
+                campaign_type,
+            )
+            existing_result = result if isinstance(result, dict) else {}
+            if existing_result.get("context_key") == context_key:
+                if _clean_product_url(product_url) != existing_result.get("product_url"):
+                    result = build_ads_result_record(
+                        product_name,
+                        category,
+                        country,
+                        campaign_type,
+                        product_id=product_id,
+                        product_url=product_url,
+                        variation_token=existing_result.get("variation_token"),
+                    )
+                else:
+                    result = existing_result
+            else:
+                result = build_ads_result_record(
+                    product_name,
+                    category,
+                    country,
+                    campaign_type,
+                    product_id=product_id,
+                    product_url=product_url,
+                    variation_token=build_visual_variation_token(),
+                )
+                _reset_ads_image_workflow(result)
+            st.session_state[ADS_RESULT_STATE_KEY] = result
+            record_ad_prompt_generated(product_name, category, country, campaign_type)
 
-    validation_message = validate_ads_inputs(product_name, category, country, campaign_type, product_url=product_url)
-    if validation_message:
-        st.warning(validation_message)
-        return
-
-    if not get_winner_pattern_key(category, campaign_type):
-        render_insufficient_winner_data()
-        return
-
-    record_ad_prompt_generated(product_name, category, country, campaign_type)
-    render_supported_result(
-        product_name,
-        category,
-        country,
-        campaign_type,
-        product_url=product_url,
-        variation_token=build_visual_variation_token(),
-    )
+    result = st.session_state.get(ADS_RESULT_STATE_KEY)
+    if isinstance(result, dict) and result.get("master_prompt"):
+        render_supported_result(result)
 
 
 render_ads_page = render_page
