@@ -931,7 +931,11 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
             self.assertIn(f'label: "{label}"', self.client)
         self.assertIn(': "Open in Windows File Explorer"', self.client)
         self.assertIn('? "Open in Finder"', self.client)
-        self.assertIn('label: "Open in desktop app"', self.client)
+        item_menu = self.client[
+            self.client.index("function showItemContextMenu") :
+            self.client.index("function showEmptyContextMenu")
+        ]
+        self.assertNotIn('label: "Open in desktop app"', item_menu)
         for label in ("New folder", "Upload", "Refresh", "Sort by", "View"):
             self.assertIn(f'label: "{label}"', self.client)
         self.assertIn("items.forEach(item =>", self.client)
@@ -1140,14 +1144,41 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
             self.client.index("function invokeDesktopClipboard") :
             self.client.index("function invokeDesktopHelper")
         ]
-        self.assertIn('desktopRequest("copyFile", items)', block)
+        self.assertIn("const action = nativeClipboardAction(items)", block)
+        self.assertIn("desktopRequest(action, items)", block)
+        self.assertIn('action === "copyImage"', block)
+        self.assertIn('items.length === 1 && items[0].kind === "image"', self.client)
+        self.assertIn('? "copyImage"', self.client)
+        self.assertIn(': "copyFile"', self.client)
         self.assertIn("item.desktop_relative_path || item.relative_path", self.client)
         self.assertIn('revision: String(item.revision || "")', self.client)
         self.assertNotIn("protocolLink", block)
         self.assertNotIn("sports-cave-files://clipboard", self.client)
-        self.assertIn('mode === "copy" && hasDesktopCapability("copyFile")', self.client)
+        self.assertIn('mode === "copy" && hasDesktopCapability(nativeAction)', self.client)
         self.assertIn("ready to move inside Sports Cave Files", self.client)
         self.assertNotIn('invokeDesktopClipboard(chosen, "move")', self.client)
+
+    def test_image_context_menu_omits_redundant_desktop_open_action(self):
+        block = self.client[
+            self.client.index("function showItemContextMenu") :
+            self.client.index("function showEmptyContextMenu")
+        ]
+        self.assertNotIn("Open in desktop app", block)
+        self.assertNotIn(">Open in desktop app<", self.client)
+        self.assertIn('{ label: "Open"', block)
+        self.assertIn('{ label: "Copy"', block)
+
+    def test_folder_render_reuses_sorted_items_and_updates_only_target_thumbnail(self):
+        self.assertIn("visibleItemsCache:", self.client)
+        self.assertIn("cached.items === state.items", self.client)
+        self.assertIn("cached.sortKey === state.sortKey", self.client)
+        thumbnail_block = self.client[
+            self.client.index("function installThumbnail") :
+            self.client.index("function drainThumbnailQueue")
+        ]
+        self.assertIn("image.isConnected", thumbnail_block)
+        self.assertIn("installThumbnail(task.image, task.key, objectUrl)", thumbnail_block)
+        self.assertNotIn('document.querySelectorAll("img[data-thumbnail-key]")', thumbnail_block)
 
     def test_missing_or_outdated_helper_has_compact_update_fallback(self):
         self.assertIn('if (!window.chrome || !window.chrome.webview)', self.client)
