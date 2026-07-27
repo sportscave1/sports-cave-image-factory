@@ -432,6 +432,32 @@
         overflow-wrap: anywhere;
       }
       .file-tooltip-line { white-space: nowrap; }
+      .outbound-drag-preview {
+        align-items: center;
+        background: rgba(255, 255, 255, 0.97);
+        border: 1px solid #8d969d;
+        box-shadow: 2px 4px 10px rgba(25, 31, 36, 0.2);
+        color: #202428;
+        display: none;
+        gap: 7px;
+        max-width: min(320px, calc(100vw - 20px));
+        min-height: 34px;
+        padding: 6px 9px;
+        pointer-events: none;
+        position: fixed;
+        z-index: 220;
+      }
+      .outbound-drag-preview.visible { display: flex; }
+      .outbound-drag-preview-icon {
+        color: #1a73a8;
+        font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets", sans-serif;
+        font-size: 17px;
+      }
+      .outbound-drag-preview-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       .modal-backdrop {
         align-items: center;
         background: rgba(25, 30, 35, 0.28);
@@ -599,13 +625,17 @@
     <input id="folderInput" type="file" multiple webkitdirectory directory hidden>
     <div class="menu" id="menu" role="menu"></div>
     <div class="file-tooltip" id="fileTooltip" role="tooltip" aria-hidden="true"></div>
+    <div class="outbound-drag-preview" id="outboundDragPreview" aria-hidden="true">
+      <span class="outbound-drag-preview-icon" aria-hidden="true">&#xE8B7;</span>
+      <span class="outbound-drag-preview-label" id="outboundDragPreviewLabel"></span>
+    </div>
     <div class="modal-backdrop" id="modalBackdrop"><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
     <div class="toast" id="toast" role="status" aria-live="polite"><span id="toastText"></span><button id="toastAction" type="button"></button></div>
     <a class="sr-only" id="protocolLink" href="#" tabindex="-1">Open in desktop app</a>
     <section class="helper-panel" id="helperPanel" aria-live="polite">
-      <strong>File didn't open?</strong>
+      <strong id="helperMessage">Desktop helper required</strong>
       <button class="helper-action" id="checkHelperButton" type="button">Check desktop helper</button>
-      <button class="helper-action" id="installHelperButton" type="button">Reinstall helper</button>
+      <button class="helper-action" id="installHelperButton" type="button">Install or update helper</button>
       <button class="helper-action" id="downloadInsteadButton" type="button">Download instead</button>
     </section>
     <section class="upload-panel" id="uploadPanel" aria-label="Uploads">
@@ -620,6 +650,8 @@
       const MAX_UPLOAD_CONCURRENT = 2;
       const MAX_THUMBNAIL_CONCURRENT = 4;
       const MAX_CLIENT_THUMBNAILS = 160;
+      const DESKTOP_MESSAGE_TYPE = "sports-cave-desktop";
+      const MINIMUM_DESKTOP_VERSION = 5;
       const VIEW_MODES = ["large", "medium", "small", "list", "details"];
       const VIEW_LABELS = { large: "Large icons", medium: "Medium icons", small: "Small icons", list: "List", details: "Details" };
       const SORT_LABELS = { name: "Name", modified: "Date modified", type: "Type", size: "Size" };
@@ -628,8 +660,9 @@
         "backButton", "forwardButton", "upButton", "refreshButton", "breadcrumbs", "searchInput", "searchClear",
         "openButton", "newButton", "uploadButton", "downloadButton", "renameButton", "deleteButton", "sortButton", "viewButton", "moreButton",
         "results", "resultsShell", "detailsHeader", "dateModifiedHeader", "modifiedSortArrow", "items", "dropOverlay", "itemCount", "selectionCount", "filesInput", "folderInput",
-        "menu", "modalBackdrop", "modal", "toast", "toastText", "toastAction", "protocolLink", "helperPanel", "checkHelperButton",
-        "installHelperButton", "downloadInsteadButton", "uploadPanel", "uploadRows", "uploadTitle", "uploadClose", "fileTooltip"
+        "menu", "modalBackdrop", "modal", "toast", "toastText", "toastAction", "protocolLink", "helperPanel", "helperMessage", "checkHelperButton",
+        "installHelperButton", "downloadInsteadButton", "uploadPanel", "uploadRows", "uploadTitle", "uploadClose", "fileTooltip",
+        "outboundDragPreview", "outboundDragPreviewLabel"
       ].map(id => [id, document.getElementById(id)]));
 
       function restoredState() {
@@ -690,7 +723,11 @@
         clipboard: restoredClipboard(),
         clipboardBusy: false,
         outboundDrag: false,
-        outboundDragTimer: 0,
+        outboundPointer: null,
+        outboundDragRequestId: "",
+        desktopCapabilities: new Set(),
+        desktopPending: new Map(),
+        desktopReady: false,
         suppressClickUntil: 0,
         tooltipTimer: 0,
         tooltipItem: null,
@@ -957,7 +994,7 @@
         row.setAttribute("role", "option");
         row.setAttribute("aria-label", `${item.name}, ${item.type}`);
         row.tabIndex = item.path === state.focusedPath ? 0 : -1;
-        row.draggable = isWindowsPlatform() && item.tag !== "folder";
+        row.draggable = false;
 
         const icon = document.createElement("span");
         icon.className = "file-icon";
@@ -988,6 +1025,7 @@
         row.addEventListener("mousemove", moveFileTooltip);
         row.addEventListener("mouseleave", hideFileTooltip);
         row.addEventListener("mousedown", hideFileTooltip);
+        row.addEventListener("pointerdown", event => beginExternalDragPointer(event, item, index));
         row.addEventListener("click", event => {
           if (Date.now() < state.suppressClickUntil) {
             event.preventDefault();
@@ -1013,7 +1051,8 @@
         row.addEventListener("keydown", event => handleItemKeydown(event, item, index));
         row.addEventListener("dragstart", event => {
           hideFileTooltip();
-          handleExternalDragStart(event, item, index);
+          event.preventDefault();
+          event.stopPropagation();
         });
         return row;
       }
@@ -1266,41 +1305,126 @@
           : "sports-cave-files";
       }
 
-      function invokeDesktopClipboard(items, effect) {
-        if (!isWindowsPlatform()) return;
-        const paths = Array.from(items || []).map(item => String(item.relative_path || "")).filter(Boolean);
-        if (!paths.length) return;
-        const protocolUrl = `sports-cave-files://clipboard?paths=${encodeURIComponent(JSON.stringify(paths))}&effect=${effect === "move" ? "move" : "copy"}`;
-        if (protocolUrl.length > 30000) {
-          showToast("Select fewer items for the Windows clipboard.", { kind: "error", duration: 5000 });
-          return;
-        }
-        elements.protocolLink.href = protocolUrl;
-        elements.protocolLink.click();
+      function showDesktopHelperProblem(error, item = null) {
+        state.helperItem = item || state.helperItem;
+        elements.helperMessage.textContent = "Sports Cave Desktop required";
+        elements.helperPanel.classList.add("visible");
+        showToast(
+          (error && error.message) || "Open this page in Sports Cave Desktop to drag or copy files.",
+          {
+            kind: "error",
+            duration: 6000,
+            actionLabel: "Open Desktop",
+            action: openSportsCaveDesktop,
+          }
+        );
       }
 
-      function invokeDesktopHelper(item, kind = "file") {
-        const relativePath = String(item.desktop_relative_path || "");
-        if (!relativePath) {
-          showToast("This item has no approved desktop path.", { kind: "error", duration: 5000 });
+      function showDesktopTransferError(error, item = null) {
+        const helperProblem = [
+          "desktop_unavailable",
+          "desktop_outdated",
+        ].includes(String(error && error.code || ""));
+        if (helperProblem) {
+          showDesktopHelperProblem(error, item);
           return;
         }
+        if (error && error.code === "drag_cancelled") return;
+        showToast(
+          (error && error.message) || "Windows could not complete the file transfer.",
+          { kind: "error", duration: 6000 }
+        );
+      }
+
+      function hasDesktopCapability(capability) {
+        return state.desktopReady && state.desktopCapabilities.has(capability);
+      }
+
+      function desktopError(message, code = "desktop_unavailable") {
+        const error = new Error(message);
+        error.code = code;
+        return error;
+      }
+
+      function desktopPost(message) {
+        if (!window.chrome || !window.chrome.webview || typeof window.chrome.webview.postMessage !== "function") {
+          throw desktopError("Open in Sports Cave Desktop to use this action.");
+        }
+        window.chrome.webview.postMessage(message);
+      }
+
+      function transferSelection(items) {
+        return Array.from(items || []).map(item => ({
+          path: String(item.desktop_relative_path || item.relative_path || ""),
+          id: String(item.id || ""),
+          revision: String(item.revision || ""),
+          tag: String(item.tag || "file"),
+        })).filter(item => item.path);
+      }
+
+      async function createDesktopTransfer(items) {
+        const selected = transferSelection(items);
+        if (!selected.length || selected.length > 100) {
+          showToast("Select between 1 and 100 items for Windows Copy.", { kind: "error", duration: 5000 });
+          throw desktopError("Select between 1 and 100 items.", "invalid_selection");
+        }
+        const grant = await apiJson("/api/files-native-transfer", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: selected }),
+        });
+        return {
+          base_url: location.origin,
+          ticket: grant.ticket,
+          secret: grant.secret,
+        };
+      }
+
+      async function desktopRequest(action, items, requestId = dragRequestId()) {
+        if (!hasDesktopCapability(action)) {
+          throw desktopError("Open in Sports Cave Desktop to drag or copy files.");
+        }
+        const transfer = await createDesktopTransfer(items);
+        return new Promise((resolve, reject) => {
+          state.desktopPending.set(requestId, { resolve, reject, action });
+          try {
+            desktopPost({ action, request_id: requestId, transfer });
+          } catch (error) {
+            state.desktopPending.delete(requestId);
+            reject(error);
+          }
+        });
+      }
+
+      async function invokeDesktopClipboard(items) {
+        showToast("Preparing files for the Windows clipboard...", { duration: 0 });
+        try {
+          const result = await desktopRequest("copyFile", items);
+          const count = Number(result.count || items.length);
+          showToast(`${count} item${count === 1 ? "" : "s"} copied`, { kind: "success", duration: 2400 });
+          return true;
+        } catch (error) {
+          showDesktopTransferError(error);
+          return false;
+        }
+      }
+
+      async function invokeDesktopHelper(item, kind = "file") {
         if (kind === "file" && BLOCKED_EXTENSIONS.has(String(item.extension || "").toLocaleLowerCase())) {
           showToast("This file type cannot be opened by the Sports Cave helper.", { kind: "error", duration: 5000 });
           return;
         }
+        if (!hasDesktopCapability("openFile")) {
+          showDesktopHelperProblem(desktopError("Open in Sports Cave Desktop to use native file actions."), item);
+          return;
+        }
         const application = kind === "folder" ? "your desktop file manager" : desktopApplication(item);
         showToast(`Opening in ${application}...`, { duration: 2400 });
-        const scheme = desktopProtocolScheme(item, kind);
-        const protocolUrl = `${scheme}://open?path=${encodeURIComponent(relativePath)}&kind=${encodeURIComponent(kind)}`;
-        state.helperItem = item;
-        elements.helperPanel.classList.remove("visible");
-        elements.protocolLink.href = protocolUrl;
-        elements.protocolLink.click();
-        window.clearTimeout(state.helperTimer);
-        state.helperTimer = window.setTimeout(() => {
-          elements.helperPanel.classList.add("visible");
-        }, 3000);
+        try {
+          await desktopRequest("openFile", [item]);
+        } catch (error) {
+          showDesktopTransferError(error, item);
+        }
       }
 
       function relativeFolderPath() {
@@ -1380,6 +1504,21 @@
         frame.src = `/api/files-desktop-helper?platform=${isMac ? "macos" : "windows"}`;
         document.body.appendChild(frame);
         window.setTimeout(() => frame.remove(), 120000);
+      }
+
+      function openSportsCaveDesktop() {
+        elements.helperPanel.classList.remove("visible");
+        elements.protocolLink.href = "sports-cave-files://app";
+        elements.protocolLink.click();
+        window.clearTimeout(state.helperTimer);
+        state.helperTimer = window.setTimeout(() => {
+          showToast("Sports Cave Desktop did not open.", {
+            kind: "error",
+            duration: 0,
+            actionLabel: "Install or update",
+            action: downloadHelper,
+          });
+        }, 3200);
       }
 
       function startDownload(items = selectedItems()) {
@@ -1578,6 +1717,8 @@
           kind: String(item.kind || "file"),
           size: Number(item.size || 0),
           extension: String(item.extension || ""),
+          id: String(item.id || ""),
+          revision: String(item.revision || ""),
         })).filter(item => item.relative_path);
       }
 
@@ -1587,14 +1728,19 @@
         state.clipboard = { mode, items: chosen, createdAt: Date.now() };
         persistClipboard();
         updateSelectionUi();
-        invokeDesktopClipboard(chosen, mode === "cut" ? "move" : "copy");
         const count = chosen.length;
-        showToast(
-          mode === "cut"
-            ? `${count} item${count === 1 ? "" : "s"} ready to move`
-            : `${count} item${count === 1 ? "" : "s"} copied`,
-          { kind: "success", duration: 2200 }
-        );
+        if (mode === "copy" && hasDesktopCapability("copyFile")) {
+          invokeDesktopClipboard(chosen);
+        } else {
+          showToast(
+            mode === "cut"
+              ? `${count} item${count === 1 ? "" : "s"} ready to move inside Sports Cave Files`
+              : `${count} item${count === 1 ? "" : "s"} copied inside Sports Cave Files`,
+            mode === "copy" && isWindowsPlatform()
+              ? { kind: "success", duration: 5000, actionLabel: "Open Desktop", action: openSportsCaveDesktop }
+              : { kind: "success", duration: 2200 }
+          );
+        }
       }
 
       function clearFilesClipboard() {
@@ -1714,39 +1860,145 @@
 
       function externalDragItems(item, index) {
         if (!state.selection.has(item.path)) setSingleSelection(item.path, index);
-        return selectedItems().filter(selected => selected.tag !== "folder");
+        return selectedItems();
       }
 
-      function handleExternalDragStart(event, item, index) {
+      function dragRequestId() {
+        if (window.crypto && typeof window.crypto.randomUUID === "function") {
+          return window.crypto.randomUUID();
+        }
+        return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+      }
+
+      function positionOutboundDragPreview(x, y) {
+        const margin = 10;
+        const bounds = elements.outboundDragPreview.getBoundingClientRect();
+        const left = Math.min(
+          window.innerWidth - bounds.width - margin,
+          Math.max(margin, Number(x || 0) + 15)
+        );
+        const top = Math.min(
+          window.innerHeight - bounds.height - margin,
+          Math.max(margin, Number(y || 0) + 18)
+        );
+        elements.outboundDragPreview.style.left = `${left}px`;
+        elements.outboundDragPreview.style.top = `${top}px`;
+      }
+
+      function showOutboundDragPreview(items, x, y) {
+        elements.outboundDragPreviewLabel.textContent = items.length === 1
+          ? items[0].name
+          : `${items.length} selected items`;
+        elements.outboundDragPreview.classList.add("visible");
+        elements.outboundDragPreview.setAttribute("aria-hidden", "false");
+        positionOutboundDragPreview(x, y);
+      }
+
+      function hideOutboundDragPreview() {
+        elements.outboundDragPreview.classList.remove("visible");
+        elements.outboundDragPreview.setAttribute("aria-hidden", "true");
+      }
+
+      function resetOutboundPointer(pointerId = null) {
+        if (
+          pointerId !== null
+          && state.outboundPointer
+          && state.outboundPointer.pointerId !== pointerId
+        ) return;
+        state.outboundPointer = null;
+      }
+
+      function beginExternalDragPointer(event, item, index) {
+        if (
+          !hasDesktopCapability("drag")
+          || event.pointerType !== "mouse"
+          || !event.isPrimary
+          || event.button !== 0
+          || event.ctrlKey
+          || event.metaKey
+          || event.shiftKey
+          || event.altKey
+          || state.outboundDrag
+          || !String(item.desktop_relative_path || "")
+        ) {
+          resetOutboundPointer();
+          return;
+        }
         const items = externalDragItems(item, index);
-        if (!items.length || !isWindowsPlatform()) {
-          event.preventDefault();
-          return;
-        }
-        const paths = items.map(selected => String(selected.desktop_relative_path || "")).filter(Boolean);
-        if (!paths.length || paths.length > 100) {
-          event.preventDefault();
-          return;
-        }
-        const protocolUrl = `sports-cave-files://drag?paths=${encodeURIComponent(JSON.stringify(paths))}&effect=copy`;
-        if (protocolUrl.length > 30000) {
-          event.preventDefault();
-          showToast("Select fewer items for Windows drag and drop.", { kind: "error", duration: 5000 });
-          return;
-        }
-        state.outboundDrag = true;
-        window.clearTimeout(state.outboundDragTimer);
-        state.outboundDragTimer = window.setTimeout(finishExternalDrag, 30000);
-        state.suppressClickUntil = Date.now() + 600;
-        elements.protocolLink.href = protocolUrl;
-        elements.protocolLink.click();
-        event.preventDefault();
+        if (!items.length || items.length > 100) return;
+        state.outboundPointer = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY,
+          items,
+        };
       }
 
-      function finishExternalDrag() {
-        window.clearTimeout(state.outboundDragTimer);
-        state.outboundDragTimer = 0;
+      function moveExternalDragPointer(event) {
+        const pointer = state.outboundPointer;
+        if (
+          !pointer
+          || pointer.pointerId !== event.pointerId
+          || state.outboundDrag
+          || (event.buttons & 1) !== 1
+        ) return;
+        const distance = Math.hypot(
+          event.clientX - pointer.startX,
+          event.clientY - pointer.startY
+        );
+        if (distance < 7) return;
+        state.outboundPointer = null;
+        startNativeOutboundDrag(pointer.items, event.clientX, event.clientY);
+      }
+
+      async function startNativeOutboundDrag(items, x, y) {
+        const paths = items
+          .map(item => String(item.desktop_relative_path || ""))
+          .filter(Boolean);
+        if (!paths.length || paths.length > 100) {
+          showToast("Select between 1 and 100 items to drag.", { kind: "error", duration: 5000 });
+          return;
+        }
+        const requestId = dragRequestId();
+        state.outboundDrag = true;
+        state.outboundDragRequestId = requestId;
+        state.suppressClickUntil = Date.now() + 1200;
+        showOutboundDragPreview(items, x, y);
+        try {
+          await desktopRequest("drag", items, requestId);
+          elements.helperPanel.classList.remove("visible");
+        } catch (error) {
+          if (!error || error.name !== "AbortError") {
+            showDesktopTransferError(error, items.length === 1 ? items[0] : null);
+          }
+        } finally {
+          finishExternalDrag(requestId);
+        }
+      }
+
+      function cancelExternalDrag() {
+        const requestId = state.outboundDragRequestId;
+        if (requestId) {
+          try { desktopPost({ action: "cancel", request_id: requestId }); } catch (_) {}
+          const pending = state.desktopPending.get(requestId);
+          if (pending) {
+            pending.reject(desktopError("The drag was cancelled.", "drag_cancelled"));
+            state.desktopPending.delete(requestId);
+          }
+        }
+        finishExternalDrag(requestId);
+      }
+
+      function finishExternalDrag(requestId = "") {
+        if (
+          requestId
+          && state.outboundDragRequestId
+          && requestId !== state.outboundDragRequestId
+        ) return;
+        state.outboundDragRequestId = "";
         state.outboundDrag = false;
+        resetOutboundPointer();
+        hideOutboundDragPreview();
       }
 
       function showItemContextMenu(item, x, y) {
@@ -2364,12 +2616,11 @@
           { label: "Copy path", disabled: !item, action: () => copyText(displayPath(item)) },
           { label: "Properties", disabled: !item, action: () => showProperties(item) },
           menuDivider(),
-          { label: "Install desktop helper", action: downloadHelper },
+          { label: state.desktopReady ? "Sports Cave Desktop is active" : "Open Sports Cave Desktop", disabled: state.desktopReady, action: openSportsCaveDesktop },
+          { label: "Install or update Desktop", action: downloadHelper },
         ], bounds.left, bounds.bottom + 3);
       };
-      elements.checkHelperButton.onclick = () => {
-        if (state.helperItem) invokeDesktopHelper(state.helperItem, state.helperItem.kind === "folder" ? "folder" : "file");
-      };
+      elements.checkHelperButton.onclick = openSportsCaveDesktop;
       elements.installHelperButton.onclick = downloadHelper;
       elements.downloadInsteadButton.onclick = () => {
         elements.helperPanel.classList.remove("visible");
@@ -2439,15 +2690,18 @@
       });
 
       document.addEventListener("pointerdown", event => {
-        if (state.outboundDrag) finishExternalDrag();
         hideFileTooltip();
         if (!event.target.closest(".menu") && !event.target.closest("#uploadButton, #sortButton, #viewButton, #moreButton")) closeMenus();
       }, true);
+      document.addEventListener("pointermove", moveExternalDragPointer, true);
+      document.addEventListener("pointerup", event => resetOutboundPointer(event.pointerId), true);
+      document.addEventListener("pointercancel", event => resetOutboundPointer(event.pointerId), true);
       document.addEventListener("keydown", event => {
         const typing = event.target.matches && event.target.matches("input, textarea, select, [contenteditable='true']");
         if (event.key === "Escape") {
           event.preventDefault();
-          if (elements.modalBackdrop.classList.contains("open")) closeModal();
+          if (state.outboundDrag || state.outboundPointer) cancelExternalDrag();
+          else if (elements.modalBackdrop.classList.contains("open")) closeModal();
           else if (document.querySelector(".menu.open")) closeMenus();
           else clearSelection();
           return;
@@ -2500,18 +2754,51 @@
         hideFileTooltip();
         stopThumbnailLoading();
         state.thumbnailCache.forEach(url => URL.revokeObjectURL(url));
-        finishExternalDrag();
+        cancelExternalDrag();
       });
       window.addEventListener("blur", hideFileTooltip);
-      window.addEventListener("focus", () => {
-        if (!state.outboundDrag) return;
-        window.setTimeout(() => {
-          if (state.outboundDrag && document.hasFocus()) finishExternalDrag();
-        }, 750);
-      });
+
+      function handleDesktopMessage(event) {
+        const message = event && event.data;
+        if (!message || message.type !== DESKTOP_MESSAGE_TYPE) return;
+        if (message.action === "capabilities" && message.ok) {
+          if (Number(message.version || 0) < MINIMUM_DESKTOP_VERSION) {
+            state.desktopCapabilities = new Set();
+            state.desktopReady = false;
+            showDesktopHelperProblem(
+              desktopError("Update Sports Cave Desktop to enable native drag and Copy.", "desktop_outdated")
+            );
+            return;
+          }
+          state.desktopCapabilities = new Set(Array.from(message.capabilities || []));
+          state.desktopReady = true;
+          elements.helperPanel.classList.remove("visible");
+          window.clearTimeout(state.helperTimer);
+          return;
+        }
+        if (message.action === "progress") {
+          const total = Number(message.total || 0);
+          const complete = Number(message.complete || 0);
+          const percent = total > 0 ? Math.min(100, Math.round(complete * 100 / total)) : 0;
+          showToast(`Preparing ${message.name || "files"}${total > 0 ? ` ${percent}%` : ""}...`, { duration: 0 });
+          return;
+        }
+        const pending = state.desktopPending.get(String(message.request_id || ""));
+        if (!pending) return;
+        state.desktopPending.delete(String(message.request_id || ""));
+        if (message.ok) pending.resolve(message);
+        else pending.reject(desktopError(message.message || "The desktop action failed.", message.code || "desktop_error"));
+      }
+
+      function initialiseDesktopBridge() {
+        if (!window.chrome || !window.chrome.webview) return;
+        window.chrome.webview.addEventListener("message", handleDesktopMessage);
+        try { desktopPost({ action: "hello", request_id: dragRequestId() }); } catch (_) {}
+      }
 
       async function initialise() {
         document.title = "Sports Cave Files";
+        initialiseDesktopBridge();
         state.searchByPath[state.currentPath] = query.get("q") || state.searchByPath[state.currentPath] || "";
         const requestedPath = state.currentPath;
         const loaded = await loadFolder(requestedPath);

@@ -407,6 +407,137 @@ class FilesWindowApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 307)
         temporary_link.assert_called_once_with("secret-token", f"{TEAM_ROOT}/{relative}")
 
+    def test_native_transfer_manifest_is_revision_scoped_and_keeps_unicode_names(self):
+        manager = files_upload_api.NativeTransferManager()
+        relative = "Designs/O'Neal & J\u00fcrgen.psd"
+        full_path = f"{TEAM_ROOT}/{relative}"
+        metadata = {
+            ".tag": "file",
+            "id": "id:unicode-file",
+            "name": "O'Neal & J\u00fcrgen.psd",
+            "path_display": full_path,
+            "size": 27,
+            "rev": "revision-9",
+        }
+        with patch.object(
+            files_upload_api.dropbox_integration,
+            "get_file_metadata",
+            return_value=metadata,
+        ):
+            record = manager.create(
+                access_token="server-only-token",
+                root_path=TEAM_ROOT,
+                user=self.user,
+                selections=[
+                    {
+                        "path": relative,
+                        "id": "id:unicode-file",
+                        "revision": "revision-9",
+                        "tag": "file",
+                    }
+                ],
+            )
+
+        self.assertEqual(record.items[0]["relative_path"], "O'Neal & J\u00fcrgen.psd")
+        self.assertEqual(record.items[0]["revision"], "revision-9")
+        self.assertEqual(
+            record.roots,
+            [
+                {
+                    "source_relative_path": relative,
+                    "name": "O'Neal & J\u00fcrgen.psd",
+                    "is_directory": False,
+                    "revision": "revision-9",
+                }
+            ],
+        )
+        self.assertNotIn("server-only-token", json.dumps(record.items))
+        self.assertIs(manager.get(record.ticket, record.secret), record)
+        with self.assertRaises(files_upload_api.FilesUploadError):
+            manager.get(record.ticket, "wrong-secret")
+
+    def test_native_transfer_rejects_traversal_absolute_and_wrong_dropbox_identity(self):
+        manager = files_upload_api.NativeTransferManager()
+        for invalid in ("../outside.jpg", "/absolute.jpg", "C:/Windows/file.jpg"):
+            with self.subTest(invalid=invalid), self.assertRaises(
+                files_upload_api.FilesUploadError
+            ):
+                manager.create(
+                    access_token="token",
+                    root_path=TEAM_ROOT,
+                    user=self.user,
+                    selections=[{"path": invalid}],
+                )
+        with patch.object(
+            files_upload_api.dropbox_integration,
+            "get_file_metadata",
+            return_value={
+                ".tag": "file",
+                "id": "id:actual",
+                "name": "Image.jpg",
+                "path_display": f"{TEAM_ROOT}/Image.jpg",
+                "size": 1,
+                "rev": "r1",
+            },
+        ):
+            with self.assertRaises(files_upload_api.FilesUploadError) as caught:
+                manager.create(
+                    access_token="token",
+                    root_path=TEAM_ROOT,
+                    user=self.user,
+                    selections=[{"path": "Image.jpg", "id": "id:forged"}],
+                )
+        self.assertEqual(caught.exception.code, "item_changed")
+
+    def test_native_folder_manifest_preserves_tree_and_empty_folders(self):
+        manager = files_upload_api.NativeTransferManager()
+        folder = f"{TEAM_ROOT}/Campaign"
+        with patch.object(
+            files_upload_api.dropbox_integration,
+            "get_file_metadata",
+            return_value={
+                ".tag": "folder",
+                "id": "id:folder",
+                "name": "Campaign",
+                "path_display": folder,
+            },
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "list_folder_recursive",
+            return_value=[
+                {
+                    ".tag": "folder",
+                    "id": "id:nested",
+                    "name": "Empty",
+                    "path_display": f"{folder}/Empty",
+                },
+                {
+                    ".tag": "file",
+                    "id": "id:file",
+                    "name": "Final.png",
+                    "path_display": f"{folder}/Final.png",
+                    "size": 4,
+                    "rev": "r2",
+                },
+            ],
+        ):
+            record = manager.create(
+                access_token="token",
+                root_path=TEAM_ROOT,
+                user=self.user,
+                selections=[{"path": "Campaign", "id": "id:folder"}],
+            )
+        self.assertEqual(
+            [item["relative_path"] for item in record.items],
+            ["Campaign", "Campaign/Empty", "Campaign/Final.png"],
+        )
+        self.assertEqual(
+            [item["is_directory"] for item in record.items],
+            [True, True, False],
+        )
+        self.assertEqual(record.roots[0]["source_relative_path"], "Campaign")
+        self.assertTrue(record.roots[0]["is_directory"])
+
     def test_helper_package_selects_real_windows_and_macos_installers(self):
         for platform, expected in (("windows", "Install.ps1"), ("macos", "Install.command")):
             request = get_request("/api/files-desktop-helper", {"platform": platform})
@@ -414,6 +545,13 @@ class FilesWindowApiTests(unittest.TestCase):
                 response = asyncio.run(files_upload_api.desktop_helper_package(request))
             with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
                 self.assertIn(expected, archive.namelist())
+                if platform == "windows":
+                    self.assertIn("SportsCaveFilesDesktop.cs", archive.namelist())
+                    self.assertIn("lib/Microsoft.Web.WebView2.Core.dll", archive.namelist())
+                    self.assertIn("lib/Microsoft.Web.WebView2.Wpf.dll", archive.namelist())
+                    self.assertIn("runtimes/win-x64/native/WebView2Loader.dll", archive.namelist())
+                    self.assertIn("SportsCaveFilesHelper.ps1", archive.namelist())
+                    self.assertNotIn("PhotoshopProtocolLauncher.cs", archive.namelist())
                 if platform == "macos":
                     mode = archive.getinfo("Install.command").external_attr >> 16
                     self.assertTrue(mode & 0o100)
@@ -539,6 +677,9 @@ class FilesWindowApiTests(unittest.TestCase):
         self.assertEqual(routes["/api/files-download"], ("GET",))
         self.assertEqual(routes["/api/files-image-preview"], ("GET",))
         self.assertEqual(routes["/api/files-image-items"], ("GET",))
+        self.assertEqual(routes["/api/files-native-transfer"], ("POST",))
+        self.assertEqual(routes["/api/files-native-transfer/manifest"], ("GET",))
+        self.assertEqual(routes["/api/files-native-transfer/content"], ("GET",))
         self.assertEqual(routes["/api/files-delete"], ("POST",))
         self.assertEqual(routes["/api/files-paste"], ("POST",))
         self.assertNotIn("/api/files-drag-token", routes)
@@ -692,13 +833,18 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
             ROOT / "components" / "files_image_viewer" / "index.html"
         ).read_text(encoding="utf-8")
 
-    def test_files_sidebar_uses_one_named_centered_window_and_keeps_main_page(self):
+    def test_files_sidebar_opens_desktop_by_default_with_one_browser_fallback(self):
+        self.assertIn('href="sports-cave-files://app"', self.launcher)
+        self.assertIn("desktopLink.click()", self.launcher)
+        self.assertIn("parentWindow.location.assign(\"/files-window\")", self.launcher)
+        self.assertIn("parentWindow.chrome && parentWindow.chrome.webview", self.launcher)
+        self.assertIn("openBrowserFilesWindow", self.launcher)
         self.assertIn('const FILES_WINDOW_NAME = "sports-cave-files"', self.launcher)
         self.assertIn('parentWindow.open("", FILES_WINDOW_NAME, filesWindowFeatures())', self.launcher)
         self.assertIn("width=${width},height=${height},left=${left},top=${top}", self.launcher)
         self.assertIn("parentWindow.__sportsCaveFilesWindow", self.launcher)
         self.assertIn("filesWindow.focus()", self.launcher)
-        self.assertIn("The browser blocked the popup", self.launcher)
+        self.assertIn("Sports Cave Desktop did not open", self.launcher)
         branch = self.app[self.app.index('if page == "Files":') : self.app.index("if st.sidebar.button(", self.app.index('if page == "Files":'))]
         self.assertIn("_files_window_launcher_component", branch)
         self.assertIn("continue", branch)
@@ -720,23 +866,20 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('event.key === "Backspace"', self.client)
         self.assertIn('event.altKey && event.key === "ArrowLeft"', self.client)
 
-    def test_open_never_downloads_and_psd_uses_desktop_helper_protocol(self):
+    def test_open_never_downloads_and_uses_desktop_bridge(self):
         open_block = self.client[self.client.index("function desktopApplication") : self.client.index("function startDownload")]
         self.assertIn('item.kind === "photoshop"', open_block)
         self.assertIn('return "Photoshop"', open_block)
-        self.assertIn('"sports-cave-photoshop"', open_block)
-        self.assertIn('"sports-cave-files"', open_block)
-        self.assertIn("function desktopProtocolScheme", open_block)
-        self.assertIn("function isWindowsPlatform()", open_block)
-        self.assertIn("return /Win/i.test(platform)", open_block)
-        self.assertIn("const protocolUrl = `${scheme}://open?path=", open_block)
+        self.assertIn('desktopRequest("openFile", [item])', open_block)
+        self.assertIn('hasDesktopCapability("openFile")', open_block)
         self.assertIn("item.desktop_relative_path", open_block)
         self.assertNotIn("/api/files-download", open_block)
         self.assertIn("Opening in ${application}...", open_block)
+        self.assertIn('elements.protocolLink.href = "sports-cave-files://app"', open_block)
         self.assertIn("elements.protocolLink.click()", open_block)
-        self.assertIn("File didn't open?", self.client)
+        self.assertIn("Sports Cave Desktop required", self.client)
         self.assertIn("Check desktop helper", self.client)
-        self.assertIn("Reinstall helper", self.client)
+        self.assertIn("Install or update helper", self.client)
         self.assertIn("Download instead", self.client)
 
     def test_every_standard_open_action_uses_the_authoritative_open_item(self):
@@ -907,14 +1050,19 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('event.key === "Delete"', self.client)
         self.assertIn('event.key === "F2"', self.client)
 
-    def test_external_drag_calls_native_helper_directly_without_browser_drag_emulation(self):
-        self.assertIn("function handleExternalDragStart(event, item, index)", self.client)
-        self.assertIn("items.map(selected => String(selected.desktop_relative_path", self.client)
-        self.assertIn("sports-cave-files://drag?paths=", self.client)
-        self.assertIn("encodeURIComponent(JSON.stringify(paths))", self.client)
-        self.assertIn("&effect=copy", self.client)
-        self.assertIn("elements.protocolLink.click()", self.client)
-        self.assertIn("event.preventDefault()", self.client)
+    def test_external_drag_uses_capability_detected_webview_bridge(self):
+        self.assertIn("function beginExternalDragPointer(event, item, index)", self.client)
+        self.assertIn("function moveExternalDragPointer(event)", self.client)
+        self.assertIn("function startNativeOutboundDrag(items, x, y)", self.client)
+        self.assertIn('hasDesktopCapability("drag")', self.client)
+        self.assertIn('desktopRequest("drag", items, requestId)', self.client)
+        self.assertIn("window.chrome.webview.postMessage(message)", self.client)
+        self.assertIn('desktopPost({ action: "cancel", request_id: requestId })', self.client)
+        self.assertIn('row.draggable = false', self.client)
+        self.assertIn('row.addEventListener("pointerdown"', self.client)
+        self.assertIn('document.addEventListener("pointermove", moveExternalDragPointer, true)', self.client)
+        self.assertIn("showOutboundDragPreview(items, x, y)", self.client)
+        self.assertIn("selectedItems();", self.client)
         self.assertIn("state.suppressClickUntil", self.client)
         for removed in (
             "item-checkbox",
@@ -926,6 +1074,8 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
             "DownloadURL",
             "text/uri-list",
             "/api/files-drag-token",
+            "sports-cave-files://drag?paths=",
+            "127.0.0.1:17384",
         ):
             self.assertNotIn(removed, self.client)
         drag_block = self.client[
@@ -934,19 +1084,48 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         ]
         self.assertNotIn("/api/files-delete", drag_block)
         self.assertNotIn("operation: \"move\"", drag_block)
-        self.assertNotIn("fetch(", drag_block)
+        self.assertNotIn("window.location", drag_block)
+        self.assertNotIn("protocolLink", drag_block)
+        self.assertNotIn("dataTransfer", drag_block)
         self.assertIn("state.outboundDrag = true", drag_block)
         self.assertIn("state.outboundDrag = false", drag_block)
+        self.assertIn("cancelExternalDrag()", self.client)
 
-    def test_copy_and_cut_also_request_native_windows_file_clipboard(self):
+    def test_copy_uses_native_helper_while_cut_remains_internal(self):
         block = self.client[
             self.client.index("function invokeDesktopClipboard") :
             self.client.index("function invokeDesktopHelper")
         ]
-        self.assertIn("sports-cave-files://clipboard?paths=", block)
-        self.assertIn("encodeURIComponent(JSON.stringify(paths))", block)
-        self.assertIn('effect === "move" ? "move" : "copy"', block)
-        self.assertIn('mode === "cut" ? "move" : "copy"', self.client)
+        self.assertIn('desktopRequest("copyFile", items)', block)
+        self.assertIn("item.desktop_relative_path || item.relative_path", self.client)
+        self.assertIn('revision: String(item.revision || "")', self.client)
+        self.assertNotIn("protocolLink", block)
+        self.assertNotIn("sports-cave-files://clipboard", self.client)
+        self.assertIn('mode === "copy" && hasDesktopCapability("copyFile")', self.client)
+        self.assertIn("ready to move inside Sports Cave Files", self.client)
+        self.assertNotIn('invokeDesktopClipboard(chosen, "move")', self.client)
+
+    def test_missing_or_outdated_helper_has_compact_update_fallback(self):
+        self.assertIn('if (!window.chrome || !window.chrome.webview)', self.client)
+        self.assertIn("Open in Sports Cave Desktop to drag or copy files", self.client)
+        self.assertIn("Install or update helper", self.client)
+        self.assertIn('elements.protocolLink.href = "sports-cave-files://app"', self.client)
+        self.assertIn("const MINIMUM_DESKTOP_VERSION = 5", self.client)
+        self.assertIn("desktop_outdated", self.client)
+
+    def test_image_viewer_supports_pixel_and_original_file_copy(self):
+        self.assertIn('id="copyImageButton"', self.viewer)
+        self.assertIn('id="copyFileButton"', self.viewer)
+        self.assertIn('desktopRequest("copyImage")', self.viewer)
+        self.assertIn('desktopRequest("copyFile")', self.viewer)
+        self.assertIn('new ClipboardItem({ "image/png": png })', self.viewer)
+        self.assertIn("if (event.shiftKey) copyOriginalFile()", self.viewer)
+        self.assertIn('<img class="image" id="image"', self.viewer)
+        self.assertIn('draggable="false"', self.viewer)
+        self.assertIn("pointer-events: auto", self.viewer)
+        self.assertIn('hasDesktopCapability("drag")', self.viewer)
+        self.assertIn('desktopRequest("drag")', self.viewer)
+        self.assertIn("const MINIMUM_DESKTOP_VERSION = 5", self.viewer)
 
 
 if __name__ == "__main__":

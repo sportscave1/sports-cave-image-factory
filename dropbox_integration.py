@@ -406,6 +406,38 @@ def list_folder(access_token, path="", *, max_entries=2000):
     return [_metadata_to_dict(entry) for entry in entries[:limit]]
 
 
+def list_folder_recursive(access_token, path="", *, max_entries=10000):
+    """Return a bounded recursive listing for an explicit native transfer."""
+    clean_path = normalize_dropbox_path(path)
+    limit = max(1, min(int(max_entries or 10000), 10000))
+    client = team_space_client(access_token)
+    try:
+        response = client.files_list_folder(
+            clean_path,
+            recursive=True,
+            include_deleted=False,
+            include_media_info=False,
+            limit=min(limit, 2000),
+        )
+    except Exception as error:
+        raise _dropbox_error(error) from error
+    entries = list(getattr(response, "entries", ()) or ())
+    seen_cursors = set()
+    while bool(getattr(response, "has_more", False)) and len(entries) < limit:
+        cursor = str(getattr(response, "cursor", "") or "").strip()
+        if not cursor or cursor in seen_cursors:
+            break
+        seen_cursors.add(cursor)
+        try:
+            response = client.files_list_folder_continue(cursor)
+        except Exception as error:
+            raise _dropbox_error(error) from error
+        entries.extend(getattr(response, "entries", ()) or ())
+    if bool(getattr(response, "has_more", False)) or len(entries) > limit:
+        raise DropboxApiError("This folder contains too many items for one desktop transfer.")
+    return [_metadata_to_dict(entry) for entry in entries]
+
+
 def get_temporary_link(access_token, path):
     try:
         result = team_space_client(access_token).files_get_temporary_link(

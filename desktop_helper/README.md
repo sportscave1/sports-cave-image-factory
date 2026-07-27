@@ -1,39 +1,45 @@
-# Sports Cave Files Desktop Helper
+# Sports Cave OS Desktop
 
-This optional Windows helper opens locally synced Dropbox files from Sports Cave OS.
-It stores no Dropbox credentials and runs only for the current Windows user.
+Sports Cave OS Desktop is the persistent Windows host for genuine outbound file
+dragging, Windows file Copy and image clipboard actions. It displays the existing
+Sports Cave OS in WebView2 and runs only for the current Windows user.
 
 ## Install
 
 1. Extract the helper package.
 2. Double-click `Install.cmd`.
-3. Select the locally synced `Sportscave Team Folder` when prompted.
-4. Restart the browser.
+3. Open **Sports Cave OS Desktop** from the Start menu.
+4. Sign in normally if the existing Sports Cave session is not already present.
 
-PSD and PSB files prefer Adobe Photoshop, AI files prefer Adobe Illustrator, and
-other files use their Windows default application. The helper accepts only safe
-relative paths inside the approved folder. Dropbox Desktop must be installed and
-signed in. The helper reads the first byte before launch so Dropbox hydrates an
-online-only placeholder before the associated application receives it.
+The desktop app does not contain Dropbox credentials. Sports Cave OS validates
+each selected Dropbox identity and revision, then issues a short-lived transfer
+grant. Validated items already present in the configured local Dropbox Team
+Folder are exposed directly. Missing local items fall back to the bounded
+`%LOCALAPPDATA%\SportsCaveOS\FileCache`. Both paths use genuine
+`FileDrop`/`CF_HDROP` data.
 
-The installer registers a Photoshop-specific protocol launcher for PSD and PSB
-files so the browser's external-application prompt identifies Photoshop instead
-of Windows PowerShell. Both protocol routes use the same root-scoped helper.
+The installer starts a windowless per-user host, creates a Start menu shortcut
+and registers the existing Open protocols. Normal use does not launch PowerShell
+or a Command Prompt window. Native bridge messages are accepted only from
+configured Sports Cave OS origins and use an allowlisted action set.
 
-Copy and Cut in Sports Cave Files also use the helper to place the selected,
-validated local Dropbox files on the Windows file clipboard. This allows Paste
-in Windows Explorer or on the Desktop, including multiple files and folders.
-Copy uses the Windows copy effect and Cut uses the Windows move effect.
+Copy places materialised files or folders on the persistent Windows file
+clipboard with a Copy effect. Cut remains the existing internal Sports Cave
+Files move workflow.
 
-Dragging files out of Sports Cave Files uses the same helper to hydrate the
-selected local Dropbox files and start a genuine Windows `FileDrop` drag with a
-copy-only effect. Receiving applications get the local files themselves, not
-browser blobs, download links or path text. Multiple files and names containing
-spaces, apostrophes, ampersands or Unicode are supported.
+Dragging begins inside the persistent desktop process and uses native
+`DragDrop.DoDragDrop` with a Copy effect. Receiving applications get real local
+files, not browser blobs, URLs or path text. Multiple files, folders and Unicode
+names are supported.
 
 Run `Install.cmd` again to upgrade an existing installation. The installer
-reuses the previously approved Dropbox root when it is still available, replaces
-the helper script and refreshes the current-user protocol registration.
+replaces the desktop host, refreshes current-user protocol registration and
+starts the new version. No administrator access is normally required.
+
+Minimal diagnostics are written to
+`%LOCALAPPDATA%\SportsCaveOS\Logs\desktop.log`. The log records only the
+action, outcome, error code and item count; it does not record paths, signed URLs
+or credentials.
 
 ## Uninstall
 

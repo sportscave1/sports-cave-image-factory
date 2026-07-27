@@ -1,8 +1,21 @@
-param([string]$DropboxRoot = "")
+param(
+    [string]$DropboxRoot = "",
+    [string]$AppUrl = "https://sports-cave-image-factory.onrender.com/files-window",
+    [string[]]$AllowedOrigins = @(
+        "https://sports-cave-image-factory.onrender.com",
+        "http://127.0.0.1:8501",
+        "http://localhost:8501"
+    )
+)
 
 $ErrorActionPreference = "Stop"
 $installRoot = Join-Path $env:LOCALAPPDATA "SportsCaveFilesHelper"
 $existingConfigPath = Join-Path $installRoot "config.json"
+$bridgePath = Join-Path $installRoot "SportsCaveOSDesktop.exe"
+$legacyBridgePath = Join-Path $installRoot "SportsCaveFilesHelper.exe"
+$bridgeTempPath = Join-Path $env:TEMP ("SportsCaveOSDesktop-" + [Guid]::NewGuid().ToString("N") + ".exe")
+$runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
+$runValueName = "SportsCaveFilesHelper"
 $filesProtocolKey = "HKCU:\Software\Classes\sports-cave-files"
 $photoshopProtocolKey = "HKCU:\Software\Classes\sports-cave-photoshop"
 
@@ -37,48 +50,137 @@ if ([string]::IsNullOrWhiteSpace($DropboxRoot) -and (Test-Path -LiteralPath $exi
     } catch {}
 }
 
-if ([string]::IsNullOrWhiteSpace($DropboxRoot)) {
-    $shell = New-Object -ComObject Shell.Application
-    $selection = $shell.BrowseForFolder(0, "Select your locally synced Sportscave Team Folder", 0x41, 0)
-    if ($null -eq $selection) {
-        Write-Host "Installation cancelled."
-        exit 1
+if (-not [string]::IsNullOrWhiteSpace($DropboxRoot)) {
+    $DropboxRoot = [System.IO.Path]::GetFullPath($DropboxRoot).TrimEnd("\")
+    if (-not (Test-Path -LiteralPath $DropboxRoot -PathType Container)) {
+        throw "The configured Dropbox folder does not exist."
     }
-    $DropboxRoot = [string]$selection.Self.Path
-}
-
-$DropboxRoot = [System.IO.Path]::GetFullPath($DropboxRoot).TrimEnd("\")
-if (-not (Test-Path -LiteralPath $DropboxRoot -PathType Container)) {
-    throw "The selected folder does not exist."
 }
 
 New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "SportsCaveFilesHelper.ps1") -Destination $installRoot -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Uninstall.ps1") -Destination $installRoot -Force
+
+Get-Process -Name "SportsCaveFilesHelper" -ErrorAction SilentlyContinue |
+    Where-Object {
+        try {
+            [System.IO.Path]::GetFullPath($_.Path) -eq [System.IO.Path]::GetFullPath($legacyBridgePath)
+        } catch {
+            $false
+        }
+    } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name "SportsCaveOSDesktop" -ErrorAction SilentlyContinue |
+    Where-Object {
+        try {
+            [System.IO.Path]::GetFullPath($_.Path) -eq [System.IO.Path]::GetFullPath($bridgePath)
+        } catch {
+            $false
+        }
+    } |
+    Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 150
+if (Test-Path -LiteralPath $legacyBridgePath -PathType Leaf) {
+    Remove-Item -LiteralPath $legacyBridgePath -Force
+}
+
+$legacyLauncherPath = Join-Path $installRoot "Sports Cave Photoshop Launcher.exe"
+if (Test-Path -LiteralPath $legacyLauncherPath -PathType Leaf) {
+    Remove-Item -LiteralPath $legacyLauncherPath -Force
+}
+
+$libSource = Join-Path $PSScriptRoot "lib"
+$runtimeSource = Join-Path $PSScriptRoot "runtimes\win-x64\native\WebView2Loader.dll"
+if (
+    -not (Test-Path -LiteralPath (Join-Path $libSource "Microsoft.Web.WebView2.Core.dll") -PathType Leaf) -or
+    -not (Test-Path -LiteralPath (Join-Path $libSource "Microsoft.Web.WebView2.Wpf.dll") -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $runtimeSource -PathType Leaf)
+) {
+    throw "The WebView2 desktop files are missing. Download a fresh helper package."
+}
+$bridgeSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "SportsCaveFilesDesktop.cs") -Raw
+try {
+    Add-Type -AssemblyName PresentationFramework
+    Add-Type -AssemblyName PresentationCore
+    Add-Type -AssemblyName WindowsBase
+    Add-Type -AssemblyName System.Xaml
+    $wpfReferences = @(
+        [System.Windows.DependencyObject].Assembly.Location,
+        [System.Windows.Media.ImageSource].Assembly.Location,
+        [System.Windows.Window].Assembly.Location,
+        [System.Xaml.XamlReader].Assembly.Location
+    ) | Select-Object -Unique
+    $compileReferences = @(
+        "System.dll",
+        "System.Core.dll",
+        "System.Net.Http.dll",
+        "System.Web.Extensions.dll"
+    ) + $wpfReferences + @(
+        (Join-Path $libSource "Microsoft.Web.WebView2.Core.dll"),
+        (Join-Path $libSource "Microsoft.Web.WebView2.Wpf.dll")
+    )
+    Add-Type `
+        -TypeDefinition $bridgeSource `
+        -Language CSharp `
+        -ReferencedAssemblies ($compileReferences | Select-Object -Unique) `
+        -OutputAssembly $bridgeTempPath `
+        -OutputType WindowsApplication
+    if (-not (Test-Path -LiteralPath $bridgeTempPath -PathType Leaf)) {
+        throw "The native desktop helper could not be built."
+    }
+    Move-Item -LiteralPath $bridgeTempPath -Destination $bridgePath -Force
+} finally {
+    if (Test-Path -LiteralPath $bridgeTempPath) {
+        Remove-Item -LiteralPath $bridgeTempPath -Force
+    }
+}
+Copy-Item -LiteralPath (Join-Path $libSource "Microsoft.Web.WebView2.Core.dll") -Destination $installRoot -Force
+Copy-Item -LiteralPath (Join-Path $libSource "Microsoft.Web.WebView2.Wpf.dll") -Destination $installRoot -Force
+Copy-Item -LiteralPath $runtimeSource -Destination $installRoot -Force
+
 @{
     RootPath = $DropboxRoot
+    AppUrl = $AppUrl
     InstalledAt = (Get-Date).ToString("o")
-    HelperVersion = 2
+    HelperVersion = 5
+    AllowedOrigins = @(
+        $AllowedOrigins |
+            ForEach-Object { [string]$_ } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            ForEach-Object { $_.Trim().TrimEnd("/") } |
+            Select-Object -Unique
+    )
 } |
     ConvertTo-Json |
     Set-Content -LiteralPath (Join-Path $installRoot "config.json") -Encoding UTF8
 
-$helperPath = Join-Path $installRoot "SportsCaveFilesHelper.ps1"
-$filesCommand = '"' + (Join-Path $PSHOME "powershell.exe") + '" -Sta -WindowStyle Hidden -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $helperPath + '" "%1"'
+$filesCommand = '"' + $bridgePath + '" "%1"'
 Register-Protocol $filesProtocolKey "Sports Cave Files Protocol" "Sports Cave Files" $filesCommand
 
-$launcherPath = Join-Path $installRoot "Sports Cave Photoshop Launcher.exe"
-if (Test-Path -LiteralPath $launcherPath) {
-    Remove-Item -LiteralPath $launcherPath -Force
-}
-$launcherSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "PhotoshopProtocolLauncher.cs") -Raw
-Add-Type -TypeDefinition $launcherSource -Language CSharp -OutputAssembly $launcherPath -OutputType WindowsApplication
-if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
-    throw "The Photoshop protocol launcher could not be installed."
-}
-$photoshopCommand = '"' + $launcherPath + '" "%1"'
+$photoshopCommand = '"' + $bridgePath + '" "%1"'
 Register-Protocol $photoshopProtocolKey "Open in Photoshop" "Photoshop" $photoshopCommand
 
-Write-Host "Sports Cave desktop helper installed."
-Write-Host "Approved folder: $DropboxRoot"
-Write-Host "Restart your browser before testing Open, Copy or native drag from Sports Cave OS."
+New-Item -Path $runKey -Force | Out-Null
+New-ItemProperty `
+    -Path $runKey `
+    -Name $runValueName `
+    -Value ('"' + $bridgePath + '" --background') `
+    -PropertyType String `
+    -Force |
+    Out-Null
+
+Start-Process -WindowStyle Hidden -FilePath $bridgePath -ArgumentList "--background"
+Start-Sleep -Milliseconds 350
+
+$programs = [Environment]::GetFolderPath("Programs")
+$shortcutPath = Join-Path $programs "Sports Cave OS Desktop.lnk"
+$shortcutShell = New-Object -ComObject WScript.Shell
+$shortcut = $shortcutShell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $bridgePath
+$shortcut.Arguments = "--app"
+$shortcut.WorkingDirectory = $installRoot
+$shortcut.Description = "Open Sports Cave OS Desktop"
+$shortcut.Save()
+
+Write-Host "Sports Cave OS Desktop installed."
+Write-Host "Open it from the Start menu for native drag, Copy and image clipboard support."

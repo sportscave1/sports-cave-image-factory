@@ -59,10 +59,12 @@
         left: 50%;
         max-height: none;
         max-width: none;
-        pointer-events: none;
+        pointer-events: auto;
         position: absolute;
         top: 50%;
         transform-origin: center center;
+        user-select: auto;
+        -webkit-user-drag: none;
         will-change: transform;
       }
       .status {
@@ -121,12 +123,14 @@
         <button class="tool" id="rotateRightButton" type="button" title="Rotate right" aria-label="Rotate right"><span class="icon">&#8635;</span></button>
         <div class="file-name" id="fileName"></div>
         <div class="toolbar-spacer"></div>
+        <button class="tool text-tool" id="copyImageButton" type="button" title="Copy image pixels"><span class="icon">&#x2398;</span><span class="tool-label">Copy image</span></button>
+        <button class="tool text-tool" id="copyFileButton" type="button" title="Copy original file"><span class="icon">&#xE8C8;</span><span class="tool-label">Copy file</span></button>
         <button class="tool text-tool" id="downloadButton" type="button" title="Download"><span class="icon">&#8681;</span><span class="tool-label">Download</span></button>
         <button class="tool text-tool" id="desktopButton" type="button" title="Open in desktop app"><span class="icon">&#8599;</span><span class="tool-label">Desktop app</span></button>
         <button class="tool" id="closeButton" type="button" title="Close" aria-label="Close"><span class="icon">&#215;</span></button>
       </div>
       <section class="stage" id="stage">
-        <img class="image" id="image" alt="" decoding="async" fetchpriority="high">
+        <img class="image" id="image" alt="" decoding="async" fetchpriority="high" draggable="false">
       </section>
       <footer class="status"><span id="dimensions"></span><span id="zoomStatus"></span></footer>
     </main>
@@ -140,9 +144,11 @@
     </aside>
     <script>
       const IMAGE_VIEWER_MESSAGE = "sports-cave-image-viewer-open";
+      const DESKTOP_MESSAGE_TYPE = "sports-cave-desktop";
+      const MINIMUM_DESKTOP_VERSION = 5;
       const elements = Object.fromEntries([
         "previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton",
-        "rotateLeftButton", "rotateRightButton", "fileName", "downloadButton", "desktopButton", "closeButton",
+        "rotateLeftButton", "rotateRightButton", "fileName", "copyImageButton", "copyFileButton", "downloadButton", "desktopButton", "closeButton",
         "stage", "image", "dimensions", "zoomStatus", "protocolLink",
         "downloadFrame", "helperPanel", "checkHelperButton", "installHelperButton", "downloadInsteadButton"
       ].map(id => [id, document.getElementById(id)]));
@@ -161,9 +167,14 @@
         panX: 0,
         panY: 0,
         pointer: null,
+        outboundPointer: null,
+        outboundBusy: false,
         loadGeneration: 0,
         helperTimer: 0,
         sizingMode: "fit",
+        desktopCapabilities: new Set(),
+        desktopPending: new Map(),
+        desktopReady: false,
       };
 
       function isMac() {
@@ -298,16 +309,99 @@
         elements.downloadFrame.src = `/api/files-download?relative_path=${encodeURIComponent(state.path)}&download=${Date.now()}`;
       }
 
+      function requestId() {
+        return window.crypto && typeof window.crypto.randomUUID === "function"
+          ? window.crypto.randomUUID()
+          : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+      }
+
+      function notify(message) {
+        elements.dimensions.textContent = message;
+      }
+
+      function hasDesktopCapability(capability) {
+        return state.desktopReady && state.desktopCapabilities.has(capability);
+      }
+
+      function desktopPost(message) {
+        if (!window.chrome || !window.chrome.webview) throw new Error("Open in Sports Cave Desktop.");
+        window.chrome.webview.postMessage(message);
+      }
+
+      async function createTransfer() {
+        const response = await fetch("/api/files-native-transfer", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: [{ path: state.path, id: "", revision: "", tag: "file" }] }),
+        });
+        const payload = await response.json();
+        if (!response.ok || payload.ok === false) throw new Error(payload.message || "The file could not be prepared.");
+        return { base_url: location.origin, ticket: payload.ticket, secret: payload.secret };
+      }
+
+      async function desktopRequest(action) {
+        if (!hasDesktopCapability(action)) throw new Error("Open in Sports Cave Desktop to use this action.");
+        const transfer = await createTransfer();
+        const id = requestId();
+        return new Promise((resolve, reject) => {
+          state.desktopPending.set(id, { resolve, reject });
+          desktopPost({ action, request_id: id, transfer });
+        });
+      }
+
+      async function copyImagePixels() {
+        try {
+          if (hasDesktopCapability("copyImage")) {
+            await desktopRequest("copyImage");
+          } else {
+            if (!navigator.clipboard || typeof ClipboardItem !== "function") {
+              throw new Error("Image copying is not supported in this browser.");
+            }
+            const canvas = document.createElement("canvas");
+            canvas.width = state.naturalWidth;
+            canvas.height = state.naturalHeight;
+            const context = canvas.getContext("2d");
+            context.drawImage(elements.image, 0, 0);
+            const png = new Promise((resolve, reject) => {
+              canvas.toBlob(value => value ? resolve(value) : reject(new Error("The image could not be copied.")), "image/png");
+            });
+            await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+          }
+          notify("Image copied");
+        } catch (error) {
+          notify(error.message || "Image copy failed");
+        }
+      }
+
+      async function copyOriginalFile() {
+        try {
+          await desktopRequest("copyFile");
+          notify("Original file copied");
+        } catch (error) {
+          notify(error.message || "Open in Sports Cave Desktop to copy the file");
+          showHelperPanel();
+        }
+      }
+
       function showHelperPanel() {
         elements.helperPanel.classList.add("visible");
       }
 
-      function invokeDesktopHelper() {
+      async function invokeDesktopHelper() {
         if (!state.path) return;
-        elements.helperPanel.classList.remove("visible");
-        window.clearTimeout(state.helperTimer);
-        elements.protocolLink.href = `sports-cave-files://open?path=${encodeURIComponent(state.path)}&kind=file`;
+        if (hasDesktopCapability("openFile")) {
+          try {
+            await desktopRequest("openFile");
+            elements.helperPanel.classList.remove("visible");
+          } catch (error) {
+            notify(error.message || "The file could not be opened");
+          }
+          return;
+        }
+        elements.protocolLink.href = "sports-cave-files://app";
         elements.protocolLink.click();
+        window.clearTimeout(state.helperTimer);
         state.helperTimer = window.setTimeout(showHelperPanel, 3000);
       }
 
@@ -323,6 +417,8 @@
       elements.actualButton.onclick = actualSize;
       elements.rotateLeftButton.onclick = () => { state.rotation -= 90; fitToScreen(); };
       elements.rotateRightButton.onclick = () => { state.rotation += 90; fitToScreen(); };
+      elements.copyImageButton.onclick = copyImagePixels;
+      elements.copyFileButton.onclick = copyOriginalFile;
       elements.downloadButton.onclick = startDownload;
       elements.desktopButton.onclick = invokeDesktopHelper;
       elements.closeButton.onclick = () => window.close();
@@ -336,17 +432,56 @@
       }, { passive: false });
       elements.stage.addEventListener("pointerdown", event => {
         if (event.button !== 0 || elements.image.style.display === "none") return;
+        if (
+          event.target === elements.image
+          && hasDesktopCapability("drag")
+          && event.pointerType === "mouse"
+          && event.isPrimary
+          && !event.ctrlKey
+          && !event.metaKey
+          && !event.shiftKey
+          && !event.altKey
+          && !state.outboundBusy
+        ) {
+          state.outboundPointer = {
+            id: event.pointerId,
+            x: event.clientX,
+            y: event.clientY,
+          };
+          return;
+        }
         state.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, panX: state.panX, panY: state.panY };
         elements.stage.setPointerCapture(event.pointerId);
         elements.stage.classList.add("panning");
       });
       elements.stage.addEventListener("pointermove", event => {
+        if (state.outboundPointer && state.outboundPointer.id === event.pointerId) {
+          if ((event.buttons & 1) !== 1) {
+            state.outboundPointer = null;
+            return;
+          }
+          const distance = Math.hypot(
+            event.clientX - state.outboundPointer.x,
+            event.clientY - state.outboundPointer.y
+          );
+          if (distance >= 7) {
+            state.outboundPointer = null;
+            state.outboundBusy = true;
+            desktopRequest("drag")
+              .catch(error => notify(error.message || "Windows drag could not start"))
+              .finally(() => { state.outboundBusy = false; });
+          }
+          return;
+        }
         if (!state.pointer || state.pointer.id !== event.pointerId) return;
         state.panX = state.pointer.panX + event.clientX - state.pointer.x;
         state.panY = state.pointer.panY + event.clientY - state.pointer.y;
         applyTransform();
       });
       const stopPanning = event => {
+        if (state.outboundPointer && state.outboundPointer.id === event.pointerId) {
+          state.outboundPointer = null;
+        }
         if (state.pointer && state.pointer.id === event.pointerId) state.pointer = null;
         elements.stage.classList.remove("panning");
       };
@@ -362,8 +497,49 @@
         loadFolderImages();
         window.focus();
       });
+      function handleDesktopMessage(event) {
+        const message = event && event.data;
+        if (!message || message.type !== DESKTOP_MESSAGE_TYPE) return;
+        if (message.action === "capabilities" && message.ok) {
+          if (Number(message.version || 0) < MINIMUM_DESKTOP_VERSION) {
+            state.desktopCapabilities = new Set();
+            state.desktopReady = false;
+            elements.copyFileButton.disabled = true;
+            elements.copyFileButton.title = "Update Sports Cave Desktop to copy the original file";
+            showHelperPanel();
+            return;
+          }
+          state.desktopCapabilities = new Set(Array.from(message.capabilities || []));
+          state.desktopReady = true;
+          elements.copyFileButton.disabled = !hasDesktopCapability("copyFile");
+          return;
+        }
+        if (message.action === "progress") {
+          const total = Number(message.total || 0);
+          const complete = Number(message.complete || 0);
+          notify(total > 0 ? `Preparing ${Math.min(100, Math.round(complete * 100 / total))}%` : "Preparing file");
+          return;
+        }
+        const pending = state.desktopPending.get(String(message.request_id || ""));
+        if (!pending) return;
+        state.desktopPending.delete(String(message.request_id || ""));
+        if (message.ok) pending.resolve(message);
+        else pending.reject(new Error(message.message || "The desktop action failed."));
+      }
+      if (window.chrome && window.chrome.webview) {
+        window.chrome.webview.addEventListener("message", handleDesktopMessage);
+        desktopPost({ action: "hello", request_id: requestId() });
+      } else {
+        elements.copyFileButton.disabled = true;
+        elements.copyFileButton.title = "Open in Sports Cave Desktop to copy the original file";
+      }
       window.addEventListener("keydown", event => {
-        if (event.key === "Escape") window.close();
+        if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "c") {
+          event.preventDefault();
+          if (event.shiftKey) copyOriginalFile();
+          else copyImagePixels();
+        }
+        else if (event.key === "Escape") window.close();
         else if (event.key === "ArrowLeft") moveImage(-1);
         else if (event.key === "ArrowRight") moveImage(1);
         else if (event.key === "+" || event.key === "=") zoomBy(1.2);

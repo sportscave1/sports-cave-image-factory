@@ -1,5 +1,6 @@
 import os
 import io
+import hashlib
 import mimetypes
 import secrets
 import threading
@@ -39,6 +40,9 @@ FILES_IMAGE_VIEWER_FILE = (
 FILES_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 FILES_IMAGE_PREVIEW_MAX_BYTES = 100 * 1024 * 1024
 FILES_STREAM_CHUNK_BYTES = 256 * 1024
+FILES_NATIVE_TRANSFER_SECONDS = 15 * 60
+FILES_NATIVE_TRANSFER_LIMIT = 100
+FILES_NATIVE_TRANSFER_FILE_LIMIT = 10000
 
 
 class FilesUploadError(RuntimeError):
@@ -285,6 +289,227 @@ class DropboxChunkUploadManager:
 
 
 UPLOAD_MANAGER = DropboxChunkUploadManager()
+
+
+@dataclass
+class NativeTransferRecord:
+    ticket: str
+    secret: str
+    access_token: str
+    user_id: str
+    roots: list
+    items: list
+    created_at: float = field(default_factory=time.monotonic)
+    expires_at: float = field(
+        default_factory=lambda: time.monotonic() + FILES_NATIVE_TRANSFER_SECONDS
+    )
+
+
+class NativeTransferManager:
+    """Short-lived server-side Dropbox grants for the trusted desktop shell."""
+
+    def __init__(self):
+        self._records = {}
+        self._lock = threading.RLock()
+
+    def _cleanup(self):
+        now = time.monotonic()
+        for ticket, record in list(self._records.items()):
+            if record.expires_at <= now:
+                self._records.pop(ticket, None)
+
+    def create(self, *, access_token, root_path, user, selections):
+        if not isinstance(selections, (list, tuple)) or not selections:
+            raise FilesUploadError("Select at least one item.")
+        if len(selections) > FILES_NATIVE_TRANSFER_LIMIT:
+            raise FilesUploadError(
+                f"Select no more than {FILES_NATIVE_TRANSFER_LIMIT} items at once."
+            )
+        clean_root = dropbox_integration.normalize_dropbox_path(root_path)
+        manifest = []
+        transfer_roots = []
+        seen_roots = set()
+        for selection in selections:
+            if not isinstance(selection, dict):
+                raise FilesUploadError("A selected item is invalid.", status_code=403)
+            if not set(selection).issubset({"path", "id", "revision", "tag"}):
+                raise FilesUploadError(
+                    "A selected item is invalid.",
+                    status_code=400,
+                    code="invalid_arguments",
+                )
+            relative_path = str(selection.get("path") or "")
+            full_path = _validated_relative_path(relative_path, clean_root)
+            if full_path.casefold() in seen_roots:
+                continue
+            seen_roots.add(full_path.casefold())
+            metadata = dropbox_integration.get_file_metadata(access_token, full_path)
+            supplied_id = str(selection.get("id") or "")
+            actual_id = str(metadata.get("id") or "")
+            supplied_revision = str(selection.get("revision") or "")
+            actual_revision = str(
+                metadata.get("rev") or metadata.get("content_hash") or ""
+            )
+            if supplied_id and actual_id and not secrets.compare_digest(supplied_id, actual_id):
+                raise FilesUploadError(
+                    "A selected item changed. Refresh Files and try again.",
+                    status_code=409,
+                    code="item_changed",
+                )
+            if (
+                supplied_revision
+                and actual_revision
+                and not secrets.compare_digest(supplied_revision, actual_revision)
+            ):
+                raise FilesUploadError(
+                    "A selected item changed. Refresh Files and try again.",
+                    status_code=409,
+                    code="item_changed",
+                )
+            tag = str(metadata.get(".tag") or "file").casefold()
+            root_name = str(metadata.get("name") or PurePosixPath(full_path).name)
+            source_relative_path = (
+                full_path[len(clean_root) :].lstrip("/")
+                if clean_root
+                else full_path.lstrip("/")
+            )
+            if not source_relative_path:
+                raise FilesUploadError(
+                    "The Dropbox Team Space root cannot be transferred.",
+                    status_code=400,
+                    code="invalid_arguments",
+                )
+            transfer_roots.append(
+                {
+                    "source_relative_path": source_relative_path,
+                    "name": root_name,
+                    "is_directory": tag == "folder",
+                    "revision": actual_revision,
+                }
+            )
+            if tag == "folder":
+                manifest.append(
+                    self._manifest_item(
+                        metadata,
+                        full_path,
+                        root_name,
+                        is_directory=True,
+                    )
+                )
+                descendants = dropbox_integration.list_folder_recursive(
+                    access_token,
+                    full_path,
+                    max_entries=FILES_NATIVE_TRANSFER_FILE_LIMIT,
+                )
+                for descendant in descendants:
+                    descendant_path = dropbox_integration.normalize_dropbox_path(
+                        descendant.get("path_display")
+                        or descendant.get("path_lower")
+                        or ""
+                    )
+                    if not descendant_path or not dropbox_integration.path_is_within_root(
+                        descendant_path, full_path
+                    ):
+                        raise FilesUploadError(
+                            "A selected folder returned invalid Dropbox metadata.",
+                            status_code=409,
+                            code="item_changed",
+                        )
+                    suffix = descendant_path[len(full_path) :].lstrip("/")
+                    output_path = f"{root_name}/{suffix}" if suffix else root_name
+                    manifest.append(
+                        self._manifest_item(
+                            descendant,
+                            descendant_path,
+                            output_path,
+                            is_directory=str(
+                                descendant.get(".tag") or "file"
+                            ).casefold()
+                            == "folder",
+                        )
+                    )
+            else:
+                manifest.append(
+                    self._manifest_item(
+                        metadata,
+                        full_path,
+                        root_name,
+                        is_directory=False,
+                    )
+                )
+        file_count = sum(not item["is_directory"] for item in manifest)
+        if file_count > FILES_NATIVE_TRANSFER_FILE_LIMIT:
+            raise FilesUploadError(
+                "This selection contains too many files for one desktop transfer."
+            )
+        ticket = secrets.token_urlsafe(24)
+        record = NativeTransferRecord(
+            ticket=ticket,
+            secret=secrets.token_urlsafe(32),
+            access_token=str(access_token),
+            user_id=str((user or {}).get("id") or ""),
+            roots=transfer_roots,
+            items=manifest,
+        )
+        with self._lock:
+            self._cleanup()
+            self._records[ticket] = record
+        return record
+
+    @staticmethod
+    def _manifest_item(metadata, dropbox_path, output_path, *, is_directory):
+        metadata = dict(metadata or {})
+        identity = str(metadata.get("id") or dropbox_path)
+        revision = str(
+            metadata.get("rev")
+            or metadata.get("content_hash")
+            or ("folder:" + identity if is_directory else "")
+        )
+        item_token = secrets.token_urlsafe(18)
+        cache_identity = hashlib.sha256(
+            f"{identity}\0{revision}".encode("utf-8")
+        ).hexdigest()
+        return {
+            "token": item_token,
+            "dropbox_path": dropbox_path,
+            "dropbox_id": str(metadata.get("id") or ""),
+            "revision": revision,
+            "cache_key": cache_identity,
+            "relative_path": str(output_path or ""),
+            "name": str(metadata.get("name") or PurePosixPath(dropbox_path).name),
+            "size": 0 if is_directory else int(metadata.get("size") or 0),
+            "is_directory": bool(is_directory),
+        }
+
+    def get(self, ticket, secret):
+        with self._lock:
+            self._cleanup()
+            record = self._records.get(str(ticket or ""))
+            if (
+                not record
+                or not secret
+                or not secrets.compare_digest(record.secret, str(secret))
+            ):
+                raise FilesUploadError(
+                    "This desktop transfer has expired.",
+                    status_code=404,
+                    code="transfer_expired",
+                )
+            return record
+
+    def item(self, ticket, secret, item_token):
+        record = self.get(ticket, secret)
+        for item in record.items:
+            if secrets.compare_digest(item["token"], str(item_token or "")):
+                return record, item
+        raise FilesUploadError(
+            "This desktop transfer item is unavailable.",
+            status_code=404,
+            code="transfer_item_missing",
+        )
+
+
+NATIVE_TRANSFER_MANAGER = NativeTransferManager()
 _DROPBOX_CONTEXT = {}
 _DROPBOX_CONTEXT_LOCK = threading.Lock()
 _THUMBNAIL_CACHE = {}
@@ -765,7 +990,7 @@ def _public_file_item(entry, root_path, *, timezone_name="UTC"):
             or entry.get("activity_timestamp")
         )
     item = {
-        "id": path,
+        "id": str(entry.get("id") or ""),
         "path": path,
         "desktop_relative_path": relative_path,
         "name": name,
@@ -792,6 +1017,7 @@ def _public_file_item(entry, root_path, *, timezone_name="UTC"):
         "tooltip_type": _file_tooltip_type_label(name, tag),
         "status": "Online",
         "protected": path.casefold() == clean_root.casefold(),
+        "revision": revision,
     }
     dimensions = _cached_dimensions(entry) if item["kind"] == "image" else None
     if dimensions:
@@ -1333,6 +1559,152 @@ async def image_folder_items(request: Request):
         return _response_error(error)
 
 
+async def create_native_transfer(request: Request):
+    """Issue a short-lived Dropbox transfer grant to the trusted desktop shell."""
+    try:
+        if not _same_origin(request):
+            raise FilesUploadError("Desktop transfer is not allowed.", status_code=403)
+        user = await run_in_threadpool(_request_user, request)
+        payload = await _json_body(request)
+        if set(payload) != {"items"}:
+            raise FilesUploadError(
+                "Desktop transfer request is invalid.",
+                status_code=400,
+                code="invalid_arguments",
+            )
+        context = await run_in_threadpool(_dropbox_context)
+        record = await run_in_threadpool(
+            NATIVE_TRANSFER_MANAGER.create,
+            access_token=context["access_token"],
+            root_path=context["root_path"],
+            user=user,
+            selections=payload.get("items"),
+        )
+        return JSONResponse(
+            {
+                "ok": True,
+                "ticket": record.ticket,
+                "secret": record.secret,
+                "expires_in": FILES_NATIVE_TRANSFER_SECONDS,
+                "item_count": len(record.items),
+                "file_count": sum(
+                    not item["is_directory"] for item in record.items
+                ),
+                "total_bytes": sum(item["size"] for item in record.items),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as error:
+        return _response_error(error)
+
+
+def _native_transfer_secret(request):
+    return str(request.headers.get("x-sports-cave-transfer-secret") or "")
+
+
+async def native_transfer_manifest(request: Request):
+    """Return only the validated manifest attached to one transfer grant."""
+    try:
+        record = NATIVE_TRANSFER_MANAGER.get(
+            request.query_params.get("ticket"),
+            _native_transfer_secret(request),
+        )
+        public_items = [
+            {
+                key: item[key]
+                for key in (
+                    "token",
+                    "cache_key",
+                    "relative_path",
+                    "name",
+                    "size",
+                    "is_directory",
+                    "revision",
+                )
+            }
+            for item in record.items
+        ]
+        public_roots = [
+            {
+                key: item[key]
+                for key in (
+                    "source_relative_path",
+                    "name",
+                    "is_directory",
+                    "revision",
+                )
+            }
+            for item in record.roots
+        ]
+        return JSONResponse(
+            {
+                "ok": True,
+                "ticket": record.ticket,
+                "roots": public_roots,
+                "items": public_items,
+                "total_bytes": sum(item["size"] for item in record.items),
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as error:
+        return _response_error(error)
+
+
+async def native_transfer_content(request: Request):
+    """Stream one ticketed Dropbox file without exposing Dropbox credentials."""
+    upstream = None
+    try:
+        record, item = NATIVE_TRANSFER_MANAGER.item(
+            request.query_params.get("ticket"),
+            _native_transfer_secret(request),
+            request.query_params.get("item"),
+        )
+        if item["is_directory"]:
+            raise FilesUploadError(
+                "Folders do not have downloadable content.",
+                status_code=400,
+                code="transfer_item_invalid",
+            )
+        metadata, upstream = await run_in_threadpool(
+            dropbox_integration.get_file_response,
+            record.access_token,
+            item["dropbox_path"],
+        )
+        current_id = str(metadata.get("id") or "")
+        current_revision = str(metadata.get("rev") or metadata.get("content_hash") or "")
+        if (
+            item["dropbox_id"]
+            and current_id
+            and not secrets.compare_digest(item["dropbox_id"], current_id)
+        ) or (
+            item["revision"]
+            and current_revision
+            and not secrets.compare_digest(item["revision"], current_revision)
+        ):
+            upstream.close()
+            upstream = None
+            raise FilesUploadError(
+                "This Dropbox file changed during transfer. Refresh Files and try again.",
+                status_code=409,
+                code="item_changed",
+            )
+        return StreamingResponse(
+            _stream_upstream_response(upstream),
+            media_type="application/octet-stream",
+            headers={
+                "Cache-Control": "no-store",
+                "Content-Disposition": _content_disposition("attachment", item["name"]),
+                "Content-Length": str(int(metadata.get("size") or item["size"] or 0)),
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    except Exception as error:
+        if upstream is not None:
+            with suppress(Exception):
+                upstream.close()
+        return _response_error(error)
+
+
 async def file_thumbnail(request: Request):
     """Serve a cached, tiny Dropbox thumbnail to an approved Files user."""
     try:
@@ -1371,18 +1743,27 @@ async def desktop_helper_package(request: Request):
         platform = str(request.query_params.get("platform") or "windows").casefold()
         is_macos = platform in {"mac", "macos", "darwin"}
         helper_dir = MACOS_DESKTOP_HELPER_DIR if is_macos else DESKTOP_HELPER_DIR
-        names = (
+        names = list(
             ("Install.command", "SportsCaveFilesHelper.py", "Uninstall.command", "README.md")
             if is_macos
             else (
                 "Install.cmd",
                 "Install.ps1",
-                "PhotoshopProtocolLauncher.cs",
+                "SportsCaveFilesDesktop.cs",
                 "SportsCaveFilesHelper.ps1",
                 "Uninstall.ps1",
                 "README.md",
             )
         )
+        if not is_macos:
+            names.extend(
+                str(path.relative_to(helper_dir)).replace("\\", "/")
+                for path in sorted((helper_dir / "lib").glob("*.dll"))
+            )
+            names.extend(
+                str(path.relative_to(helper_dir)).replace("\\", "/")
+                for path in sorted((helper_dir / "runtimes").rglob("*.dll"))
+            )
         package = io.BytesIO()
         with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for name in names:
@@ -1585,6 +1966,9 @@ FILES_UPLOAD_ROUTES = (
     ("/api/files-download", download_file, ("GET",)),
     ("/api/files-image-preview", image_preview, ("GET",)),
     ("/api/files-image-items", image_folder_items, ("GET",)),
+    ("/api/files-native-transfer", create_native_transfer, ("POST",)),
+    ("/api/files-native-transfer/manifest", native_transfer_manifest, ("GET",)),
+    ("/api/files-native-transfer/content", native_transfer_content, ("GET",)),
     ("/api/files-thumbnail", file_thumbnail, ("GET",)),
     ("/api/files-desktop-helper", desktop_helper_package, ("GET",)),
     ("/api/files-delete", delete_files, ("POST",)),

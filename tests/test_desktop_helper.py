@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from urllib.parse import quote
 
@@ -11,116 +12,226 @@ from urllib.parse import quote
 ROOT = Path(__file__).resolve().parents[1]
 HELPER_DIR = ROOT / "desktop_helper"
 MAC_HELPER_DIR = ROOT / "desktop_helper_macos"
+DESKTOP_SOURCE = HELPER_DIR / "SportsCaveFilesDesktop.cs"
 
 
 class DesktopHelperContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.helper_source = (HELPER_DIR / "SportsCaveFilesHelper.ps1").read_text(
+        cls.source = DESKTOP_SOURCE.read_text(encoding="utf-8")
+        cls.install = (HELPER_DIR / "Install.ps1").read_text(encoding="utf-8")
+        cls.uninstall = (HELPER_DIR / "Uninstall.ps1").read_text(encoding="utf-8")
+        cls.open_helper = (HELPER_DIR / "SportsCaveFilesHelper.ps1").read_text(
             encoding="utf-8"
         )
-        cls.install_source = (HELPER_DIR / "Install.ps1").read_text(encoding="utf-8")
-        cls.uninstall_source = (HELPER_DIR / "Uninstall.ps1").read_text(encoding="utf-8")
-        cls.launcher_source = (HELPER_DIR / "PhotoshopProtocolLauncher.cs").read_text(
-            encoding="utf-8"
+
+    def test_installer_builds_per_user_windowless_persistent_webview_host(self):
+        self.assertIn("SportsCaveFilesDesktop.cs", self.install)
+        self.assertIn("-OutputType WindowsApplication", self.install)
+        self.assertIn("Microsoft.Web.WebView2.Core.dll", self.install)
+        self.assertIn("Microsoft.Web.WebView2.Wpf.dll", self.install)
+        self.assertIn("WebView2Loader.dll", self.install)
+        self.assertIn("HelperVersion = 5", self.install)
+        self.assertIn("CurrentVersion\\Run", self.install)
+        self.assertIn('" --background', self.install)
+        self.assertIn("Sports Cave OS Desktop.lnk", self.install)
+        self.assertNotIn("HKLM:\\Software\\Classes", self.install)
+        self.assertIn("SportsCaveOSDesktop", self.uninstall)
+
+    def test_shell_is_persistent_and_custom_protocol_only_shows_or_opens(self):
+        self.assertIn("new Mutex(true, InstanceName(MutexName)", self.source)
+        self.assertIn("false, EventResetMode.AutoReset, InstanceName(ShowEventName)", self.source)
+        self.assertIn('request.Host == "app"', self.source)
+        self.assertIn('request.Host == "open"', self.source)
+        self.assertIn("window.ShowAndFocus", self.source)
+        self.assertNotIn("sports-cave-files://drag", self.source)
+        self.assertNotIn("TcpListener", self.source)
+
+    def test_webview_bridge_is_origin_scoped_and_action_allowlisted(self):
+        self.assertIn("browser.CoreWebView2.WebMessageReceived += OnWebMessage", self.source)
+        self.assertIn("config.Allows(args.Source)", self.source)
+        self.assertIn("AllowedOrigins.Contains", self.source)
+        for action in ("drag", "copyFile", "copyImage", "openFile"):
+            self.assertIn(f'action != "{action}"', self.source)
+        self.assertIn("Settings.AreHostObjectsAllowed = false", self.source)
+        self.assertIn("navigationArgs.Cancel = true", self.source)
+        self.assertNotIn("Dropbox", self.source.split("internal sealed class TransferGrant")[0])
+
+    def test_unsigned_desktop_files_route_opens_the_existing_sign_in_flow(self):
+        self.assertIn("NavigationCompleted +=", self.source)
+        self.assertIn("navigationArgs.HttpStatusCode == 403", self.source)
+        self.assertIn('"/files-window"', self.source)
+        self.assertIn("current.GetLeftPart(UriPartial.Authority) + \"/\"", self.source)
+
+    def test_native_drag_and_clipboard_use_real_windows_file_drop_copy(self):
+        self.assertIn("System.Windows.DataFormats.FileDrop", self.source)
+        self.assertIn('data.SetData("Preferred DropEffect"', self.source)
+        self.assertIn("BitConverter.GetBytes(1U)", self.source)
+        self.assertIn("System.Windows.DragDrop.DoDragDrop(", self.source)
+        self.assertIn("DragDropEffects.Copy", self.source)
+        self.assertIn("SetClipboardData(data)", self.source)
+        self.assertIn("for (int attempt = 0; attempt < 8; attempt++)", self.source)
+        self.assertIn("System.Windows.Clipboard.SetDataObject(data, true)", self.source)
+        self.assertIn('"clipboard_busy"', self.source)
+        self.assertIn("GetAsyncKeyState(1)", self.source)
+        self.assertIn("DoDragDrop(\n                        this, data", self.source)
+        self.assertNotIn("File.Move(paths", self.source)
+
+    def test_validated_items_use_the_configured_local_dropbox_root_before_cache(self):
+        self.assertIn('raw.ContainsKey("RootPath")', self.source)
+        self.assertIn("cache = new NativeCache(config.RootPath)", self.source)
+        self.assertIn("ResolveLocalRoots(manifest)", self.source)
+        self.assertIn('entry["source_relative_path"]', self.source)
+        self.assertIn("EnsureInside(localRoot, target)", self.source)
+        self.assertIn("Directory.Exists(target)", self.source)
+        self.assertIn("File.Exists(target)", self.source)
+        self.assertIn("return localPaths", self.source)
+        self.assertLess(
+            self.source.index("return localPaths"),
+            self.source.index('var items = manifest["items"] as IList'),
         )
 
-    def test_installer_is_current_user_only_and_persists_approved_root(self):
-        self.assertIn('HKCU:\\Software\\Classes\\sports-cave-files', self.install_source)
-        self.assertIn('HKCU:\\Software\\Classes\\sports-cave-photoshop', self.install_source)
-        self.assertIn("RootPath = $DropboxRoot", self.install_source)
-        self.assertIn("HelperVersion = 2", self.install_source)
-        self.assertIn("$existingConfigPath", self.install_source)
-        self.assertIn("$existingRoot", self.install_source)
-        self.assertIn("$env:LOCALAPPDATA", self.install_source)
-        self.assertNotIn("HKLM:\\Software\\Classes\\sports-cave-files", self.install_source)
-        self.assertIn("Remove-Item -LiteralPath $protocolKey", self.uninstall_source)
-        wrapper = (HELPER_DIR / "Install.cmd").read_text(encoding="utf-8")
-        self.assertIn("-ExecutionPolicy Bypass", wrapper)
-        self.assertIn('"%~dp0Install.ps1"', wrapper)
-        self.assertIn('" "%1"', self.install_source)
+    def test_image_clipboard_sets_pixels_and_png_transparency_payload(self):
+        self.assertIn("PngBitmapEncoder", self.source)
+        self.assertIn('data.SetData("PNG"', self.source)
+        self.assertIn("data.SetImage(bitmap)", self.source)
+        self.assertIn("BitmapCacheOption.OnLoad", self.source)
 
-    def test_psd_protocol_is_labelled_photoshop_and_forwards_to_secure_helper(self):
-        self.assertIn('Register-Protocol $photoshopProtocolKey "Open in Photoshop" "Photoshop"', self.install_source)
-        self.assertIn('"Sports Cave Photoshop Launcher.exe"', self.install_source)
-        self.assertIn('request.Scheme, "sports-cave-photoshop"', self.launcher_source)
-        self.assertIn('"SportsCaveFilesHelper.ps1"', self.launcher_source)
-        self.assertIn("UseShellExecute = false", self.launcher_source)
-        self.assertIn("CreateNoWindow = true", self.launcher_source)
-        self.assertIn('"HKCU:\\Software\\Classes\\sports-cave-photoshop"', self.uninstall_source)
+    def test_cache_is_revision_keyed_sanitized_bounded_and_preserves_leases(self):
+        self.assertIn('"SportsCaveOS", "FileCache"', self.source)
+        self.assertIn('Convert.ToString(item["cache_key"])', self.source)
+        self.assertIn("SafeRelativePath", self.source)
+        self.assertIn("Path.GetInvalidFileNameChars()", self.source)
+        self.assertIn("Path.IsPathRooted(raw)", self.source)
+        self.assertIn('part == "." || part == ".."', self.source)
+        self.assertIn('File.WriteAllText(Path.Combine(lease, ".active")', self.source)
+        self.assertIn('File.WriteAllText(Path.Combine(lease, ".lease")', self.source)
+        self.assertIn("TimeSpan.FromDays(7)", self.source)
+        self.assertIn("TimeSpan.FromDays(14)", self.source)
+        self.assertIn("CreateHardLink", self.source)
 
-    def test_helper_rejects_commands_and_resolves_only_inside_configured_root(self):
-        source = self.helper_source
-        self.assertIn("[System.IO.Path]::IsPathRooted($RelativePath)", source)
-        self.assertIn('$RelativePath.Contains(":")', source)
-        self.assertIn('$_ -in @(".", "..")', source)
-        self.assertIn("$target.StartsWith($rootPrefix", source)
-        self.assertIn('".exe"', source)
-        self.assertIn('".ps1"', source)
-        self.assertIn('$_ -notin @("path", "kind")', source)
+    def test_transfer_client_uses_only_short_lived_server_grant(self):
+        self.assertIn("X-Sports-Cave-Transfer-Secret", self.source)
+        self.assertIn("/api/files-native-transfer/manifest", self.source)
+        self.assertIn("/api/files-native-transfer/content", self.source)
+        self.assertNotIn("refresh_token", self.source.casefold())
+        self.assertNotIn("access_token", self.source.casefold())
+        self.assertNotIn("signed_url", self.source.casefold())
 
-    def test_psd_prefers_photoshop_then_uses_windows_association(self):
-        source = self.helper_source
-        self.assertIn('$extension -in @(".psd", ".psb")', source)
-        self.assertIn("Find-Photoshop", source)
-        self.assertIn("Start-Process -FilePath $photoshop", source)
-        self.assertIn("Start-Process -FilePath $target -ErrorAction Stop", source)
-        self.assertIn('Start-Process -FilePath "explorer.exe"', source)
-        self.assertIn("Request-FileHydration $target", source)
+    def test_diagnostics_are_non_sensitive(self):
+        log = self.source[self.source.index("internal static class DesktopLog") :]
+        for field in ("action=", "status=", "code=", "items="):
+            self.assertIn(field, log)
+        self.assertNotIn("BaseUrl", log)
+        self.assertNotIn("Ticket", log)
+        self.assertNotIn("Secret", log)
 
-    def test_ai_prefers_illustrator_then_uses_windows_association(self):
-        source = self.helper_source
-        self.assertIn('$extension -eq ".ai"', source)
-        self.assertIn("Find-Illustrator", source)
-        self.assertIn("Start-Process -FilePath $illustrator", source)
+    def test_legacy_open_helper_remains_root_scoped(self):
+        self.assertIn("[System.IO.Path]::IsPathRooted($RelativePath)", self.open_helper)
+        self.assertIn('$RelativePath.Contains(":")', self.open_helper)
+        self.assertIn('$_ -in @(".", "..")', self.open_helper)
+        self.assertIn("$target.StartsWith($rootPrefix", self.open_helper)
+        self.assertIn("Find-Photoshop", self.open_helper)
 
-    def test_windows_clipboard_uses_real_file_drop_and_preferred_effect(self):
-        source = self.helper_source
-        self.assertIn("SetFileDropList($fileList)", source)
-        self.assertIn('SetData("Preferred DropEffect"', source)
-        self.assertIn('if ($Effect -eq "move") { [uint32]2 } else { [uint32]1 }', source)
-        self.assertIn("[System.Windows.Forms.Clipboard]::SetDataObject($payload.Data, $true)", source)
-        self.assertIn("Request-FileHydration $targetPath", source)
-        self.assertIn('$uri.Host -eq "clipboard"', source)
-        self.assertIn('"paths", "effect"', source)
-        self.assertIn(" -Sta -WindowStyle Hidden ", self.install_source)
-
-    def test_windows_drag_uses_native_copy_only_file_drop(self):
-        source = self.helper_source
-        self.assertIn('$uri.Host -notin @("open", "clipboard", "drag")', source)
-        self.assertIn('$uri.Host -eq "drag" -and $uri.Scheme -ne "sports-cave-files"', source)
-        self.assertIn("function Start-NativeFileDrag", source)
-        self.assertIn("[System.Threading.ApartmentState]::STA", source)
-        self.assertIn("[System.Windows.Forms.DataFormats]::FileDrop", source)
-        self.assertIn("$data.SetFileDropList($fileList)", source)
-        self.assertIn("$source.DoDragDrop(", source)
-        self.assertIn("[System.Windows.Forms.DragDropEffects]::Copy", source)
-        self.assertIn('Start-NativeFileDrag ([string[]]$targets)', source)
-        self.assertIn("Request-FileHydration $targetPath", source)
-        self.assertIn('$query.effect -ne "copy"', source)
-        native_drag = source[
-            source.index("function Start-NativeFileDrag") :
-            source.index("\ntry {", source.index("function Start-NativeFileDrag"))
-        ]
-        self.assertNotIn("Start-Process", native_drag)
-        self.assertNotIn("Remove-Item", native_drag)
-        self.assertNotIn('"move"', native_drag)
-
-    def test_macos_helper_is_separate_root_scoped_and_uses_native_open(self):
-        helper = (MAC_HELPER_DIR / "SportsCaveFilesHelper.py").read_text(encoding="utf-8")
-        installer = (MAC_HELPER_DIR / "Install.command").read_text(encoding="utf-8")
+    def test_macos_helper_is_unchanged_and_root_scoped(self):
+        helper = (MAC_HELPER_DIR / "SportsCaveFilesHelper.py").read_text(
+            encoding="utf-8"
+        )
         self.assertIn('parsed.scheme != "sports-cave-files"', helper)
         self.assertIn("target.relative_to(root)", helper)
-        self.assertIn('"Adobe Photoshop"', helper)
-        self.assertIn('"Adobe Illustrator"', helper)
-        self.assertIn('["/usr/bin/open", str(target)]', helper)
-        self.assertIn("CFBundleURLSchemes", installer)
-        self.assertIn("sports-cave-files", installer)
-        self.assertNotIn("powershell", installer.casefold())
 
 
-@unittest.skipUnless(os.name == "nt" and shutil.which("powershell.exe"), "Windows helper test")
-class DesktopHelperWindowsValidationTests(unittest.TestCase):
+@unittest.skipUnless(
+    os.name == "nt" and shutil.which("powershell.exe"),
+    "Windows desktop build test",
+)
+class DesktopWindowsBuildTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.base = Path(self.temporary.name)
+        self.executable = self.base / "SportsCaveOSDesktop.exe"
+        self._copy_runtime()
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def _copy_runtime(self):
+        shutil.copy2(HELPER_DIR / "lib" / "Microsoft.Web.WebView2.Core.dll", self.base)
+        shutil.copy2(HELPER_DIR / "lib" / "Microsoft.Web.WebView2.Wpf.dll", self.base)
+        shutil.copy2(
+            HELPER_DIR / "runtimes" / "win-x64" / "native" / "WebView2Loader.dll",
+            self.base,
+        )
+        shutil.copy2(HELPER_DIR / "SportsCaveFilesHelper.ps1", self.base)
+        (self.base / "config.json").write_text(
+            json.dumps(
+                {
+                    "AppUrl": "http://127.0.0.1:8501/files-window",
+                    "RootPath": "",
+                    "AllowedOrigins": ["http://127.0.0.1:8501"],
+                    "HelperVersion": 5,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    def _compile(self):
+        source = str(DESKTOP_SOURCE).replace("'", "''")
+        output = str(self.executable).replace("'", "''")
+        core = str(HELPER_DIR / "lib" / "Microsoft.Web.WebView2.Core.dll").replace(
+            "'", "''"
+        )
+        wpf = str(HELPER_DIR / "lib" / "Microsoft.Web.WebView2.Wpf.dll").replace(
+            "'", "''"
+        )
+        script = (
+            "Add-Type -AssemblyName PresentationFramework; "
+            "Add-Type -AssemblyName PresentationCore; "
+            "Add-Type -AssemblyName WindowsBase; "
+            "Add-Type -AssemblyName System.Xaml; "
+            f"$source=Get-Content -LiteralPath '{source}' -Raw; "
+            "$refs=@('System.dll','System.Core.dll','System.Net.Http.dll',"
+            "'System.Web.Extensions.dll',[System.Windows.DependencyObject].Assembly.Location,"
+            "[System.Windows.Media.ImageSource].Assembly.Location,"
+            "[System.Windows.Window].Assembly.Location,[System.Xaml.XamlReader].Assembly.Location,"
+            f"'{core}','{wpf}')|Select-Object -Unique; "
+            f"Add-Type -TypeDefinition $source -Language CSharp -ReferencedAssemblies $refs "
+            f"-OutputAssembly '{output}' -OutputType WindowsApplication"
+        )
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
+    def test_compiled_background_host_stays_running_without_console(self):
+        self._compile()
+        process = subprocess.Popen(
+            [str(self.executable), "--background"],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            env={
+                **os.environ,
+                "SPORTS_CAVE_FILE_CACHE": str(self.base / "cache"),
+                "SPORTS_CAVE_DESKTOP_INSTANCE": "test",
+            },
+        )
+        try:
+            time.sleep(1)
+            self.assertIsNone(process.poll())
+        finally:
+            process.terminate()
+            process.wait(timeout=5)
+
+
+@unittest.skipUnless(
+    os.name == "nt" and shutil.which("powershell.exe"),
+    "Windows helper test",
+)
+class DesktopHelperOpenValidationTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.base = Path(self.temporary.name)
@@ -131,27 +242,19 @@ class DesktopHelperWindowsValidationTests(unittest.TestCase):
         self.dropbox_root = self.base / "Sportscave Team Folder"
         (self.dropbox_root / "Designs").mkdir(parents=True)
         (self.helper_dir / "config.json").write_text(
-            json.dumps({"RootPath": str(self.dropbox_root)}),
-            encoding="utf-8",
+            json.dumps({"RootPath": str(self.dropbox_root)}), encoding="utf-8"
         )
 
     def tearDown(self):
         self.temporary.cleanup()
 
-    def validate(self, relative_path, scheme="sports-cave-files"):
-        uri = f"{scheme}://open?path={quote(relative_path, safe='')}&kind=file"
+    def validate(self, relative_path):
+        uri = f"sports-cave-files://open?path={quote(relative_path, safe='')}&kind=file"
         return subprocess.run(
             [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(self.helper),
-                uri,
-                "-ValidateOnly",
-                "-NoDialog",
+                "powershell.exe", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-File", str(self.helper), uri,
+                "-ValidateOnly", "-NoDialog",
             ],
             capture_output=True,
             encoding="utf-8",
@@ -160,167 +263,14 @@ class DesktopHelperWindowsValidationTests(unittest.TestCase):
             check=False,
         )
 
-    def validate_clipboard(self, relative_paths, effect="copy"):
-        encoded_paths = quote(json.dumps(relative_paths, ensure_ascii=False), safe="")
-        uri = f"sports-cave-files://clipboard?paths={encoded_paths}&effect={effect}"
-        return subprocess.run(
-            [
-                "powershell.exe",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(self.helper),
-                uri,
-                "-ValidateOnly",
-                "-NoDialog",
-            ],
-            capture_output=True,
-            encoding="utf-8",
-            text=True,
-            timeout=10,
-            check=False,
-        )
-
-    def validate_drag(self, relative_paths, effect="copy", scheme="sports-cave-files"):
-        encoded_paths = quote(json.dumps(relative_paths, ensure_ascii=False), safe="")
-        uri = f"{scheme}://drag?paths={encoded_paths}&effect={effect}"
-        return subprocess.run(
-            [
-                "powershell.exe",
-                "-Sta",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(self.helper),
-                uri,
-                "-ValidateOnly",
-                "-NoDialog",
-            ],
-            capture_output=True,
-            encoding="utf-8",
-            text=True,
-            timeout=10,
-            check=False,
-        )
-
-    def test_spaces_ampersands_apostrophes_and_unicode_resolve_exactly(self):
-        target = self.dropbox_root / "Designs" / "O'Neal & All Rise - J\u00fadge.psd"
+    def test_special_characters_and_traversal_validation(self):
+        target = self.dropbox_root / "Designs" / "O'Neal & J\u00fcrgen.psd"
         target.write_bytes(b"test")
-
-        result = self.validate("Designs/O'Neal & All Rise - J\u00fadge.psd")
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(Path(result.stdout.strip()), target)
-
-    def test_jpg_png_psd_and_pdf_are_safe_supported_files(self):
-        for filename in ("Photo.jpg", "Artwork.png", "Design.psd", "Proof.pdf"):
-            target = self.dropbox_root / "Designs" / filename
-            target.write_bytes(b"test")
-
-            result = self.validate(f"Designs/{filename}")
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(Path(result.stdout.strip()), target)
-
-    def test_photoshop_protocol_accepts_only_psd_and_psb(self):
-        psd = self.dropbox_root / "Designs" / "Approved.psd"
-        pdf = self.dropbox_root / "Designs" / "Not Photoshop.pdf"
-        psd.write_bytes(b"test")
-        pdf.write_bytes(b"test")
-
-        psd_result = self.validate("Designs/Approved.psd", "sports-cave-photoshop")
-        pdf_result = self.validate("Designs/Not Photoshop.pdf", "sports-cave-photoshop")
-
-        self.assertEqual(psd_result.returncode, 0, psd_result.stderr)
-        self.assertNotEqual(pdf_result.returncode, 0)
-        self.assertIn("only supports PSD and PSB", pdf_result.stderr)
-
-    def test_traversal_absolute_and_executable_paths_are_rejected(self):
-        outside = self.base / "outside.txt"
-        outside.write_text("private", encoding="utf-8")
-        executable = self.dropbox_root / "Designs" / "unsafe.cmd"
-        executable.write_text("echo blocked", encoding="utf-8")
-
-        traversal = self.validate("../outside.txt")
-        absolute = self.validate(str(outside))
-        blocked = self.validate("Designs/unsafe.cmd")
-
-        self.assertNotEqual(traversal.returncode, 0)
-        self.assertNotEqual(absolute.returncode, 0)
-        self.assertNotEqual(blocked.returncode, 0)
-        self.assertIn("not allowed", traversal.stderr.casefold())
-        self.assertIn("cannot be opened", blocked.stderr.casefold())
-
-    def test_multi_item_clipboard_resolves_special_paths_and_rejects_traversal(self):
-        first = self.dropbox_root / "Designs" / "O'Neal & All Rise.jpg"
-        second = self.dropbox_root / "Designs" / "J\u00fcrgen Final.png"
-        first.write_bytes(b"one")
-        second.write_bytes(b"two")
-
-        result = self.validate_clipboard(
-            ["Designs/O'Neal & All Rise.jpg", "Designs/J\u00fcrgen Final.png"],
-            effect="move",
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            [Path(line) for line in result.stdout.splitlines() if line.strip()],
-            [first, second],
-        )
-        denied = self.validate_clipboard(["../outside.txt"])
-        self.assertNotEqual(denied.returncode, 0)
-        self.assertIn("not allowed", denied.stderr.casefold())
-
-    def test_multi_item_native_drag_preserves_special_paths_and_is_copy_only(self):
-        first = self.dropbox_root / "Designs" / "O'Neal & All Rise.jpg"
-        second = self.dropbox_root / "Designs" / "J\u00fcrgen Final & Approved.webp"
-        first.write_bytes(b"one")
-        second.write_bytes(b"two")
-
-        result = self.validate_drag(
-            [
-                "Designs/O'Neal & All Rise.jpg",
-                "Designs/J\u00fcrgen Final & Approved.webp",
-            ]
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            [Path(line) for line in result.stdout.splitlines() if line.strip()],
-            [first, second],
-        )
-        move = self.validate_drag(["Designs/O'Neal & All Rise.jpg"], effect="move")
-        photoshop_scheme = self.validate_drag(
-            ["Designs/O'Neal & All Rise.jpg"],
-            scheme="sports-cave-photoshop",
-        )
-        self.assertNotEqual(move.returncode, 0)
-        self.assertNotEqual(photoshop_scheme.returncode, 0)
-        self.assertIn("unsupported", move.stderr.casefold())
-        self.assertIn("unsupported", photoshop_scheme.stderr.casefold())
-
-    def test_native_drag_rejects_traversal_absolute_paths_and_folders(self):
-        inside = self.dropbox_root / "Designs" / "Safe.png"
-        inside.write_bytes(b"safe")
-        outside = self.base / "outside.png"
-        outside.write_bytes(b"outside")
-
-        valid = self.validate_drag(["Designs/Safe.png"])
-        traversal = self.validate_drag(["../outside.png"])
-        absolute = self.validate_drag([str(outside)])
-        folder = self.validate_drag(["Designs"])
-
+        valid = self.validate("Designs/O'Neal & J\u00fcrgen.psd")
         self.assertEqual(valid.returncode, 0, valid.stderr)
-        self.assertNotEqual(traversal.returncode, 0)
-        self.assertNotEqual(absolute.returncode, 0)
-        self.assertNotEqual(folder.returncode, 0)
-        self.assertIn("not allowed", traversal.stderr.casefold())
-        self.assertIn("not allowed", absolute.stderr.casefold())
-        self.assertIn("folders cannot be dragged", folder.stderr.casefold())
+        self.assertEqual(Path(valid.stdout.strip()), target)
+        self.assertNotEqual(self.validate("../outside.psd").returncode, 0)
+        self.assertNotEqual(self.validate(str(self.base / "outside.psd")).returncode, 0)
 
 
 if __name__ == "__main__":

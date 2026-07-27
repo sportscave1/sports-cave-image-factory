@@ -3,11 +3,34 @@ from pathlib import Path
 import unittest
 
 import app
+import sports_cave_pricing
 
 
 ROOT = Path(__file__).resolve().parents[1]
 NEW_PROMPT_SHA256 = "71092f128c8b2de679dbaed697fe393a8578ba1386aae27cd6e46eadd2d3bc6a"
 EXISTING_PROMPT_SHA256 = "190193bdbbc70f29ccd981441eeee257d37805f8c602c06d09878cd7fa0dd5ed"
+EXPECTED_FRAMED_PRICING_LINES = (
+    "- XL: Selling price $349 AUD | RRP / compare-at price $449 AUD | Saving $100 AUD | Approx. discount 22%",
+    "- L: Selling price $259 AUD | RRP / compare-at price $339 AUD | Saving $80 AUD | Approx. discount 24%",
+    "- M: Selling price $209 AUD | RRP / compare-at price $269 AUD | Saving $60 AUD | Approx. discount 22%",
+    "- S: Selling price $159 AUD | RRP / compare-at price $209 AUD | Saving $50 AUD | Approx. discount 24%",
+)
+EXPECTED_UNFRAMED_PRICING_LINES = (
+    "- XL: Selling price $159 AUD | RRP / compare-at price $209 AUD | Saving $50 AUD | Approx. discount 24%",
+    "- L: Selling price $119 AUD | RRP / compare-at price $159 AUD | Saving $40 AUD | Approx. discount 25%",
+    "- M: Selling price $85 AUD | RRP / compare-at price $109 AUD | Saving $24 AUD | Approx. discount 22%",
+    "- S: Selling price $55 AUD | RRP / compare-at price $69 AUD | Saving $14 AUD | Approx. discount 20%",
+)
+LEGACY_PRICING_LINES = (
+    "- XL: Price 329.00 | Compare-at/RRP 429.00",
+    "- L: Price 249.00 | Compare-at/RRP 329.00",
+    "- M: Price 199.00 | Compare-at/RRP 259.00",
+    "- S: Price 149.00 | Compare-at/RRP 199.00",
+    "- XL: Price 149.00 | Compare-at/RRP 199.00",
+    "- L: Price 109.00 | Compare-at/RRP 149.00",
+    "- M: Price 79.00 | Compare-at/RRP 109.00",
+    "- S: Price 49.00 | Compare-at/RRP 64.00",
+)
 
 
 def legacy_generated_prompt(base_prompt):
@@ -47,6 +70,111 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
             hashlib.sha256(app.UPDATE_EXISTING_PRODUCT_PROMPT.encode("utf-8")).hexdigest(),
             EXISTING_PROMPT_SHA256,
         )
+
+    def test_both_prompts_contain_the_exact_new_pricing_structure(self):
+        for prompt in (self.new_prompt(), self.existing_prompt()):
+            with self.subTest(prompt_start=prompt[:40]):
+                self.assertIn(
+                    "Black, Oak, and White framed variants use the same framed pricing:",
+                    prompt,
+                )
+                for line in EXPECTED_FRAMED_PRICING_LINES:
+                    self.assertEqual(prompt.count(line), 1)
+                self.assertIn("Unframed variants:", prompt)
+                for line in EXPECTED_UNFRAMED_PRICING_LINES:
+                    self.assertEqual(prompt.count(line), 1)
+                self.assertIn(
+                    "Selling price is the Shopify Price. RRP is the Shopify Compare-at price.",
+                    prompt,
+                )
+
+    def test_legacy_prompt_prices_are_absent_from_both_generated_prompts(self):
+        for prompt in (self.new_prompt(), self.existing_prompt()):
+            with self.subTest(prompt_start=prompt[:40]):
+                for legacy_line in LEGACY_PRICING_LINES:
+                    self.assertNotIn(legacy_line, prompt)
+
+    def test_saved_override_pricing_is_replaced_without_changing_custom_text(self):
+        legacy_pricing = sports_cave_pricing.price_ladder_prompt_text()
+        saved_prompt = (
+            "CUSTOM SAVED PRODUCT SOP\n"
+            "Keep this custom instruction exactly.\n\n"
+            f"{legacy_pricing}\n\n"
+            "CUSTOM SAVED APPENDIX\n"
+            "Keep this custom appendix exactly."
+        )
+
+        updated = app.apply_product_upload_pricing_update(saved_prompt)
+
+        self.assertEqual(
+            updated,
+            saved_prompt.replace(
+                legacy_pricing,
+                app.product_upload_price_ladder_prompt_text(),
+            ),
+        )
+        self.assertEqual(app.apply_product_upload_pricing_update(updated), updated)
+        self.assertIn("Keep this custom instruction exactly.", updated)
+        self.assertIn("Keep this custom appendix exactly.", updated)
+        for legacy_line in LEGACY_PRICING_LINES:
+            self.assertNotIn(legacy_line, updated)
+
+    def test_runtime_saved_override_update_preserves_media_reliability_patch(self):
+        legacy_saved_prompt = (
+            "CUSTOM SAVED PRODUCT SOP\nKeep this custom content exactly.\n\n"
+            f"{sports_cave_pricing.price_ladder_prompt_text()}\n\n"
+            "ADDITIONAL REQUIRED SUB-PROMPTS\nKeep this appendix exactly."
+        )
+
+        updated = app.apply_product_upload_prompt_updates(
+            legacy_saved_prompt,
+            source_context(),
+            update_existing=True,
+        )
+
+        self.assertEqual(updated.count(app.PRODUCT_UPLOAD_MEDIA_PATCH_START), 1)
+        self.assertEqual(updated.count(app.PRODUCT_UPLOAD_PRICE_BLOCK_START), 1)
+        self.assertIn("Keep this custom content exactly.", updated)
+        self.assertIn("Keep this appendix exactly.", updated)
+        for line in EXPECTED_FRAMED_PRICING_LINES + EXPECTED_UNFRAMED_PRICING_LINES:
+            self.assertEqual(updated.count(line), 1)
+        for legacy_line in LEGACY_PRICING_LINES:
+            self.assertNotIn(legacy_line, updated)
+
+    def test_operational_shopify_price_ladder_is_not_changed_by_prompt_update(self):
+        self.assertEqual(
+            sports_cave_pricing.SPORTS_CAVE_AU_PRICE_LADDER["framed"]["XL"],
+            {"price": "329.00", "compare_at_price": "429.00"},
+        )
+        self.assertEqual(
+            sports_cave_pricing.SPORTS_CAVE_AU_PRICE_LADDER["unframed"]["S"],
+            {"price": "49.00", "compare_at_price": "64.00"},
+        )
+
+    def test_generated_prompt_change_is_limited_to_pricing_block(self):
+        new_pricing = app.product_upload_price_ladder_prompt_text()
+        legacy_pricing = sports_cave_pricing.price_ladder_prompt_text()
+        current_sections = app.product_upload_embedded_sections()
+        legacy_sections = current_sections.replace(new_pricing, legacy_pricing)
+
+        for base_prompt, update_existing in (
+            (app.NEW_SHOPIFY_PRODUCT_PROMPT, False),
+            (app.UPDATE_EXISTING_PRODUCT_PROMPT, True),
+        ):
+            with self.subTest(update_existing=update_existing):
+                legacy_prompt = app.apply_product_upload_media_reliability_patch(
+                    f"{base_prompt.strip()}\n\n{legacy_sections}",
+                    source_context(),
+                    update_existing=update_existing,
+                )
+                current_prompt = app.get_product_upload_prompt(
+                    source_context(),
+                    update_existing=update_existing,
+                )
+                self.assertEqual(
+                    current_prompt,
+                    legacy_prompt.replace(legacy_pricing, new_pricing),
+                )
 
     def test_only_change_to_each_generated_prompt_is_the_inserted_patch(self):
         for base_prompt, update_existing in (
@@ -266,6 +394,10 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
         self.assertNotIn("Google Drive", page_source)
         self.assertNotIn("st.file_uploader", page_source)
         self.assertNotIn("_render_mockup_folder_picker", page_source)
+        self.assertEqual(
+            page_source.count("prompt_transform=lambda prompt: apply_product_upload_prompt_updates("),
+            2,
+        )
 
 
 if __name__ == "__main__":
