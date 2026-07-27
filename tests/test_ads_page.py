@@ -66,6 +66,13 @@ def button_by_label(app_test, label):
     raise AssertionError(f"{label} button was not rendered.")
 
 
+def uploader_by_label(app_test, label):
+    for uploader in app_test.file_uploader:
+        if uploader.label == label:
+            return uploader
+    raise AssertionError(f"{label} uploader was not rendered.")
+
+
 class AdsPageTests(unittest.TestCase):
     def test_visible_title_and_navigation_are_ads_only(self):
         app_test = run_ads_page()
@@ -1635,13 +1642,13 @@ PRIMARY TEXT VARIATIONS
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
         self.assertEqual(
-            [uploader.label for uploader in app_test.file_uploader],
+            [uploader.label for uploader in app_test.file_uploader[:5]],
             ["Carousel 1", "Carousel 2", "Carousel 3", "Carousel 4", "Carousel 5"],
         )
         self.assertTrue(button_by_label(app_test, "Save Images").disabled)
         original_result = dict(app_test.session_state[ads_page.ADS_RESULT_STATE_KEY])
         image = square_png_bytes()
-        for uploader in app_test.file_uploader:
+        for uploader in app_test.file_uploader[:5]:
             uploader.set_value([(f"{uploader.label}.png", image, "image/png")])
         app_test.run(timeout=30)
 
@@ -1663,7 +1670,7 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Campaign type", "Carousel")
         button_by_label(app_test, "Submit").click().run(timeout=20)
         image = square_png_bytes()
-        for uploader in app_test.file_uploader:
+        for uploader in app_test.file_uploader[:5]:
             uploader.set_value([(f"{uploader.label}.png", image, "image/png")])
         app_test.run(timeout=30)
 
@@ -1689,7 +1696,7 @@ PRIMARY TEXT VARIATIONS
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
         self.assertEqual(
-            [uploader.label for uploader in app_test.file_uploader],
+            [uploader.label for uploader in app_test.file_uploader[:1]],
             ["Instant Experience Image"],
         )
         self.assertTrue(button_by_label(app_test, "Save Images").disabled)
@@ -1739,7 +1746,7 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(new_workflow["context_key"], new_result["context_key"])
         self.assertEqual(new_workflow["slots"], {})
         self.assertEqual(
-            [uploader.label for uploader in app_test.file_uploader],
+            [uploader.label for uploader in app_test.file_uploader[:1]],
             ["Instant Experience Image"],
         )
 

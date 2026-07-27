@@ -11,6 +11,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from activity_log import record_activity_log
+import ads_final_review
 import ads_image_workflow
 from ads_product_catalog import load_live_edition_product_rows
 import dropbox_integration
@@ -58,6 +59,7 @@ CAROUSEL_CARD_COUNT = 5
 META_WINNER_COPY_BLOCK_VERSION = "SPORTS CAVE META WINNER COPY UPGRADE V1"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
+ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
 
@@ -3710,6 +3712,479 @@ def _render_ads_image_save(result, workflow):
         st.error(f"{outcome.get('label')}: {outcome.get('error') or 'Upload failed.'}")
 
 
+def _ads_review_prefill(result):
+    generated_output = str(result.get("generated_ad_output") or "").strip()
+    master_prompt = str(result.get("master_prompt") or "").strip()
+    return generated_output if generated_output and generated_output != master_prompt else ""
+
+
+def build_ads_review_context(result):
+    winner_angle = get_category_winner_angle(result.get("category")) or {}
+    generated_copy = _ads_review_prefill(result)
+    return {
+        "product_name": str(result.get("product_name") or ""),
+        "category": str(result.get("category") or ""),
+        "country": str(result.get("country") or ""),
+        "campaign_type": str(result.get("campaign_type") or ""),
+        "campaign_angle": str(
+            result.get("selected_campaign_angle")
+            or winner_angle.get("emotion")
+            or ""
+        ),
+        "generated_primary_text": str(
+            result.get("generated_primary_text") or generated_copy
+        ),
+        "headlines": list(result.get("headlines") or ()),
+        "descriptions": list(result.get("descriptions") or ()),
+        "cta": str(result.get("cta") or ""),
+        "product_url": str(result.get("product_url") or ""),
+        "carousel_character_limit": CAROUSEL_CARD_MAX_CHARACTERS,
+    }
+
+
+def _new_ads_review_workflow(result):
+    return {
+        "context_key": str(result.get("context_key") or ""),
+        "screenshots": [],
+        "creatives": [],
+        "upload_nonces": {"screenshots": 0, "creatives": 0},
+        "errors": {"screenshots": [], "creatives": []},
+        "final_copy": _ads_review_prefill(result),
+        "running": False,
+        "request_id": "",
+        "review": None,
+        "error": "",
+    }
+
+
+def _clear_ads_review_widget_state(context_key):
+    prefixes = (
+        f"ads-review-screenshots::{context_key}",
+        f"ads-review-creatives::{context_key}",
+        f"ads-review-final-copy::{context_key}",
+    )
+    for key in list(st.session_state):
+        if any(str(key).startswith(prefix) for prefix in prefixes):
+            st.session_state.pop(key, None)
+
+
+def _ads_review_workflow(result):
+    workflow = st.session_state.get(ADS_REVIEW_STATE_KEY)
+    if not isinstance(workflow, dict) or workflow.get("context_key") != result.get("context_key"):
+        if isinstance(workflow, dict):
+            _clear_ads_review_widget_state(str(workflow.get("context_key") or ""))
+        workflow = _new_ads_review_workflow(result)
+        st.session_state[ADS_REVIEW_STATE_KEY] = workflow
+    return workflow
+
+
+def _review_upload_key(result, workflow, kind):
+    nonce = int((workflow.get("upload_nonces") or {}).get(kind) or 0)
+    return f"ads-review-{kind}::{result['context_key']}::{nonce}"
+
+
+def _process_review_uploads(result, workflow, kind, uploaded_files):
+    if not uploaded_files:
+        return
+    existing = list(workflow.get(kind) or ())
+    signatures = {str(item.get("signature") or "") for item in existing}
+    errors = []
+    changed = False
+    limit = (
+        ads_final_review.MAX_SCREENSHOTS
+        if kind == "screenshots"
+        else ads_final_review.MAX_CREATIVES
+    )
+    for uploaded_file in uploaded_files:
+        if len(existing) >= limit:
+            errors.append(f"Upload no more than {limit} images in this area.")
+            break
+        try:
+            item = ads_final_review.validate_review_image(
+                uploaded_file.getvalue(),
+                filename=uploaded_file.name,
+            )
+            if item["signature"] not in signatures:
+                existing.append(item)
+                signatures.add(item["signature"])
+                changed = True
+        except ads_final_review.AdsReviewValidationError as error:
+            errors.append(f"{ads_final_review.sanitize_review_filename(uploaded_file.name)}: {error}")
+    try:
+        candidate_screenshots = existing if kind == "screenshots" else workflow.get("screenshots")
+        candidate_creatives = existing if kind == "creatives" else workflow.get("creatives")
+        ads_final_review.validate_review_upload_set(candidate_screenshots, candidate_creatives)
+    except ads_final_review.AdsReviewValidationError as error:
+        errors.append(str(error))
+    else:
+        workflow[kind] = existing
+    previous_errors = list((workflow.get("errors") or {}).get(kind) or ())
+    workflow.setdefault("errors", {})[kind] = errors
+    if changed or errors != previous_errors:
+        workflow["review"] = None
+        workflow["error"] = ""
+        st.session_state[ADS_REVIEW_STATE_KEY] = workflow
+
+
+def _remove_review_image(result, kind, index):
+    workflow = _ads_review_workflow(result)
+    items = list(workflow.get(kind) or ())
+    if 0 <= index < len(items):
+        items.pop(index)
+    workflow[kind] = items
+    nonces = workflow.setdefault("upload_nonces", {})
+    nonces[kind] = int(nonces.get(kind) or 0) + 1
+    workflow["review"] = None
+    workflow["error"] = ""
+    st.session_state[ADS_REVIEW_STATE_KEY] = workflow
+
+
+def _move_review_image(result, kind, index, offset):
+    workflow = _ads_review_workflow(result)
+    items = list(workflow.get(kind) or ())
+    target = index + offset
+    if 0 <= index < len(items) and 0 <= target < len(items):
+        items[index], items[target] = items[target], items[index]
+        workflow[kind] = items
+        workflow["review"] = None
+        workflow["error"] = ""
+        st.session_state[ADS_REVIEW_STATE_KEY] = workflow
+
+
+def _render_review_image_list(result, workflow, kind):
+    items = list(workflow.get(kind) or ())
+    if not items:
+        return
+    for index, item in enumerate(items):
+        with st.container(
+            border=True,
+            key=f"ads-review-{kind}-item::{result['context_key']}::{item['id']}::{index}",
+        ):
+            image_column, detail_column = st.columns([1, 2])
+            with image_column:
+                st.image(item["data"], width="stretch")
+            with detail_column:
+                st.markdown(f"**{html.escape(item['filename'])}**")
+                st.caption(
+                    f"{item['width']} x {item['height']} | "
+                    f"{item['format']} | {item['size'] / (1024 * 1024):.2f} MB"
+                )
+                controls = st.columns(3)
+                if controls[0].button(
+                    "Earlier",
+                    icon=":material/arrow_upward:",
+                    key=f"ads-review-{kind}-up::{result['context_key']}::{item['id']}::{index}",
+                    disabled=index == 0,
+                    help="Move this image earlier in the review order.",
+                    use_container_width=True,
+                ):
+                    _move_review_image(result, kind, index, -1)
+                    st.rerun()
+                if controls[1].button(
+                    "Later",
+                    icon=":material/arrow_downward:",
+                    key=f"ads-review-{kind}-down::{result['context_key']}::{item['id']}::{index}",
+                    disabled=index == len(items) - 1,
+                    help="Move this image later in the review order.",
+                    use_container_width=True,
+                ):
+                    _move_review_image(result, kind, index, 1)
+                    st.rerun()
+                if controls[2].button(
+                    "Remove",
+                    icon=":material/delete:",
+                    key=f"ads-review-{kind}-remove::{result['context_key']}::{item['id']}::{index}",
+                    help="Remove this image. Upload its replacement above if needed.",
+                    use_container_width=True,
+                ):
+                    _remove_review_image(result, kind, index)
+                    st.rerun()
+
+
+def _render_review_upload_area(result, workflow, kind, label, help_text):
+    with st.container(border=True, key=f"ads-review-upload-area::{kind}::{result['context_key']}"):
+        st.markdown(f"**{label}**")
+        st.caption(help_text)
+        uploaded_files = st.file_uploader(
+            label,
+            type=["png", "jpg", "jpeg", "webp"],
+            accept_multiple_files=True,
+            key=_review_upload_key(result, workflow, kind),
+            max_upload_size=20,
+            label_visibility="collapsed",
+        )
+        _process_review_uploads(result, workflow, kind, uploaded_files)
+        for error in (workflow.get("errors") or {}).get(kind) or ():
+            st.error(error)
+        _render_review_image_list(result, workflow, kind)
+
+
+def _review_ready(workflow):
+    has_screenshot = bool(workflow.get("screenshots"))
+    has_copy_and_creative = bool(
+        str(workflow.get("final_copy") or "").strip() and workflow.get("creatives")
+    )
+    return has_screenshot or has_copy_and_creative
+
+
+def _render_review_score(review):
+    score = float(review.get("overall_score") or 0)
+    verdict = html.escape(str(review.get("verdict") or "Needs Work"))
+    st.markdown(
+        f"""
+        <div class="sc-ad-review-score">
+            <div>
+                <span class="sc-ad-review-score-label">Overall Score</span>
+                <strong>{score:.1f} / 10</strong>
+            </div>
+            <span class="sc-ad-review-verdict">{verdict}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown("#### Brutal Truth")
+    st.write(str(review.get("brutal_truth") or ""))
+    st.markdown("#### Score Breakdown")
+    for row in review.get("score_breakdown") or ():
+        columns = st.columns([4, 1])
+        columns[0].write(str(row.get("category") or ""))
+        columns[1].markdown(
+            f"**{float(row.get('points_earned') or 0):g} / {int(row.get('points_available') or 0)}**"
+        )
+
+
+def _render_review_result(result, workflow):
+    review = workflow.get("review")
+    if not isinstance(review, dict):
+        return
+    _render_review_score(review)
+
+    st.markdown("#### What Is Working")
+    strengths = review.get("strengths") or ()
+    if strengths:
+        for strength in strengths:
+            st.markdown(f"- {strength}")
+    else:
+        st.caption("No strength was confirmed strongly enough to preserve.")
+
+    st.markdown("#### Highest-Impact Final Changes")
+    changes = review.get("priority_changes") or ()
+    if not changes:
+        st.success("No high-impact changes are required.")
+    for index, change in enumerate(changes, start=1):
+        priority = str(change.get("priority") or "Medium")
+        with st.container(
+            border=True,
+            key=f"ads-review-change::{result['context_key']}::{index}",
+        ):
+            st.markdown(
+                f'<span class="sc-ad-review-priority sc-ad-review-priority-{priority.casefold()}">'
+                f"{html.escape(priority)}</span>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(f"**What is wrong:** {change.get('what_is_wrong') or ''}")
+            st.write(f"Why it could reduce conversions: {change.get('conversion_risk') or ''}")
+            st.write(f"Exact correction: {change.get('exact_correction') or ''}")
+            st.caption(f"Expected impact: {change.get('expected_impact') or ''}")
+
+    st.markdown("#### Creative-by-Creative Review")
+    creatives = list(workflow.get("creatives") or ())
+    for index, creative_review in enumerate(review.get("creative_reviews") or (), start=1):
+        image_number = int(creative_review.get("image_number") or index)
+        with st.container(
+            border=True,
+            key=f"ads-review-creative-result::{result['context_key']}::{index}",
+        ):
+            columns = st.columns([1, 2])
+            if 1 <= image_number <= len(creatives):
+                columns[0].image(creatives[image_number - 1]["data"], width="stretch")
+            else:
+                columns[0].caption("Creative preview unavailable")
+            with columns[1]:
+                st.markdown(
+                    f"**Card/image {image_number} | "
+                    f"{float(creative_review.get('score') or 0):.1f} / 10**"
+                )
+                st.caption(f"Purpose: {creative_review.get('purpose') or ''}")
+                st.write(f"Visual verdict: {creative_review.get('visual_verdict') or ''}")
+                st.write(f"Copy-to-image alignment: {creative_review.get('copy_alignment') or ''}")
+                st.write(
+                    f"Required correction: "
+                    f"{creative_review.get('required_correction') or 'Keep as is'}"
+                )
+
+    st.markdown("#### Copy Review")
+    for index, copy_item in enumerate(review.get("copy_review") or (), start=1):
+        with st.container(
+            border=True,
+            key=f"ads-review-copy-result::{result['context_key']}::{index}",
+        ):
+            st.markdown(f"**{copy_item.get('field') or 'Copy'}**")
+            st.write(str(copy_item.get("verdict") or ""))
+            if copy_item.get("unsupported_claims"):
+                st.warning(str(copy_item["unsupported_claims"]))
+            original = str(copy_item.get("original") or "")
+            replacement = str(copy_item.get("replacement") or "")
+            if replacement and replacement != original:
+                st.caption("Original")
+                st.code(original, language="text")
+                st.caption("Replace with")
+                st.code(replacement, language="text")
+                render_prompt_copy_button(
+                    replacement,
+                    f"ads-review-copy-replacement::{result['context_key']}::{index}",
+                    label="Copy replacement",
+                )
+                maximum = int(copy_item.get("maximum_character_count") or 0)
+                if maximum:
+                    st.caption(
+                        f"{int(copy_item.get('current_character_count') or 0)} / {maximum} characters | "
+                        f"replacement {int(copy_item.get('replacement_character_count') or 0)} / {maximum}"
+                    )
+
+    recommended_copy = str(review.get("recommended_final_copy") or "").strip()
+    if recommended_copy:
+        st.markdown("#### Recommended Final Version")
+        st.code(recommended_copy, language="text")
+        render_prompt_copy_button(
+            recommended_copy,
+            f"ads-review-final-copy::{result['context_key']}",
+            label="Copy final version",
+        )
+
+    st.markdown("#### Launch Decision")
+    st.markdown(f"**{review.get('launch_decision') or ''}**")
+    for action in (review.get("next_actions") or ())[:3]:
+        st.markdown(f"- {action}")
+
+    st.markdown("#### Test Recommendation")
+    st.write(str(review.get("test_recommendation") or ""))
+    unverified = review.get("unverified_items") or ()
+    if unverified:
+        st.markdown("**Unable to verify from the supplied ad**")
+        for item in unverified:
+            st.markdown(f"- {item}")
+
+
+def _submit_ads_review(result, workflow):
+    request_id = secrets.token_hex(12)
+    workflow["running"] = True
+    workflow["request_id"] = request_id
+    workflow["error"] = ""
+    st.session_state[ADS_REVIEW_STATE_KEY] = workflow
+    try:
+        with st.spinner("Reviewing the complete ad..."):
+            review = ads_final_review.request_final_ad_review(
+                build_ads_review_context(result),
+                workflow.get("screenshots") or (),
+                workflow.get("creatives") or (),
+                workflow.get("final_copy") or "",
+            )
+        current = st.session_state.get(ADS_REVIEW_STATE_KEY)
+        if (
+            isinstance(current, dict)
+            and current.get("context_key") == result.get("context_key")
+            and current.get("request_id") == request_id
+        ):
+            current["review"] = review
+            current["error"] = ""
+            current["running"] = False
+            st.session_state[ADS_REVIEW_STATE_KEY] = current
+    except (
+        ads_final_review.AdsReviewError,
+        ads_final_review.AdsReviewValidationError,
+    ) as error:
+        current = st.session_state.get(ADS_REVIEW_STATE_KEY)
+        if isinstance(current, dict) and current.get("request_id") == request_id:
+            current["error"] = str(error)
+            current["running"] = False
+            st.session_state[ADS_REVIEW_STATE_KEY] = current
+    except Exception:
+        current = st.session_state.get(ADS_REVIEW_STATE_KEY)
+        if isinstance(current, dict) and current.get("request_id") == request_id:
+            current["error"] = (
+                "The review could not be completed. Your uploads are still available to retry."
+            )
+            current["running"] = False
+            st.session_state[ADS_REVIEW_STATE_KEY] = current
+
+
+def _render_final_ad_review(result):
+    workflow = _ads_review_workflow(result)
+    st.markdown('<div class="sc-ad-review-heading">Final Ad Review</div>', unsafe_allow_html=True)
+    st.caption(
+        "Upload the finished Meta ad and every creative. ChatGPT will review the complete campaign, "
+        "score it out of 10 and identify the final changes most likely to improve sales."
+    )
+    upload_columns = st.columns(2)
+    with upload_columns[0]:
+        _render_review_upload_area(
+            result,
+            workflow,
+            "screenshots",
+            "Finished Meta Ad Screenshots",
+            "Upload one or more screenshots showing the completed Meta setup and previews.",
+        )
+    with upload_columns[1]:
+        _render_review_upload_area(
+            result,
+            workflow,
+            "creatives",
+            "Final Creative Images",
+            "Upload every final creative in the exact order used in the ad.",
+        )
+
+    copy_key = f"ads-review-final-copy::{result['context_key']}"
+    if copy_key not in st.session_state:
+        st.session_state[copy_key] = str(workflow.get("final_copy") or "")
+    final_copy = st.text_area(
+        "Final Copy",
+        key=copy_key,
+        height=220,
+        placeholder="Paste the exact final primary text, headlines, descriptions and CTA if they differ from the generated version.",
+        help="Current generated copy is prefilled when it exists in Ads state. Correct it to match Meta before review.",
+    )
+    clean_final_copy = str(final_copy or "")
+    if clean_final_copy != str(workflow.get("final_copy") or ""):
+        workflow["review"] = None
+        workflow["error"] = ""
+    workflow["final_copy"] = clean_final_copy
+    st.session_state[ADS_REVIEW_STATE_KEY] = workflow
+
+    ready = _review_ready(workflow)
+    if not ready:
+        st.caption(
+            "Add at least one finished-ad screenshot, or add final copy and at least one creative image."
+        )
+    controls = st.columns([1, 1, 1])
+    action_label = "Review Again" if workflow.get("review") else "Review Finished Ad"
+    if controls[0].button(
+        action_label,
+        type="primary",
+        icon=":material/rate_review:",
+        key=f"ads-review-submit::{result['context_key']}",
+        disabled=not ready or bool(workflow.get("running")),
+        use_container_width=True,
+    ):
+        _submit_ads_review(result, workflow)
+        st.rerun()
+    if controls[1].button(
+        "Clear Review",
+        icon=":material/clear_all:",
+        key=f"ads-review-clear::{result['context_key']}",
+        disabled=bool(workflow.get("running")),
+        use_container_width=True,
+    ):
+        _clear_ads_review_widget_state(result["context_key"])
+        st.session_state[ADS_REVIEW_STATE_KEY] = _new_ads_review_workflow(result)
+        st.rerun()
+    if workflow.get("running"):
+        st.info("Reviewing the complete ad...")
+    if workflow.get("error"):
+        st.error(str(workflow["error"]))
+    _render_review_result(result, workflow)
+
+
 def render_supported_result(result):
     product_name = result["product_name"]
     category = result["category"]
@@ -3797,6 +4272,68 @@ def render_page():
         .st-key-ads-dropbox-picker button:hover {
             background: #EAF2F8 !important;
             border-color: #C5D5E0 !important;
+        }
+        .sc-ad-review-heading {
+            margin-top: 2.25rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #E2E2E2;
+            color: #161616;
+            font-size: 1.55rem;
+            font-weight: 700;
+        }
+        .sc-ad-review-score {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin: 1rem 0;
+            padding: 1rem 1.1rem;
+            border: 1px solid #D9D9D9;
+            border-left: 4px solid #D7A33D;
+            border-radius: 6px;
+            background: #FFFFFF;
+        }
+        .sc-ad-review-score-label {
+            display: block;
+            margin-bottom: 0.15rem;
+            color: #686868;
+            font-size: 0.8rem;
+        }
+        .sc-ad-review-score strong {
+            color: #111111;
+            font-size: 2rem;
+        }
+        .sc-ad-review-verdict,
+        .sc-ad-review-priority {
+            display: inline-block;
+            padding: 0.22rem 0.48rem;
+            border: 1px solid #C9A24E;
+            border-radius: 4px;
+            background: #FFF8E6;
+            color: #5C4309;
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+        .sc-ad-review-priority-critical {
+            border-color: #C53A3A;
+            background: #FFF0F0;
+            color: #8D1515;
+        }
+        .sc-ad-review-priority-high {
+            border-color: #D48329;
+            background: #FFF5E8;
+            color: #7A4100;
+        }
+        .sc-ad-review-priority-optional {
+            border-color: #A8A8A8;
+            background: #F5F5F5;
+            color: #555555;
+        }
+        @media (max-width: 720px) {
+            .sc-ad-review-score {
+                align-items: flex-start;
+                flex-direction: column;
+            }
         }
         </style>
         """,
@@ -3893,6 +4430,7 @@ def render_page():
     result = st.session_state.get(ADS_RESULT_STATE_KEY)
     if isinstance(result, dict) and result.get("master_prompt"):
         render_supported_result(result)
+        _render_final_ad_review(result)
 
 
 render_ads_page = render_page
