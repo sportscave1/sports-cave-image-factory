@@ -225,21 +225,20 @@ class AdsPageTests(unittest.TestCase):
                     "",
                 )
 
-    def test_product_page_url_field_blocks_submit_until_valid_and_preserves_value(self):
+    def test_product_page_url_field_validates_on_submit_and_preserves_value(self):
         app_test = run_ads_page()
         set_product_name(app_test, "Six Laps Ahead")
         select_option(app_test, "Category", "Motorsport")
         select_option(app_test, "Country", "Australia")
         select_option(app_test, "Campaign type", "Carousel")
 
-        self.assertTrue(button_by_label(app_test, "Submit").disabled)
+        self.assertFalse(button_by_label(app_test, "Submit").disabled)
         set_product_url(app_test, "not-a-url")
-        app_test.run(timeout=20)
-        self.assertTrue(button_by_label(app_test, "Submit").disabled)
+        button_by_label(app_test, "Submit").click().run(timeout=20)
         self.assertTrue(any(ads_page.PRODUCT_URL_ERROR in error.value for error in app_test.error))
+        self.assertNotIn(ads_page.ADS_RESULT_STATE_KEY, app_test.session_state)
 
         set_product_url(app_test, "  http://sportscave.com.au/products/six-laps  ")
-        app_test.run(timeout=20)
         self.assertFalse(button_by_label(app_test, "Submit").disabled)
         button_by_label(app_test, "Submit").click().run(timeout=20)
         self.assertEqual(

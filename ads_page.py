@@ -4681,13 +4681,11 @@ def render_page():
             placeholder="https://sportscave.com.au/products/example",
             key="ads_product_url",
         )
-        product_url_ready = is_valid_product_page_url(product_url)
-        if product_url and not product_url_ready:
+        if product_url and not is_valid_product_page_url(product_url):
             st.error(PRODUCT_URL_ERROR)
         submitted = st.form_submit_button(
             "Submit",
             type="primary",
-            disabled=not product_url_ready,
         )
 
     result = st.session_state.get(ADS_RESULT_STATE_KEY)
