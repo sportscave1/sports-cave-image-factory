@@ -369,6 +369,36 @@ class FilesWindowApiTests(unittest.TestCase):
             self.assertIn(denied_response.status_code, {403, 404})
             original.assert_not_called()
 
+    def test_image_preview_supports_root_level_unicode_and_special_characters(self):
+        relative = "O'Neal & J\u00fcrgen Final.png"
+        request = get_request("/api/files-image-preview", {"path": relative})
+        upstream = type(
+            "Upstream",
+            (),
+            {
+                "content": b"PNG",
+                "close": lambda self: None,
+            },
+        )()
+        with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "get_file_response",
+            return_value=({".tag": "file", "size": 3}, upstream),
+        ) as download:
+            response = asyncio.run(files_upload_api.image_preview(request))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(asyncio.run(response_bytes(response)), b"PNG")
+        self.assertEqual(response.media_type, "image/png")
+        download.assert_called_once_with(
+            "secret-token",
+            f"{TEAM_ROOT}/{relative}",
+        )
+
     def test_image_navigation_returns_only_root_relative_images_from_current_folder(self):
         folder = "Designs & Uploads"
         full_folder = f"{TEAM_ROOT}/{folder}"
@@ -990,8 +1020,11 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('${label}</text>', self.client)
         self.assertIn("overflow-wrap: anywhere", self.client)
 
-    def test_images_open_in_one_reused_named_window_with_blocked_popup_fallback(self):
+    def test_images_use_native_viewer_bridge_with_browser_popup_fallback(self):
         open_block = self.client[self.client.index("function imageViewerFeatures") : self.client.index("function downloadHelper")]
+        self.assertIn('hasDesktopCapability("openViewer")', open_block)
+        self.assertIn('desktopPost({ action: "openViewer"', open_block)
+        self.assertIn("path: viewerRequest.path", open_block)
         self.assertIn('window.open(viewerUrl, "sports-cave-image-viewer"', open_block)
         self.assertIn("state.imageViewerWindow.postMessage", open_block)
         self.assertIn("state.imageViewerWindow.focus()", open_block)
@@ -1012,8 +1045,10 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         for control in ("previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton", "rotateLeftButton", "rotateRightButton", "downloadButton", "desktopButton", "closeButton"):
             self.assertIn(f'id="{control}"', self.viewer)
 
-    def test_viewer_has_no_stale_loading_overlay_and_streams_directly_into_image(self):
-        self.assertNotIn("Image could not be opened", self.viewer)
+    def test_viewer_streams_directly_into_image_and_has_a_real_error_state(self):
+        self.assertIn("This image could not be opened", self.viewer)
+        self.assertIn('class="image-error"', self.viewer)
+        self.assertIn("showImageError", self.viewer)
         self.assertNotIn("Loading image", self.viewer)
         self.assertNotIn('class="spinner"', self.viewer)
         self.assertNotIn("response.blob()", self.viewer)
@@ -1024,6 +1059,17 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('elements.image.src = `/api/files-image-preview?path=', self.viewer)
         self.assertIn('elements.image.style.display = "block"', self.viewer)
         self.assertIn("if (generation !== state.loadGeneration) return", self.viewer)
+
+    def test_folder_listing_cache_deduplicates_requests_and_keeps_stale_navigation_guard(self):
+        self.assertIn("folderCache: new Map()", self.client)
+        self.assertIn("folderRequests: new Map()", self.client)
+        self.assertIn("function cachedFolder(path)", self.client)
+        self.assertIn("function requestFolder(path, refresh)", self.client)
+        self.assertIn("state.folderRequests.has(requestKey)", self.client)
+        self.assertIn("rememberFolder(payload, path)", self.client)
+        self.assertIn("if (token !== state.navigationToken) return false", self.client)
+        self.assertIn("state.thumbnailControllers.forEach(controller => controller.abort())", self.client)
+        self.assertIn("MAX_CLIENT_FOLDER_CACHE = 24", self.client)
 
     def test_cut_copy_paste_context_menus_keyboard_and_session_persistence(self):
         self.assertIn('const CLIPBOARD_KEY = "sports-cave-files-clipboard-v1"', self.client)
@@ -1108,7 +1154,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("Open in Sports Cave Desktop to drag or copy files", self.client)
         self.assertIn("Install or update helper", self.client)
         self.assertIn('elements.protocolLink.href = "sports-cave-files://app"', self.client)
-        self.assertIn("const MINIMUM_DESKTOP_VERSION = 6", self.client)
+        self.assertIn("const MINIMUM_DESKTOP_VERSION = 7", self.client)
         self.assertIn("desktop_outdated", self.client)
 
     def test_image_viewer_supports_pixel_and_original_file_copy(self):
@@ -1121,9 +1167,10 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('<img class="image" id="image"', self.viewer)
         self.assertIn('draggable="false"', self.viewer)
         self.assertIn("pointer-events: auto", self.viewer)
+        self.assertIn("window.sportsCaveCopyImagePixels = copyImagePixels", self.viewer)
         self.assertIn('hasDesktopCapability("drag")', self.viewer)
         self.assertIn('desktopRequest("drag")', self.viewer)
-        self.assertIn("const MINIMUM_DESKTOP_VERSION = 6", self.viewer)
+        self.assertIn("const MINIMUM_DESKTOP_VERSION = 7", self.viewer)
 
 
 if __name__ == "__main__":

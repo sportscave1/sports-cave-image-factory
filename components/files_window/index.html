@@ -651,7 +651,8 @@
       const MAX_THUMBNAIL_CONCURRENT = 4;
       const MAX_CLIENT_THUMBNAILS = 160;
       const DESKTOP_MESSAGE_TYPE = "sports-cave-desktop";
-      const MINIMUM_DESKTOP_VERSION = 6;
+      const MINIMUM_DESKTOP_VERSION = 7;
+      const MAX_CLIENT_FOLDER_CACHE = 24;
       const VIEW_MODES = ["large", "medium", "small", "list", "details"];
       const VIEW_LABELS = { large: "Large icons", medium: "Medium icons", small: "Small icons", list: "List", details: "Details" };
       const SORT_LABELS = { name: "Name", modified: "Date modified", type: "Type", size: "Size" };
@@ -701,6 +702,8 @@
         anchorIndex: -1,
         loading: false,
         navigationToken: 0,
+        folderCache: new Map(),
+        folderRequests: new Map(),
         openStamp: { path: "", time: 0 },
         toastTimer: 0,
         helperTimer: 0,
@@ -1194,6 +1197,61 @@
         persistState();
       }
 
+      function folderCacheKey(path) {
+        return String(path || "").replace(/\/+$/, "").toLocaleLowerCase();
+      }
+
+      function cachedFolder(path) {
+        const key = folderCacheKey(path);
+        const cached = state.folderCache.get(key);
+        if (!cached || cached.expiresAt <= Date.now()) {
+          if (cached) state.folderCache.delete(key);
+          return null;
+        }
+        state.folderCache.delete(key);
+        state.folderCache.set(key, cached);
+        return cached.payload;
+      }
+
+      function rememberFolder(payload, requestedPath) {
+        const seconds = Math.max(1, Math.min(180, Number(payload.cached_for_seconds || 30)));
+        const entry = { payload, expiresAt: Date.now() + seconds * 1000 };
+        for (const path of [requestedPath, payload.current_path]) {
+          const key = folderCacheKey(path);
+          if (!key) continue;
+          state.folderCache.delete(key);
+          state.folderCache.set(key, entry);
+        }
+        while (state.folderCache.size > MAX_CLIENT_FOLDER_CACHE) {
+          state.folderCache.delete(state.folderCache.keys().next().value);
+        }
+      }
+
+      function requestFolder(path, refresh) {
+        const params = new URLSearchParams();
+        if (path) params.set("path", path);
+        if (refresh) params.set("refresh", "1");
+        const requestKey = `${folderCacheKey(path)}|${refresh ? "refresh" : "normal"}`;
+        if (!refresh && state.folderRequests.has(requestKey)) {
+          return state.folderRequests.get(requestKey);
+        }
+        const request = apiJson(`/api/files-list?${params.toString()}`)
+          .finally(() => state.folderRequests.delete(requestKey));
+        if (!refresh) state.folderRequests.set(requestKey, request);
+        return request;
+      }
+
+      function applyFolderPayload(payload) {
+        state.rootPath = String(payload.root_path || "");
+        state.rootName = String(payload.root_name || "Files");
+        state.currentPath = String(payload.current_path || state.rootPath);
+        state.timeZone = String(payload.timezone || "UTC");
+        state.items = Array.from(payload.items || []);
+        state.canDelete = Boolean(payload.can_delete);
+        state.loading = false;
+        state.searchByPath[state.currentPath] = state.searchByPath[state.currentPath] || "";
+      }
+
       const BLOCKED_EXTENSIONS = new Set([
         "appref-ms", "application", "bat", "chm", "cmd", "com", "cpl", "dll", "exe", "gadget", "hta", "inf", "ins",
         "jar", "js", "jse", "lnk", "msi", "msp", "pif", "ps1", "py", "pyw", "reg", "scr", "sct", "shb", "shs",
@@ -1210,6 +1268,16 @@
       async function loadFolder(path, { refresh = false, preserveScroll = false } = {}) {
         const token = ++state.navigationToken;
         const oldScroll = preserveScroll ? elements.results.scrollTop : 0;
+        const cached = refresh ? null : cachedFolder(path);
+        if (cached) {
+          closeMenus();
+          clearSelection();
+          stopThumbnailLoading();
+          applyFolderPayload(cached);
+          renderAll();
+          elements.results.scrollTop = preserveScroll ? oldScroll : 0;
+          return true;
+        }
         state.loading = true;
         elements.helperPanel.classList.remove("visible");
         closeMenus();
@@ -1218,19 +1286,10 @@
         renderItems();
         renderNavigation();
         try {
-          const params = new URLSearchParams();
-          if (path) params.set("path", path);
-          if (refresh) params.set("refresh", "1");
-          const payload = await apiJson(`/api/files-list?${params.toString()}`);
+          const payload = await requestFolder(path, refresh);
           if (token !== state.navigationToken) return false;
-          state.rootPath = String(payload.root_path || "");
-          state.rootName = String(payload.root_name || "Files");
-          state.currentPath = String(payload.current_path || state.rootPath);
-          state.timeZone = String(payload.timezone || "UTC");
-          state.items = Array.from(payload.items || []);
-          state.canDelete = Boolean(payload.can_delete);
-          state.loading = false;
-          state.searchByPath[state.currentPath] = state.searchByPath[state.currentPath] || "";
+          rememberFolder(payload, path);
+          applyFolderPayload(payload);
           renderAll();
           elements.results.scrollTop = preserveScroll ? oldScroll : 0;
           return true;
@@ -1444,10 +1503,36 @@
       }
 
       function openImageViewer(item) {
-        const params = new URLSearchParams({
+        const viewerRequest = {
           path: String(item.desktop_relative_path || ""),
           folder: relativeFolderPath(),
           name: String(item.name || "Image"),
+        };
+        if (hasDesktopCapability("openViewer")) {
+          const id = dragRequestId();
+          state.desktopPending.set(id, {
+            action: "openViewer",
+            resolve: () => {},
+            reject: error => showToast(
+              error.message || "The image viewer could not be opened.",
+              { kind: "error", duration: 6000 }
+            ),
+          });
+          try {
+            desktopPost({ action: "openViewer", request_id: id, viewer: viewerRequest });
+          } catch (error) {
+            state.desktopPending.delete(id);
+            showToast(
+              error.message || "The image viewer could not be opened.",
+              { kind: "error", duration: 6000 }
+            );
+          }
+          return;
+        }
+        const params = new URLSearchParams({
+          path: viewerRequest.path,
+          folder: viewerRequest.folder,
+          name: viewerRequest.name,
         });
         const viewerUrl = `/files-image-viewer?${params.toString()}`;
         let viewer = null;
@@ -1455,9 +1540,9 @@
           if (state.imageViewerWindow && !state.imageViewerWindow.closed) {
             state.imageViewerWindow.postMessage({
               type: "sports-cave-image-viewer-open",
-              path: String(item.desktop_relative_path || ""),
-              folder: relativeFolderPath(),
-              name: String(item.name || "Image"),
+              path: viewerRequest.path,
+              folder: viewerRequest.folder,
+              name: viewerRequest.name,
             }, location.origin);
             state.imageViewerWindow.focus();
             return;

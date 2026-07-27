@@ -31,7 +31,7 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("Microsoft.Web.WebView2.Core.dll", self.install)
         self.assertIn("Microsoft.Web.WebView2.Wpf.dll", self.install)
         self.assertIn("WebView2Loader.dll", self.install)
-        self.assertIn("HelperVersion = 6", self.install)
+        self.assertIn("HelperVersion = 7", self.install)
         self.assertIn("CurrentVersion\\Run", self.install)
         self.assertIn('" --background', self.install)
         self.assertIn("Sports Cave OS Desktop.lnk", self.install)
@@ -52,9 +52,29 @@ class DesktopHelperContractTests(unittest.TestCase):
     def test_files_windows_reuse_the_signed_in_webview_profile(self):
         self.assertIn("CoreWebView2Environment sharedEnvironment = null", self.source)
         self.assertIn("environment = sharedEnvironment", self.source)
-        self.assertIn("new DesktopWindow(\n                                config, windowArgs.Uri, false, environment)", self.source)
+        self.assertIn("blank ? \"\" : windowArgs.Uri", self.source)
+        self.assertIn("bool waitForOpenerNavigation = false", self.source)
+        self.assertIn("if (!deferInitialNavigation)", self.source)
+        self.assertNotIn("browser.CoreWebView2.Navigate(initialUrl);\n                if (navigateFilesWhenReady)", self.source)
         self.assertIn('navigationArgs.Uri.Equals("about:blank"', self.source)
         self.assertIn('appUri.GetLeftPart(UriPartial.Authority) + "/files-window"', self.source)
+
+    def test_native_viewer_bridge_uses_validated_relative_paths_and_reuses_window(self):
+        self.assertIn('if (action == "openViewer")', self.source)
+        self.assertIn('ViewerRelativeValue(viewer, "path", true)', self.source)
+        self.assertIn('value.StartsWith("/", StringComparison.Ordinal)', self.source)
+        self.assertIn('part == "." || part == ".."', self.source)
+        self.assertIn('"/files-image-viewer?path=" + Uri.EscapeDataString(path)', self.source)
+        self.assertIn("imageViewerWindow.NavigateTrusted(viewerUrl)", self.source)
+        self.assertIn("imageViewerWindow.ShowAndFocus()", self.source)
+        self.assertIn("new DesktopWindow(config, viewerUrl, false, environment)", self.source)
+        self.assertIn("pendingTrustedNavigation = url", self.source)
+        self.assertIn("browser.CoreWebView2.Navigate(pending)", self.source)
+
+    def test_viewer_image_context_menu_routes_to_native_pixel_copy(self):
+        self.assertIn("ContextMenuRequested += OnContextMenuRequested", self.source)
+        self.assertIn('CreateContextMenuItem(\n            "Copy image"', self.source)
+        self.assertIn("window.sportsCaveCopyImagePixels", self.source)
 
     def test_webview_bridge_is_origin_scoped_and_action_allowlisted(self):
         self.assertIn("browser.CoreWebView2.WebMessageReceived += OnWebMessage", self.source)
@@ -62,6 +82,11 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("AllowedOrigins.Contains", self.source)
         for action in ("drag", "copyFile", "copyImage", "openFile"):
             self.assertIn(f'action != "{action}"', self.source)
+        self.assertIn('action == "openViewer"', self.source)
+        self.assertIn(
+            '"drag", "copyFile", "copyImage", "openFile", "openViewer", "folders", "cancel"',
+            self.source,
+        )
         self.assertIn("Settings.AreHostObjectsAllowed = false", self.source)
         self.assertIn("navigationArgs.Cancel = true", self.source)
         self.assertNotIn("Dropbox", self.source.split("internal sealed class TransferGrant")[0])
@@ -103,8 +128,12 @@ class DesktopHelperContractTests(unittest.TestCase):
     def test_image_clipboard_sets_pixels_and_png_transparency_payload(self):
         self.assertIn("PngBitmapEncoder", self.source)
         self.assertIn('data.SetData("PNG"', self.source)
-        self.assertIn("data.SetImage(bitmap)", self.source)
+        self.assertIn("data.SetImage(clipboardBitmap)", self.source)
+        self.assertIn("System.Windows.DataFormats.Dib", self.source)
+        self.assertIn("CreateDib(clipboardBitmap)", self.source)
+        self.assertIn("PixelFormats.Bgra32", self.source)
         self.assertIn("BitmapCacheOption.OnLoad", self.source)
+        self.assertIn("System.Windows.Clipboard.SetDataObject(data, true)", self.source)
 
     def test_cache_is_revision_keyed_sanitized_bounded_and_preserves_leases(self):
         self.assertIn('"SportsCaveOS", "FileCache"', self.source)
@@ -178,7 +207,7 @@ class DesktopWindowsBuildTests(unittest.TestCase):
                     "AppUrl": "http://127.0.0.1:8501/files-window",
                     "RootPath": "",
                     "AllowedOrigins": ["http://127.0.0.1:8501"],
-                    "HelperVersion": 6,
+                    "HelperVersion": 7,
                 }
             ),
             encoding="utf-8",

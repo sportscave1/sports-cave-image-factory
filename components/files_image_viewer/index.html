@@ -67,6 +67,18 @@
         -webkit-user-drag: none;
         will-change: transform;
       }
+      .image-error {
+        color: var(--muted);
+        display: none;
+        left: 50%;
+        max-width: min(440px, calc(100vw - 40px));
+        position: absolute;
+        text-align: center;
+        top: 50%;
+        transform: translate(-50%, -50%);
+      }
+      .image-error.visible { display: block; }
+      .image-error strong { color: var(--text); display: block; margin-bottom: 6px; }
       .status {
         align-items: center;
         background: #202020;
@@ -131,6 +143,10 @@
       </div>
       <section class="stage" id="stage">
         <img class="image" id="image" alt="" decoding="async" fetchpriority="high" draggable="false">
+        <div class="image-error" id="imageError" role="alert">
+          <strong>This image could not be opened</strong>
+          <span id="imageErrorDetail">Refresh Files and try again.</span>
+        </div>
       </section>
       <footer class="status"><span id="dimensions"></span><span id="zoomStatus"></span></footer>
     </main>
@@ -145,11 +161,11 @@
     <script>
       const IMAGE_VIEWER_MESSAGE = "sports-cave-image-viewer-open";
       const DESKTOP_MESSAGE_TYPE = "sports-cave-desktop";
-      const MINIMUM_DESKTOP_VERSION = 6;
+      const MINIMUM_DESKTOP_VERSION = 7;
       const elements = Object.fromEntries([
         "previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton",
         "rotateLeftButton", "rotateRightButton", "fileName", "copyImageButton", "copyFileButton", "downloadButton", "desktopButton", "closeButton",
-        "stage", "image", "dimensions", "zoomStatus", "protocolLink",
+        "stage", "image", "imageError", "imageErrorDetail", "dimensions", "zoomStatus", "protocolLink",
         "downloadFrame", "helperPanel", "checkHelperButton", "installHelperButton", "downloadInsteadButton"
       ].map(id => [id, document.getElementById(id)]));
       const query = new URLSearchParams(location.search);
@@ -237,14 +253,28 @@
       }
 
       function clearImage() {
+        state.naturalWidth = 0;
+        state.naturalHeight = 0;
         elements.image.style.display = "none";
+        elements.imageError.classList.remove("visible");
         elements.dimensions.textContent = "";
         elements.zoomStatus.textContent = "";
       }
 
+      function showImageError(message) {
+        clearImage();
+        elements.imageErrorDetail.textContent = String(
+          message || "Refresh Files and try again."
+        );
+        elements.imageError.classList.add("visible");
+      }
+
       function loadImage(path, { folder = state.folder, name = "", replaceHistory = true } = {}) {
         const relativePath = String(path || "");
-        if (!relativePath) { clearImage(); return; }
+        if (!relativePath) {
+          showImageError("No image was selected.");
+          return;
+        }
         const generation = ++state.loadGeneration;
         state.path = relativePath;
         state.folder = String(folder || "");
@@ -274,7 +304,7 @@
         };
         elements.image.onerror = () => {
           if (generation !== state.loadGeneration) return;
-          clearImage();
+          showImageError("The image is unavailable or could not be decoded.");
         };
         elements.image.src = `/api/files-image-preview?path=${encodeURIComponent(state.path)}`;
       }
@@ -352,6 +382,9 @@
 
       async function copyImagePixels() {
         try {
+          if (!state.naturalWidth || !state.naturalHeight || !elements.image.complete) {
+            throw new Error("Wait for the image to finish loading.");
+          }
           if (hasDesktopCapability("copyImage")) {
             await desktopRequest("copyImage");
           } else {
@@ -373,6 +406,7 @@
           notify(error.message || "Image copy failed");
         }
       }
+      window.sportsCaveCopyImagePixels = copyImagePixels;
 
       async function copyOriginalFile() {
         try {

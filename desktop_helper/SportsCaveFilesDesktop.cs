@@ -15,21 +15,22 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
 [assembly: System.Reflection.AssemblyTitle("Sports Cave OS Desktop")]
 [assembly: System.Reflection.AssemblyDescription("Persistent native Windows host for Sports Cave OS")]
 [assembly: System.Reflection.AssemblyProduct("Sports Cave OS Desktop")]
 [assembly: System.Reflection.AssemblyCompany("Sports Cave")]
-[assembly: System.Reflection.AssemblyVersion("6.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("6.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("7.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("7.0.0.0")]
 
 internal static class Program
 {
-    internal const int HelperVersion = 6;
-    private const string MutexName = @"Local\SportsCaveOSDesktop-v6";
-    private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v6";
-    private const string FilesEventName = @"Local\SportsCaveOSDesktop-Files-v6";
+    internal const int HelperVersion = 7;
+    private const string MutexName = @"Local\SportsCaveOSDesktop-v7";
+    private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v7";
+    private const string FilesEventName = @"Local\SportsCaveOSDesktop-Files-v7";
 
     private static string InstanceName(string baseName)
     {
@@ -291,20 +292,26 @@ internal sealed class DesktopWindow : Window
         new Dictionary<string, CancellationTokenSource>(StringComparer.Ordinal);
     private readonly string initialUrl;
     private readonly bool persistent;
+    private readonly bool deferInitialNavigation;
     private CoreWebView2Environment environment;
+    private DesktopWindow imageViewerWindow;
+    private string pendingTrustedNavigation = "";
     private bool initialized;
     private bool redirectedForSignIn;
     private bool navigateFilesWhenReady;
 
     internal DesktopWindow(
         DesktopConfig desktopConfig, string requestedUrl = "", bool keepResident = true,
-        CoreWebView2Environment sharedEnvironment = null)
+        CoreWebView2Environment sharedEnvironment = null,
+        bool waitForOpenerNavigation = false)
     {
         config = desktopConfig;
         cache = new NativeCache(config.RootPath);
         environment = sharedEnvironment;
-        initialUrl = String.IsNullOrWhiteSpace(requestedUrl)
-            ? config.AppUrl : requestedUrl;
+        deferInitialNavigation = waitForOpenerNavigation;
+        initialUrl = deferInitialNavigation
+            ? ""
+            : (String.IsNullOrWhiteSpace(requestedUrl) ? config.AppUrl : requestedUrl);
         persistent = keepResident;
         Title = "Sports Cave OS Desktop";
         Width = 1420;
@@ -391,7 +398,11 @@ internal sealed class DesktopWindow : Window
                         if (blank || config.Allows(windowArgs.Uri))
                         {
                             var child = new DesktopWindow(
-                                config, windowArgs.Uri, false, environment);
+                                config,
+                                blank ? "" : windowArgs.Uri,
+                                false,
+                                environment,
+                                blank);
                             child.Show();
                             await child.InitializeBrowser();
                             windowArgs.NewWindow = child.browser.CoreWebView2;
@@ -403,7 +414,17 @@ internal sealed class DesktopWindow : Window
                         deferral.Complete();
                     }
                 };
-                browser.CoreWebView2.Navigate(initialUrl);
+                browser.CoreWebView2.ContextMenuRequested += OnContextMenuRequested;
+                if (!deferInitialNavigation)
+                {
+                    browser.CoreWebView2.Navigate(initialUrl);
+                }
+                if (!String.IsNullOrWhiteSpace(pendingTrustedNavigation))
+                {
+                    string pending = pendingTrustedNavigation;
+                    pendingTrustedNavigation = "";
+                    browser.CoreWebView2.Navigate(pending);
+                }
                 if (navigateFilesWhenReady)
                 {
                     NavigateToFiles();
@@ -439,6 +460,141 @@ internal sealed class DesktopWindow : Window
             appUri.GetLeftPart(UriPartial.Authority) + "/files-window");
     }
 
+    private void OnContextMenuRequested(
+        object sender, CoreWebView2ContextMenuRequestedEventArgs args)
+    {
+        Uri current = browser.Source;
+        if (
+            current == null
+            || !current.AbsolutePath.Equals(
+                "/files-image-viewer", StringComparison.OrdinalIgnoreCase)
+            || args.ContextMenuTarget == null
+            || !args.ContextMenuTarget.HasSourceUri
+            || args.MenuItems.Any(item => String.Equals(
+                item.Label, "Copy image", StringComparison.OrdinalIgnoreCase))
+        )
+        {
+            return;
+        }
+        CoreWebView2ContextMenuItem copyImage = environment.CreateContextMenuItem(
+            "Copy image", null, CoreWebView2ContextMenuItemKind.Command);
+        copyImage.CustomItemSelected += delegate
+        {
+            Dispatcher.BeginInvoke(new Action(async delegate
+            {
+                try
+                {
+                    await browser.CoreWebView2.ExecuteScriptAsync(
+                        "window.sportsCaveCopyImagePixels && window.sportsCaveCopyImagePixels()");
+                }
+                catch (Exception error)
+                {
+                    DesktopLog.Write(
+                        "copyImage", "failed", error.GetType().Name, 0);
+                }
+            }));
+        };
+        args.MenuItems.Insert(0, copyImage);
+    }
+
+    private static string ViewerRelativeValue(
+        Dictionary<string, object> viewer, string key, bool required)
+    {
+        string value = viewer.ContainsKey(key)
+            ? Convert.ToString(viewer[key]) : "";
+        if (String.IsNullOrWhiteSpace(value))
+        {
+            if (required)
+            {
+                throw new DesktopException(
+                    "viewer_path_invalid", "The selected image path is invalid.");
+            }
+            return "";
+        }
+        if (
+            value.Length > 1024
+            || value.IndexOfAny(new[] { '\0', '\r', '\n' }) >= 0
+            || value.Contains("\\")
+            || value.Contains(":")
+            || value.StartsWith("/", StringComparison.Ordinal)
+            || value.Split('/').Any(part =>
+                String.IsNullOrWhiteSpace(part) || part == "." || part == "..")
+        )
+        {
+            throw new DesktopException(
+                "viewer_path_invalid", "The selected image path is invalid.");
+        }
+        return value;
+    }
+
+    private static string ViewerName(
+        Dictionary<string, object> viewer, string fallback)
+    {
+        string name = viewer.ContainsKey("name")
+            ? Convert.ToString(viewer["name"]) : "";
+        if (
+            String.IsNullOrWhiteSpace(name)
+            || name.Length > 260
+            || name.IndexOfAny(new[] { '\0', '\r', '\n' }) >= 0
+        )
+        {
+            return fallback;
+        }
+        return name;
+    }
+
+    private void OpenImageViewer(Dictionary<string, object> viewer)
+    {
+        string path = ViewerRelativeValue(viewer, "path", true);
+        string extension = Path.GetExtension(path).ToLowerInvariant();
+        if (!new[] { ".jpg", ".jpeg", ".png", ".webp", ".gif" }.Contains(extension))
+        {
+            throw new DesktopException(
+                "viewer_image_required", "Select an image to open in the viewer.");
+        }
+        string folder = ViewerRelativeValue(viewer, "folder", false);
+        string name = ViewerName(viewer, path.Split('/').Last());
+        Uri appUri = new Uri(config.AppUrl);
+        string viewerUrl = appUri.GetLeftPart(UriPartial.Authority)
+            + "/files-image-viewer?path=" + Uri.EscapeDataString(path)
+            + "&folder=" + Uri.EscapeDataString(folder)
+            + "&name=" + Uri.EscapeDataString(name);
+
+        if (imageViewerWindow == null || !imageViewerWindow.IsLoaded)
+        {
+            var child = new DesktopWindow(config, viewerUrl, false, environment);
+            imageViewerWindow = child;
+            child.Closed += delegate
+            {
+                if (ReferenceEquals(imageViewerWindow, child))
+                {
+                    imageViewerWindow = null;
+                }
+            };
+            child.Show();
+        }
+        else
+        {
+            imageViewerWindow.NavigateTrusted(viewerUrl);
+        }
+        imageViewerWindow.ShowAndFocus();
+    }
+
+    private void NavigateTrusted(string url)
+    {
+        if (!config.Allows(url))
+        {
+            throw new DesktopException(
+                "navigation_denied", "This desktop navigation is not allowed.");
+        }
+        if (browser.CoreWebView2 == null)
+        {
+            pendingTrustedNavigation = url;
+            return;
+        }
+        browser.CoreWebView2.Navigate(url);
+    }
+
     private async void OnWebMessage(object sender, CoreWebView2WebMessageReceivedEventArgs args)
     {
         string action = "message";
@@ -463,7 +619,7 @@ internal sealed class DesktopWindow : Window
                 Reply("capabilities", requestId, true, new Dictionary<string, object>
                 {
                     { "version", Program.HelperVersion },
-                    { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "folders", "cancel" } },
+                    { "capabilities", new[] { "drag", "copyFile", "copyImage", "openFile", "openViewer", "folders", "cancel" } },
                 });
                 return;
             }
@@ -472,6 +628,25 @@ internal sealed class DesktopWindow : Window
                 CancellationTokenSource pending;
                 if (operations.TryGetValue(requestId, out pending)) pending.Cancel();
                 Reply(action, requestId, true, null);
+                return;
+            }
+            if (action == "openViewer")
+            {
+                if (requestId.Length < 8 || requestId.Length > 80)
+                {
+                    throw new DesktopException(
+                        "invalid_request", "The desktop request is invalid.");
+                }
+                var viewer = message.ContainsKey("viewer")
+                    ? message["viewer"] as Dictionary<string, object> : null;
+                if (viewer == null || HasUnexpectedKeys(viewer))
+                {
+                    throw new DesktopException(
+                        "viewer_request_invalid", "The image viewer request is invalid.");
+                }
+                OpenImageViewer(viewer);
+                Reply(action, requestId, true, null);
+                DesktopLog.Write(action, "completed", "none", 1);
                 return;
             }
             if (action != "drag" && action != "copyFile"
@@ -575,6 +750,12 @@ internal sealed class DesktopWindow : Window
         }
     }
 
+    private static bool HasUnexpectedKeys(Dictionary<string, object> values)
+    {
+        return values.Keys.Any(key =>
+            key != "path" && key != "folder" && key != "name");
+    }
+
     private static Dictionary<string, object> Error(string code, string message)
     {
         return new Dictionary<string, object> { { "code", code }, { "message", message } };
@@ -603,8 +784,23 @@ internal sealed class DesktopWindow : Window
             bitmap.EndInit();
             bitmap.Freeze();
         }
+        BitmapSource clipboardBitmap;
+        if (bitmap.Format == PixelFormats.Bgra32)
+        {
+            clipboardBitmap = bitmap;
+        }
+        else
+        {
+            clipboardBitmap = new FormatConvertedBitmap(
+                bitmap, PixelFormats.Bgra32, null, 0);
+        }
+        if (clipboardBitmap.CanFreeze) clipboardBitmap.Freeze();
         var data = new System.Windows.DataObject();
-        data.SetImage(bitmap);
+        data.SetImage(clipboardBitmap);
+        data.SetData(
+            System.Windows.DataFormats.Dib,
+            CreateDib(clipboardBitmap),
+            false);
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(bitmap));
         var png = new MemoryStream();
@@ -612,6 +808,36 @@ internal sealed class DesktopWindow : Window
         png.Position = 0;
         data.SetData("PNG", png, false);
         SetClipboardData(data);
+    }
+
+    private static MemoryStream CreateDib(BitmapSource bitmap)
+    {
+        int width = bitmap.PixelWidth;
+        int height = bitmap.PixelHeight;
+        int stride = checked(width * 4);
+        byte[] pixels = new byte[checked(stride * height)];
+        bitmap.CopyPixels(pixels, stride, 0);
+        var stream = new MemoryStream(40 + pixels.Length);
+        using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
+        {
+            writer.Write(40);
+            writer.Write(width);
+            writer.Write(height);
+            writer.Write((short)1);
+            writer.Write((short)32);
+            writer.Write(0);
+            writer.Write(pixels.Length);
+            writer.Write(0);
+            writer.Write(0);
+            writer.Write(0);
+            writer.Write(0);
+            for (int row = height - 1; row >= 0; row--)
+            {
+                writer.Write(pixels, row * stride, stride);
+            }
+        }
+        stream.Position = 0;
+        return stream;
     }
 
     private static void SetClipboardData(System.Windows.DataObject data)
