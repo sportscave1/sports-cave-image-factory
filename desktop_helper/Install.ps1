@@ -14,6 +14,8 @@ $existingConfigPath = Join-Path $installRoot "config.json"
 $bridgePath = Join-Path $installRoot "SportsCaveOSDesktop.exe"
 $legacyBridgePath = Join-Path $installRoot "SportsCaveFilesHelper.exe"
 $bridgeTempPath = Join-Path $env:TEMP ("SportsCaveOSDesktop-" + [Guid]::NewGuid().ToString("N") + ".exe")
+$iconSource = Join-Path $PSScriptRoot "SportsCaveFiles.ico"
+$iconPath = Join-Path $installRoot "SportsCaveFiles.ico"
 $runKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"
 $runValueName = "SportsCaveFilesHelper"
 $filesProtocolKey = "HKCU:\Software\Classes\sports-cave-files"
@@ -60,6 +62,10 @@ if (-not [string]::IsNullOrWhiteSpace($DropboxRoot)) {
 New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "SportsCaveFilesHelper.ps1") -Destination $installRoot -Force
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Uninstall.ps1") -Destination $installRoot -Force
+if (-not (Test-Path -LiteralPath $iconSource -PathType Leaf)) {
+    throw "The Sports Cave Files icon is missing. Download a fresh helper package."
+}
+Copy-Item -LiteralPath $iconSource -Destination $iconPath -Force
 
 Get-Process -Name "SportsCaveFilesHelper" -ErrorAction SilentlyContinue |
     Where-Object {
@@ -119,12 +125,21 @@ try {
         (Join-Path $libSource "Microsoft.Web.WebView2.Core.dll"),
         (Join-Path $libSource "Microsoft.Web.WebView2.Wpf.dll")
     )
-    Add-Type `
-        -TypeDefinition $bridgeSource `
-        -Language CSharp `
-        -ReferencedAssemblies ($compileReferences | Select-Object -Unique) `
-        -OutputAssembly $bridgeTempPath `
-        -OutputType WindowsApplication
+    Add-Type -AssemblyName Microsoft.CSharp
+    $compiler = New-Object Microsoft.CSharp.CSharpCodeProvider
+    $compilerParameters = New-Object System.CodeDom.Compiler.CompilerParameters
+    $compilerParameters.GenerateExecutable = $true
+    $compilerParameters.GenerateInMemory = $false
+    $compilerParameters.OutputAssembly = $bridgeTempPath
+    $compilerParameters.CompilerOptions = "/target:winexe /win32icon:`"$iconPath`""
+    foreach ($reference in ($compileReferences | Select-Object -Unique)) {
+        [void]$compilerParameters.ReferencedAssemblies.Add($reference)
+    }
+    $compileResult = $compiler.CompileAssemblyFromSource($compilerParameters, $bridgeSource)
+    if ($compileResult.Errors.HasErrors) {
+        $messages = @($compileResult.Errors | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+        throw "The native desktop helper could not be built. $messages"
+    }
     if (-not (Test-Path -LiteralPath $bridgeTempPath -PathType Leaf)) {
         throw "The native desktop helper could not be built."
     }
@@ -142,7 +157,7 @@ Copy-Item -LiteralPath $runtimeSource -Destination $installRoot -Force
     RootPath = $DropboxRoot
     AppUrl = $AppUrl
     InstalledAt = (Get-Date).ToString("o")
-    HelperVersion = 7
+    HelperVersion = 8
     AllowedOrigins = @(
         $AllowedOrigins |
             ForEach-Object { [string]$_ } |
@@ -179,8 +194,9 @@ $shortcut = $shortcutShell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $bridgePath
 $shortcut.Arguments = "--app"
 $shortcut.WorkingDirectory = $installRoot
-$shortcut.Description = "Open Sports Cave OS Desktop"
+$shortcut.Description = "Open Sports Cave Files"
+$shortcut.IconLocation = $iconPath
 $shortcut.Save()
 
-Write-Host "Sports Cave OS Desktop installed."
+Write-Host "Sports Cave Files Desktop installed."
 Write-Host "Open it from the Start menu for native drag, Copy and image clipboard support."

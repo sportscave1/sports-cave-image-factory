@@ -2,6 +2,7 @@ import asyncio
 import io
 import json
 from pathlib import Path
+import threading
 import unittest
 from urllib.parse import urlencode
 from unittest.mock import patch
@@ -140,7 +141,13 @@ class FilesWindowApiTests(unittest.TestCase):
         self.assertNotIn("thumbnail_url", payload["items"][0])
         self.assertIn("thumbnail_url", payload["items"][1])
         self.assertNotIn("secret-token", response.body.decode("utf-8"))
-        directory.assert_called_once_with("secret-token", path, force=False)
+        directory.assert_called_once_with(
+            "secret-token",
+            path,
+            force=False,
+            root_path=TEAM_ROOT,
+            user_id="worker-1",
+        )
 
     def test_timestamp_formatting_converts_to_configured_timezone_and_handles_missing_values(self):
         value = "2026-07-25T02:41:00Z"
@@ -268,7 +275,13 @@ class FilesWindowApiTests(unittest.TestCase):
         payload = json.loads(response.body)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(payload["items"]), 20)
-        directory.assert_called_once_with("secret-token", TEAM_ROOT, force=False)
+        directory.assert_called_once_with(
+            "secret-token",
+            TEAM_ROOT,
+            force=False,
+            root_path=TEAM_ROOT,
+            user_id="worker-1",
+        )
         metadata.assert_not_called()
         thumbnail.assert_not_called()
 
@@ -576,6 +589,7 @@ class FilesWindowApiTests(unittest.TestCase):
             with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
                 self.assertIn(expected, archive.namelist())
                 if platform == "windows":
+                    self.assertIn("SportsCaveFiles.ico", archive.namelist())
                     self.assertIn("SportsCaveFilesDesktop.cs", archive.namelist())
                     self.assertIn("lib/Microsoft.Web.WebView2.Core.dll", archive.namelist())
                     self.assertIn("lib/Microsoft.Web.WebView2.Wpf.dll", archive.namelist())
@@ -601,6 +615,130 @@ class FilesWindowApiTests(unittest.TestCase):
             self.assertEqual(files_upload_api._directory_entries("token", first)[0]["name"], "one-new")
 
         self.assertEqual(listing.call_count, 3)
+
+    def test_directory_cache_is_scoped_by_user_root_and_path(self):
+        first_root = "/Sportscave Team Folder"
+        second_root = "/Other Team Folder"
+        path = f"{first_root}/Designs"
+        with patch.object(
+            files_upload_api.dropbox_integration,
+            "list_folder",
+            side_effect=[
+                [{"name": "worker"}],
+                [{"name": "admin"}],
+                [{"name": "other-root"}],
+            ],
+        ) as listing:
+            self.assertEqual(
+                files_upload_api._directory_entries("token", path, root_path=first_root, user_id="worker")[0]["name"],
+                "worker",
+            )
+            self.assertEqual(
+                files_upload_api._directory_entries("token", path, root_path=first_root, user_id="worker")[0]["name"],
+                "worker",
+            )
+            self.assertEqual(
+                files_upload_api._directory_entries("token", path, root_path=first_root, user_id="admin")[0]["name"],
+                "admin",
+            )
+            self.assertEqual(
+                files_upload_api._directory_entries("token", path, root_path=second_root, user_id="worker")[0]["name"],
+                "other-root",
+            )
+
+        self.assertEqual(listing.call_count, 3)
+
+    def test_identical_inflight_directory_requests_share_one_dropbox_listing(self):
+        path = f"{TEAM_ROOT}/Concurrent"
+        gate = threading.Event()
+        calls = 0
+
+        def slow_listing(_token, _path):
+            nonlocal calls
+            calls += 1
+            gate.wait(timeout=2)
+            return [{"name": "shared"}]
+
+        results = []
+        errors = []
+
+        def worker():
+            try:
+                results.append(
+                    files_upload_api._directory_entries(
+                        "token",
+                        path,
+                        root_path=TEAM_ROOT,
+                        user_id="worker-1",
+                    )[0]["name"]
+                )
+            except Exception as error:
+                errors.append(error)
+
+        with patch.object(files_upload_api.dropbox_integration, "list_folder", side_effect=slow_listing):
+            first = threading.Thread(target=worker)
+            second = threading.Thread(target=worker)
+            first.start()
+            second.start()
+            gate.set()
+            first.join(timeout=3)
+            second.join(timeout=3)
+
+        self.assertFalse(errors)
+        self.assertEqual(results, ["shared", "shared"])
+        self.assertEqual(calls, 1)
+
+    def test_files_list_can_return_first_page_then_append_later_pages(self):
+        path = f"{TEAM_ROOT}/Large"
+        first_page = {
+            "entries": [
+                {".tag": "file", "name": "A.jpg", "path_display": f"{path}/A.jpg", "rev": "a"},
+            ],
+            "cursor": "cursor-1",
+            "has_more": True,
+        }
+        second_page = {
+            "entries": [
+                {".tag": "file", "name": "B.jpg", "path_display": f"{path}/B.jpg", "rev": "b"},
+            ],
+            "cursor": "",
+            "has_more": False,
+        }
+        with patch.object(files_upload_api, "_request_user", return_value=self.user), patch.object(
+            files_upload_api,
+            "_dropbox_context",
+            return_value={"access_token": "secret-token", "root_path": TEAM_ROOT},
+        ), patch.object(
+            files_upload_api.dropbox_integration,
+            "list_folder_page",
+            side_effect=[first_page, second_page],
+        ) as listing:
+            first_response = asyncio.run(
+                files_upload_api.list_files(
+                    get_request("/api/files-list", {"path": path, "page_size": "1"})
+                )
+            )
+            first_payload = json.loads(first_response.body)
+            second_response = asyncio.run(
+                files_upload_api.list_files(
+                    get_request(
+                        "/api/files-list",
+                        {"path": path, "page_size": "1", "page": first_payload["next_page"]},
+                    )
+                )
+            )
+
+        second_payload = json.loads(second_response.body)
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual([item["name"] for item in first_payload["items"]], ["A.jpg"])
+        self.assertTrue(first_payload["has_more"])
+        self.assertTrue(first_payload["next_page"])
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual([item["name"] for item in second_payload["items"]], ["A.jpg", "B.jpg"])
+        self.assertFalse(second_payload["has_more"])
+        self.assertFalse(second_payload["next_page"])
+        self.assertIn("cache_namespace", first_payload)
+        self.assertEqual(listing.call_count, 2)
 
     def test_rename_and_delete_item_validation_rejects_root_traversal_and_other_folders(self):
         current = f"{TEAM_ROOT}/Current"
@@ -1067,13 +1205,51 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
     def test_folder_listing_cache_deduplicates_requests_and_keeps_stale_navigation_guard(self):
         self.assertIn("folderCache: new Map()", self.client)
         self.assertIn("folderRequests: new Map()", self.client)
+        self.assertIn("cacheNamespace:", self.client)
+        self.assertIn("const FOLDER_PAGE_SIZE = 500", self.client)
         self.assertIn("function cachedFolder(path)", self.client)
-        self.assertIn("function requestFolder(path, refresh)", self.client)
+        self.assertIn("function requestFolder(path, refresh, page = \"\")", self.client)
+        self.assertIn('params.set("page_size", String(FOLDER_PAGE_SIZE))', self.client)
         self.assertIn("state.folderRequests.has(requestKey)", self.client)
         self.assertIn("rememberFolder(payload, path)", self.client)
+        self.assertIn("requestFolder(path, true)", self.client)
+        self.assertIn("continueFolderPages(path, payload, token", self.client)
         self.assertIn("if (token !== state.navigationToken) return false", self.client)
+        self.assertIn("if (token !== state.navigationToken) return;", self.client)
+        self.assertIn("state.loadingMore", self.client)
+        self.assertIn('elements.itemCount.textContent = "Opening folder..."', self.client)
+        self.assertIn('Loading more...', self.client)
+        self.assertIn("function invalidateClientFolderCache(...paths)", self.client)
         self.assertIn("state.thumbnailControllers.forEach(controller => controller.abort())", self.client)
         self.assertIn("MAX_CLIENT_FOLDER_CACHE = 24", self.client)
+
+    def test_search_sort_and_view_do_not_refetch_folder(self):
+        search_block = self.client[
+            self.client.index('elements.searchInput.addEventListener("input"') :
+            self.client.index("elements.searchClear.onclick")
+        ]
+        sort_block = self.client[
+            self.client.index("function setSort") :
+            self.client.index("function setView")
+        ]
+        view_block = self.client[
+            self.client.index("function setView") :
+            self.client.index("function setUploadConflict")
+        ]
+        self.assertIn("renderItems()", search_block)
+        self.assertIn("renderItems()", sort_block)
+        self.assertIn("renderItems()", view_block)
+        self.assertNotIn("requestFolder", search_block + sort_block + view_block)
+        self.assertNotIn("apiJson", search_block + sort_block + view_block)
+
+    def test_mutations_invalidate_client_folder_cache_before_refresh(self):
+        for snippet in (
+            "invalidateClientFolderCache(state.currentPath);",
+            "invalidateClientFolderCache(state.currentPath, item.path);",
+            "invalidateClientFolderCache(state.currentPath, ...items.map(item => item.path));",
+            "invalidateClientFolderCache(row.destinationPath);",
+        ):
+            self.assertIn(snippet, self.client)
 
     def test_cut_copy_paste_context_menus_keyboard_and_session_persistence(self):
         self.assertIn('const CLIPBOARD_KEY = "sports-cave-files-clipboard-v1"', self.client)
@@ -1185,7 +1361,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("Open in Sports Cave Desktop to drag or copy files", self.client)
         self.assertIn("Install or update helper", self.client)
         self.assertIn('elements.protocolLink.href = "sports-cave-files://app"', self.client)
-        self.assertIn("const MINIMUM_DESKTOP_VERSION = 7", self.client)
+        self.assertIn("const MINIMUM_DESKTOP_VERSION = 8", self.client)
         self.assertIn("desktop_outdated", self.client)
 
     def test_image_viewer_supports_pixel_and_original_file_copy(self):
@@ -1201,7 +1377,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("window.sportsCaveCopyImagePixels = copyImagePixels", self.viewer)
         self.assertIn('hasDesktopCapability("drag")', self.viewer)
         self.assertIn('desktopRequest("drag")', self.viewer)
-        self.assertIn("const MINIMUM_DESKTOP_VERSION = 7", self.viewer)
+        self.assertIn("const MINIMUM_DESKTOP_VERSION = 8", self.viewer)
 
 
 if __name__ == "__main__":

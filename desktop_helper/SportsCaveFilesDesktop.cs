@@ -22,15 +22,16 @@ using System.Windows.Media.Imaging;
 [assembly: System.Reflection.AssemblyDescription("Persistent native Windows host for Sports Cave OS")]
 [assembly: System.Reflection.AssemblyProduct("Sports Cave OS Desktop")]
 [assembly: System.Reflection.AssemblyCompany("Sports Cave")]
-[assembly: System.Reflection.AssemblyVersion("7.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("7.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("8.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("8.0.0.0")]
 
 internal static class Program
 {
-    internal const int HelperVersion = 7;
-    private const string MutexName = @"Local\SportsCaveOSDesktop-v7";
-    private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v7";
-    private const string FilesEventName = @"Local\SportsCaveOSDesktop-Files-v7";
+    internal const int HelperVersion = 8;
+    internal const string FilesAppUserModelId = "SportsCave.Files.Desktop";
+    private const string MutexName = @"Local\SportsCaveOSDesktop-v8";
+    private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v8";
+    private const string FilesEventName = @"Local\SportsCaveOSDesktop-Files-v8";
 
     private static string InstanceName(string baseName)
     {
@@ -103,6 +104,7 @@ internal static class Program
                 }
 
                 var config = DesktopConfig.Load();
+                NativeMethods.SetCurrentProcessExplicitAppUserModelID(FilesAppUserModelId);
                 var application = new System.Windows.Application();
                 application.ShutdownMode = ShutdownMode.OnExplicitShutdown;
                 var window = new DesktopWindow(config);
@@ -313,7 +315,8 @@ internal sealed class DesktopWindow : Window
             ? ""
             : (String.IsNullOrWhiteSpace(requestedUrl) ? config.AppUrl : requestedUrl);
         persistent = keepResident;
-        Title = "Sports Cave OS Desktop";
+        Title = "Sports Cave Files";
+        Icon = LoadFilesIcon();
         Width = 1420;
         Height = 900;
         MinWidth = 900;
@@ -330,6 +333,25 @@ internal sealed class DesktopWindow : Window
                 Hide();
             }
         };
+    }
+
+    private static ImageSource LoadFilesIcon()
+    {
+        try
+        {
+            string iconPath = Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory,
+                "SportsCaveFiles.ico");
+            if (!File.Exists(iconPath)) return null;
+            return BitmapFrame.Create(
+                new Uri(iconPath, UriKind.Absolute),
+                BitmapCreateOptions.None,
+                BitmapCacheOption.OnLoad);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs args)
@@ -427,7 +449,7 @@ internal sealed class DesktopWindow : Window
                 }
                 if (navigateFilesWhenReady)
                 {
-                    NavigateToFiles();
+                    NavigateToFiles(false);
                 }
             }
         }
@@ -452,12 +474,31 @@ internal sealed class DesktopWindow : Window
 
     internal void NavigateToFiles()
     {
+        NavigateToFiles(true);
+    }
+
+    private void NavigateToFiles(bool allowReload)
+    {
         navigateFilesWhenReady = true;
         ShowAndFocus();
         if (browser.CoreWebView2 == null) return;
         Uri appUri = new Uri(config.AppUrl);
-        browser.CoreWebView2.Navigate(
-            appUri.GetLeftPart(UriPartial.Authority) + "/files-window");
+        string filesUrl = appUri.GetLeftPart(UriPartial.Authority) + "/files-window";
+        Uri current = browser.Source;
+        if (
+            !allowReload
+            || (
+                current != null
+                && current.GetLeftPart(UriPartial.Authority).Equals(
+                    appUri.GetLeftPart(UriPartial.Authority),
+                    StringComparison.OrdinalIgnoreCase)
+                && current.AbsolutePath.Equals("/files-window", StringComparison.OrdinalIgnoreCase)
+            )
+        )
+        {
+            return;
+        }
+        browser.CoreWebView2.Navigate(filesUrl);
     }
 
     private void OnContextMenuRequested(
@@ -1276,6 +1317,9 @@ internal static class NativeMethods
 {
     [DllImport("user32.dll")]
     internal static extern short GetAsyncKeyState(int virtualKey);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    internal static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

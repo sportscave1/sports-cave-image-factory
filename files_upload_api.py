@@ -29,6 +29,8 @@ FILES_THUMBNAIL_CACHE_SECONDS = 30 * 60
 FILES_THUMBNAIL_CACHE_LIMIT = 256
 FILES_DIRECTORY_CACHE_SECONDS = 3 * 60
 FILES_DIRECTORY_CACHE_LIMIT = 64
+FILES_DIRECTORY_PAGE_SECONDS = 2 * 60
+FILES_DIRECTORY_PAGE_SIZE = 500
 DESKTOP_HELPER_DIR = Path(__file__).resolve().parent / "desktop_helper"
 MACOS_DESKTOP_HELPER_DIR = Path(__file__).resolve().parent / "desktop_helper_macos"
 FILES_WINDOW_FILE = (
@@ -516,6 +518,54 @@ _THUMBNAIL_CACHE = {}
 _THUMBNAIL_CACHE_LOCK = threading.Lock()
 _DIRECTORY_CACHE = {}
 _DIRECTORY_CACHE_LOCK = threading.Lock()
+_DIRECTORY_INFLIGHT = {}
+_DIRECTORY_PAGE_CURSORS = {}
+
+
+def _directory_cache_key(path, *, root_path="", user_id=""):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    clean_root = dropbox_integration.normalize_dropbox_path(root_path)
+    return (
+        str(user_id or ""),
+        clean_root.casefold(),
+        clean_path.casefold(),
+    )
+
+
+def _directory_cache_path_from_key(key):
+    if isinstance(key, tuple) and key and isinstance(key[0], tuple):
+        return _directory_cache_path_from_key(key[0])
+    return key[2] if isinstance(key, tuple) and len(key) >= 3 else str(key).casefold()
+
+
+def _directory_cache_payload(key, now=None):
+    now = time.monotonic() if now is None else now
+    cached = _DIRECTORY_CACHE.get(key) or {}
+    if cached.get("expires_at", 0) > now and cached.get("complete", True):
+        return list(cached.get("entries") or ())
+    return None
+
+
+def _store_directory_cache(key, entries, *, complete=True, expires_in=None):
+    ttl = FILES_DIRECTORY_CACHE_SECONDS if expires_in is None else max(1, int(expires_in))
+    _DIRECTORY_CACHE[key] = {
+        "entries": list(entries or ()),
+        "expires_at": time.monotonic() + ttl,
+        "complete": bool(complete),
+    }
+    while len(_DIRECTORY_CACHE) > FILES_DIRECTORY_CACHE_LIMIT:
+        oldest = min(
+            _DIRECTORY_CACHE,
+            key=lambda candidate: _DIRECTORY_CACHE[candidate].get("expires_at", 0),
+        )
+        _DIRECTORY_CACHE.pop(oldest, None)
+
+
+def _cache_namespace(user, root_path):
+    user_id = str((user or {}).get("id") or (user or {}).get("username") or "").strip()
+    root = dropbox_integration.normalize_dropbox_path(root_path)
+    seed = f"{user_id}\n{root.casefold()}"
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
 
 
 def invalidate_directory_cache(*paths):
@@ -526,34 +576,180 @@ def invalidate_directory_cache(*paths):
     with _DIRECTORY_CACHE_LOCK:
         if not clean_paths:
             _DIRECTORY_CACHE.clear()
+            _DIRECTORY_INFLIGHT.clear()
+            _DIRECTORY_PAGE_CURSORS.clear()
             return
         for key in list(_DIRECTORY_CACHE):
-            if str(key).casefold() in clean_paths:
+            if _directory_cache_path_from_key(key) in clean_paths:
                 _DIRECTORY_CACHE.pop(key, None)
+        for key in list(_DIRECTORY_INFLIGHT):
+            if _directory_cache_path_from_key(key) in clean_paths:
+                _DIRECTORY_INFLIGHT.pop(key, None)
+        for token, page in list(_DIRECTORY_PAGE_CURSORS.items()):
+            if str((page or {}).get("path") or "").casefold() in clean_paths:
+                _DIRECTORY_PAGE_CURSORS.pop(token, None)
 
 
-def _directory_entries(access_token, path, *, force=False):
+def _directory_entries(access_token, path, *, force=False, root_path="", user_id=""):
     clean_path = dropbox_integration.normalize_dropbox_path(path)
+    cache_key = _directory_cache_key(clean_path, root_path=root_path, user_id=user_id)
     now = time.monotonic()
+    wait_for = None
+    owns_request = False
     with _DIRECTORY_CACHE_LOCK:
-        cached = _DIRECTORY_CACHE.get(clean_path) or {}
-        if not force and cached.get("expires_at", 0) > now:
-            return list(cached.get("entries") or ())
-    entries = dropbox_integration.sort_folder_entries(
-        dropbox_integration.list_folder(access_token, clean_path)
-    )
+        cached = None if force else _directory_cache_payload(cache_key, now)
+        if cached is not None:
+            return cached
+        if not force:
+            wait_for = _DIRECTORY_INFLIGHT.get(cache_key)
+            if wait_for is None:
+                wait_for = threading.Event()
+                _DIRECTORY_INFLIGHT[cache_key] = wait_for
+                owns_request = True
+        else:
+            _DIRECTORY_INFLIGHT.pop(cache_key, None)
+    if wait_for is not None and not owns_request:
+        wait_for.wait(timeout=15)
+        with _DIRECTORY_CACHE_LOCK:
+            cached = _directory_cache_payload(cache_key)
+            if cached is not None:
+                return cached
+    try:
+        entries = dropbox_integration.sort_folder_entries(
+            dropbox_integration.list_folder(access_token, clean_path)
+        )
+    except Exception:
+        with _DIRECTORY_CACHE_LOCK:
+            pending = _DIRECTORY_INFLIGHT.pop(cache_key, None)
+            if pending is not None:
+                pending.set()
+        raise
     with _DIRECTORY_CACHE_LOCK:
-        _DIRECTORY_CACHE[clean_path] = {
-            "entries": list(entries),
-            "expires_at": now + FILES_DIRECTORY_CACHE_SECONDS,
-        }
-        while len(_DIRECTORY_CACHE) > FILES_DIRECTORY_CACHE_LIMIT:
-            oldest = min(
-                _DIRECTORY_CACHE,
-                key=lambda key: _DIRECTORY_CACHE[key].get("expires_at", 0),
-            )
-            _DIRECTORY_CACHE.pop(oldest, None)
+        _store_directory_cache(cache_key, entries, complete=True)
+        pending = _DIRECTORY_INFLIGHT.pop(cache_key, None)
+        if pending is not None:
+            pending.set()
     return list(entries)
+
+
+def _directory_page(access_token, path, *, root_path, user_id, force=False, page_token="", limit=None):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    cache_key = _directory_cache_key(clean_path, root_path=root_path, user_id=user_id)
+    page_limit = max(1, min(int(limit or FILES_DIRECTORY_PAGE_SIZE), 2000))
+    now = time.monotonic()
+    cursor = ""
+    if page_token:
+        with _DIRECTORY_CACHE_LOCK:
+            page = _DIRECTORY_PAGE_CURSORS.get(str(page_token or "")) or {}
+            if (
+                page.get("expires_at", 0) <= now
+                or page.get("key") != cache_key
+            ):
+                raise FilesUploadError(
+                    "This folder page expired. Refresh the folder and try again.",
+                    status_code=409,
+                    code="folder_page_expired",
+                )
+            cursor = str(page.get("cursor") or "")
+    elif not force:
+        with _DIRECTORY_CACHE_LOCK:
+            cached = _directory_cache_payload(cache_key, now)
+            if cached is not None:
+                return {
+                    "entries": cached,
+                    "cursor": "",
+                    "page_token": "",
+                    "has_more": False,
+                    "from_cache": True,
+                    "complete": True,
+                }
+            partial = _DIRECTORY_CACHE.get(cache_key) or {}
+            if partial.get("expires_at", 0) > time.monotonic() and partial.get("entries"):
+                return {
+                    "entries": list(partial.get("entries") or ()),
+                    "cursor": "",
+                    "page_token": str(partial.get("next_page") or ""),
+                    "has_more": bool(partial.get("has_more")),
+                    "from_cache": True,
+                    "complete": bool(partial.get("complete", False)),
+                }
+
+    request_key = (cache_key, cursor or "first", page_limit)
+    wait_for = None
+    owns_request = False
+    with _DIRECTORY_CACHE_LOCK:
+        if not force:
+            wait_for = _DIRECTORY_INFLIGHT.get(request_key)
+            if wait_for is None:
+                wait_for = threading.Event()
+                _DIRECTORY_INFLIGHT[request_key] = wait_for
+                owns_request = True
+        else:
+            _DIRECTORY_INFLIGHT.pop(request_key, None)
+    if wait_for is not None and not owns_request:
+        wait_for.wait(timeout=15)
+        with _DIRECTORY_CACHE_LOCK:
+            cached = _directory_cache_payload(cache_key)
+            if cached is not None:
+                return {
+                    "entries": cached,
+                    "cursor": "",
+                    "page_token": "",
+                    "has_more": False,
+                    "from_cache": True,
+                    "complete": True,
+                }
+
+    try:
+        page = dropbox_integration.list_folder_page(
+            access_token,
+            clean_path,
+            cursor=cursor,
+            limit=page_limit,
+        )
+        page_entries = list(page.get("entries") or ())
+        has_more = bool(page.get("has_more"))
+        next_cursor = str(page.get("cursor") or "")
+        with _DIRECTORY_CACHE_LOCK:
+            previous = [] if (force and not page_token) else list((_DIRECTORY_CACHE.get(cache_key) or {}).get("entries") or ())
+            combined = previous + page_entries if page_token else page_entries
+            next_token = ""
+            if has_more and next_cursor:
+                next_token = secrets.token_urlsafe(18)
+                _DIRECTORY_PAGE_CURSORS[next_token] = {
+                    "cursor": next_cursor,
+                    "key": cache_key,
+                    "path": clean_path.casefold(),
+                    "expires_at": time.monotonic() + FILES_DIRECTORY_PAGE_SECONDS,
+                }
+            for token, cursor_record in list(_DIRECTORY_PAGE_CURSORS.items()):
+                if cursor_record.get("expires_at", 0) <= time.monotonic():
+                    _DIRECTORY_PAGE_CURSORS.pop(token, None)
+            _store_directory_cache(
+                cache_key,
+                combined,
+                complete=not has_more,
+                expires_in=FILES_DIRECTORY_CACHE_SECONDS if not has_more else FILES_DIRECTORY_PAGE_SECONDS,
+            )
+            _DIRECTORY_CACHE[cache_key]["next_page"] = next_token
+            _DIRECTORY_CACHE[cache_key]["has_more"] = has_more
+            pending = _DIRECTORY_INFLIGHT.pop(request_key, None)
+            if pending is not None:
+                pending.set()
+        return {
+            "entries": combined,
+            "cursor": next_cursor if has_more else "",
+            "page_token": next_token,
+            "has_more": has_more,
+            "from_cache": False,
+            "complete": not has_more,
+        }
+    except Exception:
+        with _DIRECTORY_CACHE_LOCK:
+            pending = _DIRECTORY_INFLIGHT.pop(request_key, None)
+            if pending is not None:
+                pending.set()
+        raise
 
 
 def invalidate_thumbnail_cache(*paths):
@@ -1182,22 +1378,67 @@ async def list_files(request: Request):
             context["root_path"],
         )
         force = str(request.query_params.get("refresh") or "").casefold() in {"1", "true"}
+        page_size = request.query_params.get("page_size")
+        page_token = str(request.query_params.get("page") or "").strip()
+        user_id = str(user.get("id") or user.get("username") or "")
         try:
-            entries = await run_in_threadpool(
-                _directory_entries,
-                context["access_token"],
-                current_path,
-                force=force,
-            )
+            if page_size or page_token:
+                page = await run_in_threadpool(
+                    _directory_page,
+                    context["access_token"],
+                    current_path,
+                    root_path=context["root_path"],
+                    user_id=user_id,
+                    force=force,
+                    page_token=page_token,
+                    limit=page_size,
+                )
+                entries = page["entries"]
+            else:
+                page = {
+                    "has_more": False,
+                    "page_token": "",
+                    "from_cache": False,
+                    "complete": True,
+                }
+                entries = await run_in_threadpool(
+                    _directory_entries,
+                    context["access_token"],
+                    current_path,
+                    force=force,
+                    root_path=context["root_path"],
+                    user_id=user_id,
+                )
         except Exception:
             context = await run_in_threadpool(_dropbox_context, force=True)
             current_path = _validated_current_folder(current_path, context["root_path"])
-            entries = await run_in_threadpool(
-                _directory_entries,
-                context["access_token"],
-                current_path,
-                force=True,
-            )
+            if page_size or page_token:
+                page = await run_in_threadpool(
+                    _directory_page,
+                    context["access_token"],
+                    current_path,
+                    root_path=context["root_path"],
+                    user_id=user_id,
+                    force=True,
+                    page_token=page_token,
+                    limit=page_size,
+                )
+                entries = page["entries"]
+            else:
+                page = {
+                    "has_more": False,
+                    "page_token": "",
+                    "from_cache": False,
+                    "complete": True,
+                }
+                entries = await run_in_threadpool(
+                    _directory_entries,
+                    context["access_token"],
+                    current_path,
+                    force=True,
+                    root_path=context["root_path"],
+                    user_id=user_id,
+                )
         timezone_name = _files_timezone_name(user)
         items = [
             item
@@ -1221,6 +1462,11 @@ async def list_files(request: Request):
                 "timezone": timezone_name,
                 "can_delete": bool(os_accounts.can_delete_files(user)),
                 "cached_for_seconds": FILES_DIRECTORY_CACHE_SECONDS,
+                "cache_namespace": _cache_namespace(user, context["root_path"]),
+                "has_more": bool(page.get("has_more")),
+                "next_page": str(page.get("page_token") or ""),
+                "from_cache": bool(page.get("from_cache")),
+                "complete": bool(page.get("complete", True)),
             },
             headers={"Cache-Control": "no-store"},
         )
@@ -1749,6 +1995,7 @@ async def desktop_helper_package(request: Request):
             else (
                 "Install.cmd",
                 "Install.ps1",
+                "SportsCaveFiles.ico",
                 "SportsCaveFilesDesktop.cs",
                 "SportsCaveFilesHelper.ps1",
                 "Uninstall.ps1",

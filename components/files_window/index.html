@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
     <title>Sports Cave Files</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%23f6c343' d='M6 16a6 6 0 0 1 6-6h14l6 7h20a6 6 0 0 1 6 6v5H6z'/%3E%3Cpath fill='%23ffd865' d='M6 24h52v28a6 6 0 0 1-6 6H12a6 6 0 0 1-6-6z'/%3E%3Cpath fill='%230f6cbd' d='M22 40h30v14H22a4 4 0 0 1-4-4v-6a4 4 0 0 1 4-4z'/%3E%3Cpath fill='%235db6f2' d='M24 44h22v3H24z'/%3E%3C/svg%3E">
     <style>
       :root {
         color-scheme: light;
@@ -650,8 +651,9 @@
       const MAX_UPLOAD_CONCURRENT = 2;
       const MAX_THUMBNAIL_CONCURRENT = 4;
       const MAX_CLIENT_THUMBNAILS = 160;
+      const FOLDER_PAGE_SIZE = 500;
       const DESKTOP_MESSAGE_TYPE = "sports-cave-desktop";
-      const MINIMUM_DESKTOP_VERSION = 7;
+      const MINIMUM_DESKTOP_VERSION = 8;
       const MAX_CLIENT_FOLDER_CACHE = 24;
       const VIEW_MODES = ["large", "medium", "small", "list", "details"];
       const VIEW_LABELS = { large: "Large icons", medium: "Medium icons", small: "Small icons", list: "List", details: "Details" };
@@ -687,6 +689,7 @@
       const state = {
         rootPath: "",
         rootName: "Sportscave Team Folder",
+        cacheNamespace: "",
         currentPath: query.get("path") || String(restored.currentPath || ""),
         timeZone: "UTC",
         back: Array.isArray(restored.back) ? restored.back.slice(-30) : [],
@@ -701,6 +704,7 @@
         focusedPath: "",
         anchorIndex: -1,
         loading: false,
+        loadingMore: false,
         navigationToken: 0,
         folderCache: new Map(),
         folderRequests: new Map(),
@@ -1102,7 +1106,7 @@
         elements.detailsHeader.setAttribute("aria-hidden", state.view === "details" ? "false" : "true");
         renderModifiedSortHeader();
         elements.items.replaceChildren();
-        if (state.loading) {
+        if (state.loading && !state.items.length) {
           const loading = document.createElement("div");
           loading.className = "loading-state";
           loading.innerHTML = '<span class="loading-ring" aria-hidden="true"></span><span>Opening folder...</span>';
@@ -1137,8 +1141,16 @@
       }
 
       function renderStatus() {
+        if (state.loading && !state.items.length) {
+          elements.itemCount.textContent = "Opening folder...";
+          elements.selectionCount.textContent = "";
+          return;
+        }
         const visible = visibleItems().length;
-        elements.itemCount.textContent = currentSearch() ? `${visible} of ${state.items.length} items` : `${state.items.length} item${state.items.length === 1 ? "" : "s"}`;
+        const loadingText = state.loadingMore ? " · Loading more..." : (state.loading ? " · Refreshing..." : "");
+        elements.itemCount.textContent = currentSearch()
+          ? `${visible} of ${state.items.length} items${loadingText}`
+          : `${state.items.length} item${state.items.length === 1 ? "" : "s"}${loadingText}`;
         const clipboardCount = state.clipboard.items.length;
         elements.selectionCount.textContent = state.selection.size
           ? `${state.selection.size} selected`
@@ -1216,7 +1228,11 @@
       }
 
       function folderCacheKey(path) {
-        return String(path || "").replace(/\/+$/, "").toLocaleLowerCase();
+        return [
+          String(state.cacheNamespace || "anonymous"),
+          String(state.rootPath || ""),
+          String(path || "").replace(/\/+$/, ""),
+        ].join("|").toLocaleLowerCase();
       }
 
       function cachedFolder(path) {
@@ -1234,39 +1250,58 @@
       function rememberFolder(payload, requestedPath) {
         const seconds = Math.max(1, Math.min(180, Number(payload.cached_for_seconds || 30)));
         const entry = { payload, expiresAt: Date.now() + seconds * 1000 };
+        const previousNamespace = state.cacheNamespace;
+        const previousRoot = state.rootPath;
+        state.cacheNamespace = String(payload.cache_namespace || previousNamespace || "");
+        state.rootPath = String(payload.root_path || previousRoot || "");
         for (const path of [requestedPath, payload.current_path]) {
           const key = folderCacheKey(path);
           if (!key) continue;
           state.folderCache.delete(key);
           state.folderCache.set(key, entry);
         }
+        state.cacheNamespace = previousNamespace;
+        state.rootPath = previousRoot;
         while (state.folderCache.size > MAX_CLIENT_FOLDER_CACHE) {
           state.folderCache.delete(state.folderCache.keys().next().value);
         }
       }
 
-      function requestFolder(path, refresh) {
+      function invalidateClientFolderCache(...paths) {
+        const targets = paths.map(path => folderCacheKey(path)).filter(Boolean);
+        if (!targets.length) {
+          state.folderCache.clear();
+          return;
+        }
+        for (const key of Array.from(state.folderCache.keys())) {
+          if (targets.includes(key)) state.folderCache.delete(key);
+        }
+      }
+
+      function requestFolder(path, refresh, page = "") {
         const params = new URLSearchParams();
         if (path) params.set("path", path);
         if (refresh) params.set("refresh", "1");
-        const requestKey = `${folderCacheKey(path)}|${refresh ? "refresh" : "normal"}`;
-        if (!refresh && state.folderRequests.has(requestKey)) {
+        params.set("page_size", String(FOLDER_PAGE_SIZE));
+        if (page) params.set("page", page);
+        const requestKey = `${folderCacheKey(path)}|${refresh ? "refresh" : "normal"}|${page || "first"}`;
+        if (!refresh && !page && state.folderRequests.has(requestKey)) {
           return state.folderRequests.get(requestKey);
         }
         const request = apiJson(`/api/files-list?${params.toString()}`)
           .finally(() => state.folderRequests.delete(requestKey));
-        if (!refresh) state.folderRequests.set(requestKey, request);
+        if (!refresh && !page) state.folderRequests.set(requestKey, request);
         return request;
       }
 
       function applyFolderPayload(payload) {
         state.rootPath = String(payload.root_path || "");
         state.rootName = String(payload.root_name || "Files");
+        state.cacheNamespace = String(payload.cache_namespace || state.cacheNamespace || "");
         state.currentPath = String(payload.current_path || state.rootPath);
         state.timeZone = String(payload.timezone || "UTC");
         state.items = Array.from(payload.items || []);
         state.canDelete = Boolean(payload.can_delete);
-        state.loading = false;
         state.searchByPath[state.currentPath] = state.searchByPath[state.currentPath] || "";
       }
 
@@ -1292,28 +1327,51 @@
           clearSelection();
           stopThumbnailLoading();
           applyFolderPayload(cached);
+          state.loading = false;
+          state.loadingMore = true;
           renderAll();
           elements.results.scrollTop = preserveScroll ? oldScroll : 0;
+          requestFolder(path, true)
+            .then(async payload => {
+              if (token !== state.navigationToken) return;
+              rememberFolder(payload, path);
+              applyFolderPayload(payload);
+              state.loading = false;
+              state.loadingMore = Boolean(payload.has_more && payload.next_page);
+              renderAll();
+              await continueFolderPages(path, payload, token, oldScroll, preserveScroll);
+            })
+            .catch(() => {
+              if (token !== state.navigationToken) return;
+              state.loadingMore = false;
+              renderStatus();
+            });
           return true;
         }
         state.loading = true;
+        state.loadingMore = false;
         elements.helperPanel.classList.remove("visible");
         closeMenus();
         clearSelection();
         stopThumbnailLoading();
         renderItems();
         renderNavigation();
+        renderStatus();
         try {
           const payload = await requestFolder(path, refresh);
           if (token !== state.navigationToken) return false;
           rememberFolder(payload, path);
           applyFolderPayload(payload);
+          state.loading = false;
+          state.loadingMore = Boolean(payload.has_more && payload.next_page);
           renderAll();
           elements.results.scrollTop = preserveScroll ? oldScroll : 0;
+          await continueFolderPages(path, payload, token, oldScroll, preserveScroll);
           return true;
         } catch (error) {
           if (token !== state.navigationToken) return false;
           state.loading = false;
+          state.loadingMore = false;
           state.items = [];
           renderAll();
           const message = error.status === 403
@@ -1321,6 +1379,32 @@
             : (error.message || "This folder could not be loaded right now.");
           showToast(message, { kind: "error", duration: 6000 });
           return false;
+        }
+      }
+
+      async function continueFolderPages(path, firstPayload, token, oldScroll, preserveScroll) {
+        let payload = firstPayload;
+        while (payload && payload.has_more && payload.next_page) {
+          try {
+            payload = await requestFolder(path, false, payload.next_page);
+          } catch (error) {
+            if (token === state.navigationToken) {
+              state.loadingMore = false;
+              renderStatus();
+            }
+            return;
+          }
+          if (token !== state.navigationToken) return;
+          rememberFolder(payload, path);
+          applyFolderPayload(payload);
+          state.loading = false;
+          state.loadingMore = Boolean(payload.has_more && payload.next_page);
+          renderAll();
+          if (preserveScroll) elements.results.scrollTop = oldScroll;
+        }
+        if (token === state.navigationToken) {
+          state.loadingMore = false;
+          renderStatus();
         }
       }
 
@@ -1931,6 +2015,7 @@
           } else {
             showToast(`${operation === "move" ? "Moved" : "Copied"} to ${folderName}`, { kind: "success", duration: 2400 });
           }
+          invalidateClientFolderCache(state.currentPath);
           await navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
         } catch (error) {
           if (error.code === "paste_conflict" && error.conflicts.length) showPasteConflictDialog(error.conflicts);
@@ -2244,6 +2329,7 @@
               });
               closeModal();
               showToast(`Created ${name}`, { kind: "success" });
+              invalidateClientFolderCache(state.currentPath);
               await navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
             } catch (error) {
               button.disabled = false;
@@ -2282,6 +2368,7 @@
               });
               closeModal();
               showToast(`Renamed to ${name}`, { kind: "success" });
+              invalidateClientFolderCache(state.currentPath, item.path);
               await navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
             } catch (error) {
               button.disabled = false;
@@ -2324,6 +2411,7 @@
               clearSelection();
               if (failed.length) showToast(`Deleted ${successful.length}; ${failed.length} could not be deleted.`, { kind: "error", duration: 6000 });
               else showToast(`Deleted ${successful.length} item${successful.length === 1 ? "" : "s"}`, { kind: "success" });
+              invalidateClientFolderCache(state.currentPath, ...items.map(item => item.path));
               await navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true });
             } catch (error) {
               button.disabled = false;
@@ -2621,6 +2709,7 @@
         renderUploads();
         showToast(`Uploaded ${row.name}`, { kind: "success" });
         if (row.destinationPath === state.currentPath) {
+          invalidateClientFolderCache(row.destinationPath);
           window.clearTimeout(state.uploadRefreshTimer);
           state.uploadRefreshTimer = window.setTimeout(
             () => navigateTo(state.currentPath, { remember: false, refresh: true, preserveScroll: true }),

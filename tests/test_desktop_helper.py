@@ -27,16 +27,27 @@ class DesktopHelperContractTests(unittest.TestCase):
 
     def test_installer_builds_per_user_windowless_persistent_webview_host(self):
         self.assertIn("SportsCaveFilesDesktop.cs", self.install)
-        self.assertIn("-OutputType WindowsApplication", self.install)
+        self.assertIn("Microsoft.CSharp.CSharpCodeProvider", self.install)
+        self.assertIn('/target:winexe /win32icon:', self.install)
         self.assertIn("Microsoft.Web.WebView2.Core.dll", self.install)
         self.assertIn("Microsoft.Web.WebView2.Wpf.dll", self.install)
         self.assertIn("WebView2Loader.dll", self.install)
-        self.assertIn("HelperVersion = 7", self.install)
+        self.assertIn("HelperVersion = 8", self.install)
+        self.assertIn("SportsCaveFiles.ico", self.install)
+        self.assertIn("$shortcut.IconLocation = $iconPath", self.install)
         self.assertIn("CurrentVersion\\Run", self.install)
         self.assertIn('" --background', self.install)
         self.assertIn("Sports Cave OS Desktop.lnk", self.install)
         self.assertNotIn("HKLM:\\Software\\Classes", self.install)
         self.assertIn("SportsCaveOSDesktop", self.uninstall)
+
+    def test_files_window_uses_native_folder_icon_and_app_user_model_id(self):
+        self.assertIn('internal const string FilesAppUserModelId = "SportsCave.Files.Desktop"', self.source)
+        self.assertIn("SetCurrentProcessExplicitAppUserModelID(FilesAppUserModelId)", self.source)
+        self.assertIn('Title = "Sports Cave Files"', self.source)
+        self.assertIn("Icon = LoadFilesIcon()", self.source)
+        self.assertIn('"SportsCaveFiles.ico"', self.source)
+        self.assertTrue((HELPER_DIR / "SportsCaveFiles.ico").is_file())
 
     def test_shell_is_persistent_and_custom_protocol_only_shows_or_opens(self):
         self.assertIn("new Mutex(true, InstanceName(MutexName)", self.source)
@@ -48,6 +59,8 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("window.NavigateToFiles", self.source)
         self.assertNotIn("sports-cave-files://drag", self.source)
         self.assertNotIn("TcpListener", self.source)
+        self.assertIn("private void NavigateToFiles(bool allowReload)", self.source)
+        self.assertIn('current.AbsolutePath.Equals("/files-window"', self.source)
 
     def test_files_windows_reuse_the_signed_in_webview_profile(self):
         self.assertIn("CoreWebView2Environment sharedEnvironment = null", self.source)
@@ -207,7 +220,7 @@ class DesktopWindowsBuildTests(unittest.TestCase):
                     "AppUrl": "http://127.0.0.1:8501/files-window",
                     "RootPath": "",
                     "AllowedOrigins": ["http://127.0.0.1:8501"],
-                    "HelperVersion": 7,
+                    "HelperVersion": 8,
                 }
             ),
             encoding="utf-8",

@@ -380,30 +380,45 @@ def configured_root_path(config=None):
 def list_folder(access_token, path="", *, max_entries=2000):
     clean_path = normalize_dropbox_path(path)
     limit = max(1, min(int(max_entries or 2000), 2000))
-    client = team_space_client(access_token)
-    try:
-        response = client.files_list_folder(
-            clean_path,
-            recursive=False,
-            include_deleted=False,
-            include_media_info=False,
-            limit=limit,
-        )
-    except Exception as error:
-        raise _dropbox_error(error) from error
-    entries = list(getattr(response, "entries", ()) or ())
+    page = list_folder_page(access_token, clean_path, limit=min(limit, 2000))
+    entries = list(page.get("entries") or ())
+    cursor = page.get("cursor") or ""
+    has_more = bool(page.get("has_more"))
     seen_cursors = set()
-    while bool(getattr(response, "has_more", False)) and len(entries) < limit:
-        cursor = str(getattr(response, "cursor", "") or "").strip()
+    while has_more and len(entries) < limit:
         if not cursor or cursor in seen_cursors:
             break
         seen_cursors.add(cursor)
-        try:
-            response = client.files_list_folder_continue(cursor)
-        except Exception as error:
-            raise _dropbox_error(error) from error
-        entries.extend(getattr(response, "entries", ()) or ())
+        page = list_folder_page(access_token, clean_path, cursor=cursor, limit=min(limit, 2000))
+        entries.extend(page.get("entries") or ())
+        cursor = page.get("cursor") or ""
+        has_more = bool(page.get("has_more"))
     return [_metadata_to_dict(entry) for entry in entries[:limit]]
+
+
+def list_folder_page(access_token, path="", *, cursor="", limit=500):
+    """Return one non-recursive Dropbox folder page without scanning the whole folder."""
+    clean_path = normalize_dropbox_path(path)
+    page_limit = max(1, min(int(limit or 500), 2000))
+    client = team_space_client(access_token)
+    try:
+        if cursor:
+            response = client.files_list_folder_continue(str(cursor))
+        else:
+            response = client.files_list_folder(
+                clean_path,
+                recursive=False,
+                include_deleted=False,
+                include_media_info=False,
+                limit=page_limit,
+            )
+    except Exception as error:
+        raise _dropbox_error(error) from error
+    return {
+        "entries": [_metadata_to_dict(entry) for entry in (getattr(response, "entries", ()) or ())],
+        "cursor": str(getattr(response, "cursor", "") or ""),
+        "has_more": bool(getattr(response, "has_more", False)),
+    }
 
 
 def list_folder_recursive(access_token, path="", *, max_entries=10000):
