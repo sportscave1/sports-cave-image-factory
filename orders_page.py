@@ -16,6 +16,7 @@ except Exception:  # pragma: no cover - optional at import time
 
 import certificate_engine
 import certificate_job
+import os_accounts
 import order_allocator
 import shopify_sync
 from activity_log import record_activity_log
@@ -464,7 +465,9 @@ def _display_prodigi_status(value):
 
 
 def _developer_mode():
-    return bool(st.session_state.get("developer_unlocked"))
+    return os_accounts.is_admin(
+        st.session_state.get("sports_cave_current_user") or {}
+    )
 
 
 def _certificate_is_uploaded(row):

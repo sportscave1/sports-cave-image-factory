@@ -238,7 +238,6 @@ PAGE_QUERY_PARAM = "page"
 CURRENT_PAGE_STATE_KEY = "current_page"
 LEGACY_PAGE_STATE_KEY = "selected_page"
 APP_VERSION = "Sports Cave Dashboard - 2026-07-21"
-DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
 DRIVE_SECTION_NAMES = {
     "mockups": "Mockups",
     "edition_ops": "Edition Ops",
@@ -4787,6 +4786,102 @@ FINAL
 """
 
 
+PRODUCT_UPLOAD_AUD_PRICING = {
+    "framed": (
+        ("XL", "$349 AUD", "$449 AUD", "$100 AUD", "22%"),
+        ("L", "$259 AUD", "$339 AUD", "$80 AUD", "24%"),
+        ("M", "$209 AUD", "$269 AUD", "$60 AUD", "22%"),
+        ("S", "$159 AUD", "$209 AUD", "$50 AUD", "24%"),
+    ),
+    "unframed": (
+        ("XL", "$159 AUD", "$209 AUD", "$50 AUD", "24%"),
+        ("L", "$119 AUD", "$159 AUD", "$40 AUD", "25%"),
+        ("M", "$85 AUD", "$109 AUD", "$24 AUD", "22%"),
+        ("S", "$55 AUD", "$69 AUD", "$14 AUD", "20%"),
+    ),
+}
+PRODUCT_UPLOAD_PRICE_BLOCK_START = "CENTRAL SPORTS CAVE AUD PRICE LADDER"
+PRODUCT_UPLOAD_PRICE_BLOCK_END = (
+    "These rules do not authorise live publishing or live Shopify price updates."
+)
+
+
+def product_upload_price_ladder_prompt_text():
+    lines = [
+        PRODUCT_UPLOAD_PRICE_BLOCK_START,
+        "Use these exact supplied values. Do not round, recalculate, estimate, or substitute them.",
+        "Selling price is the Shopify Price. RRP is the Shopify Compare-at price.",
+        "",
+        "Black, Oak, and White framed variants use the same framed pricing:",
+    ]
+    for size, price, rrp, saving, discount in PRODUCT_UPLOAD_AUD_PRICING["framed"]:
+        lines.append(
+            f"- {size}: Selling price {price} | RRP / compare-at price {rrp} | "
+            f"Saving {saving} | Approx. discount {discount}"
+        )
+    lines.extend(["", "Unframed variants:"])
+    for size, price, rrp, saving, discount in PRODUCT_UPLOAD_AUD_PRICING["unframed"]:
+        lines.append(
+            f"- {size}: Selling price {price} | RRP / compare-at price {rrp} | "
+            f"Saving {saving} | Approx. discount {discount}"
+        )
+    lines.extend(
+        [
+            "",
+            "NEW PRODUCT CREATION SAFETY",
+            "When creating a new Shopify product:",
+            "- Never set product status to Active.",
+            "- Never publish to Online Store.",
+            "- Keep the product Draft and unpublished.",
+            "- Return the Shopify draft/admin link for manual review.",
+            PRODUCT_UPLOAD_PRICE_BLOCK_END,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _product_upload_price_block_bounds(prompt_text):
+    prompt = str(prompt_text or "")
+    start = prompt.find(PRODUCT_UPLOAD_PRICE_BLOCK_START)
+    if start < 0:
+        return None
+    end = prompt.find(PRODUCT_UPLOAD_PRICE_BLOCK_END, start)
+    if end < 0:
+        return None
+    return start, end + len(PRODUCT_UPLOAD_PRICE_BLOCK_END)
+
+
+def apply_product_upload_pricing_update(prompt_text):
+    prompt = str(prompt_text or "")
+    pricing_block = product_upload_price_ladder_prompt_text()
+    if pricing_block in prompt:
+        return prompt
+
+    bounds = _product_upload_price_block_bounds(prompt)
+    if bounds:
+        start, end = bounds
+        return f"{prompt[:start]}{pricing_block}{prompt[end:]}"
+
+    insertion_marker = "IMAGE ALT TEXT SUB-PROMPT"
+    insertion_index = prompt.find(insertion_marker)
+    if insertion_index >= 0:
+        return (
+            f"{prompt[:insertion_index]}{pricing_block}\n\n"
+            f"{prompt[insertion_index:]}"
+        )
+
+    appendix_marker = "ADDITIONAL REQUIRED SUB-PROMPTS"
+    appendix_index = prompt.find(appendix_marker)
+    if appendix_index >= 0:
+        insertion_index = appendix_index + len(appendix_marker)
+        return (
+            f"{prompt[:insertion_index]}\n\n{pricing_block}"
+            f"{prompt[insertion_index:]}"
+        )
+
+    return f"{prompt.rstrip()}\n\n{pricing_block}".strip()
+
+
 PRODUCT_UPLOAD_MEDIA_PATCH_START = "MEDIA-UPLOAD RELIABILITY PATCH - MANDATORY"
 PRODUCT_UPLOAD_MEDIA_PATCH_END = "END MEDIA-UPLOAD RELIABILITY PATCH"
 
@@ -5049,11 +5144,25 @@ def apply_product_upload_media_reliability_patch(
     ).strip()
 
 
+def apply_product_upload_prompt_updates(
+    prompt_text,
+    metadata=None,
+    *,
+    update_existing=False,
+):
+    prompt = apply_product_upload_pricing_update(prompt_text)
+    return apply_product_upload_media_reliability_patch(
+        prompt,
+        metadata,
+        update_existing=update_existing,
+    )
+
+
 def product_upload_embedded_sections():
     return f"""ADDITIONAL REQUIRED SUB-PROMPTS
 Use these sections inside the product creation/update workflow. Do not run them as separate prompts unless the user explicitly asks.
 
-{sports_cave_pricing.price_ladder_prompt_text()}
+{product_upload_price_ladder_prompt_text()}
 
 IMAGE ALT TEXT SUB-PROMPT
 {PRODUCT_UPLOAD_ALT_TEXT_PROMPT.strip()}
@@ -5071,7 +5180,7 @@ def build_product_upload_prompt(base_prompt, *, metadata=None, update_existing=F
         f"{str(base_prompt or '').strip()}\n\n"
         f"{product_upload_embedded_sections()}"
     ).strip()
-    return apply_product_upload_media_reliability_patch(
+    return apply_product_upload_prompt_updates(
         existing_prompt,
         metadata,
         update_existing=update_existing,
@@ -5379,6 +5488,10 @@ def current_prompt_record(prompt_id, default_text, *, title="", module=""):
     )
 
 
+def prompt_editing_allowed():
+    return os_accounts.can_edit_prompts(current_os_user())
+
+
 def current_lifestyle_prompt_text(prompt_filename, default_text):
     prompt_key = prompt_key_from_prompt_filename(prompt_filename)
     prompt_id = prompt_edit_id("lifestyle", prompt_key)
@@ -5390,20 +5503,27 @@ def current_lifestyle_prompt_text(prompt_filename, default_text):
 
 
 def render_prompt_edit_button(prompt_id, *, label="✎"):
+    if not prompt_editing_allowed():
+        return False
     button_key = f"prompt-edit-button::{prompt_id}"
     panel_key = f"prompt-edit-open::{prompt_id}"
-    if st.button(label, key=button_key, help="Developer password required.", use_container_width=True):
+    if st.button(label, key=button_key, help="Edit prompt", use_container_width=True):
         st.session_state[panel_key] = True
+        return True
+    return False
 
 
 def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=420, default_text=None):
     panel_key = f"prompt-edit-open::{prompt_id}"
+    if not prompt_editing_allowed():
+        st.session_state.pop(panel_key, None)
+        return
     if not st.session_state.get(panel_key):
         return
 
     with st.container(border=True):
         source_record = prompt_store.get_prompt_source(prompt_id, prompt_text, prompt_name=title)
-        st.caption(f"Developer only. {source_record.get('source_label')}")
+        st.caption(source_record.get("source_label") or "")
         if source_record.get("warning"):
             st.warning(source_record["warning"])
         edited_text = st.text_area(
@@ -5412,15 +5532,10 @@ def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=420, defau
             height=height,
             key=f"prompt-edit-text::{prompt_id}",
         )
-        password = st.text_input(
-            "Developer password",
-            type="password",
-            key=f"prompt-edit-password::{prompt_id}",
-        )
         cols = st.columns([1, 1, 3])
         if cols[0].button("Save prompt", key=f"prompt-edit-save::{prompt_id}", use_container_width=True):
-            if password != DEVELOPER_PAGE_PASSWORD:
-                st.error("Developer password is incorrect.")
+            if not prompt_editing_allowed():
+                st.error("Prompt editing is not approved for this account.")
             else:
                 try:
                     saved = prompt_store.save_prompt(prompt_id, title, edited_text)
@@ -5604,22 +5719,25 @@ def render_copyable_prompt(
     safe_text = html.escape(prompt_text)
 
     with st.container(border=True):
+        can_edit = prompt_editing_allowed()
         if show_title:
-            header_cols = st.columns([6, 1.2, 0.35])
+            header_cols = st.columns([6, 1.2, 0.35] if can_edit else [6, 1.2])
             header_cols[0].markdown(f"**{title}**")
             header_cols[0].caption(prompt_record.get("source_label") or "")
             if prompt_record.get("warning"):
                 header_cols[0].warning(prompt_record["warning"])
             with header_cols[1]:
                 render_copy_prompt_button(prompt_text, f"copy::{key}")
-            with header_cols[2]:
-                render_prompt_edit_button(prompt_id)
+            if can_edit:
+                with header_cols[2]:
+                    render_prompt_edit_button(prompt_id)
         else:
-            header_cols = st.columns([1.2, 0.35, 6])
+            header_cols = st.columns([1.2, 0.35, 6] if can_edit else [1.2, 6])
             with header_cols[0]:
                 render_copy_prompt_button(prompt_text, f"copy::{key}")
-            with header_cols[1]:
-                render_prompt_edit_button(prompt_id)
+            if can_edit:
+                with header_cols[1]:
+                    render_prompt_edit_button(prompt_id)
 
         render_prompt_edit_panel(title, prompt_id, prompt_text, default_text=default_prompt_text)
 
@@ -5671,6 +5789,9 @@ def _close_mockup_prompt_editor(prompt_id):
 
 
 def render_mockup_prompt_editor(title, prompt_id, prompt_text, default_text=None):
+    if not prompt_editing_allowed():
+        _close_mockup_prompt_editor(prompt_id)
+        return
     _consume_mockup_prompt_edit_request(prompt_id)
     edit_key = _mockup_prompt_edit_key(prompt_id)
     if not st.session_state.get(edit_key):
@@ -5679,26 +5800,9 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text, default_text=None
     with st.container(border=True):
         st.markdown(f"**Edit prompt: {title}**")
         source_record = prompt_store.get_prompt_source(prompt_id, prompt_text, prompt_name=title, module="lifestyle")
-        st.caption(f"Developer only. {source_record.get('source_label')}")
+        st.caption(source_record.get("source_label") or "")
         if source_record.get("warning"):
             st.warning(source_record["warning"])
-        if not st.session_state.get("developer_unlocked"):
-            password = st.text_input(
-                "Developer password",
-                type="password",
-                key=f"mockup-prompt-unlock-password::{prompt_id}",
-            )
-            cols = st.columns([1, 1, 3])
-            if cols[0].button("Unlock Developer", key=f"mockup-prompt-unlock::{prompt_id}", type="primary", use_container_width=True):
-                if password == DEVELOPER_PAGE_PASSWORD:
-                    st.session_state.developer_unlocked = True
-                    st.rerun()
-                else:
-                    st.error("Incorrect developer password.")
-            if cols[1].button("Cancel", key=f"mockup-prompt-unlock-cancel::{prompt_id}", use_container_width=True):
-                _close_mockup_prompt_editor(prompt_id)
-                st.rerun()
-            return
 
         edited_text = st.text_area(
             "Prompt text",
@@ -5708,18 +5812,21 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text, default_text=None
         )
         cols = st.columns([1, 1, 3])
         if cols[0].button("Save", key=f"mockup-prompt-edit-save::{prompt_id}", type="primary", use_container_width=True):
-            try:
-                saved = prompt_store.save_prompt(prompt_id, title, edited_text, module="lifestyle")
-            except Exception as error:
-                st.error(str(error))
+            if not prompt_editing_allowed():
+                st.error("Prompt editing is not approved for this account.")
             else:
-                _close_mockup_prompt_editor(prompt_id)
-                st.session_state["mockup_prompt_notice"] = (
-                    "Prompt saved to Supabase"
-                    if saved.get("persisted")
-                    else (saved.get("warning") or saved.get("source_label") or "Not persisted — Supabase unavailable")
-                )
-                st.rerun()
+                try:
+                    saved = prompt_store.save_prompt(prompt_id, title, edited_text, module="lifestyle")
+                except Exception as error:
+                    st.error(str(error))
+                else:
+                    _close_mockup_prompt_editor(prompt_id)
+                    st.session_state["mockup_prompt_notice"] = (
+                        "Prompt saved to Supabase"
+                        if saved.get("persisted")
+                        else (saved.get("warning") or saved.get("source_label") or "Not persisted — Supabase unavailable")
+                    )
+                    st.rerun()
         if cols[1].button("Cancel", key=f"mockup-prompt-edit-cancel::{prompt_id}", use_container_width=True):
             _close_mockup_prompt_editor(prompt_id)
             st.rerun()
@@ -5754,6 +5861,7 @@ def render_mockup_prompt_editor(title, prompt_id, prompt_text, default_text=None
 
 
 def render_mockup_prompt_bar(prompt_text, key, prompt_id, show_edit=True):
+    show_edit = bool(show_edit and prompt_editing_allowed())
     prompt_text_json = json.dumps(prompt_text)
     prompt_id_json = json.dumps(prompt_id)
     bar_id = f"mockup-prompt-bar-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
@@ -5942,13 +6050,16 @@ def render_mockup_prompt_action_row(title, prompt_text, key, prompt_id):
     notice = st.session_state.pop("mockup_prompt_notice", "")
     if notice:
         st.success(notice)
-    action_cols = st.columns([8, 1])
-    with action_cols[0]:
+    if prompt_editing_allowed():
+        action_cols = st.columns([8, 1])
+        with action_cols[0]:
+            render_mockup_prompt_bar(prompt_text, f"mockup-copy::{key}", prompt_id, show_edit=False)
+        with action_cols[1]:
+            if st.button("✎", key=f"mockup-prompt-edit-button::{prompt_id}", help="Edit prompt", use_container_width=True):
+                st.session_state[_mockup_prompt_edit_key(prompt_id)] = True
+                st.rerun()
+    else:
         render_mockup_prompt_bar(prompt_text, f"mockup-copy::{key}", prompt_id, show_edit=False)
-    with action_cols[1]:
-        if st.button("✎", key=f"mockup-prompt-edit-button::{prompt_id}", help="Edit prompt", use_container_width=True):
-            st.session_state[_mockup_prompt_edit_key(prompt_id)] = True
-            st.rerun()
     render_mockup_prompt_editor(title, prompt_id, prompt_text, default_text=default_prompt_text)
 
 
@@ -7571,7 +7682,7 @@ def render_product_uploads_page():
         get_product_upload_prompt(source_metadata, update_existing=False),
         "new-shopify-product-prompt",
         prompt_id=prompt_edit_id("product-upload", "new-shopify-product"),
-        prompt_transform=lambda prompt: apply_product_upload_media_reliability_patch(
+        prompt_transform=lambda prompt: apply_product_upload_prompt_updates(
             prompt,
             source_metadata,
             update_existing=False,
@@ -7585,7 +7696,7 @@ def render_product_uploads_page():
         get_product_upload_prompt(source_metadata, update_existing=True),
         "update-existing-shopify-product-prompt",
         prompt_id=prompt_edit_id("product-upload", "update-existing-shopify-product"),
-        prompt_transform=lambda prompt: apply_product_upload_media_reliability_patch(
+        prompt_transform=lambda prompt: apply_product_upload_prompt_updates(
             prompt,
             source_metadata,
             update_existing=True,
@@ -8008,10 +8119,6 @@ def logout_app():
     st.stop()
 
 
-def _developer_unlocked():
-    return bool(st.session_state.get("developer_unlocked"))
-
-
 def _developer_section_enabled(key, label):
     state_key = f"{key}-enabled"
     button_key = f"{key}-button"
@@ -8038,24 +8145,6 @@ def _developer_action_error(label, error):
     st.error(f"{label} failed.")
     st.caption(f"{type(error).__name__}: {error}")
     st.caption("Full traceback is logged in Render.")
-
-
-def _render_developer_password_gate(title="Developer", caption="Protected diagnostics and setup tools."):
-    st.title(title)
-    st.caption(caption)
-    password = st.text_input(
-        "Developer password",
-        type="password",
-        key="developer-page-password-input",
-    )
-    unlock_cols = st.columns([1, 2])
-    if unlock_cols[0].button("Unlock Developer", type="primary", use_container_width=True):
-        if password == DEVELOPER_PAGE_PASSWORD:
-            st.session_state.developer_unlocked = True
-            st.rerun()
-        else:
-            st.error("Incorrect developer password.")
-    unlock_cols[1].caption("Unlock is kept only for this Streamlit session.")
 
 
 def _allocation_baseline_row_from_product(product):
@@ -8856,6 +8945,14 @@ def _account_permission_fields(prefix, selected=()):
             help="Allow this worker to see the Activity log on Home.",
         ):
             chosen.append(os_accounts.ACTIVITY_LOG_CAPABILITY)
+    with columns[1]:
+        if st.checkbox(
+            "Edit prompts",
+            value=os_accounts.EDIT_PROMPTS_CAPABILITY in selected,
+            key=f"{prefix}::{os_accounts.EDIT_PROMPTS_CAPABILITY}",
+            help="Show prompt editing controls and allow this account to save or restore prompts.",
+        ):
+            chosen.append(os_accounts.EDIT_PROMPTS_CAPABILITY)
     return chosen
 
 
@@ -9023,19 +9120,13 @@ def render_accounts_access_page():
 
 
 def render_settings_page():
-    admin_account = os_accounts.is_admin(current_os_user())
-    if not admin_account and not _developer_unlocked():
-        _render_developer_password_gate()
+    if not os_accounts.is_admin(current_os_user()):
+        st.title("Access not approved")
+        st.caption("This page is available to the admin account only.")
         return
 
     st.title("Developer")
     st.caption("Protected setup tools. Diagnostics run only when you click a button.")
-    if not admin_account:
-        lock_cols = st.columns([1, 3])
-        if lock_cols[0].button("Lock Developer", use_container_width=True):
-            st.session_state.developer_unlocked = False
-            st.rerun()
-        lock_cols[1].caption("No store, database, Drive, or storage calls run just by opening this page.")
 
     with st.expander("Basic App Info", expanded=True):
         st.write(f"**App version:** {APP_VERSION}")
@@ -9043,7 +9134,6 @@ def render_settings_page():
         st.write(f"**Deployment timestamp:** {os.getenv('RENDER_DEPLOY_CREATED_AT') or os.getenv('DEPLOYMENT_TIMESTAMP') or 'local'}")
         st.write(f"**Service role:** {os.getenv('SPORTS_CAVE_SERVICE_ROLE') or 'app'}")
         st.write(f"**App password protection:** {get_password_protection_status()}")
-        st.write(f"**Protected tools password:** {'Custom' if os.getenv('DEVELOPER_PAGE_PASSWORD') else 'Default'}")
         st.write(f"**Output folder path:** `{RUNS_DIR}`")
         st.write(f"**Python working directory:** `{Path.cwd()}`")
 
@@ -11876,10 +11966,12 @@ def render_selected_page(current_page):
         render_mockups_page()
     elif current_page == "Social Media Reels Studio":
         get_social_media_reels_studio_page().render_page(
-            developer_password=DEVELOPER_PAGE_PASSWORD
+            can_edit_prompts=prompt_editing_allowed()
         )
     elif current_page == "Design Studio":
-        get_design_studio_page().render_design_studio_page(developer_password=DEVELOPER_PAGE_PASSWORD)
+        get_design_studio_page().render_design_studio_page(
+            can_edit_prompts=prompt_editing_allowed()
+        )
     elif current_page == "Edition Ops":
         get_edition_ops().render_page()
     elif current_page == "Orders":
@@ -11958,7 +12050,7 @@ def main():
         print(f"ERROR {error_message}", flush=True)
         logging.exception(error_message)
         st.error("This page failed to load, but Sports Cave is still running.")
-        if _developer_unlocked():
+        if os_accounts.is_admin(current_os_user()):
             st.exception(error)
         else:
             st.caption("Technical details are available in protected tools.")

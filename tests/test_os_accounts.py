@@ -174,6 +174,37 @@ class AccountAccessTests(unittest.TestCase):
             )
         )
 
+    def test_prompt_editing_defaults_off_for_workers_and_on_for_admin(self):
+        admin = {"role": "admin", "is_active": True, "page_permissions": []}
+        worker = {
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["product_uploads"],
+        }
+
+        self.assertTrue(os_accounts.can_edit_prompts(admin))
+        self.assertFalse(os_accounts.can_edit_prompts(worker))
+        self.assertTrue(
+            os_accounts.can_edit_prompts(
+                {
+                    **worker,
+                    "page_permissions": [
+                        "product_uploads",
+                        os_accounts.EDIT_PROMPTS_CAPABILITY,
+                    ],
+                }
+            )
+        )
+        self.assertFalse(
+            os_accounts.can_edit_prompts(
+                {
+                    **worker,
+                    "is_active": False,
+                    "page_permissions": [os_accounts.EDIT_PROMPTS_CAPABILITY],
+                }
+            )
+        )
+
     def test_activity_log_capability_is_accepted_by_permission_storage(self):
         class RecordingCursor:
             def __init__(self):
@@ -196,6 +227,32 @@ class AccountAccessTests(unittest.TestCase):
         self.assertTrue(
             any(
                 parameters == ("worker-1", os_accounts.ACTIVITY_LOG_CAPABILITY)
+                for _, parameters in cursor.calls
+            )
+        )
+
+    def test_prompt_editing_capability_is_accepted_by_permission_storage(self):
+        class RecordingCursor:
+            def __init__(self):
+                self.calls = []
+
+            def execute(self, sql, parameters):
+                self.calls.append((sql, parameters))
+
+        cursor = RecordingCursor()
+        selected = os_accounts.PostgresAccountStore._replace_permissions(
+            cursor,
+            "worker-1",
+            ["product_uploads", os_accounts.EDIT_PROMPTS_CAPABILITY, "not-a-permission"],
+        )
+
+        self.assertEqual(
+            selected,
+            [os_accounts.EDIT_PROMPTS_CAPABILITY, "product_uploads"],
+        )
+        self.assertTrue(
+            any(
+                parameters == ("worker-1", os_accounts.EDIT_PROMPTS_CAPABILITY)
                 for _, parameters in cursor.calls
             )
         )
@@ -303,6 +360,31 @@ class AccountAccessTests(unittest.TestCase):
         self.assertEqual(updated["page_permissions"], ["mockups", "orders"])
         self.assertEqual(updated["display_name"], "VA One")
         self.assertEqual(updated["email"], "worker@sportscave.test")
+
+    def test_prompt_editing_approval_is_saved_for_new_and_existing_workers(self):
+        store = FakeAccountStore()
+        worker = os_accounts.create_worker_account(
+            username="prompt-editor",
+            display_name="Prompt Editor",
+            password="Worker password 26!",
+            page_keys=("product_uploads", os_accounts.EDIT_PROMPTS_CAPABILITY),
+            store=store,
+        )
+
+        self.assertTrue(os_accounts.can_edit_prompts(worker))
+        self.assertIn(os_accounts.EDIT_PROMPTS_CAPABILITY, worker["page_permissions"])
+
+        updated = os_accounts.update_worker_account(
+            worker["id"],
+            username="prompt-editor",
+            display_name="Prompt Editor",
+            is_active=True,
+            page_keys=("product_uploads",),
+            store=store,
+        )
+
+        self.assertFalse(os_accounts.can_edit_prompts(updated))
+        self.assertNotIn(os_accounts.EDIT_PROMPTS_CAPABILITY, updated["page_permissions"])
 
     def test_account_timezones_default_by_role(self):
         self.assertEqual(os_accounts.default_timezone_for_role("admin"), "Australia/Sydney")
@@ -1410,6 +1492,85 @@ class AccountAccessTests(unittest.TestCase):
 
         self.assertIn('"View activity log"', permission_source)
         self.assertIn("os_accounts.ACTIVITY_LOG_CAPABILITY", permission_source)
+
+    def test_accounts_access_exposes_prompt_editing_permission_tick(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        permission_source = source[
+            source.index("def _account_permission_fields") :
+            source.index("\n\ndef render_accounts_access_page")
+        ]
+
+        self.assertIn('"Edit prompts"', permission_source)
+        self.assertIn("os_accounts.EDIT_PROMPTS_CAPABILITY", permission_source)
+        self.assertIn("create-worker-permission", source)
+        self.assertIn("edit-worker-permission", source)
+
+    def test_prompt_edit_surfaces_use_account_permission_without_developer_passwords(self):
+        sources = {
+            filename: (ROOT / filename).read_text(encoding="utf-8")
+            for filename in (
+                "app.py",
+                "os_pages.py",
+                "design_studio_page.py",
+                "social_media_reels_studio_page.py",
+            )
+        }
+
+        for filename, source in sources.items():
+            with self.subTest(filename=filename):
+                self.assertNotIn("Developer password", source)
+                self.assertNotIn("DEVELOPER_PAGE_PASSWORD", source)
+                self.assertNotIn("developer_unlocked", source)
+
+        app_prompt_button = sources["app.py"][
+            sources["app.py"].index("def render_prompt_edit_button") :
+            sources["app.py"].index("\n\ndef render_prompt_edit_panel")
+        ]
+        self.assertIn("if not prompt_editing_allowed():", app_prompt_button)
+        self.assertIn("return False", app_prompt_button)
+        self.assertIn("if can_edit_prompts:", sources["design_studio_page.py"])
+        self.assertIn("editing_enabled = bool(can_edit_prompts)", sources["social_media_reels_studio_page.py"])
+
+    def test_product_upload_prompt_edit_buttons_follow_account_permission(self):
+        def render_for(user):
+            app_test = AppTest.from_file(str(ROOT / "app.py"))
+            app_test.session_state["sports_cave_authenticated"] = True
+            app_test.session_state["sports_cave_current_user"] = user
+            app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
+            app_test.session_state["current_page"] = "Product Uploads"
+            app_test.session_state["selected_page"] = "Product Uploads"
+            app_test.run(timeout=20)
+            self.assertFalse(app_test.exception)
+            return sum(button.label == "\u270e" for button in app_test.button)
+
+        worker = {
+            "id": "worker-no-prompt-edit",
+            "username": "worker",
+            "display_name": "Worker",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["product_uploads"],
+        }
+        approved_worker = {
+            **worker,
+            "id": "worker-with-prompt-edit",
+            "page_permissions": [
+                "product_uploads",
+                os_accounts.EDIT_PROMPTS_CAPABILITY,
+            ],
+        }
+        admin = {
+            "id": "admin-prompt-edit",
+            "username": "nathan",
+            "display_name": "Nathan",
+            "role": "admin",
+            "is_active": True,
+            "page_permissions": [],
+        }
+
+        self.assertEqual(render_for(worker), 0)
+        self.assertEqual(render_for(approved_worker), 2)
+        self.assertEqual(render_for(admin), 2)
 
     def test_admin_home_still_renders_activity_log(self):
         app_test = AppTest.from_file(str(ROOT / "app.py"))

@@ -3031,7 +3031,8 @@ def _render_editable_prompt(
         disabled=not editing_enabled,
     )
     if not editing_enabled:
-        st.caption("Unlock Developer prompt editing above to save or restore prompts.")
+        _copy_button(edited_text, key, copy_label, large=True)
+        return
     cols = st.columns([1.25, 1, 1])
     with cols[0]:
         _copy_button(edited_text, key, copy_label, large=True)
@@ -3095,7 +3096,7 @@ def _render_editable_prompt(
             st.rerun()
 
 
-def render_page(developer_password: str = "") -> None:
+def render_page(can_edit_prompts: bool = False) -> None:
     page_started = time.perf_counter()
     _inject_styles()
     _ensure_wizard_flags()
@@ -3120,27 +3121,7 @@ def render_page(developer_password: str = "") -> None:
         unsafe_allow_html=True,
     )
 
-    editing_enabled = bool(st.session_state.get("developer_unlocked")) or not developer_password
-    with st.expander("Prompt editing", expanded=False):
-        if editing_enabled:
-            st.success("Developer prompt editing is unlocked.")
-        else:
-            st.caption("Use the existing Developer password to edit, save, or restore persistent prompts.")
-            entered_password = st.text_input(
-                "Developer password",
-                type="password",
-                key="social-reels-prompt-developer-password",
-            )
-            if st.button(
-                "Unlock Prompt Editing",
-                key="social-reels-prompt-developer-unlock",
-                use_container_width=True,
-            ):
-                if entered_password == developer_password:
-                    st.session_state["developer_unlocked"] = True
-                    st.rerun()
-                else:
-                    st.error("Developer password is incorrect.")
+    editing_enabled = bool(can_edit_prompts)
 
     scene_options = {scene["name"]: scene["slug"] for scene in SCENES}
     default_scene = st.session_state.get("smrs_selected_scene_slug", SCENES[0]["slug"])

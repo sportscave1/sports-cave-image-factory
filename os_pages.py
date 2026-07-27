@@ -18,6 +18,7 @@ import streamlit.components.v1 as components
 from activity_log import record_activity_log
 import certificate_job
 import db
+import os_accounts
 import prompt_store
 import shopify_sync
 import supabase_backend
@@ -30,7 +31,6 @@ SUPABASE_PAGE_CACHE_TTL_SECONDS = int(os.getenv("SUPABASE_PAGE_CACHE_TTL_SECONDS
 PRODUCT_CACHE_DISPLAY_LIMIT = 5000
 ORDER_SCREEN_CACHE_LIMIT = int(os.getenv("SUPABASE_ORDER_SCREEN_CACHE_LIMIT", "1500"))
 DEFAULT_PAGE_SIZE = 50
-DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
 PRODIGI_CERTIFICATE_ACTION_LOADING_KEY = "prodigi_certificate_action_loading"
 PRODIGI_CERTIFICATE_ACTION_STATE_KEY = "prodigi_certificate_action_state"
 PRODIGI_CERTIFICATE_ACTION_STALE_SECONDS = 300
@@ -635,7 +635,10 @@ def prodigi_variant_copy_text(row):
 
 def prodigi_reference_table_html(rows):
     headers = ("Sports Cave Variant", "Sports Cave Frame", "Sports Cave Size", "Fulfilment Product", "Fulfilment Code", "Fulfilment Frame Colour")
-    header_html = "".join(f"<th>{html.escape(header)}</th>" for header in headers)
+    header_html = "".join(
+        f'<th style="background:#ffffff !important;color:#111111 !important;">{html.escape(header)}</th>'
+        for header in headers
+    )
     body_rows = []
     for row in rows:
         cells = []
@@ -654,15 +657,16 @@ def prodigi_reference_table_html(rows):
       .prodigi-reference-table th {{
         position: sticky;
         top: 0;
-        background: #151515;
-        color: #ffffff !important;
+        background: #ffffff !important;
+        color: #111111 !important;
         text-align: left;
         padding: 0.55rem 0.6rem;
-        border-bottom: 1px solid rgba(218, 179, 92, 0.35);
+        border-bottom: 1px solid rgba(15, 15, 15, 0.18);
       }}
       .prodigi-reference-table thead th,
       .prodigi-reference-table thead th * {{
-        color: #ffffff !important;
+        background: #ffffff !important;
+        color: #111111 !important;
       }}
       .prodigi-reference-table td {{
         color: #efe9dd;
@@ -9232,15 +9236,28 @@ def _prompt_edit_id(namespace, key):
     return f"{namespace}::{key}"
 
 
+def prompt_editing_allowed():
+    return os_accounts.can_edit_prompts(
+        st.session_state.get("sports_cave_current_user") or {}
+    )
+
+
 def render_prompt_edit_button(prompt_id, *, label="✎"):
+    if not prompt_editing_allowed():
+        return False
     button_key = f"prompt-edit-button::{prompt_id}"
     panel_key = f"prompt-edit-open::{prompt_id}"
-    if st.button(label, key=button_key, help="Developer password required.", use_container_width=True):
+    if st.button(label, key=button_key, help="Edit prompt", use_container_width=True):
         st.session_state[panel_key] = True
+        return True
+    return False
 
 
 def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=360, default_text=None):
     panel_key = f"prompt-edit-open::{prompt_id}"
+    if not prompt_editing_allowed():
+        st.session_state.pop(panel_key, None)
+        return prompt_text
     if not st.session_state.get(panel_key):
         return prompt_text
 
@@ -9251,7 +9268,7 @@ def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=360, defau
             prompt_name=title,
             module="marketing",
         )
-        st.caption(f"Developer only. {source_record.get('source_label')}")
+        st.caption(source_record.get("source_label") or "")
         if source_record.get("warning"):
             st.warning(source_record["warning"])
         edited_text = st.text_area(
@@ -9260,15 +9277,10 @@ def render_prompt_edit_panel(title, prompt_id, prompt_text, *, height=360, defau
             height=height,
             key=f"prompt-edit-text::{prompt_id}",
         )
-        password = st.text_input(
-            "Developer password",
-            type="password",
-            key=f"prompt-edit-password::{prompt_id}",
-        )
         cols = st.columns([1, 1, 3])
         if cols[0].button("Save prompt", key=f"prompt-edit-save::{prompt_id}", use_container_width=True):
-            if password != DEVELOPER_PAGE_PASSWORD:
-                st.error("Developer password is incorrect.")
+            if not prompt_editing_allowed():
+                st.error("Prompt editing is not approved for this account.")
             else:
                 try:
                     saved = prompt_store.save_prompt(prompt_id, title, edited_text, module="marketing")
@@ -9336,11 +9348,13 @@ def render_prompt_block(title, prompt, key, when_to_use=None, height=220):
             key=f"prompt-text-{key}",
             label_visibility="collapsed",
         )
-        action_cols = st.columns([1.2, 0.35, 4.45])
+        can_edit = prompt_editing_allowed()
+        action_cols = st.columns([1.2, 0.35, 4.45] if can_edit else [1.2, 4.8])
         with action_cols[0]:
             render_copy_text_button(prompt_text, f"marketing-{key}", "Copy Prompt")
-        with action_cols[1]:
-            render_prompt_edit_button(prompt_id)
+        if can_edit:
+            with action_cols[1]:
+                render_prompt_edit_button(prompt_id)
         render_prompt_edit_panel(title, prompt_id, prompt_text, default_text=prompt)
 
 

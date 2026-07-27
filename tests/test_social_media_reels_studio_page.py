@@ -64,7 +64,8 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
 
         self.assertIn('"Social Media Reels Studio"', source)
         self.assertIn("get_social_media_reels_studio_page().render_page(", source)
-        self.assertIn("developer_password=DEVELOPER_PAGE_PASSWORD", source)
+        self.assertIn("can_edit_prompts=prompt_editing_allowed()", source)
+        self.assertNotIn("developer_password=DEVELOPER_PAGE_PASSWORD", source)
 
     def test_ads_route_does_not_import_legacy_marketing_factory_page_bundle(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
@@ -75,11 +76,12 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertNotIn("get_marketing_factory_page().render_page()", route_source)
         self.assertNotIn("os_route_pages().render_marketing_factory_page()", route_source)
 
-    def test_top_level_page_errors_keep_technical_details_protected(self):
+    def test_top_level_page_errors_show_technical_details_to_admin_only(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         main_source = source[source.index("def main") :]
 
-        self.assertIn("if _developer_unlocked():", main_source)
+        self.assertIn("if os_accounts.is_admin(current_os_user()):", main_source)
+        self.assertNotIn("developer_unlocked", main_source)
         self.assertIn("st.exception(error)", main_source)
         self.assertIn("Technical details are available in protected tools.", main_source)
 
@@ -508,6 +510,11 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertIn('"Prompt saved"', helper)
         self.assertIn('"Prompt restored to default"', helper)
         self.assertIn('"Save failed — existing prompt remains unchanged"', helper)
+        self.assertLess(
+            helper.index("if not editing_enabled:"),
+            helper.index("cols = st.columns"),
+        )
+        self.assertIn("_copy_button(edited_text, key, copy_label, large=True)", helper)
 
     def test_reels_hub_scene_changes_image_and_video_prompts(self):
         holding = reels.build_reels_hub_payload("roger-federer", "Roger Federer", "Tennis", "", "collector-admire")

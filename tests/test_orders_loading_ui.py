@@ -34,8 +34,9 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("render_edition_orders_page", source)
         self.assertNotIn("render_edition_integrity_check_page", source)
         self.assertIn('current_page in {"Dashboard", "Products", "Edition Ops", "Orders", "Developer", "Settings"}', source)
-        self.assertIn("DEVELOPER_PAGE_PASSWORD", source)
-        self.assertIn("developer_unlocked", source)
+        self.assertNotIn("DEVELOPER_PAGE_PASSWORD", source)
+        self.assertNotIn("developer_unlocked", source)
+        self.assertIn("os_accounts.is_admin(current_os_user())", source)
 
     def test_edition_ops_uses_one_editor_and_no_old_data_sources(self):
         source = (ROOT / "edition_ops.py").read_text(encoding="utf-8")
@@ -1367,7 +1368,7 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn('@app.api_route("/{path:path}"', source)
         self.assertNotIn('@app.websocket("/{path:path}")', source)
 
-    def test_prompt_editing_is_password_gated_and_backend_persisted(self):
+    def test_prompt_editing_is_account_gated_and_backend_persisted(self):
         app_source = (ROOT / "app.py").read_text(encoding="utf-8")
         os_pages_source = (ROOT / "os_pages.py").read_text(encoding="utf-8")
 
@@ -1375,8 +1376,10 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("import prompt_store", os_pages_source)
         self.assertIn("def render_prompt_edit_controls", app_source)
         self.assertIn("def render_prompt_edit_controls", os_pages_source)
-        self.assertIn("Developer password", app_source)
-        self.assertIn("DEVELOPER_PAGE_PASSWORD", app_source)
+        self.assertNotIn("Developer password", app_source)
+        self.assertNotIn("DEVELOPER_PAGE_PASSWORD", app_source)
+        self.assertIn("prompt_editing_allowed()", app_source)
+        self.assertIn("os_accounts.can_edit_prompts", app_source)
         self.assertIn('label="✎"', app_source)
         self.assertIn('div[data-testid="stButton"] button', app_source)
         self.assertIn("prompt_store.save_prompt", app_source)
@@ -1407,7 +1410,8 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertIn("Prompt saved", mockup_actions)
         self.assertIn("Prompt copied", mockup_actions)
         self.assertIn("prompt_store.save_prompt", mockup_actions)
-        self.assertIn("Developer password", mockup_actions)
+        self.assertNotIn("Developer password", mockup_actions)
+        self.assertIn("prompt_editing_allowed()", mockup_actions)
         self.assertIn("mockup_prompt_edit", mockup_actions)
         self.assertIn("prompt_edit", mockup_actions)
         self.assertIn("mockup-prompt-edit-button", mockup_actions)
@@ -2960,7 +2964,7 @@ class EditionOpsUiTests(unittest.TestCase):
 
         diagnostics.assert_not_called()
 
-    def test_sync_diagnostics_available_when_developer_unlocked(self):
+    def test_sync_diagnostics_available_to_signed_in_admin(self):
         class FakeColumn:
             def text_input(self, *args, **kwargs):
                 return ""
@@ -2975,7 +2979,11 @@ class EditionOpsUiTests(unittest.TestCase):
                     orders_page.META_KEY: {"last_refreshed": "2026-06-29T06:00:00Z"},
                     orders_page.SYNC_RESULT_KEY: {"shopify_orders_fetched": 2},
                     orders_page.NOTICE_KEY: "",
-                    "developer_unlocked": True,
+                    "sports_cave_current_user": {
+                        "id": "admin-1",
+                        "role": "admin",
+                        "is_active": True,
+                    },
                 }
 
             def title(self, *args, **kwargs):

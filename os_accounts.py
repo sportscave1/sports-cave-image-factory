@@ -12,6 +12,7 @@ ADMIN_TIMEZONE = "Australia/Sydney"
 WORKER_TIMEZONE = "Asia/Manila"
 FILES_DELETE_CAPABILITY = "delete_files"
 ACTIVITY_LOG_CAPABILITY = "view_activity_log"
+EDIT_PROMPTS_CAPABILITY = "edit_prompts"
 
 PAGE_REGISTRY = (
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
@@ -187,6 +188,15 @@ def can_view_activity_log(user):
         can_access_page(user, "Dashboard")
         and ACTIVITY_LOG_CAPABILITY in permission_keys(user)
     )
+
+
+def can_edit_prompts(user):
+    """Return whether the signed-in account may edit persistent prompts."""
+    if not user or not bool(user.get("is_active", True)):
+        return False
+    if is_admin(user):
+        return True
+    return EDIT_PROMPTS_CAPABILITY in permission_keys(user)
 
 
 def allowed_navigation_routes(user):
@@ -406,6 +416,7 @@ class PostgresAccountStore:
         valid_keys = {page["key"] for page in worker_assignable_pages()}
         valid_keys.add(FILES_DELETE_CAPABILITY)
         valid_keys.add(ACTIVITY_LOG_CAPABILITY)
+        valid_keys.add(EDIT_PROMPTS_CAPABILITY)
         selected = sorted(
             {
                 normalise_page_key(key)

@@ -1,7 +1,6 @@
 import hashlib
 import html
 import json
-import os
 import textwrap
 from pathlib import Path
 
@@ -12,7 +11,6 @@ from activity_log import record_activity_log
 import prompt_store
 
 
-DEFAULT_DEVELOPER_PAGE_PASSWORD = os.getenv("DEVELOPER_PAGE_PASSWORD", "sportscave1993")
 BASE_DIR = Path(__file__).resolve().parent
 EXPIRED_EDITION_NEXT_CHAPTER_PROMPT_PATH = (
     BASE_DIR / "design_studio_prompts" / "expired_edition_next_chapter_prompt.txt"
@@ -1520,11 +1518,6 @@ def _design_studio_prompt_id(key: str) -> str:
     return f"design-studio::{key}"
 
 
-def _developer_password_matches(password: str, developer_password: str | None) -> bool:
-    expected_password = developer_password if developer_password is not None else DEFAULT_DEVELOPER_PAGE_PASSWORD
-    return str(password or "") == str(expected_password or "")
-
-
 def _render_copy_button(prompt_text: str, key: str, label: str = "Copy Prompt"):
     component_id = f"copy-prompt-{hashlib.sha1(key.encode('utf-8')).hexdigest()[:12]}"
     prompt_json = json.dumps(prompt_text)
@@ -1602,8 +1595,18 @@ def _render_copy_button(prompt_text: str, key: str, label: str = "Copy Prompt"):
     )
 
 
-def _render_prompt_editor(label: str, prompt_id: str, prompt_text: str, key: str, developer_password: str | None, default_text: str | None = None):
+def _render_prompt_editor(
+    label: str,
+    prompt_id: str,
+    prompt_text: str,
+    key: str,
+    can_edit_prompts: bool,
+    default_text: str | None = None,
+):
     editor_key = f"design-studio-edit-open::{key}"
+    if not can_edit_prompts:
+        st.session_state.pop(editor_key, None)
+        return
     if not st.session_state.get(editor_key):
         return
 
@@ -1614,7 +1617,7 @@ def _render_prompt_editor(label: str, prompt_id: str, prompt_text: str, key: str
             prompt_name=label,
             module="design_studio",
         )
-        st.caption(f"Developer only. {source_record.get('source_label')}")
+        st.caption(source_record.get("source_label") or "")
         if source_record.get("warning"):
             st.warning(source_record["warning"])
         edited_prompt = st.text_area(
@@ -1623,17 +1626,12 @@ def _render_prompt_editor(label: str, prompt_id: str, prompt_text: str, key: str
             height=460,
             key=f"design-studio-edit-text::{key}",
         )
-        password = st.text_input(
-            "Developer password",
-            type="password",
-            key=f"design-studio-edit-password::{key}",
-        )
         save_col, cancel_col, _ = st.columns([1, 1, 4])
         if save_col.button("Save", key=f"design-studio-edit-save::{key}", use_container_width=True):
             if not edited_prompt.strip():
                 st.error("Prompt cannot be empty.")
-            elif not _developer_password_matches(password, developer_password):
-                st.error("Developer password is incorrect.")
+            elif not can_edit_prompts:
+                st.error("Prompt editing is not approved for this account.")
             else:
                 try:
                     saved = prompt_store.save_prompt(prompt_id, label, edited_prompt, module="design_studio")
@@ -1690,7 +1688,7 @@ def render_copy_prompt_box(
     label: str,
     default_prompt_text: str,
     key: str,
-    developer_password: str | None = None,
+    can_edit_prompts: bool = False,
 ):
     prompt_id = _design_studio_prompt_id(key)
     effective_prompt = prompt_store.get_prompt(prompt_id, _clean_prompt(default_prompt_text))
@@ -1713,26 +1711,29 @@ def render_copy_prompt_box(
         label_visibility="collapsed",
         disabled=True,
     )
-    copy_col, edit_col = st.columns([6, 1])
-    with copy_col:
+    if can_edit_prompts:
+        copy_col, edit_col = st.columns([6, 1])
+        with copy_col:
+            _render_copy_button(effective_prompt, key)
+        if edit_col.button(
+            "Edit",
+            key=f"design-studio-edit-button::{key}",
+            help="Edit prompt.",
+            icon=":material/edit:",
+            use_container_width=True,
+        ):
+            st.session_state[f"design-studio-edit-text::{key}"] = effective_prompt
+            st.session_state[f"design-studio-edit-open::{key}"] = True
+            st.rerun()
+    else:
         _render_copy_button(effective_prompt, key)
-    if edit_col.button(
-        "Edit",
-        key=f"design-studio-edit-button::{key}",
-        help="Edit prompt.",
-        icon=":material/edit:",
-        use_container_width=True,
-    ):
-        st.session_state[f"design-studio-edit-text::{key}"] = effective_prompt
-        st.session_state[f"design-studio-edit-open::{key}"] = True
-        st.rerun()
 
     _render_prompt_editor(
         label,
         prompt_id,
         effective_prompt,
         key,
-        developer_password,
+        can_edit_prompts,
         default_text=_clean_prompt(default_prompt_text),
     )
 
@@ -1821,11 +1822,11 @@ def render_new_design_tab():
     )
 
 
-def _render_prompt_box(name, prompt, key, developer_password):
-    render_copy_prompt_box(name, prompt, key, developer_password)
+def _render_prompt_box(name, prompt, key, can_edit_prompts):
+    render_copy_prompt_box(name, prompt, key, can_edit_prompts)
 
 
-def render_design_studio_page(developer_password: str | None = None):
+def render_design_studio_page(can_edit_prompts: bool = False):
     st.title("Design Studio")
     st.caption("Sports Cave prompt hub for premium collector artwork.")
 
@@ -1859,7 +1860,7 @@ def render_design_studio_page(developer_password: str | None = None):
         _render_prompt_box(
             "Upgrade Existing Design Prompt",
             *PROMPT_BOXES["Upgrade Existing Design Prompt"],
-            developer_password=developer_password,
+            can_edit_prompts=can_edit_prompts,
         )
 
     with research_tab:
@@ -1874,7 +1875,7 @@ def render_design_studio_page(developer_password: str | None = None):
         _render_prompt_box(
             "Expired Edition / Next Chapter Design Prompt",
             *PROMPT_BOXES["Expired Edition / Next Chapter Design Prompt"],
-            developer_password=developer_password,
+            can_edit_prompts=can_edit_prompts,
         )
 
     with create_tab:
@@ -1892,13 +1893,13 @@ def render_design_studio_page(developer_password: str | None = None):
         _render_prompt_box(
             "Find The Moment Prompt",
             *PROMPT_BOXES["Find The Moment Prompt"],
-            developer_password=developer_password,
+            can_edit_prompts=can_edit_prompts,
         )
         st.divider()
         _render_prompt_box(
             "Create Sports Cave Style Artwork Prompt",
             *PROMPT_BOXES["Create Sports Cave Style Artwork Prompt"],
-            developer_password=developer_password,
+            can_edit_prompts=can_edit_prompts,
         )
 
     with review_tab:
@@ -1910,5 +1911,5 @@ def render_design_studio_page(developer_password: str | None = None):
         _render_prompt_box(
             "Harsh Truth Sports Cave Design Review",
             *PROMPT_BOXES["Harsh Truth Sports Cave Design Review"],
-            developer_password=developer_password,
+            can_edit_prompts=can_edit_prompts,
         )
