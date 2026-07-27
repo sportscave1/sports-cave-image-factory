@@ -833,18 +833,16 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
             ROOT / "components" / "files_image_viewer" / "index.html"
         ).read_text(encoding="utf-8")
 
-    def test_files_sidebar_opens_desktop_by_default_with_one_browser_fallback(self):
+    def test_files_sidebar_opens_desktop_without_false_popup_failure_flow(self):
         self.assertIn('href="sports-cave-files://app"', self.launcher)
         self.assertIn("desktopLink.click()", self.launcher)
-        self.assertIn("parentWindow.location.assign(\"/files-window\")", self.launcher)
-        self.assertIn("parentWindow.chrome && parentWindow.chrome.webview", self.launcher)
-        self.assertIn("openBrowserFilesWindow", self.launcher)
-        self.assertIn('const FILES_WINDOW_NAME = "sports-cave-files"', self.launcher)
-        self.assertIn('parentWindow.open("", FILES_WINDOW_NAME, filesWindowFeatures())', self.launcher)
-        self.assertIn("width=${width},height=${height},left=${left},top=${top}", self.launcher)
-        self.assertIn("parentWindow.__sportsCaveFilesWindow", self.launcher)
-        self.assertIn("filesWindow.focus()", self.launcher)
-        self.assertIn("Sports Cave Desktop did not open", self.launcher)
+        self.assertNotIn("parentWindow.open", self.launcher)
+        self.assertNotIn("openBrowserFilesWindow", self.launcher)
+        self.assertNotIn("FILES_WINDOW_NAME", self.launcher)
+        self.assertNotIn("fallbackTimer", self.launcher)
+        self.assertNotIn("window.setTimeout", self.launcher)
+        self.assertNotIn("Sports Cave Desktop did not open", self.launcher)
+        self.assertNotIn("blocked", self.launcher)
         branch = self.app[self.app.index('if page == "Files":') : self.app.index("if st.sidebar.button(", self.app.index('if page == "Files":'))]
         self.assertIn("_files_window_launcher_component", branch)
         self.assertIn("continue", branch)
@@ -1110,7 +1108,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("Open in Sports Cave Desktop to drag or copy files", self.client)
         self.assertIn("Install or update helper", self.client)
         self.assertIn('elements.protocolLink.href = "sports-cave-files://app"', self.client)
-        self.assertIn("const MINIMUM_DESKTOP_VERSION = 5", self.client)
+        self.assertIn("const MINIMUM_DESKTOP_VERSION = 6", self.client)
         self.assertIn("desktop_outdated", self.client)
 
     def test_image_viewer_supports_pixel_and_original_file_copy(self):
@@ -1125,7 +1123,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("pointer-events: auto", self.viewer)
         self.assertIn('hasDesktopCapability("drag")', self.viewer)
         self.assertIn('desktopRequest("drag")', self.viewer)
-        self.assertIn("const MINIMUM_DESKTOP_VERSION = 5", self.viewer)
+        self.assertIn("const MINIMUM_DESKTOP_VERSION = 6", self.viewer)
 
 
 if __name__ == "__main__":

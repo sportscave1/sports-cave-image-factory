@@ -21,14 +21,15 @@ using System.Windows.Media.Imaging;
 [assembly: System.Reflection.AssemblyDescription("Persistent native Windows host for Sports Cave OS")]
 [assembly: System.Reflection.AssemblyProduct("Sports Cave OS Desktop")]
 [assembly: System.Reflection.AssemblyCompany("Sports Cave")]
-[assembly: System.Reflection.AssemblyVersion("5.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("5.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("6.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("6.0.0.0")]
 
 internal static class Program
 {
-    internal const int HelperVersion = 5;
-    private const string MutexName = @"Local\SportsCaveOSDesktop-v5";
-    private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v5";
+    internal const int HelperVersion = 6;
+    private const string MutexName = @"Local\SportsCaveOSDesktop-v6";
+    private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v6";
+    private const string FilesEventName = @"Local\SportsCaveOSDesktop-Files-v6";
 
     private static string InstanceName(string baseName)
     {
@@ -53,6 +54,7 @@ internal static class Program
         {
             string protocol = args.Length == 1 ? args[0] : "";
             bool show = args.Length == 1 && args[0] == "--app";
+            bool openFiles = false;
             if (Uri.IsWellFormedUriString(protocol, UriKind.Absolute))
             {
                 Uri request = new Uri(protocol);
@@ -65,6 +67,7 @@ internal static class Program
                     && String.IsNullOrEmpty(request.Query))
                 {
                     show = true;
+                    openFiles = true;
                 }
                 else
                 {
@@ -81,7 +84,14 @@ internal static class Program
             {
                 if (!ownsMutex)
                 {
-                    if (show)
+                    if (openFiles)
+                    {
+                        using (var signal = EventWaitHandle.OpenExisting(InstanceName(FilesEventName)))
+                        {
+                            signal.Set();
+                        }
+                    }
+                    else if (show)
                     {
                         using (var signal = EventWaitHandle.OpenExisting(InstanceName(ShowEventName)))
                         {
@@ -97,6 +107,8 @@ internal static class Program
                 var window = new DesktopWindow(config);
                 using (var showEvent = new EventWaitHandle(
                     false, EventResetMode.AutoReset, InstanceName(ShowEventName)))
+                using (var filesEvent = new EventWaitHandle(
+                    false, EventResetMode.AutoReset, InstanceName(FilesEventName)))
                 {
                     var waiter = new Thread(delegate()
                     {
@@ -108,9 +120,23 @@ internal static class Program
                     waiter.IsBackground = true;
                     waiter.Name = "SportsCaveDesktopShow";
                     waiter.Start();
+                    var filesWaiter = new Thread(delegate()
+                    {
+                        while (filesEvent.WaitOne())
+                        {
+                            window.Dispatcher.BeginInvoke(new Action(window.NavigateToFiles));
+                        }
+                    });
+                    filesWaiter.IsBackground = true;
+                    filesWaiter.Name = "SportsCaveDesktopFiles";
+                    filesWaiter.Start();
                     if (show)
                     {
                         window.Show();
+                    }
+                    if (openFiles)
+                    {
+                        window.NavigateToFiles();
                     }
                     application.Run();
                 }
@@ -265,14 +291,18 @@ internal sealed class DesktopWindow : Window
         new Dictionary<string, CancellationTokenSource>(StringComparer.Ordinal);
     private readonly string initialUrl;
     private readonly bool persistent;
+    private CoreWebView2Environment environment;
     private bool initialized;
     private bool redirectedForSignIn;
+    private bool navigateFilesWhenReady;
 
     internal DesktopWindow(
-        DesktopConfig desktopConfig, string requestedUrl = "", bool keepResident = true)
+        DesktopConfig desktopConfig, string requestedUrl = "", bool keepResident = true,
+        CoreWebView2Environment sharedEnvironment = null)
     {
         config = desktopConfig;
         cache = new NativeCache(config.RootPath);
+        environment = sharedEnvironment;
         initialUrl = String.IsNullOrWhiteSpace(requestedUrl)
             ? config.AppUrl : requestedUrl;
         persistent = keepResident;
@@ -312,8 +342,10 @@ internal sealed class DesktopWindow : Window
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "SportsCaveOS", "WebView2");
                 Directory.CreateDirectory(userData);
-                CoreWebView2Environment environment =
-                    await CoreWebView2Environment.CreateAsync(null, userData);
+                if (environment == null)
+                {
+                    environment = await CoreWebView2Environment.CreateAsync(null, userData);
+                }
                 await browser.EnsureCoreWebView2Async(environment);
                 browser.CoreWebView2.Settings.AreDevToolsEnabled = false;
                 browser.CoreWebView2.Settings.AreHostObjectsAllowed = false;
@@ -323,7 +355,10 @@ internal sealed class DesktopWindow : Window
                 browser.CoreWebView2.NavigationStarting += delegate(
                     object navigationSender, CoreWebView2NavigationStartingEventArgs navigationArgs)
                 {
-                    if (!config.Allows(navigationArgs.Uri))
+                    if (
+                        !navigationArgs.Uri.Equals("about:blank", StringComparison.OrdinalIgnoreCase)
+                        && !config.Allows(navigationArgs.Uri)
+                    )
                     {
                         navigationArgs.Cancel = true;
                     }
@@ -351,9 +386,12 @@ internal sealed class DesktopWindow : Window
                     CoreWebView2Deferral deferral = windowArgs.GetDeferral();
                     try
                     {
-                        if (config.Allows(windowArgs.Uri))
+                        bool blank = windowArgs.Uri.Equals(
+                            "about:blank", StringComparison.OrdinalIgnoreCase);
+                        if (blank || config.Allows(windowArgs.Uri))
                         {
-                            var child = new DesktopWindow(config, windowArgs.Uri, false);
+                            var child = new DesktopWindow(
+                                config, windowArgs.Uri, false, environment);
                             child.Show();
                             await child.InitializeBrowser();
                             windowArgs.NewWindow = child.browser.CoreWebView2;
@@ -366,6 +404,10 @@ internal sealed class DesktopWindow : Window
                     }
                 };
                 browser.CoreWebView2.Navigate(initialUrl);
+                if (navigateFilesWhenReady)
+                {
+                    NavigateToFiles();
+                }
             }
         }
         catch (Exception error)
@@ -385,6 +427,16 @@ internal sealed class DesktopWindow : Window
         Topmost = true;
         Topmost = false;
         Focus();
+    }
+
+    internal void NavigateToFiles()
+    {
+        navigateFilesWhenReady = true;
+        ShowAndFocus();
+        if (browser.CoreWebView2 == null) return;
+        Uri appUri = new Uri(config.AppUrl);
+        browser.CoreWebView2.Navigate(
+            appUri.GetLeftPart(UriPartial.Authority) + "/files-window");
     }
 
     private async void OnWebMessage(object sender, CoreWebView2WebMessageReceivedEventArgs args)

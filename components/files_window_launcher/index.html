@@ -24,40 +24,14 @@
       button:hover { background: #e9eaec; border-color: #dcdee1; }
       button:active { background: #dfe1e4; }
       button:focus-visible { outline: 2px solid #0f6cbd; outline-offset: -2px; }
-      #status {
-        color: #8a2d24;
-        display: none;
-        font-size: 11px;
-        line-height: 1.25;
-        padding: 5px 8px 0;
-      }
-      body.blocked #status { display: block; }
-      #browserFallback {
-        background: none;
-        border: 0;
-        color: #0f5d9c;
-        display: inline;
-        font-size: 11px;
-        height: auto;
-        padding: 0;
-        text-decoration: underline;
-        width: auto;
-      }
     </style>
   </head>
   <body>
     <button id="launcher" type="button">Files</button>
     <a id="desktopLink" href="sports-cave-files://app" hidden></a>
-    <div id="status" role="alert">
-      Sports Cave Desktop did not open.
-      <button id="browserFallback" type="button">Open browser Files</button>
-    </div>
     <script>
-      const FILES_WINDOW_NAME = "sports-cave-files";
       const button = document.getElementById("launcher");
       const desktopLink = document.getElementById("desktopLink");
-      const browserFallback = document.getElementById("browserFallback");
-      let fallbackTimer = 0;
 
       function send(type, data) {
         window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, data || {}), "*");
@@ -67,65 +41,11 @@
         send("streamlit:setFrameHeight", { height });
       }
 
-      function filesWindowFeatures() {
-        const parentWindow = window.parent;
-        const width = Math.min(1250, Math.max(760, Number(parentWindow.screen.availWidth || 1250) - 80));
-        const height = Math.min(800, Math.max(600, Number(parentWindow.screen.availHeight || 800) - 80));
-        const left = Math.max(0, Math.round((Number(parentWindow.screen.availWidth || width) - width) / 2));
-        const top = Math.max(0, Math.round((Number(parentWindow.screen.availHeight || height) - height) / 2));
-        return `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
-      }
-
-      function openBrowserFilesWindow() {
-        const parentWindow = window.parent;
-        let filesWindow = parentWindow.__sportsCaveFilesWindow;
-        if (filesWindow && !filesWindow.closed) {
-          filesWindow.focus();
-          return;
-        }
-        filesWindow = parentWindow.open("", FILES_WINDOW_NAME, filesWindowFeatures());
-        if (!filesWindow) {
-          document.body.classList.add("blocked");
-          button.textContent = "Open Files window";
-          setHeight(78);
-          return;
-        }
-        parentWindow.__sportsCaveFilesWindow = filesWindow;
-        document.body.classList.remove("blocked");
-        button.textContent = "Files";
-        setHeight(38);
-        try {
-          if (filesWindow.location.pathname !== "/files-window") {
-            filesWindow.location.replace("/files-window");
-          }
-        } catch (_) {
-          filesWindow.location = "/files-window";
-        }
-        filesWindow.focus();
-      }
-
       function openFilesWindow() {
-        const parentWindow = window.parent;
-        const desktopHost = (
-          (window.chrome && window.chrome.webview)
-          || (parentWindow.chrome && parentWindow.chrome.webview)
-        );
-        if (desktopHost && typeof desktopHost.postMessage === "function") {
-          parentWindow.location.assign("/files-window");
-          return;
-        }
-        document.body.classList.remove("blocked");
-        setHeight(38);
         desktopLink.click();
-        window.clearTimeout(fallbackTimer);
-        fallbackTimer = window.setTimeout(() => {
-          document.body.classList.add("blocked");
-          setHeight(62);
-        }, 2200);
       }
 
       button.addEventListener("click", openFilesWindow);
-      browserFallback.addEventListener("click", openBrowserFilesWindow);
       send("streamlit:componentReady", { apiVersion: 1 });
       setHeight(38);
     </script>

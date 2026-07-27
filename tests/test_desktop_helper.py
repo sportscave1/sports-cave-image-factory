@@ -31,7 +31,7 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("Microsoft.Web.WebView2.Core.dll", self.install)
         self.assertIn("Microsoft.Web.WebView2.Wpf.dll", self.install)
         self.assertIn("WebView2Loader.dll", self.install)
-        self.assertIn("HelperVersion = 5", self.install)
+        self.assertIn("HelperVersion = 6", self.install)
         self.assertIn("CurrentVersion\\Run", self.install)
         self.assertIn('" --background', self.install)
         self.assertIn("Sports Cave OS Desktop.lnk", self.install)
@@ -41,11 +41,20 @@ class DesktopHelperContractTests(unittest.TestCase):
     def test_shell_is_persistent_and_custom_protocol_only_shows_or_opens(self):
         self.assertIn("new Mutex(true, InstanceName(MutexName)", self.source)
         self.assertIn("false, EventResetMode.AutoReset, InstanceName(ShowEventName)", self.source)
+        self.assertIn("false, EventResetMode.AutoReset, InstanceName(FilesEventName)", self.source)
         self.assertIn('request.Host == "app"', self.source)
         self.assertIn('request.Host == "open"', self.source)
         self.assertIn("window.ShowAndFocus", self.source)
+        self.assertIn("window.NavigateToFiles", self.source)
         self.assertNotIn("sports-cave-files://drag", self.source)
         self.assertNotIn("TcpListener", self.source)
+
+    def test_files_windows_reuse_the_signed_in_webview_profile(self):
+        self.assertIn("CoreWebView2Environment sharedEnvironment = null", self.source)
+        self.assertIn("environment = sharedEnvironment", self.source)
+        self.assertIn("new DesktopWindow(\n                                config, windowArgs.Uri, false, environment)", self.source)
+        self.assertIn('navigationArgs.Uri.Equals("about:blank"', self.source)
+        self.assertIn('appUri.GetLeftPart(UriPartial.Authority) + "/files-window"', self.source)
 
     def test_webview_bridge_is_origin_scoped_and_action_allowlisted(self):
         self.assertIn("browser.CoreWebView2.WebMessageReceived += OnWebMessage", self.source)
@@ -169,7 +178,7 @@ class DesktopWindowsBuildTests(unittest.TestCase):
                     "AppUrl": "http://127.0.0.1:8501/files-window",
                     "RootPath": "",
                     "AllowedOrigins": ["http://127.0.0.1:8501"],
-                    "HelperVersion": 5,
+                    "HelperVersion": 6,
                 }
             ),
             encoding="utf-8",
