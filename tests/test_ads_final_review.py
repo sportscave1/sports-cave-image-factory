@@ -50,6 +50,14 @@ def set_product_name(app_test, value):
     raise AssertionError("Product name was not rendered.")
 
 
+def set_product_url(app_test, value="https://sportscave.com.au/products/six-laps"):
+    for widget in app_test.text_input:
+        if widget.label == "Product page URL *":
+            widget.set_value(value)
+            return
+    raise AssertionError("Product page URL field was not rendered.")
+
+
 def button(app_test, label):
     for candidate in app_test.button:
         if candidate.label == label:
@@ -77,6 +85,7 @@ def submitted_ads_page(campaign_type="Carousel"):
     select_option(app_test, "Category", "Motorsport")
     select_option(app_test, "Country", "Australia")
     select_option(app_test, "Campaign type", campaign_type)
+    set_product_url(app_test)
     button(app_test, "Submit").click().run(timeout=20)
     return app_test
 
@@ -381,124 +390,101 @@ class AdsFinalReviewStateTests(unittest.TestCase):
 
 
 class AdsFinalReviewUiTests(unittest.TestCase):
-    def test_section_is_at_bottom_with_two_multiple_upload_areas(self):
+    def test_section_is_copy_only_with_how_to_and_no_review_uploads(self):
         app_test = submitted_ads_page()
         labels = [candidate.label for candidate in app_test.file_uploader]
-        self.assertEqual(labels[-2:], ["Finished Meta Ad Screenshots", "Final Creative Images"])
-        self.assertTrue(uploader(app_test, "Finished Meta Ad Screenshots").accept_multiple_files)
-        self.assertTrue(uploader(app_test, "Final Creative Images").accept_multiple_files)
-        self.assertTrue(button(app_test, "Review Finished Ad").disabled)
+        self.assertNotIn("Finished Meta Ad Screenshots", labels)
+        self.assertNotIn("Final Creative Images", labels)
+        self.assertNotIn("Final Copy", [candidate.label for candidate in app_test.text_area])
+        self.assertNotIn("Review Finished Ad", [candidate.label for candidate in app_test.button])
+        self.assertNotIn("Clear Review", [candidate.label for candidate in app_test.button])
+        self.assertTrue(
+            any(
+                "Upload screenshots of the finished Meta campaign to ChatGPT, then paste the review prompt below."
+                in caption.value
+                for caption in app_test.caption
+            )
+        )
+        self.assertTrue(
+            "How to complete the final review" in (ROOT / "ads_page.py").read_text(encoding="utf-8")
+        )
         self.assertEqual(len(app_test.exception), 0)
 
-    def test_multiple_uploads_persist_and_screenshot_enables_review(self):
-        app_test = submitted_ads_page()
-        screenshot_uploader = uploader(app_test, "Finished Meta Ad Screenshots")
-        screenshot_uploader.set_value(
-            [
-                ("Meta mobile.png", image_bytes("PNG"), "image/png"),
-                ("Meta desktop.jpg", image_bytes("JPEG"), "image/jpeg"),
-            ]
+    def test_final_review_copy_prompt_preserves_existing_prompt_and_appends_landing_page(self):
+        result = ads_page.build_ads_result_record(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            product_url="  https://sportscave.com.au/products/six-laps?variant=1  ",
+            variation_token="copy-review",
         )
-        app_test.run(timeout=30)
+        prompt = ads_page.build_final_ad_review_copy_prompt(result)
 
-        workflow = app_test.session_state[ads_page.ADS_REVIEW_STATE_KEY]
-        self.assertEqual(
-            [item["filename"] for item in workflow["screenshots"]],
-            ["Meta mobile.png", "Meta desktop.jpg"],
-        )
-        self.assertFalse(button(app_test, "Review Finished Ad").disabled)
-        app_test.run(timeout=20)
-        self.assertEqual(len(app_test.session_state[ads_page.ADS_REVIEW_STATE_KEY]["screenshots"]), 2)
+        self.assertIn("You are the final campaign approver and senior Meta Ads growth strategist", prompt)
+        self.assertIn("WEIGHTED SCORE", prompt)
+        self.assertIn("OUTPUT DISCIPLINE", prompt)
+        self.assertIn("Product page URL: `https://sportscave.com.au/products/six-laps?variant=1`", prompt)
+        self.assertIn("PRODUCT LANDING PAGE", prompt)
+        self.assertIn("ad-to-landing-page journey is ready to launch", prompt)
+        self.assertIn('"product_url": "https://sportscave.com.au/products/six-laps?variant=1"', prompt)
 
-    def test_copy_plus_creative_enables_review_and_clear_resets_only_review(self):
-        app_test = submitted_ads_page()
-        original_prompt = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]["master_prompt"]
-        uploader(app_test, "Final Creative Images").set_value(
-            [("Carousel 01.webp", image_bytes("WEBP"), "image/webp")]
+    def test_final_review_copy_button_copies_complete_prompt_with_success_state(self):
+        result = ads_page.build_ads_result_record(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            product_url="https://sportscave.com.au/products/six-laps",
+            variation_token="copy-review-html",
         )
-        text_area(app_test, "Final Copy").set_value("Exact final Meta copy")
-        app_test.run(timeout=30)
+        with patch("ads_page.components.html") as render_html:
+            ads_page._render_final_ad_review(result)
+        html_payload = render_html.call_args.args[0]
 
-        self.assertFalse(button(app_test, "Review Finished Ad").disabled)
-        button(app_test, "Clear Review").click().run(timeout=20)
-        workflow = app_test.session_state[ads_page.ADS_REVIEW_STATE_KEY]
-        self.assertEqual(workflow["screenshots"], [])
-        self.assertEqual(workflow["creatives"], [])
-        self.assertIsNone(workflow["review"])
-        self.assertEqual(
-            app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]["master_prompt"],
-            original_prompt,
-        )
+        self.assertIn("Copy Final Review Prompt", html_payload)
+        self.assertIn("Final review prompt copied", html_payload)
+        self.assertIn("PRODUCT LANDING PAGE", html_payload)
+        self.assertIn("https://sportscave.com.au/products/six-laps", html_payload)
+        self.assertIn("navigator.clipboard.writeText(promptText)", html_payload)
 
-    def test_creative_can_be_removed_and_replaced_without_duplicate_uploads(self):
-        app_test = submitted_ads_page()
-        uploader(app_test, "Final Creative Images").set_value(
-            [
-                ("Carousel 01.png", image_bytes("PNG", color=(10, 20, 30, 255)), "image/png"),
-                ("Carousel 02.png", image_bytes("PNG", color=(40, 50, 60, 255)), "image/png"),
-            ]
+    def test_saved_prompt_override_text_is_preserved_when_supplied(self):
+        result = ads_page.build_ads_result_record(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            product_url="https://sportscave.com.au/products/six-laps",
+            variation_token="copy-review-override",
         )
-        text_area(app_test, "Final Copy").set_value("Exact final copy")
-        app_test.run(timeout=30)
-        self.assertEqual(
-            len(app_test.session_state[ads_page.ADS_REVIEW_STATE_KEY]["creatives"]),
-            2,
+        prompt = ads_page.build_final_ad_review_copy_prompt(
+            result,
+            resolved_prompt="CUSTOM SAVED FINAL REVIEW PROMPT\nKeep this exact custom wording.",
         )
 
-        button(app_test, "Remove").click().run(timeout=20)
-        self.assertEqual(
-            [item["filename"] for item in app_test.session_state[ads_page.ADS_REVIEW_STATE_KEY]["creatives"]],
-            ["Carousel 02.png"],
-        )
-        uploader(app_test, "Final Creative Images").set_value(
-            [("Carousel 01 replacement.webp", image_bytes("WEBP"), "image/webp")]
-        )
-        app_test.run(timeout=30)
-        filenames = [
-            item["filename"]
-            for item in app_test.session_state[ads_page.ADS_REVIEW_STATE_KEY]["creatives"]
-        ]
-        self.assertEqual(filenames, ["Carousel 02.png", "Carousel 01 replacement.webp"])
-        self.assertEqual(len(set(filenames)), 2)
+        self.assertTrue(prompt.startswith("CUSTOM SAVED FINAL REVIEW PROMPT\nKeep this exact custom wording."))
+        self.assertIn("PRODUCT LANDING PAGE", prompt)
+        self.assertIn("Product page URL: `https://sportscave.com.au/products/six-laps`", prompt)
 
-    def test_review_result_renders_and_review_again_does_not_duplicate_submission(self):
-        app_test = submitted_ads_page()
-        uploader(app_test, "Finished Meta Ad Screenshots").set_value(
-            [("Meta setup.png", image_bytes("PNG"), "image/png")]
-        )
-        app_test.run(timeout=30)
+    def test_no_in_app_ai_review_request_is_triggered_by_page_render(self):
+        with patch("ads_final_review.request_final_ad_review") as review_request:
+            app_test = submitted_ads_page()
 
-        with patch(
-            "ads_final_review.request_final_ad_review",
-            return_value=ads_final_review.validate_review_response(valid_review()),
-        ) as review_request:
-            button(app_test, "Review Finished Ad").click().run(timeout=30)
-
-        self.assertEqual(review_request.call_count, 1)
-        self.assertIn("Review Again", [candidate.label for candidate in app_test.button])
-        self.assertTrue(any("Overall Score" in markdown.value for markdown in app_test.markdown))
-        self.assertTrue(any("Brutal Truth" in markdown.value for markdown in app_test.markdown))
-        self.assertEqual(len(app_test.exception), 0)
+        self.assertEqual(review_request.call_count, 0)
+        self.assertNotIn("Reviewing the complete ad...", [info.value for info in app_test.info])
 
     def test_campaign_change_resets_review_identity_without_touching_ads_exports(self):
         app_test = submitted_ads_page()
-        uploader(app_test, "Finished Meta Ad Screenshots").set_value(
-            [("Meta setup.png", image_bytes("PNG"), "image/png")]
-        )
-        app_test.run(timeout=30)
-        old_context = app_test.session_state[ads_page.ADS_REVIEW_STATE_KEY]["context_key"]
+        old_context = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]["context_key"]
 
         select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test)
         button(app_test, "Submit").click().run(timeout=20)
-        review_workflow = app_test.session_state[ads_page.ADS_REVIEW_STATE_KEY]
         image_workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
-        self.assertNotEqual(review_workflow["context_key"], old_context)
-        self.assertEqual(review_workflow["screenshots"], [])
-        self.assertEqual(review_workflow["creatives"], [])
-        self.assertEqual(
-            review_workflow["context_key"],
-            image_workflow["context_key"],
-        )
+        new_result = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]
+        self.assertNotEqual(new_result["context_key"], old_context)
+        self.assertEqual(new_result["context_key"], image_workflow["context_key"])
+        self.assertNotIn(ads_page.ADS_REVIEW_STATE_KEY, app_test.session_state)
 
     def test_existing_campaign_prompt_and_export_contract_remain_unchanged(self):
         prompt = ads_page.build_ads_prompt(
