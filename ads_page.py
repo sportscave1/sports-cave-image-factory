@@ -55,6 +55,7 @@ EDITION_OPS_ROWS_SESSION_KEY = "edition_ops_rows"
 
 CAROUSEL_CARD_MAX_CHARACTERS = 17
 CAROUSEL_CARD_COUNT = 5
+META_WINNER_COPY_BLOCK_VERSION = "SPORTS CAVE META WINNER COPY UPGRADE V1"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
@@ -862,6 +863,18 @@ Each prompt must be based on the selected product name, selected sport, selected
 
 The five images must form one premium visual story, not five random mockups. Maintain compatible colour restraint, premium photographic quality, related lighting character, correct black-frame presentation and a shared Sports Cave collector tone without making the rooms identical.
 
+Each visual must clearly support its assigned card message while the framed product remains the unmistakable hero. Card 1 must deliver the strongest immediate product presentation. Card 5 must deliver the strongest truthful scarcity or final-claim presentation.
+
+Use this direct conversion-focused visual progression while preserving the selected template's approved role labels:
+
+- Card 1: a clean product-hero presentation.
+- Card 2: a desirable ownership setting.
+- Card 3: a premium collector display suited to the selected category.
+- Card 4: an emotional lifestyle, memory or legacy presentation.
+- Card 5: a scarcity-focused view that gives the existing edition plate or numbered detail prominence when verified while keeping the complete outer frame visible.
+
+For every card, make the exact generated headline, exact generated description, creative direction and image prompt communicate the same clear selling idea. The room, wall, lighting, angle and composition must visibly support that idea. Favour premium but believable homes and ownership environments that help shoppers imagine owning the artwork. Do not use abstract room symbolism when it weakens a direct commercial presentation.
+
 Privately develop a fresh visual concept from the selected product before writing the five prompts. Do not output that reasoning.
 
 Across the five prompts deliberately vary room type, architecture, wall finish, material palette, furniture style, lighting direction, time of day, camera height, camera distance, camera angle, artwork placement, emotional intensity, negative space, framing and composition, and how the room expresses the card's message.
@@ -872,9 +885,11 @@ Do not merely recolour the same room. Do not default to a generic office, living
 
 Treat this as a new creative run. Do not default to room combinations you have previously supplied for Sports Cave. Build a fresh set from the product title, sport, country, card copy and emotional story. Within this run, do not repeat a room type, wall treatment, principal furniture arrangement, lighting setup or camera composition.
 
+Visual variety must never alter, regenerate, crop or distort the supplied artwork or frame. Never crop the outer frame or let the artwork extend beyond its border. Avoid five near-identical framed mockups with only minor furniture changes.
+
 Normally do not place the card headline or description inside the image because Meta supplies those fields separately. Only include in-image card text if the existing approved campaign template explicitly requires it.
 
-Do not add prices, discounts, fake buttons, fake UI, watermarks or random copy.
+Do not add prices, discounts, fake buttons, fake UI, watermarks, promotional stickers, unsupported text, fake edition details or random copy.
 
 Every image prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, LAST-IMAGE VARIATION LOCK, sport-and-country adaptation and relevant visual-story requirements inside every prompt. Never write "same as above", "use the previous room" or "keep the same settings".
 
@@ -1108,7 +1123,10 @@ def validate_carousel_cards(cards, *, edition_info_supplied=False):
     return errors
 
 
-def validate_carousel_card_length(cards, max_characters=17):
+def validate_carousel_card_length(
+    cards,
+    max_characters=CAROUSEL_CARD_MAX_CHARACTERS,
+):
     errors = []
     for index, card in enumerate(cards or [], start=1):
         for field_name in ("headline", "description"):
@@ -1167,27 +1185,31 @@ Create exactly {CAROUSEL_CARD_COUNT} carousel cards.
 
 The five cards must work as one connected sequence rather than five unrelated sales labels.
 
+The headings below define each card's commercial function. Keep the selected approved template's existing role labels in the final output schema.
+
 Card 1 — Product Identity
-- Immediately identify the artwork, driver, rivalry, car or defining phrase.
+- Immediately identify the artwork, athlete, team, rivalry, vehicle, event or defining phrase.
 - Use the strongest recognisable phrase from the product name or attached artwork.
 
-Card 2 — Race Or Moment
-- Trigger a recognisable motorsport memory.
-- Prioritise race name, circuit, year, car number, rivalry, famous lap or defining event.
-- Use only details confirmed by the supplied product name or attached artwork.
+Card 2 — Display Desire
+- Show a commercially desirable and category-relevant ownership setting.
+- Help the customer imagine the product in a home, sports room, office, bar, garage or collection.
+- Keep the product central rather than selling the room itself.
 
-Card 3 — Legacy
-- Express why the subject still matters to fans.
-- Make the legacy or nostalgia specific to the actual product whenever possible.
+Card 3 — Collector Appeal
+- Communicate premium display value, collector status or a category-relevant ownership environment.
+- Add a distinct ownership reason rather than repeating Card 2.
+- Do not invent product quality or manufacturing claims.
 
-Card 4 — Fan Ownership
-- Make the correct fan imagine displaying it proudly.
-- Prioritise fan identity over generic room descriptions.
-- Do not use Garage Pride or similarly generic wording unless it is clearly the strongest product-specific option.
+Card 4 — Emotional Meaning
+- Express the verified relationship, legacy, era, memory, mentality or fan connection.
+- Do not repeat names already used on Card 1.
+- Make the emotional meaning specific to the supplied product.
 
 Card 5 — Scarcity
 - Close with genuine limited-edition scarcity.
-- Communicate only 100 numbered editions, no second run, and no restock once sold out.
+- Communicate an edition quantity, numbered run, no second run or no restock only when confirmed by the approved claim path, supplied product information or visible artwork.
+- When no quantity is confirmed, use only the strongest truthful non-numeric scarcity already permitted by the campaign.
 - Keep it premium and controlled. Do not use cheap urgency.
 
 PRODUCT SPECIFICITY TEST
@@ -1203,7 +1225,7 @@ QUALITY SELECTION
 - Analyse the product name and attached artwork.
 - Identify the most recognisable verified product details.
 - Silently create several possible headline and description options for each strategic card role.
-- Reject anything generic, unclear or over 17 characters.
+- Reject anything generic, unclear or over {CAROUSEL_CARD_MAX_CHARACTERS} characters.
 - Select the strongest final combination.
 - Do not output rejected alternatives.
 - Do not display the internal candidate list or reasoning.
@@ -1231,6 +1253,7 @@ Description:
 
 This is a strict limit.
 
+- Treat {CAROUSEL_CARD_MAX_CHARACTERS} characters as the absolute limit, not the target.
 - Do not truncate text to make it fit.
 - Do not cut words in half.
 - Do not silently allow text longer than {CAROUSEL_CARD_MAX_CHARACTERS} characters.
@@ -1238,6 +1261,7 @@ This is a strict limit.
 - Use Python len(value) semantics: spaces and punctuation count.
 - Never contain a comma or full stop.
 - Use complete words only.
+- Never make wording unnatural, abbreviated or confusing merely to fit the limit.
 
 QUALITY PRIORITY
 
@@ -1267,6 +1291,90 @@ These generic phrases may only be used when no more specific verified product la
 Do not force generic room language into a card when stronger product history or fan identity is available."""
 
 
+def build_carousel_high_conversion_quality_rules():
+    return f"""HIGH-CONVERSION CAROUSEL QUALITY
+
+Preserve the exact approved five-card output schema and order required by the selected campaign template. Make the five cards work as one connected persuasion journey rather than five unrelated captions.
+
+Card 1 - Product Identity
+- State clearly who or what the artwork celebrates.
+- Use the full product identity only here when it fits naturally within the character limit. Otherwise use the strongest unmistakable verified identity.
+- Make the reader want to continue scrolling.
+- Do not waste this card on generic wording such as Premium Art.
+
+Card 2 - Display Desire
+- Show the result of ownership and where the artwork belongs.
+- Choose a product-relevant man cave, sports room, office, home bar, garage or believable home setting.
+- Make the setting commercially desirable without relying on generic room wording.
+
+Card 3 - Collector Appeal
+- Communicate premium display value, collector status or a category-relevant ownership environment.
+- Give a distinct collector reason rather than repeating Card 2's room benefit.
+- Do not make unsupported product-quality or manufacturing claims.
+
+Card 4 - Emotional Meaning
+- Distil the verified relationship, legacy, era, memory, mentality or fan connection.
+- Do not repeat names already used on Card 1.
+- Do not invent achievements, dates, teams, rivalries or events.
+
+Card 5 - Authentic Scarcity
+- Finish with the strongest truthful reason to act now.
+- Use the confirmed edition limit, numbered run, once gone or no second run only when supported by supplied product information or the existing approved-claim path.
+- Make this card decisive without sounding cheap, aggressive or spammy.
+
+CONNECTED COPY QUALITY
+
+- Every card must communicate a different buying reason.
+- The headline and description on the same card must complement one another rather than repeat the same idea.
+- Across all ten card lines, do not repeat any meaningful word. Treat singular and plural forms as the same word.
+- Use athlete, team, event or product names only once, normally on Card 1.
+- Use the edition number only on Card 5.
+- Do not repeat legend, legacy, icon, collector, edition, wall, made, pride, greatness or similar keywords across multiple cards.
+- Avoid forced fan language such as Who Did You Back, Your Legends Wall or similarly unnatural phrases.
+- Do not hard-code names or reference copy from another product.
+- Use one clear idea per line.
+- Write for fast mobile scanning.
+- Use natural spoken language, not compressed advertising jargon.
+- Keep the Sports Cave voice emotional, nostalgic, urgent, premium and collector-driven.
+- Connect the product to fan identity, memory, rivalry, pride, legacy or ownership.
+- Prefer specific product-supported emotion over generic luxury language.
+- Do not sound corporate, poetic for its own sake or obviously AI-generated.
+- Do not invent players, teams, dates, trophies, records, signatures, licensing, edition quantities or product features.
+- Preserve the selected country's localisation and the selected sport's terminology.
+- Preserve all current CTAs, URLs, UTM parameters and output quantities.
+- Do not turn all five cards into direct sales commands.
+- Use scarcity strongly once, normally on Card 5, rather than weakening it through repetition.
+
+COPY AND CREATIVE ALIGNMENT
+
+- The headline, description, creative direction and generated image prompt for each card must communicate the same selling idea.
+- Card 1 uses a clean product-hero presentation.
+- Card 2 uses a desirable ownership setting.
+- Card 3 uses a premium collector display suited to the selected category.
+- Card 4 uses an emotional lifestyle, memory or legacy presentation.
+- Card 5 uses a scarcity-focused view that gives an existing edition plate or numbered detail prominence when verified while keeping the complete outer frame visible.
+- The room, wall, lighting, angle and composition must visibly support the exact headline and description.
+- Favour premium but believable homes and ownership environments that help shoppers imagine owning the artwork.
+- Do not use abstract visual metaphors when they weaken a clear commercial product presentation.
+- Never place the Meta headline or description inside the generated image.
+- Never crop the outer frame or let artwork extend beyond its border.
+
+INTERNAL SELECTION - DO NOT OUTPUT
+
+Before returning the campaign, silently:
+
+1. Generate several candidate headline and description pairs for each role.
+2. Count every character, including spaces.
+3. Reject anything exceeding {CAROUSEL_CARD_MAX_CHARACTERS} characters.
+4. Reject awkward abbreviations and incomplete phrases.
+5. Reject repetitive or generic card combinations.
+6. Check that every card has a distinct conversion purpose.
+7. Select only the strongest connected five-card sequence.
+8. Output only the final campaign in the existing format.
+
+Do not expose candidate lines, scoring notes or internal reasoning in the generated output."""
+
+
 def build_carousel_final_quality_check(include_primary_text_variations=False):
     checks = [
         "Exactly five carousel cards are present.",
@@ -1275,11 +1383,16 @@ def build_carousel_final_quality_check(include_primary_text_variations=False):
         "Spaces and punctuation are included in the count.",
         "No words have been truncated.",
         "Card 1 identifies the product.",
-        "Card 2 triggers a race, place, year or moment.",
-        "Card 3 communicates legacy or nostalgia.",
-        "Card 4 communicates fan ownership.",
+        "Card 2 communicates display desire in a product-relevant ownership setting.",
+        "Card 3 communicates premium collector appeal without repeating Card 2.",
+        "Card 4 communicates verified emotional meaning without repeating names from Card 1.",
         "Card 5 communicates genuine scarcity.",
         "The cards read as one connected story.",
+        "Every card communicates a different buying reason.",
+        "Each headline and description complement one another without repeating the same idea.",
+        "No meaningful word is repeated across the ten card lines unless unavoidable for clarity.",
+        "Product names appear only on Card 1 and the edition number appears only on Card 5.",
+        "Each card's copy, creative direction and image prompt communicate the same selling idea.",
         "The wording is specific to the supplied product.",
         "Generic labels have been replaced wherever stronger verified wording exists.",
         "No duplicate headlines.",
@@ -1318,6 +1431,7 @@ def apply_campaign_copy_rule_blocks(prompt, campaign_type, include_primary_text_
 
     story_rules = build_carousel_story_and_specificity_rules(category)
     card_rules = build_carousel_card_copy_rules()
+    high_conversion_rules = build_carousel_high_conversion_quality_rules()
     final_quality_check = build_carousel_final_quality_check(
         include_primary_text_variations=include_primary_text_variations
     )
@@ -1326,11 +1440,100 @@ def apply_campaign_copy_rule_blocks(prompt, campaign_type, include_primary_text_
         prompt = f"{prompt.rstrip()}\n\n{story_rules}"
     if card_rules not in prompt:
         prompt = f"{prompt.rstrip()}\n\nCAROUSEL COPY RULES\n\n{card_rules}"
+    if high_conversion_rules not in prompt:
+        prompt = f"{prompt.rstrip()}\n\n{high_conversion_rules}"
     if "CTA GUIDANCE" not in prompt:
         prompt = f"{prompt.rstrip()}\n\n{cta_guidance}"
     if final_quality_check not in prompt:
         prompt = f"{prompt.rstrip()}\n\n{final_quality_check}"
     return prompt
+
+
+def build_shared_meta_winner_copy_upgrade():
+    return f"""{META_WINNER_COPY_BLOCK_VERSION}
+
+This block strengthens copy selection only. Preserve the current campaign's approved output schema, field count, card labels, CTA, URL parameters, localisation, claim safeguards and all campaign-specific winner instructions.
+
+PRIMARY-TEXT ANGLE BALANCE
+
+When the approved campaign template requests five primary-text variations, use these five genuinely different conversion angles in their existing numbered output positions. Keep the template's existing variation labels and output formatting unchanged.
+
+Variation 1 - Staccato Legacy Story
+
+- Begin with two to four short sharp lines.
+- Build product-specific contrast, progression, rivalry, connection, achievement or emotional tension.
+- Follow with a two-line reframe that moves the product from decoration to memory, identity, mentality or legacy.
+- Finish with authentic scarcity and a direct collector CTA.
+- Keep individual lines immediately readable on mobile. Fragments are encouraged.
+- Make every line specific to the supplied product.
+- Do not reuse example wording from another campaign.
+- Do not mechanically force they or a rivalry structure onto a single athlete, team, car, horse, event or championship product.
+- Adapt the grammar to the actual product type.
+- Never invent a rivalry, achievement, record, number, trophy, team, year or historical fact.
+- The result must feel raw, restrained and confident rather than like conventional ad copy.
+
+Variation 2 - Framed Greatness
+
+Use this exact two-line opening once:
+
+Greatness doesn’t fade.
+It gets framed.
+
+- Do not repeat greatness in the middle or closing.
+- Write one compact product-specific paragraph using the supplied product name, supported people, team, vehicle, event or moment, selected sport, selected country, fan emotion and any verified era, rivalry, mentality or memory.
+- Follow with one short emotional paragraph about collector ownership or display appeal.
+- Close with: Limited to {{authentic edition limit}} worldwide. Secure your edition before it’s gone.
+- Replace {{authentic edition limit}} with the confirmed edition quantity from the approved claim path, supplied product information or visible artwork. Never leave the placeholder in final copy.
+- When the confirmed edition limit is 100, write exactly: Limited to 100 worldwide. Secure your edition before it’s gone.
+- When no edition quantity is confirmed, use the strongest truthful scarcity already permitted by the campaign instead. Never fabricate 100, a numbered edition or a no-second-run claim.
+
+Variation 3 - Nostalgia And Remembered Moment
+
+- Lead with a verified memory, era, atmosphere or defining feeling tied to the supplied product.
+- Make the correct fan remember why the subject mattered.
+- Keep the writing compact, natural and fact-safe.
+
+Variation 4 - Fan Identity And Ownership
+
+- Connect the product to belonging, pride and the feeling of owning and displaying it.
+- Help the customer picture it in a relevant home, sports room, office, bar, garage or collection without turning the copy into an interior-design advertisement.
+
+Variation 5 - Collector Scarcity Or Gifting
+
+- Lead with collector meaning and finish with the strongest authentic urgency.
+- Use gifting only when it naturally strengthens the selected product and audience.
+- Do not repeat the scarcity sentence used by another variation.
+
+If the approved campaign-specific template requires exactly one primary text rather than five, preserve that quantity. Silently consider these angles and return only the strongest compatible final version in the existing schema.
+
+UNIVERSAL PRIMARY-TEXT QUALITY
+
+- Lead with the emotional hook rather than a product description.
+- Write for a mobile Meta feed using short paragraphs and deliberate line breaks.
+- Connect the product to verified memory, identity, rivalry, legacy, mentality, pride or belonging.
+- Make the writing human, direct, premium and collector-driven.
+- Use the product title and supplied artwork as the factual source of truth.
+- Localise terminology using the existing selected-country rules.
+- Keep scarcity premium, authentic and believable.
+- End with a natural action such as Secure yours or Claim your edition.
+- Avoid long explanations, excessive rhetorical questions and repeated hooks or scarcity sentences.
+- Avoid generic AI language including elevate, transform, ultimate, unleash, must-have, masterpiece, conversation starter and bring your walls to life.
+- Do not name unsupported athletes, teams, records, years, trophies, events, numbers or achievements.
+- Do not claim licensing, signatures or authenticity unless supplied.
+- Do not use discount language unless the campaign variables explicitly support it.
+- The five variations must feel like five distinct human selling angles rather than rewrites of one message.
+
+SILENT COPY SELECTION
+
+Before returning the campaign, privately compare several product-specific candidates for each required angle. Reject generic, repetitive, fact-unsafe or unnatural writing. Return only the strongest finished copy in the current approved output format. Do not expose candidates, scoring notes, research or reasoning."""
+
+
+def apply_shared_meta_winner_copy_upgrade(prompt, campaign_type):
+    if campaign_type not in {"Carousel", "Instant Experience"} or not prompt:
+        return prompt
+    if META_WINNER_COPY_BLOCK_VERSION in prompt:
+        return prompt
+    return f"{prompt.rstrip()}\n\n{build_shared_meta_winner_copy_upgrade()}"
 
 
 def compose_final_ads_prompt(
@@ -1352,6 +1555,7 @@ def compose_final_ads_prompt(
         include_primary_text_variations=include_primary_text_variations,
         category=category,
     )
+    prompt = apply_shared_meta_winner_copy_upgrade(prompt, campaign_type)
     prompt = apply_country_language_guidance(prompt, country)
     prompt = apply_meta_url_parameters_guidance(prompt)
     if product_name:
@@ -1431,7 +1635,7 @@ Description
 
 {carousel_card_copy_rules}
 
-Use the five strategic roles exactly as defined above: Product Identity, Race Or Moment, Legacy, Fan Ownership, and Scarcity.
+Keep the approved output role labels Product Identity, Race Or Moment, Legacy, Fan Ownership and Scarcity exactly as shown in the output schema. Apply the commercial functions in the shared high-conversion block below to Cards 1 through 5 without renaming these output fields.
 
 PRIMARY TEXT VARIATIONS
 
@@ -2201,6 +2405,18 @@ def get_category_winner_angle(category):
     return CATEGORY_WINNER_ANGLES.get(category, {})
 
 
+def build_carousel_winner_examples(example_text):
+    examples = []
+    for example in str(example_text or "").split(";"):
+        example = example.strip()
+        if len(example) > CAROUSEL_CARD_MAX_CHARACTERS:
+            raise ValueError(
+                f"Carousel winner example exceeds {CAROUSEL_CARD_MAX_CHARACTERS} characters: {example}"
+            )
+        examples.append(example)
+    return "; ".join(example for example in examples if example)
+
+
 def build_category_winner_angle_block(category, campaign_type, country):
     angle = get_category_winner_angle(category)
     if not angle:
@@ -2208,20 +2424,22 @@ def build_category_winner_angle_block(category, campaign_type, country):
 
     category_label = str(category or "").upper()
     if campaign_type == "Carousel":
+        headline_examples = build_carousel_winner_examples(angle["headline_examples"])
+        description_examples = build_carousel_winner_examples(angle["description_examples"])
         strategy = f"""CATEGORY-SPECIFIC CAROUSEL WINNER ANGLE
 
 - Category decides the ad structure and emotional angle. Country only localises spelling, terminology and language flavour.
 - Audience: {angle["audience"]}.
 - Emotional territory: {angle["emotion"]}.
-- Carousel sequence: {angle["carousel_flow"]}.
-- Use the five required roles exactly: Product Identity, Moment / Legacy, Emotional Hook, Fan Ownership, Scarcity.
+- Category-specific emotional cues: {angle["carousel_flow"]}. Use these cues only where they support the required commercial card journey and verified product facts.
+- Keep the selected template's existing five role labels and output order unchanged.
 - Card 1 must show the product clearly.
-- Card 2 must connect to the sport moment, memory or legacy.
-- Card 3 must trigger the fan identity.
-- Card 4 must show ownership on the wall, cave, home bar, office or sports room.
+- Card 2 must create display desire in a product-relevant ownership setting.
+- Card 3 must communicate premium collector appeal suited to the category.
+- Card 4 must distil the verified emotional meaning, memory or fan connection without repeating names from Card 1.
 - Card 5 must make scarcity feel final and collector-led.
-- Strong short-line examples for this category: {angle["headline_examples"]}.
-- Short description examples for this category: {angle["description_examples"]}.
+- Strong short-line examples for this category: {headline_examples}.
+- Short description examples for this category: {description_examples}.
 - {angle["country_note"]}"""
     elif campaign_type == "Instant Experience":
         strategy = f"""CATEGORY-SPECIFIC INSTANT EXPERIENCE WINNER ANGLE

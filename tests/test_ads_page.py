@@ -194,7 +194,7 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Maximum 17 characters including spaces and punctuation.", prompt)
         self.assertIn("Every headline is 17 characters or fewer including spaces and punctuation.", prompt)
         self.assertIn("Every description is 17 characters or fewer including spaces and punctuation.", prompt)
-        self.assertNotIn("13 characters", prompt)
+        self.assertNotIn("Prefer 10 to 13 characters", prompt)
         self.assertNotIn("Maximum 32 characters including spaces.", prompt)
         self.assertNotIn("Maximum 24 characters including spaces.", prompt)
         self.assertIn("Use the supplied product name as the source of identity.", prompt)
@@ -226,6 +226,7 @@ class AdsPageTests(unittest.TestCase):
 
         self.assertEqual(ads_page.CAROUSEL_CARD_MAX_CHARACTERS, 17)
         self.assertIn("def build_carousel_card_copy_rules", source)
+        self.assertIn("def build_carousel_high_conversion_quality_rules", source)
         self.assertIn("def build_carousel_story_and_specificity_rules", source)
         self.assertIn("def build_carousel_final_quality_check", source)
         self.assertIn("def compose_final_ads_prompt", source)
@@ -617,21 +618,238 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Maximum 17 characters", prompt)
         self.assertIn("No commas", prompt)
         self.assertIn("No full stops", prompt)
-        self.assertEqual(ads_page.validate_carousel_card_length(cards, max_characters=17), [])
+        self.assertEqual(ads_page.validate_carousel_card_length(cards), [])
         self.assertEqual(
             ads_page.validate_carousel_card_length(
-                [{"headline": "Collector Edition", "description": "Valid"}],
-                max_characters=17,
+                [{"headline": "123456789012345", "description": "Valid"}],
             ),
             [],
         )
         self.assertEqual(
             ads_page.validate_carousel_card_length(
-                [{"headline": "Far Too Long For Cards", "description": "Valid"}],
-                max_characters=17,
+                [{"headline": "12345678901234567", "description": "Valid"}],
+            ),
+            [],
+        )
+        self.assertEqual(
+            ads_page.validate_carousel_card_length(
+                [{"headline": "123456789012345678", "description": "Valid"}],
             ),
             ["Card 1 headline exceeds 17 characters."],
         )
+
+    def test_carousel_limit_counts_spaces_and_rejects_18_characters(self):
+        exactly_seventeen = "12345678901 12345"
+        eighteen = "123456789012 12345"
+
+        self.assertEqual(len(exactly_seventeen), 17)
+        self.assertEqual(len(eighteen), 18)
+        self.assertEqual(
+            ads_page.validate_carousel_card_length(
+                [{"headline": exactly_seventeen, "description": exactly_seventeen}],
+            ),
+            [],
+        )
+        self.assertEqual(
+            ads_page.validate_carousel_card_length(
+                [{"headline": eighteen, "description": eighteen}],
+            ),
+            [
+                "Card 1 headline exceeds 17 characters.",
+                "Card 1 description exceeds 17 characters.",
+            ],
+        )
+
+    def test_carousel_limit_does_not_restrict_primary_text_or_instant_experience(self):
+        long_primary_text = (
+            "This primary text intentionally exceeds seventeen characters and remains valid."
+        )
+        cards = [
+            {
+                "headline": "Product Hero",
+                "description": "Fan Identity",
+                "primary_text": long_primary_text,
+            }
+        ]
+
+        self.assertEqual(ads_page.validate_carousel_card_length(cards), [])
+        instant_prompt = ads_page.build_ads_prompt(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Instant Experience",
+        )
+        self.assertNotIn("CAROUSEL CARD CHARACTER LIMIT", instant_prompt)
+        self.assertNotIn("HIGH-CONVERSION CAROUSEL QUALITY", instant_prompt)
+        self.assertIn("4 to 6 words max.", instant_prompt)
+
+    def test_carousel_winner_examples_fit_limit_without_changing_other_campaigns(self):
+        for category, angle in ads_page.CATEGORY_WINNER_ANGLES.items():
+            for field in ("headline_examples", "description_examples"):
+                with self.subTest(category=category, field=field):
+                    rendered = ads_page.build_carousel_winner_examples(angle[field])
+                    self.assertTrue(rendered)
+                    self.assertTrue(
+                        all(
+                            len(example.strip()) <= ads_page.CAROUSEL_CARD_MAX_CHARACTERS
+                            for example in rendered.split(";")
+                        )
+                    )
+
+        cricket_carousel = ads_page.build_category_winner_angle_block(
+            "Cricket",
+            "Carousel",
+            "Australia",
+        )
+        cricket_instant = ads_page.build_category_winner_angle_block(
+            "Cricket",
+            "Instant Experience",
+            "Australia",
+        )
+        baseball_carousel = ads_page.build_category_winner_angle_block(
+            "Baseball",
+            "Carousel",
+            "USA",
+        )
+        baseball_instant = ads_page.build_category_winner_angle_block(
+            "Baseball",
+            "Instant Experience",
+            "USA",
+        )
+
+        self.assertIn("For Cricket Fans", cricket_carousel)
+        self.assertIn("For Cricket Fans", cricket_instant)
+        self.assertIn("For Baseball Fans", baseball_carousel)
+        self.assertIn("For Baseball Fans", baseball_instant)
+
+    def test_high_conversion_rules_are_shared_without_changing_card_schema(self):
+        rules = ads_page.build_carousel_high_conversion_quality_rules()
+        role_markers = (
+            "Card 1 - Product Identity",
+            "Card 2 - Display Desire",
+            "Card 3 - Collector Appeal",
+            "Card 4 - Emotional Meaning",
+            "Card 5 - Authentic Scarcity",
+        )
+
+        self.assertEqual(
+            [rules.index(marker) for marker in role_markers],
+            sorted(rules.index(marker) for marker in role_markers),
+        )
+        for required in (
+            "one connected persuasion journey",
+            "different buying reason",
+            "must complement one another rather than repeat",
+            "Write for fast mobile scanning.",
+            "Reject anything exceeding 17 characters.",
+            "Reject awkward abbreviations and incomplete phrases.",
+            "Select only the strongest connected five-card sequence.",
+            "Output only the final campaign in the existing format.",
+        ):
+            self.assertIn(required, rules)
+
+        motorsport_prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+        )
+        football_prompt = ads_page.build_ads_prompt(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Carousel",
+        )
+        self.assertEqual(motorsport_prompt.count("HIGH-CONVERSION CAROUSEL QUALITY"), 1)
+        self.assertEqual(football_prompt.count("HIGH-CONVERSION CAROUSEL QUALITY"), 1)
+        self.assertIn(
+            "Keep the approved output role labels Product Identity, Race Or Moment, "
+            "Legacy, Fan Ownership and Scarcity exactly as shown in the output schema.",
+            motorsport_prompt,
+        )
+        self.assertIn("Card 2 - Moment / Legacy", football_prompt)
+        self.assertIn("Card 3 - Emotional Hook", football_prompt)
+
+    def test_shared_winner_copy_upgrade_reaches_carousel_and_instant_experience(self):
+        carousel_prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+        )
+        instant_prompt = ads_page.build_ads_prompt(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Instant Experience",
+        )
+        single_prompt = ads_page.build_ads_prompt(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Single Image / Video",
+        )
+
+        for prompt in (carousel_prompt, instant_prompt):
+            with self.subTest(campaign=prompt.split("Campaign type:", 1)[-1].splitlines()[0].strip()):
+                self.assertEqual(prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
+                self.assertIn("Variation 1 - Staccato Legacy Story", prompt)
+                self.assertIn("Variation 2 - Framed Greatness", prompt)
+                self.assertIn("Variation 3 - Nostalgia And Remembered Moment", prompt)
+                self.assertIn("Variation 4 - Fan Identity And Ownership", prompt)
+                self.assertIn("Variation 5 - Collector Scarcity Or Gifting", prompt)
+                self.assertIn("UNIVERSAL PRIMARY-TEXT QUALITY", prompt)
+                self.assertIn("Lead with the emotional hook rather than a product description.", prompt)
+                self.assertIn("Write for a mobile Meta feed", prompt)
+                self.assertIn("Use the product title and supplied artwork as the factual source of truth.", prompt)
+
+        self.assertNotIn(ads_page.META_WINNER_COPY_BLOCK_VERSION, single_prompt)
+
+    def test_staccato_and_framed_greatness_rules_are_reusable_and_fact_safe(self):
+        rules = ads_page.build_shared_meta_winner_copy_upgrade()
+        opening = "Greatness doesn’t fade.\nIt gets framed."
+
+        self.assertEqual(rules.count(opening), 1)
+        self.assertIn("Begin with two to four short sharp lines.", rules)
+        self.assertIn("Do not mechanically force they or a rivalry structure", rules)
+        self.assertIn("single athlete, team, car, horse, event or championship product", rules)
+        self.assertIn("Close with: Limited to {authentic edition limit} worldwide.", rules)
+        self.assertIn(
+            "When the confirmed edition limit is 100, write exactly: "
+            "Limited to 100 worldwide. Secure your edition before it’s gone.",
+            rules,
+        )
+        self.assertIn("When no edition quantity is confirmed", rules)
+        self.assertNotIn("Kobe", rules)
+        self.assertNotIn("Jordan", rules)
+
+    def test_shared_winner_copy_upgrade_is_idempotent_and_preserves_custom_text(self):
+        custom_prompt = "CUSTOM SAVED INSTRUCTION\nKeep this exact specialist direction."
+
+        once = ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Carousel")
+        twice = ads_page.apply_shared_meta_winner_copy_upgrade(once, "Carousel")
+
+        self.assertEqual(once, twice)
+        self.assertEqual(once.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
+        self.assertIn(custom_prompt, once)
+        self.assertEqual(
+            ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Single Image / Video"),
+            custom_prompt,
+        )
+
+    def test_dedicated_baseball_instant_experience_keeps_approved_single_copy_schema(self):
+        prompt = ads_page.build_ads_prompt(
+            "Shohei Ohtani 50/50 Season",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/ohtani-50-50",
+        )
+
+        self.assertEqual(prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
+        self.assertIn("If the approved campaign-specific template requires exactly one primary text", prompt)
+        self.assertIn("Return one final primary text only.", prompt)
+        self.assertNotIn("PRIMARY TEXT VARIATIONS\n\nVariation 1:", prompt)
 
     def test_baseball_instant_experience_receives_country_localisation_without_changing_baseball_terms(self):
         countries = {
@@ -1151,6 +1369,22 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Every image prompt must be fully standalone.", contract)
         self.assertIn('Never write "same as above"', contract)
         self.assertIn("Normally do not place the card headline or description inside the image", contract)
+        self.assertIn("Each visual must clearly support its assigned card message", contract)
+        self.assertIn("Card 1 must deliver the strongest immediate product presentation.", contract)
+        self.assertIn(
+            "Card 5 must deliver the strongest truthful scarcity or final-claim presentation.",
+            contract,
+        )
+        self.assertIn("framed product remains the unmistakable hero", contract)
+        self.assertIn("Avoid five near-identical framed mockups", contract)
+        self.assertIn("fake edition details", contract)
+        self.assertIn("Card 1: a clean product-hero presentation.", contract)
+        self.assertIn("Card 2: a desirable ownership setting.", contract)
+        self.assertIn("Card 3: a premium collector display suited to the selected category.", contract)
+        self.assertIn("Card 4: an emotional lifestyle, memory or legacy presentation.", contract)
+        self.assertIn("exact generated headline, exact generated description, creative direction", contract)
+        self.assertIn("Do not use abstract room symbolism", contract)
+        self.assertIn("Never crop the outer frame", contract)
 
     def test_last_image_variation_lock_is_required_inside_every_carousel_prompt(self):
         contract = visual_contract(
