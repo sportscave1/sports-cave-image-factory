@@ -6,6 +6,7 @@ import re
 import secrets
 import time
 from pathlib import Path, PurePosixPath
+from urllib.parse import urlparse
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -62,6 +63,56 @@ ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
+PRODUCT_URL_ERROR = "Enter a valid product page URL before submitting."
+
+FINAL_REVIEW_HOW_TO_STEPS = (
+    "1. Finish setting up the complete campaign in Meta Ads Manager.",
+    "2. Take screenshots showing every part of the finished ad: primary text, headline, description, CTA, every creative or carousel card in order, and all relevant placement previews.",
+    "3. For Instant Experience campaigns, also include the Instant Experience cover, catalogue setup and finished mobile preview.",
+    "4. Open ChatGPT and upload all screenshots into the same conversation.",
+    "5. Wait until every screenshot has finished uploading, then copy and paste the Final Ad Review prompt.",
+    "The Product page URL will already be included in the copied prompt.",
+)
+
+FINAL_REVIEW_LANDING_PAGE_BLOCK_TEMPLATE = """PRODUCT LANDING PAGE
+
+Product page URL: `{product_page_url}`
+
+Open and inspect the live product landing page at the URL above.
+
+Review every attached screenshot as one complete finished Meta advertising campaign. Inspect all screenshots before reaching a verdict. Treat the ad and the linked product page as one continuous customer journey rather than two separate pieces.
+
+In addition to the existing campaign review, assess whether the product landing page flows naturally from the ad.
+
+Check:
+
+* Whether the product, artwork and promise shown in the ad immediately match the landing page
+* Whether the strongest ad hook continues above the fold
+* Whether the landing page preserves the same emotional angle, fan identity and collector positioning
+* Whether the scarcity and edition messaging are consistent and believable
+* Whether the target market, currency, price, shipping and delivery information feel aligned
+* Whether framed and unframed options are easy to understand
+* Whether the primary CTA is clear and continues the action promised by the ad
+* Whether reviews, guarantees, payment security and other trust signals appear at the right stage
+* Whether the product media supports the same premium impression created by the ad
+* Whether the mobile page hierarchy creates unnecessary friction before the customer can choose a variant or buy
+* Whether any copy, offer, image or expectation changes between the ad and landing page could cause hesitation or abandonment
+
+Identify any disconnect where the ad creates a desire or expectation that the landing page fails to continue.
+
+Recommend exact landing-page changes that would make the product page flow more naturally from this specific campaign and improve conversion without making Sports Cave look like a discount store.
+
+Prioritise recommendations by likely sales impact. Clearly separate:
+
+1. Changes required before launching
+2. Strong improvements worth making
+3. Optional tests for later
+
+Give a final verdict on whether the complete ad-to-landing-page journey is ready to launch.
+
+If the live product page cannot be accessed, state that clearly. Do not invent page content. Complete the ad review from the attached screenshots and specify which product-page screenshots are needed to finish the landing-page assessment.
+
+Integrate these findings into the existing review structure. Do not duplicate sections or replace the existing scoring format."""
 
 BANNED_GENERIC_CAROUSEL_PHRASES = (
     "History Framed",
@@ -416,7 +467,21 @@ def _clean_product_name(product_name):
 
 
 def _clean_product_url(product_url):
-    return re.sub(r"[\x00-\x20\x7f]", "", product_url or "").strip()
+    return str(product_url or "").strip()
+
+
+def is_valid_product_page_url(product_url):
+    clean_url = _clean_product_url(product_url)
+    if not clean_url:
+        return False
+    if re.search(r"\s", clean_url):
+        return False
+    parsed = urlparse(clean_url)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    if not parsed.netloc:
+        return False
+    return True
 
 
 def _normalise_option_label(value):
@@ -563,24 +628,30 @@ def resolve_edition_ops_product_id(product_name):
     return ""
 
 
-def render_prompt_copy_button(prompt_text, key, label="Copy Prompt"):
+def render_prompt_copy_button(prompt_text, key, label="Copy Prompt", success_label="Prompt copied"):
     prompt_text_json = json.dumps(str(prompt_text or ""))
     safe_label = html.escape(label)
+    safe_success_label = html.escape(success_label)
     button_id = f"ads-copy-prompt-{hashlib.sha1(str(key).encode('utf-8')).hexdigest()[:12]}"
+    status_id = f"{button_id}-status"
     components.html(
         f"""
         <div style="padding:2px 0;">
           <button
             id="{button_id}"
             type="button"
+            aria-label="{safe_label}"
+            aria-describedby="{status_id}"
             style="width:100%;border:1px solid rgba(11,11,13,0.55);border-radius:14px;padding:12px 14px;background:#FFFFFF;color:#0B0B0D;font-weight:700;font-size:0.95rem;cursor:pointer;box-sizing:border-box;"
           >
             {safe_label}
           </button>
+          <div id="{status_id}" role="status" aria-live="polite" style="margin-top:6px;min-height:18px;color:#5C4309;font-size:0.82rem;"></div>
         </div>
         <script>
         (() => {{
           const button = document.getElementById("{button_id}");
+          const status = document.getElementById("{status_id}");
           const promptText = {prompt_text_json};
           const originalLabel = button.innerText;
 
@@ -600,12 +671,15 @@ def render_prompt_copy_button(prompt_text, key, label="Copy Prompt"):
                 document.execCommand("copy");
                 document.body.removeChild(textarea);
               }}
-              button.innerText = "Prompt copied";
+              button.innerText = "{safe_success_label}";
+              status.innerText = "{safe_success_label}";
             }} catch (error) {{
               button.innerText = "Copy failed";
+              status.innerText = "Copy failed";
             }}
             setTimeout(() => {{
               button.innerText = originalLabel;
+              status.innerText = "";
             }}, 1400);
           }}
 
@@ -622,6 +696,8 @@ def validate_ads_inputs(product_name, category, country, campaign_type, product_
         return "Enter a product name and choose a category, country and campaign type."
     if category == "Select category" or country == "Select country" or campaign_type == "Select campaign type":
         return "Enter a product name and choose a category, country and campaign type."
+    if not is_valid_product_page_url(product_url):
+        return PRODUCT_URL_ERROR
     return ""
 
 
@@ -902,19 +978,292 @@ IMAGE PROMPTS — GENERATE IN THIS ORDER
 Return exactly these five image-prompt entries and no sixth prompt."""
 
 
-def build_instant_experience_visual_output_requirements(template_key):
+def build_default_instant_experience_cover_prompt_requirements(product_name, category, country):
+    product_name = _clean_product_name(product_name)
+    category = _normalise_option_label(category) or "selected sport category"
+    country = _normalise_option_label(country) or "selected market"
+    return f"""UPGRADED DEFAULT INSTANT EXPERIENCE IMAGE PROMPT
+
+Product name: {product_name}
+
+Sport category: {category}
+
+Target market: {country}
+
+Reference image: Upload the selected product's exact black-framed reference image into ChatGPT before using this prompt.
+
+Create a 1024 x 1024 ultra-realistic Sports Cave Instant Experience cover for a Meta ad using the uploaded product image as the exact, immutable reference.
+
+This cover will appear above the product catalogue inside the Instant Experience. It must stop the scroll, make the artwork immediately desirable and communicate genuine collector scarcity without looking like a discount advertisement.
+
+CREATIVE PRIORITIES
+
+If any instructions conflict, follow this order:
+
+1. Exact artwork and frame fidelity
+2. Clear, unobstructed product visibility
+3. Photorealistic home placement
+4. Mobile-readable scarcity messaging
+5. Restrained Sports Cave branding
+
+LOCK THE PRODUCT
+
+Treat everything inside the uploaded product's outer frame as one locked, finished product asset.
+
+The uploaded artwork and frame must remain exactly the same.
+
+Do not recreate, reinterpret or redesign any part of it.
+
+Use the Product name above as the product identity. Never use the uploaded image filename as the product name.
+
+Use the Sport category above as the selected Ads sport category. Do not infer the category from the filename or artwork.
+
+Do not change:
+
+* Faces or people
+* Uniforms or colours
+* Artwork composition
+* Artwork text
+* Signatures
+* Logos
+* Badges
+* Borders
+* Edition plaques or numbers
+* Frame colour
+* Frame dimensions
+* Crop or aspect ratio
+
+Do not blur, repaint, sharpen, stretch, warp, bend, squash or distort the artwork or frame.
+
+Do not invent signatures, logos, edition numbers, plaques, reflections or artwork details.
+
+If an edition number already appears in the reference, preserve it exactly. Do not create a different number.
+
+CORE COMPOSITION
+
+Keep the proven Sports Cave layout:
+
+* Photorealistic framed-artwork lifestyle hero across the top 70-72% of the canvas
+* Premium black collector panel across the bottom 28-30%
+* One restrained gold separator between the two sections
+
+The framed artwork must remain the unmistakable hero.
+
+Show the entire outer frame, including all four corners and edges.
+
+The frame should occupy approximately 78-86% of the hero section's width while retaining natural breathing room around it.
+
+Do not crop the frame against the canvas edges.
+
+Do not place furniture, reflections, shadows or text over the artwork.
+
+REAL-HOME ENVIRONMENT
+
+Place the exact framed artwork on the wall of a believable, premium home.
+
+The result must look like genuine high-end interior photography, not CGI, a showroom render, a gallery mockup or an artificial background.
+
+Use one cohesive environment, such as:
+
+* A refined collector living room
+* A premium home sports lounge
+* A restrained masculine study
+* An architectural living space with subtle sports-room character
+
+The room should feel premium, masculine, calm, lived-in and realistic.
+
+Use a warm neutral wall such as:
+
+* Soft limewash
+* Warm plaster
+* Muted taupe
+* Warm grey
+* Refined off-white
+* Soft charcoal
+* Subtle concrete
+
+Show only enough surrounding architecture to prove that this is a real home.
+
+Include one or two restrained residential cues near the outer edges, such as:
+
+* The corner of a low-profile sofa
+* A clean timber console
+* A curtain or window reveal
+* Skirting board
+* A softly blurred doorway
+* A small, natural indoor plant
+
+Keep these elements secondary and softly out of focus.
+
+Do not add extra wall art, sports equipment, jerseys, trophies, neon signs, visible branding, people or decorative clutter.
+
+CAMERA AND PERSPECTIVE
+
+Photograph the frame from a natural standing eye level using the visual character of a professional 40-55 mm interior lens.
+
+Keep the camera mostly front-facing, with no more than a subtle 3-7 degree viewing angle.
+
+Maintain straight architectural verticals and correct landscape proportions.
+
+The frame must not appear stretched, trapezoidal, floating or pasted onto the wall.
+
+Show realistic frame depth, sharp mitred corners, subtle black timber texture and believable mounting.
+
+Create a physically accurate contact shadow behind and slightly below the frame.
+
+LIGHTING AND GLASS
+
+Use soft natural daylight entering from one believable direction.
+
+Add restrained warm interior fill light where appropriate.
+
+Lighting should include:
+
+* Controlled highlights
+* Natural tonal falloff
+* Realistic wall shadows
+* Subtle depth around the frame
+* Premium but believable contrast
+
+Add realistic glass over the artwork.
+
+Glass reflections must correspond to plausible windows or room geometry.
+
+Keep reflections subtle and controlled. Place the strongest reflections toward the glass edges or darker artwork areas.
+
+Do not place glare across faces, important artwork text, signatures, plaques or key details.
+
+The artwork must remain sharp, readable and visually dominant.
+
+SPORTS CAVE 2026 BRAND PANEL
+
+Create a full-width collector panel across the bottom 28-30% of the canvas.
+
+Use the Sports Cave premium visual system:
+
+* Deep carbon black
+* Subtle smoked-black texture
+* Restrained antique gold
+* Warm ivory text
+* Fine editorial spacing
+* Quiet metallic detail
+* Controlled contrast
+
+The panel should feel like premium collector packaging or a limited-release campaign, not a coupon, sale graphic or generic luxury template.
+
+Separate the room image and panel with a fine antique-gold rule and a very subtle warm centre glint.
+
+Do not use a large lens flare, glitter, excessive metallic effects, marble, bright yellow gold or heavy gradients.
+
+Do not invent or redraw a Sports Cave logo. Express the brand through colour, typography, restraint and composition.
+
+EXACT OVERLAY TEXT
+
+Use exactly these three lines with the exact spelling, capitalisation and line breaks:
+
+ONLY 100 WILL EVER EXIST
+The release closes with the final number
+CLAIM YOUR EDITION
+
+Do not add any other words.
+
+TYPOGRAPHIC HIERARCHY
+
+Line one:
+
+* Largest line
+* Uppercase
+* Premium editorial serif or restrained Roman-style capitals
+* Warm ivory with a very subtle antique-gold finish
+* Strong enough to stop the scroll
+* Never stretched or crowded
+
+Line two:
+
+* Smaller
+* Clean and highly readable
+* Warm ivory
+* Calm collector language
+* Generous spacing above and below
+
+Line three:
+
+* Uppercase
+* Antique gold
+* Strong, clean and unmistakably actionable
+* Slightly smaller than the headline
+* Presented as typography, not a fake website button
+
+Keep all text centred and inside a mobile-safe area with generous left, right and bottom margins.
+
+Do not allow the headline to run close to the canvas edges.
+
+Do not misspell, rephrase, duplicate or add punctuation to the supplied text.
+
+RESTRICTIONS
+
+Do not add:
+
+* Prices
+* Discounts
+* Percentage savings
+* Sale language
+* Countdown timers
+* "Shop Now"
+* Fake buttons
+* Fake interface elements
+* Extra product information
+* Paragraphs
+* Random logos
+* Watermarks
+* Social-media icons
+* People
+* Additional wall art
+* Sports props
+* Clutter
+
+FINAL QUALITY CHECK
+
+Before delivering the image, confirm that:
+
+* The exact uploaded artwork has been preserved
+* All four outer frame edges are visible
+* The artwork remains large, sharp and unobstructed
+* The room looks like a believable premium home
+* The frame perspective and wall shadow are physically realistic
+* Glass glare does not hide important artwork
+* The collector panel occupies no more than 30% of the canvas
+* All three text lines are spelled exactly as supplied
+* The message remains readable on a mobile screen
+* The design feels unmistakably premium and collector-driven
+* Nothing resembles a discount-store advertisement
+
+FINAL RESULT
+
+A photorealistic 1024 x 1024 Sports Cave Instant Experience cover featuring the exact uploaded framed artwork mounted naturally inside a believable premium home, with realistic glass, physically accurate shadows, clear product visibility and a restrained black-and-gold collector panel carrying powerful limited-edition scarcity messaging.
+
+The finished cover should feel like a real Sports Cave collector release photographed in someone's home, not an AI mockup or promotional sale banner."""
+
+
+def build_instant_experience_visual_output_requirements(
+    template_key,
+    *,
+    product_name="",
+    category="",
+    country="",
+):
     if template_key == "baseball_instant_experience":
         layout_rules = """Use the existing approved 06 - Instant Experience Cover Banner (Social) dimensions and aspect ratio from the Sports Cave Mockups template. Do not replace that approved banner format with a global square size.
 
 Use the uploaded framed artwork as the hero and preserve the existing banner's approved placement logic, safe areas and Meta-readable composition."""
         scarcity_rules = """The Baseball Instant Experience template has an approved claim path. Use only the generated and verified campaign wording from that path. Do not add a different quantity, product fact or scarcity claim."""
     else:
-        layout_rules = """Create a square 1024 x 1024 Sports Cave Instant Experience cover.
-
-Use the framed artwork as the hero across approximately the upper 60-68% and a luxury black scarcity panel across approximately the lower 32-40%.
-
-Use premium black, gold, ivory and charcoal styling, with a refined separation glow or controlled gold highlight. Use no more than three short text lines, preserve mobile-readable spacing and make it feel like a premium collector release rather than a cheap promotional banner."""
-        scarcity_rules = """Use the exact generated and verified campaign headline, supporting copy, scarcity wording and CTA. Never automatically claim "Limited to 100 worldwide" or any edition quantity unless it is confirmed by the existing approved-claim path, the supplied product information or visible artwork. When quantity is not verified, use only non-numeric scarcity wording already permitted by the copy system."""
+        layout_rules = build_default_instant_experience_cover_prompt_requirements(
+            product_name,
+            category,
+            country,
+        )
+        scarcity_rules = """Use the exact default overlay text supplied above. Do not replace it with generated copy, alternate scarcity wording, a different CTA, a fake button or an inferred edition claim."""
 
     return f"""INSTANT EXPERIENCE VISUAL REQUIREMENTS
 
@@ -967,7 +1316,12 @@ def build_campaign_visual_output_contract(
     if campaign_type == "Carousel":
         campaign_requirements = build_carousel_visual_output_requirements(template_key)
     elif campaign_type == "Instant Experience":
-        campaign_requirements = build_instant_experience_visual_output_requirements(template_key)
+        campaign_requirements = build_instant_experience_visual_output_requirements(
+            template_key,
+            product_name=product_name,
+            category=category,
+            country=country,
+        )
     elif campaign_type == "Single Image / Video":
         campaign_requirements = build_single_image_video_visual_output_requirements()
     else:
@@ -2512,7 +2866,11 @@ FOOTBALL INSTANT EXPERIENCE DIRECTION
 - Output must work for World Cup, national teams, Ronaldo, Messi, Mbappe, Beckham, Arsenal, rivalries, finals, farewells and iconic football moments without inventing facts.
 """
     category_block = build_category_winner_angle_block(category, campaign_type, country)
-    category_setting = get_instant_experience_setting(category)
+    default_cover_prompt = build_default_instant_experience_cover_prompt_requirements(
+        product_name,
+        category,
+        country,
+    )
 
     return f"""{pattern_heading}
 
@@ -2581,20 +2939,9 @@ INSTANT EXPERIENCE COVER PROMPT
 
 Create one image prompt for the selected product.
 
-The image prompt must instruct the image generator:
-- Create a square 1:1 premium Meta Instant Experience cover.
-- Use the uploaded image as the exact reference for the framed Sports Cave artwork.
-- Keep the exact framed artwork unchanged.
-- Do not change the artwork, colours, text, frame, badge, crop or layout.
-- Top 60-68% of the image: framed artwork hero in a premium category-relevant collector setting.
-- Category setting: {category_setting}.
-- Bottom 32-40% of the image: black/gold CTA panel.
-- Panel main text: use the strongest generated and verified scarcity wording. Use LIMITED TO 100 WORLDWIDE only when the edition quantity is confirmed by the approved claim path, supplied product information or visible artwork.
-- Panel subtext: use the generated supporting scarcity line. Once it sells out, it's gone. is permitted only when consistent with the approved copy.
-- Panel CTA: Claim Your Edition
-- Style: cinematic, premium, masculine, collector-focused.
-- No people unless the selected product/ad specifically asks for UGC.
-- No fake logos, fake club logos, fake federation logos, fake edition numbers, extra branding, clutter or extra artwork competing with the product.
+The image prompt must use this upgraded default Instant Experience cover prompt:
+
+{default_cover_prompt}
 
 CTA GUIDANCE
 
@@ -3742,6 +4089,28 @@ def build_ads_review_context(result):
     }
 
 
+def build_final_ad_review_landing_page_block(product_page_url):
+    clean_url = _clean_product_url(product_page_url)
+    return FINAL_REVIEW_LANDING_PAGE_BLOCK_TEMPLATE.format(product_page_url=clean_url)
+
+
+def build_final_ad_review_copy_prompt(result, *, resolved_prompt=None):
+    context = build_ads_review_context(result)
+    base_prompt = str(
+        resolved_prompt
+        if resolved_prompt is not None
+        else ads_final_review.build_review_instructions(CAROUSEL_CARD_MAX_CHARACTERS)
+    )
+    context_text = ads_final_review.build_review_context(context, "")
+    landing_page_block = build_final_ad_review_landing_page_block(context.get("product_url") or "")
+    return (
+        f"{base_prompt.rstrip()}\n\n"
+        "CAMPAIGN CONTEXT\n\n"
+        f"{context_text}\n\n"
+        f"{landing_page_block}"
+    )
+
+
 def _new_ads_review_workflow(result):
     return {
         "context_key": str(result.get("context_key") or ""),
@@ -4110,79 +4479,18 @@ def _submit_ads_review(result, workflow):
 
 
 def _render_final_ad_review(result):
-    workflow = _ads_review_workflow(result)
     st.markdown('<div class="sc-ad-review-heading">Final Ad Review</div>', unsafe_allow_html=True)
     st.caption(
-        "Upload the finished Meta ad and every creative. ChatGPT will review the complete campaign, "
-        "score it out of 10 and identify the final changes most likely to improve sales."
+        "Upload screenshots of the finished Meta campaign to ChatGPT, then paste the review prompt below."
     )
-    upload_columns = st.columns(2)
-    with upload_columns[0]:
-        _render_review_upload_area(
-            result,
-            workflow,
-            "screenshots",
-            "Finished Meta Ad Screenshots",
-            "Upload one or more screenshots showing the completed Meta setup and previews.",
-        )
-    with upload_columns[1]:
-        _render_review_upload_area(
-            result,
-            workflow,
-            "creatives",
-            "Final Creative Images",
-            "Upload every final creative in the exact order used in the ad.",
-        )
-
-    copy_key = f"ads-review-final-copy::{result['context_key']}"
-    if copy_key not in st.session_state:
-        st.session_state[copy_key] = str(workflow.get("final_copy") or "")
-    final_copy = st.text_area(
-        "Final Copy",
-        key=copy_key,
-        height=220,
-        placeholder="Paste the exact final primary text, headlines, descriptions and CTA if they differ from the generated version.",
-        help="Current generated copy is prefilled when it exists in Ads state. Correct it to match Meta before review.",
+    with st.expander("How to complete the final review", expanded=False):
+        st.markdown("\n\n".join(FINAL_REVIEW_HOW_TO_STEPS))
+    render_prompt_copy_button(
+        build_final_ad_review_copy_prompt(result),
+        f"ads-final-review-prompt::{result['context_key']}",
+        label="Copy Final Review Prompt",
+        success_label="Final review prompt copied",
     )
-    clean_final_copy = str(final_copy or "")
-    if clean_final_copy != str(workflow.get("final_copy") or ""):
-        workflow["review"] = None
-        workflow["error"] = ""
-    workflow["final_copy"] = clean_final_copy
-    st.session_state[ADS_REVIEW_STATE_KEY] = workflow
-
-    ready = _review_ready(workflow)
-    if not ready:
-        st.caption(
-            "Add at least one finished-ad screenshot, or add final copy and at least one creative image."
-        )
-    controls = st.columns([1, 1, 1])
-    action_label = "Review Again" if workflow.get("review") else "Review Finished Ad"
-    if controls[0].button(
-        action_label,
-        type="primary",
-        icon=":material/rate_review:",
-        key=f"ads-review-submit::{result['context_key']}",
-        disabled=not ready or bool(workflow.get("running")),
-        use_container_width=True,
-    ):
-        _submit_ads_review(result, workflow)
-        st.rerun()
-    if controls[1].button(
-        "Clear Review",
-        icon=":material/clear_all:",
-        key=f"ads-review-clear::{result['context_key']}",
-        disabled=bool(workflow.get("running")),
-        use_container_width=True,
-    ):
-        _clear_ads_review_widget_state(result["context_key"])
-        st.session_state[ADS_REVIEW_STATE_KEY] = _new_ads_review_workflow(result)
-        st.rerun()
-    if workflow.get("running"):
-        st.info("Reviewing the complete ad...")
-    if workflow.get("error"):
-        st.error(str(workflow["error"]))
-    _render_review_result(result, workflow)
 
 
 def render_supported_result(result):
@@ -4368,14 +4676,19 @@ def render_page():
                 CAMPAIGN_TYPE_OPTIONS,
                 key="ads_campaign_type",
             )
-        product_url = ""
-        if get_template_key(category, campaign_type) == "baseball_instant_experience":
-            product_url = st.text_input(
-                "Product page URL",
-                placeholder="https://sportscave.com.au/products/example",
-                key="ads_product_url",
-            )
-        submitted = st.form_submit_button("Submit", type="primary")
+        product_url = st.text_input(
+            "Product page URL *",
+            placeholder="https://sportscave.com.au/products/example",
+            key="ads_product_url",
+        )
+        product_url_ready = is_valid_product_page_url(product_url)
+        if product_url and not product_url_ready:
+            st.error(PRODUCT_URL_ERROR)
+        submitted = st.form_submit_button(
+            "Submit",
+            type="primary",
+            disabled=not product_url_ready,
+        )
 
     result = st.session_state.get(ADS_RESULT_STATE_KEY)
     if submitted:
@@ -4387,7 +4700,25 @@ def render_page():
             product_url=product_url,
         )
         if validation_message:
-            st.warning(validation_message)
+            if validation_message == PRODUCT_URL_ERROR:
+                st.error(validation_message)
+                components.html(
+                    """
+                    <script>
+                    (() => {
+                      const labels = Array.from(window.parent.document.querySelectorAll('label'));
+                      const targetLabel = labels.find((label) => label.textContent.trim() === 'Product page URL *');
+                      const input = targetLabel
+                        ? window.parent.document.getElementById(targetLabel.getAttribute('for'))
+                        : null;
+                      if (input) input.focus();
+                    })();
+                    </script>
+                    """,
+                    height=0,
+                )
+            else:
+                st.warning(validation_message)
         elif not get_winner_pattern_key(category, campaign_type):
             render_insufficient_winner_data()
         else:

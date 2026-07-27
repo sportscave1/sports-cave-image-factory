@@ -238,6 +238,60 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")
+    def test_instant_experience_save_uses_selected_product_not_uploaded_filename(
+        self,
+        upload_batch,
+        _metadata,
+    ):
+        result, workflow = self.build_result_and_workflow("Instant Experience")
+        workflow["slots"]["instant-experience"]["original_name"] = "random-chatgpt-cover.png"
+        progress_events = []
+
+        def upload_success(_token, destination, items, **kwargs):
+            kwargs["progress_callback"](1, 1, items[0]["relative_path"], 5, 10)
+            kwargs["progress_callback"](1, 1, items[0]["relative_path"], 10, 10)
+            filename = items[0]["relative_path"]
+            return {
+                "successes": [
+                    {
+                        "relative_path": filename,
+                        "metadata": {
+                            "name": filename,
+                            "path_display": f"{destination}/{filename}",
+                            "size": items[0]["size"],
+                        },
+                    }
+                ],
+                "failures": [],
+            }
+
+        upload_batch.side_effect = upload_success
+        outcomes = ads_page.save_ads_images_to_dropbox(
+            "token",
+            "/Sportscave Team Folder",
+            "/Sportscave Team Folder/04_OUTPUT/product-images",
+            result,
+            workflow,
+            progress_callback=lambda index, total, label, uploaded, size: progress_events.append(
+                (index, total, label, uploaded, size)
+            ),
+        )
+
+        self.assertEqual(upload_batch.call_count, 1)
+        filename = upload_batch.call_args.args[2][0]["relative_path"]
+        self.assertEqual(
+            filename,
+            "Shohei Ohtani 50_50 Wall Art - Instant Experience - 2026-07-25.jpg",
+        )
+        self.assertNotIn("random-chatgpt-cover", filename)
+        self.assertEqual(outcomes["instant-experience"]["status"], "saved")
+        self.assertEqual(
+            [(event[0], event[1], event[2]) for event in progress_events],
+            [(1, 1, "Instant Experience Image"), (1, 1, "Instant Experience Image")],
+        )
+
+    @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
+    @patch("ads_page.dropbox_integration.upload_batch")
     def test_partial_retry_skips_already_saved_files(self, upload_batch, _metadata):
         result, workflow = self.build_result_and_workflow()
         call_index = {"value": 0}

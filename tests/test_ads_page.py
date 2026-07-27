@@ -48,6 +48,14 @@ def select_option(app_test, label, value):
     raise AssertionError(f"{label} selectbox was not rendered.")
 
 
+def set_product_url(app_test, value="https://sportscave.com.au/products/six-laps-ahead"):
+    for text_input in app_test.text_input:
+        if text_input.label == "Product page URL *":
+            text_input.set_value(value)
+            return
+    raise AssertionError("Product page URL field was not rendered.")
+
+
 def visual_contract(prompt):
     marker = "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT"
     return prompt[prompt.index(marker) :]
@@ -178,7 +186,7 @@ class AdsPageTests(unittest.TestCase):
                 "Instant Experience",
                 product_url="",
             ),
-            "",
+            ads_page.PRODUCT_URL_ERROR,
         )
         self.assertEqual(
             ads_page.validate_ads_inputs(
@@ -190,6 +198,66 @@ class AdsPageTests(unittest.TestCase):
             ),
             "",
         )
+
+    def test_product_page_url_is_required_and_must_be_absolute_http_url(self):
+        for bad_url in ("", "sportscave.com.au/products/six-laps", "ftp://example.com/item", "https://bad url"):
+            with self.subTest(bad_url=bad_url):
+                self.assertEqual(
+                    ads_page.validate_ads_inputs(
+                        "Six Laps Ahead",
+                        "Motorsport",
+                        "Australia",
+                        "Carousel",
+                        product_url=bad_url,
+                    ),
+                    ads_page.PRODUCT_URL_ERROR,
+                )
+        for good_url in ("http://sportscave.com.au/products/six-laps", "https://sportscave.com.au/products/six-laps"):
+            with self.subTest(good_url=good_url):
+                self.assertEqual(
+                    ads_page.validate_ads_inputs(
+                        "Six Laps Ahead",
+                        "Motorsport",
+                        "Australia",
+                        "Carousel",
+                        product_url=good_url,
+                    ),
+                    "",
+                )
+
+    def test_product_page_url_field_blocks_submit_until_valid_and_preserves_value(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Carousel")
+
+        self.assertTrue(button_by_label(app_test, "Submit").disabled)
+        set_product_url(app_test, "not-a-url")
+        app_test.run(timeout=20)
+        self.assertTrue(button_by_label(app_test, "Submit").disabled)
+        self.assertTrue(any(ads_page.PRODUCT_URL_ERROR in error.value for error in app_test.error))
+
+        set_product_url(app_test, "  http://sportscave.com.au/products/six-laps  ")
+        app_test.run(timeout=20)
+        self.assertFalse(button_by_label(app_test, "Submit").disabled)
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+        self.assertEqual(
+            app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]["product_url"],
+            "http://sportscave.com.au/products/six-laps",
+        )
+        app_test.run(timeout=20)
+        self.assertEqual(
+            app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]["product_url"],
+            "http://sportscave.com.au/products/six-laps",
+        )
+
+    def test_product_page_url_validation_has_focus_hook(self):
+        source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
+
+        self.assertIn("Product page URL *", source)
+        self.assertIn("input.focus()", source)
+        self.assertIn(ads_page.PRODUCT_URL_ERROR, source)
 
     def test_generated_prompt_contains_required_dynamic_and_rule_text(self):
         prompt = ads_page.build_ads_prompt("Six Laps Ahead", "Motorsport", "UK", "Carousel")
@@ -409,11 +477,11 @@ class AdsPageTests(unittest.TestCase):
                 self.assertIn("HEADLINE", prompt)
                 self.assertIn("DESCRIPTION", prompt)
                 self.assertIn("INSTANT EXPERIENCE COVER PROMPT", prompt)
-                self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
-                self.assertIn("Once it sells out, it's gone.", prompt)
-                self.assertIn("Claim Your Edition", prompt)
-                self.assertIn("top 60-68%", prompt)
-                self.assertIn("bottom 32-40%", prompt)
+                self.assertIn("ONLY 100 WILL EVER EXIST", prompt)
+                self.assertIn("The release closes with the final number", prompt)
+                self.assertIn("CLAIM YOUR EDITION", prompt)
+                self.assertIn("top 70-72%", prompt)
+                self.assertIn("bottom 28-30%", prompt)
                 self.assertIn("META URL PARAMETERS", prompt)
                 self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
                 self.assertNotEqual(prompt, "")
@@ -484,12 +552,12 @@ class AdsPageTests(unittest.TestCase):
                         self.assertIn("CATEGORY-SPECIFIC INSTANT EXPERIENCE WINNER ANGLE", prompt)
                         self.assertIn("Variant 5:", prompt)
                         self.assertIn("INSTANT EXPERIENCE COVER PROMPT", prompt)
-                        self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
-                        self.assertIn("Once it sells out, it's gone.", prompt)
-                        self.assertIn("black/gold CTA panel", prompt)
-                        self.assertIn("Top 60-68%", prompt)
-                        self.assertIn("Bottom 32-40%", prompt)
-                        self.assertIn("Claim Your Edition", prompt)
+                        self.assertIn("ONLY 100 WILL EVER EXIST", prompt)
+                        self.assertIn("The release closes with the final number", prompt)
+                        self.assertIn("black collector panel", prompt)
+                        self.assertIn("top 70-72%", prompt)
+                        self.assertIn("bottom 28-30%", prompt)
+                        self.assertIn("CLAIM YOUR EDITION", prompt)
 
     def test_football_carousel_has_football_specific_winner_angle_and_five_cards(self):
         prompt = ads_page.build_ads_prompt("Arsenal Derby Night", "Football", "UK", "Carousel")
@@ -512,10 +580,10 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE WINNER PATTERN", prompt)
         self.assertIn("football collector wall art", prompt)
         self.assertIn("World Cup nights", prompt)
-        self.assertIn("black/gold CTA panel", prompt)
-        self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
-        self.assertIn("Once it sells out, it's gone.", prompt)
-        self.assertIn("Claim Your Edition", prompt)
+        self.assertIn("black collector panel", prompt)
+        self.assertIn("ONLY 100 WILL EVER EXIST", prompt)
+        self.assertIn("The release closes with the final number", prompt)
+        self.assertIn("CLAIM YOUR EDITION", prompt)
 
     def test_added_categories_have_specific_outputs_for_all_campaign_sections(self):
         expected_terms = {
@@ -1462,12 +1530,38 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(contract.count("INSTANT EXPERIENCE COVER IMAGE PROMPT"), 1)
         self.assertNotIn("IMAGE PROMPTS — GENERATE IN THIS ORDER", contract)
         self.assertIn("output exactly one complete cover-image prompt", contract)
-        self.assertIn("square 1024 x 1024", contract)
-        self.assertIn("upper 60-68%", contract)
-        self.assertIn("lower 32-40%", contract)
-        self.assertIn("Never automatically claim", contract)
+        self.assertIn("Product name: fg", contract)
+        self.assertIn("Sport category: AFL", contract)
+        self.assertIn("Target market: Australia", contract)
+        self.assertIn("Create a 1024 x 1024 ultra-realistic Sports Cave Instant Experience cover", contract)
+        self.assertIn("top 70-72% of the canvas", contract)
+        self.assertIn("bottom 28-30%", contract)
+        self.assertIn("ONLY 100 WILL EVER EXIST", contract)
+        self.assertIn("The release closes with the final number", contract)
+        self.assertIn("CLAIM YOUR EDITION", contract)
+        self.assertIn("Never use the uploaded image filename as the product name.", contract)
+        self.assertIn("Do not infer the category from the filename or artwork.", contract)
         self.assertIn("Selected product name: fg", contract)
         self.assertNotIn("Six Laps Ahead", contract)
+
+    def test_old_instant_experience_prompt_schema_gets_upgraded_default_contract(self):
+        prompt = ads_page.compose_final_ads_prompt(
+            "SAVED INSTANT EXPERIENCE PROMPT\n\nINSTANT EXPERIENCE COVER PROMPT\n\n[old saved cover prompt]",
+            category="Golf",
+            country="Canada",
+            campaign_type="Instant Experience",
+            product_name="Masters Sunday Frame",
+            variation_token="saved-compatible",
+        )
+        contract = visual_contract(prompt)
+
+        self.assertIn("INSTANT EXPERIENCE COVER PROMPT", prompt)
+        self.assertEqual(contract.count("INSTANT EXPERIENCE COVER IMAGE PROMPT"), 1)
+        self.assertIn("Product name: Masters Sunday Frame", contract)
+        self.assertIn("Sport category: Golf", contract)
+        self.assertIn("Target market: Canada", contract)
+        self.assertIn("The final campaign-specific visual heading and prompt count below are authoritative.", contract)
+        self.assertIn("ONLY 100 WILL EVER EXIST", contract)
 
     def test_baseball_instant_experience_keeps_approved_banner_and_claim_path(self):
         prompt = ads_page.build_ads_prompt(
@@ -1601,6 +1695,7 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Category", "Motorsport")
         select_option(app_test, "Country", "Canada")
         select_option(app_test, "Campaign type", "Carousel")
+        set_product_url(app_test)
         app_test.button[0].click().run(timeout=20)
 
         self.assertEqual(
@@ -1624,6 +1719,7 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Category", "Motorsport")
         select_option(app_test, "Country", "Australia")
         select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test)
         app_test.button[0].click().run(timeout=20)
 
         self.assertNotIn("Insufficient winner data", [subheader.value for subheader in app_test.subheader])
@@ -1639,6 +1735,7 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Category", "Motorsport")
         select_option(app_test, "Country", "Australia")
         select_option(app_test, "Campaign type", "Carousel")
+        set_product_url(app_test)
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
         self.assertEqual(
@@ -1668,6 +1765,7 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Category", "Motorsport")
         select_option(app_test, "Country", "Australia")
         select_option(app_test, "Campaign type", "Carousel")
+        set_product_url(app_test)
         button_by_label(app_test, "Submit").click().run(timeout=20)
         image = square_png_bytes()
         for uploader in app_test.file_uploader[:5]:
@@ -1693,6 +1791,7 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Category", "Football")
         select_option(app_test, "Country", "UK")
         select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test, "https://sportscave.com.au/products/final-whistle-glory")
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
         self.assertEqual(
@@ -1707,12 +1806,58 @@ PRIMARY TEXT VARIATIONS
         self.assertFalse(button_by_label(app_test, "Save Images").disabled)
         self.assertEqual(len(app_test.exception), 0)
 
+    def test_instant_experience_preview_remove_replace_and_rerun_persistence(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Final Whistle Glory")
+        select_option(app_test, "Category", "Football")
+        select_option(app_test, "Country", "UK")
+        select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test, "https://sportscave.com.au/products/final-whistle-glory")
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        app_test.file_uploader[0].set_value(
+            [("uploaded-filename.png", square_png_bytes(), "image/png")]
+        )
+        app_test.run(timeout=30)
+        workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
+        self.assertTrue(workflow["slots"]["instant-experience"]["valid"])
+        self.assertEqual(workflow["slots"]["instant-experience"]["original_name"], "uploaded-filename.png")
+        self.assertTrue(any("1080 x 1080 JPEG" in caption.value for caption in app_test.caption))
+        result = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]
+        filename = ads_page._meta_output_filename(
+            result,
+            workflow,
+            ads_page.ads_image_workflow.campaign_image_slots("Instant Experience")[0],
+        )
+        self.assertIn(" - Instant Experience - ", filename)
+        self.assertTrue(filename.endswith(".jpg"))
+        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
+
+        app_test.run(timeout=20)
+        workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
+        self.assertIn("instant-experience", workflow["slots"])
+        self.assertEqual(workflow["slots"]["instant-experience"]["original_name"], "uploaded-filename.png")
+
+        button_by_label(app_test, "Remove").click().run(timeout=20)
+        workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
+        self.assertEqual(workflow["slots"], {})
+        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+
+        app_test.file_uploader[0].set_value(
+            [("replacement.webp", square_png_bytes(color=(90, 120, 150)), "image/webp")]
+        )
+        app_test.run(timeout=30)
+        workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
+        self.assertEqual(workflow["slots"]["instant-experience"]["original_name"], "replacement.webp")
+        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
+
     def test_invalid_generated_image_shows_inline_error_and_keeps_save_disabled(self):
         app_test = run_ads_page()
         set_product_name(app_test, "Final Whistle Glory")
         select_option(app_test, "Category", "Football")
         select_option(app_test, "Country", "UK")
         select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test, "https://sportscave.com.au/products/final-whistle-glory")
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
         app_test.file_uploader[0].set_value(
@@ -1730,6 +1875,7 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Category", "Motorsport")
         select_option(app_test, "Country", "Australia")
         select_option(app_test, "Campaign type", "Carousel")
+        set_product_url(app_test)
         button_by_label(app_test, "Submit").click().run(timeout=20)
         app_test.file_uploader[0].set_value(
             [("carousel-one.png", square_png_bytes(), "image/png")]
@@ -1738,6 +1884,7 @@ PRIMARY TEXT VARIATIONS
         old_context = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]["context_key"]
 
         select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test)
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
         new_result = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]
