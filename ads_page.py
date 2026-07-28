@@ -978,271 +978,378 @@ IMAGE PROMPTS — GENERATE IN THIS ORDER
 Return exactly these five image-prompt entries and no sixth prompt."""
 
 
+INSTANT_EXPERIENCE_REFERENCE_IMAGE_INSTRUCTION = (
+    "the selected framed Sports Cave product reference image uploaded through the Ads section"
+)
+
+
+INSTANT_EXPERIENCE_MASTER_IMAGE_PROMPT_TEMPLATE = """06 — INSTANT EXPERIENCE COVER — 1:1 SOCIAL
+
+Use the product information and uploaded reference image already supplied through the Sports Cave Ads section:
+
+Product name: {{PRODUCT_NAME}}
+Sport category: {{SPORT_CATEGORY}}
+Target market: {{TARGET_MARKET}}
+Reference image: {{UPLOADED_FRAMED_PRODUCT_IMAGE}}
+
+Do not ask for these details again.
+
+OBJECTIVE
+
+Using the uploaded Sports Cave product image as the exact product reference, create one ultra-realistic 1024 × 1024 Meta Instant Experience cover.
+
+The output must always be:
+
+* Exactly 1024 × 1024 pixels.
+* Exactly 1:1 square.
+* Designed for mobile viewing.
+* Suitable for the top of a Meta Instant Experience, with the product catalogue appearing underneath.
+
+Never generate a landscape or portrait canvas. If the result is not exactly 1:1, regenerate it before returning the final image.
+
+The cover must instantly communicate:
+
+* Premium collector value.
+* Authentic limited-edition scarcity.
+* Emotional fan ownership.
+* The feeling that this artwork belongs in a real home.
+* A clear reason to claim an edition before all 100 are gone.
+
+The artwork must remain the unmistakable hero.
+
+APPROVED COMPOSITION
+
+Divide the square canvas into two visually connected sections:
+
+Top lifestyle section: approximately 64–68% of the canvas.
+Bottom scarcity panel: approximately 32–36% of the canvas.
+
+Do not allow the bottom panel to overpower the product.
+
+The framed artwork must be the largest and most immediately recognizable element in the image.
+
+TOP LIFESTYLE SECTION
+
+Place the exact uploaded framed artwork prominently on the wall of a genuine premium residential interior.
+
+The setting must resemble a real house photographed by a professional interior photographer—not a showroom, retail display, studio set or AI-generated luxury room.
+
+Select one believable residential area appropriate to the product and target market, such as:
+
+* A refined living-room feature wall.
+* An intimate home office.
+* A renovated gallery landing.
+* A premium hallway or stair landing.
+* A collector’s reading room.
+* A restrained media or entertainment room.
+* A sophisticated man cave without sports-themed clutter.
+
+Use only one setting. Do not combine multiple room concepts.
+
+The room should feel premium, masculine, minimal and lived-in without becoming cold, clichéd or excessively luxurious.
+
+Use a restrained residential palette such as:
+
+* Warm off-white.
+* Muted taupe.
+* Soft concrete.
+* Natural plaster.
+* Warm grey.
+* Charcoal.
+* Lightly textured beige.
+* Subtle timber and neutral architectural finishes.
+
+REAL-HOUSE PHOTOGRAPHY REQUIREMENTS
+
+The environment must include believable residential architecture:
+
+* Correct room dimensions and ceiling height.
+* Straight vertical walls and doorways.
+* Accurate floor-to-wall joins.
+* Natural furniture scale.
+* Realistic frame size relative to the wall.
+* Plausible mounting height.
+* Correct perspective and viewing distance.
+* Natural space around the artwork.
+* Genuinely textured plaster, timber, fabric, leather or concrete.
+* Subtle signs that somebody lives in the house.
+* Controlled imperfection rather than artificial symmetry.
+
+Use a limited number of carefully placed residential details, such as one bench, console, chair, book or ceramic object.
+
+Do not fill the room with decorative clutter.
+
+Do not use sports props to explain the sport. The supplied artwork must carry the sporting identity.
+
+ARTWORK PROMINENCE
+
+The framed artwork must dominate the lifestyle section.
+
+It should occupy approximately 48–62% of the available width in the top section, depending on the room and camera angle.
+
+It must remain:
+
+* Large at thumbnail size.
+* Fully visible.
+* Instantly recognizable.
+* Clearly separated from surrounding furniture.
+* The primary focal point.
+* More visually important than the architecture.
+
+Do not place the artwork far away on a large empty wall.
+
+Do not make the room more prominent than the product.
+
+Do not crop any part of the artwork or frame.
+
+PRODUCT LOCK — NON-NEGOTIABLE
+
+Treat the uploaded Sports Cave framed product image as a locked photographic product asset.
+
+Keep the uploaded artwork and frame exactly the same.
+
+Do not:
+
+* Redesign, repaint or redraw the artwork.
+* Regenerate or reinterpret the artwork.
+* Create a similar or lookalike version.
+* Change the athlete, subject or identity.
+* Change faces, bodies, uniforms or equipment.
+* Change any colours.
+* Change the composition or layout.
+* Change any wording inside the artwork.
+* Change the badge, seal, plaque or edition plate.
+* Add fake signatures.
+* Add fake logos.
+* Add fake edition numbers.
+* Add invented artwork details.
+* Crop the artwork.
+* Blur or soften the artwork.
+* Mirror the artwork.
+* Stretch, warp, bend, squash or distort it.
+* Change its landscape proportions.
+* Change the frame colour, shape or design.
+* Replace the supplied product with newly generated artwork.
+
+The artwork must remain sharp, rectangular, correctly aligned and completely visible inside the frame.
+
+FRAME AND GLASS REALISM
+
+The frame must look like a genuine physical product mounted on a real wall.
+
+Preserve the supplied frame colour and design.
+
+Show:
+
+* Premium timber construction.
+* Believable frame depth.
+* Sharp square corners.
+* Clean frame joins.
+* Subtle material texture.
+* Correct landscape proportions.
+* Accurate perspective.
+* A natural gap or shadow between the frame and wall.
+* Realistic weight and mounting.
+
+Add physically believable glass over the artwork.
+
+The glass should show:
+
+* Soft environmental reflections.
+* Subtle premium glare.
+* Restrained highlight streaks.
+* Reflections consistent with the room’s windows and lighting.
+* Controlled transparency that keeps the entire artwork readable.
+
+Glass reflections must enhance the realism without obscuring, changing or washing out the artwork.
+
+The frame must look mounted—not pasted, floating or digitally overlaid.
+
+LIGHTING AND CAMERA
+
+Use authentic residential lighting.
+
+Combine:
+
+* Soft natural light entering from one believable direction.
+* Restrained warm practical or architectural lighting.
+* Natural shadows behind and beneath the frame.
+* Subtle shadow falloff across the wall.
+* Controlled contrast.
+* Realistic highlights on timber, plaster and glass.
+
+Avoid bright orange lighting, extreme spotlights, artificial glow and overprocessed HDR.
+
+Use a natural interior-photography camera position.
+
+A subtle three-quarter angle is allowed, but the frame must remain geometrically correct and easy to see.
+
+Avoid:
+
+* Extreme wide-angle lenses.
+* Distorted walls.
+* Dramatic Dutch angles.
+* Excessive perspective.
+* Bent architecture.
+* Perfect front-facing artificial symmetry.
+* Camera positions that make the artwork appear small.
+
+BOTTOM SCARCITY PANEL
+
+Add an integrated collector-grade panel across the bottom 32–36% of the square canvas.
+
+The panel must feel like part of a premium Sports Cave campaign—not a separate cheap promotional banner.
+
+Panel styling:
+
+* Deep matte black.
+* Subtle black material texture.
+* Restrained vignette.
+* Refined dark tonal variation.
+* Very subtle metallic-gold detailing.
+* Clean spacing.
+* No excessive shine.
+* No loud gradients.
+* No neon effects.
+* No discount-store styling.
+
+Separate the lifestyle section and panel with one restrained gold hairline, subtle metallic edge or controlled warm light transition.
+
+Do not use a large artificial lens flare.
+
+SCARCITY COPY
+
+Use only these three lines:
+
+LIMITED TO 100 WORLDWIDE
+
+Once it sells out, it’s gone.
+
+CLAIM YOUR EDITION
+
+Do not add any other overlay copy.
+
+Do not add:
+
+* Product names.
+* Prices.
+* Discounts.
+* Percentage savings.
+* Shipping claims.
+* Product features.
+* Paragraphs.
+* Countdown timers.
+* “Shop Now” buttons.
+* Fake clickable UI.
+* Additional scarcity claims.
+
+TEXT HIERARCHY
+
+Line one:
+
+“LIMITED TO 100 WORLDWIDE”
+
+* Largest line.
+* Uppercase.
+* Premium collector-style serif or refined high-end display typeface.
+* Soft metallic gold, warm ivory or premium white.
+* Strong enough to stop the scroll.
+* Fully readable on mobile.
+
+Line two:
+
+“Once it sells out, it’s gone.”
+
+* Smaller.
+* Clean and understated.
+* White or warm ivory.
+* Use the apostrophes exactly as written.
+* Give the line breathing room.
+
+Line three:
+
+“CLAIM YOUR EDITION”
+
+* Uppercase.
+* Refined metallic gold or warm gold.
+* Clearly readable.
+* Slightly smaller than the main scarcity headline.
+* Styled as a premium campaign command, not a fake website button.
+
+Keep all text centred, correctly spelled and safely inside the mobile margins.
+
+The panel must feel urgent through restraint, spacing and hierarchy—not through oversized graphics or aggressive sales styling.
+
+SPORT AND MARKET ADAPTATION
+
+Use the supplied sport category and target market only to guide the architectural atmosphere and emotional tone.
+
+The setting should feel appropriate for a serious fan and collector in that market without using stereotypes.
+
+Do not introduce:
+
+* Sports equipment.
+* Balls.
+* Bats.
+* Helmets.
+* Jerseys.
+* Trophies.
+* Figurines.
+* Team flags.
+* Novelty signs.
+* Team-coloured rooms.
+* Extra athlete photographs.
+* Extra sports artwork.
+* Fake memorabilia.
+* Retail fixtures.
+* Neon signs.
+
+The framed artwork alone must communicate the sport, athlete, team, rivalry or moment.
+
+FINAL REALISM CHECK
+
+Before returning the image, confirm that:
+
+* The canvas is exactly 1024 × 1024.
+* The output is a true 1:1 square.
+* The framed artwork is completely visible.
+* The artwork remains the dominant visual element.
+* The original artwork has not been altered.
+* The frame has correct landscape proportions.
+* The room resembles a genuine lived-in house.
+* The frame appears physically mounted.
+* Glass reflections are realistic and controlled.
+* Wall, floor, ceiling and furniture geometry are believable.
+* The three approved text lines are spelled correctly.
+* No additional text or claims have been introduced.
+* The scarcity panel feels premium rather than promotional.
+* The overall image remains clear and persuasive at mobile size.
+
+Avoid warped walls, impossible windows, crooked ceilings, bent furniture, floating objects, duplicate objects, plastic materials, fake luxury, excessive blur, overprocessed HDR, unrealistic reflections, malformed lighting, perfect artificial symmetry and any obvious AI-showroom appearance.
+
+FINAL RESULT
+
+Create a photorealistic, premium 1024 × 1024 Sports Cave Instant Experience cover featuring the exact uploaded framed artwork displayed prominently in a genuine high-end residential interior.
+
+The final image must make the artwork feel like a real limited-edition collector piece already hanging in a desirable home—then use the restrained black-and-gold scarcity panel to make the viewer feel they should claim one of the 100 editions before it is gone."""
+
+
 def build_default_instant_experience_cover_prompt_requirements(product_name, category, country):
     product_name = _clean_product_name(product_name)
     category = _normalise_option_label(category) or "selected sport category"
     country = _normalise_option_label(country) or "selected market"
-    return f"""UPGRADED DEFAULT INSTANT EXPERIENCE IMAGE PROMPT
-
-Product name: {product_name}
-
-Sport category: {category}
-
-Target market: {country}
-
-Reference image: Upload the selected product's exact black-framed reference image into ChatGPT before using this prompt.
-
-Create a 1024 x 1024 ultra-realistic Sports Cave Instant Experience cover for a Meta ad using the uploaded product image as the exact, immutable reference.
-
-This cover will appear above the product catalogue inside the Instant Experience. It must stop the scroll, make the artwork immediately desirable and communicate genuine collector scarcity without looking like a discount advertisement.
-
-CREATIVE PRIORITIES
-
-If any instructions conflict, follow this order:
-
-1. Exact artwork and frame fidelity
-2. Clear, unobstructed product visibility
-3. Photorealistic home placement
-4. Mobile-readable scarcity messaging
-5. Restrained Sports Cave branding
-
-LOCK THE PRODUCT
-
-Treat everything inside the uploaded product's outer frame as one locked, finished product asset.
-
-The uploaded artwork and frame must remain exactly the same.
-
-Do not recreate, reinterpret or redesign any part of it.
-
-Use the Product name above as the product identity. Never use the uploaded image filename as the product name.
-
-Use the Sport category above as the selected Ads sport category. Do not infer the category from the filename or artwork.
-
-Do not change:
-
-* Faces or people
-* Uniforms or colours
-* Artwork composition
-* Artwork text
-* Signatures
-* Logos
-* Badges
-* Borders
-* Edition plaques or numbers
-* Frame colour
-* Frame dimensions
-* Crop or aspect ratio
-
-Do not blur, repaint, sharpen, stretch, warp, bend, squash or distort the artwork or frame.
-
-Do not invent signatures, logos, edition numbers, plaques, reflections or artwork details.
-
-If an edition number already appears in the reference, preserve it exactly. Do not create a different number.
-
-CORE COMPOSITION
-
-Keep the proven Sports Cave layout:
-
-* Photorealistic framed-artwork lifestyle hero across the top 70-72% of the canvas
-* Premium black collector panel across the bottom 28-30%
-* One restrained gold separator between the two sections
-
-The framed artwork must remain the unmistakable hero.
-
-Show the entire outer frame, including all four corners and edges.
-
-The frame should occupy approximately 78-86% of the hero section's width while retaining natural breathing room around it.
-
-Do not crop the frame against the canvas edges.
-
-Do not place furniture, reflections, shadows or text over the artwork.
-
-REAL-HOME ENVIRONMENT
-
-Place the exact framed artwork on the wall of a believable, premium home.
-
-The result must look like genuine high-end interior photography, not CGI, a showroom render, a gallery mockup or an artificial background.
-
-Use one cohesive environment, such as:
-
-* A refined collector living room
-* A premium home sports lounge
-* A restrained masculine study
-* An architectural living space with subtle sports-room character
-
-The room should feel premium, masculine, calm, lived-in and realistic.
-
-Use a warm neutral wall such as:
-
-* Soft limewash
-* Warm plaster
-* Muted taupe
-* Warm grey
-* Refined off-white
-* Soft charcoal
-* Subtle concrete
-
-Show only enough surrounding architecture to prove that this is a real home.
-
-Include one or two restrained residential cues near the outer edges, such as:
-
-* The corner of a low-profile sofa
-* A clean timber console
-* A curtain or window reveal
-* Skirting board
-* A softly blurred doorway
-* A small, natural indoor plant
-
-Keep these elements secondary and softly out of focus.
-
-Do not add extra wall art, sports equipment, jerseys, trophies, neon signs, visible branding, people or decorative clutter.
-
-CAMERA AND PERSPECTIVE
-
-Photograph the frame from a natural standing eye level using the visual character of a professional 40-55 mm interior lens.
-
-Keep the camera mostly front-facing, with no more than a subtle 3-7 degree viewing angle.
-
-Maintain straight architectural verticals and correct landscape proportions.
-
-The frame must not appear stretched, trapezoidal, floating or pasted onto the wall.
-
-Show realistic frame depth, sharp mitred corners, subtle black timber texture and believable mounting.
-
-Create a physically accurate contact shadow behind and slightly below the frame.
-
-LIGHTING AND GLASS
-
-Use soft natural daylight entering from one believable direction.
-
-Add restrained warm interior fill light where appropriate.
-
-Lighting should include:
-
-* Controlled highlights
-* Natural tonal falloff
-* Realistic wall shadows
-* Subtle depth around the frame
-* Premium but believable contrast
-
-Add realistic glass over the artwork.
-
-Glass reflections must correspond to plausible windows or room geometry.
-
-Keep reflections subtle and controlled. Place the strongest reflections toward the glass edges or darker artwork areas.
-
-Do not place glare across faces, important artwork text, signatures, plaques or key details.
-
-The artwork must remain sharp, readable and visually dominant.
-
-SPORTS CAVE 2026 BRAND PANEL
-
-Create a full-width collector panel across the bottom 28-30% of the canvas.
-
-Use the Sports Cave premium visual system:
-
-* Deep carbon black
-* Subtle smoked-black texture
-* Restrained antique gold
-* Warm ivory text
-* Fine editorial spacing
-* Quiet metallic detail
-* Controlled contrast
-
-The panel should feel like premium collector packaging or a limited-release campaign, not a coupon, sale graphic or generic luxury template.
-
-Separate the room image and panel with a fine antique-gold rule and a very subtle warm centre glint.
-
-Do not use a large lens flare, glitter, excessive metallic effects, marble, bright yellow gold or heavy gradients.
-
-Do not invent or redraw a Sports Cave logo. Express the brand through colour, typography, restraint and composition.
-
-EXACT OVERLAY TEXT
-
-Use exactly these three lines with the exact spelling, capitalisation and line breaks:
-
-ONLY 100 WILL EVER EXIST
-The release closes with the final number
-CLAIM YOUR EDITION
-
-Do not add any other words.
-
-TYPOGRAPHIC HIERARCHY
-
-Line one:
-
-* Largest line
-* Uppercase
-* Premium editorial serif or restrained Roman-style capitals
-* Warm ivory with a very subtle antique-gold finish
-* Strong enough to stop the scroll
-* Never stretched or crowded
-
-Line two:
-
-* Smaller
-* Clean and highly readable
-* Warm ivory
-* Calm collector language
-* Generous spacing above and below
-
-Line three:
-
-* Uppercase
-* Antique gold
-* Strong, clean and unmistakably actionable
-* Slightly smaller than the headline
-* Presented as typography, not a fake website button
-
-Keep all text centred and inside a mobile-safe area with generous left, right and bottom margins.
-
-Do not allow the headline to run close to the canvas edges.
-
-Do not misspell, rephrase, duplicate or add punctuation to the supplied text.
-
-RESTRICTIONS
-
-Do not add:
-
-* Prices
-* Discounts
-* Percentage savings
-* Sale language
-* Countdown timers
-* "Shop Now"
-* Fake buttons
-* Fake interface elements
-* Extra product information
-* Paragraphs
-* Random logos
-* Watermarks
-* Social-media icons
-* People
-* Additional wall art
-* Sports props
-* Clutter
-
-FINAL QUALITY CHECK
-
-Before delivering the image, confirm that:
-
-* The exact uploaded artwork has been preserved
-* All four outer frame edges are visible
-* The artwork remains large, sharp and unobstructed
-* The room looks like a believable premium home
-* The frame perspective and wall shadow are physically realistic
-* Glass glare does not hide important artwork
-* The collector panel occupies no more than 30% of the canvas
-* All three text lines are spelled exactly as supplied
-* The message remains readable on a mobile screen
-* The design feels unmistakably premium and collector-driven
-* Nothing resembles a discount-store advertisement
-
-FINAL RESULT
-
-A photorealistic 1024 x 1024 Sports Cave Instant Experience cover featuring the exact uploaded framed artwork mounted naturally inside a believable premium home, with realistic glass, physically accurate shadows, clear product visibility and a restrained black-and-gold collector panel carrying powerful limited-edition scarcity messaging.
-
-The finished cover should feel like a real Sports Cave collector release photographed in someone's home, not an AI mockup or promotional sale banner."""
+    return (
+        INSTANT_EXPERIENCE_MASTER_IMAGE_PROMPT_TEMPLATE.replace(
+            "{{PRODUCT_NAME}}",
+            product_name,
+        )
+        .replace("{{SPORT_CATEGORY}}", category)
+        .replace("{{TARGET_MARKET}}", country)
+        .replace(
+            "{{UPLOADED_FRAMED_PRODUCT_IMAGE}}",
+            INSTANT_EXPERIENCE_REFERENCE_IMAGE_INSTRUCTION,
+        )
+    )
 
 
 def build_instant_experience_visual_output_requirements(
@@ -1252,18 +1359,12 @@ def build_instant_experience_visual_output_requirements(
     category="",
     country="",
 ):
-    if template_key == "baseball_instant_experience":
-        layout_rules = """Use the existing approved 06 - Instant Experience Cover Banner (Social) dimensions and aspect ratio from the Sports Cave Mockups template. Do not replace that approved banner format with a global square size.
-
-Use the uploaded framed artwork as the hero and preserve the existing banner's approved placement logic, safe areas and Meta-readable composition."""
-        scarcity_rules = """The Baseball Instant Experience template has an approved claim path. Use only the generated and verified campaign wording from that path. Do not add a different quantity, product fact or scarcity claim."""
-    else:
-        layout_rules = build_default_instant_experience_cover_prompt_requirements(
-            product_name,
-            category,
-            country,
-        )
-        scarcity_rules = """Use the exact default overlay text supplied above. Do not replace it with generated copy, alternate scarcity wording, a different CTA, a fake button or an inferred edition claim."""
+    layout_rules = build_default_instant_experience_cover_prompt_requirements(
+        product_name,
+        category,
+        country,
+    )
+    scarcity_rules = """Use the exact default overlay text supplied above. Do not replace it with generated copy, alternate scarcity wording, a different CTA, a fake button or an inferred edition claim."""
 
     return f"""INSTANT EXPERIENCE VISUAL REQUIREMENTS
 
@@ -2623,8 +2724,7 @@ INSTANT EXPERIENCE SETUP GUIDE
 
 Use this exact workflow in the generated setup section:
 
-1. In the Mockups download, use:
-   06 - Instant Experience Cover Banner (Social)
+1. Generate the Instant Experience cover from the Instant Experience Cover Prompt above.
 
 2. In Meta Ads Manager, create or edit the Instant Experience using the Product template.
 
@@ -2636,7 +2736,7 @@ Use this exact workflow in the generated setup section:
 
 5. Set products to Order dynamically unless the campaign requires a manually chosen product order.
 
-6. Upload the Instant Experience Cover Banner from the Mockups ZIP as the cover image.
+6. Upload the Instant Experience cover generated from the prompt above.
 
 7. Keep Automatically group into relevant sections turned OFF unless the campaign specifically requires it.
 
@@ -2663,13 +2763,11 @@ Do not invent the destination URL.
 
 Use the exact product URL supplied by the user or selected product record.
 
-INSTANT EXPERIENCE BANNER RULE
+INSTANT EXPERIENCE COVER RULE
 
-The how-to section must specifically tell the user to use:
+The how-to section must specifically tell the user:
 
-06 - Instant Experience Cover Banner (Social)
-
-from the Mockups ZIP download.
+Upload the Instant Experience cover generated from the prompt above.
 
 Do not tell the user to use a random lifestyle image, product-page frame, Reel, carousel card or unlabelled image.
 
@@ -2699,7 +2797,7 @@ Before returning the output, confirm:
 - Exactly one headline is provided.
 - CTA is {BASEBALL_INSTANT_EXPERIENCE_CTA}.
 - Instant Experience setup instructions are included.
-- The Mockups Instant Experience Cover Banner is specified.
+- The generated Instant Experience cover upload step is specified.
 - Shopify Product Catalog is specified.
 - {BASEBALL_INSTANT_EXPERIENCE_PRODUCT_SET_NAME} product set is specified.
 - Product headline is product.name.
@@ -3498,6 +3596,97 @@ def _slot_upload_key(result, workflow, slot_id):
     return f"ads-image-upload::{result['context_key']}::{slot_id}::{nonce}"
 
 
+INSTANT_EXPERIENCE_LEGACY_SLOT_IDS = (
+    "instant-experience",
+    "instant_experience",
+    "instant_experience_image",
+)
+
+
+def _is_instant_experience_result(result):
+    return result.get("campaign_type") == "Instant Experience"
+
+
+def _instant_experience_slots_by_position():
+    return ads_image_workflow.campaign_image_slots("Instant Experience")
+
+
+def _compact_instant_experience_slots(workflow):
+    slots = workflow.setdefault("slots", {})
+    if not isinstance(slots, dict):
+        workflow["slots"] = {}
+        return
+    if slots.get("data") or slots.get("valid"):
+        slots = {"instant-experience-01": dict(slots)}
+    slot_specs = _instant_experience_slots_by_position()
+    ordered = []
+    outcomes = workflow.setdefault("outcomes", {})
+    ordered_outcomes = []
+    seen_ids = set()
+    for slot in slot_specs:
+        slot_id = slot["id"]
+        if slot_id in slots:
+            ordered.append(dict(slots[slot_id]))
+            ordered_outcomes.append(dict(outcomes.get(slot_id) or {}))
+            seen_ids.add(slot_id)
+    for slot_id in INSTANT_EXPERIENCE_LEGACY_SLOT_IDS:
+        if slot_id in slots and slot_id not in seen_ids:
+            ordered.append(dict(slots[slot_id]))
+            ordered_outcomes.append(dict(outcomes.get(slot_id) or {}))
+            seen_ids.add(slot_id)
+
+    new_slots = {}
+    new_outcomes = {}
+    for index, slot_data in enumerate(ordered[: len(slot_specs)], start=1):
+        slot = slot_specs[index - 1]
+        slot_data.update(
+            {
+                "slot_id": slot["id"],
+                "label": slot["label"],
+                "position": slot["position"],
+            }
+        )
+        new_slots[slot["id"]] = slot_data
+        outcome = ordered_outcomes[index - 1] if index - 1 < len(ordered_outcomes) else {}
+        if outcome:
+            outcome.update({"label": slot["label"]})
+            new_outcomes[slot["id"]] = outcome
+    workflow["slots"] = new_slots
+    workflow["outcomes"] = new_outcomes
+
+
+def _ads_image_slot_specs_for_render(result, workflow):
+    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    if not _is_instant_experience_result(result):
+        return slot_specs
+    _compact_instant_experience_slots(workflow)
+    slots = workflow.get("slots") or {}
+    last_valid_position = 0
+    for slot in slot_specs:
+        if (slots.get(slot["id"]) or {}).get("valid"):
+            last_valid_position = max(last_valid_position, int(slot["position"]))
+    visible_count = min(len(slot_specs), max(1, last_valid_position + 1))
+    return slot_specs[:visible_count]
+
+
+def _ads_image_valid_slots(result, workflow):
+    if _is_instant_experience_result(result):
+        _compact_instant_experience_slots(workflow)
+    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    slots = workflow.get("slots") or {}
+    return [
+        slot
+        for slot in slot_specs
+        if (slots.get(slot["id"]) or {}).get("valid") and (slots.get(slot["id"]) or {}).get("data")
+    ]
+
+
+def _ads_image_required_count(result):
+    return 1 if _is_instant_experience_result(result) else len(
+        ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    )
+
+
 def _remove_ads_image_slot(result, slot_id):
     workflow = _ads_image_workflow(result)
     has_other_saved = any(
@@ -3512,6 +3701,8 @@ def _remove_ads_image_slot(result, slot_id):
     workflow["save_open"] = False
     if not has_other_saved:
         workflow["destination_path"] = ""
+    if _is_instant_experience_result(result):
+        _compact_instant_experience_slots(workflow)
     st.session_state[ADS_IMAGE_STATE_KEY] = workflow
 
 
@@ -3558,6 +3749,8 @@ def _process_ads_image_upload(result, workflow, slot, uploaded_file):
     workflow["save_open"] = False
     if not has_other_saved:
         workflow["destination_path"] = ""
+    if _is_instant_experience_result(result):
+        _compact_instant_experience_slots(workflow)
     st.session_state[ADS_IMAGE_STATE_KEY] = workflow
 
 
@@ -3565,6 +3758,11 @@ def ads_images_ready(result, workflow=None):
     workflow = workflow or _ads_image_workflow(result)
     slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
     slots = workflow.get("slots") or {}
+    if _is_instant_experience_result(result):
+        _compact_instant_experience_slots(workflow)
+        slots = workflow.get("slots") or {}
+        first_slot = slot_specs[0] if slot_specs else {}
+        return bool((slots.get(first_slot.get("id")) or {}).get("valid"))
     return bool(slot_specs) and all((slots.get(slot["id"]) or {}).get("valid") for slot in slot_specs)
 
 
@@ -3578,61 +3776,79 @@ def _meta_output_filename(result, workflow, slot):
 
 
 def _render_ads_image_slots(result, workflow):
-    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    slot_specs = _ads_image_slot_specs_for_render(result, workflow)
     if not slot_specs:
         return
     st.subheader("Generated Ad Images")
-    st.caption(
-        "Upload the images generated from the prompt above. They will be optimized and saved as individual Meta-ready files."
-    )
+    if _is_instant_experience_result(result):
+        st.caption(
+            "Upload the Instant Experience cover generated from the prompt above. Cover 1 is required; cover variations 2-5 are optional."
+        )
+    else:
+        st.caption(
+            "Upload the images generated from the prompt above. They will be optimized and saved as individual Meta-ready files."
+        )
+
+    def render_slot(slot, index):
+        with st.container(border=True, key=f"ads-image-slot::{result['context_key']}::{slot['id']}"):
+            st.markdown(f"**{slot['label']}**")
+            if result.get("campaign_type") == "Carousel" and index < len(IMAGE_ORDER):
+                title, body = IMAGE_ORDER[index]
+                st.caption(f"Card {index + 1}: {title}")
+                st.caption(body)
+            uploaded_file = st.file_uploader(
+                slot["label"],
+                type=["jpg", "jpeg", "png", "webp"],
+                key=_slot_upload_key(result, workflow, slot["id"]),
+                max_upload_size=20,
+                label_visibility="collapsed",
+            )
+            _process_ads_image_upload(result, workflow, slot, uploaded_file)
+            saved_slot = (workflow.get("slots") or {}).get(slot["id"]) or {}
+            if saved_slot.get("valid"):
+                st.image(saved_slot["data"], width="stretch")
+                st.caption(
+                    f"1080 x 1080 JPEG | {saved_slot['output_size'] / (1024 * 1024):.2f} MB"
+                )
+                st.caption(_meta_output_filename(result, workflow, slot))
+                outcome = (workflow.get("outcomes") or {}).get(slot["id"]) or {}
+                if outcome.get("status") == "saved":
+                    st.success("Saved")
+                elif outcome.get("status") == "failed":
+                    st.error(outcome.get("error") or "Upload failed.")
+                if st.button(
+                    "Remove",
+                    icon=":material/delete:",
+                    key=f"ads-image-remove::{result['context_key']}::{slot['id']}",
+                    use_container_width=True,
+                ):
+                    _remove_ads_image_slot(result, slot["id"])
+                    st.rerun()
+                st.caption("Drop or browse for a replacement at any time.")
+            elif saved_slot.get("error"):
+                st.error(saved_slot["error"])
+                if st.button(
+                    "Remove",
+                    icon=":material/delete:",
+                    key=f"ads-image-remove-invalid::{result['context_key']}::{slot['id']}",
+                    use_container_width=True,
+                ):
+                    _remove_ads_image_slot(result, slot["id"])
+                    st.rerun()
+
+    if _is_instant_experience_result(result):
+        for index, slot in enumerate(ads_image_workflow.campaign_image_slots("Instant Experience")):
+            if index > 0:
+                previous_slot = ads_image_workflow.campaign_image_slots("Instant Experience")[index - 1]
+                if not ((workflow.get("slots") or {}).get(previous_slot["id"]) or {}).get("valid"):
+                    break
+            render_slot(slot, index)
+        return
+
     columns = st.columns(len(slot_specs))
     for index, slot in enumerate(slot_specs):
         with columns[index]:
-            with st.container(border=True, key=f"ads-image-slot::{result['context_key']}::{slot['id']}"):
-                st.markdown(f"**{slot['label']}**")
-                if result.get("campaign_type") == "Carousel" and index < len(IMAGE_ORDER):
-                    title, body = IMAGE_ORDER[index]
-                    st.caption(f"Card {index + 1}: {title}")
-                    st.caption(body)
-                uploaded_file = st.file_uploader(
-                    slot["label"],
-                    type=["jpg", "jpeg", "png", "webp"],
-                    key=_slot_upload_key(result, workflow, slot["id"]),
-                    max_upload_size=20,
-                    label_visibility="collapsed",
-                )
-                _process_ads_image_upload(result, workflow, slot, uploaded_file)
-                saved_slot = (workflow.get("slots") or {}).get(slot["id"]) or {}
-                if saved_slot.get("valid"):
-                    st.image(saved_slot["data"], width="stretch")
-                    st.caption(
-                        f"1080 x 1080 JPEG | {saved_slot['output_size'] / (1024 * 1024):.2f} MB"
-                    )
-                    st.caption(_meta_output_filename(result, workflow, slot))
-                    outcome = (workflow.get("outcomes") or {}).get(slot["id"]) or {}
-                    if outcome.get("status") == "saved":
-                        st.success("Saved")
-                    elif outcome.get("status") == "failed":
-                        st.error(outcome.get("error") or "Upload failed.")
-                    if st.button(
-                        "Remove",
-                        icon=":material/delete:",
-                        key=f"ads-image-remove::{result['context_key']}::{slot['id']}",
-                        use_container_width=True,
-                    ):
-                        _remove_ads_image_slot(result, slot["id"])
-                        st.rerun()
-                    st.caption("Drop or browse for a replacement at any time.")
-                elif saved_slot.get("error"):
-                    st.error(saved_slot["error"])
-                    if st.button(
-                        "Remove",
-                        icon=":material/delete:",
-                        key=f"ads-image-remove-invalid::{result['context_key']}::{slot['id']}",
-                        use_container_width=True,
-                    ):
-                        _remove_ads_image_slot(result, slot["id"])
-                        st.rerun()
+            render_slot(slot, index)
 
 
 def _ads_dropbox_connection():
@@ -3791,6 +4007,9 @@ def save_ads_images_to_dropbox(
     if not dropbox_integration.path_is_within_root(clean_destination, clean_root):
         raise ValueError("The selected destination is outside the approved Files folder.")
     slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    if _is_instant_experience_result(result):
+        _compact_instant_experience_slots(workflow)
+        slot_specs = tuple(_ads_image_valid_slots(result, workflow))
     outcomes = dict(workflow.get("outcomes") or {})
     pending_slots = [
         slot for slot in slot_specs if (outcomes.get(slot["id"]) or {}).get("status") != "saved"
@@ -3915,22 +4134,40 @@ def _open_ads_files_folder(path):
 def _render_ads_image_save(result, workflow):
     if not ads_image_workflow.campaign_image_slots(result.get("campaign_type")):
         return
+    if _is_instant_experience_result(result):
+        _compact_instant_experience_slots(workflow)
     ready = ads_images_ready(result, workflow)
+    valid_slots = _ads_image_valid_slots(result, workflow)
     saved_count = sum(
         1 for outcome in (workflow.get("outcomes") or {}).values() if outcome.get("status") == "saved"
     )
-    required_count = len(ads_image_workflow.campaign_image_slots(result["campaign_type"]))
-    all_saved = saved_count == required_count
+    required_count = _ads_image_required_count(result)
+    save_target_count = max(required_count, len(valid_slots))
+    failed_count = sum(
+        1 for outcome in (workflow.get("outcomes") or {}).values() if outcome.get("status") == "failed"
+    )
+    all_saved = ready and saved_count >= len(valid_slots) and bool(valid_slots) and not failed_count
     if not ready:
-        st.caption(f"{saved_count if saved_count else len([slot for slot in (workflow.get('slots') or {}).values() if slot.get('valid')])} of {required_count} images ready.")
+        st.caption(f"{len(valid_slots)} of {required_count} images ready.")
+    elif _is_instant_experience_result(result):
+        st.caption(
+            f"{len(valid_slots)} Instant Experience {'cover' if len(valid_slots) == 1 else 'covers'} ready."
+        )
     if st.button(
         "Save Images",
         type="primary",
         icon=":material/save:",
         key=f"ads-images-save-open::{result['context_key']}",
-        disabled=not ready or bool(workflow.get("saving")) or all_saved,
+        disabled=(
+            bool(workflow.get("saving"))
+            or all_saved
+            or (not _is_instant_experience_result(result) and not ready)
+        ),
         use_container_width=True,
     ):
+        if _is_instant_experience_result(result) and not ready:
+            st.warning("Upload Instant Experience cover 1 before saving.")
+            return
         workflow["save_open"] = True
         st.session_state[ADS_IMAGE_STATE_KEY] = workflow
         st.rerun()
@@ -3956,10 +4193,7 @@ def _render_ads_image_save(result, workflow):
         return
 
     st.caption(f"Destination: {destination}")
-    failed_count = sum(
-        1 for outcome in (workflow.get("outcomes") or {}).values() if outcome.get("status") == "failed"
-    )
-    remaining_count = max(0, required_count - saved_count)
+    remaining_count = max(0, save_target_count - saved_count)
     action_label = (
         "All images saved"
         if all_saved
@@ -4046,7 +4280,7 @@ def _render_ads_image_save(result, workflow):
     failed = [row for row in outcomes.values() if row.get("status") == "failed"]
     if successful:
         if failed:
-            st.warning(f"{len(successful)} of {required_count} images saved. {len(failed)} need attention.")
+            st.warning(f"{len(successful)} of {save_target_count} images saved. {len(failed)} need attention.")
         else:
             st.success(f"{len(successful)} images saved to {workflow['destination_path']}.")
         if st.button(
@@ -4526,7 +4760,7 @@ def render_supported_result(result):
         _render_ads_image_slots(result, workflow)
         _render_ads_image_save(result, workflow)
         st.subheader("2. Build it in Meta")
-        st.caption("Use the Instant Experience cover prompt and CTA guidance inside the generated output.")
+        st.caption("Upload the Instant Experience cover generated from the prompt above.")
         render_meta_url_parameters_section(3)
         return
 

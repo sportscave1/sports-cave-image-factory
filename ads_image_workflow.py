@@ -34,12 +34,18 @@ def campaign_image_slots(campaign_type):
             for index in range(1, 6)
         )
     if campaign_type == "Instant Experience":
-        return (
+        return tuple(
             {
-                "id": "instant-experience",
-                "label": "Instant Experience Image",
-                "position": 1,
-            },
+                "id": f"instant-experience-{index:02d}",
+                "label": (
+                    "Instant Experience cover 1"
+                    if index == 1
+                    else f"Cover variation {index} - optional"
+                ),
+                "position": index,
+                "required": index == 1,
+            }
+            for index in range(1, 6)
         )
     return ()
 
@@ -199,7 +205,7 @@ def build_meta_image_filename(product_name, campaign_type, *, position=1, iso_da
     if campaign_type == "Carousel":
         suffix = f" - Carousel {int(position):02d} - {iso_date}.jpg"
     elif campaign_type == "Instant Experience":
-        suffix = f" - Instant Experience - {iso_date}.jpg"
+        suffix = f" - Instant Experience {int(position):02d} - {iso_date}.jpg"
     else:
         raise ValueError("This campaign type does not support generated-image export.")
     product_limit = max(1, MAX_FILENAME_LENGTH - len(suffix))
