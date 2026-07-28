@@ -52,20 +52,35 @@
         user-select: none;
       }
       .app-mark {
-        background: var(--accent);
-        border-radius: 2px;
+        background: #ffd45c;
+        border: 1px solid #d7a821;
+        border-radius: 2px 2px 3px 3px;
+        box-shadow: inset 0 -2px 0 rgba(226, 170, 35, 0.35);
         height: 15px;
         position: relative;
-        width: 18px;
+        width: 20px;
       }
       .app-mark::before {
-        background: #7cb8e8;
+        background: #ffe38a;
+        border: 1px solid #d7a821;
+        border-bottom: 0;
+        border-radius: 2px 2px 0 0;
+        content: "";
+        height: 6px;
+        left: -1px;
+        position: absolute;
+        top: -6px;
+        width: 11px;
+      }
+      .app-mark::after {
+        background: #1b82d1;
+        border-radius: 2px 2px 0 0;
+        bottom: 0;
         content: "";
         height: 5px;
-        left: 2px;
         position: absolute;
-        top: -3px;
-        width: 8px;
+        right: 3px;
+        width: 11px;
       }
       .address-row {
         align-items: center;
@@ -1468,17 +1483,7 @@
 
       function showDesktopHelperProblem(error, item = null) {
         state.helperItem = item || state.helperItem;
-        elements.helperMessage.textContent = "Sports Cave Desktop required";
-        elements.helperPanel.classList.add("visible");
-        showToast(
-          (error && error.message) || "Open this page in Sports Cave Desktop to drag or copy files.",
-          {
-            kind: "error",
-            duration: 6000,
-            actionLabel: "Open Desktop",
-            action: openSportsCaveDesktop,
-          }
-        );
+        elements.helperPanel.classList.remove("visible");
       }
 
       function showDesktopTransferError(error, item = null) {
@@ -1710,12 +1715,7 @@
         elements.protocolLink.click();
         window.clearTimeout(state.helperTimer);
         state.helperTimer = window.setTimeout(() => {
-          showToast("Sports Cave Desktop did not open.", {
-            kind: "error",
-            duration: 0,
-            actionLabel: "Install or update",
-            action: downloadHelper,
-          });
+          elements.helperPanel.classList.remove("visible");
         }, 3200);
       }
 
@@ -2977,7 +2977,7 @@
             state.desktopCapabilities = new Set();
             state.desktopReady = false;
             showDesktopHelperProblem(
-              desktopError("Update Sports Cave Desktop to enable native drag and Copy.", "desktop_outdated")
+              desktopError("", "desktop_outdated")
             );
             return;
           }

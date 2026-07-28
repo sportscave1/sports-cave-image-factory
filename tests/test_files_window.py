@@ -1043,10 +1043,10 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("Opening in ${application}...", open_block)
         self.assertIn('elements.protocolLink.href = "sports-cave-files://app"', open_block)
         self.assertIn("elements.protocolLink.click()", open_block)
-        self.assertIn("Sports Cave Desktop required", self.client)
-        self.assertIn("Check desktop helper", self.client)
-        self.assertIn("Install or update helper", self.client)
-        self.assertIn("Download instead", self.client)
+        self.assertNotIn("Sports Cave Desktop required", self.client)
+        self.assertNotIn("Update Sports Cave Desktop to enable native drag and Copy.", self.client)
+        self.assertNotIn("Sports Cave Desktop did not open.", self.client)
+        self.assertNotIn('elements.helperPanel.classList.add("visible")', self.client)
 
     def test_every_standard_open_action_uses_the_authoritative_open_item(self):
         self.assertEqual(self.client.count("function openItem(item)"), 1)
@@ -1359,10 +1359,24 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
     def test_missing_or_outdated_helper_has_compact_update_fallback(self):
         self.assertIn('if (!window.chrome || !window.chrome.webview)', self.client)
         self.assertIn("Open in Sports Cave Desktop to drag or copy files", self.client)
-        self.assertIn("Install or update helper", self.client)
         self.assertIn('elements.protocolLink.href = "sports-cave-files://app"', self.client)
         self.assertIn("const MINIMUM_DESKTOP_VERSION = 8", self.client)
         self.assertIn("desktop_outdated", self.client)
+        self.assertIn('desktopError("", "desktop_outdated")', self.client)
+        self.assertNotIn("Update Sports Cave Desktop to enable native drag and Copy.", self.client)
+        self.assertNotIn("Sports Cave Desktop did not open.", self.client)
+        self.assertNotIn('elements.helperPanel.classList.add("visible")', self.client)
+
+    def test_files_window_uses_folder_app_mark_instead_of_generic_blue_window(self):
+        self.assertIn(".app-mark", self.client)
+        self.assertIn("background: #ffd45c", self.client)
+        self.assertIn("background: #ffe38a", self.client)
+        self.assertIn("background: #1b82d1", self.client)
+        app_mark_block = self.client[
+            self.client.index(".app-mark {") :
+            self.client.index(".address-row {")
+        ]
+        self.assertNotIn("background: var(--accent);", app_mark_block)
 
     def test_image_viewer_supports_pixel_and_original_file_copy(self):
         self.assertIn('id="copyImageButton"', self.viewer)
