@@ -303,12 +303,17 @@ class AccountAccessTests(unittest.TestCase):
         self.assertEqual(first["id"], second["id"])
         self.assertEqual(store.created_count, 1)
 
-    def test_admin_can_access_every_registered_page(self):
+    def test_admin_can_access_every_registered_page_except_owner_only_reporting(self):
         admin = {"role": "admin", "is_active": True, "page_permissions": []}
 
         self.assertTrue(
-            all(os_accounts.can_access_page(admin, page["key"]) for page in os_accounts.PAGE_REGISTRY)
+            all(
+                os_accounts.can_access_page(admin, page["key"])
+                for page in os_accounts.PAGE_REGISTRY
+                if page["key"] != os_accounts.REPORTING_PAGE_KEY
+            )
         )
+        self.assertFalse(os_accounts.can_access_page(admin, os_accounts.REPORTING_PAGE_KEY))
 
     def test_worker_only_sees_and_opens_approved_pages(self):
         worker = {

@@ -42,6 +42,7 @@ import dropbox_integration
 import os_accounts
 import prompt_store
 import sc_auth
+import social_media
 import sports_cave_dashboard
 import sports_cave_pricing
 import sports_sales_calendar
@@ -54,7 +55,9 @@ edition_ops_module = None
 orders_page_module = None
 design_studio_page_module = None
 social_media_reels_studio_page_module = None
+social_media_page_module = None
 ads_page_module = None
+reporting_page_module = None
 requests_module = None
 components_module = None
 pillow_modules = None
@@ -169,6 +172,15 @@ def get_social_media_reels_studio_page():
     return social_media_reels_studio_page_module
 
 
+def get_social_media_page():
+    global social_media_page_module
+    if social_media_page_module is None:
+        log_startup_stage("SOCIAL MEDIA PAGE IMPORT START")
+        social_media_page_module = importlib.import_module("social_media_page")
+        log_startup_stage("SOCIAL MEDIA PAGE IMPORT DONE")
+    return social_media_page_module
+
+
 def get_ads_page():
     global ads_page_module
     if ads_page_module is None:
@@ -180,6 +192,15 @@ def get_ads_page():
 
 def get_marketing_factory_page():
     return get_ads_page()
+
+
+def get_reporting_page():
+    global reporting_page_module
+    if reporting_page_module is None:
+        log_startup_stage("REPORTING PAGE IMPORT START")
+        reporting_page_module = importlib.import_module("reporting_page")
+        log_startup_stage("REPORTING PAGE IMPORT DONE")
+    return reporting_page_module
 
 
 def get_requests_module():
@@ -225,14 +246,14 @@ ZIP_SAVE_DRIVE_FOLDER_URL = os.getenv(
     "ZIP_SAVE_DRIVE_FOLDER_URL",
     "https://drive.google.com/drive/folders/1FfXmTVuVGkD7PFhRjAtvPDZOn7Gpk3q_",
 ).strip()
-MENU_OPTIONS = [page["route"] for page in os_accounts.worker_assignable_pages()]
+MENU_OPTIONS = [page["route"] for page in os_accounts.navigation_pages()]
 SIDEBAR_NAV_LABELS = {
     page["route"]: page["label"] for page in os_accounts.PAGE_REGISTRY
 }
 HIDDEN_PAGE_OPTIONS = [
     page["route"]
     for page in os_accounts.PAGE_REGISTRY
-    if not page["worker_assignable"]
+    if page["route"] not in MENU_OPTIONS
 ]
 ALL_PAGE_OPTIONS = [*MENU_OPTIONS, *HIDDEN_PAGE_OPTIONS]
 PAGE_QUERY_PARAM = "page"
@@ -2346,6 +2367,40 @@ def inject_styles():
             white-space: nowrap;
         }
 
+        .st-key-sidebar-social-media-group [data-testid="stHorizontalBlock"] {
+            align-items: center;
+            gap: 0.2rem;
+        }
+
+        .st-key-sidebar-social-media-group [data-testid="stColumn"]:last-child {
+            flex: 0 0 2.1rem;
+            min-width: 2.1rem;
+        }
+
+        .st-key-sidebar-social-media-group [data-testid="stColumn"]:last-child button {
+            justify-content: center;
+            min-height: 1.95rem;
+            padding: 0.25rem !important;
+        }
+
+        .st-key-sidebar-social-media-group [data-testid="stColumn"]:last-child button > div {
+            justify-content: center;
+        }
+
+        .st-key-sidebar-social-media-child {
+            padding-left: 1.25rem;
+        }
+
+        .st-key-sidebar-social-media-child button {
+            min-height: 1.8rem !important;
+        }
+
+        .st-key-sidebar-social-media-child button p,
+        .st-key-sidebar-social-media-child button span {
+            color: #5E5E62 !important;
+            font-size: 0.78rem !important;
+        }
+
         .st-key-files-address-bar button::after,
         .st-key-files-address-bar div[data-testid="stButton"] button::after,
         .st-key-files-address-bar .stButton > button::after {
@@ -3391,6 +3446,8 @@ def page_from_query_params():
     value = str(value or "").strip()
     if not value:
         return ""
+    if value == social_media.LEGACY_REELS_PAGE_KEY:
+        return social_media.AI_REELS_ROUTE
     route = normalise_app_page(value)
     if route:
         return route
@@ -7371,8 +7428,54 @@ def render_sidebar():
         if current_page in allowed_menu_options
         else ""
     )
+    social_group_active = current_page in {
+        social_media.SOCIAL_MEDIA_ROUTE,
+        social_media.AI_REELS_ROUTE,
+    }
+    if social_group_active:
+        st.session_state["social-media-nav-expanded"] = True
     for page in allowed_menu_options:
         button_label = SIDEBAR_NAV_LABELS.get(page, page)
+        if page == social_media.SOCIAL_MEDIA_ROUTE:
+            expanded = bool(
+                st.session_state.get("social-media-nav-expanded", social_group_active)
+            )
+            with st.sidebar.container(key="sidebar-social-media-group"):
+                parent_columns = st.columns([5, 1], gap="small")
+                if parent_columns[0].button(
+                    button_label,
+                    key="sidebar-nav::Social Media",
+                    use_container_width=True,
+                    type="primary" if social_group_active else "secondary",
+                ):
+                    st.session_state["social-media-nav-expanded"] = True
+                    if current_page != social_media.SOCIAL_MEDIA_ROUTE:
+                        set_current_page(social_media.SOCIAL_MEDIA_ROUTE, source="sidebar")
+                        st.rerun()
+                if parent_columns[1].button(
+                    "v" if expanded else ">",
+                    key="sidebar-nav::Social Media::toggle",
+                    help="Collapse Social Media" if expanded else "Expand Social Media",
+                    use_container_width=True,
+                ):
+                    st.session_state["social-media-nav-expanded"] = not expanded
+                    st.rerun()
+                if expanded:
+                    with st.container(key="sidebar-social-media-child"):
+                        if st.button(
+                            social_media.AI_REELS_ROUTE,
+                            key="sidebar-nav::AI Reels",
+                            use_container_width=True,
+                            type=(
+                                "primary"
+                                if current_page == social_media.AI_REELS_ROUTE
+                                else "secondary"
+                            ),
+                        ):
+                            if current_page != social_media.AI_REELS_ROUTE:
+                                set_current_page(social_media.AI_REELS_ROUTE, source="sidebar")
+                                st.rerun()
+            continue
         if page == "Files":
             st.sidebar.markdown(
                 '<span class="sc-files-window-launcher-label">Files</span>',
@@ -7395,6 +7498,7 @@ def render_sidebar():
                 st.rerun()
     if (
         current_page not in MENU_OPTIONS
+        and current_page != social_media.AI_REELS_ROUTE
         and current_page != "Accounts & Access"
         and os_accounts.is_admin(user)
     ):
@@ -8981,6 +9085,14 @@ def _account_permission_fields(prefix, selected=()):
             help="Show prompt editing controls and allow this account to save or restore prompts.",
         ):
             chosen.append(os_accounts.EDIT_PROMPTS_CAPABILITY)
+    with columns[0]:
+        st.checkbox(
+            "Reporting",
+            value=False,
+            disabled=True,
+            key=f"{prefix}::{os_accounts.REPORTING_PAGE_KEY}",
+            help="Reporting is locked to the configured owner account and cannot be assigned to workers.",
+        )
     return chosen
 
 
@@ -9103,10 +9215,75 @@ def render_my_profile_section(user):
         st.rerun()
 
 
+def render_reporting_permission_section(user):
+    is_owner = os_accounts.is_reporting_owner(user)
+    current_value = bool(
+        is_owner
+        and os_accounts.REPORTING_PAGE_KEY in os_accounts.permission_keys(user)
+    )
+    st.markdown("### Reporting Access")
+    with st.form(f"reporting-access-form::{user.get('id') or 'anonymous'}"):
+        enabled = st.checkbox(
+            "Reporting",
+            value=current_value,
+            disabled=not is_owner,
+            help=(
+                "Enable the private staff-report archive and test-email tools for your owner account."
+                if is_owner
+                else "Reporting is locked to the configured active owner/admin account."
+            ),
+            key=f"reporting-access-checkbox::{user.get('id') or 'anonymous'}",
+        )
+        submitted = st.form_submit_button(
+            "Save Reporting access",
+            disabled=not is_owner,
+            use_container_width=True,
+        )
+    if not is_owner:
+        st.caption("Reporting is locked and unticked for this account.")
+        return
+    if not submitted:
+        return
+    try:
+        result = os_accounts.update_reporting_permission(user, enabled=enabled)
+    except PermissionError:
+        st.warning("Reporting access is restricted to the configured owner account.")
+        return
+    except Exception:
+        st.warning("Reporting access could not be saved right now. Please try again.")
+        return
+    updated = result.get("user") or user
+    _set_authenticated_user(updated, legacy=bool(user.get("legacy")))
+    if result.get("changed"):
+        record_activity_log(
+            "reporting_permission_changed",
+            "Accounts & Access",
+            f"Reporting access {'enabled' if result.get('new_value') else 'disabled'}",
+            entity_type="os_user",
+            entity_id=updated.get("id") or "",
+            metadata={
+                "actor_id": user.get("id") or "",
+                "target_account_id": updated.get("id") or "",
+                "target_role": updated.get("role") or "",
+                "page_key": os_accounts.REPORTING_PAGE_KEY,
+                "old_value": bool(result.get("old_value")),
+                "new_value": bool(result.get("new_value")),
+                "result": "success",
+                "status": "success",
+            },
+            event_key=result.get("event_key") or "",
+        )
+        st.success("Reporting access saved.")
+    else:
+        st.info("Reporting access was already set to that value.")
+    st.rerun()
+
+
 def render_accounts_access_page():
     user = current_os_user()
     st.title("Accounts & Access")
     render_my_profile_section(user)
+    render_reporting_permission_section(user)
     if not os_accounts.is_admin(user):
         st.caption("Your profile is available here. Admin account controls are not available for your account.")
         return
@@ -10024,15 +10201,27 @@ def _daily_execution_review_payload(prefix, sheet):
     }
 
 
-def _save_daily_execution_review(sheet, payload):
+def _save_daily_execution_review(sheet, payload, *, rerun=True):
     try:
-        sports_cave_dashboard.complete_daily_execution_review(sheet.get("id"), payload, user=current_os_user())
+        saved_sheet = sports_cave_dashboard.complete_daily_execution_review(
+            sheet.get("id"),
+            payload,
+            user=current_os_user(),
+        )
     except sports_cave_dashboard.DashboardStorageError:
         st.warning("Daily Review could not save right now. Please try again.")
         return False
+    if (
+        not saved_sheet
+        or saved_sheet.get("id") != sheet.get("id")
+        or not sports_cave_dashboard.daily_execution_review_complete(saved_sheet)
+    ):
+        st.warning("Daily Review could not be confirmed as complete. Please try again.")
+        return False
     st.session_state.pop("daily_execution_review_sheet_id", None)
-    st.success("Daily Review complete.")
-    _daily_execution_fragment_rerun()
+    st.session_state["daily_execution_review_notice"] = "Daily Review complete. Plan tomorrow when ready."
+    if rerun:
+        st.rerun()
     return True
 
 
@@ -10040,11 +10229,14 @@ def render_daily_execution_review(sheet):
     if hasattr(st, "dialog"):
         @st.dialog("Complete Daily Review")
         def review_dialog():
-            with st.form(f"daily-execution-review::{sheet.get('id')}"):
-                payload = _daily_execution_review_payload(f"daily-review::{sheet.get('id')}", sheet)
-                submitted = st.form_submit_button("Complete Daily Review", type="primary", use_container_width=True)
-            if submitted:
-                _save_daily_execution_review(sheet, payload)
+            dialog_body = st.empty()
+            with dialog_body.container():
+                with st.form(f"daily-execution-review::{sheet.get('id')}"):
+                    payload = _daily_execution_review_payload(f"daily-review::{sheet.get('id')}", sheet)
+                    submitted = st.form_submit_button("Complete Daily Review", type="primary", use_container_width=True)
+            if submitted and _save_daily_execution_review(sheet, payload, rerun=False):
+                dialog_body.empty()
+                st.rerun()
 
         review_dialog()
         return
@@ -10070,6 +10262,11 @@ def _daily_execution_status_control(container, label, current, key):
 
 def _render_daily_planning_form(user, target_date, existing_sheet, source_sheet, timezone_name):
     date_key = target_date.isoformat()
+    try:
+        source_date = date.fromisoformat(str((source_sheet or {}).get("sheet_date") or ""))
+    except ValueError:
+        source_date = None
+    is_tomorrow_plan = bool(source_date and target_date == source_date + timedelta(days=1))
     st.markdown(f"**Plan {_daily_execution_date_heading(target_date)}**")
     top_tasks = (existing_sheet or {}).get("top_tasks") or sports_cave_dashboard._blank_top_tasks()
     existing_other = [item for item in (existing_sheet or {}).get("additional_items") or [] if sports_cave_dashboard._daily_additional_item_has_content(item)]
@@ -10131,7 +10328,11 @@ def _render_daily_planning_form(user, target_date, existing_sheet, source_sheet,
         add_other = actions[0].form_submit_button("Add other task", use_container_width=True)
         cancel = actions[1].form_submit_button("Cancel", use_container_width=True)
         sydney_today = datetime.now(ZoneInfo("Australia/Sydney")).date()
-        save = actions[2].form_submit_button("Save tomorrow's plan" if target_date > sydney_today else "Save today's plan", type="primary", use_container_width=True)
+        save = actions[2].form_submit_button(
+            "Save tomorrow's plan" if is_tomorrow_plan or target_date > sydney_today else "Save today's plan",
+            type="primary",
+            use_container_width=True,
+        )
 
     if add_other:
         st.session_state[count_key] = int(st.session_state.get(count_key) or 1) + 1
@@ -10152,7 +10353,10 @@ def _render_daily_planning_form(user, target_date, existing_sheet, source_sheet,
             "planned_for": date_key,
         }
         archive_sheet_id = None
-        if target_date > sydney_today and sports_cave_dashboard.daily_execution_review_complete(source_sheet):
+        if (
+            (is_tomorrow_plan or target_date > sydney_today)
+            and sports_cave_dashboard.daily_execution_review_complete(source_sheet)
+        ):
             archive_sheet_id = (source_sheet or {}).get("id")
         try:
             saved_sheet = sports_cave_dashboard.save_daily_execution_plan(
@@ -10171,7 +10375,11 @@ def _render_daily_planning_form(user, target_date, existing_sheet, source_sheet,
             st.warning("The plan could not be confirmed as saved. Please try again.")
             return
         st.session_state.pop("daily_execution_plan_date", None)
-        st.success("Tomorrow's plan saved." if target_date > sydney_today else "Today's plan saved.")
+        st.success(
+            "Tomorrow's plan saved."
+            if is_tomorrow_plan or target_date > sydney_today
+            else "Today's plan saved."
+        )
         _daily_execution_fragment_rerun()
 
 
@@ -10200,11 +10408,20 @@ def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
     timezone_name = os_accounts.timezone_for_user(user)
     try:
         home_sheets = sports_cave_dashboard.get_daily_execution_home_sheets(user, today)
-        sheet = home_sheets.get("today") or {}
+        sheet = home_sheets.get("today") or home_sheets.get("carryover_review") or {}
         tomorrow_sheet = home_sheets.get("tomorrow") or {}
     except sports_cave_dashboard.DashboardStorageError:
         st.warning("Daily Execution could not load right now.")
         return False
+    try:
+        workflow_date = date.fromisoformat(str(sheet.get("sheet_date") or today.isoformat()))
+    except ValueError:
+        workflow_date = today
+    tomorrow = workflow_date + timedelta(days=1)
+
+    review_notice = st.session_state.pop("daily_execution_review_notice", "")
+    if review_notice:
+        st.success(review_notice)
 
     for alert in sports_cave_dashboard.daily_execution_alerts(sheet, local_now, user_name=user_name):
         st.warning(alert)
@@ -12180,13 +12397,17 @@ def render_selected_page(current_page):
         render_lightweight_dashboard_page()
     elif current_page == "Accounts & Access":
         render_accounts_access_page()
+    elif current_page == "Reporting":
+        get_reporting_page().render_page(current_os_user())
     elif current_page == "Files":
         render_files_page()
     elif current_page == "Products":
         render_placeholder_page("Products", "Full product sync is paused. Use Edition Ops for product edition fields.")
     elif current_page == "Mockups":
         render_mockups_page()
-    elif current_page == "Social Media Reels Studio":
+    elif current_page == social_media.SOCIAL_MEDIA_ROUTE:
+        get_social_media_page().render_page(current_os_user())
+    elif current_page == social_media.AI_REELS_ROUTE:
         get_social_media_reels_studio_page().render_page(
             can_edit_prompts=prompt_editing_allowed()
         )

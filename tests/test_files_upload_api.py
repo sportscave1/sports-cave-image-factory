@@ -294,7 +294,10 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
             files_upload_api.dropbox_integration,
             "get_temporary_link",
             return_value="https://dropbox.test/temporary/collector-art.psd",
-        ) as temporary_link:
+        ) as temporary_link, patch.object(
+            files_upload_api,
+            "record_activity_log",
+        ) as record_activity:
             response = asyncio.run(files_upload_api.download_file(request))
 
         self.assertEqual(response.status_code, 307)
@@ -304,6 +307,15 @@ class DropboxChunkUploadManagerTests(unittest.TestCase):
         )
         temporary_link.assert_called_once_with(
             "short-lived-token",
+            f"{TEAM_ROOT}/collector-art.psd",
+        )
+        self.assertEqual(record_activity.call_args.args[:3], (
+            "files_downloaded",
+            "Files",
+            "Downloaded file: collector-art.psd",
+        ))
+        self.assertEqual(
+            record_activity.call_args.kwargs["entity_id"],
             f"{TEAM_ROOT}/collector-art.psd",
         )
 

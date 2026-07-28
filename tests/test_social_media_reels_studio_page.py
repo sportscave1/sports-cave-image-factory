@@ -59,12 +59,15 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         Image.new("RGB", size, color).save(buffer, format="PNG")
         return buffer.getvalue()
 
-    def test_app_sidebar_and_router_include_reels_studio_page(self):
+    def test_app_sidebar_and_router_nest_existing_reels_page_under_social_media(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
 
-        self.assertIn('"Social Media Reels Studio"', source)
+        self.assertIn("social_media.SOCIAL_MEDIA_ROUTE", source)
+        self.assertIn("social_media.AI_REELS_ROUTE", source)
+        self.assertIn('key="sidebar-nav::AI Reels"', source)
         self.assertIn("get_social_media_reels_studio_page().render_page(", source)
         self.assertIn("can_edit_prompts=prompt_editing_allowed()", source)
+        self.assertNotIn('elif current_page == "Social Media Reels Studio":', source)
         self.assertNotIn("developer_password=DEVELOPER_PAGE_PASSWORD", source)
 
     def test_ads_route_does_not_import_legacy_marketing_factory_page_bundle(self):

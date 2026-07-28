@@ -3070,7 +3070,7 @@ def _render_editable_prompt(
             else:
                 record_activity_log(
                     "reel_prompt_saved",
-                    "Social Media Reels Studio",
+                    "AI Reels",
                     f"Saved reel prompt: {prompt_name}",
                     entity_type="reel_prompt",
                     entity_id=prompt_key,
@@ -3114,7 +3114,7 @@ def render_page(can_edit_prompts: bool = False) -> None:
     st.markdown(
         """
         <div class="smrs-header">
-          <h1>Social Media Reels Studio</h1>
+          <h1>AI Reels</h1>
           <p>Create background references, lifestyle mockups, and image-to-video reels for Sports Cave products.</p>
         </div>
         """,
@@ -3309,7 +3309,7 @@ Optional final archive location:
                 st.success(f"Saved as {record['filename']}")
                 record_activity_log(
                     "reel_video_uploaded",
-                    "Social Media Reels Studio",
+                    "AI Reels",
                     f"Uploaded reel video: {record['filename']}",
                     entity_type="reel_video",
                     entity_id=record.get("filename") or "",

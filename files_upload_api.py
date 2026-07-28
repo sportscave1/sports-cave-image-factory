@@ -1696,7 +1696,7 @@ async def download_file(request: Request):
     try:
         if not _same_origin(request):
             raise FilesUploadError("Download request is not allowed.", status_code=403)
-        await run_in_threadpool(_request_user, request)
+        user = await run_in_threadpool(_request_user, request)
         context = await run_in_threadpool(_dropbox_context)
         relative_path = request.query_params.get("relative_path")
         path = (
@@ -1713,6 +1713,16 @@ async def download_file(request: Request):
         )
         if not link:
             raise FilesUploadError("This file could not be downloaded right now.", status_code=503)
+        await run_in_threadpool(
+            record_activity_log,
+            "files_downloaded",
+            "Files",
+            f"Downloaded file: {PurePosixPath(path).name}",
+            entity_type="dropbox_file",
+            entity_id=path,
+            metadata={"filename": PurePosixPath(path).name},
+            actor=_activity_actor(user),
+        )
         return RedirectResponse(str(link), status_code=307)
     except Exception as error:
         return _response_error(error)

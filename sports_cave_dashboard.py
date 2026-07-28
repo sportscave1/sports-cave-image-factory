@@ -519,13 +519,27 @@ def get_daily_execution_home_sheets(user, today):
     clean_today = today.isoformat() if isinstance(today, date) else str(today or "")
     tomorrow = date.fromisoformat(clean_today) + timedelta(days=1)
     cache_key = ("daily_home", user_id, clean_today)
-    cached = _cache_get(_DAILY_EXECUTION_CACHE, cache_key)
-    if cached is not None:
-        by_date = {row.get("sheet_date"): row for row in cached}
+
+    def home_bundle(rows):
+        by_date = {row.get("sheet_date"): row for row in rows}
+        carryover_review = next(
+            (
+                row
+                for row in rows
+                if row.get("sheet_date") < clean_today
+                and daily_execution_review_complete(row)
+            ),
+            {},
+        )
         return {
             "today": by_date.get(clean_today, {}),
             "tomorrow": by_date.get(tomorrow.isoformat(), {}),
+            "carryover_review": carryover_review,
         }
+
+    cached = _cache_get(_DAILY_EXECUTION_CACHE, cache_key)
+    if cached is not None:
+        return home_bundle(cached)
     try:
         backend = get_supabase_backend()
         if hasattr(backend, "get_daily_execution_home_sheets"):
@@ -540,12 +554,19 @@ def get_daily_execution_home_sheets(user, today):
                 )
                 if row
             ]
+        if not normalised and hasattr(backend, "list_daily_execution_sheets"):
+            recovery_start = (date.fromisoformat(clean_today) - timedelta(days=31)).isoformat()
+            recovery_rows = backend.list_daily_execution_sheets(
+                user_id,
+                recovery_start,
+                clean_today,
+                limit=1,
+            )
+            latest = _normalise_daily_sheet((recovery_rows or [{}])[0])
+            if latest and daily_execution_review_complete(latest):
+                normalised = [latest]
         _cache_set(_DAILY_EXECUTION_CACHE, cache_key, normalised, DAILY_EXECUTION_CACHE_TTL_SECONDS)
-        by_date = {row.get("sheet_date"): row for row in normalised}
-        return {
-            "today": by_date.get(clean_today, {}),
-            "tomorrow": by_date.get(tomorrow.isoformat(), {}),
-        }
+        return home_bundle(normalised)
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 

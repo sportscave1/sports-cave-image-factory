@@ -731,6 +731,70 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(backend.activity_rows[0]["event_type"], "daily_execution_completed")
         self.assertEqual(backend.activity_rows[0]["actor"], "Nathan")
 
+    def test_daily_review_submission_closes_dialog_and_loads_tomorrow_action(self):
+        backend = FakeDashboardBackend()
+        today = date.today()
+        backend.daily_sheets.append(
+            {
+                "id": "today-active",
+                "user_id": "admin-1",
+                "user_name": "Nathan",
+                "sheet_date": today.isoformat(),
+                "timezone": "Australia/Sydney",
+                "status": "active",
+                "top_tasks": [
+                    {"task": "One", "why": "Revenue", "time_blocked": "1h", "status": "done"},
+                    {"task": "Two", "why": "Products", "time_blocked": "1h", "status": "done"},
+                    {"task": "Three", "why": "Ads", "time_blocked": "1h", "status": "done"},
+                ],
+                "additional_items": [],
+                "ratings": {},
+                "review_data": {},
+                "no_grey_zone": {},
+                "daily_summary": "",
+                "tomorrow_intention": "",
+                "planning_data": {},
+            }
+        )
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = {
+            "id": "admin-1",
+            "username": "nathan",
+            "display_name": "Nathan",
+            "role": "admin",
+            "timezone": "Australia/Sydney",
+            "is_active": True,
+            "page_permissions": [],
+        }
+        app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            app_test.run(timeout=20)
+            next(button for button in app_test.button if button.label == "Complete Daily Review").click().run(timeout=20)
+            review_buttons = [button for button in app_test.button if button.label == "Complete Daily Review"]
+            review_buttons[-1].click().run(timeout=20)
+
+        self.assertFalse(app_test.exception)
+        self.assertEqual(backend.daily_sheets[0]["status"], "reviewed")
+        self.assertTrue(any(button.label == "Plan tomorrow" for button in app_test.button))
+        self.assertFalse(any(button.label == "Complete Daily Review" for button in app_test.button))
+        self.assertIsNone(app_test.session_state.filtered_state.get("daily_execution_review_sheet_id"))
+
+    def test_daily_review_ui_requires_a_confirmed_saved_sheet(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        save_source = source.split("def _save_daily_execution_review", 1)[1].split(
+            "\ndef render_daily_execution_review",
+            1,
+        )[0]
+
+        self.assertIn("saved_sheet = sports_cave_dashboard.complete_daily_execution_review", save_source)
+        self.assertIn("daily_execution_review_complete(saved_sheet)", save_source)
+        self.assertIn("Daily Review could not be confirmed as complete.", save_source)
+        self.assertIn("st.rerun()", save_source)
+        self.assertNotIn("_daily_execution_fragment_rerun()", save_source)
+
     def test_tomorrow_plan_upserts_one_sheet_and_archives_reviewed_today_once(self):
         backend = FakeDashboardBackend()
         user = {"id": "admin-1", "display_name": "Nathan"}

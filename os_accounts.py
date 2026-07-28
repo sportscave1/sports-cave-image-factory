@@ -3,6 +3,7 @@ import threading
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import sc_auth
+import social_media
 
 
 ROLE_ADMIN = "admin"
@@ -20,6 +21,11 @@ COUNTRY_OPTIONS = tuple(COUNTRY_TIMEZONES)
 FILES_DELETE_CAPABILITY = "delete_files"
 ACTIVITY_LOG_CAPABILITY = "view_activity_log"
 EDIT_PROMPTS_CAPABILITY = "edit_prompts"
+REPORTING_PAGE_KEY = "reporting"
+REPORTING_OWNER_ENV_KEYS = (
+    "SPORTS_CAVE_REPORTING_OWNER_EMAIL",
+    "SPORTS_CAVE_ADMIN_EMAIL",
+)
 
 PAGE_REGISTRY = (
     {"key": "dashboard", "route": "Dashboard", "label": "Home", "worker_assignable": True},
@@ -28,10 +34,18 @@ PAGE_REGISTRY = (
     {"key": "edition_ops", "route": "Edition Ops", "label": "Edition Ops", "worker_assignable": True},
     {"key": "mockups", "route": "Mockups", "label": "Mockups", "worker_assignable": True},
     {
-        "key": "social_media_reels_studio",
-        "route": "Social Media Reels Studio",
-        "label": "Social Media Reels Studio",
+        "key": social_media.SOCIAL_MEDIA_PAGE_KEY,
+        "route": social_media.SOCIAL_MEDIA_ROUTE,
+        "label": social_media.SOCIAL_MEDIA_ROUTE,
         "worker_assignable": True,
+    },
+    {
+        "key": social_media.AI_REELS_PAGE_KEY,
+        "route": social_media.AI_REELS_ROUTE,
+        "label": social_media.AI_REELS_ROUTE,
+        "worker_assignable": False,
+        "parent_key": social_media.SOCIAL_MEDIA_PAGE_KEY,
+        "navigation_child": True,
     },
     {
         "key": "product_uploads",
@@ -53,6 +67,14 @@ PAGE_REGISTRY = (
         "worker_assignable": True,
     },
     {"key": "files", "route": "Files", "label": "Files", "worker_assignable": True},
+    {
+        "key": REPORTING_PAGE_KEY,
+        "route": "Reporting",
+        "label": "Reporting",
+        "worker_assignable": False,
+        "top_level": True,
+        "sensitive": True,
+    },
     {
         "key": "accounts_access",
         "route": "Accounts & Access",
@@ -87,8 +109,12 @@ PAGE_ALIASES = {
     "Settings": "Developer",
     "Marketing Factory": "Ads",
     "Dropbox": "Files",
+    social_media.LEGACY_REELS_ROUTE: social_media.AI_REELS_ROUTE,
 }
-PAGE_KEY_ALIASES = {"dropbox": "files"}
+PAGE_KEY_ALIASES = {
+    "dropbox": "files",
+    social_media.LEGACY_REELS_PAGE_KEY: social_media.SOCIAL_MEDIA_PAGE_KEY,
+}
 PAGE_BY_KEY = {page["key"]: page for page in PAGE_REGISTRY}
 PAGE_BY_ROUTE = {page["route"]: page for page in PAGE_REGISTRY}
 DATABASE_URL_ENV_KEYS = (
@@ -137,6 +163,14 @@ def normalise_page_key(page_key):
 
 def worker_assignable_pages():
     return tuple(page for page in PAGE_REGISTRY if page["worker_assignable"])
+
+
+def navigation_pages():
+    return tuple(
+        page
+        for page in PAGE_REGISTRY
+        if page.get("worker_assignable") or page.get("top_level")
+    )
 
 
 def default_timezone_for_role(role):
@@ -190,12 +224,59 @@ def is_admin(user):
     return str((user or {}).get("role") or "").strip().casefold() == ROLE_ADMIN
 
 
+def reporting_owner_email(environ=None):
+    environ = os.environ if environ is None else environ
+    for key in REPORTING_OWNER_ENV_KEYS:
+        value = normalise_login(environ.get(key, ""))
+        if value:
+            return value
+    return ""
+
+
+def is_reporting_owner(user, *, environ=None):
+    user = user or {}
+    owner_email = reporting_owner_email(environ)
+    return bool(
+        owner_email
+        and user.get("is_active", True)
+        and is_admin(user)
+        and normalise_login(user.get("email")) == owner_email
+    )
+
+
+def can_manage_reporting_permission(actor, target):
+    actor = actor or {}
+    target = target or {}
+    return bool(
+        actor.get("id")
+        and str(actor.get("id")) == str(target.get("id") or "")
+        and is_reporting_owner(actor)
+        and is_reporting_owner(target)
+    )
+
+
+def can_access_reporting(user):
+    return bool(
+        is_reporting_owner(user)
+        and REPORTING_PAGE_KEY in permission_keys(user)
+    )
+
+
 def can_access_page(user, route_or_key):
     if not user or not bool(user.get("is_active", True)):
         return False
     page = PAGE_BY_KEY.get(normalise_page_key(route_or_key))
     if page is None:
         page = PAGE_BY_ROUTE.get(normalise_route(route_or_key))
+    if page and page["key"] == REPORTING_PAGE_KEY:
+        return can_access_reporting(user)
+    if page and page["key"] in {
+        social_media.SOCIAL_MEDIA_PAGE_KEY,
+        social_media.AI_REELS_PAGE_KEY,
+    }:
+        if is_admin(user):
+            return True
+        return social_media.SOCIAL_MEDIA_PAGE_KEY in permission_keys(user)
     if page and page["key"] == "accounts_access":
         return True
     if is_admin(user):
@@ -241,7 +322,7 @@ def can_edit_prompts(user):
 def allowed_navigation_routes(user):
     return tuple(
         page["route"]
-        for page in worker_assignable_pages()
+        for page in navigation_pages()
         if can_access_page(user, page["key"])
     )
 
@@ -662,6 +743,63 @@ class PostgresAccountStore:
             conn.commit()
         return _clean_user(row, permissions)
 
+    def set_reporting_permission(self, actor, target_user_id, enabled):
+        actor = _clean_user(actor)
+        clean_target_id = str(target_user_id or "").strip()
+        if not clean_target_id or str(actor.get("id") or "") != clean_target_id:
+            raise PermissionError("Reporting access can only be changed for the signed-in owner account.")
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT * FROM os_users WHERE id=%s LIMIT 1 FOR UPDATE",
+                    (clean_target_id,),
+                )
+                target = cur.fetchone()
+                permissions = self._permissions(cur, clean_target_id) if target else ()
+                clean_target = _clean_user(target, permissions)
+                if not can_manage_reporting_permission(actor, clean_target):
+                    raise PermissionError("Reporting access is restricted to the configured owner account.")
+                old_value = REPORTING_PAGE_KEY in permission_keys(clean_target)
+                new_value = bool(enabled)
+                if old_value != new_value:
+                    if new_value:
+                        cur.execute(
+                            """
+                            INSERT INTO os_user_page_permissions(user_id, page_key, can_access)
+                            VALUES (%s, %s, TRUE)
+                            ON CONFLICT (user_id, page_key)
+                            DO UPDATE SET can_access=TRUE, updated_at=now()
+                            """,
+                            (clean_target_id, REPORTING_PAGE_KEY),
+                        )
+                    else:
+                        cur.execute(
+                            """
+                            DELETE FROM os_user_page_permissions
+                            WHERE user_id=%s AND page_key=%s
+                            """,
+                            (clean_target_id, REPORTING_PAGE_KEY),
+                        )
+                    cur.execute(
+                        "UPDATE os_users SET updated_at=now() WHERE id=%s RETURNING *",
+                        (clean_target_id,),
+                    )
+                    target = cur.fetchone() or target
+                    permissions = self._permissions(cur, clean_target_id)
+                updated = _clean_user(target, permissions)
+            conn.commit()
+        return {
+            "changed": old_value != new_value,
+            "old_value": old_value,
+            "new_value": new_value,
+            "user": updated,
+            "event_key": (
+                f"reporting-permission:{clean_target_id}:"
+                f"{int(old_value)}:{int(new_value)}:{updated.get('updated_at') or ''}"
+            ),
+        }
+
 
 DEFAULT_STORE = PostgresAccountStore()
 _PREPARE_LOCK = threading.Lock()
@@ -793,6 +931,15 @@ def change_my_password(user_id, *, current_password, new_password, store=None):
         user_id,
         current_password=current_password,
         new_password=new_password,
+    )
+
+
+def update_reporting_permission(actor, *, enabled, store=None):
+    actor = actor or {}
+    return (store or DEFAULT_STORE).set_reporting_permission(
+        actor,
+        actor.get("id"),
+        bool(enabled),
     )
 
 

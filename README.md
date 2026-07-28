@@ -72,6 +72,18 @@ python -m streamlit run app.py
 
 You can also use `start-app.bat` on Windows.
 
+## Daily Staff Reporting
+
+The owner-only Reporting page, Resend delivery, Supabase archive, and manual
+Render Cron setup are documented in
+[`docs/DAILY_STAFF_REPORTING.md`](docs/DAILY_STAFF_REPORTING.md).
+
+## Social Media
+
+The Social Media hub, nested AI Reels navigation, daily plans, Post Tracker,
+weekly check-ins, permissions, Reporting integration and migration steps are
+documented in [`docs/SOCIAL_MEDIA.md`](docs/SOCIAL_MEDIA.md).
+
 ## Google Drive Link-Based Mode
 
 Phase 3 stores Google Drive file and folder URLs on each product record. It does
