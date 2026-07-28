@@ -82,7 +82,7 @@ class FakeDashboardBackend:
 
     def list_activity_logs(self, *, start_at=None, end_at=None, limit=200):
         self.activity_calls.append({"start_at": start_at, "end_at": end_at, "limit": limit})
-        return self.activity_rows[:limit]
+        return list(self.activity_rows) if limit is None else self.activity_rows[:limit]
 
     def list_dashboard_edition_products(self, *, limit=1000):
         self.edition_product_calls.append(limit)
@@ -349,7 +349,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertEqual(len(backend.task_status_calls), 3)
 
-    def test_activity_log_queries_use_view_date_bounds_and_limits(self):
+    def test_activity_log_queries_use_view_date_bounds_without_pagination_limits(self):
         backend = FakeDashboardBackend()
         now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
 
@@ -360,10 +360,10 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME, now)
 
         today_call, week_call, month_call, all_time_call = backend.activity_calls
-        self.assertEqual(today_call["limit"], 50)
-        self.assertEqual(week_call["limit"], 100)
-        self.assertEqual(month_call["limit"], 150)
-        self.assertEqual(all_time_call["limit"], 200)
+        self.assertIsNone(today_call["limit"])
+        self.assertIsNone(week_call["limit"])
+        self.assertIsNone(month_call["limit"])
+        self.assertIsNone(all_time_call["limit"])
         self.assertEqual(today_call["start_at"], datetime(2026, 7, 21, tzinfo=timezone.utc))
         self.assertEqual(today_call["end_at"], datetime(2026, 7, 22, tzinfo=timezone.utc))
         self.assertEqual(week_call["start_at"], datetime(2026, 7, 15, tzinfo=timezone.utc))
@@ -1202,7 +1202,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             {"display_name": "Nathan", "email": "nathan@sportscave.test"},
         )
 
-        self.assertEqual(greeting, "Good morning, Nathan")
+        self.assertEqual(greeting, "Good morning, Nathan :)")
 
     def test_admin_greeting_uses_australia_sydney_time(self):
         utc_now = datetime(2026, 7, 21, 20, 30, tzinfo=timezone.utc)
@@ -1215,7 +1215,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertEqual(
             sports_cave_dashboard.greeting_for_account(local_now, admin),
-            "Good morning, Nathan",
+            "Good morning, Nathan :)",
         )
 
     def test_worker_greeting_uses_asia_manila_time(self):
@@ -1229,7 +1229,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertEqual(
             sports_cave_dashboard.greeting_for_account(local_now, worker),
-            "Good night, Maria",
+            "Good night, Maria :)",
         )
 
     def test_activity_table_record_displays_actor_name(self):
@@ -1246,6 +1246,67 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
         self.assertEqual(record["User"], "Maria")
         self.assertEqual(record["Activity"], "Mockup made")
+
+    def test_activity_table_record_uses_new_audit_metadata_columns(self):
+        record = sports_cave_dashboard.activity_table_record(
+            {
+                "action_type": "certificate_upload_failed",
+                "message": "Certificate upload failed: #SC1234 #012",
+                "page": "Orders",
+                "actor": "Reina",
+                "created_at": "2026-07-21T00:00:00+00:00",
+                "metadata": {
+                    "product": "Legacy Montana vs Marino",
+                    "status": "failed",
+                    "error": "Shopify upload failed",
+                },
+            },
+            ZoneInfo("Australia/Sydney"),
+        )
+
+        self.assertEqual(record["Action"], "Certificate failed")
+        self.assertEqual(record["Page/Area"], "Orders")
+        self.assertEqual(record["Item or Product"], "Legacy Montana vs Marino")
+        self.assertEqual(record["Result/Status"], "failed")
+        self.assertIn("AEST", record["Time"])
+
+    def test_activity_filters_sort_and_search_are_client_side(self):
+        records = [
+            {
+                "Action": "Task completed",
+                "User": "Reina",
+                "Page/Area": "Dashboard",
+                "Item or Product": "NFL",
+                "Details": "Finished NFL",
+                "Result/Status": "success",
+                "Sort Timestamp": datetime(2026, 7, 21, 2, tzinfo=timezone.utc),
+            },
+            {
+                "Action": "Certificate failed",
+                "User": "Nathan",
+                "Page/Area": "Orders",
+                "Item or Product": "SC1234",
+                "Details": "Upload failed",
+                "Result/Status": "failed",
+                "Sort Timestamp": datetime(2026, 7, 21, 1, tzinfo=timezone.utc),
+            },
+        ]
+
+        filtered = sports_cave_dashboard.filter_activity_records(
+            records,
+            user="All",
+            action="All",
+            area="Orders",
+            status="failed",
+            search="upload",
+        )
+        sorted_rows = sports_cave_dashboard.sort_activity_records(
+            records,
+            sports_cave_dashboard.ACTIVITY_SORT_USER_ASC,
+        )
+
+        self.assertEqual([row["Action"] for row in filtered], ["Certificate failed"])
+        self.assertEqual([row["User"] for row in sorted_rows], ["Nathan", "Reina"])
 
     def test_mockup_upload_activity_is_grouped_with_all_item_details(self):
         entries = [
@@ -1676,9 +1737,11 @@ class DashboardRenderContractTests(unittest.TestCase):
             source.index("\n\ndef _calendar_event_pill")
         ]
 
-        for heading in ("Date", "Time", "Activity", "Details", "User", "Area"):
+        for heading in ("Time", "User", "Action", "Page/Area", "Item or Product", "Details", "Result/Status"):
             self.assertIn(f"<th>{heading}</th>", table_source)
         self.assertIn("activity_table_record", table_source)
+        self.assertNotIn("Activity page", table_source)
+        self.assertNotIn("ACTIVITY_TABLE_PAGE_SIZE", table_source)
         self.assertNotIn('<div class="sc-log-row">', table_source)
 
 

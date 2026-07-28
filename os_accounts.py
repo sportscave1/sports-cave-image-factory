@@ -10,6 +10,13 @@ ROLE_WORKER = "worker"
 VALID_ROLES = {ROLE_ADMIN, ROLE_WORKER}
 ADMIN_TIMEZONE = "Australia/Sydney"
 WORKER_TIMEZONE = "Asia/Manila"
+COUNTRY_AUSTRALIA = "Australia"
+COUNTRY_PHILIPPINES = "Philippines"
+COUNTRY_TIMEZONES = {
+    COUNTRY_AUSTRALIA: ADMIN_TIMEZONE,
+    COUNTRY_PHILIPPINES: WORKER_TIMEZONE,
+}
+COUNTRY_OPTIONS = tuple(COUNTRY_TIMEZONES)
 FILES_DELETE_CAPABILITY = "delete_files"
 ACTIVITY_LOG_CAPABILITY = "view_activity_log"
 EDIT_PROMPTS_CAPABILITY = "edit_prompts"
@@ -136,9 +143,39 @@ def default_timezone_for_role(role):
     return ADMIN_TIMEZONE if str(role or "").strip().casefold() == ROLE_ADMIN else WORKER_TIMEZONE
 
 
+def default_country_for_role(role):
+    return COUNTRY_AUSTRALIA if str(role or "").strip().casefold() == ROLE_ADMIN else COUNTRY_PHILIPPINES
+
+
+def timezone_for_country(country):
+    return COUNTRY_TIMEZONES.get(str(country or "").strip(), "")
+
+
+def normalise_country(country, *, role=ROLE_WORKER):
+    clean_country = str(country or "").strip()
+    return clean_country if clean_country in COUNTRY_TIMEZONES else default_country_for_role(role)
+
+
 def timezone_for_user(user):
     user = user or {}
-    return str(user.get("timezone") or "").strip() or default_timezone_for_role(user.get("role"))
+    return (
+        str(user.get("timezone") or "").strip()
+        or timezone_for_country(user.get("country"))
+        or default_timezone_for_role(user.get("role"))
+    )
+
+
+def password_strength_error(password):
+    value = str(password or "")
+    if len(value) < 10:
+        return "Password must be at least 10 characters."
+    if not any(char.isupper() for char in value):
+        return "Password must include an uppercase letter."
+    if not any(char.islower() for char in value):
+        return "Password must include a lowercase letter."
+    if not any(char.isdigit() for char in value):
+        return "Password must include a number."
+    return ""
 
 
 def permission_keys(user):
@@ -156,11 +193,13 @@ def is_admin(user):
 def can_access_page(user, route_or_key):
     if not user or not bool(user.get("is_active", True)):
         return False
-    if is_admin(user):
-        return True
     page = PAGE_BY_KEY.get(normalise_page_key(route_or_key))
     if page is None:
         page = PAGE_BY_ROUTE.get(normalise_route(route_or_key))
+    if page and page["key"] == "accounts_access":
+        return True
+    if is_admin(user):
+        return True
     if not page or not page.get("worker_assignable"):
         return False
     return page["key"] in permission_keys(user)
@@ -223,7 +262,10 @@ def _clean_user(row, permissions=None):
     row["email"] = str(row.get("email") or "")
     row["display_name"] = str(row.get("display_name") or row.get("username") or "")
     row["role"] = str(row.get("role") or ROLE_WORKER).casefold()
-    row["timezone"] = str(row.get("timezone") or default_timezone_for_role(row["role"])).strip()
+    row["country"] = normalise_country(row.get("country"), role=row["role"])
+    row["timezone"] = str(
+        row.get("timezone") or timezone_for_country(row["country"]) or default_timezone_for_role(row["role"])
+    ).strip()
     row["is_active"] = bool(row.get("is_active", True))
     if permissions is not None:
         row["page_permissions"] = sorted(set(permissions))
@@ -290,6 +332,7 @@ class PostgresAccountStore:
                                 password_hash TEXT NOT NULL,
                                 role TEXT NOT NULL DEFAULT 'worker'
                                     CHECK (role IN ('admin', 'worker')),
+                                country TEXT NOT NULL DEFAULT 'Philippines',
                                 timezone TEXT NOT NULL DEFAULT 'Asia/Manila',
                                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
                                 created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -311,18 +354,41 @@ class PostgresAccountStore:
                             )
                             """
                         )
+                        cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS country TEXT")
                         cur.execute("ALTER TABLE os_users ADD COLUMN IF NOT EXISTS timezone TEXT")
                         cur.execute(
                             """
                             UPDATE os_users
+                            SET country = CASE
+                                WHEN role = 'admin' THEN %s
+                                ELSE %s
+                            END
+                            WHERE country IS NULL OR country = ''
+                            """,
+                            (COUNTRY_AUSTRALIA, COUNTRY_PHILIPPINES),
+                        )
+                        cur.execute(
+                            """
+                            UPDATE os_users
                             SET timezone = CASE
+                                WHEN country = %s THEN %s
+                                WHEN country = %s THEN %s
                                 WHEN role = 'admin' THEN %s
                                 ELSE %s
                             END
                             WHERE timezone IS NULL OR timezone = ''
                             """,
-                            (ADMIN_TIMEZONE, WORKER_TIMEZONE),
+                            (
+                                COUNTRY_AUSTRALIA,
+                                ADMIN_TIMEZONE,
+                                COUNTRY_PHILIPPINES,
+                                WORKER_TIMEZONE,
+                                ADMIN_TIMEZONE,
+                                WORKER_TIMEZONE,
+                            ),
                         )
+                        cur.execute("ALTER TABLE os_users ALTER COLUMN country SET DEFAULT 'Philippines'")
+                        cur.execute("ALTER TABLE os_users ALTER COLUMN country SET NOT NULL")
                         cur.execute("ALTER TABLE os_users ALTER COLUMN timezone SET DEFAULT 'Asia/Manila'")
                         cur.execute("ALTER TABLE os_users ALTER COLUMN timezone SET NOT NULL")
                         cur.execute(
@@ -400,7 +466,7 @@ class PostgresAccountStore:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT id, username, email, display_name, role, timezone, is_active,
+                    SELECT id, username, email, display_name, role, country, timezone, is_active,
                            created_at, updated_at, last_login_at
                     FROM os_users
                     ORDER BY CASE WHEN role='admin' THEN 0 ELSE 1 END, display_name, username
@@ -435,18 +501,20 @@ class PostgresAccountStore:
             )
         return selected
 
-    def create_user(self, *, username, email, display_name, password_hash, role, page_keys=()):
+    def create_user(self, *, username, email, display_name, password_hash, role, page_keys=(), country=""):
         self.ensure_schema()
         clean_role = str(role or ROLE_WORKER).casefold()
         if clean_role not in VALID_ROLES:
             raise ValueError("Invalid account role.")
+        clean_country = normalise_country(country, role=clean_role)
+        timezone_name = timezone_for_country(clean_country) or default_timezone_for_role(clean_role)
         try:
             with self._connect() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        INSERT INTO os_users(username, email, display_name, password_hash, role, timezone)
-                        VALUES (%s, %s, %s, %s, %s, %s)
+                        INSERT INTO os_users(username, email, display_name, password_hash, role, country, timezone)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
                         RETURNING *
                         """,
                         (
@@ -455,7 +523,8 @@ class PostgresAccountStore:
                             str(display_name or "").strip(),
                             str(password_hash or ""),
                             clean_role,
-                            default_timezone_for_role(clean_role),
+                            clean_country,
+                            timezone_name,
                         ),
                     )
                     row = cur.fetchone() or {}
@@ -477,8 +546,11 @@ class PostgresAccountStore:
         is_active,
         page_keys,
         password_hash="",
+        country="",
     ):
         self.ensure_schema()
+        clean_country = normalise_country(country, role=ROLE_WORKER)
+        timezone_name = timezone_for_country(clean_country) or WORKER_TIMEZONE
         try:
             with self._connect() as conn:
                 with conn.cursor() as cur:
@@ -489,6 +561,8 @@ class PostgresAccountStore:
                             str(email or "").strip() or None,
                             str(display_name or "").strip(),
                             bool(is_active),
+                            clean_country,
+                            timezone_name,
                             str(password_hash),
                             str(user_id),
                         ]
@@ -499,12 +573,15 @@ class PostgresAccountStore:
                             str(email or "").strip() or None,
                             str(display_name or "").strip(),
                             bool(is_active),
+                            clean_country,
+                            timezone_name,
                             str(user_id),
                         ]
                     cur.execute(
                         f"""
                         UPDATE os_users
                         SET username=%s, email=%s, display_name=%s, is_active=%s,
+                            country=%s, timezone=%s,
                             updated_at=now(){password_sql}
                         WHERE id=%s AND role='worker'
                         RETURNING *
@@ -521,6 +598,56 @@ class PostgresAccountStore:
             if getattr(error, "sqlstate", "") == "23505":
                 raise ValueError("That username or email is already in use.") from error
             raise
+
+    def update_profile(self, user_id, *, display_name, country):
+        self.ensure_schema()
+        clean_name = str(display_name or "").strip()
+        if not clean_name:
+            raise ValueError("Display name is required.")
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT role FROM os_users WHERE id=%s LIMIT 1", (str(user_id),))
+                current = cur.fetchone() or {}
+                if not current:
+                    raise ValueError("Account was not found.")
+                role = str(current.get("role") or ROLE_WORKER).casefold()
+                clean_country = normalise_country(country, role=role)
+                timezone_name = timezone_for_country(clean_country) or default_timezone_for_role(role)
+                cur.execute(
+                    """
+                    UPDATE os_users
+                    SET display_name=%s, country=%s, timezone=%s, updated_at=now()
+                    WHERE id=%s
+                    RETURNING *
+                    """,
+                    (clean_name, clean_country, timezone_name, str(user_id)),
+                )
+                row = cur.fetchone()
+                permissions = self._permissions(cur, user_id) if row else ()
+            conn.commit()
+        return _clean_user(row, permissions)
+
+    def update_password(self, user_id, *, current_password, new_password):
+        self.ensure_schema()
+        strength_error = password_strength_error(new_password)
+        if strength_error:
+            raise ValueError(strength_error)
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM os_users WHERE id=%s LIMIT 1", (str(user_id),))
+                row = cur.fetchone()
+                if not row:
+                    raise ValueError("Account was not found.")
+                if not verify_password(current_password, row.get("password_hash")):
+                    raise ValueError("Current password is incorrect.")
+                cur.execute(
+                    "UPDATE os_users SET password_hash=%s, updated_at=now() WHERE id=%s RETURNING *",
+                    (hash_password(new_password), str(user_id)),
+                )
+                updated = cur.fetchone()
+                permissions = self._permissions(cur, user_id) if updated else ()
+            conn.commit()
+        return _clean_user(updated, permissions)
 
     def update_last_login(self, user_id):
         self.ensure_schema()
@@ -556,7 +683,14 @@ def prepare_account_system(store=None):
         return {"available": True, "admin": admin or store.first_admin(), "reason": "ok"}
 
 
-def bootstrap_first_admin(username, password, *, display_name="Sports Cave Admin", store=None):
+def bootstrap_first_admin(
+    username,
+    password,
+    *,
+    display_name="Sports Cave Admin",
+    country=COUNTRY_AUSTRALIA,
+    store=None,
+):
     store = store or DEFAULT_STORE
     existing = store.first_admin()
     if existing:
@@ -572,6 +706,7 @@ def bootstrap_first_admin(username, password, *, display_name="Sports Cave Admin
             display_name=str(display_name or "").strip() or "Sports Cave Admin",
             password_hash=hash_password(password),
             role=ROLE_ADMIN,
+            country=country,
         )
     except ValueError:
         return store.first_admin()
@@ -599,7 +734,7 @@ def authenticate_user(login, password, *, store=None):
 
 
 def create_worker_account(
-    *, username, email="", display_name, password, page_keys=(), store=None
+    *, username, email="", display_name, password, page_keys=(), country=COUNTRY_PHILIPPINES, store=None
 ):
     clean_username = str(username or "").strip()
     clean_name = str(display_name or "").strip()
@@ -612,6 +747,7 @@ def create_worker_account(
         password_hash=hash_password(password),
         role=ROLE_WORKER,
         page_keys=page_keys,
+        country=country,
     )
 
 
@@ -624,6 +760,7 @@ def update_worker_account(
     is_active,
     page_keys=(),
     new_password="",
+    country=COUNTRY_PHILIPPINES,
     store=None,
 ):
     clean_username = str(username or "").strip()
@@ -639,6 +776,23 @@ def update_worker_account(
         is_active=bool(is_active),
         page_keys=page_keys,
         password_hash=password_hash,
+        country=country,
+    )
+
+
+def update_my_profile(user_id, *, display_name, country, store=None):
+    return (store or DEFAULT_STORE).update_profile(
+        user_id,
+        display_name=display_name,
+        country=country,
+    )
+
+
+def change_my_password(user_id, *, current_password, new_password, store=None):
+    return (store or DEFAULT_STORE).update_password(
+        user_id,
+        current_password=current_password,
+        new_password=new_password,
     )
 
 

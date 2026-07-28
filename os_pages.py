@@ -4251,9 +4251,11 @@ def prodigi_save_dispatch_row(base_row, *, status, notes="", qa_answers=None, en
         metadata={
             "order": order_ref,
             "status": status,
+            "result": "success",
             "product": product_label,
             "qa_confirmed": saved.get("qa_confirmed"),
             "certificate_generated": certificate_done,
+            "certificate_status": "Generated" if certificate_done else saved.get("certificate_status") or "",
         },
         event_key=event_key,
     )
@@ -6864,11 +6866,28 @@ def _render_certificate_popover(order_summary, key_prefix):
                         f"Generated certificate: {edition_label}",
                         entity_type="certificate",
                         entity_id=str(edition_order_id or ""),
-                        metadata={"product": product_label},
+                        metadata={
+                            "product": product_label,
+                            "status": "success",
+                            "result": "success",
+                            "certificate_status": "Generated",
+                        },
                     )
                     st.rerun()
                 except Exception as error:
                     st.error("Could not generate certificate.")
+                    record_activity_log(
+                        "certificate_generation_failed",
+                        "Certificate generation failed",
+                        entity_type="certificate",
+                        entity_id=str(edition_order_id or ""),
+                        metadata={
+                            "product": product_label,
+                            "status": "failed",
+                            "result": "failed",
+                            "error": str(error),
+                        },
+                    )
                     supabase_backend.log_app_error(
                         "orders_certificate_generate_failed",
                         str(error),
@@ -7266,7 +7285,12 @@ def _render_certificate_action_cell(order_summary, key_prefix):
                     "Orders",
                     f"Generated {generated_count} certificate PDF{'s' if generated_count != 1 else ''}.",
                     entity_type="certificate",
-                    metadata={"count": generated_count},
+                    metadata={
+                        "count": generated_count,
+                        "status": "success",
+                        "result": "success",
+                        "certificate_status": "Generated",
+                    },
                 )
                 st.session_state.supabase_orders_notice = (
                     f"Generated {generated_count} certificate PDF"
@@ -7277,6 +7301,18 @@ def _render_certificate_action_cell(order_summary, key_prefix):
             st.warning("No edition assignment was available for certificate generation.")
         except Exception as error:
             st.error("Could not generate PDF.")
+            record_activity_log(
+                "certificate_generation_failed",
+                "Orders",
+                "Certificate generation failed",
+                entity_type="certificate",
+                metadata={
+                    "order": order_summary.get("order_label") or "",
+                    "status": "failed",
+                    "result": "failed",
+                    "error": str(error),
+                },
+            )
             supabase_backend.log_app_error(
                 "orders_certificate_generate_failed",
                 str(error),
@@ -8270,7 +8306,12 @@ def render_certificate_actions(assignments, key_prefix):
                     "Orders",
                     f"Generated {len(missing)} certificate PDF{'s' if len(missing) != 1 else ''}.",
                     entity_type="certificate",
-                    metadata={"count": len(missing)},
+                    metadata={
+                        "count": len(missing),
+                        "status": "success",
+                        "result": "success",
+                        "certificate_status": "Generated",
+                    },
                 )
                 st.session_state.orders_notice = (
                     f"Generated {len(missing)} certificate PDF"
@@ -8280,6 +8321,13 @@ def render_certificate_actions(assignments, key_prefix):
             except Exception as error:
                 st.error("Could not generate the certificate PDF.")
                 st.error(str(error))
+                record_activity_log(
+                    "certificate_generation_failed",
+                    "Orders",
+                    "Certificate generation failed",
+                    entity_type="certificate",
+                    metadata={"count": len(missing), "status": "failed", "result": "failed", "error": str(error)},
+                )
         return
 
     if len(active) == 1:

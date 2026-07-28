@@ -62,6 +62,7 @@ pillow_modules = None
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+APP_FAVICON_PATH = Path(__file__).resolve().parent / "assets" / "sports-cave-sc-gold-favicon.svg"
 
 
 def log_startup_stage(stage, extra=""):
@@ -1211,6 +1212,7 @@ Return the product link and full validation results.
 
 st.set_page_config(
     page_title="Sports Cave",
+    page_icon=str(APP_FAVICON_PATH),
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -3330,13 +3332,17 @@ def inject_styles():
         .sc-activity-time,
         .sc-activity-name,
         .sc-activity-user,
-        .sc-activity-area {
+        .sc-activity-area,
+        .sc-activity-item,
+        .sc-activity-status {
             white-space: nowrap;
         }
 
         .sc-activity-details {
-            overflow-wrap: anywhere;
-            white-space: normal;
+            max-width: 34rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         @media (max-width: 760px) {
@@ -7401,21 +7407,20 @@ def render_sidebar():
             set_current_page("Dashboard", source="sidebar")
             st.rerun()
 
-    if os_accounts.is_admin(user):
-        st.sidebar.divider()
-        if st.sidebar.button(
-            "Accounts & Access",
-            key="sidebar-nav::Accounts & Access",
-            use_container_width=True,
-            type="primary" if current_page == "Accounts & Access" else "secondary",
-        ):
-            set_current_page("Accounts & Access", source="sidebar")
-            st.rerun()
+    st.sidebar.divider()
+    if st.sidebar.button(
+        "Accounts & Access",
+        key="sidebar-nav::Accounts & Access",
+        use_container_width=True,
+        type="primary" if current_page == "Accounts & Access" else "secondary",
+    ):
+        set_current_page("Accounts & Access", source="sidebar")
+        st.rerun()
 
     st.sidebar.divider()
     display_name = str(user.get("display_name") or user.get("username") or "").strip()
     if display_name:
-        st.sidebar.caption(display_name)
+        st.sidebar.caption(f"{display_name} :)")
     if st.sidebar.button("Logout", use_container_width=True):
         logout_app()
 
@@ -7798,6 +7803,7 @@ def _legacy_admin_account():
         "email": "",
         "display_name": "Sports Cave Admin",
         "role": os_accounts.ROLE_ADMIN,
+        "country": os_accounts.COUNTRY_AUSTRALIA,
         "timezone": os_accounts.ADMIN_TIMEZONE,
         "is_active": True,
         "page_permissions": [],
@@ -7823,6 +7829,17 @@ def _activity_actor_for_user(user):
     )
 
 
+def _activity_actor_metadata_for_user(user):
+    user = user or {}
+    return {
+        "actor_id": user.get("id") or "",
+        "actor_email": user.get("email") or "",
+        "actor_role": user.get("role") or "",
+        "actor_country": user.get("country") or "",
+        "actor_timezone": os_accounts.timezone_for_user(user),
+    }
+
+
 def timezone_for_os_user(user):
     timezone_name = os_accounts.timezone_for_user(user or _legacy_admin_account())
     try:
@@ -7842,7 +7859,7 @@ def _set_authenticated_user(user, *, legacy=False):
     st.session_state["sports_cave_authenticated"] = True
     st.session_state["sports_cave_current_user"] = clean_user
     st.session_state["sports_cave_auth_checked_at"] = time.monotonic()
-    set_activity_actor(_activity_actor_for_user(clean_user))
+    set_activity_actor(_activity_actor_for_user(clean_user), _activity_actor_metadata_for_user(clean_user))
 
 
 def _account_system_status():
@@ -7875,7 +7892,7 @@ def _refresh_session_account_if_due(user, *, max_age_seconds=30):
         return {}
     refreshed = _public_account(refreshed)
     st.session_state["sports_cave_current_user"] = refreshed
-    set_activity_actor(_activity_actor_for_user(refreshed))
+    set_activity_actor(_activity_actor_for_user(refreshed), _activity_actor_metadata_for_user(refreshed))
     return refreshed
 
 
@@ -8059,6 +8076,11 @@ def render_admin_account_setup():
         with st.form("sports-cave-admin-setup"):
             display_name = st.text_input("Display name", value="Sports Cave Admin")
             username = st.text_input("Email or username")
+            country = _country_select(
+                "Country",
+                value=os_accounts.COUNTRY_AUSTRALIA,
+                key="admin-setup-country",
+            )
             password = st.text_input("New password", type="password")
             confirm_password = st.text_input("Confirm password", type="password")
             submitted = st.form_submit_button("Create admin account", type="primary", use_container_width=True)
@@ -8075,6 +8097,7 @@ def render_admin_account_setup():
             username,
             password,
             display_name=display_name,
+            country=country,
         )
     except Exception:
         st.error("The admin account could not be created right now. Please try again.")
@@ -8098,7 +8121,12 @@ def render_admin_account_setup():
         f"Account created: {user.get('display_name') or user.get('username')}",
         entity_type="os_user",
         entity_id=user.get("id") or "",
-        metadata={"username": user.get("username") or "", "role": os_accounts.ROLE_ADMIN},
+        metadata={
+            "username": user.get("username") or "",
+            "role": os_accounts.ROLE_ADMIN,
+            "country": user.get("country") or "",
+            "timezone": user.get("timezone") or "",
+        },
     )
     set_auth_cookie(token, remember=bool(st.session_state.get("sports_cave_login_remember", True)))
     return True
@@ -8956,14 +8984,135 @@ def _account_permission_fields(prefix, selected=()):
     return chosen
 
 
+def _country_select(label, *, value="", key="account-country"):
+    clean_country = os_accounts.normalise_country(value, role=(current_os_user() or {}).get("role"))
+    options = os_accounts.COUNTRY_OPTIONS
+    return st.selectbox(
+        label,
+        options,
+        index=options.index(clean_country) if clean_country in options else 0,
+        key=key,
+    )
+
+
+def render_my_profile_section(user):
+    st.markdown("### My Profile")
+    with st.form("my-profile-form"):
+        profile_cols = st.columns(2)
+        display_name = profile_cols[0].text_input(
+            "Display name",
+            value=user.get("display_name") or user.get("username") or "",
+            key="my-profile-display-name",
+        )
+        profile_cols[1].text_input(
+            "Login email",
+            value=user.get("email") or user.get("username") or "",
+            disabled=True,
+            key="my-profile-login-email",
+        )
+        country = _country_select(
+            "Country",
+            value=user.get("country") or os_accounts.default_country_for_role(user.get("role")),
+            key="my-profile-country",
+        )
+        submitted = st.form_submit_button("Save profile", type="primary", use_container_width=True)
+    if submitted:
+        try:
+            updated = os_accounts.update_my_profile(
+                user.get("id"),
+                display_name=display_name,
+                country=country,
+            )
+        except ValueError as error:
+            st.warning(str(error))
+        except Exception:
+            st.warning("Your profile could not be saved right now. Please try again.")
+        else:
+            _set_authenticated_user(updated, legacy=bool(user.get("legacy")))
+            record_activity_log(
+                "profile_updated",
+                "Accounts & Access",
+                "Profile updated",
+                entity_type="os_user",
+                entity_id=updated.get("id") or "",
+                metadata={
+                    "username": updated.get("username") or "",
+                    "country": updated.get("country") or "",
+                    "timezone": updated.get("timezone") or "",
+                },
+            )
+            st.success("Profile saved.")
+            st.rerun()
+
+    with st.form("my-password-form"):
+        password_cols = st.columns(3)
+        current_password = password_cols[0].text_input("Current password", type="password")
+        new_password = password_cols[1].text_input("New password", type="password")
+        confirm_password = password_cols[2].text_input("Confirm new password", type="password")
+        password_submitted = st.form_submit_button("Change password", use_container_width=True)
+    if not password_submitted:
+        return
+    if new_password != confirm_password:
+        st.warning("New passwords must match.")
+        record_activity_log(
+            "password_change_failed",
+            "Accounts & Access",
+            "Password change failed",
+            entity_type="os_user",
+            entity_id=user.get("id") or "",
+            metadata={"status": "failed", "error": "password_mismatch"},
+        )
+        return
+    try:
+        updated = os_accounts.change_my_password(
+            user.get("id"),
+            current_password=current_password,
+            new_password=new_password,
+        )
+    except ValueError as error:
+        st.warning(str(error))
+        record_activity_log(
+            "password_change_failed",
+            "Accounts & Access",
+            "Password change failed",
+            entity_type="os_user",
+            entity_id=user.get("id") or "",
+            metadata={"status": "failed", "error": str(error)},
+        )
+    except Exception:
+        st.warning("Your password could not be changed right now. Please try again.")
+        record_activity_log(
+            "password_change_failed",
+            "Accounts & Access",
+            "Password change failed",
+            entity_type="os_user",
+            entity_id=user.get("id") or "",
+            metadata={"status": "failed", "error": "storage_unavailable"},
+        )
+    else:
+        _set_authenticated_user(updated, legacy=bool(user.get("legacy")))
+        record_activity_log(
+            "password_changed",
+            "Accounts & Access",
+            "Password changed",
+            entity_type="os_user",
+            entity_id=updated.get("id") or "",
+            metadata={"status": "success"},
+        )
+        st.success("Password changed.")
+        st.rerun()
+
+
 def render_accounts_access_page():
     user = current_os_user()
+    st.title("Accounts & Access")
+    render_my_profile_section(user)
     if not os_accounts.is_admin(user):
-        st.title("Access not approved")
-        st.caption("This page is not available for your account.")
+        st.caption("Your profile is available here. Admin account controls are not available for your account.")
         return
 
-    st.title("Accounts & Access")
+    st.divider()
+    st.markdown("### Admin Controls")
     try:
         users = os_accounts.DEFAULT_STORE.list_users()
     except Exception:
@@ -8978,6 +9127,8 @@ def render_accounts_access_page():
                 "Username": account.get("username") or "",
                 "Email": account.get("email") or "",
                 "Role": str(account.get("role") or "").title(),
+                "Country": account.get("country") or "",
+                "Timezone": account.get("timezone") or "",
                 "Status": "Active" if account.get("is_active") else "Inactive",
                 "Last login": format_dashboard_timestamp(account.get("last_login_at"))
                 if account.get("last_login_at")
@@ -8996,6 +9147,11 @@ def render_accounts_access_page():
             worker_username = fields[1].text_input("Username")
             worker_email = fields[0].text_input("Email (optional)")
             worker_password = fields[1].text_input("Temporary password", type="password")
+            worker_country = _country_select(
+                "Country",
+                value=os_accounts.COUNTRY_PHILIPPINES,
+                key="create-worker-country",
+            )
             st.markdown("**Page access**")
             create_permissions = _account_permission_fields("create-worker-permission")
             create_submitted = st.form_submit_button(
@@ -9010,6 +9166,7 @@ def render_accounts_access_page():
                     email=worker_email,
                     display_name=worker_name,
                     password=worker_password,
+                    country=worker_country,
                     page_keys=create_permissions,
                 )
             except ValueError as error:
@@ -9023,7 +9180,12 @@ def render_accounts_access_page():
                     f"Account created: {created.get('display_name') or created.get('username')}",
                     entity_type="os_user",
                     entity_id=created.get("id") or "",
-                    metadata={"username": created.get("username") or "", "role": os_accounts.ROLE_WORKER},
+                    metadata={
+                        "username": created.get("username") or "",
+                        "role": os_accounts.ROLE_WORKER,
+                        "country": created.get("country") or "",
+                        "timezone": created.get("timezone") or "",
+                    },
                 )
                 st.success("Worker account created.")
                 st.rerun()
@@ -9070,6 +9232,11 @@ def render_accounts_access_page():
             value=bool(selected_worker.get("is_active")),
             key=f"edit-worker-active::{selected_worker_id}",
         )
+        edit_country = _country_select(
+            "Country",
+            value=selected_worker.get("country") or os_accounts.COUNTRY_PHILIPPINES,
+            key=f"edit-worker-country::{selected_worker_id}",
+        )
         st.markdown("**Page access**")
         edit_permissions = _account_permission_fields(
             f"edit-worker-permission::{selected_worker_id}",
@@ -9091,6 +9258,7 @@ def render_accounts_access_page():
             is_active=edit_active,
             page_keys=edit_permissions,
             new_password=edit_password,
+            country=edit_country,
         )
     except ValueError as error:
         st.warning(str(error))
@@ -9105,7 +9273,12 @@ def render_accounts_access_page():
         f"Account updated: {label}",
         entity_type="os_user",
         entity_id=updated.get("id") or "",
-        metadata={"username": updated.get("username") or "", "active": updated.get("is_active")},
+        metadata={
+            "username": updated.get("username") or "",
+            "active": updated.get("is_active"),
+            "country": updated.get("country") or "",
+            "timezone": updated.get("timezone") or "",
+        },
     )
     record_activity_log(
         "permissions_changed",
@@ -10282,27 +10455,28 @@ def dashboard_activity_month_options(local_now, count=12):
     return months
 
 
-ACTIVITY_TABLE_PAGE_SIZE = 25
-
-
 def _activity_table_html(records):
     rows = []
     for record in records:
+        details = str(record.get("Details") or "")
+        details_title = html.escape(details)
         rows.append(
             "<tr>"
-            f'<td class="sc-activity-date">{html.escape(record.get("Date") or "")}</td>'
             f'<td class="sc-activity-time">{html.escape(record.get("Time") or "")}</td>'
-            f'<td class="sc-activity-name"><strong>{html.escape(record.get("Activity") or "Activity")}</strong></td>'
-            f'<td class="sc-activity-details">{html.escape(record.get("Details") or "")}</td>'
             f'<td class="sc-activity-user">{html.escape(record.get("User") or "")}</td>'
-            f'<td class="sc-activity-area">{html.escape(record.get("Area") or "Sports Cave")}</td>'
+            f'<td class="sc-activity-name"><strong>{html.escape(record.get("Action") or record.get("Activity") or "Activity")}</strong></td>'
+            f'<td class="sc-activity-area">{html.escape(record.get("Page/Area") or record.get("Area") or "Sports Cave")}</td>'
+            f'<td class="sc-activity-item">{html.escape(record.get("Item or Product") or "")}</td>'
+            f'<td class="sc-activity-details" title="{details_title}">{html.escape(details)}</td>'
+            f'<td class="sc-activity-status">{html.escape(record.get("Result/Status") or "")}</td>'
             "</tr>"
         )
     return (
         '<div class="sc-activity-table-wrap"><table class="sc-activity-table">'
-        '<colgroup><col style="width: 8.2rem;"><col style="width: 6.8rem;">'
-        '<col style="width: 10.5rem;"><col><col style="width: 9rem;"><col style="width: 8.5rem;"></colgroup>'
-        '<thead><tr><th>Date</th><th>Time</th><th>Activity</th><th>Details</th><th>User</th><th>Area</th></tr></thead>'
+        '<colgroup><col style="width: 11.2rem;"><col style="width: 8.4rem;">'
+        '<col style="width: 10.5rem;"><col style="width: 8.5rem;"><col style="width: 12rem;">'
+        '<col><col style="width: 8.5rem;"></colgroup>'
+        '<thead><tr><th>Time</th><th>User</th><th>Action</th><th>Page/Area</th><th>Item or Product</th><th>Details</th><th>Result/Status</th></tr></thead>'
         f'<tbody>{"".join(rows)}</tbody></table></div>'
     )
 
@@ -10360,23 +10534,71 @@ def render_activity_log(local_now, *, show_denied=True):
         sports_cave_dashboard.activity_table_record(entry, activity_timezone)
         for entry in display_entries
     ]
-    page_count = max((len(records) + ACTIVITY_TABLE_PAGE_SIZE - 1) // ACTIVITY_TABLE_PAGE_SIZE, 1)
-    page_number = 1
-    if page_count > 1:
-        month_key = month_start.isoformat() if month_start else "current"
-        page_number = st.selectbox(
-            "Activity page",
-            range(1, page_count + 1),
-            format_func=lambda page: f"Page {page} of {page_count}",
-            key=f"dashboard-activity-page-{view}-{month_key}",
-            label_visibility="collapsed",
+    filter_cols = st.columns([1, 1, 1, 1, 1, 1.25])
+    user_filter = filter_cols[0].selectbox(
+        "User",
+        sports_cave_dashboard.activity_filter_options(records, "User"),
+        key="dashboard-activity-filter-user",
+    )
+    action_filter = filter_cols[1].selectbox(
+        "Action",
+        sports_cave_dashboard.activity_filter_options(records, "Action"),
+        key="dashboard-activity-filter-action",
+    )
+    area_filter = filter_cols[2].selectbox(
+        "Page/Area",
+        sports_cave_dashboard.activity_filter_options(records, "Page/Area"),
+        key="dashboard-activity-filter-area",
+    )
+    status_filter = filter_cols[3].selectbox(
+        "Status",
+        sports_cave_dashboard.activity_filter_options(records, "Result/Status"),
+        key="dashboard-activity-filter-status",
+    )
+    sort_order = filter_cols[4].selectbox(
+        "Sort",
+        sports_cave_dashboard.ACTIVITY_SORT_OPTIONS,
+        key="dashboard-activity-sort",
+    )
+    search = filter_cols[5].text_input(
+        "Search",
+        key="dashboard-activity-search",
+        placeholder="Search activity",
+    )
+    reset_cols = st.columns([1, 5])
+    if reset_cols[0].button("Reset filters", key="dashboard-activity-reset-filters", use_container_width=True):
+        for key in (
+            "dashboard-activity-filter-user",
+            "dashboard-activity-filter-action",
+            "dashboard-activity-filter-area",
+            "dashboard-activity-filter-status",
+            "dashboard-activity-sort",
+            "dashboard-activity-search",
+        ):
+            st.session_state.pop(key, None)
+        st.rerun()
+    page_records = sports_cave_dashboard.filter_activity_records(
+        records,
+        user=user_filter,
+        action=action_filter,
+        area=area_filter,
+        status=status_filter,
+        search=search,
+    )
+    page_records = sports_cave_dashboard.sort_activity_records(page_records, sort_order)
+    reset_cols[1].caption(f"{len(page_records)} of {len(records)} activity record(s)")
+    if not page_records:
+        st.markdown(
+            '<div class="sc-empty-note">No activity matches these filters.</div>',
+            unsafe_allow_html=True,
         )
-    first_row = (page_number - 1) * ACTIVITY_TABLE_PAGE_SIZE
-    page_records = records[first_row : first_row + ACTIVITY_TABLE_PAGE_SIZE]
-    page_entries = display_entries[first_row : first_row + ACTIVITY_TABLE_PAGE_SIZE]
+        return True
     st.markdown(_activity_table_html(page_records), unsafe_allow_html=True)
-    for entry, record in zip(page_entries, page_records):
+    page_entries = display_entries
+    for entry, record in zip(page_entries, records):
         if not entry.get("is_mockup_group"):
+            continue
+        if record not in page_records:
             continue
         with st.expander(
             f"{record['Activity']} · {record['Details']}",
@@ -12016,7 +12238,10 @@ def main():
         log_startup_stage("ADMIN SETUP STOP")
         return
 
-    set_activity_actor(_activity_actor_for_user(current_os_user()))
+    set_activity_actor(
+        _activity_actor_for_user(current_os_user()),
+        _activity_actor_metadata_for_user(current_os_user()),
+    )
     if (
         _dropbox_oauth_pending()
         and os_accounts.is_admin(current_os_user())

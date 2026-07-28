@@ -44,11 +44,27 @@ ACTIVITY_VIEWS = (
     ACTIVITY_VIEW_ALL_TIME,
 )
 ACTIVITY_VIEW_LIMITS = {
-    ACTIVITY_VIEW_TODAY: 50,
-    ACTIVITY_VIEW_LAST_7_DAYS: 100,
-    ACTIVITY_VIEW_MONTH: 150,
-    ACTIVITY_VIEW_ALL_TIME: 200,
+    ACTIVITY_VIEW_TODAY: None,
+    ACTIVITY_VIEW_LAST_7_DAYS: None,
+    ACTIVITY_VIEW_MONTH: None,
+    ACTIVITY_VIEW_ALL_TIME: None,
 }
+ACTIVITY_SORT_NEWEST = "Newest first"
+ACTIVITY_SORT_OLDEST = "Oldest first"
+ACTIVITY_SORT_ACTION_ASC = "Action A-Z"
+ACTIVITY_SORT_ACTION_DESC = "Action Z-A"
+ACTIVITY_SORT_USER_ASC = "User A-Z"
+ACTIVITY_SORT_USER_DESC = "User Z-A"
+ACTIVITY_SORT_AREA_ASC = "Page/Area A-Z"
+ACTIVITY_SORT_OPTIONS = (
+    ACTIVITY_SORT_NEWEST,
+    ACTIVITY_SORT_OLDEST,
+    ACTIVITY_SORT_ACTION_ASC,
+    ACTIVITY_SORT_ACTION_DESC,
+    ACTIVITY_SORT_USER_ASC,
+    ACTIVITY_SORT_USER_DESC,
+    ACTIVITY_SORT_AREA_ASC,
+)
 MOCKUP_ACTIVITY_GROUP_WINDOW = timedelta(minutes=45)
 MOCKUP_ACTIVITY_GROUP_ACTIONS = {"mockup_uploaded", "mockup_made"}
 _TASK_CACHE = {}
@@ -1137,7 +1153,9 @@ _HOME_SYSTEM_ACTIVITY_PHRASES = (
 _ACTIVITY_LABELS = {
     "ad_prompt_generated": "Ad prompt made",
     "certificate_generated": "Certificate generated",
+    "certificate_generation_failed": "Certificate failed",
     "certificate_uploaded": "Certificate generated",
+    "certificate_upload_failed": "Certificate failed",
     "dashboard_task_added": "Task added",
     "dashboard_task_completed": "Task completed",
     "daily_execution_completed": "Daily Review completed",
@@ -1157,8 +1175,11 @@ _ACTIVITY_LABELS = {
     "mockup_zip_exported": "Mockup pack exported",
     "order_fulfilled": "Order fulfilled",
     "order_fulfilled_certificate_generated": "Order fulfilled",
+    "password_changed": "Password changed",
+    "password_change_failed": "Password change failed",
     "product_edition_updated": "Edition updated",
     "product_uploaded": "Product uploaded",
+    "profile_updated": "Profile updated",
     "prompt_pack_exported": "Mockup pack exported",
     "reel_prompt_saved": "Reel saved",
     "reel_saved": "Reel saved",
@@ -1379,6 +1400,7 @@ def activity_from_audit_row(row):
         "entity_type": row.get("entity_type") or "",
         "entity_id": row.get("entity_id") or "",
         "actor": row.get("actor")
+        or metadata.get("actor_display")
         or metadata.get("actor_name")
         or metadata.get("display_name")
         or metadata.get("email")
@@ -1587,17 +1609,34 @@ def activity_table_record(entry, tzinfo=timezone.utc):
     if created_at is not None:
         local_created_at = created_at.astimezone(tzinfo or timezone.utc)
         date_text = local_created_at.strftime("%d %b %Y").lstrip("0")
-        time_text = local_created_at.strftime("%I:%M %p").lstrip("0")
+        time_text = local_created_at.strftime("%d %b %Y %I:%M %p %Z").lstrip("0")
     else:
         date_text = ""
         time_text = ""
+    metadata = entry.get("metadata") or {}
+    item = _metadata_text(
+        metadata,
+        "item",
+        "product",
+        "product_title",
+        "product_name",
+        "order",
+        "folder",
+        "filename",
+    )
+    status = _metadata_text(metadata, "result", "status", "certificate_status")
     return {
         "Date": date_text,
         "Time": time_text,
+        "Action": activity,
         "Activity": activity,
         "Details": details,
         "User": _compact_text(entry.get("actor") or (entry.get("metadata") or {}).get("email") or ""),
+        "Page/Area": clean_activity_source(entry.get("page") or entry.get("source")),
         "Area": clean_activity_source(entry.get("page") or entry.get("source")),
+        "Item or Product": item,
+        "Result/Status": status,
+        "Sort Timestamp": created_at or datetime.min.replace(tzinfo=timezone.utc),
     }
 
 
@@ -1673,7 +1712,7 @@ def activity_limit_for_view(view, limit=None):
         requested = max(int(limit), 1)
     except (TypeError, ValueError):
         return view_limit
-    return min(requested, view_limit)
+    return min(requested, int(view_limit or requested))
 
 
 def list_activity_entries(view=ACTIVITY_VIEW_TODAY, local_now=None, *, month_start=None, limit=None):
@@ -1685,7 +1724,7 @@ def list_activity_entries(view=ACTIVITY_VIEW_TODAY, local_now=None, *, month_sta
         view if view in ACTIVITY_VIEWS else ACTIVITY_VIEW_TODAY,
         start.isoformat() if start else "",
         end.isoformat() if end else "",
-        safe_limit,
+        safe_limit or "all",
     )
     cached = _cache_get(_ACTIVITY_CACHE, cache_key)
     if cached is not None:
@@ -1697,6 +1736,71 @@ def list_activity_entries(view=ACTIVITY_VIEW_TODAY, local_now=None, *, month_sta
         return _cache_set(_ACTIVITY_CACHE, cache_key, entries, ACTIVITY_CACHE_TTL_SECONDS)
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
+
+
+def activity_filter_options(records, field):
+    values = sorted(
+        {
+            _compact_text(record.get(field))
+            for record in records or []
+            if _compact_text(record.get(field))
+        },
+        key=str.casefold,
+    )
+    return ("All", *values)
+
+
+def filter_activity_records(
+    records,
+    *,
+    user="All",
+    action="All",
+    area="All",
+    status="All",
+    search="",
+):
+    query = str(search or "").strip().casefold()
+    filtered = []
+    for record in records or []:
+        if user != "All" and record.get("User") != user:
+            continue
+        if action != "All" and record.get("Action") != action:
+            continue
+        if area != "All" and record.get("Page/Area") != area:
+            continue
+        if status != "All" and record.get("Result/Status") != status:
+            continue
+        if query:
+            haystack = " ".join(
+                str(record.get(key) or "")
+                for key in ("Action", "Item or Product", "Details", "User", "Page/Area", "Result/Status")
+            ).casefold()
+            if query not in haystack:
+                continue
+        filtered.append(dict(record))
+    return filtered
+
+
+def sort_activity_records(records, sort_order=ACTIVITY_SORT_NEWEST):
+    rows = [dict(record) for record in records or []]
+    sort_order = sort_order if sort_order in ACTIVITY_SORT_OPTIONS else ACTIVITY_SORT_NEWEST
+    if sort_order == ACTIVITY_SORT_OLDEST:
+        return sorted(rows, key=lambda row: row.get("Sort Timestamp") or datetime.min.replace(tzinfo=timezone.utc))
+    if sort_order == ACTIVITY_SORT_ACTION_ASC:
+        return sorted(rows, key=lambda row: str(row.get("Action") or "").casefold())
+    if sort_order == ACTIVITY_SORT_ACTION_DESC:
+        return sorted(rows, key=lambda row: str(row.get("Action") or "").casefold(), reverse=True)
+    if sort_order == ACTIVITY_SORT_USER_ASC:
+        return sorted(rows, key=lambda row: str(row.get("User") or "").casefold())
+    if sort_order == ACTIVITY_SORT_USER_DESC:
+        return sorted(rows, key=lambda row: str(row.get("User") or "").casefold(), reverse=True)
+    if sort_order == ACTIVITY_SORT_AREA_ASC:
+        return sorted(rows, key=lambda row: str(row.get("Page/Area") or "").casefold())
+    return sorted(
+        rows,
+        key=lambda row: row.get("Sort Timestamp") or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
 
 
 def load_dashboard_state(
@@ -1773,7 +1877,7 @@ def greeting_for_account(local_dt, user):
         or (user or {}).get("email")
         or (user or {}).get("username")
     )
-    return f"{base}, {name}" if name else base
+    return f"{base}, {name} :)" if name else base
 
 
 def load_calendar_events(path=SPORTING_CALENDAR_PATH):

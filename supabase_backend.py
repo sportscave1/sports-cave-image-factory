@@ -3018,11 +3018,15 @@ def list_activity_logs(*, start_at=None, end_at=None, limit=200):
         ]
     )
     where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    try:
-        safe_limit = min(max(int(limit or 200), 1), 500)
-    except (TypeError, ValueError):
-        safe_limit = 200
-    params.append(safe_limit)
+    safe_limit = None
+    if limit is not None:
+        try:
+            safe_limit = min(max(int(limit), 1), 5000)
+        except (TypeError, ValueError):
+            safe_limit = 200
+    limit_sql = "LIMIT %s" if safe_limit is not None else ""
+    if safe_limit is not None:
+        params.append(safe_limit)
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
@@ -3036,7 +3040,7 @@ def list_activity_logs(*, start_at=None, end_at=None, limit=200):
                 FROM audit_logs
                 {where_sql}
                 ORDER BY created_at DESC
-                LIMIT %s
+                {limit_sql}
                 """,
                 params,
             )

@@ -30,7 +30,8 @@ class FakeAccountStore:
     def first_admin(self):
         return next((dict(user) for user in self.users if user.get("role") == "admin"), {})
 
-    def create_user(self, *, username, email, display_name, password_hash, role, page_keys=()):
+    def create_user(self, *, username, email, display_name, password_hash, role, page_keys=(), country=""):
+        clean_country = os_accounts.normalise_country(country, role=role)
         self.created_count += 1
         user = {
             "id": f"user-{self.created_count}",
@@ -39,7 +40,8 @@ class FakeAccountStore:
             "display_name": display_name,
             "password_hash": password_hash,
             "role": role,
-            "timezone": os_accounts.default_timezone_for_role(role),
+            "country": clean_country,
+            "timezone": os_accounts.timezone_for_country(clean_country) or os_accounts.default_timezone_for_role(role),
             "is_active": True,
             "page_permissions": sorted(page_keys),
             "last_login_at": None,
@@ -77,21 +79,48 @@ class FakeAccountStore:
         is_active,
         page_keys,
         password_hash="",
+        country="",
     ):
         for user in self.users:
             if user["id"] == user_id and user["role"] == "worker":
+                clean_country = os_accounts.normalise_country(country, role=user.get("role"))
                 user.update(
                     username=username,
                     email=email,
                     display_name=display_name,
                     is_active=is_active,
-                    timezone=os_accounts.default_timezone_for_role(user.get("role")),
+                    country=clean_country,
+                    timezone=os_accounts.timezone_for_country(clean_country),
                     page_permissions=sorted(page_keys),
                 )
                 if password_hash:
                     user["password_hash"] = password_hash
                 return dict(user)
         raise ValueError("Worker account was not found.")
+
+    def update_profile(self, user_id, *, display_name, country):
+        for user in self.users:
+            if user["id"] == user_id:
+                clean_country = os_accounts.normalise_country(country, role=user.get("role"))
+                user.update(
+                    display_name=display_name,
+                    country=clean_country,
+                    timezone=os_accounts.timezone_for_country(clean_country),
+                )
+                return dict(user)
+        raise ValueError("Account was not found.")
+
+    def update_password(self, user_id, *, current_password, new_password):
+        for user in self.users:
+            if user["id"] == user_id:
+                if not os_accounts.verify_password(current_password, user.get("password_hash")):
+                    raise ValueError("Current password is incorrect.")
+                strength = os_accounts.password_strength_error(new_password)
+                if strength:
+                    raise ValueError(strength)
+                user["password_hash"] = os_accounts.hash_password(new_password)
+                return dict(user)
+        raise ValueError("Account was not found.")
 
 
 class PasswordSecurityTests(unittest.TestCase):
@@ -291,7 +320,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertEqual(os_accounts.allowed_navigation_routes(worker), ("Dashboard", "Mockups"))
         self.assertTrue(os_accounts.can_access_page(worker, "Mockups"))
         self.assertFalse(os_accounts.can_access_page(worker, "Orders"))
-        self.assertFalse(os_accounts.can_access_page(worker, "Accounts & Access"))
+        self.assertTrue(os_accounts.can_access_page(worker, "Accounts & Access"))
         self.assertFalse(os_accounts.can_access_page(worker, "Developer"))
 
     def test_files_can_be_assigned_and_legacy_dropbox_permission_is_preserved(self):
@@ -389,6 +418,8 @@ class AccountAccessTests(unittest.TestCase):
     def test_account_timezones_default_by_role(self):
         self.assertEqual(os_accounts.default_timezone_for_role("admin"), "Australia/Sydney")
         self.assertEqual(os_accounts.default_timezone_for_role("worker"), "Asia/Manila")
+        self.assertEqual(os_accounts.default_country_for_role("admin"), "Australia")
+        self.assertEqual(os_accounts.default_country_for_role("worker"), "Philippines")
         self.assertEqual(
             os_accounts.timezone_for_user({"role": "admin", "timezone": ""}),
             "Australia/Sydney",
@@ -397,12 +428,68 @@ class AccountAccessTests(unittest.TestCase):
             os_accounts.timezone_for_user({"role": "worker", "timezone": ""}),
             "Asia/Manila",
         )
+        self.assertEqual(
+            os_accounts.timezone_for_user({"role": "worker", "country": "Australia", "timezone": ""}),
+            "Australia/Sydney",
+        )
+
+    def test_profile_country_update_changes_only_self_timezone(self):
+        store = FakeAccountStore()
+        worker = os_accounts.create_worker_account(
+            username="worker",
+            display_name="Worker",
+            password="Worker password 26!",
+            page_keys=("dashboard",),
+            store=store,
+        )
+
+        updated = os_accounts.update_my_profile(
+            worker["id"],
+            display_name="VA One",
+            country="Australia",
+            store=store,
+        )
+
+        self.assertEqual(updated["display_name"], "VA One")
+        self.assertEqual(updated["country"], "Australia")
+        self.assertEqual(updated["timezone"], "Australia/Sydney")
+        self.assertEqual(updated["role"], "worker")
+        self.assertEqual(updated["page_permissions"], ["dashboard"])
+
+    def test_change_my_password_requires_current_password_and_strength(self):
+        store = FakeAccountStore()
+        worker = os_accounts.create_worker_account(
+            username="worker",
+            display_name="Worker",
+            password="Worker password 26!",
+            page_keys=("dashboard",),
+            store=store,
+        )
+
+        with self.assertRaises(ValueError):
+            os_accounts.change_my_password(
+                worker["id"],
+                current_password="wrong",
+                new_password="New password 27!",
+                store=store,
+            )
+        updated = os_accounts.change_my_password(
+            worker["id"],
+            current_password="Worker password 26!",
+            new_password="New password 27!",
+            store=store,
+        )
+
+        self.assertTrue(os_accounts.verify_password("New password 27!", updated["password_hash"]))
 
     def test_account_migration_contains_both_required_tables(self):
         sql = (ROOT / "migrations" / "20260722_os_accounts_access.sql").read_text(encoding="utf-8")
 
         self.assertIn("CREATE TABLE IF NOT EXISTS os_users", sql)
+        self.assertIn("country TEXT NOT NULL DEFAULT 'Philippines'", sql)
         self.assertIn("timezone TEXT NOT NULL DEFAULT 'Asia/Manila'", sql)
+        self.assertIn("Australia", sql)
+        self.assertIn("Philippines", sql)
         self.assertIn("Australia/Sydney", sql)
         self.assertIn("Asia/Manila", sql)
         self.assertIn("CREATE TABLE IF NOT EXISTS os_user_page_permissions", sql)

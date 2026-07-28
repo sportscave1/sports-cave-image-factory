@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS os_users (
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'worker' CHECK (role IN ('admin', 'worker')),
+    country TEXT NOT NULL DEFAULT 'Philippines',
     timezone TEXT NOT NULL DEFAULT 'Asia/Manila',
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -14,15 +15,27 @@ CREATE TABLE IF NOT EXISTS os_users (
     last_login_at TIMESTAMPTZ
 );
 
+ALTER TABLE os_users ADD COLUMN IF NOT EXISTS country TEXT;
 ALTER TABLE os_users ADD COLUMN IF NOT EXISTS timezone TEXT;
 
 UPDATE os_users
+SET country = CASE
+    WHEN role = 'admin' THEN 'Australia'
+    ELSE 'Philippines'
+END
+WHERE country IS NULL OR country = '';
+
+UPDATE os_users
 SET timezone = CASE
+    WHEN country = 'Australia' THEN 'Australia/Sydney'
+    WHEN country = 'Philippines' THEN 'Asia/Manila'
     WHEN role = 'admin' THEN 'Australia/Sydney'
     ELSE 'Asia/Manila'
 END
 WHERE timezone IS NULL OR timezone = '';
 
+ALTER TABLE os_users ALTER COLUMN country SET DEFAULT 'Philippines';
+ALTER TABLE os_users ALTER COLUMN country SET NOT NULL;
 ALTER TABLE os_users ALTER COLUMN timezone SET DEFAULT 'Asia/Manila';
 ALTER TABLE os_users ALTER COLUMN timezone SET NOT NULL;
 

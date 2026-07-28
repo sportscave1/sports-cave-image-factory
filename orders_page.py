@@ -115,6 +115,10 @@ def _certificate_action_log(event, *, row=None, source="Orders", **extra):
 
 def _record_order_activity(action_type, message, *, row=None, metadata=None):
     normalised = _normalise_row(row or {}) if row else {}
+    clean_metadata = dict(metadata or {})
+    clean_metadata.setdefault("status", "success")
+    clean_metadata.setdefault("result", clean_metadata.get("status") or "success")
+    clean_metadata.setdefault("certificate_status", normalised.get("certificate_status") or normalised.get("certificate") or "")
     record_activity_log(
         action_type,
         "Orders",
@@ -125,7 +129,7 @@ def _record_order_activity(action_type, message, *, row=None, metadata=None):
             "order": normalised.get("order") or normalised.get("order_name") or "",
             "product": normalised.get("product") or normalised.get("product_title") or "",
             "edition": normalised.get("edition") or normalised.get("edition_number") or "",
-            **(metadata or {}),
+            **clean_metadata,
         },
     )
 
@@ -1498,6 +1502,12 @@ def _generate_certificate_for_row(row, *, raise_errors=False):
     except Exception as error:
         _update_matching_row(row, {"certificate_status": "Error", "certificate_error": str(error), "certificate": "Error"})
         st.session_state[NOTICE_KEY] = f"Certificate generation failed: {error}"
+        _record_order_activity(
+            "certificate_generation_failed",
+            f"Certificate generation failed: {row.get('order')} {row.get('edition')}",
+            row=row,
+            metadata={"status": "failed", "result": "failed", "error": str(error)},
+        )
         if raise_errors:
             raise
         return False
@@ -1563,6 +1573,12 @@ def _upload_certificate_for_row(row, *, raise_errors=False):
     except Exception as error:
         _update_matching_row(row, {"certificate_status": "Upload failed", "certificate_error": str(error), "certificate": "Upload failed"})
         st.session_state[NOTICE_KEY] = f"Certificate upload failed: {error}"
+        _record_order_activity(
+            "certificate_upload_failed",
+            f"Certificate upload failed: {row.get('order')} {row.get('edition')}",
+            row=row,
+            metadata={"status": "failed", "result": "failed", "error": str(error)},
+        )
         if raise_errors:
             raise
         return False
@@ -1741,6 +1757,13 @@ def _generate_upload_selected_certificates(rows):
         message = f"Certificate upload failed: {error}. You can retry this order."
         st.session_state[NOTICE_KEY] = message
         st.error(message)
+        failed_row = rows[completed] if completed < len(rows) else None
+        _record_order_activity(
+            "certificate_upload_failed",
+            "Certificate upload failed",
+            row=failed_row,
+            metadata={"status": "failed", "result": "failed", "error": str(error), "job": "generate_upload"},
+        )
         return False
     finally:
         _clear_certificate_action_state(source="Orders")
