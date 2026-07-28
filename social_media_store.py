@@ -1,5 +1,9 @@
 import hashlib
 import json
+import logging
+from pathlib import Path
+import threading
+import time
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -10,10 +14,129 @@ import social_media
 SOCIAL_MEDIA_MIGRATION = "20260728_social_media_hub.sql"
 DEFAULT_HISTORY_LIMIT = 15
 MAX_HISTORY_LIMIT = 50
+SCHEMA_RETRY_SECONDS = 10.0
+SOCIAL_MEDIA_REQUIRED_SCHEMA = {
+    "social_daily_plans": {
+        "id",
+        "user_id",
+        "plan_date",
+        "timezone",
+        "status",
+        "focus_areas",
+        "content_plan",
+        "planned_platforms",
+        "planned_post_count",
+        "improvement_test",
+        "what_worked",
+        "what_learned",
+        "improve_next",
+        "blockers",
+        "execution_score",
+        "created_by",
+        "updated_by",
+        "completed_at",
+        "reopened_at",
+        "created_at",
+        "updated_at",
+    },
+    "social_daily_priorities": {
+        "id",
+        "plan_id",
+        "priority_index",
+        "task",
+        "completed",
+        "created_at",
+        "updated_at",
+    },
+    "social_posts": {
+        "id",
+        "user_id",
+        "content_name",
+        "campaign",
+        "content_format",
+        "market",
+        "created_date",
+        "notes",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at",
+    },
+    "social_post_platforms": {
+        "id",
+        "post_id",
+        "platform",
+        "status",
+        "scheduled_published_at",
+        "public_url",
+        "reach_views",
+        "engagements",
+        "link_clicks",
+        "saves_shares",
+        "result_note",
+        "created_at",
+        "updated_at",
+    },
+    "social_weekly_reports": {
+        "id",
+        "user_id",
+        "week_start",
+        "week_end",
+        "timezone",
+        "status",
+        "performed_best",
+        "learned",
+        "test_next",
+        "average_execution_score",
+        "mips_completed",
+        "completed_workdays",
+        "created_by",
+        "updated_by",
+        "submitted_at",
+        "created_at",
+        "updated_at",
+    },
+    "social_weekly_platform_metrics": {
+        "id",
+        "report_id",
+        "platform",
+        "audience_total",
+        "reach_views",
+        "engagements",
+        "outbound_clicks",
+        "posts_published",
+        "best_post_url",
+        "best_post_result",
+        "created_at",
+        "updated_at",
+    },
+    "social_action_requests": {
+        "id",
+        "request_key",
+        "actor_user_id",
+        "action_type",
+        "entity_type",
+        "entity_id",
+        "created_at",
+    },
+}
+
+
+LOGGER = logging.getLogger(__name__)
+_SCHEMA_LOCK = threading.Lock()
+_SCHEMA_READY = False
+_SCHEMA_FAILURE_STATUS = None
+_SCHEMA_RETRY_AT = 0.0
 
 
 class SocialMediaStoreError(RuntimeError):
     pass
+
+
+class SocialMediaSchemaError(SocialMediaStoreError):
+    def __init__(self, message, *, reason):
+        super().__init__(message)
+        self.reason = str(reason or "storage_unavailable")
 
 
 def _backend():
@@ -55,35 +178,215 @@ def request_key(action, actor_user_id, scope, payload):
     return f"social/{hashlib.sha256(identity.encode('utf-8')).hexdigest()}"
 
 
-def schema_status():
-    backend = _backend()
-    if not backend.is_configured():
-        return {"configured": False, "ready": False, "reason": "database_not_configured"}
+def _migration_path():
+    return Path(__file__).resolve().parent / "migrations" / SOCIAL_MEDIA_MIGRATION
+
+
+def _schema_gaps(cur):
+    table_names = tuple(SOCIAL_MEDIA_REQUIRED_SCHEMA)
+    cur.execute(
+        """
+        SELECT table_name, column_name
+        FROM information_schema.columns
+        WHERE table_schema='public'
+          AND table_name = ANY(%s)
+        """,
+        (list(table_names),),
+    )
+    available = {table: set() for table in table_names}
+    for row in cur.fetchall() or ():
+        table = str(row.get("table_name") or "")
+        column = str(row.get("column_name") or "")
+        if table in available and column:
+            available[table].add(column)
+    missing_tables = [
+        table for table in table_names if not available.get(table)
+    ]
+    missing_columns = {
+        table: sorted(required - available.get(table, set()))
+        for table, required in SOCIAL_MEDIA_REQUIRED_SCHEMA.items()
+        if available.get(table) and required - available.get(table, set())
+    }
+    return {
+        "missing_tables": missing_tables,
+        "missing_columns": missing_columns,
+    }
+
+
+def _verify_table_access(cur):
+    for table in SOCIAL_MEDIA_REQUIRED_SCHEMA:
+        cur.execute(f"SELECT 1 FROM {table} LIMIT 0")
+
+
+def _apply_social_media_migration(cur):
+    from run_migrations import safe_migration_sql
+
+    migration_path = _migration_path()
+    if not migration_path.is_file():
+        raise SocialMediaSchemaError(
+            "The Social Media setup migration is unavailable.",
+            reason="migration_not_packaged",
+        )
+    sql = migration_path.read_text(encoding="utf-8")
+    if not safe_migration_sql(sql):
+        raise SocialMediaSchemaError(
+            "The Social Media setup migration did not pass its safety check.",
+            reason="migration_safety_check_failed",
+        )
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            filename TEXT PRIMARY KEY,
+            applied_at TIMESTAMPTZ DEFAULT now()
+        )
+        """
+    )
+    cur.execute(sql)
+
+
+def _record_social_media_migration(cur):
+    cur.execute(
+        """
+        INSERT INTO schema_migrations(filename)
+        VALUES (%s)
+        ON CONFLICT (filename) DO NOTHING
+        """,
+        (SOCIAL_MEDIA_MIGRATION,),
+    )
+
+
+def _safe_schema_failure_reason(error, fallback="storage_unavailable"):
+    if isinstance(error, SocialMediaSchemaError):
+        return error.reason
+    sqlstate = str(
+        getattr(error, "sqlstate", "")
+        or getattr(error, "pgcode", "")
+        or ""
+    )
+    if sqlstate == "42501":
+        return "database_permission_denied"
+    return fallback
+
+
+def _uncached_schema_status(backend):
     try:
         with backend.connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT
-                        to_regclass('public.social_daily_plans') IS NOT NULL AS daily_plans,
-                        to_regclass('public.social_posts') IS NOT NULL AS posts,
-                        to_regclass('public.social_weekly_reports') IS NOT NULL AS weekly_reports,
-                        to_regclass('public.social_action_requests') IS NOT NULL AS action_requests
-                    """
-                )
-                row = cur.fetchone() or {}
-        ready = all(
-            bool(row.get(key))
-            for key in ("daily_plans", "posts", "weekly_reports", "action_requests")
-        )
+                gaps = _schema_gaps(cur)
+                migration_applied = bool(gaps["missing_tables"])
+                if gaps["missing_tables"]:
+                    try:
+                        _apply_social_media_migration(cur)
+                    except Exception as error:
+                        raise SocialMediaSchemaError(
+                            "Social Media storage could not be prepared.",
+                            reason=_safe_schema_failure_reason(
+                                error,
+                                "schema_initialisation_failed",
+                            ),
+                        ) from error
+                    gaps = _schema_gaps(cur)
+                if gaps["missing_tables"] or gaps["missing_columns"]:
+                    if migration_applied:
+                        raise SocialMediaSchemaError(
+                            "Social Media storage is missing required fields.",
+                            reason="schema_mismatch",
+                        )
+                    return {
+                        "configured": True,
+                        "ready": False,
+                        "reason": "schema_mismatch",
+                        "migration": SOCIAL_MEDIA_MIGRATION,
+                        **gaps,
+                    }
+                _verify_table_access(cur)
+                if migration_applied:
+                    _record_social_media_migration(cur)
+            conn.commit()
+    except SocialMediaSchemaError:
+        raise
+    except Exception as error:
+        raise SocialMediaSchemaError(
+            "Social Media storage could not be checked.",
+            reason=_safe_schema_failure_reason(error),
+        ) from error
+    return {
+        "configured": True,
+        "ready": True,
+        "reason": "ok",
+        "migration": SOCIAL_MEDIA_MIGRATION,
+        "missing_tables": [],
+        "missing_columns": {},
+    }
+
+
+def reset_schema_cache():
+    global _SCHEMA_READY, _SCHEMA_FAILURE_STATUS, _SCHEMA_RETRY_AT
+    with _SCHEMA_LOCK:
+        _SCHEMA_READY = False
+        _SCHEMA_FAILURE_STATUS = None
+        _SCHEMA_RETRY_AT = 0.0
+
+
+def schema_status(*, force=False):
+    global _SCHEMA_READY, _SCHEMA_FAILURE_STATUS, _SCHEMA_RETRY_AT
+    backend = _backend()
+    if not backend.is_configured():
         return {
-            "configured": True,
-            "ready": ready,
-            "reason": "ok" if ready else "migration_required",
+            "configured": False,
+            "ready": False,
+            "reason": "database_not_configured",
             "migration": SOCIAL_MEDIA_MIGRATION,
         }
-    except Exception as error:
-        raise SocialMediaStoreError("Social Media setup could not be checked.") from error
+    if _SCHEMA_READY:
+        return {
+            "configured": True,
+            "ready": True,
+            "reason": "ok",
+            "migration": SOCIAL_MEDIA_MIGRATION,
+            "missing_tables": [],
+            "missing_columns": {},
+        }
+    now = time.monotonic()
+    if not force and _SCHEMA_FAILURE_STATUS and now < _SCHEMA_RETRY_AT:
+        return dict(_SCHEMA_FAILURE_STATUS)
+    with _SCHEMA_LOCK:
+        if _SCHEMA_READY:
+            return {
+                "configured": True,
+                "ready": True,
+                "reason": "ok",
+                "migration": SOCIAL_MEDIA_MIGRATION,
+                "missing_tables": [],
+                "missing_columns": {},
+            }
+        now = time.monotonic()
+        if not force and _SCHEMA_FAILURE_STATUS and now < _SCHEMA_RETRY_AT:
+            return dict(_SCHEMA_FAILURE_STATUS)
+        try:
+            status = _uncached_schema_status(backend)
+        except Exception as error:
+            reason = _safe_schema_failure_reason(error)
+            status = {
+                "configured": True,
+                "ready": False,
+                "reason": reason,
+                "migration": SOCIAL_MEDIA_MIGRATION,
+                "retryable": True,
+            }
+            LOGGER.warning(
+                "Social Media storage readiness failed: %s (%s)",
+                reason,
+                error.__class__.__name__,
+            )
+        if status.get("ready"):
+            _SCHEMA_READY = True
+            _SCHEMA_FAILURE_STATUS = None
+            _SCHEMA_RETRY_AT = 0.0
+        else:
+            _SCHEMA_FAILURE_STATUS = dict(status)
+            _SCHEMA_RETRY_AT = now + SCHEMA_RETRY_SECONDS
+        return dict(status)
 
 
 def require_schema():

@@ -70,7 +70,13 @@ subsection and source of truth.
 
 ## Database Setup
 
-Apply the additive migration through the repository's normal migration command:
+The Social Media page verifies its dedicated schema on first use and applies
+the packaged additive migration when tables have not been created yet. A
+successful schema check is cached for the process; a temporary failure is
+retried after a short delay and can also be retried from the page.
+
+For a database role that is intentionally not allowed to create tables, apply
+the additive migration through the repository's normal migration command:
 
 ```bash
 python run_migrations.py
@@ -83,9 +89,11 @@ migrations/20260728_social_media_hub.sql
 ```
 
 It creates dedicated daily plan, priority, post, post-platform, weekly report,
-weekly platform-metric and idempotency tables. Row-level security is enabled and
-the app continues to use the existing server-side Supabase connection. No
-social passwords, cookies, OAuth tokens or API credentials are stored.
+weekly platform-metric and idempotency tables. Empty tables are a valid ready
+state. Readiness verifies all required tables and columns without loading staff
+records. Row-level security is enabled and the app continues to use the
+existing server-side Supabase connection. No social passwords, cookies, OAuth
+tokens or API credentials are stored.
 
-A normal application deployment is required after review. Apply the migration
-before staff use the new Social Media page. No desktop helper update is needed.
+A normal application deployment is required after review. No desktop helper
+update is needed.

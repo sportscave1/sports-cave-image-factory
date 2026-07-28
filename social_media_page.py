@@ -1087,9 +1087,24 @@ def render_page(user, *, store=social_media_store, account_store=None):
     try:
         storage = store.schema_status()
     except Exception:
-        storage = {"ready": False}
+        storage = {"ready": False, "reason": "storage_unavailable"}
     if not storage.get("ready"):
-        st.info("Social Media tracking is not ready yet. Ask an administrator to finish setup.")
+        if os_accounts.is_admin(user):
+            st.warning(
+                "Social Media storage could not be prepared right now. "
+                "Retry once; if it continues, the app's storage setup needs attention."
+            )
+        else:
+            st.warning(
+                "Social Media is temporarily unavailable. Your existing work is safe."
+            )
+        if st.button("Retry", key="social-media-storage-retry"):
+            try:
+                storage = store.schema_status(force=True)
+            except Exception:
+                storage = {"ready": False, "reason": "storage_unavailable"}
+            if storage.get("ready"):
+                st.rerun()
         return
     try:
         staff = store.authorised_social_staff(

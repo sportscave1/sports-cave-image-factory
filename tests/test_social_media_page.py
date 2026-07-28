@@ -119,6 +119,64 @@ social_media_page.render_page(user)
             item.value for item in app.markdown
         ))
 
+    def test_genuine_storage_outage_is_retryable_without_the_old_setup_warning(self):
+        app = AppTest.from_string(
+            r'''
+import streamlit as st
+import social_media_page
+
+user = {
+    "id": "worker-1",
+    "role": "worker",
+    "is_active": True,
+    "page_permissions": ["social_media"],
+}
+
+class UnavailableStore:
+    @staticmethod
+    def schema_status(force=False):
+        if force:
+            st.session_state["forced-social-retry"] = True
+        return {
+            "ready": bool(st.session_state.get("forced-social-retry")),
+            "reason": "storage_unavailable",
+        }
+
+    @staticmethod
+    def authorised_social_staff(viewer, account_store=None):
+        return [viewer]
+
+    @staticmethod
+    def get_daily_snapshot(viewer, **kwargs):
+        return {
+            "plan": {},
+            "priorities": [],
+            "posts": [],
+            "plan_date": "2026-07-28",
+            "summary": {
+                "plan_status": "not_started",
+                "priorities_completed": 0,
+                "priorities_total": 0,
+                "posts_live": 0,
+                "platforms_used": [],
+                "score": 0.0,
+            },
+        }
+
+social_media_page.render_page(user, store=UnavailableStore)
+'''
+        ).run(timeout=15)
+
+        self.assertEqual(len(app.exception), 0)
+        self.assertIn("temporarily unavailable", app.warning[0].value)
+        self.assertNotIn(
+            "tracking is not ready yet",
+            " ".join(item.value for item in app.info),
+        )
+        app.button[0].click().run(timeout=15)
+        self.assertEqual(len(app.exception), 0)
+        self.assertEqual([item.value for item in app.subheader], ["Today"])
+
 
 if __name__ == "__main__":
     unittest.main()
