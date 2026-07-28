@@ -167,7 +167,7 @@ def _render_staff_summary(snapshot):
                 else:
                     st.caption(
                         "Daily Execution: "
-                        f"{daily['completed_count']} of {daily['task_count']} complete "
+                        f"{daily['completed_count']} of {daily['task_count']} closed "
                         f"({daily['completion_percentage']}%)."
                     )
             social = member.get("social_media") or {}

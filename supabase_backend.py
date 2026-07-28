@@ -2980,7 +2980,14 @@ _HOME_ACTIVITY_SYSTEM_PATTERNS = tuple(
 )
 
 
-def list_activity_logs(*, start_at=None, end_at=None, limit=200):
+def list_activity_logs(
+    *,
+    start_at=None,
+    end_at=None,
+    limit=200,
+    actor_user_id=None,
+    actor_email=None,
+):
     ensure_dashboard_schema()
     clauses = []
     params = []
@@ -2990,6 +2997,17 @@ def list_activity_logs(*, start_at=None, end_at=None, limit=200):
     if end_at is not None:
         clauses.append("created_at < %s")
         params.append(end_at)
+    clean_actor_user_id = str(actor_user_id or "").strip()
+    clean_actor_email = str(actor_email or "").strip().casefold()
+    if clean_actor_user_id or clean_actor_email:
+        identity_clauses = []
+        if clean_actor_user_id:
+            identity_clauses.append("COALESCE(new_value->'metadata'->>'actor_id', '') = %s")
+            params.append(clean_actor_user_id)
+        if clean_actor_email:
+            identity_clauses.append("lower(COALESCE(new_value->'metadata'->>'actor_email', '')) = %s")
+            params.append(clean_actor_email)
+        clauses.append(f"({' OR '.join(identity_clauses)})")
     clauses.append(
         """
         NOT (
@@ -3563,8 +3581,11 @@ def save_daily_execution_plan(
     return _daily_execution_sheet_from_row(saved_row)
 
 
-def update_daily_execution_top_tasks(sheet_id, top_tasks, additional_items=None):
+def update_daily_execution_top_tasks(sheet_id, top_tasks, additional_items=None, *, user_id=None):
     ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    if not clean_user_id:
+        return {}
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
@@ -3574,10 +3595,10 @@ def update_daily_execution_top_tasks(sheet_id, top_tasks, additional_items=None)
                     UPDATE daily_execution_sheets
                     SET top_tasks=%s::jsonb,
                         updated_at=now()
-                    WHERE id=%s AND status <> 'archived'
+                    WHERE id=%s AND user_id=%s AND status <> 'archived'
                     RETURNING *
                     """,
-                    (json_dumps(top_tasks or []), str(sheet_id or "").strip()),
+                    (json_dumps(top_tasks or []), str(sheet_id or "").strip(), clean_user_id),
                 )
             else:
                 cur.execute(
@@ -3586,13 +3607,14 @@ def update_daily_execution_top_tasks(sheet_id, top_tasks, additional_items=None)
                     SET top_tasks=%s::jsonb,
                         additional_items=%s::jsonb,
                         updated_at=now()
-                    WHERE id=%s AND status <> 'archived'
+                    WHERE id=%s AND user_id=%s AND status <> 'archived'
                     RETURNING *
                     """,
                     (
                         json_dumps(top_tasks or []),
                         json_dumps(additional_items or []),
                         str(sheet_id or "").strip(),
+                        clean_user_id,
                     ),
                 )
             row = cur.fetchone()
@@ -3600,13 +3622,34 @@ def update_daily_execution_top_tasks(sheet_id, top_tasks, additional_items=None)
     return _daily_execution_sheet_from_row(row)
 
 
-def set_daily_execution_mip_completed(sheet_id, index, completed):
+def set_daily_execution_mip_completed(
+    sheet_id,
+    index,
+    completed,
+    *,
+    outcome=None,
+    user_id=None,
+):
     ensure_dashboard_schema()
     safe_index = max(min(int(index or 0), 2), 0)
+    clean_user_id = str(user_id or "").strip()
+    if not clean_user_id:
+        return {}
+    clean_outcome = str(outcome or "").strip().casefold()
+    if clean_outcome not in {"done", "couldnt_finish"}:
+        clean_outcome = "done" if bool(completed) else ""
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
-            cur.execute("SELECT * FROM daily_execution_sheets WHERE id=%s AND status <> 'archived' LIMIT 1", (str(sheet_id or "").strip(),))
+            cur.execute(
+                """
+                SELECT *
+                FROM daily_execution_sheets
+                WHERE id=%s AND user_id=%s AND status <> 'archived'
+                LIMIT 1
+                """,
+                (str(sheet_id or "").strip(), clean_user_id),
+            )
             row = cur.fetchone()
             if not row:
                 return {}
@@ -3614,34 +3657,52 @@ def set_daily_execution_mip_completed(sheet_id, index, completed):
             while len(tasks) < 3:
                 tasks.append({"task": "", "why": "", "time_blocked": "", "completed": False})
             task = dict(tasks[safe_index] or {})
-            was_complete = bool(task.get("completed"))
-            task["completed"] = bool(completed)
-            task["status"] = "done" if task["completed"] else ""
+            old_status = str(task.get("status") or "").strip().casefold()
+            if old_status not in {"done", "couldnt_finish"}:
+                old_status = "done" if bool(task.get("completed")) else ""
+            task["completed"] = clean_outcome in {"done", "couldnt_finish"}
+            task["status"] = clean_outcome
             tasks[safe_index] = task
             cur.execute(
                 """
                 UPDATE daily_execution_sheets
                 SET top_tasks=%s::jsonb,
                     updated_at=now()
-                WHERE id=%s AND status <> 'archived'
+                WHERE id=%s AND user_id=%s AND status <> 'archived'
                 RETURNING *
                 """,
-                (json_dumps(tasks), str(sheet_id or "").strip()),
+                (json_dumps(tasks), str(sheet_id or "").strip(), clean_user_id),
             )
             updated = cur.fetchone()
-            if task.get("completed") and not was_complete and str(task.get("task") or "").strip():
+            if clean_outcome != old_status and clean_outcome and str(task.get("task") or "").strip():
+                could_not_finish = clean_outcome == "couldnt_finish"
+                event_type = (
+                    "daily_execution_mip_could_not_finish"
+                    if could_not_finish
+                    else "daily_execution_mip_completed"
+                )
+                message = (
+                    f"Daily task could not be finished: {task.get('task')}"
+                    if could_not_finish
+                    else f"Daily task completed: {task.get('task')}"
+                )
                 _insert_audit_log(
                     cur,
-                    event_type="daily_execution_mip_completed",
+                    event_type=event_type,
                     entity_type="daily_execution_sheet",
                     entity_id=str(sheet_id or "").strip(),
                     new_value={
-                        "message": f"Daily task completed: {task.get('task')}",
+                        "message": message,
                         "page": "Dashboard",
-                        "action_type": "daily_execution_task_completed",
-                        "metadata": {"task": task.get("task") or "", "index": safe_index},
+                        "action_type": event_type,
+                        "metadata": {
+                            "task": task.get("task") or "",
+                            "index": safe_index,
+                            "outcome": clean_outcome,
+                            "result": "could_not_finish" if could_not_finish else "success",
+                        },
                     },
-                    reason=f"Daily task completed: {task.get('task')}",
+                    reason=message,
                     actor=str(row.get("user_name") or "sports_cave_os"),
                     source="Dashboard",
                 )
@@ -3651,14 +3712,17 @@ def set_daily_execution_mip_completed(sheet_id, index, completed):
 
 def complete_daily_execution_review(sheet_id, review_payload, *, actor="sports_cave_os", user_id=None):
     ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    if not clean_user_id:
+        return {}
     review_payload = dict(review_payload or {})
     no_grey_zone = review_payload.get("no_grey_zone") or {}
     ratings = review_payload.get("ratings") or {}
     daily_summary = str(review_payload.get("daily_summary") or "").strip()
     tomorrow_intention = str(review_payload.get("tomorrow_intention") or "").strip()
     review_data = review_payload.get("review_data") or no_grey_zone
-    owner_clause = " AND user_id=%s" if str(user_id or "").strip() else ""
-    owner_params = (str(user_id or "").strip(),) if owner_clause else ()
+    owner_clause = " AND user_id=%s"
+    owner_params = (clean_user_id,)
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
@@ -3736,8 +3800,11 @@ def complete_daily_execution_review(sheet_id, review_payload, *, actor="sports_c
     return _daily_execution_sheet_from_row(row)
 
 
-def update_daily_execution_prompt(sheet_id, prompt):
+def update_daily_execution_prompt(sheet_id, prompt, *, user_id=None):
     ensure_dashboard_schema()
+    clean_user_id = str(user_id or "").strip()
+    if not clean_user_id:
+        return {}
     with connect() as conn:
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {_dashboard_query_timeout_ms()}")
@@ -3746,10 +3813,10 @@ def update_daily_execution_prompt(sheet_id, prompt):
                 UPDATE daily_execution_sheets
                 SET generated_prompt=%s,
                     updated_at=now()
-                WHERE id=%s
+                WHERE id=%s AND user_id=%s
                 RETURNING *
                 """,
-                (str(prompt or ""), str(sheet_id or "").strip()),
+                (str(prompt or ""), str(sheet_id or "").strip(), clean_user_id),
             )
             row = cur.fetchone()
         conn.commit()

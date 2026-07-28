@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 from time import monotonic
 
+import os_accounts
 import sports_sales_calendar
 
 
@@ -498,8 +499,14 @@ def daily_execution_user_name(user):
     )
 
 
+def _require_daily_execution_owner(user):
+    if not os_accounts.is_reporting_owner(user):
+        raise DashboardStorageError("Daily Execution access is not available for this account.")
+    return daily_execution_user_id(user)
+
+
 def get_daily_execution_sheet(user, sheet_date):
-    user_id = daily_execution_user_id(user)
+    user_id = _require_daily_execution_owner(user)
     clean_date = sheet_date.isoformat() if isinstance(sheet_date, date) else str(sheet_date or "")
     cache_key = ("daily_execution", user_id, clean_date)
     cached = _cache_get(_DAILY_EXECUTION_CACHE, cache_key)
@@ -515,7 +522,7 @@ def get_daily_execution_sheet(user, sheet_date):
 
 
 def get_daily_execution_home_sheets(user, today):
-    user_id = daily_execution_user_id(user)
+    user_id = _require_daily_execution_owner(user)
     clean_today = today.isoformat() if isinstance(today, date) else str(today or "")
     tomorrow = date.fromisoformat(clean_today) + timedelta(days=1)
     cache_key = ("daily_home", user_id, clean_today)
@@ -572,13 +579,14 @@ def get_daily_execution_home_sheets(user, today):
 
 
 def create_daily_execution_sheet(user, sheet_date, timezone_name, *, status=None):
+    user_id = _require_daily_execution_owner(user)
     clean_date = sheet_date.isoformat() if isinstance(sheet_date, date) else str(sheet_date or "")
     try:
         backend = get_supabase_backend()
         from activity_log import get_activity_actor
 
         kwargs = {
-            "user_id": daily_execution_user_id(user),
+            "user_id": user_id,
             "user_name": daily_execution_user_name(user),
             "sheet_date": clean_date,
             "timezone_name": timezone_name,
@@ -592,24 +600,32 @@ def create_daily_execution_sheet(user, sheet_date, timezone_name, *, status=None
             kwargs.pop("status", None)
             raw_sheet = backend.create_daily_execution_sheet(**kwargs)
         sheet = _normalise_daily_sheet(raw_sheet)
-        clear_daily_execution_cache(daily_execution_user_id(user))
+        clear_daily_execution_cache(user_id)
         clear_activity_cache()
         return sheet
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 
 
-def save_daily_execution_top_tasks(sheet_id, top_tasks):
+def save_daily_execution_top_tasks(sheet_id, top_tasks, *, user=None):
+    user_id = _require_daily_execution_owner(user)
     try:
         backend = get_supabase_backend()
-        sheet = _normalise_daily_sheet(backend.update_daily_execution_top_tasks(sheet_id, _normalise_top_tasks(top_tasks)))
-        clear_daily_execution_cache()
+        sheet = _normalise_daily_sheet(
+            backend.update_daily_execution_top_tasks(
+                sheet_id,
+                _normalise_top_tasks(top_tasks),
+                user_id=user_id,
+            )
+        )
+        clear_daily_execution_cache(user_id)
         return sheet
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 
 
 def save_daily_execution_tasks(sheet_id, top_tasks, additional_items, *, user=None):
+    user_id = _require_daily_execution_owner(user)
     try:
         backend = get_supabase_backend()
         sheet = _normalise_daily_sheet(
@@ -617,19 +633,32 @@ def save_daily_execution_tasks(sheet_id, top_tasks, additional_items, *, user=No
                 sheet_id,
                 _normalise_top_tasks(top_tasks),
                 _normalise_additional_items_for_save(additional_items),
+                user_id=user_id,
             )
         )
-        clear_daily_execution_cache(daily_execution_user_id(user) if user else None)
+        clear_daily_execution_cache(user_id)
         return sheet
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 
 
-def set_daily_execution_mip_completed(sheet_id, index, completed):
+def set_daily_execution_mip_completed(sheet_id, index, completed, *, outcome=None, user=None):
+    user_id = _require_daily_execution_owner(user)
+    clean_outcome = _compact_text(outcome or "").casefold()
+    if clean_outcome not in DAILY_TASK_FINISHED_STATUSES:
+        clean_outcome = DAILY_TASK_STATUS_DONE if bool(completed) else ""
     try:
         backend = get_supabase_backend()
-        sheet = _normalise_daily_sheet(backend.set_daily_execution_mip_completed(sheet_id, index, bool(completed)))
-        clear_daily_execution_cache()
+        sheet = _normalise_daily_sheet(
+            backend.set_daily_execution_mip_completed(
+                sheet_id,
+                index,
+                clean_outcome in DAILY_TASK_FINISHED_STATUSES,
+                outcome=clean_outcome,
+                user_id=user_id,
+            )
+        )
+        clear_daily_execution_cache(user_id)
         clear_activity_cache()
         return sheet
     except Exception as error:
@@ -637,41 +666,45 @@ def set_daily_execution_mip_completed(sheet_id, index, completed):
 
 
 def complete_daily_execution_review(sheet_id, review_payload, *, user=None):
+    user_id = _require_daily_execution_owner(user)
     try:
         backend = get_supabase_backend()
         from activity_log import get_activity_actor
 
         kwargs = {"actor": get_activity_actor()}
-        if user:
-            kwargs["user_id"] = daily_execution_user_id(user)
-        try:
-            raw_sheet = backend.complete_daily_execution_review(sheet_id, review_payload or {}, **kwargs)
-        except TypeError:
-            kwargs.pop("user_id", None)
-            raw_sheet = backend.complete_daily_execution_review(sheet_id, review_payload or {}, **kwargs)
+        kwargs["user_id"] = user_id
+        raw_sheet = backend.complete_daily_execution_review(sheet_id, review_payload or {}, **kwargs)
         sheet = _normalise_daily_sheet(raw_sheet)
-        clear_daily_execution_cache(daily_execution_user_id(user) if user else None)
+        clear_daily_execution_cache(user_id)
         clear_activity_cache()
         return sheet
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 
 
-def save_daily_execution_prompt(sheet_id, prompt):
+def save_daily_execution_prompt(sheet_id, prompt, *, user=None):
+    user_id = _require_daily_execution_owner(user)
     try:
         backend = get_supabase_backend()
-        sheet = _normalise_daily_sheet(backend.update_daily_execution_prompt(sheet_id, str(prompt or "")))
-        clear_daily_execution_cache()
+        sheet = _normalise_daily_sheet(
+            backend.update_daily_execution_prompt(
+                sheet_id,
+                str(prompt or ""),
+                user_id=user_id,
+            )
+        )
+        clear_daily_execution_cache(user_id)
         return sheet
     except Exception as error:
         raise DashboardStorageError(_storage_error(error)) from error
 
 
 def list_daily_execution_sheets(user, start_date, end_date, *, limit=10):
+    user_id = _require_daily_execution_owner(user)
     try:
         backend = get_supabase_backend()
         rows = backend.list_daily_execution_sheets(
-            daily_execution_user_id(user),
+            user_id,
             start_date.isoformat() if isinstance(start_date, date) else str(start_date or ""),
             end_date.isoformat() if isinstance(end_date, date) else str(end_date or ""),
             limit=limit,
@@ -692,7 +725,7 @@ def save_daily_execution_plan(
     archive_sheet_id=None,
 ):
     clean_date = sheet_date.isoformat() if isinstance(sheet_date, date) else str(sheet_date or "")
-    user_id = daily_execution_user_id(user)
+    user_id = _require_daily_execution_owner(user)
     try:
         backend = get_supabase_backend()
         from activity_log import get_activity_actor
@@ -716,6 +749,7 @@ def save_daily_execution_plan(
                     existing.get("id"),
                     _normalise_top_tasks(top_tasks),
                     _normalise_additional_items_for_save(additional_items),
+                    user_id=user_id,
                 )
             else:
                 raw = backend.create_daily_execution_sheet(
@@ -729,6 +763,7 @@ def save_daily_execution_plan(
                     raw.get("id"),
                     _normalise_top_tasks(top_tasks),
                     _normalise_additional_items_for_save(additional_items),
+                    user_id=user_id,
                 )
         affected_dates = [clean_date]
         if archive_sheet_id:
@@ -744,7 +779,7 @@ def save_daily_execution_plan(
 
 
 def list_daily_execution_archive_summaries(user, start_date, end_date, *, limit=8):
-    user_id = daily_execution_user_id(user)
+    user_id = _require_daily_execution_owner(user)
     clean_start = start_date.isoformat() if isinstance(start_date, date) else str(start_date or "")
     clean_end = end_date.isoformat() if isinstance(end_date, date) else str(end_date or "")
     cache_key = ("daily_week", user_id, clean_start, clean_end, int(limit))
@@ -770,7 +805,7 @@ def list_daily_execution_archive_summaries(user, start_date, end_date, *, limit=
 
 
 def get_daily_execution_archive_detail(user, sheet_id):
-    user_id = daily_execution_user_id(user)
+    user_id = _require_daily_execution_owner(user)
     clean_id = str(sheet_id or "").strip()
     cache_key = ("daily_archive_detail", user_id, clean_id)
     cached = _cache_get(_DAILY_EXECUTION_CACHE, cache_key)
@@ -876,7 +911,7 @@ def daily_execution_weekly_summary(sheets):
                 continue
             if _normalise_daily_task_status(task) == DAILY_TASK_STATUS_DONE:
                 mip_done += 1
-            else:
+            elif not daily_execution_task_finished(task):
                 mip_open += 1
             planned_hours += _planned_hours(task.get("time_blocked"))
         for task in sheet.get("additional_items") or []:
@@ -934,7 +969,7 @@ def daily_execution_alerts(sheet, local_now, *, user_name="Nathan"):
     if filled == 0:
         alerts.append("Today's list has no tasks yet.")
     if local_now.hour >= 15 and complete < 2:
-        alerts.append("Past 3pm: fewer than 2/3 tasks are complete.")
+        alerts.append("Past 3pm: fewer than 2/3 tasks are closed.")
     if local_now.hour >= 19 and not daily_execution_review_complete(sheet):
         alerts.append("Past 7pm: Daily Review is still open.")
     return alerts
@@ -1736,7 +1771,33 @@ def activity_limit_for_view(view, limit=None):
     return min(requested, int(view_limit or requested))
 
 
-def list_activity_entries(view=ACTIVITY_VIEW_TODAY, local_now=None, *, month_start=None, limit=None):
+def activity_log_access_scope(user):
+    if not os_accounts.can_view_activity_log(user):
+        return None
+    if os_accounts.is_reporting_owner(user):
+        return {"all_users": True, "actor_user_id": "", "actor_email": ""}
+    actor_user_id = str((user or {}).get("id") or "").strip()
+    actor_email = os_accounts.normalise_login((user or {}).get("email"))
+    if not actor_user_id and not actor_email:
+        return None
+    return {
+        "all_users": False,
+        "actor_user_id": actor_user_id,
+        "actor_email": actor_email,
+    }
+
+
+def list_activity_entries(
+    view=ACTIVITY_VIEW_TODAY,
+    local_now=None,
+    *,
+    month_start=None,
+    limit=None,
+    user=None,
+):
+    access_scope = activity_log_access_scope(user)
+    if access_scope is None:
+        raise DashboardStorageError("Activity Log access is not available for this account.")
     local_now = local_now or datetime.now(timezone.utc)
     start, end = activity_log_bounds(view, local_now, month_start=month_start)
     safe_limit = activity_limit_for_view(view, limit)
@@ -1746,13 +1807,21 @@ def list_activity_entries(view=ACTIVITY_VIEW_TODAY, local_now=None, *, month_sta
         start.isoformat() if start else "",
         end.isoformat() if end else "",
         safe_limit or "all",
+        "all" if access_scope["all_users"] else access_scope["actor_user_id"],
+        "" if access_scope["all_users"] else access_scope["actor_email"],
     )
     cached = _cache_get(_ACTIVITY_CACHE, cache_key)
     if cached is not None:
         return cached
     try:
         backend = get_supabase_backend()
-        rows = backend.list_activity_logs(start_at=start, end_at=end, limit=safe_limit)
+        rows = backend.list_activity_logs(
+            start_at=start,
+            end_at=end,
+            limit=safe_limit,
+            actor_user_id=None if access_scope["all_users"] else access_scope["actor_user_id"],
+            actor_email=None if access_scope["all_users"] else access_scope["actor_email"],
+        )
         entries = [activity_from_audit_row(row) for row in rows if home_activity_row_is_visible(row)]
         return _cache_set(_ACTIVITY_CACHE, cache_key, entries, ACTIVITY_CACHE_TTL_SECONDS)
     except Exception as error:
@@ -1830,6 +1899,7 @@ def load_dashboard_state(
     *,
     month_start=None,
     include_activity=True,
+    user=None,
 ):
     state = {"tasks": [], "activity_log": [], "task_error": "", "activity_error": ""}
     try:
@@ -1843,6 +1913,7 @@ def load_dashboard_state(
             activity_view,
             local_now or datetime.now(timezone.utc),
             month_start=month_start,
+            user=user,
         )
     except DashboardStorageError as error:
         state["activity_error"] = str(error)

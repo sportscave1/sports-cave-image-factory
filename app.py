@@ -3346,12 +3346,14 @@ def inject_styles():
             background: #FFFFFF;
             border: 1px solid #DDD7CB;
             border-radius: 8px;
-            overflow-x: auto;
+            max-width: 100%;
+            overflow: hidden;
         }
 
         table.sc-activity-table {
             border-collapse: collapse;
             table-layout: fixed;
+            max-width: 100%;
             width: 100%;
         }
 
@@ -3371,6 +3373,8 @@ def inject_styles():
             color: #171717 !important;
             font-size: 0.78rem;
             line-height: 1.25;
+            max-width: 0;
+            overflow: hidden;
             padding: 0.45rem 0.52rem;
             vertical-align: top;
         }
@@ -3383,21 +3387,26 @@ def inject_styles():
             background: #FFF9EA;
         }
 
-        .sc-activity-date,
-        .sc-activity-time,
-        .sc-activity-name,
-        .sc-activity-user,
-        .sc-activity-area,
-        .sc-activity-item,
-        .sc-activity-status {
-            white-space: nowrap;
-        }
-
-        .sc-activity-details {
-            max-width: 34rem;
+        .sc-activity-time .sc-activity-cell-text,
+        .sc-activity-user .sc-activity-cell-text {
+            display: block;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        .sc-activity-name .sc-activity-cell-text,
+        .sc-activity-area .sc-activity-cell-text,
+        .sc-activity-item .sc-activity-cell-text,
+        .sc-activity-details .sc-activity-cell-text,
+        .sc-activity-status .sc-activity-cell-text {
+            display: -webkit-box;
+            overflow: hidden;
+            overflow-wrap: anywhere;
+            white-space: normal;
+            word-break: break-word;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
         }
 
         @media (max-width: 760px) {
@@ -10394,7 +10403,7 @@ def _render_daily_execution_read_only(sheet):
 @st.fragment
 def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
     user = current_os_user()
-    if not os_accounts.is_admin(user):
+    if not os_accounts.is_reporting_owner(user):
         if show_denied:
             st.title("Access not approved")
             st.caption("This page is not available for your account.")
@@ -10455,7 +10464,7 @@ def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
     completed_count = sports_cave_dashboard.daily_execution_completed_count(sheet)
     filled_count = sports_cave_dashboard.daily_execution_filled_task_count(sheet)
     status_text = "Daily Review complete." if sports_cave_dashboard.daily_execution_review_complete(sheet) else "Today's tasks are still open."
-    st.caption(f"{completed_count}/3 complete - {status_text}")
+    st.caption(f"{completed_count}/3 closed - {status_text}")
 
     if sports_cave_dashboard.daily_execution_review_complete(sheet):
         _render_daily_execution_read_only(sheet)
@@ -10673,64 +10682,78 @@ def dashboard_activity_month_options(local_now, count=12):
 
 
 def _activity_table_html(records):
+    def activity_cell(record, key, css_class, *, fallback="", strong=False):
+        value = str(record.get(key) or fallback)
+        escaped = html.escape(value)
+        content = f"<strong>{escaped}</strong>" if strong else escaped
+        return (
+            f'<td class="{css_class}" title="{escaped}">'
+            f'<span class="sc-activity-cell-text">{content}</span></td>'
+        )
+
     rows = []
     for record in records:
-        details = str(record.get("Details") or "")
-        details_title = html.escape(details)
         rows.append(
             "<tr>"
-            f'<td class="sc-activity-time">{html.escape(record.get("Time") or "")}</td>'
-            f'<td class="sc-activity-user">{html.escape(record.get("User") or "")}</td>'
-            f'<td class="sc-activity-name"><strong>{html.escape(record.get("Action") or record.get("Activity") or "Activity")}</strong></td>'
-            f'<td class="sc-activity-area">{html.escape(record.get("Page/Area") or record.get("Area") or "Sports Cave")}</td>'
-            f'<td class="sc-activity-item">{html.escape(record.get("Item or Product") or "")}</td>'
-            f'<td class="sc-activity-details" title="{details_title}">{html.escape(details)}</td>'
-            f'<td class="sc-activity-status">{html.escape(record.get("Result/Status") or "")}</td>'
+            f'{activity_cell(record, "Time", "sc-activity-time")}'
+            f'{activity_cell(record, "User", "sc-activity-user")}'
+            f'{activity_cell(record, "Action", "sc-activity-name", fallback=record.get("Activity") or "Activity", strong=True)}'
+            f'{activity_cell(record, "Page/Area", "sc-activity-area", fallback=record.get("Area") or "Sports Cave")}'
+            f'{activity_cell(record, "Item or Product", "sc-activity-item")}'
+            f'{activity_cell(record, "Details", "sc-activity-details")}'
+            f'{activity_cell(record, "Result/Status", "sc-activity-status")}'
             "</tr>"
         )
     return (
         '<div class="sc-activity-table-wrap"><table class="sc-activity-table">'
-        '<colgroup><col style="width: 11.2rem;"><col style="width: 8.4rem;">'
-        '<col style="width: 10.5rem;"><col style="width: 8.5rem;"><col style="width: 12rem;">'
-        '<col><col style="width: 8.5rem;"></colgroup>'
+        '<colgroup><col style="width: 15%;"><col style="width: 10%;">'
+        '<col style="width: 14%;"><col style="width: 10%;"><col style="width: 15%;">'
+        '<col style="width: 24%;"><col style="width: 12%;"></colgroup>'
         '<thead><tr><th>Time</th><th>User</th><th>Action</th><th>Page/Area</th><th>Item or Product</th><th>Details</th><th>Result/Status</th></tr></thead>'
         f'<tbody>{"".join(rows)}</tbody></table></div>'
     )
 
 
 def render_activity_log(local_now, *, show_denied=True):
-    if not os_accounts.can_view_activity_log(current_os_user()):
+    user = current_os_user()
+    if not os_accounts.can_view_activity_log(user):
         if show_denied:
             st.title("Access not approved")
             st.caption("This page is not available for your account.")
         return False
-    render_html_section_title("Activity log")
-    control_columns = st.columns([1.2, 1])
-    view = control_columns[0].radio(
-        "View",
-        sports_cave_dashboard.ACTIVITY_VIEWS,
-        horizontal=True,
-        label_visibility="collapsed",
-        key="dashboard-activity-view",
-    )
+    is_owner = os_accounts.is_reporting_owner(user)
+    render_html_section_title("Activity log" if is_owner else "My Work Log")
+    view = sports_cave_dashboard.ACTIVITY_VIEW_TODAY
     month_start = None
-    if view == sports_cave_dashboard.ACTIVITY_VIEW_MONTH:
-        month_options = dashboard_activity_month_options(local_now)
-        month_start = control_columns[1].selectbox(
-            "Month",
-            month_options,
-            format_func=lambda value: f"{calendar.month_name[value.month]} {value.year}",
-            key="dashboard-activity-month",
+    if is_owner:
+        control_columns = st.columns([1.2, 1])
+        view = control_columns[0].radio(
+            "View",
+            sports_cave_dashboard.ACTIVITY_VIEWS,
+            horizontal=True,
             label_visibility="collapsed",
+            key="dashboard-activity-view",
         )
+        if view == sports_cave_dashboard.ACTIVITY_VIEW_MONTH:
+            month_options = dashboard_activity_month_options(local_now)
+            month_start = control_columns[1].selectbox(
+                "Month",
+                month_options,
+                format_func=lambda value: f"{calendar.month_name[value.month]} {value.year}",
+                key="dashboard-activity-month",
+                label_visibility="collapsed",
+            )
+        else:
+            control_columns[1].empty()
     else:
-        control_columns[1].empty()
+        st.caption("Your activity for today")
 
     try:
         entries = sports_cave_dashboard.list_activity_entries(
             view,
             local_now,
             month_start=month_start,
+            user=user,
         )
     except sports_cave_dashboard.DashboardStorageError:
         st.warning("Activity could not load right now. Please try again shortly.")
@@ -10742,7 +10765,7 @@ def render_activity_log(local_now, *, show_denied=True):
             unsafe_allow_html=True,
         )
         return True
-    activity_timezone = timezone_for_os_user(current_os_user())
+    activity_timezone = timezone_for_os_user(user)
     display_entries = sports_cave_dashboard.group_mockup_activity_entries(
         entries,
         activity_timezone,
@@ -10751,59 +10774,66 @@ def render_activity_log(local_now, *, show_denied=True):
         sports_cave_dashboard.activity_table_record(entry, activity_timezone)
         for entry in display_entries
     ]
-    filter_cols = st.columns([1, 1, 1, 1, 1, 1.25])
-    user_filter = filter_cols[0].selectbox(
-        "User",
-        sports_cave_dashboard.activity_filter_options(records, "User"),
-        key="dashboard-activity-filter-user",
-    )
-    action_filter = filter_cols[1].selectbox(
-        "Action",
-        sports_cave_dashboard.activity_filter_options(records, "Action"),
-        key="dashboard-activity-filter-action",
-    )
-    area_filter = filter_cols[2].selectbox(
-        "Page/Area",
-        sports_cave_dashboard.activity_filter_options(records, "Page/Area"),
-        key="dashboard-activity-filter-area",
-    )
-    status_filter = filter_cols[3].selectbox(
-        "Status",
-        sports_cave_dashboard.activity_filter_options(records, "Result/Status"),
-        key="dashboard-activity-filter-status",
-    )
-    sort_order = filter_cols[4].selectbox(
-        "Sort",
-        sports_cave_dashboard.ACTIVITY_SORT_OPTIONS,
-        key="dashboard-activity-sort",
-    )
-    search = filter_cols[5].text_input(
-        "Search",
-        key="dashboard-activity-search",
-        placeholder="Search activity",
-    )
-    reset_cols = st.columns([1, 5])
-    if reset_cols[0].button("Reset filters", key="dashboard-activity-reset-filters", use_container_width=True):
-        for key in (
-            "dashboard-activity-filter-user",
-            "dashboard-activity-filter-action",
-            "dashboard-activity-filter-area",
-            "dashboard-activity-filter-status",
-            "dashboard-activity-sort",
-            "dashboard-activity-search",
-        ):
-            st.session_state.pop(key, None)
-        st.rerun()
-    page_records = sports_cave_dashboard.filter_activity_records(
-        records,
-        user=user_filter,
-        action=action_filter,
-        area=area_filter,
-        status=status_filter,
-        search=search,
-    )
-    page_records = sports_cave_dashboard.sort_activity_records(page_records, sort_order)
-    reset_cols[1].caption(f"{len(page_records)} of {len(records)} activity record(s)")
+    if is_owner:
+        filter_cols = st.columns([1, 1, 1, 1, 1, 1.25])
+        user_filter = filter_cols[0].selectbox(
+            "User",
+            sports_cave_dashboard.activity_filter_options(records, "User"),
+            key="dashboard-activity-filter-user",
+        )
+        action_filter = filter_cols[1].selectbox(
+            "Action",
+            sports_cave_dashboard.activity_filter_options(records, "Action"),
+            key="dashboard-activity-filter-action",
+        )
+        area_filter = filter_cols[2].selectbox(
+            "Page/Area",
+            sports_cave_dashboard.activity_filter_options(records, "Page/Area"),
+            key="dashboard-activity-filter-area",
+        )
+        status_filter = filter_cols[3].selectbox(
+            "Status",
+            sports_cave_dashboard.activity_filter_options(records, "Result/Status"),
+            key="dashboard-activity-filter-status",
+        )
+        sort_order = filter_cols[4].selectbox(
+            "Sort",
+            sports_cave_dashboard.ACTIVITY_SORT_OPTIONS,
+            key="dashboard-activity-sort",
+        )
+        search = filter_cols[5].text_input(
+            "Search",
+            key="dashboard-activity-search",
+            placeholder="Search activity",
+        )
+        reset_cols = st.columns([1, 5])
+        if reset_cols[0].button("Reset filters", key="dashboard-activity-reset-filters", use_container_width=True):
+            for key in (
+                "dashboard-activity-filter-user",
+                "dashboard-activity-filter-action",
+                "dashboard-activity-filter-area",
+                "dashboard-activity-filter-status",
+                "dashboard-activity-sort",
+                "dashboard-activity-search",
+            ):
+                st.session_state.pop(key, None)
+            st.rerun()
+        page_records = sports_cave_dashboard.filter_activity_records(
+            records,
+            user=user_filter,
+            action=action_filter,
+            area=area_filter,
+            status=status_filter,
+            search=search,
+        )
+        page_records = sports_cave_dashboard.sort_activity_records(page_records, sort_order)
+        reset_cols[1].caption(f"{len(page_records)} of {len(records)} activity record(s)")
+    else:
+        page_records = sports_cave_dashboard.sort_activity_records(
+            records,
+            sports_cave_dashboard.ACTIVITY_SORT_NEWEST,
+        )
+        st.caption(f"{len(page_records)} activity record(s)")
     if not page_records:
         st.markdown(
             '<div class="sc-empty-note">No activity matches these filters.</div>',
@@ -10873,7 +10903,7 @@ def _render_archived_sheet_detail(sheet):
 @st.fragment
 def render_daily_execution_archive(local_now, *, show_denied=True):
     user = current_os_user()
-    if not os_accounts.is_admin(user):
+    if not os_accounts.is_reporting_owner(user):
         if show_denied:
             st.title("Access not approved")
             st.caption("This page is not available for your account.")
@@ -10904,7 +10934,7 @@ def render_daily_execution_archive(local_now, *, show_denied=True):
         return False
 
     header = st.columns([1.3, 1, 1.15, 0.9, 0.8, 1, 0.7])
-    for column, label in zip(header, ("Date", "MIP completed", "Other tasks", "Planned hours", "Day rating", "Status", "View")):
+    for column, label in zip(header, ("Date", "MIPs closed", "Other tasks", "Planned hours", "Day rating", "Status", "View")):
         column.markdown(f"**{label}**")
     if not sheets:
         st.caption("No execution sheets for this week.")
@@ -11054,17 +11084,16 @@ def render_lightweight_dashboard_page():
         """,
         unsafe_allow_html=True,
     )
-    if os_accounts.is_admin(user):
-        render_active_alerts(events, today)
+    render_active_alerts(events, today)
+    if os_accounts.is_reporting_owner(user):
         render_daily_execution_panel(local_now, events, state)
-    else:
-        render_active_alerts(events, today)
     render_todays_design_ideas(local_now, events)
     render_dashboard_tasks(state)
     if os_accounts.can_view_activity_log(user):
         render_activity_log(local_now)
-    if os_accounts.is_admin(user):
+    if os_accounts.is_reporting_owner(user):
         render_daily_execution_archive(local_now)
+    if os_accounts.is_admin(user):
         render_sports_sales_calendar(events, local_now)
     safe_startup_print(f"PERF Dashboard total={(time.perf_counter() - started):.3f}s")
 

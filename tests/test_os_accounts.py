@@ -1572,7 +1572,9 @@ class AccountAccessTests(unittest.TestCase):
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
-        self.assertIn("Activity log", text)
+        self.assertIn("My Work Log", text)
+        self.assertNotIn("Activity log", text)
+        self.assertFalse(any(select.label == "User" for select in app_test.selectbox))
         self.assertNotIn("Daily Task Execution Sheet", text)
 
     def test_accounts_access_exposes_activity_log_permission_tick(self):
@@ -1665,11 +1667,13 @@ class AccountAccessTests(unittest.TestCase):
         self.assertEqual(render_for(admin), 2)
 
     def test_admin_home_still_renders_activity_log(self):
+        owner_email = "owner@sportscave.test"
         app_test = AppTest.from_file(str(ROOT / "app.py"))
         app_test.session_state["sports_cave_authenticated"] = True
         app_test.session_state["sports_cave_current_user"] = {
             "id": "admin-1",
             "username": "nathan",
+            "email": owner_email,
             "display_name": "Nathan",
             "role": "admin",
             "timezone": os_accounts.ADMIN_TIMEZONE,
@@ -1679,7 +1683,12 @@ class AccountAccessTests(unittest.TestCase):
         app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
         app_test.session_state["selected_page"] = "Dashboard"
 
-        app_test.run(timeout=20)
+        with patch.dict(
+            "os.environ",
+            {"SPORTS_CAVE_REPORTING_OWNER_EMAIL": owner_email},
+            clear=False,
+        ):
+            app_test.run(timeout=20)
 
         text = self._app_text(app_test)
         self.assertFalse(app_test.exception)
@@ -1694,7 +1703,15 @@ class AccountAccessTests(unittest.TestCase):
             def list_dashboard_tasks(self, status="open"):
                 return []
 
-            def list_activity_logs(self, *, start_at=None, end_at=None, limit=200):
+            def list_activity_logs(
+                self,
+                *,
+                start_at=None,
+                end_at=None,
+                limit=200,
+                actor_user_id=None,
+                actor_email=None,
+            ):
                 return []
 
             def list_dashboard_edition_products(self, *, limit=1000):
@@ -1723,11 +1740,13 @@ class AccountAccessTests(unittest.TestCase):
                     "generated_prompt": "",
                 }
 
+        owner_email = "owner@sportscave.test"
         app_test = AppTest.from_file(str(ROOT / "app.py"))
         app_test.session_state["sports_cave_authenticated"] = True
         app_test.session_state["sports_cave_current_user"] = {
             "id": "admin-1",
             "username": "nathan",
+            "email": owner_email,
             "display_name": "Nathan",
             "role": "admin",
             "timezone": os_accounts.ADMIN_TIMEZONE,
@@ -1737,7 +1756,15 @@ class AccountAccessTests(unittest.TestCase):
         app_test.session_state["sports_cave_auth_checked_at"] = time.monotonic()
         app_test.session_state["selected_page"] = "Dashboard"
 
-        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=DailyExecutionBackend()):
+        with patch.object(
+            sports_cave_dashboard,
+            "get_supabase_backend",
+            return_value=DailyExecutionBackend(),
+        ), patch.dict(
+            "os.environ",
+            {"SPORTS_CAVE_REPORTING_OWNER_EMAIL": owner_email},
+            clear=False,
+        ):
             app_test.run(timeout=20)
 
         text = self._app_text(app_test)
@@ -1756,9 +1783,9 @@ class AccountAccessTests(unittest.TestCase):
             source.index("\n\ndef page_uses_local_database")
         ]
 
-        self.assertIn("if not os_accounts.is_admin(user):", panel_source)
+        self.assertIn("if not os_accounts.is_reporting_owner(user):", panel_source)
         self.assertIn("Access not approved", panel_source)
-        self.assertIn("if os_accounts.is_admin(user):", dashboard_source)
+        self.assertIn("if os_accounts.is_reporting_owner(user):", dashboard_source)
         self.assertIn("render_daily_execution_panel(local_now, events, state)", dashboard_source)
 
 

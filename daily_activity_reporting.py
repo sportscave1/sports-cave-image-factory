@@ -477,7 +477,20 @@ def _activity_account(activity, indexes):
 def _task_finished(task):
     task = dict(task or {})
     status = str(task.get("status") or "").strip().casefold()
-    return bool(task.get("completed")) or status in {"done", "complete", "completed"}
+    return bool(task.get("completed")) or status in {
+        "done",
+        "complete",
+        "completed",
+        "couldnt_finish",
+    }
+
+
+def _task_successful(task):
+    task = dict(task or {})
+    status = str(task.get("status") or "").strip().casefold()
+    return status in {"done", "complete", "completed"} or (
+        bool(task.get("completed")) and status != "couldnt_finish"
+    )
 
 
 def _task_row(task, *, kind):
@@ -492,6 +505,7 @@ def _task_row(task, *, kind):
         "task": name,
         "status": status or ("done" if completed else "outstanding"),
         "completed": completed,
+        "successful": _task_successful(task),
         "notes": sanitize_report_text(
             task.get("why") or task.get("details") or task.get("outcome") or "",
             limit=300,
@@ -514,6 +528,8 @@ def summarise_daily_execution(sheet, *, report_date):
             "outstanding_tasks": [],
             "moved_tasks": [],
             "completed_count": 0,
+            "successful_count": 0,
+            "could_not_finish_count": 0,
             "outstanding_count": 0,
             "task_count": 0,
             "completion_percentage": 0,
@@ -529,6 +545,8 @@ def summarise_daily_execution(sheet, *, report_date):
         if row:
             tasks.append(row)
     completed = [task for task in tasks if task["completed"]]
+    successful = [task for task in tasks if task["successful"]]
+    could_not_finish = [task for task in tasks if task["status"] == "couldnt_finish"]
     outstanding = [task for task in tasks if not task["completed"]]
     moved = [
         task
@@ -575,6 +593,8 @@ def summarise_daily_execution(sheet, *, report_date):
         "outstanding_tasks": outstanding,
         "moved_tasks": moved,
         "completed_count": completed_count,
+        "successful_count": len(successful),
+        "could_not_finish_count": len(could_not_finish),
         "outstanding_count": len(outstanding),
         "task_count": task_count,
         "completion_percentage": round((completed_count / task_count) * 100) if task_count else 0,
@@ -731,6 +751,12 @@ def build_report_snapshot(
             f"Daily Execution: {daily_execution['outstanding_count']} task"
             f"{'s' if daily_execution['outstanding_count'] != 1 else ''} outstanding."
         )
+    if daily_execution.get("could_not_finish_count"):
+        attention.append(
+            f"Daily Execution: {daily_execution['could_not_finish_count']} task"
+            f"{'s' if daily_execution['could_not_finish_count'] != 1 else ''} "
+            "closed as could not finish."
+        )
 
     subject_prefix = "[TEST] " if is_test else ""
     subject = (
@@ -758,7 +784,7 @@ def build_report_snapshot(
             "completed_actions": completed_actions,
             "failed_actions": failed_actions,
             "attention_count": len(attention),
-            "daily_execution_completed": daily_execution["completed_count"],
+            "daily_execution_completed": daily_execution["successful_count"],
             "daily_execution_outstanding": daily_execution["outstanding_count"],
             "social_media": social_overview,
         },
@@ -799,7 +825,11 @@ def _daily_execution_html(daily):
         )
     task_items = []
     for task in daily.get("tasks") or []:
-        marker = "Complete" if task["completed"] else "Outstanding"
+        marker = (
+            "Could not finish"
+            if task.get("status") == "couldnt_finish"
+            else ("Complete" if task["completed"] else "Outstanding")
+        )
         notes = f" - {html.escape(task['notes'])}" if task.get("notes") else ""
         task_items.append(
             f"<li><strong>{html.escape(task['kind'])}:</strong> "
@@ -808,7 +838,7 @@ def _daily_execution_html(daily):
     return (
         '<div style="margin-top:14px;padding:12px;background:#f7f5ef;border-left:3px solid #b58a2a;">'
         "<strong>Daily Execution</strong>"
-        f"<div style=\"margin-top:4px;\">{daily['completed_count']} of {daily['task_count']} tasks complete "
+        f"<div style=\"margin-top:4px;\">{daily['completed_count']} of {daily['task_count']} tasks closed "
         f"({daily['completion_percentage']}%)</div>"
         f"<ul style=\"margin:8px 0 0 18px;padding:0;\">{''.join(task_items) or '<li>No tasks were planned.</li>'}</ul>"
         "</div>"
@@ -991,11 +1021,15 @@ def render_report_text(snapshot):
                 lines.append("- No Daily Execution sheet was created for this date.")
             else:
                 lines.append(
-                    f"- {daily['completed_count']} of {daily['task_count']} tasks complete "
+                    f"- {daily['completed_count']} of {daily['task_count']} tasks closed "
                     f"({daily['completion_percentage']}%)"
                 )
                 for task in daily.get("tasks") or []:
-                    marker = "Complete" if task["completed"] else "Outstanding"
+                    marker = (
+                        "Could not finish"
+                        if task.get("status") == "couldnt_finish"
+                        else ("Complete" if task["completed"] else "Outstanding")
+                    )
                     lines.append(f"- {task['kind']}: {task['task']} ({marker})")
         social = member.get("social_media") or {}
         if social:
@@ -1096,7 +1130,11 @@ def render_report_csv(snapshot):
                 "Page/Area": "Daily Execution",
                 "Item or Product": task["task"],
                 "Details": task.get("notes") or "",
-                "Result/Status": "complete" if task["completed"] else task.get("status") or "outstanding",
+                "Result/Status": (
+                    "could not finish"
+                    if task.get("status") == "couldnt_finish"
+                    else ("complete" if task["completed"] else task.get("status") or "outstanding")
+                ),
             }
             writer.writerow({key: csv_safe_cell(value) for key, value in row.items()})
     return output.getvalue()

@@ -291,9 +291,11 @@ class StaffReportTests(unittest.TestCase):
 
         self.assertTrue(daily["exists"])
         self.assertEqual(daily["task_count"], 4)
-        self.assertEqual(daily["completed_count"], 3)
-        self.assertEqual(daily["outstanding_count"], 1)
-        self.assertEqual(daily["completion_percentage"], 75)
+        self.assertEqual(daily["completed_count"], 4)
+        self.assertEqual(daily["successful_count"], 3)
+        self.assertEqual(daily["could_not_finish_count"], 1)
+        self.assertEqual(daily["outstanding_count"], 0)
+        self.assertEqual(daily["completion_percentage"], 100)
         self.assertEqual([task["task"] for task in daily["mips"]], [
             "Launch product",
             "Review ads",

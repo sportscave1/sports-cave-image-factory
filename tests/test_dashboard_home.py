@@ -14,6 +14,20 @@ import supabase_backend
 
 
 ROOT = Path(__file__).resolve().parents[1]
+OWNER_EMAIL = "owner@sportscave.test"
+
+
+def owner_user():
+    return {
+        "id": "admin-1",
+        "username": "nathan",
+        "email": OWNER_EMAIL,
+        "display_name": "Nathan",
+        "role": "admin",
+        "timezone": "Australia/Sydney",
+        "is_active": True,
+        "page_permissions": [],
+    }
 
 
 class FakeDashboardBackend:
@@ -80,9 +94,41 @@ class FakeDashboardBackend:
             return list(self.tasks)
         return [task for task in self.tasks if task.get("status") == status]
 
-    def list_activity_logs(self, *, start_at=None, end_at=None, limit=200):
-        self.activity_calls.append({"start_at": start_at, "end_at": end_at, "limit": limit})
-        return list(self.activity_rows) if limit is None else self.activity_rows[:limit]
+    def list_activity_logs(
+        self,
+        *,
+        start_at=None,
+        end_at=None,
+        limit=200,
+        actor_user_id=None,
+        actor_email=None,
+    ):
+        self.activity_calls.append(
+            {
+                "start_at": start_at,
+                "end_at": end_at,
+                "limit": limit,
+                "actor_user_id": actor_user_id,
+                "actor_email": actor_email,
+            }
+        )
+        rows = list(self.activity_rows)
+        if actor_user_id or actor_email:
+            rows = [
+                row
+                for row in rows
+                if (
+                    bool(actor_user_id)
+                    and str(((row.get("new_value") or {}).get("metadata") or {}).get("actor_id") or "")
+                    == str(actor_user_id)
+                )
+                or (
+                    bool(actor_email)
+                    and str(((row.get("new_value") or {}).get("metadata") or {}).get("actor_email") or "").casefold()
+                    == str(actor_email).casefold()
+                )
+            ]
+        return rows if limit is None else rows[:limit]
 
     def list_dashboard_edition_products(self, *, limit=1000):
         self.edition_product_calls.append(limit)
@@ -187,21 +233,28 @@ class FakeDashboardBackend:
         self.activity_rows[0]["actor"] = actor
         return dict(existing)
 
-    def update_daily_execution_top_tasks(self, sheet_id, top_tasks, additional_items=None):
+    def update_daily_execution_top_tasks(self, sheet_id, top_tasks, additional_items=None, *, user_id=None):
         for sheet in self.daily_sheets:
-            if sheet["id"] == sheet_id:
+            if sheet["id"] == sheet_id and sheet.get("user_id") == user_id:
                 sheet["top_tasks"] = top_tasks
                 if additional_items is not None:
                     sheet["additional_items"] = additional_items
                 return dict(sheet)
         return {}
 
-    def set_daily_execution_mip_completed(self, sheet_id, index, completed):
+    def set_daily_execution_mip_completed(self, sheet_id, index, completed, *, outcome=None, user_id=None):
         for sheet in self.daily_sheets:
-            if sheet["id"] == sheet_id:
+            if sheet["id"] == sheet_id and sheet.get("user_id") == user_id:
+                old_status = sheet["top_tasks"][index].get("status") or ""
                 sheet["top_tasks"][index]["completed"] = completed
-                sheet["top_tasks"][index]["status"] = "done" if completed else ""
-                self._activity_row("daily_execution_mip_completed", f"Daily task completed: {sheet['top_tasks'][index]['task']}")
+                sheet["top_tasks"][index]["status"] = outcome or ("done" if completed else "")
+                if old_status != sheet["top_tasks"][index]["status"] and sheet["top_tasks"][index]["status"]:
+                    event_type = (
+                        "daily_execution_mip_could_not_finish"
+                        if sheet["top_tasks"][index]["status"] == "couldnt_finish"
+                        else "daily_execution_mip_completed"
+                    )
+                    self._activity_row(event_type, f"Daily task updated: {sheet['top_tasks'][index]['task']}")
                 return dict(sheet)
         return {}
 
@@ -222,9 +275,9 @@ class FakeDashboardBackend:
                 return dict(sheet)
         return {}
 
-    def update_daily_execution_prompt(self, sheet_id, prompt):
+    def update_daily_execution_prompt(self, sheet_id, prompt, *, user_id=None):
         for sheet in self.daily_sheets:
-            if sheet["id"] == sheet_id:
+            if sheet["id"] == sheet_id and sheet.get("user_id") == user_id:
                 sheet["generated_prompt"] = prompt
                 return dict(sheet)
         return {}
@@ -266,12 +319,19 @@ class SportsCaveAuthTests(unittest.TestCase):
 
 class SportsCaveDashboardStateTests(unittest.TestCase):
     def setUp(self):
+        self.owner_environment = patch.dict(
+            "os.environ",
+            {"SPORTS_CAVE_REPORTING_OWNER_EMAIL": OWNER_EMAIL},
+            clear=False,
+        )
+        self.owner_environment.start()
         sports_cave_dashboard.clear_dashboard_caches()
         sports_cave_dashboard.clear_calendar_cache()
 
     def tearDown(self):
         sports_cave_dashboard.clear_dashboard_caches()
         sports_cave_dashboard.clear_calendar_cache()
+        self.owner_environment.stop()
 
     def test_task_add_persists_to_supabase_backend(self):
         backend = FakeDashboardBackend()
@@ -307,6 +367,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             state = sports_cave_dashboard.load_dashboard_state(
                 sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME,
                 datetime(2026, 7, 21, tzinfo=timezone.utc),
+                user=owner_user(),
             )
 
         self.assertEqual(completed["status"], "complete")
@@ -354,10 +415,10 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
 
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
-            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_TODAY, now)
-            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_LAST_7_DAYS, now)
-            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_MONTH, now)
-            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME, now)
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_TODAY, now, user=owner_user())
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_LAST_7_DAYS, now, user=owner_user())
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_MONTH, now, user=owner_user())
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME, now, user=owner_user())
 
         today_call, week_call, month_call, all_time_call = backend.activity_calls
         self.assertIsNone(today_call["limit"])
@@ -378,11 +439,123 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         now = datetime(2026, 7, 21, 10, 30, tzinfo=timezone.utc)
 
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
-            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_TODAY, now)
-            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_TODAY, now)
-            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_LAST_7_DAYS, now)
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_TODAY, now, user=owner_user())
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_TODAY, now, user=owner_user())
+            sports_cave_dashboard.list_activity_entries(sports_cave_dashboard.ACTIVITY_VIEW_LAST_7_DAYS, now, user=owner_user())
 
         self.assertEqual(len(backend.activity_calls), 2)
+
+    def test_activity_log_owner_receives_all_users_without_identity_filter(self):
+        backend = FakeDashboardBackend()
+        backend.activity_rows = [
+            {
+                "id": 1,
+                "event_type": "files_uploaded",
+                "actor": "Nathan",
+                "created_at": "2026-07-21T01:00:00+00:00",
+                "new_value": {"message": "Owner work", "metadata": {"actor_id": "admin-1"}},
+            },
+            {
+                "id": 2,
+                "event_type": "files_uploaded",
+                "actor": "Reina",
+                "created_at": "2026-07-21T00:30:00+00:00",
+                "new_value": {"message": "Worker work", "metadata": {"actor_id": "worker-1"}},
+            },
+        ]
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            entries = sports_cave_dashboard.list_activity_entries(
+                sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME,
+                user=owner_user(),
+            )
+
+        self.assertEqual([entry["message"] for entry in entries], ["Owner work", "Worker work"])
+        self.assertIsNone(backend.activity_calls[0]["actor_user_id"])
+        self.assertIsNone(backend.activity_calls[0]["actor_email"])
+
+    def test_activity_log_non_owner_is_scoped_to_authenticated_identity(self):
+        backend = FakeDashboardBackend()
+        backend.activity_rows = [
+            {
+                "id": 1,
+                "event_type": "files_uploaded",
+                "actor": "Nathan",
+                "created_at": "2026-07-21T01:00:00+00:00",
+                "new_value": {
+                    "message": "Owner work",
+                    "metadata": {"actor_id": "admin-1", "actor_email": OWNER_EMAIL},
+                },
+            },
+            {
+                "id": 2,
+                "event_type": "files_uploaded",
+                "actor": "Reina",
+                "created_at": "2026-07-21T00:30:00+00:00",
+                "new_value": {
+                    "message": "Worker work",
+                    "metadata": {
+                        "actor_id": "worker-1",
+                        "actor_email": "reina@sportscave.test",
+                    },
+                },
+            },
+        ]
+        worker = {
+            "id": "worker-1",
+            "email": "reina@sportscave.test",
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["dashboard", os_accounts.ACTIVITY_LOG_CAPABILITY],
+        }
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            entries = sports_cave_dashboard.list_activity_entries(
+                sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME,
+                user=worker,
+            )
+
+        self.assertEqual([entry["message"] for entry in entries], ["Worker work"])
+        self.assertEqual(backend.activity_calls[0]["actor_user_id"], "worker-1")
+        self.assertEqual(backend.activity_calls[0]["actor_email"], "reina@sportscave.test")
+
+    def test_activity_log_invalid_owner_configuration_fails_closed_to_own_records(self):
+        non_owner_admin = {
+            **owner_user(),
+            "id": "admin-2",
+            "email": "other-admin@sportscave.test",
+        }
+        with patch.dict(
+            "os.environ",
+            {"SPORTS_CAVE_REPORTING_OWNER_EMAIL": "missing@sportscave.test"},
+            clear=False,
+        ):
+            scope = sports_cave_dashboard.activity_log_access_scope(non_owner_admin)
+
+        self.assertFalse(scope["all_users"])
+        self.assertEqual(scope["actor_user_id"], "admin-2")
+        self.assertEqual(scope["actor_email"], "other-admin@sportscave.test")
+
+    def test_activity_log_unverified_or_inactive_owner_never_receives_all_users(self):
+        configured_email = OWNER_EMAIL
+        worker_with_owner_email = {
+            "id": "worker-1",
+            "email": configured_email,
+            "role": "worker",
+            "is_active": True,
+            "page_permissions": ["dashboard", os_accounts.ACTIVITY_LOG_CAPABILITY],
+        }
+        inactive_admin = {**owner_user(), "is_active": False}
+
+        self.assertFalse(
+            sports_cave_dashboard.activity_log_access_scope(worker_with_owner_email)["all_users"]
+        )
+        self.assertIsNone(sports_cave_dashboard.activity_log_access_scope(inactive_admin))
+        with self.assertRaises(sports_cave_dashboard.DashboardStorageError):
+            sports_cave_dashboard.list_activity_entries(
+                sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME,
+                user=None,
+            )
 
     def test_home_activity_log_excludes_automatic_backend_events(self):
         backend = FakeDashboardBackend()
@@ -432,6 +605,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             entries = sports_cave_dashboard.list_activity_entries(
                 sports_cave_dashboard.ACTIVITY_VIEW_ALL_TIME,
                 now,
+                user=owner_user(),
             )
 
         messages = [entry["message"] for entry in entries]
@@ -474,12 +648,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
     def test_daily_execution_sheet_creation_logs_with_actor(self):
         backend = FakeDashboardBackend()
-        user = {
-            "id": "admin-1",
-            "display_name": "Nathan",
-            "role": "admin",
-            "timezone": "Australia/Sydney",
-        }
+        user = owner_user()
 
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend), patch(
             "activity_log.get_activity_actor",
@@ -499,7 +668,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
     def test_daily_execution_mip_checklist_save_and_complete(self):
         backend = FakeDashboardBackend()
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
 
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
             sheet = sports_cave_dashboard.create_daily_execution_sheet(user, date(2026, 7, 21), "Australia/Sydney")
@@ -510,12 +679,106 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
                     {"task": "Upload products", "why": "More SKUs", "time_blocked": "11-1", "completed": False},
                     {"task": "Fix ads", "why": "Traffic", "time_blocked": "2-3", "completed": False},
                 ],
+                user=user,
             )
-            sheet = sports_cave_dashboard.set_daily_execution_mip_completed(sheet["id"], 0, True)
+            sheet = sports_cave_dashboard.set_daily_execution_mip_completed(
+                sheet["id"],
+                0,
+                True,
+                user=user,
+            )
 
         self.assertEqual(sports_cave_dashboard.daily_execution_filled_task_count(sheet), 3)
         self.assertEqual(sports_cave_dashboard.daily_execution_completed_count(sheet), 1)
         self.assertFalse(sports_cave_dashboard.daily_execution_all_mips_complete(sheet))
+
+    def test_daily_execution_outcome_mapping_closes_only_finished_outcomes(self):
+        backend = FakeDashboardBackend()
+        user = owner_user()
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            sheet = sports_cave_dashboard.create_daily_execution_sheet(
+                user,
+                date(2026, 7, 21),
+                "Australia/Sydney",
+            )
+            sheet = sports_cave_dashboard.save_daily_execution_top_tasks(
+                sheet["id"],
+                [
+                    {"task": "Open task"},
+                    {"task": "Completed task"},
+                    {"task": "Blocked task"},
+                ],
+                user=user,
+            )
+            sheet = sports_cave_dashboard.set_daily_execution_mip_completed(
+                sheet["id"],
+                0,
+                False,
+                outcome="",
+                user=user,
+            )
+            sheet = sports_cave_dashboard.set_daily_execution_mip_completed(
+                sheet["id"],
+                1,
+                True,
+                outcome=sports_cave_dashboard.DAILY_TASK_STATUS_DONE,
+                user=user,
+            )
+            sheet = sports_cave_dashboard.set_daily_execution_mip_completed(
+                sheet["id"],
+                2,
+                True,
+                outcome=sports_cave_dashboard.DAILY_TASK_STATUS_COULDNT_FINISH,
+                user=user,
+            )
+            event_count = len(backend.activity_rows)
+            repeated = sports_cave_dashboard.set_daily_execution_mip_completed(
+                sheet["id"],
+                2,
+                True,
+                outcome=sports_cave_dashboard.DAILY_TASK_STATUS_COULDNT_FINISH,
+                user=user,
+            )
+            reloaded = sports_cave_dashboard.get_daily_execution_sheet(
+                user,
+                date(2026, 7, 21),
+            )
+
+        self.assertFalse(reloaded["top_tasks"][0]["completed"])
+        self.assertEqual(reloaded["top_tasks"][0]["status"], "")
+        self.assertTrue(reloaded["top_tasks"][1]["completed"])
+        self.assertEqual(reloaded["top_tasks"][1]["status"], "done")
+        self.assertTrue(reloaded["top_tasks"][2]["completed"])
+        self.assertEqual(reloaded["top_tasks"][2]["status"], "couldnt_finish")
+        self.assertEqual(sports_cave_dashboard.daily_execution_completed_count(repeated), 2)
+        self.assertEqual(len(backend.activity_rows), event_count)
+
+    def test_daily_execution_data_helpers_reject_non_owner_accounts(self):
+        backend = FakeDashboardBackend()
+        worker = {
+            "id": "worker-1",
+            "email": "worker@sportscave.test",
+            "role": "worker",
+            "is_active": True,
+        }
+        non_owner_admin = {
+            "id": "admin-2",
+            "email": "admin@sportscave.test",
+            "role": "admin",
+            "is_active": True,
+        }
+
+        with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
+            for user in (worker, non_owner_admin):
+                with self.subTest(user=user["id"]), self.assertRaises(
+                    sports_cave_dashboard.DashboardStorageError
+                ):
+                    sports_cave_dashboard.get_daily_execution_home_sheets(
+                        user,
+                        date(2026, 7, 21),
+                    )
+
+        self.assertEqual(backend.daily_calls, [])
 
     def test_daily_execution_task_statuses_count_as_complete(self):
         sheet = {
@@ -569,7 +832,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
     def test_daily_execution_create_sheet_does_not_duplicate_same_date(self):
         backend = FakeDashboardBackend()
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
 
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
             first = sports_cave_dashboard.create_daily_execution_sheet(user, date(2026, 7, 22), "Australia/Sydney")
@@ -613,7 +876,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
     def test_daily_execution_saves_other_tasks_and_filters_blank_rows(self):
         backend = FakeDashboardBackend()
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
 
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
             sheet = sports_cave_dashboard.create_daily_execution_sheet(user, date(2026, 7, 21), "Australia/Sydney")
@@ -628,6 +891,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
                     {"task": "Check inbox", "details": "Customer issue", "time_blocked": "15m", "status": "done"},
                     {"task": "", "details": "", "time_blocked": "", "status": ""},
                 ],
+                user=user,
             )
 
         self.assertEqual(len(backend.daily_sheets[0]["additional_items"]), 1)
@@ -685,7 +949,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
     def test_daily_execution_save_with_mips_and_other_tasks_does_not_raise(self):
         backend = FakeDashboardBackend()
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
 
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
             sheet = sports_cave_dashboard.create_daily_execution_sheet(user, date(2026, 7, 22), "Australia/Sydney")
@@ -700,6 +964,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
                     {"task": "Other one", "details": "Small task", "time_blocked": "15m", "status": "done"},
                     {"task": "", "details": "", "time_blocked": "", "status": ""},
                 ],
+                user=user,
             )
             reloaded = sports_cave_dashboard.get_daily_execution_sheet(user, date(2026, 7, 22))
 
@@ -709,7 +974,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
     def test_daily_execution_review_saves_ratings_and_reflections(self):
         backend = FakeDashboardBackend()
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
         review = {
             "daily_summary": "Uploaded the products.",
             "tomorrow_intention": "Nail ads.",
@@ -722,7 +987,11 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             return_value="Nathan",
         ):
             sheet = sports_cave_dashboard.create_daily_execution_sheet(user, date(2026, 7, 21), "Australia/Sydney")
-            completed = sports_cave_dashboard.complete_daily_execution_review(sheet["id"], review)
+            completed = sports_cave_dashboard.complete_daily_execution_review(
+                sheet["id"],
+                review,
+                user=user,
+            )
 
         self.assertEqual(completed["status"], "reviewed")
         self.assertEqual(completed["ratings"]["Focus"], 8)
@@ -761,6 +1030,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         app_test.session_state["sports_cave_current_user"] = {
             "id": "admin-1",
             "username": "nathan",
+            "email": OWNER_EMAIL,
             "display_name": "Nathan",
             "role": "admin",
             "timezone": "Australia/Sydney",
@@ -797,7 +1067,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
     def test_tomorrow_plan_upserts_one_sheet_and_archives_reviewed_today_once(self):
         backend = FakeDashboardBackend()
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
         today = date(2026, 7, 22)
         tomorrow = date(2026, 7, 23)
         top_tasks = [
@@ -832,7 +1102,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
     def test_unreviewed_sheet_is_not_archived_and_archived_sheet_is_read_only(self):
         backend = FakeDashboardBackend()
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
         top_tasks = [{"task": f"MIP {index}"} for index in range(1, 4)]
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend), patch(
             "activity_log.get_activity_actor", return_value="Nathan"
@@ -860,7 +1130,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
             {"id": "nathan", "user_id": "admin-1", "sheet_date": "2026-07-21", "status": "archived"},
             {"id": "other", "user_id": "admin-2", "sheet_date": "2026-07-21", "status": "archived"},
         ]
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
             rows = sports_cave_dashboard.list_daily_execution_archive_summaries(user, date(2026, 7, 20), date(2026, 7, 26))
             blocked_detail = sports_cave_dashboard.get_daily_execution_archive_detail(user, "other")
@@ -881,7 +1151,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
                 "additional_items": [],
             }
         )
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
             home = sports_cave_dashboard.get_daily_execution_home_sheets(user, date(2026, 7, 23))
         self.assertEqual(home["today"]["status"], "active")
@@ -905,7 +1175,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
     def test_archive_week_summary_and_detail_are_separate_queries(self):
         backend = FakeDashboardBackend()
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
         backend.daily_sheets.append(
             {
                 "id": "archive-1",
@@ -955,7 +1225,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(summary["days_planned"], 2)
         self.assertEqual(summary["days_reviewed"], 2)
         self.assertEqual(summary["mip_completed"], 2)
-        self.assertEqual(summary["mip_not_completed"], 2)
+        self.assertEqual(summary["mip_not_completed"], 0)
         self.assertEqual(summary["other_completed"], 1)
         self.assertEqual(summary["planned_hours"], 6.0)
         self.assertEqual(summary["average_day_rating"], 7.0)
@@ -963,7 +1233,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
     def test_home_execution_bundle_uses_one_backend_query_and_warm_cache(self):
         backend = FakeDashboardBackend()
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend):
             sports_cave_dashboard.get_daily_execution_home_sheets(user, date(2026, 7, 22))
             sports_cave_dashboard.get_daily_execution_home_sheets(user, date(2026, 7, 22))
@@ -971,7 +1241,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
 
     def test_plan_save_invalidates_only_the_affected_execution_week(self):
         backend = FakeDashboardBackend()
-        user = {"id": "admin-1", "display_name": "Nathan"}
+        user = owner_user()
         top_tasks = [{"task": f"MIP {index}", "why": "Revenue", "time_blocked": "1h"} for index in range(1, 4)]
         with patch.object(sports_cave_dashboard, "get_supabase_backend", return_value=backend), patch(
             "activity_log.get_activity_actor", return_value="Nathan"
@@ -1022,6 +1292,7 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         app_test.session_state["sports_cave_current_user"] = {
             "id": "admin-1",
             "username": "nathan",
+            "email": OWNER_EMAIL,
             "display_name": "Nathan",
             "role": "admin",
             "timezone": "Australia/Sydney",
@@ -1807,6 +2078,39 @@ class DashboardRenderContractTests(unittest.TestCase):
         self.assertNotIn("Activity page", table_source)
         self.assertNotIn("ACTIVITY_TABLE_PAGE_SIZE", table_source)
         self.assertNotIn('<div class="sc-log-row">', table_source)
+
+    def test_activity_log_overflow_styles_are_scoped_and_keep_full_values_in_titles(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        table_source = source[
+            source.index("def _activity_table_html") :
+            source.index("\n\ndef render_activity_log")
+        ]
+        style_source = source[
+            source.index(".sc-activity-table-wrap") :
+            source.index("@media (max-width: 760px)")
+        ]
+
+        self.assertIn('title="{escaped}"', table_source)
+        self.assertIn('class="sc-activity-cell-text"', table_source)
+        self.assertIn("overflow-wrap: anywhere", style_source)
+        self.assertIn("word-break: break-word", style_source)
+        self.assertIn("-webkit-line-clamp: 2", style_source)
+        self.assertNotIn("\n        table td {", style_source)
+
+    def test_non_owner_activity_log_has_no_filter_toolbar(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        render_source = source[
+            source.index("def render_activity_log") :
+            source.index("\n\ndef _daily_archive_row_metrics")
+        ]
+
+        self.assertIn('render_html_section_title("Activity log" if is_owner else "My Work Log")', render_source)
+        self.assertIn("if is_owner:", render_source)
+        self.assertIn('st.caption("Your activity for today")', render_source)
+        self.assertGreater(
+            render_source.index('filter_cols[0].selectbox(\n            "User"'),
+            render_source.index("if is_owner:"),
+        )
 
 
 if __name__ == "__main__":
