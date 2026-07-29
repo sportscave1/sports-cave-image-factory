@@ -2058,6 +2058,92 @@ PRIMARY TEXT VARIATIONS
                 self.assertIn("SPORT AND COUNTRY VISUAL ADAPTATION", contract)
                 self.assertIn("Selected country: New Zealand", contract)
 
+    def test_ads_visual_contract_is_text_first_across_all_campaign_types(self):
+        expected_prompt_counts = {
+            "Carousel": ads_page.CAROUSEL_CARD_COUNT,
+            "Instant Experience": 1,
+            "Single Image / Video": 1,
+        }
+
+        for campaign_type, expected_prompt_count in expected_prompt_counts.items():
+            with self.subTest(campaign_type=campaign_type):
+                contract = visual_contract(
+                    ads_page.build_ads_prompt(
+                        "Collector Test Product",
+                        "Cricket",
+                        "Australia",
+                        campaign_type,
+                        variation_token="text-first-test",
+                    )
+                )
+
+                self.assertIn("TEXT-FIRST IMAGE GENERATION GATE - HIGHEST PRIORITY", contract)
+                self.assertIn(
+                    "The first response to this Ads prompt must be text and planning only.",
+                    contract,
+                )
+                self.assertIn("Do not call an image-generation tool", contract)
+                self.assertIn(
+                    "Artwork or product images being attached",
+                    contract,
+                )
+                self.assertIn(
+                    "write out the complete finished campaign package in chat",
+                    contract,
+                )
+                self.assertIn(
+                    "every required production-ready image or video prompt in full",
+                    contract,
+                )
+                self.assertIn(
+                    "clearly separated, copyable block",
+                    contract,
+                )
+                self.assertIn(
+                    "complete and self-contained",
+                    contract,
+                )
+                self.assertIn(
+                    "Would you like me to generate Card 1?",
+                    contract,
+                )
+                self.assertIn(
+                    "generate Card 1 only",
+                    contract,
+                )
+                self.assertIn(
+                    "EXPLICIT DIRECT-GENERATION EXCEPTION",
+                    contract,
+                )
+                self.assertIn(
+                    "generate specifically identified creatives now",
+                    contract,
+                )
+
+                if campaign_type == "Carousel":
+                    self.assertEqual(
+                        contract.count("Image prompt:"),
+                        expected_prompt_count,
+                    )
+                    self.assertIn(
+                        "the first response must contain all five complete card prompts",
+                        contract,
+                    )
+                    self.assertIn(
+                        "IMAGE PROMPTS - WRITE OUT IN THIS ORDER",
+                        contract,
+                    )
+                elif campaign_type == "Instant Experience":
+                    self.assertEqual(
+                        contract.count("INSTANT EXPERIENCE COVER IMAGE PROMPT"),
+                        expected_prompt_count,
+                    )
+                else:
+                    self.assertEqual(
+                        contract.count("CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO"),
+                        expected_prompt_count,
+                    )
+
     def test_instant_experience_visual_contract_returns_one_tailored_cover_not_five(self):
         prompt = ads_page.build_ads_prompt(
             "fg",
