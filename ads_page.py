@@ -5,8 +5,10 @@ import logging
 import re
 import secrets
 import time
+from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -16,6 +18,7 @@ import ads_final_review
 import ads_image_workflow
 from ads_product_catalog import load_live_edition_product_rows
 import dropbox_integration
+import image_factory
 import os_accounts
 
 
@@ -51,6 +54,41 @@ CAMPAIGN_TYPE_OPTIONS = [
     "Instant Experience",
     "Single Image / Video",
 ]
+
+CAMPAIGN_MOMENT_TYPE_OPTIONS = [
+    "Gifting Occasion",
+    "Sporting Event",
+    "Sale Period",
+    "Product Drop",
+    "Seasonal Moment",
+    "Other",
+]
+
+CAMPAIGN_MOMENT_MARKET_OPTIONS = [
+    "Use selected ad country",
+    "Australia",
+    "USA",
+    "UK",
+    "Canada",
+    "New Zealand",
+    "Global",
+]
+
+CAMPAIGN_MOMENT_STRENGTH_OPTIONS = [
+    "Subtle",
+    "Moderate",
+    "Campaign-led",
+]
+
+CAMPAIGN_MOMENT_SESSION_KEYS = (
+    "ads_campaign_moment_type",
+    "ads_campaign_moment_name",
+    "ads_campaign_moment_market",
+    "ads_campaign_moment_date",
+    "ads_campaign_moment_promotion",
+    "ads_campaign_moment_strength",
+    "ads_campaign_moment_include_images",
+)
 
 EDITION_OPS_SNAPSHOT_PATH = Path(__file__).resolve().parent / "output" / "_cache" / "edition_ops_products_snapshot.json"
 EDITION_OPS_ROWS_SESSION_KEY = "edition_ops_rows"
@@ -701,6 +739,274 @@ def validate_ads_inputs(product_name, category, country, campaign_type, product_
     return ""
 
 
+def _clean_campaign_moment_value(value):
+    cleaned = re.sub(r"[\x00-\x1f\x7f]", " ", str(value or ""))
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _parse_campaign_moment_date(value):
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = _clean_campaign_moment_value(value)
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _normalise_campaign_moment_option(value, options, default=""):
+    clean_value = _clean_campaign_moment_value(value)
+    for option in options:
+        if clean_value.casefold() == option.casefold():
+            return option
+    return default
+
+
+def empty_campaign_moment():
+    return {
+        "type": "",
+        "name": "",
+        "market": "Use selected ad country",
+        "date": "",
+        "promotion": "",
+        "strength": "Subtle",
+        "include_in_image_prompts": False,
+    }
+
+
+def normalize_campaign_moment(campaign_moment=None, *, selected_country=""):
+    moment = empty_campaign_moment()
+    if isinstance(campaign_moment, dict):
+        moment_type = _normalise_campaign_moment_option(
+            campaign_moment.get("type"),
+            CAMPAIGN_MOMENT_TYPE_OPTIONS,
+            "",
+        )
+        market = _normalise_campaign_moment_option(
+            campaign_moment.get("market"),
+            CAMPAIGN_MOMENT_MARKET_OPTIONS,
+            "Use selected ad country",
+        )
+        strength = _normalise_campaign_moment_option(
+            campaign_moment.get("strength"),
+            CAMPAIGN_MOMENT_STRENGTH_OPTIONS,
+            "Subtle",
+        )
+        parsed_date = _parse_campaign_moment_date(campaign_moment.get("date"))
+        moment.update(
+            {
+                "type": moment_type,
+                "name": _clean_campaign_moment_value(campaign_moment.get("name")),
+                "market": market,
+                "date": parsed_date.isoformat() if parsed_date else "",
+                "promotion": _clean_campaign_moment_value(campaign_moment.get("promotion")),
+                "strength": strength,
+                "include_in_image_prompts": bool(
+                    campaign_moment.get("include_in_image_prompts")
+                ),
+            }
+        )
+    resolved_market = (
+        _clean_campaign_moment_value(selected_country)
+        if moment["market"] == "Use selected ad country"
+        else moment["market"]
+    )
+    moment["resolved_market"] = resolved_market or "not supplied"
+    return moment
+
+
+def campaign_moment_has_user_values(campaign_moment):
+    moment = normalize_campaign_moment(campaign_moment)
+    return any(
+        (
+            bool(moment["type"]),
+            bool(moment["name"]),
+            bool(moment["date"]),
+            bool(moment["promotion"]),
+            moment["market"] != "Use selected ad country",
+            moment["strength"] != "Subtle",
+            bool(moment["include_in_image_prompts"]),
+        )
+    )
+
+
+def campaign_moment_is_active(campaign_moment):
+    moment = normalize_campaign_moment(campaign_moment)
+    return bool(moment["name"])
+
+
+def campaign_moment_today(user=None):
+    timezone_name = os_accounts.timezone_for_user(user or {}) if user else os_accounts.ADMIN_TIMEZONE
+    try:
+        return datetime.now(ZoneInfo(timezone_name)).date()
+    except Exception:
+        return date.today()
+
+
+def campaign_moment_is_expired(campaign_moment, *, today=None):
+    moment = normalize_campaign_moment(campaign_moment)
+    parsed_date = _parse_campaign_moment_date(moment.get("date"))
+    if not parsed_date:
+        return False
+    check_date = today or campaign_moment_today()
+    return parsed_date < check_date
+
+
+def validate_campaign_moment(campaign_moment, *, selected_country="", today=None):
+    moment = normalize_campaign_moment(campaign_moment, selected_country=selected_country)
+    if moment["type"] and not moment["name"]:
+        return "Enter the specific campaign moment, such as Father’s Day or NBA Playoffs."
+    if campaign_moment_has_user_values(moment) and campaign_moment_is_expired(moment, today=today):
+        return "This campaign moment has expired. Update the date or remove the moment before generating timely copy."
+    return ""
+
+
+def campaign_moment_from_result(result, *, selected_country=""):
+    if not isinstance(result, dict):
+        return empty_campaign_moment()
+    return normalize_campaign_moment(
+        result.get("campaign_moment"),
+        selected_country=selected_country,
+    )
+
+
+def _campaign_moment_context_key(campaign_moment, selected_country=""):
+    moment = normalize_campaign_moment(campaign_moment, selected_country=selected_country)
+    if not campaign_moment_is_active(moment):
+        return {}
+    return {
+        "type": moment["type"],
+        "name": moment["name"],
+        "market": moment["market"],
+        "date": moment["date"],
+        "promotion": moment["promotion"],
+        "strength": moment["strength"],
+        "include_in_image_prompts": bool(moment["include_in_image_prompts"]),
+    }
+
+
+def build_campaign_moment_copy_relevance_block(campaign_moment, *, selected_country=""):
+    moment = normalize_campaign_moment(campaign_moment, selected_country=selected_country)
+    if not campaign_moment_is_active(moment):
+        return ""
+    promotion_line = moment["promotion"] or "none supplied"
+    date_line = moment["date"] or "not supplied"
+    type_line = moment["type"] or "not supplied"
+    strength = moment["strength"]
+    return f"""CAMPAIGN MOMENT — OPTIONAL RELEVANCE LAYER
+
+A campaign moment has been supplied for timely relevance.
+
+- Moment type: {type_line}
+- Moment name: {moment["name"]}
+- Relevant market: {moment["resolved_market"]}
+- Event/end date: {date_line}
+- Confirmed promotion: {promotion_line}
+- Relevance strength: {strength}
+
+Use this moment in exactly one primary ad-text variation by default.
+
+Required variation structure:
+
+1. Evergreen emotional/nostalgia angle — no campaign-moment reference.
+2. Evergreen collector, product or fan-identity angle — no campaign-moment reference.
+3. Timely angle — naturally incorporate the supplied campaign moment.
+
+Do not force the moment into every variation.
+
+Even when "Campaign-led" is selected:
+- Only one primary-text variation should be campaign-led.
+- At least two evergreen primary-text variations must remain available for testing.
+- The framed artwork, fan identity, nostalgia and limited-edition value must remain central.
+
+Usage by strength:
+
+SUBTLE:
+Mention the moment naturally and briefly in one variation. Do not lead with a sale. The reference should feel like a timely reason to buy rather than the entire ad concept.
+
+MODERATE:
+Make one variation clearly connected to the moment, while keeping the sporting memory, product and collector value central.
+
+CAMPAIGN-LED:
+Make one variation primarily built around the selected moment or buying occasion. Preserve two evergreen alternatives.
+
+The timely variation must sound human and emotionally relevant. Avoid mechanical lines such as "Father’s Day is approaching. Buy now." Do not hard-code examples into every generated result.
+
+HEADLINE AND DESCRIPTION RULES
+
+The selected moment may influence headlines and description lines only when it improves relevance, fits the existing character limits, sounds natural and does not replace the product identity or scarcity message across the entire set.
+
+For Carousel campaigns:
+- Preserve all existing 17-character headline and description limits.
+- Do not force the event into every card.
+- Use the Campaign Moment on no more than one carousel card unless the user selects Campaign-led.
+- Even when Campaign-led is selected, retain product identity and edition scarcity across the sequence.
+- Do not weaken the existing five-card roles or product-dominance rules.
+- Never lengthen text beyond existing platform limits to fit an event name.
+
+ACCURACY AND OFFER SAFETY
+
+- Never invent event dates, match results, teams, participants or competition outcomes.
+- Never claim a product is officially licensed, endorsed by or affiliated with an event unless that information is explicitly supplied and verified elsewhere in the existing product data.
+- Never invent a discount, free-shipping offer, sale deadline or scarcity figure.
+- Only use the exact promotion entered by the user.
+- If Confirmed promotion is "none supplied", do not create a discount, free-shipping claim, sale deadline, coupon, bundle offer or savings claim.
+- Do not convert a normal product into a "Father’s Day Edition", "World Cup Edition" or similar unless that is the product’s verified name.
+- Do not claim "ends soon", "last chance" or "final hours" unless supported by the supplied date or offer data.
+- Use market-appropriate terminology already established in the Ads system, including "soccer" for the USA and "football" for the UK where relevant.
+- If the selected moment is weakly connected to the product, make the reference about the buying occasion or fan experience rather than inventing a sporting connection.
+- Ensure any promotion referenced in the ad can be matched by the landing page. Flag any potential offer mismatch instead of assuming the offer exists on the page."""
+
+
+def build_campaign_moment_visual_context(campaign_moment, *, selected_country=""):
+    moment = normalize_campaign_moment(campaign_moment, selected_country=selected_country)
+    if not campaign_moment_is_active(moment) or not moment["include_in_image_prompts"]:
+        return ""
+    return f"""CAMPAIGN MOMENT VISUAL CONTEXT — OPTIONAL:
+The selected campaign moment is {moment["name"]} for {moment["resolved_market"]}. Use it only as restrained, premium and believable visual context when it naturally supports the product. The framed artwork must remain the visual hero. Do not make an event prop or seasonal decoration more prominent than the framed artwork. Do not automatically place the event name as text inside the image. Do not add official event logos, trademarks, branded graphics, athlete endorsements, prices, discounts, buttons, banners or promotional stickers. Do not make every room look themed. Preserve all current product locks, square-format locks, card composition rules, room variation rules and photorealism requirements."""
+
+
+def apply_campaign_moment_copy_relevance_layer(prompt, campaign_moment, *, selected_country=""):
+    if not prompt:
+        return prompt
+    block = build_campaign_moment_copy_relevance_block(
+        campaign_moment,
+        selected_country=selected_country,
+    )
+    if not block or "CAMPAIGN MOMENT — OPTIONAL RELEVANCE LAYER" in prompt:
+        return prompt
+    return f"{prompt.rstrip()}\n\n{block}"
+
+
+def campaign_moment_from_form_state():
+    return normalize_campaign_moment(
+        {
+            "type": st.session_state.get("ads_campaign_moment_type"),
+            "name": st.session_state.get("ads_campaign_moment_name"),
+            "market": st.session_state.get(
+                "ads_campaign_moment_market",
+                "Use selected ad country",
+            ),
+            "date": st.session_state.get("ads_campaign_moment_date"),
+            "promotion": st.session_state.get("ads_campaign_moment_promotion"),
+            "strength": st.session_state.get("ads_campaign_moment_strength", "Subtle"),
+            "include_in_image_prompts": st.session_state.get(
+                "ads_campaign_moment_include_images",
+                False,
+            ),
+        }
+    )
+
+
+def clear_campaign_moment_state():
+    for key in CAMPAIGN_MOMENT_SESSION_KEYS:
+        st.session_state.pop(key, None)
+
+
 def _template_slug(value):
     return re.sub(r"[^a-z0-9]+", "_", str(value or "").casefold()).strip("_")
 
@@ -928,19 +1234,90 @@ def build_carousel_final_square_format_check():
     return "FINAL FORMAT CHECK: Output one true 1024 × 1024 image only. Width must equal height. Never output a landscape or portrait image."
 
 
+def build_carousel_card_one_mockups_close_up_foundation():
+    foundation = image_factory.get_close_up_wall_prompt_foundation()
+    if not foundation:
+        return ""
+    replacements = {
+        "Using the uploaded artwork and frame as the exact reference, create a 1024 x 1024 ultra-realistic close-up lifestyle mockup. Use a different angle and different wall colour so it looks like a different house and camera angle to the previous generation.": (
+            "Using the uploaded artwork and frame as the exact reference, create a 1024 x 1024 ultra-realistic close-up product mockup. Use a restrained wall colour, material and lighting treatment that fits the selected product, sport and market while keeping the frame extremely large."
+        ),
+        "Create a close-up shot of the framed artwork mounted on a premium wall, as if it is hanging in someone's real home.": (
+            "Create a close-up shot of the framed artwork mounted on a premium wall, as if it is hanging in someone's real home."
+        ),
+        "Slight natural angle from one side.": (
+            "Almost perfectly straight-on camera position, with only a very subtle 2-4 degree natural angle when required for realistic frame depth."
+        ),
+        "close-up lifestyle mockup": "close-up product mockup",
+        "different house and camera angle": "different premium wall context",
+    }
+    for old, new in replacements.items():
+        foundation = foundation.replace(old, new)
+    return foundation.strip()
+
+
 def build_carousel_card_one_product_hero_lock():
-    return """CARD 1 PRODUCT-HERO COMPOSITION — MANDATORY:
-This is the first and most important carousel image and must be the closest and most product-focused image in the complete five-card sequence. Use a premium close or medium-close product-hero composition in which the complete framed artwork is the dominant visual subject and immediately stops the viewer at thumbnail size. The complete framed artwork should occupy approximately 65-80% of the square image's width while remaining fully visible with breathing room around it, including all four outer edges and corners. Use a premium, realistic room setting, but keep furniture and architectural details secondary. Do not use a wide room view. Do not place the frame far away, make it small or allow the environment to compete with the product. Photograph it almost straight-on or from a very restrained natural angle so the artwork, frame depth and design remain easy to inspect. Preserve enough surrounding wall and setting to feel aspirational and physically believable.
+    close_up_foundation = build_carousel_card_one_mockups_close_up_foundation()
+    foundation_block = (
+        f"\n\nMOCKUPS CLOSE-UP WALL SHOT FOUNDATION — REUSED:\n{close_up_foundation}"
+        if close_up_foundation
+        else ""
+    )
+    return f"""CARD 1 EXTREME PRODUCT CLOSE-UP LOCK — MANDATORY:
+Carousel Card 1 must use the existing Mockups/Reel Close-Up Premium Wall Shot as its close-up composition foundation, then obey the stricter Carousel Card 1 rules below. Carousel Card 1 must be a premium close-up product photograph, not a lifestyle room photograph.{foundation_block}
+
+The complete framed product must occupy approximately 86-92% of the square canvas width and should fill most of the vertical composition while preserving its correct landscape proportions. This percentage is mandatory, not an optional target.
+
+Keep all four outer frame edges and all four corners completely visible. Leave only a narrow, natural margin around the frame. Never crop the frame, artwork, border, plaque or shadow.
+
+Use an almost perfectly straight-on camera position, level with the centre of the artwork. Allow no more than a very subtle 2-4 degree natural angle when required for realistic frame depth.
+
+Use the visual character of a premium 70-85 mm product-photography lens:
+- No wide-angle room view.
+- No distant camera position.
+- No exaggerated perspective.
+- No large foreground.
+- No visible ceiling.
+- No doorway framing.
+- No long floor area.
+- No large furniture.
+- No room-establishing composition.
+
+Show only enough environment to prove the frame is physically mounted in a real premium home. The background should mainly be a realistic wall surface. At most, allow a very small restrained edge of a console, cabinet or surface at the bottom of the image, but only if it does not reduce the frame's required 86-92% canvas-width size.
+
+The frame and artwork must be immediately readable at Facebook carousel thumbnail size. The viewer should first see the product, then notice the wall and atmosphere afterward.
+
+CARD 1 SCENE RULE — MANDATORY:
+Preserve the selected sport, country and product-specific visual adaptation, but express it through restrained wall material, lighting and colour rather than a full room scene. Do not generate an entry gallery, living room, office, man cave, home bar or other wide lifestyle environment for Card 1.
+
+Card 1 should feel like a high-end framed-art campaign photograph:
+- Exact framed product as the hero.
+- Narrow wall context.
+- Sharp artwork detail.
+- Visible physical frame depth.
+- Controlled real-glass reflections.
+- Realistic mounting and contact shadow.
+- Premium natural light.
+- Photorealistic materials.
+- No obvious AI appearance.
 
 Card 1 must:
 - Predominantly display the framed product.
 - Show the complete outer frame without cropping any edge.
 - Keep the artwork large, sharp and readable.
-- Use a close or medium-close camera distance.
-- Still show a tasteful portion of the room around it.
+- Use an extreme close-up product-photography camera distance.
+- Show only narrow wall context around it.
 - Avoid wide establishing shots.
 - Avoid furniture blocking or visually competing with the frame.
-- Retain all existing product-lock and artwork-preservation instructions."""
+- Retain all existing product-lock and artwork-preservation instructions.
+
+STRICT PRODUCT PRESERVATION — CARD 1:
+Use the uploaded framed product as the exact compositing source. Preserve the entire original frame and everything inside it exactly: artwork, athletes and faces, vehicles, colours, typography, names, signatures, Sports Cave branding, borders, edition plaque and number, internal crop and composition, frame colour, thickness and proportions. Do not regenerate, reinterpret, redraw or create a lookalike of the artwork. Do not blur, stretch, warp, bend, squash or distort the artwork or frame. The artwork must never extend beyond its original border.
+
+CARD 1 REALISM UPGRADE — MANDATORY:
+Card 1 must resemble genuine commercial product photography. Require physically convincing premium timber frame depth, sharp square corners and clean joins, natural glass thickness, subtle reflections that match the light source, controlled glare that never hides important artwork details, realistic contact shadow behind and slightly below the frame, accurate scale and perspective, fine wall texture, natural highlight falloff and realistic sharpness without oversharpening.
+
+Reject flat pasted-on artwork, fake or missing glass, plastic frame materials, artificial HDR, excessive glow, warped frame edges, curved walls, impossible reflections, melted textures, fake luxury styling, AI-generated-looking artwork, excessive depth of field, blurred product detail, compact entry gallery compositions, visible flooring, furniture-led composition or any room-setting instruction that would make the framed product smaller than 86-92% of the canvas width."""
 
 
 def build_carousel_product_dominance_principle_lock():
@@ -968,12 +1345,21 @@ def build_carousel_photorealism_lock():
 Make the room, frame and product placement resemble a genuine high-end interior photograph, not an AI-generated room or digital render. Use believable architecture, correct perspective, natural proportions and physically accurate scale. Create realistic contact shadows behind and below the frame. Use subtle, controlled glass reflections without obscuring the artwork. Give the frame convincing timber depth, sharp corners, natural texture and accurate mounting. Use realistic natural or practical lighting with consistent direction and colour temperature. Avoid plastic-looking surfaces, excessive HDR, artificial glow, oversharpening and cinematic effects that make the image look generated. Avoid warped walls, bent furniture, duplicate objects, melted textures, impossible shadows, distorted decor, floating objects and inconsistent reflections. Keep room styling restrained and believable with a small number of purposeful objects rather than AI-generated clutter. Do not add people unless the individual carousel concept explicitly requires them; if people are required, they must look anatomically and photographically realistic."""
 
 
-def build_carousel_image_prompt_schema(index, role):
+def build_carousel_image_prompt_schema(index, role, campaign_moment=None, *, selected_country=""):
     square_lock = build_carousel_square_format_lock()
     product_dominance_lock = build_carousel_product_dominance_principle_lock()
     camera_distance_lock = build_carousel_card_camera_distance_lock(index)
     strict_product_lock = build_carousel_strict_product_lock()
     photorealism_lock = build_carousel_photorealism_lock()
+    campaign_moment_visual_context = build_campaign_moment_visual_context(
+        campaign_moment,
+        selected_country=selected_country,
+    )
+    campaign_moment_visual_block = (
+        f"\n\n{campaign_moment_visual_context}"
+        if campaign_moment_visual_context
+        else ""
+    )
     final_check = build_carousel_final_square_format_check()
     return f"""Card {index} — [exact generated Card {index} headline]
 Matching description: [exact generated Card {index} description]
@@ -989,18 +1375,25 @@ Card-specific visual purpose: {role}
 
 {strict_product_lock}
 
-{photorealism_lock}
+{photorealism_lock}{campaign_moment_visual_block}
 
 [Then continue this same standalone prompt with the exact uploaded-product/artwork lock, room, camera, lighting and realism instructions, previous-image variation lock, sport and country adaptation, prohibited elements, and any relevant card-specific selling idea.]
 
 {final_check}"""
 
 
-def build_carousel_visual_output_requirements(template_key):
+def build_carousel_visual_output_requirements(template_key, campaign_moment=None, *, selected_country=""):
     roles = get_carousel_visual_roles(template_key)
     schema = []
     for index, role in enumerate(roles, start=1):
-        schema.append(build_carousel_image_prompt_schema(index, role))
+        schema.append(
+            build_carousel_image_prompt_schema(
+                index,
+                role,
+                campaign_moment,
+                selected_country=selected_country,
+            )
+        )
     schema_text = "\n".join(schema).rstrip()
     return f"""CAROUSEL VISUAL STORY REQUIREMENTS
 
@@ -1027,11 +1420,11 @@ Each prompt must be based on the selected product name, selected sport, selected
 
 The five images must form one premium visual story, not five random mockups. Maintain compatible colour restraint, premium photographic quality, related lighting character, correct black-frame presentation and a shared Sports Cave collector tone without making the rooms identical.
 
-Each visual must clearly support its assigned card message while the framed product remains the unmistakable hero. Card 1 must deliver the strongest immediate product presentation and be the most zoomed-in card. Cards 2-5 may show more of the environment, but only moderately; none may become a distant room shot. Card 5 must deliver the strongest truthful scarcity or final-claim presentation while keeping the product prominent.
+Each visual must clearly support its assigned card message while the framed product remains the unmistakable hero. Card 1 must deliver the strongest immediate product presentation and be the most zoomed-in card: a close-up wall product photograph with the frame occupying 86-92% of the square canvas width. Cards 2-5 may show more of the environment, but only moderately; none may become a distant room shot. Card 5 must deliver the strongest truthful scarcity or final-claim presentation while keeping the product prominent.
 
 Use this direct conversion-focused visual progression while preserving the selected template's approved role labels:
 
-- Card 1: a clean product-hero presentation.
+- Card 1: an extreme close-up wall product-hero presentation based on the Mockups/Reel Close-Up Premium Wall Shot.
 - Card 2: a desirable ownership setting.
 - Card 3: a premium collector display suited to the selected category.
 - Card 4: an emotional lifestyle, memory or legacy presentation.
@@ -1041,9 +1434,9 @@ For every card, make the exact generated headline, exact generated description, 
 
 Privately develop a fresh visual concept from the selected product before writing the five prompts. Do not output that reasoning.
 
-Across the five prompts deliberately vary room type, architecture, wall finish, material palette, furniture style, lighting direction, time of day, camera height, camera distance, camera angle, artwork placement, emotional intensity, negative space, framing and composition, and how the room expresses the card's message without zooming out so far that the framed artwork becomes small.
+Across the five prompts deliberately vary room type, architecture, wall finish, material palette, furniture style, lighting direction, time of day, camera height, camera distance, camera angle, artwork placement, emotional intensity, negative space, framing and composition, and how the room expresses the card's message without zooming out so far that the framed artwork becomes small. For Card 1, variation means restrained wall material, wall colour, lighting and frame-depth treatment only; do not create a full room scene for Card 1.
 
-No two cards may repeat the room type, house architecture, wall treatment, wall colour family, main furniture layout, lighting setup, time-of-day treatment, camera composition, camera height or artwork placement.
+No two cards may repeat the room type, house architecture, wall treatment, wall colour family, main furniture layout, lighting setup, time-of-day treatment, camera composition, camera height or artwork placement. Card 1 is intentionally a close-up wall product shot, so do not force it into a living room, entry gallery, office, man cave, home bar or other room type for the sake of variety.
 
 Do not merely recolour the same room. Do not default to a generic office, living room, man cave, collector room and close-up sequence.
 
@@ -1444,6 +1837,7 @@ def build_instant_experience_visual_output_requirements(
     product_name="",
     category="",
     country="",
+    campaign_moment=None,
 ):
     layout_rules = build_default_instant_experience_cover_prompt_requirements(
         product_name,
@@ -1451,6 +1845,15 @@ def build_instant_experience_visual_output_requirements(
         country,
     )
     scarcity_rules = """Use the exact default overlay text supplied above. Do not replace it with generated copy, alternate scarcity wording, a different CTA, a fake button or an inferred edition claim."""
+    campaign_moment_visual_context = build_campaign_moment_visual_context(
+        campaign_moment,
+        selected_country=country,
+    )
+    campaign_moment_visual_block = (
+        f"\n\n{campaign_moment_visual_context}"
+        if campaign_moment_visual_context
+        else ""
+    )
 
     return f"""INSTANT EXPERIENCE VISUAL REQUIREMENTS
 
@@ -1461,6 +1864,8 @@ Tailor the cover to the selected product name, selected sport, selected country,
 {layout_rules}
 
 {scarcity_rules}
+
+{campaign_moment_visual_block}
 
 Never invent edition quantities, sale prices, discounts, signatures, logos, athlete names, achievements, dates, rivalries, product details or scarcity facts.
 
@@ -1473,7 +1878,16 @@ INSTANT EXPERIENCE COVER IMAGE PROMPT
 Return exactly one cover-image prompt and no additional image prompts."""
 
 
-def build_single_image_video_visual_output_requirements():
+def build_single_image_video_visual_output_requirements(campaign_moment=None, *, selected_country=""):
+    campaign_moment_visual_context = build_campaign_moment_visual_context(
+        campaign_moment,
+        selected_country=selected_country,
+    )
+    campaign_moment_visual_block = (
+        f"\n\n{campaign_moment_visual_context}"
+        if campaign_moment_visual_context
+        else ""
+    )
     return """SINGLE IMAGE / VIDEO VISUAL REQUIREMENTS
 
 Preserve the existing Single Image / Video route and output fields.
@@ -1482,11 +1896,15 @@ Upgrade its existing creative brief into exactly one complete standalone creativ
 
 Place this one enhanced creative prompt after every existing copy, headline, description, CTA, setup and URL-parameter field.
 
+{campaign_moment_visual_block}
+
 CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO
 
 [one complete standalone image or video prompt that repeats the complete LAST-IMAGE VARIATION LOCK instructions]
 
-Return exactly one creative prompt."""
+Return exactly one creative prompt.""".format(
+        campaign_moment_visual_block=campaign_moment_visual_block
+    )
 
 
 def build_campaign_visual_output_contract(
@@ -1497,20 +1915,29 @@ def build_campaign_visual_output_contract(
     *,
     template_key=None,
     variation_token="",
+    campaign_moment=None,
 ):
     product_name = _clean_product_name(product_name)
     variation_token = _normalise_option_label(variation_token) or "standard"
     if campaign_type == "Carousel":
-        campaign_requirements = build_carousel_visual_output_requirements(template_key)
+        campaign_requirements = build_carousel_visual_output_requirements(
+            template_key,
+            campaign_moment,
+            selected_country=country,
+        )
     elif campaign_type == "Instant Experience":
         campaign_requirements = build_instant_experience_visual_output_requirements(
             template_key,
             product_name=product_name,
             category=category,
             country=country,
+            campaign_moment=campaign_moment,
         )
     elif campaign_type == "Single Image / Video":
-        campaign_requirements = build_single_image_video_visual_output_requirements()
+        campaign_requirements = build_single_image_video_visual_output_requirements(
+            campaign_moment,
+            selected_country=country,
+        )
     else:
         return ""
 
@@ -1556,6 +1983,7 @@ def apply_campaign_visual_output_contract(
     campaign_type,
     template_key=None,
     variation_token="",
+    campaign_moment=None,
 ):
     if not prompt or "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT" in prompt:
         return prompt
@@ -1566,6 +1994,7 @@ def apply_campaign_visual_output_contract(
         campaign_type,
         template_key=template_key,
         variation_token=variation_token,
+        campaign_moment=campaign_moment,
     )
     return f"{prompt.rstrip()}\n\n{contract}" if contract else prompt
 
@@ -2089,6 +2518,7 @@ def compose_final_ads_prompt(
     product_name="",
     template_key=None,
     variation_token="",
+    campaign_moment=None,
 ):
     if not prompt:
         return prompt
@@ -2100,6 +2530,11 @@ def compose_final_ads_prompt(
     )
     prompt = apply_shared_meta_winner_copy_upgrade(prompt, campaign_type)
     prompt = apply_country_language_guidance(prompt, country)
+    prompt = apply_campaign_moment_copy_relevance_layer(
+        prompt,
+        campaign_moment,
+        selected_country=country,
+    )
     prompt = apply_meta_url_parameters_guidance(prompt)
     if product_name:
         prompt = apply_campaign_visual_output_contract(
@@ -2110,6 +2545,7 @@ def compose_final_ads_prompt(
             campaign_type=campaign_type,
             template_key=template_key,
             variation_token=variation_token,
+            campaign_moment=campaign_moment,
         )
     return prompt
 
@@ -3467,6 +3903,7 @@ def build_ads_prompt(
     product_url="",
     *,
     variation_token="",
+    campaign_moment=None,
 ):
     template_key = get_template_key(category, campaign_type)
     if template_key == "motorsport_carousel":
@@ -3518,6 +3955,7 @@ def build_ads_prompt(
         product_name=product_name,
         template_key=template_key,
         variation_token=variation_token,
+        campaign_moment=campaign_moment,
     )
 
 
@@ -3556,6 +3994,79 @@ def render_product_name_input():
     )
 
 
+def render_campaign_moment_section():
+    with st.container(border=True):
+        st.markdown("**Campaign Moment (Optional)**")
+        st.caption(
+            "Add an occasion, sporting event or promotional period to make one copy variation more timely. Leave blank for fully evergreen ads."
+        )
+        type_col, name_col = st.columns([1, 2])
+        with type_col:
+            st.selectbox(
+                "Moment Type",
+                [""] + CAMPAIGN_MOMENT_TYPE_OPTIONS,
+                index=0,
+                format_func=lambda option: "Select a moment type" if not option else option,
+                key="ads_campaign_moment_type",
+            )
+        with name_col:
+            st.text_input(
+                "Moment Name",
+                placeholder="Father’s Day, NBA Playoffs, World Cup, Bathurst, Black Friday",
+                key="ads_campaign_moment_name",
+            )
+        market_col, date_col = st.columns(2)
+        with market_col:
+            st.selectbox(
+                "Relevant Country or Market",
+                CAMPAIGN_MOMENT_MARKET_OPTIONS,
+                index=0,
+                key="ads_campaign_moment_market",
+            )
+        with date_col:
+            st.date_input(
+                "Event Date or End Date",
+                value=None,
+                key="ads_campaign_moment_date",
+            )
+            st.caption("Used to prevent outdated or misleading event references.")
+        offer_col, strength_col = st.columns([2, 1])
+        with offer_col:
+            st.text_input(
+                "Promotion or Offer",
+                placeholder="Free shipping, 15% off 2+ editions, no offer",
+                key="ads_campaign_moment_promotion",
+            )
+            st.caption(
+                "Only the exact entered offer may be used. Leave blank to prevent discount or free-shipping claims."
+            )
+        with strength_col:
+            st.selectbox(
+                "Relevance Strength",
+                CAMPAIGN_MOMENT_STRENGTH_OPTIONS,
+                index=0,
+                key="ads_campaign_moment_strength",
+            )
+        st.caption(
+            "Subtle: Mention the moment naturally in one copy variation. Moderate: Make one variation clearly timely while keeping the product and collector story central. Campaign-led: Make one variation primarily about the moment, while keeping the other variations evergreen."
+        )
+        st.checkbox(
+            "Use this moment in image prompts",
+            value=False,
+            key="ads_campaign_moment_include_images",
+            help="Leave off to keep the event limited to ad copy. Enable only when the room, styling or visual context should subtly support the moment.",
+        )
+        st.caption(
+            "Do not add event text, promotional overlays, prices, logos, event branding or sale stickers to generated images unless separately and explicitly requested by the existing workflow."
+        )
+        moment = campaign_moment_from_form_state()
+        if campaign_moment_is_active(moment):
+            st.caption(
+                f"{moment['name']} · {moment['resolved_market']} · {moment['strength']}"
+            )
+    return campaign_moment_from_form_state()
+
+
 def record_ad_prompt_generated(product_name, category, country, campaign_type):
     record_activity_log(
         "ad_prompt_generated",
@@ -3586,18 +4097,28 @@ def current_ads_user():
     return {}
 
 
-def ads_result_context_key(product_id, product_name, category, country, campaign_type):
-    payload = json.dumps(
-        {
-            "product_id": str(product_id or ""),
-            "product_name": _clean_product_name(product_name),
-            "category": str(category or ""),
-            "country": str(country or ""),
-            "campaign_type": str(campaign_type or ""),
-        },
-        sort_keys=True,
-        ensure_ascii=False,
+def ads_result_context_key(
+    product_id,
+    product_name,
+    category,
+    country,
+    campaign_type,
+    campaign_moment=None,
+):
+    payload_data = {
+        "product_id": str(product_id or ""),
+        "product_name": _clean_product_name(product_name),
+        "category": str(category or ""),
+        "country": str(country or ""),
+        "campaign_type": str(campaign_type or ""),
+    }
+    moment_key = _campaign_moment_context_key(
+        campaign_moment,
+        selected_country=country,
     )
+    if moment_key:
+        payload_data["campaign_moment"] = moment_key
+    payload = json.dumps(payload_data, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
 
 
@@ -3610,10 +4131,15 @@ def build_ads_result_record(
     product_id="",
     product_url="",
     variation_token="",
+    campaign_moment=None,
 ):
     clean_product_name = _clean_product_name(product_name)
     clean_product_id = str(product_id or "").strip()
     clean_variation_token = str(variation_token or "").strip() or build_visual_variation_token()
+    clean_campaign_moment = normalize_campaign_moment(
+        campaign_moment,
+        selected_country=country,
+    )
     master_prompt = build_ads_prompt(
         clean_product_name,
         category,
@@ -3621,6 +4147,7 @@ def build_ads_result_record(
         campaign_type,
         product_url=product_url,
         variation_token=clean_variation_token,
+        campaign_moment=clean_campaign_moment,
     )
     return {
         "context_key": ads_result_context_key(
@@ -3629,6 +4156,7 @@ def build_ads_result_record(
             category,
             country,
             campaign_type,
+            clean_campaign_moment,
         ),
         "product_id": clean_product_id,
         "product_name": clean_product_name,
@@ -3637,6 +4165,7 @@ def build_ads_result_record(
         "campaign_type": str(campaign_type or ""),
         "product_url": _clean_product_url(product_url),
         "variation_token": clean_variation_token,
+        "campaign_moment": clean_campaign_moment,
         "master_prompt": master_prompt,
         "generated_ad_output": master_prompt,
     }
@@ -3656,6 +4185,7 @@ def _new_ads_image_workflow(result):
         "destination_path": "",
         "picker_path": "",
         "outcomes": {},
+        "ad_notes": {},
     }
 
 
@@ -3767,6 +4297,30 @@ def _ads_image_valid_slots(result, workflow):
     ]
 
 
+def _ads_image_saved_count(result, workflow):
+    slot_ids = {
+        slot["id"]
+        for slot in ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    }
+    return sum(
+        1
+        for slot_id, outcome in (workflow.get("outcomes") or {}).items()
+        if slot_id in slot_ids and outcome.get("status") == "saved"
+    )
+
+
+def _ads_image_failed_count(result, workflow):
+    slot_ids = {
+        slot["id"]
+        for slot in ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    }
+    return sum(
+        1
+        for slot_id, outcome in (workflow.get("outcomes") or {}).items()
+        if slot_id in slot_ids and outcome.get("status") == "failed"
+    )
+
+
 def _ads_image_required_count(result):
     return 1 if _is_instant_experience_result(result) else len(
         ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
@@ -3859,6 +4413,202 @@ def _meta_output_filename(result, workflow, slot):
         position=slot["position"],
         iso_date=workflow["export_date"],
     )
+
+
+def _ads_export_date_compact(workflow):
+    export_date = str((workflow or {}).get("export_date") or "").strip()
+    try:
+        parsed = date.fromisoformat(export_date)
+    except ValueError:
+        parsed = campaign_moment_today()
+    return parsed.strftime("%d%m%y")
+
+
+def build_ads_export_folder_name(result, workflow):
+    date_code = _ads_export_date_compact(workflow)
+    product = ads_image_workflow.sanitize_product_filename(
+        result.get("product_name"),
+        max_length=80,
+    )
+    category = ads_image_workflow.sanitize_product_filename(
+        result.get("category"),
+        max_length=40,
+    )
+    country = ads_image_workflow.sanitize_product_filename(
+        result.get("country"),
+        max_length=40,
+    )
+    return ads_image_workflow.sanitize_product_filename(
+        f"Ad({date_code}) {product} ({category}) {country}",
+        max_length=180,
+    )
+
+
+def build_ads_notes_filename(result, workflow):
+    folder_name = build_ads_export_folder_name(result, workflow)
+    return ads_image_workflow.sanitize_product_filename(
+        f"{folder_name} - Ad Setup Notes.txt",
+        max_length=210,
+    )
+
+
+def _ads_export_folder_path(destination, result, workflow):
+    clean_destination = dropbox_integration.normalize_dropbox_path(destination)
+    folder_name = build_ads_export_folder_name(result, workflow)
+    if PurePosixPath(clean_destination).name.casefold() == folder_name.casefold():
+        return clean_destination
+    return dropbox_integration.join_upload_path(clean_destination, folder_name)
+
+
+def _ads_notes_for_workflow(workflow):
+    notes = dict((workflow or {}).get("ad_notes") or {})
+    def clean_multiline(value):
+        text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", text)
+        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
+        return "\n".join(lines).strip()
+
+    return {
+        "headlines": clean_multiline(notes.get("headlines")),
+        "descriptions": clean_multiline(notes.get("descriptions")),
+        "cards": clean_multiline(notes.get("cards")),
+    }
+
+
+def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
+    notes = _ads_notes_for_workflow(workflow)
+    campaign_type = str(result.get("campaign_type") or "")
+    image_outcomes = dict(image_outcomes or (workflow or {}).get("outcomes") or {})
+    slot_specs = ads_image_workflow.campaign_image_slots(campaign_type)
+    lines = [
+        "Sports Cave Ad Setup Notes",
+        "",
+        f"Product: {result.get('product_name') or ''}",
+        f"Category: {result.get('category') or ''}",
+        f"Country/market: {result.get('country') or ''}",
+        f"Campaign type: {campaign_type}",
+        f"Product URL: {result.get('product_url') or ''}",
+        f"Meta URL parameters: {META_AD_URL_PARAMETERS}",
+        f"Export date: {(workflow or {}).get('export_date') or ''}",
+        "",
+        "Uploaded images",
+    ]
+    if slot_specs:
+        for slot in slot_specs:
+            outcome = image_outcomes.get(slot["id"]) or {}
+            filename = outcome.get("filename") or _meta_output_filename(result, workflow, slot)
+            status = outcome.get("status") or (
+                "ready to save"
+                if ((workflow.get("slots") or {}).get(slot["id"]) or {}).get("valid")
+                else "not supplied"
+            )
+            lines.append(f"- {slot['label']}: {filename} ({status})")
+    else:
+        lines.append("- No generated image upload slots for this campaign type.")
+
+    lines.extend(["", "Pasted headlines"])
+    lines.append(notes["headlines"] or "[not supplied]")
+    lines.extend(["", "Pasted descriptions"])
+    lines.append(notes["descriptions"] or "[not supplied]")
+
+    if campaign_type == "Carousel":
+        lines.extend(
+            [
+                "",
+                "Carousel card copy / setup",
+                notes["cards"] or "[not supplied]",
+                "",
+                "Carousel setup checklist",
+                "- Use exactly 5 carousel cards in the generated order.",
+                f"- Keep each carousel headline and description within {CAROUSEL_CARD_MAX_CHARACTERS} characters.",
+                "- Match each saved image to its corresponding card number.",
+                "- Use the pasted primary text, card copy, CTA and URL parameters from the ChatGPT output.",
+            ]
+        )
+    elif campaign_type == "Instant Experience":
+        lines.extend(
+            [
+                "",
+                "Instant Experience copy / setup",
+                notes["cards"] or "[not supplied]",
+                "",
+                "Instant Experience setup checklist",
+                "- Use cover 1 as the main Instant Experience cover.",
+                "- Optional cover variations can be used for testing when supplied.",
+                "- Product headline should use the selected product name.",
+                "- Product description should use Limited Edition unless the prompt output gives a verified alternative.",
+                "- Use the pasted primary text, headline option, description, CTA and URL parameters from the ChatGPT output.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "",
+                "Single Image / Video copy / setup",
+                notes["cards"] or "[not supplied]",
+                "",
+                "Single Image / Video setup checklist",
+                "- Use the pasted primary text, headline, description, CTA and URL parameters from the ChatGPT output.",
+                "- Keep product identity, scarcity and landing-page claims aligned.",
+            ]
+        )
+
+    moment = normalize_campaign_moment(
+        result.get("campaign_moment"),
+        selected_country=result.get("country"),
+    )
+    if campaign_moment_is_active(moment):
+        lines.extend(
+            [
+                "",
+                "Campaign moment",
+                f"- Type: {moment.get('type') or 'not supplied'}",
+                f"- Name: {moment.get('name') or 'not supplied'}",
+                f"- Market: {moment.get('resolved_market') or 'not supplied'}",
+                f"- Date/end date: {moment.get('date') or 'not supplied'}",
+                f"- Promotion: {moment.get('promotion') or 'none supplied'}",
+                f"- Strength: {moment.get('strength') or 'Subtle'}",
+                f"- Included in image prompts: {'yes' if moment.get('include_in_image_prompts') else 'no'}",
+            ]
+        )
+    return "\r\n".join(lines).strip() + "\r\n"
+
+
+def _render_ads_setup_notes(result, workflow):
+    if not ads_image_workflow.campaign_image_slots(result.get("campaign_type")):
+        return
+    notes = dict(workflow.get("ad_notes") or {})
+    with st.expander("Ad setup notes (optional)", expanded=False):
+        st.caption("Paste the final ChatGPT ad copy here. A text file will save beside the uploaded images.")
+        first, second = st.columns(2)
+        with first:
+            notes["headlines"] = st.text_area(
+                "Headlines",
+                value=str(notes.get("headlines") or ""),
+                placeholder="Paste the 5 headlines, one per line.",
+                height=90,
+                key=f"ads-notes-headlines::{result['context_key']}",
+            )
+        with second:
+            notes["descriptions"] = st.text_area(
+                "Descriptions",
+                value=str(notes.get("descriptions") or ""),
+                placeholder="Paste the 5 descriptions, one per line.",
+                height=90,
+                key=f"ads-notes-descriptions::{result['context_key']}",
+            )
+        notes["cards"] = st.text_area(
+            "Carousel cards / ad setup",
+            value=str(notes.get("cards") or ""),
+            placeholder=(
+                "Paste carousel card copy, primary text, CTA, Instant Experience setup, "
+                "or any final Meta build details from ChatGPT."
+            ),
+            height=110,
+            key=f"ads-notes-cards::{result['context_key']}",
+        )
+    workflow["ad_notes"] = notes
+    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
 
 
 def _render_ads_image_slots(result, workflow):
@@ -5003,12 +5753,18 @@ def render_page():
         )
         if product_url and not is_valid_product_page_url(product_url):
             st.error(PRODUCT_URL_ERROR)
-        submitted = st.form_submit_button(
+        campaign_moment = render_campaign_moment_section()
+        clear_col, submit_col = st.columns([1, 2])
+        clear_moment = clear_col.form_submit_button("Clear moment")
+        submitted = submit_col.form_submit_button(
             "Submit",
             type="primary",
         )
 
     result = st.session_state.get(ADS_RESULT_STATE_KEY)
+    if clear_moment:
+        clear_campaign_moment_state()
+        st.rerun()
     if submitted:
         validation_message = validate_ads_inputs(
             product_name,
@@ -5017,7 +5773,13 @@ def render_page():
             campaign_type,
             product_url=product_url,
         )
-        if validation_message:
+        campaign_moment_message = validate_campaign_moment(
+            campaign_moment,
+            selected_country=country,
+        )
+        if campaign_moment_message:
+            st.warning(campaign_moment_message)
+        elif validation_message:
             if validation_message == PRODUCT_URL_ERROR:
                 st.error(validation_message)
                 components.html(
@@ -5047,10 +5809,21 @@ def render_page():
                 category,
                 country,
                 campaign_type,
+                campaign_moment,
             )
             existing_result = result if isinstance(result, dict) else {}
             if existing_result.get("context_key") == context_key:
-                if _clean_product_url(product_url) != existing_result.get("product_url"):
+                if (
+                    _clean_product_url(product_url) != existing_result.get("product_url")
+                    or normalize_campaign_moment(
+                        campaign_moment,
+                        selected_country=country,
+                    )
+                    != campaign_moment_from_result(
+                        existing_result,
+                        selected_country=country,
+                    )
+                ):
                     result = build_ads_result_record(
                         product_name,
                         category,
@@ -5059,6 +5832,7 @@ def render_page():
                         product_id=product_id,
                         product_url=product_url,
                         variation_token=existing_result.get("variation_token"),
+                        campaign_moment=campaign_moment,
                     )
                 else:
                     result = existing_result
@@ -5071,6 +5845,7 @@ def render_page():
                     product_id=product_id,
                     product_url=product_url,
                     variation_token=build_visual_variation_token(),
+                    campaign_moment=campaign_moment,
                 )
                 _reset_ads_image_workflow(result)
             st.session_state[ADS_RESULT_STATE_KEY] = result

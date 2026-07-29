@@ -1,6 +1,7 @@
 import importlib
 import io
 import json
+from datetime import date
 from pathlib import Path
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ from PIL import Image
 from streamlit.testing.v1 import AppTest
 
 import ads_page
+import image_factory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -276,6 +278,35 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Product page URL *", source)
         self.assertIn("input.focus()", source)
         self.assertIn(ads_page.PRODUCT_URL_ERROR, source)
+
+    def test_campaign_moment_form_is_optional_and_validates_missing_name(self):
+        app_test = run_ads_page()
+
+        self.assertIn("Moment Type", [selectbox.label for selectbox in app_test.selectbox])
+        self.assertIn("Relevant Country or Market", [selectbox.label for selectbox in app_test.selectbox])
+        self.assertIn("Relevance Strength", [selectbox.label for selectbox in app_test.selectbox])
+        self.assertIn("Moment Name", [text_input.label for text_input in app_test.text_input])
+        self.assertIn("Promotion or Offer", [text_input.label for text_input in app_test.text_input])
+        self.assertIn("Use this moment in image prompts", [checkbox.label for checkbox in app_test.checkbox])
+        self.assertIn("Clear moment", [button.label for button in app_test.button])
+
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Carousel")
+        set_product_url(app_test)
+        select_option(app_test, "Moment Type", "Sporting Event")
+
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        self.assertTrue(
+            any(
+                "Enter the specific campaign moment, such as Father’s Day or NBA Playoffs."
+                in warning.value
+                for warning in app_test.warning
+            )
+        )
+        self.assertNotIn(ads_page.ADS_RESULT_STATE_KEY, app_test.session_state)
 
     def test_generated_prompt_contains_required_dynamic_and_rule_text(self):
         prompt = ads_page.build_ads_prompt("Six Laps Ahead", "Motorsport", "UK", "Carousel")
@@ -1233,6 +1264,270 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("CAROUSEL CARD CHARACTER LIMIT", carousel_prompt)
         self.assertNotIn("CAROUSEL CARD CHARACTER LIMIT", single_image_prompt)
 
+    def test_empty_campaign_moment_preserves_existing_prompt_output(self):
+        base_prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            variation_token="no-moment-test",
+        )
+        empty_prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            variation_token="no-moment-test",
+            campaign_moment=ads_page.empty_campaign_moment(),
+        )
+
+        self.assertEqual(empty_prompt, base_prompt)
+        self.assertNotIn("CAMPAIGN MOMENT", empty_prompt)
+
+    def test_campaign_moment_type_without_name_triggers_validation(self):
+        message = ads_page.validate_campaign_moment(
+            {"type": "Sporting Event"},
+            selected_country="Australia",
+        )
+
+        self.assertEqual(
+            message,
+            "Enter the specific campaign moment, such as Father’s Day or NBA Playoffs.",
+        )
+
+    def test_expired_campaign_moment_is_blocked_from_timely_prompt_use(self):
+        message = ads_page.validate_campaign_moment(
+            {
+                "type": "Sale Period",
+                "name": "Black Friday",
+                "date": "2026-01-01",
+            },
+            selected_country="Australia",
+            today=date(2026, 7, 29),
+        )
+
+        self.assertEqual(
+            message,
+            "This campaign moment has expired. Update the date or remove the moment before generating timely copy.",
+        )
+
+    def test_campaign_moment_copy_layer_reaches_all_campaign_types(self):
+        moment = {
+            "type": "Gifting Occasion",
+            "name": "Father’s Day",
+            "market": "Australia",
+            "date": "2026-09-06",
+            "strength": "Subtle",
+        }
+
+        for campaign_type in ("Carousel", "Instant Experience", "Single Image / Video"):
+            with self.subTest(campaign_type=campaign_type):
+                prompt = ads_page.build_ads_prompt(
+                    "Six Laps Ahead",
+                    "Motorsport",
+                    "Australia",
+                    campaign_type,
+                    variation_token=f"moment-{campaign_type}",
+                    campaign_moment=moment,
+                )
+
+                self.assertIn("CAMPAIGN MOMENT — OPTIONAL RELEVANCE LAYER", prompt)
+                self.assertIn("- Moment type: Gifting Occasion", prompt)
+                self.assertIn("- Moment name: Father’s Day", prompt)
+                self.assertIn("- Relevant market: Australia", prompt)
+                self.assertIn("- Event/end date: 2026-09-06", prompt)
+                self.assertIn("- Confirmed promotion: none supplied", prompt)
+                self.assertIn("- Relevance strength: Subtle", prompt)
+                self.assertIn("Use this moment in exactly one primary ad-text variation", prompt)
+                self.assertIn("1. Evergreen emotional/nostalgia angle", prompt)
+                self.assertIn("2. Evergreen collector, product or fan-identity angle", prompt)
+                self.assertIn("3. Timely angle", prompt)
+                self.assertIn("At least two evergreen primary-text variations", prompt)
+
+    def test_campaign_moment_strengths_have_distinct_instruction_contracts(self):
+        for strength, expected in (
+            ("Subtle", "Mention the moment naturally and briefly in one variation."),
+            ("Moderate", "Make one variation clearly connected to the moment"),
+            ("Campaign-led", "Make one variation primarily built around the selected moment"),
+        ):
+            with self.subTest(strength=strength):
+                block = ads_page.build_campaign_moment_copy_relevance_block(
+                    {
+                        "type": "Seasonal Moment",
+                        "name": "Christmas",
+                        "strength": strength,
+                    },
+                    selected_country="Australia",
+                )
+
+                self.assertIn(f"- Relevance strength: {strength}", block)
+                self.assertIn(expected, block)
+                self.assertIn("Preserve two evergreen alternatives.", block)
+
+    def test_blank_promotion_cannot_create_offer_claims_and_exact_promotion_passes_through(self):
+        blank_block = ads_page.build_campaign_moment_copy_relevance_block(
+            {
+                "type": "Sporting Event",
+                "name": "NBA Playoffs",
+                "market": "USA",
+                "strength": "Moderate",
+            },
+            selected_country="USA",
+        )
+        offer_block = ads_page.build_campaign_moment_copy_relevance_block(
+            {
+                "type": "Sale Period",
+                "name": "Black Friday",
+                "market": "Global",
+                "promotion": "Free shipping",
+                "strength": "Campaign-led",
+            },
+            selected_country="Australia",
+        )
+
+        self.assertIn("- Confirmed promotion: none supplied", blank_block)
+        self.assertIn("do not create a discount, free-shipping claim", blank_block)
+        self.assertIn("- Confirmed promotion: Free shipping", offer_block)
+        self.assertIn("Only use the exact promotion entered by the user.", offer_block)
+
+    def test_campaign_moment_excludes_image_prompts_until_image_toggle_is_enabled(self):
+        moment = {
+            "type": "Gifting Occasion",
+            "name": "Father’s Day",
+            "market": "Australia",
+            "strength": "Subtle",
+            "include_in_image_prompts": False,
+        }
+        prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            variation_token="moment-image-off",
+            campaign_moment=moment,
+        )
+        contract = visual_contract(prompt)
+
+        self.assertNotIn("Father’s Day", contract)
+        self.assertNotIn("CAMPAIGN MOMENT VISUAL CONTEXT", contract)
+        self.assertIn("SQUARE FORMAT — MANDATORY:", contract)
+        self.assertIn("CARD 1 EXTREME PRODUCT CLOSE-UP LOCK — MANDATORY:", contract)
+        self.assertIn("PRODUCT DOMINANCE PRINCIPLE — MANDATORY:", contract)
+
+    def test_campaign_moment_image_toggle_adds_restrained_visual_context(self):
+        moment = {
+            "type": "Sporting Event",
+            "name": "Bathurst",
+            "market": "Australia",
+            "strength": "Moderate",
+            "include_in_image_prompts": True,
+        }
+        prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            variation_token="moment-image-on",
+            campaign_moment=moment,
+        )
+        contract = visual_contract(prompt)
+
+        self.assertEqual(
+            contract.count("CAMPAIGN MOMENT VISUAL CONTEXT — OPTIONAL:"),
+            ads_page.CAROUSEL_CARD_COUNT,
+        )
+        self.assertIn("The selected campaign moment is Bathurst for Australia.", contract)
+        self.assertIn("The framed artwork must remain the visual hero.", contract)
+        self.assertIn("Do not add official event logos, trademarks, branded graphics", contract)
+        self.assertIn("Do not make every room look themed.", contract)
+        self.assertIn("SQUARE FORMAT — MANDATORY:", contract)
+        self.assertIn("CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:", contract)
+
+    def test_campaign_moment_visual_context_can_reach_single_prompt_campaigns_when_enabled(self):
+        moment = {
+            "type": "Product Drop",
+            "name": "Launch Week",
+            "market": "Global",
+            "include_in_image_prompts": True,
+        }
+
+        for campaign_type in ("Instant Experience", "Single Image / Video"):
+            with self.subTest(campaign_type=campaign_type):
+                prompt = ads_page.build_ads_prompt(
+                    "Collector Test Product",
+                    "Cricket",
+                    "New Zealand",
+                    campaign_type,
+                    variation_token=f"single-visual-{campaign_type}",
+                    campaign_moment=moment,
+                )
+                contract = visual_contract(prompt)
+
+                self.assertIn("CAMPAIGN MOMENT VISUAL CONTEXT — OPTIONAL:", contract)
+                self.assertIn("Launch Week for Global", contract)
+                self.assertIn("Do not automatically place the event name as text inside the image.", contract)
+
+    def test_campaign_moment_result_storage_legacy_compatibility_and_clear_action(self):
+        moment = {
+            "type": "Sale Period",
+            "name": "Black Friday",
+            "market": "Global",
+            "promotion": "Free shipping",
+            "strength": "Campaign-led",
+            "include_in_image_prompts": True,
+        }
+        result = ads_page.build_ads_result_record(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            product_id="product-123",
+            product_url="https://sportscave.com.au/products/six-laps-ahead",
+            variation_token="moment-storage-test",
+            campaign_moment=moment,
+        )
+
+        self.assertEqual(result["campaign_moment"]["name"], "Black Friday")
+        self.assertEqual(result["campaign_moment"]["promotion"], "Free shipping")
+        self.assertTrue(result["campaign_moment"]["include_in_image_prompts"])
+        self.assertIn("CAMPAIGN MOMENT — OPTIONAL RELEVANCE LAYER", result["master_prompt"])
+
+        legacy_moment = ads_page.campaign_moment_from_result({})
+        self.assertFalse(ads_page.campaign_moment_is_active(legacy_moment))
+        self.assertEqual(legacy_moment["market"], "Use selected ad country")
+
+        session_state = {
+            "ads_product_name": "Six Laps Ahead",
+            "ads_campaign_moment_type": "Sale Period",
+            "ads_campaign_moment_name": "Black Friday",
+            "ads_campaign_moment_market": "Global",
+            "ads_campaign_moment_date": date(2026, 11, 27),
+            "ads_campaign_moment_promotion": "Free shipping",
+            "ads_campaign_moment_strength": "Campaign-led",
+            "ads_campaign_moment_include_images": True,
+        }
+        with patch.object(ads_page.st, "session_state", session_state):
+            ads_page.clear_campaign_moment_state()
+
+        self.assertEqual(session_state, {"ads_product_name": "Six Laps Ahead"})
+
+    def test_campaign_moment_safety_rules_prevent_invention_and_unsupported_claims(self):
+        block = ads_page.build_campaign_moment_copy_relevance_block(
+            {
+                "type": "Sporting Event",
+                "name": "World Cup",
+                "market": "UK",
+                "date": "2026-07-19",
+            },
+            selected_country="UK",
+        )
+
+        self.assertIn("Never invent event dates, match results, teams", block)
+        self.assertIn("Never claim a product is officially licensed, endorsed by or affiliated", block)
+        self.assertIn("Do not convert a normal product into a \"Father’s Day Edition\"", block)
+        self.assertIn("Do not claim \"ends soon\", \"last chance\" or \"final hours\"", block)
+        self.assertIn("football\" for the UK", block)
+
     def test_motorsport_carousel_prompt_receives_country_block_for_every_supported_country(self):
         for country in ads_page.COUNTRY_OPTIONS[1:]:
             with self.subTest(country=country):
@@ -1450,7 +1745,7 @@ PRIMARY TEXT VARIATIONS
                 self.assertIn("width and height are identical", section)
                 self.assertIn(final_check, section)
 
-    def test_carousel_card_one_has_product_hero_semi_close_up_lock_only(self):
+    def test_carousel_card_one_uses_mockups_close_up_foundation_with_extreme_lock_only(self):
         contract = visual_contract(
             ads_page.build_ads_prompt(
                 "Final Whistle Glory",
@@ -1463,23 +1758,34 @@ PRIMARY TEXT VARIATIONS
         sections = carousel_prompt_card_sections(contract)
         card_one = sections[1]
 
-        self.assertIn("CARD 1 PRODUCT-HERO COMPOSITION — MANDATORY:", card_one)
-        self.assertIn("closest and most product-focused image", card_one)
-        self.assertIn("close or medium-close product-hero composition", card_one)
-        self.assertIn("dominant visual subject", card_one)
-        self.assertIn("approximately 65-80% of the square image's width", card_one)
-        self.assertIn("all four outer edges and corners", card_one)
-        self.assertIn("Do not use a wide room view.", card_one)
+        self.assertIn("CARD 1 EXTREME PRODUCT CLOSE-UP LOCK — MANDATORY:", card_one)
+        self.assertIn("Mockups/Reel Close-Up Premium Wall Shot", card_one)
+        self.assertIn("MOCKUPS CLOSE-UP WALL SHOT FOUNDATION — REUSED:", card_one)
+        self.assertIn("Use only the framed artwork on a premium textured wall.", card_one)
+        self.assertIn("No room decor.", card_one)
+        self.assertIn("No furniture.", card_one)
+        self.assertIn("The frame should be the hero of the image.", card_one)
+        self.assertIn("approximately 86-92% of the square canvas width", card_one)
+        self.assertIn("This percentage is mandatory, not an optional target.", card_one)
+        self.assertIn("Keep all four outer frame edges and all four corners completely visible.", card_one)
+        self.assertIn("Use an almost perfectly straight-on camera position", card_one)
+        self.assertIn("premium 70-85 mm product-photography lens", card_one)
+        self.assertIn("No wide-angle room view.", card_one)
+        self.assertIn("No room-establishing composition.", card_one)
+        self.assertIn("Do not generate an entry gallery, living room, office, man cave, home bar", card_one)
         self.assertIn("Show the complete outer frame without cropping any edge.", card_one)
         self.assertIn("Avoid wide establishing shots.", card_one)
+        self.assertIn("Use the uploaded framed product as the exact compositing source.", card_one)
+        self.assertIn("Preserve the entire original frame and everything inside it exactly", card_one)
+        self.assertIn("Card 1 must resemble genuine commercial product photography.", card_one)
         self.assertIn("Retain all existing product-lock and artwork-preservation instructions.", card_one)
 
         for index in range(2, ads_page.CAROUSEL_CARD_COUNT + 1):
             with self.subTest(card=index):
                 self.assertIn("SQUARE FORMAT — MANDATORY:", sections[index])
-                self.assertNotIn("CARD 1 PRODUCT-HERO COMPOSITION — MANDATORY:", sections[index])
-                self.assertNotIn("close or medium-close product-hero composition", sections[index])
-                self.assertNotIn("approximately 65-80% of the square image's width", sections[index])
+                self.assertNotIn("CARD 1 EXTREME PRODUCT CLOSE-UP LOCK — MANDATORY:", sections[index])
+                self.assertNotIn("MOCKUPS CLOSE-UP WALL SHOT FOUNDATION — REUSED:", sections[index])
+                self.assertNotIn("approximately 86-92% of the square canvas width", sections[index])
 
     def test_every_carousel_card_prompt_has_product_dominance_lock(self):
         contract = visual_contract(
@@ -1516,8 +1822,8 @@ PRIMARY TEXT VARIATIONS
         )
         sections = carousel_prompt_card_sections(contract)
 
-        self.assertIn("approximately 65-80% of the square image's width", sections[1])
-        self.assertIn("must be the closest and most product-focused image", sections[1])
+        self.assertIn("approximately 86-92% of the square canvas width", sections[1])
+        self.assertIn("must be a premium close-up product photograph", sections[1])
         for index in (2, 3, 4):
             with self.subTest(card=index):
                 self.assertIn("CARDS 2-4 PRODUCT-DOMINANT LIFESTYLE COMPOSITION — MANDATORY:", sections[index])
@@ -1526,12 +1832,14 @@ PRIMARY TEXT VARIATIONS
                 self.assertIn("small Facebook carousel card on a phone", sections[index])
                 self.assertIn("Never use an extreme wide shot", sections[index])
                 self.assertIn("Keep the complete outer frame visible", sections[index])
+                self.assertNotIn("approximately 86-92% of the square canvas width", sections[index])
 
         self.assertIn("CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:", sections[5])
         self.assertIn("must remain one of the largest elements", sections[5])
         self.assertIn("must not become secondary to scarcity messaging", sections[5])
         self.assertIn("Do not zoom out significantly farther than Cards 2-4.", sections[5])
         self.assertIn("Keep the complete outer frame visible", sections[5])
+        self.assertNotIn("approximately 86-92% of the square canvas width", sections[5])
 
     def test_every_carousel_card_prompt_has_strict_product_lock_and_photorealism(self):
         contract = visual_contract(
@@ -1610,13 +1918,32 @@ PRIMARY TEXT VARIATIONS
 
         for contract in (instant_contract, single_contract):
             self.assertNotIn("SQUARE FORMAT — MANDATORY:", contract)
-            self.assertNotIn("CARD 1 PRODUCT-HERO COMPOSITION — MANDATORY:", contract)
+            self.assertNotIn("CARD 1 EXTREME PRODUCT CLOSE-UP LOCK — MANDATORY:", contract)
+            self.assertNotIn("MOCKUPS CLOSE-UP WALL SHOT FOUNDATION — REUSED:", contract)
             self.assertNotIn("PRODUCT DOMINANCE PRINCIPLE — MANDATORY:", contract)
             self.assertNotIn("CARDS 2-4 PRODUCT-DOMINANT LIFESTYLE COMPOSITION — MANDATORY:", contract)
             self.assertNotIn("CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:", contract)
             self.assertNotIn("STRICT PRODUCT LOCK — MANDATORY:", contract)
             self.assertNotIn("CAROUSEL PHOTOREALISM REQUIREMENTS — MANDATORY:", contract)
             self.assertNotIn(ads_page.build_carousel_final_square_format_check(), contract)
+
+    def test_mockups_close_up_prompt_foundation_matches_existing_reel_prompt_source(self):
+        foundation = image_factory.get_close_up_wall_prompt_foundation()
+        prompt_items = image_factory.build_lifestyle_prompt_items(
+            "Six Laps Ahead",
+            "Motorsport",
+            local_only=True,
+        )
+        close_up_item = next(
+            item
+            for item in prompt_items
+            if item["filename"] == image_factory.CLOSE_UP_WALL_PROMPT_FILENAME
+        )
+
+        self.assertIn("Close-Up Premium Wall Shot", close_up_item["label"])
+        self.assertIn(foundation, close_up_item["prompt"])
+        self.assertIn("create a 1024 x 1024 ultra-realistic close-up lifestyle mockup", foundation)
+        self.assertIn("Use only the framed artwork on a premium textured wall.", foundation)
 
     def test_generic_carousel_visual_contract_preserves_approved_generic_roles(self):
         prompt = ads_page.build_ads_prompt(
@@ -1657,7 +1984,7 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Normally do not place the card headline or description inside the image", contract)
         self.assertIn("Each visual must clearly support its assigned card message", contract)
         self.assertIn(
-            "Card 1 must deliver the strongest immediate product presentation and be the most zoomed-in card.",
+            "Card 1 must deliver the strongest immediate product presentation and be the most zoomed-in card",
             contract,
         )
         self.assertIn(
@@ -1667,7 +1994,10 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("framed product remains the unmistakable hero", contract)
         self.assertIn("Avoid five near-identical framed mockups", contract)
         self.assertIn("fake edition details", contract)
-        self.assertIn("Card 1: a clean product-hero presentation.", contract)
+        self.assertIn(
+            "Card 1: an extreme close-up wall product-hero presentation based on the Mockups/Reel Close-Up Premium Wall Shot.",
+            contract,
+        )
         self.assertIn("Card 2: a desirable ownership setting.", contract)
         self.assertIn("Card 3: a premium collector display suited to the selected category.", contract)
         self.assertIn("Card 4: an emotional lifestyle, memory or legacy presentation.", contract)
@@ -1912,7 +2242,7 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Country", "Canada")
         select_option(app_test, "Campaign type", "Carousel")
         set_product_url(app_test)
-        app_test.button[0].click().run(timeout=20)
+        button_by_label(app_test, "Submit").click().run(timeout=20)
 
         self.assertEqual(
             [subheader.value for subheader in app_test.subheader],
@@ -1936,7 +2266,7 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Country", "Australia")
         select_option(app_test, "Campaign type", "Instant Experience")
         set_product_url(app_test)
-        app_test.button[0].click().run(timeout=20)
+        button_by_label(app_test, "Submit").click().run(timeout=20)
 
         self.assertNotIn("Insufficient winner data", [subheader.value for subheader in app_test.subheader])
         self.assertIn("1. Copy this ChatGPT prompt", [subheader.value for subheader in app_test.subheader])

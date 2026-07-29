@@ -252,6 +252,8 @@ LIFESTYLE_IMAGE_VARIANTS = {
     "20-collector-display-room-reel-prompt.txt": "20-collector-display-room-reel",
 }
 
+CLOSE_UP_WALL_PROMPT_FILENAME = "04-close-up-wall-prompt.txt"
+
 PRODUCT_PAGE_PROMPT_FILENAMES = {
     "01-man-cave-prompt.txt",
     "02-office-prompt.txt",
@@ -816,6 +818,28 @@ LIFESTYLE_PROMPT_SPECS = [
         ).strip(),
     ),
 ]
+
+
+def get_lifestyle_prompt_spec(prompt_filename):
+    prompt_filename = Path(prompt_filename).name
+    for filename, title, prompt_body in LIFESTYLE_PROMPT_SPECS:
+        if filename == prompt_filename:
+            return {
+                "filename": filename,
+                "title": title,
+                "prompt": get_lifestyle_prompt_text(
+                    filename,
+                    prompt_body,
+                    local_only=True,
+                ),
+            }
+    return {}
+
+
+def get_close_up_wall_prompt_foundation():
+    spec = get_lifestyle_prompt_spec(CLOSE_UP_WALL_PROMPT_FILENAME)
+    return str(spec.get("prompt") or "").strip()
+
 
 LIFESTYLE_PROMPT_SPECS.extend([
     (
