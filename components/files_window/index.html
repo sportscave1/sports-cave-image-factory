@@ -670,6 +670,7 @@
       const DESKTOP_MESSAGE_TYPE = "sports-cave-desktop";
       const MINIMUM_DESKTOP_VERSION = 8;
       const MAX_CLIENT_FOLDER_CACHE = 24;
+      const CLIENT_FOLDER_REVALIDATE_SECONDS = 20;
       const VIEW_MODES = ["large", "medium", "small", "list", "details"];
       const VIEW_LABELS = { large: "Large icons", medium: "Medium icons", small: "Small icons", list: "List", details: "Details" };
       const SORT_LABELS = { name: "Name", modified: "Date modified", type: "Type", size: "Size" };
@@ -723,12 +724,14 @@
         navigationToken: 0,
         folderCache: new Map(),
         folderRequests: new Map(),
+        folderControllers: new Map(),
         visibleItemsCache: { items: null, search: "", sortKey: "", sortDir: "", value: [] },
         openStamp: { path: "", time: 0 },
         toastTimer: 0,
         helperTimer: 0,
         helperItem: null,
         imageViewerWindow: null,
+        imageViewerReady: false,
         menuParent: null,
         thumbnailObserver: null,
         thumbnailQueue: [],
@@ -1251,6 +1254,11 @@
       }
 
       function cachedFolder(path) {
+        const entry = cachedFolderEntry(path);
+        return entry ? entry.payload : null;
+      }
+
+      function cachedFolderEntry(path) {
         const key = folderCacheKey(path);
         const cached = state.folderCache.get(key);
         if (!cached || cached.expiresAt <= Date.now()) {
@@ -1259,12 +1267,16 @@
         }
         state.folderCache.delete(key);
         state.folderCache.set(key, cached);
-        return cached.payload;
+        return cached;
       }
 
       function rememberFolder(payload, requestedPath) {
         const seconds = Math.max(1, Math.min(180, Number(payload.cached_for_seconds || 30)));
-        const entry = { payload, expiresAt: Date.now() + seconds * 1000 };
+        const entry = {
+          payload,
+          cachedAt: Date.now(),
+          expiresAt: Date.now() + seconds * 1000,
+        };
         const previousNamespace = state.cacheNamespace;
         const previousRoot = state.rootPath;
         state.cacheNamespace = String(payload.cache_namespace || previousNamespace || "");
@@ -1300,13 +1312,30 @@
         params.set("page_size", String(FOLDER_PAGE_SIZE));
         if (page) params.set("page", page);
         const requestKey = `${folderCacheKey(path)}|${refresh ? "refresh" : "normal"}|${page || "first"}`;
-        if (!refresh && !page && state.folderRequests.has(requestKey)) {
+        if (!page && state.folderRequests.has(requestKey)) {
           return state.folderRequests.get(requestKey);
         }
-        const request = apiJson(`/api/files-list?${params.toString()}`)
-          .finally(() => state.folderRequests.delete(requestKey));
-        if (!refresh && !page) state.folderRequests.set(requestKey, request);
-        return request;
+        const controller = typeof AbortController === "function" ? new AbortController() : null;
+        if (controller) state.folderControllers.set(requestKey, controller);
+        const controlledRequest = apiJson(
+          `/api/files-list?${params.toString()}`,
+          controller ? { signal: controller.signal } : {}
+        ).finally(() => {
+          state.folderRequests.delete(requestKey);
+          state.folderControllers.delete(requestKey);
+        });
+        if (!page) state.folderRequests.set(requestKey, controlledRequest);
+        return controlledRequest;
+      }
+
+      function abortStaleFolderRequests(exceptPath = null) {
+        const keepPrefix = exceptPath == null ? "" : `${folderCacheKey(exceptPath)}|`;
+        for (const [key, controller] of Array.from(state.folderControllers.entries())) {
+          if (keepPrefix && key.startsWith(keepPrefix)) continue;
+          if (controller && typeof controller.abort === "function") controller.abort();
+          state.folderControllers.delete(key);
+          state.folderRequests.delete(key);
+        }
       }
 
       function applyFolderPayload(payload) {
@@ -1336,16 +1365,25 @@
       async function loadFolder(path, { refresh = false, preserveScroll = false } = {}) {
         const token = ++state.navigationToken;
         const oldScroll = preserveScroll ? elements.results.scrollTop : 0;
-        const cached = refresh ? null : cachedFolder(path);
-        if (cached) {
+        abortStaleFolderRequests(path);
+        const cachedEntry = refresh ? null : cachedFolderEntry(path);
+        if (cachedEntry) {
+          const cached = cachedEntry.payload;
+          const needsMorePages = Boolean(cached.has_more && cached.next_page);
+          const shouldRevalidate = !needsMorePages && Date.now() - cachedEntry.cachedAt > CLIENT_FOLDER_REVALIDATE_SECONDS * 1000;
           closeMenus();
           clearSelection();
           stopThumbnailLoading();
           applyFolderPayload(cached);
           state.loading = false;
-          state.loadingMore = true;
+          state.loadingMore = needsMorePages || shouldRevalidate;
           renderAll();
           elements.results.scrollTop = preserveScroll ? oldScroll : 0;
+          if (needsMorePages) {
+            await continueFolderPages(path, cached, token, oldScroll, preserveScroll);
+            return true;
+          }
+          if (!shouldRevalidate) return true;
           requestFolder(path, true)
             .then(async payload => {
               if (token !== state.navigationToken) return;
@@ -1655,7 +1693,7 @@
         const viewerUrl = `/files-image-viewer?${params.toString()}`;
         let viewer = null;
         try {
-          if (state.imageViewerWindow && !state.imageViewerWindow.closed) {
+          if (state.imageViewerWindow && !state.imageViewerWindow.closed && state.imageViewerReady) {
             state.imageViewerWindow.postMessage({
               type: "sports-cave-image-viewer-open",
               path: viewerRequest.path,
@@ -1679,6 +1717,7 @@
           return;
         }
         state.imageViewerWindow = viewer;
+        state.imageViewerReady = false;
         viewer.focus();
       }
 
@@ -2964,6 +3003,7 @@
       window.addEventListener("beforeunload", () => {
         hideFileTooltip();
         stopThumbnailLoading();
+        abortStaleFolderRequests();
         state.thumbnailCache.forEach(url => URL.revokeObjectURL(url));
         cancelExternalDrag();
       });
@@ -3006,6 +3046,18 @@
         window.chrome.webview.addEventListener("message", handleDesktopMessage);
         try { desktopPost({ action: "hello", request_id: dragRequestId() }); } catch (_) {}
       }
+
+      window.addEventListener("message", event => {
+        if (
+          event.origin !== location.origin
+          || event.source !== state.imageViewerWindow
+          || !event.data
+          || event.data.type !== "sports-cave-image-viewer-ready"
+        ) {
+          return;
+        }
+        state.imageViewerReady = true;
+      });
 
       async function initialise() {
         document.title = "Sports Cave Files";

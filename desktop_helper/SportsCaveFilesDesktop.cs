@@ -584,7 +584,7 @@ internal sealed class DesktopWindow : Window
         return name;
     }
 
-    private void OpenImageViewer(Dictionary<string, object> viewer)
+    private async Task OpenImageViewer(Dictionary<string, object> viewer)
     {
         string path = ViewerRelativeValue(viewer, "path", true);
         string extension = Path.GetExtension(path).ToLowerInvariant();
@@ -613,9 +613,11 @@ internal sealed class DesktopWindow : Window
                 }
             };
             child.Show();
+            await child.InitializeBrowser();
         }
         else
         {
+            await imageViewerWindow.InitializeBrowser();
             imageViewerWindow.NavigateTrusted(viewerUrl);
         }
         imageViewerWindow.ShowAndFocus();
@@ -685,7 +687,7 @@ internal sealed class DesktopWindow : Window
                     throw new DesktopException(
                         "viewer_request_invalid", "The image viewer request is invalid.");
                 }
-                OpenImageViewer(viewer);
+                await OpenImageViewer(viewer);
                 Reply(action, requestId, true, null);
                 DesktopLog.Write(action, "completed", "none", 1);
                 return;

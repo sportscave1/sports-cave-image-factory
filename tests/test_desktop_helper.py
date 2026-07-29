@@ -78,6 +78,9 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn('value.StartsWith("/", StringComparison.Ordinal)', self.source)
         self.assertIn('part == "." || part == ".."', self.source)
         self.assertIn('"/files-image-viewer?path=" + Uri.EscapeDataString(path)', self.source)
+        self.assertIn("private async Task OpenImageViewer", self.source)
+        self.assertIn("await child.InitializeBrowser()", self.source)
+        self.assertIn("await imageViewerWindow.InitializeBrowser()", self.source)
         self.assertIn("imageViewerWindow.NavigateTrusted(viewerUrl)", self.source)
         self.assertIn("imageViewerWindow.ShowAndFocus()", self.source)
         self.assertIn("new DesktopWindow(config, viewerUrl, false, environment)", self.source)
@@ -96,6 +99,7 @@ class DesktopHelperContractTests(unittest.TestCase):
         for action in ("drag", "copyFile", "copyImage", "openFile"):
             self.assertIn(f'action != "{action}"', self.source)
         self.assertIn('action == "openViewer"', self.source)
+        self.assertIn("await OpenImageViewer(viewer)", self.source)
         self.assertIn(
             '"drag", "copyFile", "copyImage", "openFile", "openViewer", "folders", "cancel"',
             self.source,

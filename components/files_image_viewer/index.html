@@ -531,6 +531,16 @@
         loadFolderImages();
         window.focus();
       });
+      function notifyOpenerReady() {
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({
+              type: "sports-cave-image-viewer-ready",
+              path: state.path,
+            }, location.origin);
+          }
+        } catch (_) {}
+      }
       function handleDesktopMessage(event) {
         const message = event && event.data;
         if (!message || message.type !== DESKTOP_MESSAGE_TYPE) return;
@@ -584,6 +594,7 @@
 
       loadImage(state.path, { folder: state.folder, name: state.name, replaceHistory: false });
       loadFolderImages();
+      notifyOpenerReady();
     </script>
   </body>
 </html>
