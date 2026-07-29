@@ -61,6 +61,21 @@ def visual_contract(prompt):
     return prompt[prompt.index(marker) :]
 
 
+def carousel_prompt_card_sections(contract):
+    sections = {}
+    for index in range(1, ads_page.CAROUSEL_CARD_COUNT + 1):
+        marker = f"Card {index} — [exact generated Card {index} headline]"
+        start = contract.index(marker)
+        next_marker = (
+            f"Card {index + 1} — [exact generated Card {index + 1} headline]"
+            if index < ads_page.CAROUSEL_CARD_COUNT
+            else "Return exactly these five image-prompt entries"
+        )
+        end = contract.index(next_marker, start)
+        sections[index] = contract[start:end]
+    return sections
+
+
 def square_png_bytes(color=(46, 76, 112)):
     buffer = io.BytesIO()
     Image.new("RGB", (96, 96), color).save(buffer, format="PNG")
@@ -1412,6 +1427,197 @@ PRIMARY TEXT VARIATIONS
             self.assertIn(f"Visual purpose: {role}", contract)
         self.assertIn("Return exactly these five image-prompt entries and no sixth prompt.", contract)
 
+    def test_every_carousel_card_prompt_has_mandatory_square_format_lock(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Six Laps Ahead",
+                "Motorsport",
+                "Australia",
+                "Carousel",
+                variation_token="square-lock-test",
+            )
+        )
+        sections = carousel_prompt_card_sections(contract)
+        final_check = ads_page.build_carousel_final_square_format_check()
+
+        self.assertEqual(contract.count("SQUARE FORMAT — MANDATORY:"), ads_page.CAROUSEL_CARD_COUNT)
+        self.assertEqual(contract.count(final_check), ads_page.CAROUSEL_CARD_COUNT)
+        for index, section in sections.items():
+            with self.subTest(card=index):
+                self.assertIn("true 1:1 square canvas", section)
+                self.assertIn("1024 × 1024", section)
+                self.assertIn("1:1 square", section)
+                self.assertIn("width and height are identical", section)
+                self.assertIn(final_check, section)
+
+    def test_carousel_card_one_has_product_hero_semi_close_up_lock_only(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Final Whistle Glory",
+                "Football",
+                "UK",
+                "Carousel",
+                variation_token="card-one-product-hero-test",
+            )
+        )
+        sections = carousel_prompt_card_sections(contract)
+        card_one = sections[1]
+
+        self.assertIn("CARD 1 PRODUCT-HERO COMPOSITION — MANDATORY:", card_one)
+        self.assertIn("closest and most product-focused image", card_one)
+        self.assertIn("close or medium-close product-hero composition", card_one)
+        self.assertIn("dominant visual subject", card_one)
+        self.assertIn("approximately 65-80% of the square image's width", card_one)
+        self.assertIn("all four outer edges and corners", card_one)
+        self.assertIn("Do not use a wide room view.", card_one)
+        self.assertIn("Show the complete outer frame without cropping any edge.", card_one)
+        self.assertIn("Avoid wide establishing shots.", card_one)
+        self.assertIn("Retain all existing product-lock and artwork-preservation instructions.", card_one)
+
+        for index in range(2, ads_page.CAROUSEL_CARD_COUNT + 1):
+            with self.subTest(card=index):
+                self.assertIn("SQUARE FORMAT — MANDATORY:", sections[index])
+                self.assertNotIn("CARD 1 PRODUCT-HERO COMPOSITION — MANDATORY:", sections[index])
+                self.assertNotIn("close or medium-close product-hero composition", sections[index])
+                self.assertNotIn("approximately 65-80% of the square image's width", sections[index])
+
+    def test_every_carousel_card_prompt_has_product_dominance_lock(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Final Whistle Glory",
+                "Football",
+                "USA",
+                "Carousel",
+                variation_token="product-dominance-test",
+            )
+        )
+        sections = carousel_prompt_card_sections(contract)
+
+        self.assertEqual(
+            contract.count("PRODUCT DOMINANCE PRINCIPLE — MANDATORY:"),
+            ads_page.CAROUSEL_CARD_COUNT,
+        )
+        for index, section in sections.items():
+            with self.subTest(card=index):
+                self.assertIn("We are selling the framed Sports Cave edition, not the room.", section)
+                self.assertIn("must never overpower the framed artwork or make it look small", section)
+                self.assertIn("dominant, instantly recognizable and readable", section)
+                self.assertIn("without creating distant product shots", section)
+
+    def test_carousel_card_distance_rules_keep_products_dominant(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Six Laps Ahead",
+                "Motorsport",
+                "Australia",
+                "Carousel",
+                variation_token="card-distance-test",
+            )
+        )
+        sections = carousel_prompt_card_sections(contract)
+
+        self.assertIn("approximately 65-80% of the square image's width", sections[1])
+        self.assertIn("must be the closest and most product-focused image", sections[1])
+        for index in (2, 3, 4):
+            with self.subTest(card=index):
+                self.assertIn("CARDS 2-4 PRODUCT-DOMINANT LIFESTYLE COMPOSITION — MANDATORY:", sections[index])
+                self.assertIn("medium lifestyle composition, not a distant wide-angle room shot", sections[index])
+                self.assertIn("approximately 50-70% of the square image's width", sections[index])
+                self.assertIn("small Facebook carousel card on a phone", sections[index])
+                self.assertIn("Never use an extreme wide shot", sections[index])
+                self.assertIn("Keep the complete outer frame visible", sections[index])
+
+        self.assertIn("CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:", sections[5])
+        self.assertIn("must remain one of the largest elements", sections[5])
+        self.assertIn("must not become secondary to scarcity messaging", sections[5])
+        self.assertIn("Do not zoom out significantly farther than Cards 2-4.", sections[5])
+        self.assertIn("Keep the complete outer frame visible", sections[5])
+
+    def test_every_carousel_card_prompt_has_strict_product_lock_and_photorealism(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Collector Test Product",
+                "Cricket",
+                "New Zealand",
+                "Carousel",
+                variation_token="carousel-product-realism-test",
+            )
+        )
+        sections = carousel_prompt_card_sections(contract)
+
+        self.assertEqual(contract.count("STRICT PRODUCT LOCK — MANDATORY:"), ads_page.CAROUSEL_CARD_COUNT)
+        self.assertEqual(
+            contract.count("CAROUSEL PHOTOREALISM REQUIREMENTS — MANDATORY:"),
+            ads_page.CAROUSEL_CARD_COUNT,
+        )
+        for index, section in sections.items():
+            with self.subTest(card=index):
+                self.assertIn("Use the uploaded product image as the exact compositing source.", section)
+                self.assertIn("Preserve the exact artwork, outer frame, colours, text, typography", section)
+                self.assertIn("Do not redraw, regenerate, reinterpret or replace anything inside the frame.", section)
+                self.assertIn("Do not change the frame colour, thickness, shape, proportions or material.", section)
+                self.assertIn("Keep the complete outer frame visible.", section)
+                self.assertIn("The artwork must remain sharp and visually legible.", section)
+                self.assertIn("genuine high-end interior photograph", section)
+                self.assertIn("Create realistic contact shadows behind and below the frame.", section)
+                self.assertIn("subtle, controlled glass reflections without obscuring the artwork", section)
+                self.assertIn("convincing timber depth, sharp corners, natural texture and accurate mounting", section)
+                self.assertIn("Avoid warped walls, bent furniture, duplicate objects", section)
+                self.assertIn("Do not add people unless the individual carousel concept explicitly requires them", section)
+
+    def test_carousel_square_lock_reaches_every_category_country_and_role_variation(self):
+        for category in ads_page.CATEGORY_OPTIONS[1:]:
+            for country in ads_page.COUNTRY_OPTIONS[1:]:
+                with self.subTest(category=category, country=country):
+                    prompt = ads_page.build_ads_prompt(
+                        f"{category} Square Test",
+                        category,
+                        country,
+                        "Carousel",
+                        variation_token="all-carousel-square-test",
+                    )
+                    contract = visual_contract(prompt)
+                    sections = carousel_prompt_card_sections(contract)
+                    self.assertEqual(len(sections), ads_page.CAROUSEL_CARD_COUNT)
+                    for section in sections.values():
+                        self.assertIn("SQUARE FORMAT — MANDATORY:", section)
+                        self.assertIn("1024 × 1024", section)
+                        self.assertIn("1:1 square", section)
+                        self.assertIn("PRODUCT DOMINANCE PRINCIPLE — MANDATORY:", section)
+                        self.assertIn("STRICT PRODUCT LOCK — MANDATORY:", section)
+                        self.assertIn("CAROUSEL PHOTOREALISM REQUIREMENTS — MANDATORY:", section)
+                        self.assertIn(ads_page.build_carousel_final_square_format_check(), section)
+
+    def test_non_carousel_visual_contracts_do_not_receive_carousel_square_lock(self):
+        instant_contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Final Whistle Glory",
+                "Football",
+                "UK",
+                "Instant Experience",
+                variation_token="non-carousel-instant-test",
+            )
+        )
+        single_contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Final Whistle Glory",
+                "Football",
+                "UK",
+                "Single Image / Video",
+                variation_token="non-carousel-single-test",
+            )
+        )
+
+        for contract in (instant_contract, single_contract):
+            self.assertNotIn("SQUARE FORMAT — MANDATORY:", contract)
+            self.assertNotIn("CARD 1 PRODUCT-HERO COMPOSITION — MANDATORY:", contract)
+            self.assertNotIn("PRODUCT DOMINANCE PRINCIPLE — MANDATORY:", contract)
+            self.assertNotIn("CARDS 2-4 PRODUCT-DOMINANT LIFESTYLE COMPOSITION — MANDATORY:", contract)
+            self.assertNotIn("CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:", contract)
+            self.assertNotIn("STRICT PRODUCT LOCK — MANDATORY:", contract)
+            self.assertNotIn("CAROUSEL PHOTOREALISM REQUIREMENTS — MANDATORY:", contract)
+            self.assertNotIn(ads_page.build_carousel_final_square_format_check(), contract)
+
     def test_generic_carousel_visual_contract_preserves_approved_generic_roles(self):
         prompt = ads_page.build_ads_prompt(
             "Final Whistle Glory",
@@ -1450,9 +1656,12 @@ PRIMARY TEXT VARIATIONS
         self.assertIn('Never write "same as above"', contract)
         self.assertIn("Normally do not place the card headline or description inside the image", contract)
         self.assertIn("Each visual must clearly support its assigned card message", contract)
-        self.assertIn("Card 1 must deliver the strongest immediate product presentation.", contract)
         self.assertIn(
-            "Card 5 must deliver the strongest truthful scarcity or final-claim presentation.",
+            "Card 1 must deliver the strongest immediate product presentation and be the most zoomed-in card.",
+            contract,
+        )
+        self.assertIn(
+            "Card 5 must deliver the strongest truthful scarcity or final-claim presentation while keeping the product prominent.",
             contract,
         )
         self.assertIn("framed product remains the unmistakable hero", contract)
@@ -1492,12 +1701,9 @@ PRIMARY TEXT VARIATIONS
             "Never sacrifice the product lock",
         ):
             self.assertIn(instruction, contract)
-        self.assertEqual(
-            contract.count(
-                "Image prompt: [one complete standalone image-generation prompt that repeats the complete LAST-IMAGE VARIATION LOCK instructions]"
-            ),
-            5,
-        )
+        self.assertEqual(contract.count("Image prompt:"), ads_page.CAROUSEL_CARD_COUNT)
+        for section in carousel_prompt_card_sections(contract).values():
+            self.assertIn("previous-image variation lock", section)
         self.assertIn("No two cards may repeat the room type, house architecture", contract)
         self.assertIn("time-of-day treatment, camera composition, camera height", contract)
 

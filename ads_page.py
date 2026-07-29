@@ -919,29 +919,115 @@ def get_carousel_visual_roles(template_key):
     return CAROUSEL_VISUAL_ROLES.get(template_key, CAROUSEL_VISUAL_ROLES["default"])
 
 
+def build_carousel_square_format_lock():
+    return """SQUARE FORMAT — MANDATORY:
+Generate this image on a true 1:1 square canvas at exactly 1024 × 1024 pixels. The final delivered image must be square—not landscape, portrait, widescreen or cropped from another aspect ratio. Compose the entire room, framed product and negative space specifically for a square canvas. Before delivering the image, verify that its width and height are identical. If the result is not exactly 1:1, regenerate it as a true 1024 × 1024 square image."""
+
+
+def build_carousel_final_square_format_check():
+    return "FINAL FORMAT CHECK: Output one true 1024 × 1024 image only. Width must equal height. Never output a landscape or portrait image."
+
+
+def build_carousel_card_one_product_hero_lock():
+    return """CARD 1 PRODUCT-HERO COMPOSITION — MANDATORY:
+This is the first and most important carousel image and must be the closest and most product-focused image in the complete five-card sequence. Use a premium close or medium-close product-hero composition in which the complete framed artwork is the dominant visual subject and immediately stops the viewer at thumbnail size. The complete framed artwork should occupy approximately 65-80% of the square image's width while remaining fully visible with breathing room around it, including all four outer edges and corners. Use a premium, realistic room setting, but keep furniture and architectural details secondary. Do not use a wide room view. Do not place the frame far away, make it small or allow the environment to compete with the product. Photograph it almost straight-on or from a very restrained natural angle so the artwork, frame depth and design remain easy to inspect. Preserve enough surrounding wall and setting to feel aspirational and physically believable.
+
+Card 1 must:
+- Predominantly display the framed product.
+- Show the complete outer frame without cropping any edge.
+- Keep the artwork large, sharp and readable.
+- Use a close or medium-close camera distance.
+- Still show a tasteful portion of the room around it.
+- Avoid wide establishing shots.
+- Avoid furniture blocking or visually competing with the frame.
+- Retain all existing product-lock and artwork-preservation instructions."""
+
+
+def build_carousel_product_dominance_principle_lock():
+    return """PRODUCT DOMINANCE PRINCIPLE — MANDATORY:
+We are selling the framed Sports Cave edition, not the room. The room may enhance the product, provide scale and create aspiration, but it must never overpower the framed artwork or make it look small. In every carousel card, the framed edition must be dominant, instantly recognizable and readable as a small Facebook carousel card on a phone. Use varied rooms, wall colours, camera positions and viewing angles without creating distant product shots. Maintain a cohesive premium campaign while ensuring every card works independently as a Facebook advertisement."""
+
+
+def build_carousel_card_camera_distance_lock(index):
+    if index == 1:
+        return build_carousel_card_one_product_hero_lock()
+    if index in {2, 3, 4}:
+        return """CARDS 2-4 PRODUCT-DOMINANT LIFESTYLE COMPOSITION — MANDATORY:
+Use a medium lifestyle composition, not a distant wide-angle room shot. The complete framed artwork should generally occupy approximately 50-70% of the square image's width. The product must remain instantly recognizable and readable when viewed as a small Facebook carousel card on a phone. Show enough of the room to create variety, context, ownership appeal and atmosphere, but do not place the frame far away, at the end of a large room or as a small background decoration. Never use an extreme wide shot, excessive empty space or oversized furniture that visually reduces the product. Keep the complete outer frame visible with breathing room around it and do not crop any part of the artwork or frame."""
+    return """CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:
+Keep the framed edition prominent even when the card focuses on scarcity, edition details or a different environment. The framed edition must remain one of the largest elements in the composition and must not become secondary to scarcity messaging, furniture, architecture or atmosphere. Do not zoom out significantly farther than Cards 2-4. Keep the complete outer frame visible with breathing room around it and do not crop any part of the artwork or frame."""
+
+
+def build_carousel_strict_product_lock():
+    return """STRICT PRODUCT LOCK — MANDATORY:
+Use the uploaded product image as the exact compositing source. Preserve the exact artwork, outer frame, colours, text, typography, badges, edition details, crop and internal composition. Do not redraw, regenerate, reinterpret or replace anything inside the frame. Do not change the frame colour, thickness, shape, proportions or material. Do not crop, stretch, warp, bend, blur or distort the artwork or frame. Keep the complete outer frame visible. The artwork must remain sharp and visually legible. Ensure the frame is mounted at a believable height and realistic scale."""
+
+
+def build_carousel_photorealism_lock():
+    return """CAROUSEL PHOTOREALISM REQUIREMENTS — MANDATORY:
+Make the room, frame and product placement resemble a genuine high-end interior photograph, not an AI-generated room or digital render. Use believable architecture, correct perspective, natural proportions and physically accurate scale. Create realistic contact shadows behind and below the frame. Use subtle, controlled glass reflections without obscuring the artwork. Give the frame convincing timber depth, sharp corners, natural texture and accurate mounting. Use realistic natural or practical lighting with consistent direction and colour temperature. Avoid plastic-looking surfaces, excessive HDR, artificial glow, oversharpening and cinematic effects that make the image look generated. Avoid warped walls, bent furniture, duplicate objects, melted textures, impossible shadows, distorted decor, floating objects and inconsistent reflections. Keep room styling restrained and believable with a small number of purposeful objects rather than AI-generated clutter. Do not add people unless the individual carousel concept explicitly requires them; if people are required, they must look anatomically and photographically realistic."""
+
+
+def build_carousel_image_prompt_schema(index, role):
+    square_lock = build_carousel_square_format_lock()
+    product_dominance_lock = build_carousel_product_dominance_principle_lock()
+    camera_distance_lock = build_carousel_card_camera_distance_lock(index)
+    strict_product_lock = build_carousel_strict_product_lock()
+    photorealism_lock = build_carousel_photorealism_lock()
+    final_check = build_carousel_final_square_format_check()
+    return f"""Card {index} — [exact generated Card {index} headline]
+Matching description: [exact generated Card {index} description]
+Visual purpose: {role}
+Image prompt:
+{square_lock}
+
+Card-specific visual purpose: {role}
+
+{product_dominance_lock}
+
+{camera_distance_lock}
+
+{strict_product_lock}
+
+{photorealism_lock}
+
+[Then continue this same standalone prompt with the exact uploaded-product/artwork lock, room, camera, lighting and realism instructions, previous-image variation lock, sport and country adaptation, prohibited elements, and any relevant card-specific selling idea.]
+
+{final_check}"""
+
+
 def build_carousel_visual_output_requirements(template_key):
     roles = get_carousel_visual_roles(template_key)
     schema = []
     for index, role in enumerate(roles, start=1):
-        schema.extend(
-            [
-                f"Card {index} — [exact generated Card {index} headline]",
-                f"Matching description: [exact generated Card {index} description]",
-                f"Visual purpose: {role}",
-                "Image prompt: [one complete standalone image-generation prompt that repeats the complete LAST-IMAGE VARIATION LOCK instructions]",
-                "",
-            ]
-        )
+        schema.append(build_carousel_image_prompt_schema(index, role))
     schema_text = "\n".join(schema).rstrip()
     return f"""CAROUSEL VISUAL STORY REQUIREMENTS
 
 After every existing Carousel copy, card, primary-text, CTA, setup and URL-parameter field, output exactly {CAROUSEL_CARD_COUNT} complete image-generation prompts. Map one prompt to each generated card in the existing approved order and role structure.
 
+Every generated carousel image prompt must begin with the mandatory square-format lock below, then follow the required prompt order. No carousel image prompt may omit, weaken, paraphrase or contradict the square-format lock, product-dominance principle, card camera-distance lock, strict product lock or carousel photorealism requirements. No card-specific template, sport adaptation, country direction, previous-image variation instruction, scarcity idea or room-composition idea may override the 1:1 square requirement, product prominence, complete-frame visibility, artwork accuracy or photorealism requirements.
+
+For every generated carousel prompt, use this priority order:
+
+1. Mandatory 1:1 square-format lock
+2. Card-specific visual purpose
+3. Product-dominance principle
+4. Card camera-distance lock
+5. Strict product lock
+6. Carousel photorealism requirements
+7. Exact uploaded-product/artwork lock
+8. Room, camera, lighting and realism instructions
+9. Previous-image variation lock
+10. Sport and country adaptation
+11. Prohibited elements
+12. Final mandatory square-format check
+
 Each prompt must be based on the selected product name, selected sport, selected country, the emotional meaning of that specific card, that card's exact generated headline, that card's exact generated description, its role and position in the overall story, the uploaded product artwork, and only verified product and scarcity information already permitted by the copy system.
 
 The five images must form one premium visual story, not five random mockups. Maintain compatible colour restraint, premium photographic quality, related lighting character, correct black-frame presentation and a shared Sports Cave collector tone without making the rooms identical.
 
-Each visual must clearly support its assigned card message while the framed product remains the unmistakable hero. Card 1 must deliver the strongest immediate product presentation. Card 5 must deliver the strongest truthful scarcity or final-claim presentation.
+Each visual must clearly support its assigned card message while the framed product remains the unmistakable hero. Card 1 must deliver the strongest immediate product presentation and be the most zoomed-in card. Cards 2-5 may show more of the environment, but only moderately; none may become a distant room shot. Card 5 must deliver the strongest truthful scarcity or final-claim presentation while keeping the product prominent.
 
 Use this direct conversion-focused visual progression while preserving the selected template's approved role labels:
 
@@ -955,7 +1041,7 @@ For every card, make the exact generated headline, exact generated description, 
 
 Privately develop a fresh visual concept from the selected product before writing the five prompts. Do not output that reasoning.
 
-Across the five prompts deliberately vary room type, architecture, wall finish, material palette, furniture style, lighting direction, time of day, camera height, camera distance, camera angle, artwork placement, emotional intensity, negative space, framing and composition, and how the room expresses the card's message.
+Across the five prompts deliberately vary room type, architecture, wall finish, material palette, furniture style, lighting direction, time of day, camera height, camera distance, camera angle, artwork placement, emotional intensity, negative space, framing and composition, and how the room expresses the card's message without zooming out so far that the framed artwork becomes small.
 
 No two cards may repeat the room type, house architecture, wall treatment, wall colour family, main furniture layout, lighting setup, time-of-day treatment, camera composition, camera height or artwork placement.
 
@@ -963,7 +1049,7 @@ Do not merely recolour the same room. Do not default to a generic office, living
 
 Treat this as a new creative run. Do not default to room combinations you have previously supplied for Sports Cave. Build a fresh set from the product title, sport, country, card copy and emotional story. Within this run, do not repeat a room type, wall treatment, principal furniture arrangement, lighting setup or camera composition.
 
-Visual variety must never alter, regenerate, crop or distort the supplied artwork or frame. Never crop the outer frame or let the artwork extend beyond its border. Avoid five near-identical framed mockups with only minor furniture changes.
+Visual variety must never alter, regenerate, crop or distort the supplied artwork or frame. Never crop the outer frame or let the artwork extend beyond its border. Never let room variety, furniture scale, architecture, negative space, sport atmosphere, country adaptation or scarcity emphasis make the framed product secondary. Avoid five near-identical framed mockups with only minor furniture changes.
 
 Normally do not place the card headline or description inside the image because Meta supplies those fields separately. Only include in-image card text if the existing approved campaign template explicitly requires it.
 
