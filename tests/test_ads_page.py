@@ -66,10 +66,10 @@ def visual_contract(prompt):
 def carousel_prompt_card_sections(contract):
     sections = {}
     for index in range(1, ads_page.CAROUSEL_CARD_COUNT + 1):
-        marker = f"Card {index} — [exact generated Card {index} headline]"
+        marker = f"CARD {index} IMAGE GENERATION PROMPT"
         start = contract.index(marker)
         next_marker = (
-            f"Card {index + 1} — [exact generated Card {index + 1} headline]"
+            f"CARD {index + 1} IMAGE GENERATION PROMPT"
             if index < ads_page.CAROUSEL_CARD_COUNT
             else "Return exactly these five image-prompt entries"
         )
@@ -1411,7 +1411,7 @@ PRIMARY TEXT VARIATIONS
         self.assertNotIn("Father’s Day", contract)
         self.assertNotIn("CAMPAIGN MOMENT VISUAL CONTEXT", contract)
         self.assertIn("SQUARE FORMAT — MANDATORY:", contract)
-        self.assertIn("CARD 1 EXTREME PRODUCT CLOSE-UP LOCK — MANDATORY:", contract)
+        self.assertIn("CARD 1 CLOSE-UP PRODUCT HERO LOCK — MANDATORY:", contract)
         self.assertIn("PRODUCT DOMINANCE PRINCIPLE — MANDATORY:", contract)
 
     def test_campaign_moment_image_toggle_adds_restrained_visual_context(self):
@@ -1715,11 +1715,26 @@ PRIMARY TEXT VARIATIONS
             "Scarcity",
         )
 
-        self.assertEqual(contract.count("Image prompt:"), 5)
+        self.assertEqual(
+            contract.count("IMAGE GENERATION PROMPTS — COPY ONE AT A TIME"),
+            1,
+        )
         for index, role in enumerate(expected_roles, start=1):
-            self.assertIn(f"Card {index} — [exact generated Card {index} headline]", contract)
-            self.assertIn(f"Matching description: [exact generated Card {index} description]", contract)
-            self.assertIn(f"Visual purpose: {role}", contract)
+            self.assertEqual(
+                contract.count(f"CARD {index} IMAGE GENERATION PROMPT"),
+                1,
+            )
+            self.assertIn(f"Approved card role: {role}", contract)
+            self.assertIn("Selected Sports Cave product: Six Laps Ahead", contract)
+            self.assertIn("Selected sport: Motorsport", contract)
+            self.assertIn("Selected market: Australia", contract)
+        self.assertIn(
+            "A Creative direction line may remain in the card-copy section as supplementary context, "
+            "but it can never substitute for, abbreviate or satisfy the required standalone image prompt.",
+            contract,
+        )
+        self.assertIn("Do not output only Creative direction.", contract)
+        self.assertIn("Do not output one shared prompt followed by five short variations.", contract)
         self.assertIn("Return exactly these five image-prompt entries and no sixth prompt.", contract)
 
     def test_every_carousel_card_prompt_has_mandatory_square_format_lock(self):
@@ -1745,7 +1760,7 @@ PRIMARY TEXT VARIATIONS
                 self.assertIn("width and height are identical", section)
                 self.assertIn(final_check, section)
 
-    def test_carousel_card_one_uses_mockups_close_up_foundation_with_extreme_lock_only(self):
+    def test_carousel_card_one_uses_mockups_close_up_foundation_with_close_lock_only(self):
         contract = visual_contract(
             ads_page.build_ads_prompt(
                 "Final Whistle Glory",
@@ -1758,15 +1773,14 @@ PRIMARY TEXT VARIATIONS
         sections = carousel_prompt_card_sections(contract)
         card_one = sections[1]
 
-        self.assertIn("CARD 1 EXTREME PRODUCT CLOSE-UP LOCK — MANDATORY:", card_one)
+        self.assertIn("CARD 1 CLOSE-UP PRODUCT HERO LOCK — MANDATORY:", card_one)
         self.assertIn("Mockups/Reel Close-Up Premium Wall Shot", card_one)
         self.assertIn("MOCKUPS CLOSE-UP WALL SHOT FOUNDATION — REUSED:", card_one)
         self.assertIn("Use only the framed artwork on a premium textured wall.", card_one)
         self.assertIn("No room decor.", card_one)
         self.assertIn("No furniture.", card_one)
         self.assertIn("The frame should be the hero of the image.", card_one)
-        self.assertIn("approximately 86-92% of the square canvas width", card_one)
-        self.assertIn("This percentage is mandatory, not an optional target.", card_one)
+        self.assertIn("approximately 65-80% of the useful square composition", card_one)
         self.assertIn("Keep all four outer frame edges and all four corners completely visible.", card_one)
         self.assertIn("Use an almost perfectly straight-on camera position", card_one)
         self.assertIn("premium 70-85 mm product-photography lens", card_one)
@@ -1783,9 +1797,9 @@ PRIMARY TEXT VARIATIONS
         for index in range(2, ads_page.CAROUSEL_CARD_COUNT + 1):
             with self.subTest(card=index):
                 self.assertIn("SQUARE FORMAT — MANDATORY:", sections[index])
-                self.assertNotIn("CARD 1 EXTREME PRODUCT CLOSE-UP LOCK — MANDATORY:", sections[index])
+                self.assertNotIn("CARD 1 CLOSE-UP PRODUCT HERO LOCK — MANDATORY:", sections[index])
                 self.assertNotIn("MOCKUPS CLOSE-UP WALL SHOT FOUNDATION — REUSED:", sections[index])
-                self.assertNotIn("approximately 86-92% of the square canvas width", sections[index])
+                self.assertNotIn("approximately 65-80% of the useful square composition", sections[index])
 
     def test_every_carousel_card_prompt_has_product_dominance_lock(self):
         contract = visual_contract(
@@ -1822,24 +1836,26 @@ PRIMARY TEXT VARIATIONS
         )
         sections = carousel_prompt_card_sections(contract)
 
-        self.assertIn("approximately 86-92% of the square canvas width", sections[1])
+        self.assertIn("approximately 65-80% of the useful square composition", sections[1])
         self.assertIn("must be a premium close-up product photograph", sections[1])
         for index in (2, 3, 4):
             with self.subTest(card=index):
                 self.assertIn("CARDS 2-4 PRODUCT-DOMINANT LIFESTYLE COMPOSITION — MANDATORY:", sections[index])
-                self.assertIn("medium lifestyle composition, not a distant wide-angle room shot", sections[index])
-                self.assertIn("approximately 50-70% of the square image's width", sections[index])
+                self.assertIn("medium or medium-close lifestyle composition, not a distant wide-angle room shot", sections[index])
+                self.assertIn("approximately 45-65% of the useful square composition", sections[index])
                 self.assertIn("small Facebook carousel card on a phone", sections[index])
                 self.assertIn("Never use an extreme wide shot", sections[index])
                 self.assertIn("Keep the complete outer frame visible", sections[index])
-                self.assertNotIn("approximately 86-92% of the square canvas width", sections[index])
+                self.assertNotIn("approximately 65-80% of the useful square composition", sections[index])
 
         self.assertIn("CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:", sections[5])
+        self.assertIn("dramatic product-led scarcity image using a close or medium-close composition", sections[5])
         self.assertIn("must remain one of the largest elements", sections[5])
         self.assertIn("must not become secondary to scarcity messaging", sections[5])
+        self.assertIn("never invent, replace or modify an edition number", sections[5])
         self.assertIn("Do not zoom out significantly farther than Cards 2-4.", sections[5])
         self.assertIn("Keep the complete outer frame visible", sections[5])
-        self.assertNotIn("approximately 86-92% of the square canvas width", sections[5])
+        self.assertNotIn("approximately 65-80% of the useful square composition", sections[5])
 
     def test_every_carousel_card_prompt_has_strict_product_lock_and_photorealism(self):
         contract = visual_contract(
@@ -1860,18 +1876,29 @@ PRIMARY TEXT VARIATIONS
         )
         for index, section in sections.items():
             with self.subTest(card=index):
+                self.assertIn("Create a 1024 × 1024 square image.", section)
+                self.assertIn("Selected Sports Cave product: Collector Test Product", section)
+                self.assertIn("Selected sport: Cricket", section)
+                self.assertIn("Selected market: New Zealand", section)
                 self.assertIn("Use the uploaded product image as the exact compositing source.", section)
+                self.assertIn("Use the supplied product reference as the exact framed Sports Cave product.", section)
                 self.assertIn("Preserve the exact artwork, outer frame, colours, text, typography", section)
                 self.assertIn("Do not redraw, regenerate, reinterpret or replace anything inside the frame.", section)
                 self.assertIn("Do not change the frame colour, thickness, shape, proportions or material.", section)
                 self.assertIn("Keep the complete outer frame visible.", section)
                 self.assertIn("The artwork must remain sharp and visually legible.", section)
+                self.assertIn("PRODUCT LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT", section)
+                self.assertIn("FRAME AND GLASS REALISM - INCLUDE IN EVERY RETURNED IMAGE PROMPT", section)
+                self.assertIn("DYNAMIC ROOM REALISM - INCLUDE IN EVERY RETURNED IMAGE PROMPT", section)
+                self.assertIn("LAST-IMAGE VARIATION LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT", section)
+                self.assertIn("SPORT AND COUNTRY VISUAL ADAPTATION", section)
                 self.assertIn("genuine high-end interior photograph", section)
                 self.assertIn("Create realistic contact shadows behind and below the frame.", section)
                 self.assertIn("subtle, controlled glass reflections without obscuring the artwork", section)
                 self.assertIn("convincing timber depth, sharp corners, natural texture and accurate mounting", section)
                 self.assertIn("Avoid warped walls, bent furniture, duplicate objects", section)
                 self.assertIn("Do not add people unless the individual carousel concept explicitly requires them", section)
+                self.assertIn(ads_page.build_carousel_final_square_format_check(), section)
 
     def test_carousel_square_lock_reaches_every_category_country_and_role_variation(self):
         for category in ads_page.CATEGORY_OPTIONS[1:]:
@@ -1918,7 +1945,7 @@ PRIMARY TEXT VARIATIONS
 
         for contract in (instant_contract, single_contract):
             self.assertNotIn("SQUARE FORMAT — MANDATORY:", contract)
-            self.assertNotIn("CARD 1 EXTREME PRODUCT CLOSE-UP LOCK — MANDATORY:", contract)
+            self.assertNotIn("CARD 1 CLOSE-UP PRODUCT HERO LOCK — MANDATORY:", contract)
             self.assertNotIn("MOCKUPS CLOSE-UP WALL SHOT FOUNDATION — REUSED:", contract)
             self.assertNotIn("PRODUCT DOMINANCE PRINCIPLE — MANDATORY:", contract)
             self.assertNotIn("CARDS 2-4 PRODUCT-DOMINANT LIFESTYLE COMPOSITION — MANDATORY:", contract)
@@ -1945,6 +1972,56 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("create a 1024 x 1024 ultra-realistic close-up lifestyle mockup", foundation)
         self.assertIn("Use only the framed artwork on a premium textured wall.", foundation)
 
+    def test_ads_setup_notes_text_matches_campaign_type_and_pasted_copy(self):
+        carousel_result = ads_page.build_ads_result_record(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            product_url="https://sportscave.com.au/products/six-laps-ahead",
+            variation_token="notes-carousel",
+        )
+        carousel_workflow = {
+            "export_date": "2026-07-29",
+            "slots": {},
+            "outcomes": {},
+            "ad_notes": {
+                "headlines": "Six Laps\nRace Memory",
+                "descriptions": "Built For Fans\nLimited Run",
+                "cards": "Card 1: Identity\nCard 2: Moment",
+            },
+        }
+
+        carousel_notes = ads_page.build_ads_setup_notes_text(carousel_result, carousel_workflow)
+
+        self.assertIn("Campaign type: Carousel", carousel_notes)
+        self.assertIn("Six Laps\nRace Memory", carousel_notes)
+        self.assertIn("Card 1: Identity\nCard 2: Moment", carousel_notes)
+        self.assertIn("Carousel setup checklist", carousel_notes)
+        self.assertIn("Use exactly 5 carousel cards", carousel_notes)
+
+        instant_result = ads_page.build_ads_result_record(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/final-whistle-glory",
+            variation_token="notes-instant",
+        )
+        instant_workflow = {
+            "export_date": "2026-07-29",
+            "slots": {},
+            "outcomes": {},
+            "ad_notes": {"cards": "Instant Experience setup from ChatGPT"},
+        }
+
+        instant_notes = ads_page.build_ads_setup_notes_text(instant_result, instant_workflow)
+
+        self.assertIn("Campaign type: Instant Experience", instant_notes)
+        self.assertIn("Instant Experience copy / setup", instant_notes)
+        self.assertIn("Use cover 1 as the main Instant Experience cover.", instant_notes)
+        self.assertNotIn("Use exactly 5 carousel cards", instant_notes)
+
     def test_generic_carousel_visual_contract_preserves_approved_generic_roles(self):
         prompt = ads_page.build_ads_prompt(
             "Final Whistle Glory",
@@ -1962,8 +2039,8 @@ PRIMARY TEXT VARIATIONS
             "Fan Ownership",
             "Scarcity",
         ):
-            self.assertIn(f"Visual purpose: {role}", contract)
-        self.assertNotIn("Visual purpose: Race Or Moment", contract)
+            self.assertIn(f"Approved card role: {role}", contract)
+        self.assertNotIn("Approved card role: Race Or Moment", contract)
 
     def test_carousel_visual_contract_requires_distinct_coherent_standalone_rooms(self):
         contract = visual_contract(
@@ -1995,12 +2072,12 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Avoid five near-identical framed mockups", contract)
         self.assertIn("fake edition details", contract)
         self.assertIn(
-            "Card 1: an extreme close-up wall product-hero presentation based on the Mockups/Reel Close-Up Premium Wall Shot.",
+            "Card 1: product identity and a scroll-stopping close-up hero based on the Mockups/Reel Close-Up Premium Wall Shot.",
             contract,
         )
-        self.assertIn("Card 2: a desirable ownership setting.", contract)
-        self.assertIn("Card 3: a premium collector display suited to the selected category.", contract)
-        self.assertIn("Card 4: an emotional lifestyle, memory or legacy presentation.", contract)
+        self.assertIn("Card 2: the verified moment, era or legacy.", contract)
+        self.assertIn("Card 3: an emotional collector hook.", contract)
+        self.assertIn("Card 4: fan ownership and how the framed edition commands the wall.", contract)
         self.assertIn("exact generated headline, exact generated description, creative direction", contract)
         self.assertIn("Do not use abstract room symbolism", contract)
         self.assertIn("Never crop the outer frame", contract)
@@ -2031,9 +2108,18 @@ PRIMARY TEXT VARIATIONS
             "Never sacrifice the product lock",
         ):
             self.assertIn(instruction, contract)
-        self.assertEqual(contract.count("Image prompt:"), ads_page.CAROUSEL_CARD_COUNT)
+        self.assertEqual(
+            sum(
+                contract.count(f"CARD {index} IMAGE GENERATION PROMPT")
+                for index in range(1, ads_page.CAROUSEL_CARD_COUNT + 1)
+            ),
+            ads_page.CAROUSEL_CARD_COUNT,
+        )
         for section in carousel_prompt_card_sections(contract).values():
-            self.assertIn("previous-image variation lock", section)
+            self.assertIn(
+                "LAST-IMAGE VARIATION LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT",
+                section,
+            )
         self.assertIn("No two cards may repeat the room type, house architecture", contract)
         self.assertIn("time-of-day treatment, camera composition, camera height", contract)
 
@@ -2058,91 +2144,151 @@ PRIMARY TEXT VARIATIONS
                 self.assertIn("SPORT AND COUNTRY VISUAL ADAPTATION", contract)
                 self.assertIn("Selected country: New Zealand", contract)
 
-    def test_ads_visual_contract_is_text_first_across_all_campaign_types(self):
-        expected_prompt_counts = {
-            "Carousel": ads_page.CAROUSEL_CARD_COUNT,
-            "Instant Experience": 1,
-            "Single Image / Video": 1,
-        }
-
-        for campaign_type, expected_prompt_count in expected_prompt_counts.items():
+    def test_every_ads_prompt_requires_text_first_no_automatic_image_generation(self):
+        for campaign_type in ("Carousel", "Instant Experience", "Single Image / Video"):
             with self.subTest(campaign_type=campaign_type):
                 contract = visual_contract(
                     ads_page.build_ads_prompt(
                         "Collector Test Product",
-                        "Cricket",
+                        "Football",
                         "Australia",
                         campaign_type,
                         variation_token="text-first-test",
                     )
                 )
 
-                self.assertIn("TEXT-FIRST IMAGE GENERATION GATE - HIGHEST PRIORITY", contract)
-                self.assertIn(
-                    "The first response to this Ads prompt must be text and planning only.",
-                    contract,
-                )
-                self.assertIn("Do not call an image-generation tool", contract)
-                self.assertIn(
-                    "Artwork or product images being attached",
-                    contract,
-                )
-                self.assertIn(
-                    "write out the complete finished campaign package in chat",
-                    contract,
-                )
-                self.assertIn(
-                    "every required production-ready image or video prompt in full",
-                    contract,
-                )
-                self.assertIn(
-                    "clearly separated, copyable block",
-                    contract,
-                )
-                self.assertIn(
-                    "complete and self-contained",
-                    contract,
-                )
-                self.assertIn(
-                    "Would you like me to generate Card 1?",
-                    contract,
-                )
-                self.assertIn(
-                    "generate Card 1 only",
-                    contract,
-                )
-                self.assertIn(
-                    "EXPLICIT DIRECT-GENERATION EXCEPTION",
-                    contract,
-                )
-                self.assertIn(
-                    "generate specifically identified creatives now",
-                    contract,
+                self.assertIn("TEXT-FIRST IMAGE-GENERATION GATE - MANDATORY", contract)
+                self.assertIn("Your first response must be text and planning only.", contract)
+                self.assertIn("Do not call, invoke, open or use any image-generation tool", contract)
+                self.assertIn("Having artwork attached", contract)
+                self.assertIn("must not be treated as permission to create an image automatically", contract)
+                self.assertIn("Any imperative wording inside an image-prompt block is copy", contract)
+                self.assertIn('"Would you like me to generate Card 1?"', contract)
+                self.assertIn("Then wait for explicit approval before generating anything.", contract)
+                self.assertIn('"generate the image now"', contract)
+                self.assertIn("generate only that requested image immediately", contract)
+
+    def test_text_first_contract_requires_complete_ad_package_before_images(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Six Laps Ahead",
+                "Motorsport",
+                "Australia",
+                "Carousel",
+                variation_token="package-test",
+            )
+        )
+
+        for required_item in (
+            "Campaign objective and funnel stage.",
+            "Target market and audience.",
+            "Main emotional/creative angle.",
+            "Primary ad text variants.",
+            "Headlines.",
+            "Description lines.",
+            "CTA recommendation.",
+            "Optional event or seasonal integration, when supplied.",
+            "Card-by-card or creative-by-creative strategy.",
+            "The text shown on each creative, where applicable.",
+            "A complete production-ready image prompt for every required image.",
+            "placement, sizing, export, consistency, artwork-preservation and realism instructions",
+        ):
+            self.assertIn(required_item, contract)
+
+        self.assertIn("Print every image prompt in full in clearly separated, copyable blocks.", contract)
+        self.assertIn("Do not shorten, summarise, collapse or hide them behind buttons.", contract)
+        self.assertIn("Every image prompt must be self-contained", contract)
+        self.assertIn("fresh ChatGPT conversation", contract)
+
+    def test_carousel_text_first_contract_requires_all_five_card_prompts_first(self):
+        prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            variation_token="carousel-text-first-test",
+        )
+        contract = visual_contract(prompt)
+
+        self.assertIn("For Carousel campaigns, the first text-only response must include", contract)
+        self.assertIn("five complete, separately copyable image prompts", contract)
+        self.assertIn("Card 1 must remain the strongest, closest and most scroll-stopping product hero", contract)
+        self.assertIn("Cards 2-4 may show more environment while keeping the framed artwork dominant", contract)
+        self.assertIn("Card 5 must focus on scarcity and final conversion", contract)
+        self.assertIn("17-character Carousel headline and description validation", contract)
+        self.assertIn("country terminology", contract)
+        self.assertIn("optional event relevance", contract)
+        self.assertIn("strict artwork lock, frame realism, product dominance and photorealism rules", contract)
+        self.assertIn("IMAGE GENERATION PROMPTS — COPY ONE AT A TIME", contract)
+        for index in range(1, ads_page.CAROUSEL_CARD_COUNT + 1):
+            self.assertIn(f"CARD {index} IMAGE GENERATION PROMPT", contract)
+        self.assertNotIn("IMAGE PROMPTS — GENERATE IN THIS ORDER", contract)
+        self.assertTrue(
+            prompt.rstrip().endswith("Would you like me to generate Card 1?"),
+            "The complete text-only package must end with the generation approval question.",
+        )
+
+    def test_old_cached_result_is_refreshed_to_current_full_visual_prompt_contract(self):
+        current = ads_page.build_ads_result_record(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            product_id="product-123",
+            product_url="https://sportscave.com.au/products/six-laps-ahead",
+            variation_token="cached-result-test",
+        )
+        legacy = {
+            **current,
+            "master_prompt": (
+                "OLD CAROUSEL PROMPT\n\nMASTER RESPONSE AND VISUAL OUTPUT CONTRACT\n\n"
+                "Card 1 - Product Identity\nCreative direction: Use the framed artwork."
+            ),
+            "generated_ad_output": (
+                "OLD CAROUSEL PROMPT\n\nMASTER RESPONSE AND VISUAL OUTPUT CONTRACT\n\n"
+                "Card 1 - Product Identity\nCreative direction: Use the framed artwork."
+            ),
+        }
+        legacy.pop("prompt_contract_version")
+
+        refreshed = ads_page.ensure_current_ads_result_prompt(legacy)
+
+        self.assertEqual(
+            refreshed["prompt_contract_version"],
+            ads_page.ADS_PROMPT_CONTRACT_VERSION,
+        )
+        self.assertEqual(refreshed["product_id"], "product-123")
+        self.assertEqual(refreshed["variation_token"], "cached-result-test")
+        self.assertNotIn("OLD CAROUSEL PROMPT", refreshed["master_prompt"])
+        self.assertIn(
+            "IMAGE GENERATION PROMPTS — COPY ONE AT A TIME",
+            refreshed["master_prompt"],
+        )
+        for index in range(1, ads_page.CAROUSEL_CARD_COUNT + 1):
+            self.assertIn(
+                f"CARD {index} IMAGE GENERATION PROMPT",
+                refreshed["master_prompt"],
+            )
+
+    def test_non_carousel_text_first_contract_requires_one_copyable_prompt(self):
+        for campaign_type, expected in (
+            ("Instant Experience", "one complete, separately copyable, production-ready cover image prompt"),
+            ("Single Image / Video", "one complete, separately copyable, production-ready creative prompt"),
+        ):
+            with self.subTest(campaign_type=campaign_type):
+                contract = visual_contract(
+                    ads_page.build_ads_prompt(
+                        "Collector Test Product",
+                        "Cricket",
+                        "UK",
+                        campaign_type,
+                        variation_token="non-carousel-text-first",
+                    )
                 )
 
-                if campaign_type == "Carousel":
-                    self.assertEqual(
-                        contract.count("Image prompt:"),
-                        expected_prompt_count,
-                    )
-                    self.assertIn(
-                        "the first response must contain all five complete card prompts",
-                        contract,
-                    )
-                    self.assertIn(
-                        "IMAGE PROMPTS - WRITE OUT IN THIS ORDER",
-                        contract,
-                    )
-                elif campaign_type == "Instant Experience":
-                    self.assertEqual(
-                        contract.count("INSTANT EXPERIENCE COVER IMAGE PROMPT"),
-                        expected_prompt_count,
-                    )
-                else:
-                    self.assertEqual(
-                        contract.count("CREATIVE PROMPT FOR SINGLE IMAGE/VIDEO"),
-                        expected_prompt_count,
-                    )
+                self.assertIn(expected, contract)
+                self.assertIn("before asking for approval to generate anything", contract)
+                self.assertNotIn("CARD 1 IMAGE GENERATION PROMPT", contract)
 
     def test_instant_experience_visual_contract_returns_one_tailored_cover_not_five(self):
         prompt = ads_page.build_ads_prompt(
@@ -2155,8 +2301,16 @@ PRIMARY TEXT VARIATIONS
         contract = visual_contract(prompt)
 
         self.assertEqual(contract.count("INSTANT EXPERIENCE COVER IMAGE PROMPT"), 1)
+        self.assertEqual(
+            contract.count("IMAGE GENERATION PROMPTS — COPY ONE AT A TIME"),
+            1,
+        )
         self.assertNotIn("IMAGE PROMPTS — GENERATE IN THIS ORDER", contract)
         self.assertIn("output exactly one complete cover-image prompt", contract)
+        self.assertIn(
+            "Do not replace it with Creative direction, a short cover brief, a shared base prompt",
+            contract,
+        )
         self.assertIn("Product name: fg", contract)
         self.assertIn("Sport category: AFL", contract)
         self.assertIn("Target market: Australia", contract)
@@ -2170,6 +2324,13 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Do not ask for these details again.", contract)
         self.assertIn("Reference image: the selected framed Sports Cave product reference image uploaded through the Ads section", contract)
         self.assertIn("Selected product name: fg", contract)
+        cover = contract[contract.index("INSTANT EXPERIENCE COVER IMAGE PROMPT") :]
+        self.assertIn("PRODUCT LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT", cover)
+        self.assertIn("FRAME AND GLASS REALISM - INCLUDE IN EVERY RETURNED IMAGE PROMPT", cover)
+        self.assertIn("DYNAMIC ROOM REALISM - INCLUDE IN EVERY RETURNED IMAGE PROMPT", cover)
+        self.assertIn("LAST-IMAGE VARIATION LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT", cover)
+        self.assertIn("SPORT AND COUNTRY VISUAL ADAPTATION", cover)
+        self.assertIn("Return exactly one cover-image prompt and no additional image prompts.", cover)
         self.assertNotIn("Social Media Reels", contract)
         self.assertNotIn("Six Laps Ahead", contract)
 
@@ -2189,7 +2350,10 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Product name: Masters Sunday Frame", contract)
         self.assertIn("Sport category: Golf", contract)
         self.assertIn("Target market: Canada", contract)
-        self.assertIn("The final campaign-specific visual heading and prompt count below are authoritative.", contract)
+        self.assertIn(
+            "The final campaign-specific visual heading, exact headings and prompt count below are authoritative.",
+            contract,
+        )
         self.assertIn("LIMITED TO 100 WORLDWIDE", contract)
         self.assertIn("Once it sells out, it’s gone.", contract)
         self.assertNotIn("Social Media Reels", contract)
@@ -2249,7 +2413,10 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Return the finished existing ad-copy output first", contract)
         self.assertIn("Directly beneath that complete existing output", contract)
         self.assertIn("Do not output a preliminary brief, duplicate visual field or second prompt.", contract)
-        self.assertIn("The final campaign-specific visual heading and prompt count below are authoritative.", contract)
+        self.assertIn(
+            "The final campaign-specific visual heading, exact headings and prompt count below are authoritative.",
+            contract,
+        )
         self.assertIn("Do not repeat the research", contract)
 
     def test_product_name_is_collapsed_to_one_safe_prompt_line(self):
@@ -2289,7 +2456,7 @@ PRIMARY TEXT VARIATIONS
         clipboard_html = render_html.call_args.args[0]
         self.assertIn("SPORTS CAVE MOTORSPORT CAROUSEL AD", clipboard_html)
         self.assertIn("MASTER RESPONSE AND VISUAL OUTPUT CONTRACT", clipboard_html)
-        self.assertIn("IMAGE PROMPTS", clipboard_html)
+        self.assertIn("IMAGE GENERATION PROMPTS", clipboard_html)
         self.assertEqual(render_html.call_count, 1)
 
     def test_ads_prompt_code_has_no_external_ai_api_path(self):
@@ -2320,6 +2487,22 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("navigator.clipboard.writeText(promptText)", source)
         self.assertIn("render_prompt_copy_button(", supported_result_source)
         self.assertNotIn("st.code(build_ads_prompt", supported_result_source)
+
+    def test_generated_image_uploads_include_compact_setup_notes_before_save(self):
+        source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
+        supported_result_source = source[source.index("def render_supported_result") : source.index("def render_page")]
+
+        self.assertIn('st.expander("Ad setup notes (optional)"', source)
+        self.assertIn("Paste the 5 headlines, one per line.", source)
+        self.assertIn("Paste the 5 descriptions, one per line.", source)
+        self.assertLess(
+            supported_result_source.index("_render_ads_image_slots(result, workflow)"),
+            supported_result_source.index("_render_ads_setup_notes(result, workflow)"),
+        )
+        self.assertLess(
+            supported_result_source.index("_render_ads_setup_notes(result, workflow)"),
+            supported_result_source.index("_render_ads_image_save(result, workflow)"),
+        )
 
     def test_submit_supported_result_renders_compact_sections_with_url_parameters(self):
         app_test = run_ads_page()
@@ -2374,9 +2557,12 @@ PRIMARY TEXT VARIATIONS
             [uploader.label for uploader in app_test.file_uploader[:5]],
             ["Carousel 1", "Carousel 2", "Carousel 3", "Carousel 4", "Carousel 5"],
         )
-        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
         original_result = dict(app_test.session_state[ads_page.ADS_RESULT_STATE_KEY])
         image = square_png_bytes()
+        app_test.file_uploader[0].set_value([("Carousel 1.png", image, "image/png")])
+        app_test.run(timeout=30)
+        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
         for uploader in app_test.file_uploader[:5]:
             uploader.set_value([(f"{uploader.label}.png", image, "image/png")])
         app_test.run(timeout=30)
@@ -2391,7 +2577,7 @@ PRIMARY TEXT VARIATIONS
         self.assertFalse(button_by_label(app_test, "Save Images").disabled)
         self.assertEqual(len(app_test.exception), 0)
 
-    def test_remove_and_replace_updates_carousel_save_readiness(self):
+    def test_remove_and_replace_keeps_carousel_partial_save_available(self):
         app_test = run_ads_page()
         set_product_name(app_test, "Six Laps Ahead")
         select_option(app_test, "Category", "Motorsport")
@@ -2405,7 +2591,7 @@ PRIMARY TEXT VARIATIONS
         app_test.run(timeout=30)
 
         button_by_label(app_test, "Remove").click().run(timeout=20)
-        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
         self.assertEqual(
             len(app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]["slots"]),
             4,

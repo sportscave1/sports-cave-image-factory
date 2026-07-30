@@ -96,6 +96,7 @@ EDITION_OPS_ROWS_SESSION_KEY = "edition_ops_rows"
 CAROUSEL_CARD_MAX_CHARACTERS = 17
 CAROUSEL_CARD_COUNT = 5
 META_WINNER_COPY_BLOCK_VERSION = "SPORTS CAVE META WINNER COPY UPGRADE V1"
+ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V2"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
@@ -1116,19 +1117,21 @@ def apply_meta_url_parameters_guidance(prompt):
 def build_product_lock_visual_rules():
     return """PRODUCT LOCK - INCLUDE IN EVERY RETURNED IMAGE PROMPT
 
-Use the uploaded Sports Cave product image as the exact reference.
+Use the supplied product reference as the exact framed Sports Cave product.
 
 Keep the uploaded artwork and frame exactly the same.
 
 Do not redesign, repaint, redraw, replace, reinterpret or regenerate the artwork inside the frame.
 
-Do not change the athlete or subject, face, vehicle, uniform, livery, colours, text, badge, edition plate, plaque, signature, layout, crop, composition, frame colour, frame shape or landscape proportions.
+Do not change the athlete or subject, face, team, vehicle, uniform, livery, colours, typography, text, badge, edition number, edition plate, plaque, signature, layout, crop, composition, frame colour, frame shape or landscape proportions.
 
 Do not blur, stretch, warp, bend, squash or distort the artwork or frame.
 
 The artwork must remain sharp, rectangular, correctly aligned and physically believable inside the frame.
 
-Do not generate a lookalike version of the artwork."""
+Do not generate a lookalike version of the artwork.
+
+Do not add additional artwork, fake branding, unofficial logos or competing focal points."""
 
 
 def build_frame_and_glass_visual_rules():
@@ -1231,7 +1234,11 @@ Generate this image on a true 1:1 square canvas at exactly 1024 × 1024 pixels. 
 
 
 def build_carousel_final_square_format_check():
-    return "FINAL FORMAT CHECK: Output one true 1024 × 1024 image only. Width must equal height. Never output a landscape or portrait image."
+    return (
+        "FINAL VERIFICATION: Output one true 1024 × 1024 image only. Width must equal height. "
+        "Never output a landscape or portrait image. Confirm that the complete supplied product and outer frame "
+        "remain visible and that the artwork, frame, typography, badge, plaque and edition details are unchanged."
+    )
 
 
 def build_carousel_card_one_mockups_close_up_foundation():
@@ -1263,12 +1270,12 @@ def build_carousel_card_one_product_hero_lock():
         if close_up_foundation
         else ""
     )
-    return f"""CARD 1 EXTREME PRODUCT CLOSE-UP LOCK — MANDATORY:
+    return f"""CARD 1 CLOSE-UP PRODUCT HERO LOCK — MANDATORY:
 Carousel Card 1 must use the existing Mockups/Reel Close-Up Premium Wall Shot as its close-up composition foundation, then obey the stricter Carousel Card 1 rules below. Carousel Card 1 must be a premium close-up product photograph, not a lifestyle room photograph.{foundation_block}
 
-The complete framed product must occupy approximately 86-92% of the square canvas width and should fill most of the vertical composition while preserving its correct landscape proportions. This percentage is mandatory, not an optional target.
+The complete framed product must occupy approximately 65-80% of the useful square composition and should fill most of the available visual area while preserving its correct landscape proportions.
 
-Keep all four outer frame edges and all four corners completely visible. Leave only a narrow, natural margin around the frame. Never crop the frame, artwork, border, plaque or shadow.
+Keep all four outer frame edges and all four corners completely visible. Leave natural breathing room around the frame. Never crop the frame, artwork, border, plaque or shadow.
 
 Use an almost perfectly straight-on camera position, level with the centre of the artwork. Allow no more than a very subtle 2-4 degree natural angle when required for realistic frame depth.
 
@@ -1283,7 +1290,7 @@ Use the visual character of a premium 70-85 mm product-photography lens:
 - No large furniture.
 - No room-establishing composition.
 
-Show only enough environment to prove the frame is physically mounted in a real premium home. The background should mainly be a realistic wall surface. At most, allow a very small restrained edge of a console, cabinet or surface at the bottom of the image, but only if it does not reduce the frame's required 86-92% canvas-width size.
+Show only enough environment to prove the frame is physically mounted in a real premium home. The background should mainly be a realistic wall surface. At most, allow a small restrained edge of a console, cabinet or surface at the bottom of the image, but only if it does not reduce the frame's required product dominance.
 
 The frame and artwork must be immediately readable at Facebook carousel thumbnail size. The viewer should first see the product, then notice the wall and atmosphere afterward.
 
@@ -1317,7 +1324,7 @@ Use the uploaded framed product as the exact compositing source. Preserve the en
 CARD 1 REALISM UPGRADE — MANDATORY:
 Card 1 must resemble genuine commercial product photography. Require physically convincing premium timber frame depth, sharp square corners and clean joins, natural glass thickness, subtle reflections that match the light source, controlled glare that never hides important artwork details, realistic contact shadow behind and slightly below the frame, accurate scale and perspective, fine wall texture, natural highlight falloff and realistic sharpness without oversharpening.
 
-Reject flat pasted-on artwork, fake or missing glass, plastic frame materials, artificial HDR, excessive glow, warped frame edges, curved walls, impossible reflections, melted textures, fake luxury styling, AI-generated-looking artwork, excessive depth of field, blurred product detail, compact entry gallery compositions, visible flooring, furniture-led composition or any room-setting instruction that would make the framed product smaller than 86-92% of the canvas width."""
+Reject flat pasted-on artwork, fake or missing glass, plastic frame materials, artificial HDR, excessive glow, warped frame edges, curved walls, impossible reflections, melted textures, fake luxury styling, AI-generated-looking artwork, excessive depth of field, blurred product detail, compact entry gallery compositions, visible flooring, furniture-led composition or any room-setting instruction that would make the framed product smaller than 65% of the useful composition."""
 
 
 def build_carousel_product_dominance_principle_lock():
@@ -1330,9 +1337,9 @@ def build_carousel_card_camera_distance_lock(index):
         return build_carousel_card_one_product_hero_lock()
     if index in {2, 3, 4}:
         return """CARDS 2-4 PRODUCT-DOMINANT LIFESTYLE COMPOSITION — MANDATORY:
-Use a medium lifestyle composition, not a distant wide-angle room shot. The complete framed artwork should generally occupy approximately 50-70% of the square image's width. The product must remain instantly recognizable and readable when viewed as a small Facebook carousel card on a phone. Show enough of the room to create variety, context, ownership appeal and atmosphere, but do not place the frame far away, at the end of a large room or as a small background decoration. Never use an extreme wide shot, excessive empty space or oversized furniture that visually reduces the product. Keep the complete outer frame visible with breathing room around it and do not crop any part of the artwork or frame."""
+Use a medium or medium-close lifestyle composition, not a distant wide-angle room shot. The complete framed artwork should generally occupy approximately 45-65% of the useful square composition. The product must remain instantly recognizable and readable when viewed as a small Facebook carousel card on a phone. Show enough of the room to create variety, context, ownership appeal and atmosphere, but do not place the frame far away, at the end of a large room or as a small background decoration. Never use an extreme wide shot, excessive empty space or oversized furniture that visually reduces the product. Keep the complete outer frame visible with breathing room around it and do not crop any part of the artwork or frame."""
     return """CARD 5 PRODUCT-PROMINENT SCARCITY COMPOSITION — MANDATORY:
-Keep the framed edition prominent even when the card focuses on scarcity, edition details or a different environment. The framed edition must remain one of the largest elements in the composition and must not become secondary to scarcity messaging, furniture, architecture or atmosphere. Do not zoom out significantly farther than Cards 2-4. Keep the complete outer frame visible with breathing room around it and do not crop any part of the artwork or frame."""
+Finish with a dramatic product-led scarcity image using a close or medium-close composition. Keep the framed edition prominent even when the card focuses on scarcity, edition details or a different environment. The framed edition must remain one of the largest elements in the composition and must not become secondary to scarcity messaging, furniture, architecture or atmosphere. Make the existing edition badge, plaque or numbered-edition detail visible when it exists in the supplied product, but never invent, replace or modify an edition number. Do not zoom out significantly farther than Cards 2-4. Keep the complete outer frame visible with breathing room around it and do not crop any part of the artwork or frame."""
 
 
 def build_carousel_strict_product_lock():
@@ -1345,12 +1352,38 @@ def build_carousel_photorealism_lock():
 Make the room, frame and product placement resemble a genuine high-end interior photograph, not an AI-generated room or digital render. Use believable architecture, correct perspective, natural proportions and physically accurate scale. Create realistic contact shadows behind and below the frame. Use subtle, controlled glass reflections without obscuring the artwork. Give the frame convincing timber depth, sharp corners, natural texture and accurate mounting. Use realistic natural or practical lighting with consistent direction and colour temperature. Avoid plastic-looking surfaces, excessive HDR, artificial glow, oversharpening and cinematic effects that make the image look generated. Avoid warped walls, bent furniture, duplicate objects, melted textures, impossible shadows, distorted decor, floating objects and inconsistent reflections. Keep room styling restrained and believable with a small number of purposeful objects rather than AI-generated clutter. Do not add people unless the individual carousel concept explicitly requires them; if people are required, they must look anatomically and photographically realistic."""
 
 
-def build_carousel_image_prompt_schema(index, role, campaign_moment=None, *, selected_country=""):
+def build_carousel_image_prompt_schema(
+    index,
+    role,
+    campaign_moment=None,
+    *,
+    product_name="",
+    category="",
+    selected_country="",
+):
+    product_name = _clean_product_name(product_name)
+    category = _normalise_option_label(category) or "selected sport category"
+    selected_country = _normalise_option_label(selected_country) or "selected market"
+    required_purposes = {
+        1: "Product identity and a scroll-stopping product hero.",
+        2: "The verified moment, era or legacy connected to the product.",
+        3: "An emotional collector hook rooted in memory, identity or pride.",
+        4: "Fan ownership and how the framed edition commands the wall.",
+        5: "Scarcity, limited edition and no second run, using only verified claims.",
+    }
     square_lock = build_carousel_square_format_lock()
     product_dominance_lock = build_carousel_product_dominance_principle_lock()
     camera_distance_lock = build_carousel_card_camera_distance_lock(index)
     strict_product_lock = build_carousel_strict_product_lock()
+    product_lock = build_product_lock_visual_rules()
+    frame_and_glass_rules = build_frame_and_glass_visual_rules()
+    room_realism_rules = build_room_realism_visual_rules()
     photorealism_lock = build_carousel_photorealism_lock()
+    variation_lock = build_last_image_variation_visual_rules()
+    sport_country_adaptation = build_sport_country_visual_adaptation(
+        category,
+        selected_country,
+    )
     campaign_moment_visual_context = build_campaign_moment_visual_context(
         campaign_moment,
         selected_country=selected_country,
@@ -1361,13 +1394,23 @@ def build_carousel_image_prompt_schema(index, role, campaign_moment=None, *, sel
         else ""
     )
     final_check = build_carousel_final_square_format_check()
-    return f"""Card {index} — [exact generated Card {index} headline]
-Matching description: [exact generated Card {index} description]
-Visual purpose: {role}
-Image prompt:
+    return f"""CARD {index} IMAGE GENERATION PROMPT
+
+Create a complete, production-ready image for Carousel Card {index}. Create a 1024 × 1024 square image.
+
+Selected Sports Cave product: {product_name}
+Selected sport: {category}
+Selected market: {selected_country}
+Approved card role: {role}
+Required card purpose: {required_purposes[index]}
+
+Use the exact Card {index} headline, description and supplementary creative direction generated earlier in this campaign to shape one concrete scene. Do not render the Meta headline or description inside the image unless the approved card concept explicitly requires on-image text. The creative-direction line is additional context only and must never replace or shorten this complete prompt.
+
+Describe the concrete room or wall, wall colour and material, camera position, lens character, lighting direction, furniture context and emotional atmosphere in full. Do not return a summary, shorthand variation, shared base prompt, list of changes or reference to instructions elsewhere.
+
 {square_lock}
 
-Card-specific visual purpose: {role}
+Card-specific visual purpose: {required_purposes[index]}
 
 {product_dominance_lock}
 
@@ -1375,14 +1418,29 @@ Card-specific visual purpose: {role}
 
 {strict_product_lock}
 
-{photorealism_lock}{campaign_moment_visual_block}
+{product_lock}
 
-[Then continue this same standalone prompt with the exact uploaded-product/artwork lock, room, camera, lighting and realism instructions, previous-image variation lock, sport and country adaptation, prohibited elements, and any relevant card-specific selling idea.]
+{frame_and_glass_rules}
+
+{room_realism_rules}
+
+{photorealism_lock}
+
+{variation_lock}
+
+{sport_country_adaptation}{campaign_moment_visual_block}
 
 {final_check}"""
 
 
-def build_carousel_visual_output_requirements(template_key, campaign_moment=None, *, selected_country=""):
+def build_carousel_visual_output_requirements(
+    template_key,
+    campaign_moment=None,
+    *,
+    product_name="",
+    category="",
+    selected_country="",
+):
     roles = get_carousel_visual_roles(template_key)
     schema = []
     for index, role in enumerate(roles, start=1):
@@ -1391,6 +1449,8 @@ def build_carousel_visual_output_requirements(template_key, campaign_moment=None
                 index,
                 role,
                 campaign_moment,
+                product_name=product_name,
+                category=category,
                 selected_country=selected_country,
             )
         )
@@ -1398,6 +1458,10 @@ def build_carousel_visual_output_requirements(template_key, campaign_moment=None
     return f"""CAROUSEL VISUAL STORY REQUIREMENTS
 
 After every existing Carousel copy, card, primary-text, CTA, setup and URL-parameter field, output exactly {CAROUSEL_CARD_COUNT} complete image-generation prompts. Map one prompt to each generated card in the existing approved order and role structure.
+
+The response is incomplete unless it contains the exact image-generation section heading shown below followed by all five exact card-prompt headings. Under each card heading, write the entire detailed prompt in full. A Creative direction line may remain in the card-copy section as supplementary context, but it can never substitute for, abbreviate or satisfy the required standalone image prompt.
+
+Do not output only Creative direction. Do not output one shared prompt followed by five short variations. Do not use "same as above", "apply the shared rules", "use the previous prompt" or a list of differences. Do not shorten the prompts to save response length. Each card prompt must work when copied by itself into a fresh ChatGPT conversation with the supplied product image.
 
 Every generated carousel image prompt must begin with the mandatory square-format lock below, then follow the required prompt order. No carousel image prompt may omit, weaken, paraphrase or contradict the square-format lock, product-dominance principle, card camera-distance lock, strict product lock or carousel photorealism requirements. No card-specific template, sport adaptation, country direction, previous-image variation instruction, scarcity idea or room-composition idea may override the 1:1 square requirement, product prominence, complete-frame visibility, artwork accuracy or photorealism requirements.
 
@@ -1418,17 +1482,17 @@ For every generated carousel prompt, use this priority order:
 
 Each prompt must be based on the selected product name, selected sport, selected country, the emotional meaning of that specific card, that card's exact generated headline, that card's exact generated description, its role and position in the overall story, the uploaded product artwork, and only verified product and scarcity information already permitted by the copy system.
 
-The five images must form one premium visual story, not five random mockups. Maintain compatible colour restraint, premium photographic quality, related lighting character, correct black-frame presentation and a shared Sports Cave collector tone without making the rooms identical.
+The five images must form one premium visual story, not five random mockups. Maintain compatible colour restraint, ultra-realistic premium lifestyle photography, related lighting character, correct black-frame presentation and a shared Sports Cave collector tone without making the rooms identical.
 
-Each visual must clearly support its assigned card message while the framed product remains the unmistakable hero. Card 1 must deliver the strongest immediate product presentation and be the most zoomed-in card: a close-up wall product photograph with the frame occupying 86-92% of the square canvas width. Cards 2-5 may show more of the environment, but only moderately; none may become a distant room shot. Card 5 must deliver the strongest truthful scarcity or final-claim presentation while keeping the product prominent.
+Each visual must clearly support its assigned card message while the framed product remains the unmistakable hero. Card 1 must deliver the strongest immediate product presentation and be the most zoomed-in card: a close-up wall product photograph with the frame occupying approximately 65-80% of the useful square composition. Cards 2-5 may show more of the environment, but only moderately; none may become a distant room shot. Card 5 must deliver the strongest truthful scarcity or final-claim presentation while keeping the product prominent.
 
 Use this direct conversion-focused visual progression while preserving the selected template's approved role labels:
 
-- Card 1: an extreme close-up wall product-hero presentation based on the Mockups/Reel Close-Up Premium Wall Shot.
-- Card 2: a desirable ownership setting.
-- Card 3: a premium collector display suited to the selected category.
-- Card 4: an emotional lifestyle, memory or legacy presentation.
-- Card 5: a scarcity-focused view that gives the existing edition plate or numbered detail prominence when verified while keeping the complete outer frame visible.
+- Card 1: product identity and a scroll-stopping close-up hero based on the Mockups/Reel Close-Up Premium Wall Shot.
+- Card 2: the verified moment, era or legacy.
+- Card 3: an emotional collector hook.
+- Card 4: fan ownership and how the framed edition commands the wall.
+- Card 5: scarcity, limited edition and no second run, using only verified claims and edition details.
 
 For every card, make the exact generated headline, exact generated description, creative direction and image prompt communicate the same clear selling idea. The room, wall, lighting, angle and composition must visibly support that idea. Favour premium but believable homes and ownership environments that help shoppers imagine owning the artwork. Do not use abstract room symbolism when it weakens a direct commercial presentation.
 
@@ -1450,7 +1514,7 @@ Do not add prices, discounts, fake buttons, fake UI, watermarks, promotional sti
 
 Every image prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, LAST-IMAGE VARIATION LOCK, sport-and-country adaptation and relevant visual-story requirements inside every prompt. Never write "same as above", "use the previous room" or "keep the same settings".
 
-IMAGE PROMPTS - WRITE OUT IN THIS ORDER
+IMAGE GENERATION PROMPTS — COPY ONE AT A TIME
 
 {schema_text}
 
@@ -1844,6 +1908,14 @@ def build_instant_experience_visual_output_requirements(
         category,
         country,
     )
+    product_lock = build_product_lock_visual_rules()
+    frame_and_glass_rules = build_frame_and_glass_visual_rules()
+    room_realism_rules = build_room_realism_visual_rules()
+    variation_lock = build_last_image_variation_visual_rules()
+    sport_country_adaptation = build_sport_country_visual_adaptation(
+        category,
+        country,
+    )
     scarcity_rules = """Use the exact default overlay text supplied above. Do not replace it with generated copy, alternate scarcity wording, a different CTA, a fake button or an inferred edition claim."""
     campaign_moment_visual_context = build_campaign_moment_visual_context(
         campaign_moment,
@@ -1861,19 +1933,29 @@ After every existing Instant Experience copy, headline, description, CTA, setup 
 
 Tailor the cover to the selected product name, selected sport, selected country, generated Instant Experience headline, generated supporting copy, approved scarcity claim, existing CTA, emotional theme and uploaded framed artwork. It must not be a generic reusable collector-room prompt.
 
-{layout_rules}
+The response is incomplete unless it contains the exact image-generation section heading shown below followed by the complete Instant Experience cover prompt heading. Write the entire production-ready cover prompt in full. Do not replace it with Creative direction, a short cover brief, a shared base prompt, a list of changes or a reference to rules elsewhere.
 
-{scarcity_rules}
-
-{campaign_moment_visual_block}
-
-Never invent edition quantities, sale prices, discounts, signatures, logos, athlete names, achievements, dates, rivalries, product details or scarcity facts.
-
-The one cover prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, LAST-IMAGE VARIATION LOCK, sport-and-country adaptation and cover-layout requirements inside it. Do not refer to shared rules elsewhere in the response.
+IMAGE GENERATION PROMPTS — COPY ONE AT A TIME
 
 INSTANT EXPERIENCE COVER IMAGE PROMPT
 
-[one complete standalone cover-image prompt that repeats the complete LAST-IMAGE VARIATION LOCK instructions]
+{layout_rules}
+
+{product_lock}
+
+{frame_and_glass_rules}
+
+{room_realism_rules}
+
+{variation_lock}
+
+{sport_country_adaptation}
+
+{scarcity_rules}{campaign_moment_visual_block}
+
+Never invent edition quantities, sale prices, discounts, signatures, logos, athlete names, achievements, dates, rivalries, product details or scarcity facts.
+
+The one cover prompt must be fully standalone and must contain the complete product-lock, frame-and-glass, room-realism, LAST-IMAGE VARIATION LOCK, sport-and-country adaptation and cover-layout requirements printed above. Do not refer to shared rules elsewhere in the response.
 
 Return exactly one cover-image prompt and no additional image prompts."""
 
@@ -1907,28 +1989,68 @@ Return exactly one creative prompt.""".format(
     )
 
 
-def build_ads_text_first_image_generation_gate():
-    return """TEXT-FIRST IMAGE GENERATION GATE - HIGHEST PRIORITY
+def build_ads_text_first_image_generation_gate(campaign_type):
+    campaign_type = _normalise_option_label(campaign_type) or "selected campaign"
+    if campaign_type == "Carousel":
+        format_detail = (
+            "For Carousel campaigns, the first text-only response must include the full campaign strategy, "
+            "all primary text, all headlines, all descriptions, CTA, the purpose and hook of Cards 1-5, "
+            "the exact on-image text for each card where applicable, and five complete, separately copyable "
+            "image prompts. Card 1 must remain the strongest, closest and most scroll-stopping product hero; "
+            "Cards 2-4 may show more environment while keeping the framed artwork dominant; Card 5 must focus "
+            "on scarcity and final conversion while keeping the product prominent. Preserve the existing "
+            "17-character Carousel headline and description validation, country terminology, optional event "
+            "relevance, strict artwork lock, frame realism, product dominance and photorealism rules."
+        )
+    elif campaign_type == "Instant Experience":
+        format_detail = (
+            "For Instant Experience campaigns, the first text-only response must include the complete campaign "
+            "strategy, copy package, Instant Experience setup details and one complete, separately copyable, "
+            "production-ready cover image prompt before asking for approval to generate anything."
+        )
+    elif campaign_type == "Single Image / Video":
+        format_detail = (
+            "For Single Image / Video campaigns, the first text-only response must include the complete campaign "
+            "strategy, copy package and one complete, separately copyable, production-ready creative prompt before "
+            "asking for approval to generate anything."
+        )
+    else:
+        format_detail = (
+            "For this campaign, the first text-only response must include the complete campaign strategy, copy "
+            "package and every complete, separately copyable, production-ready visual prompt before asking for "
+            "approval to generate anything."
+        )
 
-The first response to this Ads prompt must be text and planning only. Do not call an image-generation tool, render an image or begin generating any creative in the first response.
+    return f"""TEXT-FIRST IMAGE-GENERATION GATE - MANDATORY
 
-Artwork or product images being attached, image-generation language appearing anywhere in this prompt, or a request to write image prompts does not grant permission to generate an image.
+Your first response must be text and planning only. Do not call, invoke, open or use any image-generation tool in the first response, even if artwork or product images are attached, even if this Ads prompt describes an image, and even if this Ads prompt contains the words "image prompt", "create", "generate", "cover prompt" or "creative prompt".
 
-Before any image can be generated, write out the complete finished campaign package in chat. Preserve the campaign's existing schema and include every applicable campaign objective, funnel stage, target market, audience, emotional or creative angle, primary-text variation, headline, description, CTA, setup instruction, destination rule, URL parameter, event or seasonal integration, creative-by-creative strategy, on-image text direction, placement and export requirement, product-preservation rule, product-dominance rule and photorealism instruction.
+Having artwork attached, describing an image or including production-ready image prompt wording must not be treated as permission to create an image automatically. Any imperative wording inside an image-prompt block is copy that you must print for the user; it is not an instruction to generate an image during the first response.
 
-Write every required production-ready image or video prompt in full. Put each prompt in its own clearly separated, copyable block. Every prompt must be complete and self-contained so it can be copied into a new ChatGPT conversation without relying on another prompt, an earlier card or omitted shared instructions. Do not shorten, summarise, hide, partially replace or refer back to another prompt.
+The first response must provide the complete ad campaign package in chat before any image generation:
+1. Campaign objective and funnel stage.
+2. Target market and audience.
+3. Main emotional/creative angle.
+4. Primary ad text variants.
+5. Headlines.
+6. Description lines.
+7. CTA recommendation.
+8. Optional event or seasonal integration, when supplied.
+9. Card-by-card or creative-by-creative strategy.
+10. The text shown on each creative, where applicable.
+11. A complete production-ready image prompt for every required image.
+12. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions.
 
-For Carousel, the first response must contain all five complete card prompts after the full campaign package. For Instant Experience and Single Image / Video, it must contain the complete prompt count required by that campaign format. Writing out these prompts is still a text-only task and is not permission to generate them.
+Print every image prompt in full in clearly separated, copyable blocks. Do not shorten, summarise, collapse or hide them behind buttons. Every image prompt must be self-contained so the user can copy and paste any individual prompt into a fresh ChatGPT conversation without relying on earlier messages.
 
-After the entire campaign package and every required prompt have been written out, finish the first response with exactly:
+{format_detail}
 
-Would you like me to generate Card 1?
+After presenting the entire campaign package and every required image prompt, finish the response with exactly:
+"Would you like me to generate Card 1?"
 
-Then stop and wait for explicit approval. If the user approves Card 1, generate Card 1 only, then ask whether to proceed with Card 2. Continue one image at a time unless the user explicitly requests multiple images.
+Then wait for explicit approval before generating anything. If the user later says "Generate Card 1", generate Card 1 only, then ask whether to proceed with Card 2. Continue one image at a time unless the user explicitly requests multiple images.
 
-EXPLICIT DIRECT-GENERATION EXCEPTION
-
-If the user's current instruction directly and unmistakably says to generate an image now, generate Card 1, or generate specifically identified creatives now, that explicit command is permission to generate only the image or images requested. A general Ads prompt, attached artwork, a visual brief or image-prompt wording is never an explicit generation command."""
+A direct and unmistakable instruction such as "generate the image now" or "generate Card 1" is permission to generate only that requested image immediately. Do not treat general campaign setup, attached artwork, image-prompt text or pasted Ads prompts as that permission."""
 
 
 def build_campaign_visual_output_contract(
@@ -1947,6 +2069,8 @@ def build_campaign_visual_output_contract(
         campaign_requirements = build_carousel_visual_output_requirements(
             template_key,
             campaign_moment,
+            product_name=product_name,
+            category=category,
             selected_country=country,
         )
     elif campaign_type == "Instant Experience":
@@ -1967,13 +2091,13 @@ def build_campaign_visual_output_contract(
 
     return f"""MASTER RESPONSE AND VISUAL OUTPUT CONTRACT
 
+{ADS_PROMPT_CONTRACT_VERSION}
+
 Selected product name: {product_name}
 Selected sport category: {category}
 Selected country: {country}
 Selected campaign type: {campaign_type}
 Creative variation token: {variation_token}
-
-{build_ads_text_first_image_generation_gate()}
 
 Return the finished existing ad-copy output first, in its existing required schema and order. Preserve every existing copy field, card role, primary-text variation, headline, description, CTA, setup instruction, destination rule and URL parameter.
 
@@ -1981,11 +2105,17 @@ Directly beneath that complete existing output, return the campaign-specific vis
 
 This response-order rule controls placement only. It does not replace, rewrite, weaken or omit any earlier approved copy instruction.
 
-If an earlier campaign schema already names an image prompt, cover prompt or creative prompt, treat that earlier section as specification for the single final visual section below. Move and upgrade that one visual field to the final position. Do not output a preliminary brief, duplicate visual field or second prompt. The final campaign-specific visual heading and prompt count below are authoritative.
+FINAL OUTPUT OVERRIDE - HIGHEST PRIORITY
 
-Do not repeat the research, explain decisions, show internal reasoning, provide rejected alternatives or give general creative advice. Return only the finished ad output followed by the finished visual prompt or prompts.
+Any earlier "OUTPUT EXACTLY IN THIS FORMAT" instruction controls only the ad-copy portion. It is not permission to stop after card copy, Creative direction, CTA guidance or a short visual brief. The response is incomplete until the complete campaign-specific image-generation prompt section below has also been printed in full.
+
+If an earlier campaign schema already names an image prompt, cover prompt, creative prompt or Creative direction field, treat that earlier field as supplementary specification for the final visual section below. Move and upgrade that visual guidance to the final position. Do not output a preliminary brief, duplicate visual field or second prompt. The final campaign-specific visual heading, exact headings and prompt count below are authoritative.
+
+Do not repeat the research, explain decisions, show internal reasoning, provide rejected alternatives or give general creative advice. Return only the finished ad output followed by the finished visual prompt or prompts, then the mandatory approval question.
 
 Treat the creative variation token only as a cue for a fresh interpretation. Never display it in ad copy or inside an image.
+
+{build_ads_text_first_image_generation_gate(campaign_type)}
 
 {build_product_lock_visual_rules()}
 
@@ -1997,7 +2127,13 @@ Treat the creative variation token only as a cue for a fresh interpretation. Nev
 
 {build_sport_country_visual_adaptation(category, country)}
 
-{campaign_requirements}"""
+{campaign_requirements}
+
+FINAL RESPONSE TERMINATION - MANDATORY
+
+Only after the complete campaign package and every full image-generation prompt above have been printed, end the first response with exactly this sentence and nothing after it:
+
+Would you like me to generate Card 1?"""
 
 
 def apply_campaign_visual_output_contract(
@@ -2011,8 +2147,13 @@ def apply_campaign_visual_output_contract(
     variation_token="",
     campaign_moment=None,
 ):
-    if not prompt or "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT" in prompt:
+    if not prompt:
         return prompt
+    marker = "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT"
+    if ADS_PROMPT_CONTRACT_VERSION in prompt:
+        return prompt
+    if marker in prompt:
+        prompt = prompt[:prompt.index(marker)].rstrip()
     contract = build_campaign_visual_output_contract(
         product_name,
         category,
@@ -2995,7 +3136,7 @@ You may safely use these general concepts:
 
 Do not state manufacturing location, delivery time, customer count or shipping offer unless that information is separately supplied.
 
-OUTPUT EXACTLY IN THIS FORMAT
+OUTPUT THE AD-COPY PORTION IN THIS FORMAT
 
 CAROUSEL CARDS
 
@@ -3319,7 +3460,7 @@ Upload the Instant Experience cover generated from the prompt above.
 
 Do not tell the user to use a random lifestyle image, product-page frame, Reel, carousel card or unlabelled image.
 
-OUTPUT EXACTLY IN THIS FORMAT
+OUTPUT THE AD-COPY PORTION IN THIS FORMAT
 
 PRIMARY TEXT
 
@@ -3596,7 +3737,7 @@ Claim Your Edition
 
 Catalogue/cards below the Instant Experience should feel like a connected collector range, not one isolated product.
 
-OUTPUT EXACTLY IN THIS FORMAT
+OUTPUT THE AD-COPY PORTION IN THIS FORMAT
 
 PRIMARY TEXT
 
@@ -3741,7 +3882,7 @@ CTA GUIDANCE
 Use:
 Claim Your Edition
 
-OUTPUT EXACTLY IN THIS FORMAT
+OUTPUT THE AD-COPY PORTION IN THIS FORMAT
 
 CAROUSEL CARDS
 
@@ -3789,7 +3930,21 @@ Variation 5:
 
 CTA GUIDANCE
 
-Claim Your Edition"""
+Claim Your Edition
+
+Do not stop after CTA guidance or after the five Creative direction lines. Continue with the authoritative full visual-output section appended at the end of this master prompt. That final section must be headed:
+
+IMAGE GENERATION PROMPTS — COPY ONE AT A TIME
+
+It must then contain:
+
+CARD 1 IMAGE GENERATION PROMPT
+CARD 2 IMAGE GENERATION PROMPT
+CARD 3 IMAGE GENERATION PROMPT
+CARD 4 IMAGE GENERATION PROMPT
+CARD 5 IMAGE GENERATION PROMPT
+
+Each heading must be followed by its complete standalone prompt in full."""
 
 
 def build_generic_single_image_video_prompt(product_name, category, country, campaign_type):
@@ -3873,7 +4028,7 @@ CTA GUIDANCE
 Use:
 Claim Your Edition
 
-OUTPUT EXACTLY IN THIS FORMAT
+OUTPUT THE AD-COPY PORTION IN THIS FORMAT
 
 PRIMARY TEXT
 
@@ -4192,9 +4347,33 @@ def build_ads_result_record(
         "product_url": _clean_product_url(product_url),
         "variation_token": clean_variation_token,
         "campaign_moment": clean_campaign_moment,
+        "prompt_contract_version": ADS_PROMPT_CONTRACT_VERSION,
         "master_prompt": master_prompt,
         "generated_ad_output": master_prompt,
     }
+
+
+def ensure_current_ads_result_prompt(result):
+    if not isinstance(result, dict) or not result.get("master_prompt"):
+        return result
+    if result.get("prompt_contract_version") == ADS_PROMPT_CONTRACT_VERSION:
+        return result
+    old_master_prompt = str(result.get("master_prompt") or "")
+    old_generated_output = str(result.get("generated_ad_output") or "")
+    refreshed = build_ads_result_record(
+        result.get("product_name"),
+        result.get("category"),
+        result.get("country"),
+        result.get("campaign_type"),
+        product_id=result.get("product_id"),
+        product_url=result.get("product_url"),
+        variation_token=result.get("variation_token"),
+        campaign_moment=result.get("campaign_moment"),
+    )
+    merged = {**result, **refreshed}
+    if old_generated_output and old_generated_output != old_master_prompt:
+        merged["generated_ad_output"] = old_generated_output
+    return merged
 
 
 def _new_ads_image_workflow(result):
@@ -4600,6 +4779,16 @@ def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
     return "\r\n".join(lines).strip() + "\r\n"
 
 
+def _ads_setup_notes_signature(result, workflow, *, image_outcomes=None):
+    return hashlib.sha256(
+        build_ads_setup_notes_text(
+            result,
+            workflow,
+            image_outcomes=image_outcomes,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _render_ads_setup_notes(result, workflow):
     if not ads_image_workflow.campaign_image_slots(result.get("campaign_type")):
         return
@@ -4868,13 +5057,24 @@ def save_ads_images_to_dropbox(
     clean_destination = dropbox_integration.normalize_dropbox_path(destination)
     if not dropbox_integration.path_is_within_root(clean_destination, clean_root):
         raise ValueError("The selected destination is outside the approved Files folder.")
+    export_folder = _ads_export_folder_path(clean_destination, result, workflow)
+    if not dropbox_integration.path_is_within_root(export_folder, clean_root):
+        raise ValueError("The export folder is outside the approved Files folder.")
+    dropbox_integration.ensure_folder_path(
+        access_token,
+        export_folder,
+        root_path=clean_root,
+    )
     slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
     if _is_instant_experience_result(result):
         _compact_instant_experience_slots(workflow)
-        slot_specs = tuple(_ads_image_valid_slots(result, workflow))
+    valid_slot_ids = {slot["id"] for slot in _ads_image_valid_slots(result, workflow)}
     outcomes = dict(workflow.get("outcomes") or {})
     pending_slots = [
-        slot for slot in slot_specs if (outcomes.get(slot["id"]) or {}).get("status") != "saved"
+        slot
+        for slot in slot_specs
+        if slot["id"] in valid_slot_ids
+        and (outcomes.get(slot["id"]) or {}).get("status") != "saved"
     ]
     total = len(pending_slots)
     for index, slot in enumerate(pending_slots, start=1):
@@ -4889,7 +5089,7 @@ def save_ads_images_to_dropbox(
         resolved_filename = ""
         try:
             filename = _meta_output_filename(result, workflow, slot)
-            proposed_path = dropbox_integration.join_upload_path(clean_destination, filename)
+            proposed_path = dropbox_integration.join_upload_path(export_folder, filename)
             if dropbox_integration.get_metadata_if_exists(access_token, proposed_path):
                 proposed_path = dropbox_integration.windows_numbered_path(access_token, proposed_path)
             resolved_filename = PurePosixPath(proposed_path).name
@@ -4900,7 +5100,7 @@ def save_ads_images_to_dropbox(
 
             upload_result = dropbox_integration.upload_batch(
                 access_token,
-                clean_destination,
+                export_folder,
                 [
                     {
                         "relative_path": resolved_filename,
@@ -4943,6 +5143,49 @@ def save_ads_images_to_dropbox(
                 "filename": resolved_filename,
                 "error": str(error)[:300] or "Upload failed.",
             }
+    notes_filename = build_ads_notes_filename(result, workflow)
+    notes_text = build_ads_setup_notes_text(result, workflow, image_outcomes=outcomes)
+    notes_result = dropbox_integration.upload_batch(
+        access_token,
+        export_folder,
+        [
+            {
+                "relative_path": notes_filename,
+                "data": notes_text.encode("utf-8"),
+                "size": len(notes_text.encode("utf-8")),
+            }
+        ],
+        conflict="replace",
+    )
+    notes_successes = list(notes_result.get("successes") or ())
+    notes_failures = list(notes_result.get("failures") or ())
+    if notes_successes:
+        metadata = dict(notes_successes[0].get("metadata") or {})
+        outcomes["_ad_setup_notes"] = {
+            "status": "saved",
+            "label": "Ad setup notes",
+            "filename": notes_filename,
+            "path": str(
+                metadata.get("path_display")
+                or metadata.get("path_lower")
+                or dropbox_integration.join_upload_path(export_folder, notes_filename)
+            ),
+            "metadata": metadata,
+            "asset_type": "meta_ads_notes",
+            "signature": _ads_setup_notes_signature(result, workflow, image_outcomes=outcomes),
+        }
+    else:
+        outcomes["_ad_setup_notes"] = {
+            "status": "failed",
+            "label": "Ad setup notes",
+            "filename": notes_filename,
+            "error": str((notes_failures[0] if notes_failures else {}).get("error") or "Upload failed."),
+            "asset_type": "meta_ads_notes",
+        }
+    workflow["saved_folder_path"] = export_folder
+    workflow["ad_notes_saved_signature"] = (
+        outcomes.get("_ad_setup_notes") or {}
+    ).get("signature") or ""
     return outcomes
 
 
@@ -4958,13 +5201,13 @@ def _save_ads_upload_metadata(outcomes, user):
         if not metadata:
             continue
         try:
-            supabase_backend.save_dropbox_asset_metadata(
-                dropbox_integration.normalise_asset_metadata(
+                supabase_backend.save_dropbox_asset_metadata(
+                    dropbox_integration.normalise_asset_metadata(
                     dropbox_file_id=metadata.get("id"),
                     dropbox_path=outcome.get("path"),
                     name=metadata.get("name") or outcome.get("filename"),
                     size=metadata.get("size"),
-                    asset_type="meta_ads",
+                    asset_type=outcome.get("asset_type") or "meta_ads",
                     uploaded_by_user_name=str(
                         user.get("display_name")
                         or user.get("email")
@@ -5000,17 +5243,23 @@ def _render_ads_image_save(result, workflow):
         _compact_instant_experience_slots(workflow)
     ready = ads_images_ready(result, workflow)
     valid_slots = _ads_image_valid_slots(result, workflow)
-    saved_count = sum(
-        1 for outcome in (workflow.get("outcomes") or {}).values() if outcome.get("status") == "saved"
-    )
+    has_valid_upload = bool(valid_slots)
+    saved_count = _ads_image_saved_count(result, workflow)
     required_count = _ads_image_required_count(result)
-    save_target_count = max(required_count, len(valid_slots))
-    failed_count = sum(
-        1 for outcome in (workflow.get("outcomes") or {}).values() if outcome.get("status") == "failed"
+    save_target_count = len(valid_slots)
+    failed_count = _ads_image_failed_count(result, workflow)
+    notes_current_signature = _ads_setup_notes_signature(result, workflow)
+    notes_outcome = (workflow.get("outcomes") or {}).get("_ad_setup_notes") or {}
+    notes_saved = (
+        notes_outcome.get("status") == "saved"
+        and notes_outcome.get("signature") == notes_current_signature
     )
-    all_saved = ready and saved_count >= len(valid_slots) and bool(valid_slots) and not failed_count
-    if not ready:
-        st.caption(f"{len(valid_slots)} of {required_count} images ready.")
+    images_saved = saved_count >= len(valid_slots) and bool(valid_slots) and not failed_count
+    all_saved = images_saved and notes_saved
+    if not has_valid_upload:
+        st.caption(f"0 of {required_count} images ready.")
+    elif not ready and not _is_instant_experience_result(result):
+        st.caption(f"{len(valid_slots)} of {required_count} images ready. You can save now and add more later.")
     elif _is_instant_experience_result(result):
         st.caption(
             f"{len(valid_slots)} Instant Experience {'cover' if len(valid_slots) == 1 else 'covers'} ready."
@@ -5023,12 +5272,11 @@ def _render_ads_image_save(result, workflow):
         disabled=(
             bool(workflow.get("saving"))
             or all_saved
-            or (not _is_instant_experience_result(result) and not ready)
         ),
         use_container_width=True,
     ):
-        if _is_instant_experience_result(result) and not ready:
-            st.warning("Upload Instant Experience cover 1 before saving.")
+        if not has_valid_upload and not any(_ads_notes_for_workflow(workflow).values()):
+            st.warning("Upload at least one valid generated image or add setup notes before saving.")
             return
         workflow["save_open"] = True
         st.session_state[ADS_IMAGE_STATE_KEY] = workflow
@@ -5057,10 +5305,14 @@ def _render_ads_image_save(result, workflow):
     st.caption(f"Destination: {destination}")
     remaining_count = max(0, save_target_count - saved_count)
     action_label = (
-        "All images saved"
+        "All images and notes saved"
         if all_saved
         else "Retry failed images"
         if failed_count
+        else "Update setup notes"
+        if images_saved and not notes_saved
+        else "Save setup notes here"
+        if not has_valid_upload
         else f"Save {remaining_count} {'image' if remaining_count == 1 else 'images'} here"
     )
     action_columns = st.columns([1, 1])
@@ -5084,7 +5336,7 @@ def _render_ads_image_save(result, workflow):
             previously_saved = {
                 slot_id
                 for slot_id, outcome in (workflow.get("outcomes") or {}).items()
-                if outcome.get("status") == "saved"
+                if outcome.get("status") == "saved" and not str(slot_id).startswith("_")
             }
             outcomes = save_ads_images_to_dropbox(
                 access_token,
@@ -5095,6 +5347,7 @@ def _render_ads_image_save(result, workflow):
                 progress_callback=update_progress,
             )
             workflow["outcomes"] = outcomes
+            workflow["destination_path"] = workflow.get("saved_folder_path") or destination
             _save_ads_upload_metadata(
                 {
                     slot_id: outcome
@@ -5103,9 +5356,21 @@ def _render_ads_image_save(result, workflow):
                 },
                 user,
             )
-            successful = [row for row in outcomes.values() if row.get("status") == "saved"]
-            failed = [row for row in outcomes.values() if row.get("status") == "failed"]
-            _ads_clear_directory_cache(destination)
+            slot_ids = {
+                slot["id"]
+                for slot in ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+            }
+            successful = [
+                row
+                for slot_id, row in outcomes.items()
+                if slot_id in slot_ids and row.get("status") == "saved"
+            ]
+            failed = [
+                row
+                for slot_id, row in outcomes.items()
+                if slot_id in slot_ids and row.get("status") == "failed"
+            ]
+            _ads_clear_directory_cache(destination, workflow["destination_path"])
             record_activity_log(
                 "ad_images_saved",
                 "Ads",
@@ -5138,17 +5403,42 @@ def _render_ads_image_save(result, workflow):
         st.rerun()
 
     outcomes = workflow.get("outcomes") or {}
-    successful = [row for row in outcomes.values() if row.get("status") == "saved"]
-    failed = [row for row in outcomes.values() if row.get("status") == "failed"]
+    slot_ids = {
+        slot["id"]
+        for slot in ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
+    }
+    successful = [
+        row
+        for slot_id, row in outcomes.items()
+        if slot_id in slot_ids and row.get("status") == "saved"
+    ]
+    failed = [
+        row
+        for slot_id, row in outcomes.items()
+        if slot_id in slot_ids and row.get("status") == "failed"
+    ]
+    notes_outcome = outcomes.get("_ad_setup_notes") or {}
     if successful:
         if failed:
             st.warning(f"{len(successful)} of {save_target_count} images saved. {len(failed)} need attention.")
         else:
             st.success(f"{len(successful)} images saved to {workflow['destination_path']}.")
+        if notes_outcome.get("status") == "saved":
+            st.caption(f"Ad setup notes saved: {notes_outcome.get('filename')}")
+        elif notes_outcome.get("status") == "failed":
+            st.warning(f"Ad setup notes were not saved: {notes_outcome.get('error') or 'Upload failed.'}")
         if st.button(
             "Open folder",
             icon=":material/folder_open:",
             key=f"ads-images-open-folder::{result['context_key']}",
+        ):
+            _open_ads_files_folder(workflow["destination_path"])
+    elif notes_outcome.get("status") == "saved":
+        st.success(f"Ad setup notes saved to {workflow['destination_path']}.")
+        if st.button(
+            "Open folder",
+            icon=":material/folder_open:",
+            key=f"ads-notes-open-folder::{result['context_key']}",
         ):
             _open_ads_files_folder(workflow["destination_path"])
     for outcome in failed:
@@ -5606,6 +5896,7 @@ def render_supported_result(result):
         )
 
         _render_ads_image_slots(result, workflow)
+        _render_ads_setup_notes(result, workflow)
         _render_ads_image_save(result, workflow)
         st.subheader("2. Build it in Meta")
         st.caption("Follow the INSTANT EXPERIENCE SETUP section inside the generated prompt.")
@@ -5620,6 +5911,7 @@ def render_supported_result(result):
         )
 
         _render_ads_image_slots(result, workflow)
+        _render_ads_setup_notes(result, workflow)
         _render_ads_image_save(result, workflow)
         st.subheader("2. Build it in Meta")
         st.caption("Upload the Instant Experience cover generated from the prompt above.")
@@ -5645,6 +5937,7 @@ def render_supported_result(result):
     )
 
     _render_ads_image_slots(result, workflow)
+    _render_ads_setup_notes(result, workflow)
     _render_ads_image_save(result, workflow)
     st.caption("Upload them to Meta in this exact order before adding the carousel copy.")
 
@@ -5878,6 +6171,10 @@ def render_page():
             record_ad_prompt_generated(product_name, category, country, campaign_type)
 
     result = st.session_state.get(ADS_RESULT_STATE_KEY)
+    refreshed_result = ensure_current_ads_result_prompt(result)
+    if refreshed_result is not result:
+        result = refreshed_result
+        st.session_state[ADS_RESULT_STATE_KEY] = result
     if isinstance(result, dict) and result.get("master_prompt"):
         render_supported_result(result)
         _render_final_ad_review(result)
