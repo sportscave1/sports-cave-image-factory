@@ -1450,7 +1450,7 @@ Do not add prices, discounts, fake buttons, fake UI, watermarks, promotional sti
 
 Every image prompt must be fully standalone. Repeat the complete product-lock, frame-and-glass, room-realism, LAST-IMAGE VARIATION LOCK, sport-and-country adaptation and relevant visual-story requirements inside every prompt. Never write "same as above", "use the previous room" or "keep the same settings".
 
-IMAGE PROMPTS — GENERATE IN THIS ORDER
+IMAGE PROMPTS - WRITE OUT IN THIS ORDER
 
 {schema_text}
 
@@ -1907,6 +1907,30 @@ Return exactly one creative prompt.""".format(
     )
 
 
+def build_ads_text_first_image_generation_gate():
+    return """TEXT-FIRST IMAGE GENERATION GATE - HIGHEST PRIORITY
+
+The first response to this Ads prompt must be text and planning only. Do not call an image-generation tool, render an image or begin generating any creative in the first response.
+
+Artwork or product images being attached, image-generation language appearing anywhere in this prompt, or a request to write image prompts does not grant permission to generate an image.
+
+Before any image can be generated, write out the complete finished campaign package in chat. Preserve the campaign's existing schema and include every applicable campaign objective, funnel stage, target market, audience, emotional or creative angle, primary-text variation, headline, description, CTA, setup instruction, destination rule, URL parameter, event or seasonal integration, creative-by-creative strategy, on-image text direction, placement and export requirement, product-preservation rule, product-dominance rule and photorealism instruction.
+
+Write every required production-ready image or video prompt in full. Put each prompt in its own clearly separated, copyable block. Every prompt must be complete and self-contained so it can be copied into a new ChatGPT conversation without relying on another prompt, an earlier card or omitted shared instructions. Do not shorten, summarise, hide, partially replace or refer back to another prompt.
+
+For Carousel, the first response must contain all five complete card prompts after the full campaign package. For Instant Experience and Single Image / Video, it must contain the complete prompt count required by that campaign format. Writing out these prompts is still a text-only task and is not permission to generate them.
+
+After the entire campaign package and every required prompt have been written out, finish the first response with exactly:
+
+Would you like me to generate Card 1?
+
+Then stop and wait for explicit approval. If the user approves Card 1, generate Card 1 only, then ask whether to proceed with Card 2. Continue one image at a time unless the user explicitly requests multiple images.
+
+EXPLICIT DIRECT-GENERATION EXCEPTION
+
+If the user's current instruction directly and unmistakably says to generate an image now, generate Card 1, or generate specifically identified creatives now, that explicit command is permission to generate only the image or images requested. A general Ads prompt, attached artwork, a visual brief or image-prompt wording is never an explicit generation command."""
+
+
 def build_campaign_visual_output_contract(
     product_name,
     category,
@@ -1948,6 +1972,8 @@ Selected sport category: {category}
 Selected country: {country}
 Selected campaign type: {campaign_type}
 Creative variation token: {variation_token}
+
+{build_ads_text_first_image_generation_gate()}
 
 Return the finished existing ad-copy output first, in its existing required schema and order. Preserve every existing copy field, card role, primary-text variation, headline, description, CTA, setup instruction, destination rule and URL parameter.
 
