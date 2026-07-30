@@ -668,7 +668,7 @@
       const MAX_CLIENT_THUMBNAILS = 160;
       const FOLDER_PAGE_SIZE = 500;
       const DESKTOP_MESSAGE_TYPE = "sports-cave-desktop";
-      const MINIMUM_DESKTOP_VERSION = 8;
+      const MINIMUM_DESKTOP_VERSION = 9;
       const MAX_CLIENT_FOLDER_CACHE = 24;
       const CLIENT_FOLDER_REVALIDATE_SECONDS = 20;
       const VIEW_MODES = ["large", "medium", "small", "list", "details"];
@@ -732,6 +732,8 @@
         helperItem: null,
         imageViewerWindow: null,
         imageViewerReady: false,
+        imageViewerPending: null,
+        imageViewerRetryTimer: 0,
         menuParent: null,
         thumbnailObserver: null,
         thumbnailQueue: [],
@@ -1658,6 +1660,75 @@
         return `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=no`;
       }
 
+      function imageViewerUrl(viewerRequest) {
+        const url = new URL("/files-image-viewer", location.origin);
+        url.search = new URLSearchParams({
+          path: viewerRequest.path,
+          folder: viewerRequest.folder,
+          name: viewerRequest.name,
+        }).toString();
+        return url.href;
+      }
+
+      function clearImageViewerDelivery(requestId = "") {
+        if (
+          requestId
+          && state.imageViewerPending
+          && state.imageViewerPending.requestId !== requestId
+        ) {
+          return;
+        }
+        window.clearTimeout(state.imageViewerRetryTimer);
+        state.imageViewerRetryTimer = 0;
+        state.imageViewerPending = null;
+      }
+
+      function deliverPendingImageViewerRequest() {
+        const pending = state.imageViewerPending;
+        const viewer = state.imageViewerWindow;
+        if (!pending || !viewer || viewer.closed || !state.imageViewerReady) return;
+        try {
+          viewer.postMessage({
+            type: "sports-cave-image-viewer-open",
+            version: 1,
+            requestId: pending.requestId,
+            path: pending.path,
+            folder: pending.folder,
+            name: pending.name,
+          }, location.origin);
+        } catch (_) {
+          state.imageViewerReady = false;
+          return;
+        }
+        pending.attempts += 1;
+        window.clearTimeout(state.imageViewerRetryTimer);
+        if (pending.attempts < 8) {
+          state.imageViewerRetryTimer = window.setTimeout(
+            deliverPendingImageViewerRequest,
+            300
+          );
+        } else {
+          clearImageViewerDelivery(pending.requestId);
+          showToast("The image viewer did not accept the selected image.", {
+            kind: "error",
+            duration: 0,
+            actionLabel: "Open here",
+            action: () => location.assign(imageViewerUrl(pending)),
+          });
+        }
+      }
+
+      function queueImageViewerRequest(viewerRequest) {
+        window.clearTimeout(state.imageViewerRetryTimer);
+        state.imageViewerRetryTimer = 0;
+        state.imageViewerPending = {
+          ...viewerRequest,
+          requestId: dragRequestId(),
+          attempts: 0,
+        };
+        deliverPendingImageViewerRequest();
+      }
+
       function openImageViewer(item) {
         const viewerRequest = {
           path: String(item.desktop_relative_path || ""),
@@ -1685,21 +1756,11 @@
           }
           return;
         }
-        const params = new URLSearchParams({
-          path: viewerRequest.path,
-          folder: viewerRequest.folder,
-          name: viewerRequest.name,
-        });
-        const viewerUrl = `/files-image-viewer?${params.toString()}`;
+        const viewerUrl = imageViewerUrl(viewerRequest);
         let viewer = null;
         try {
           if (state.imageViewerWindow && !state.imageViewerWindow.closed && state.imageViewerReady) {
-            state.imageViewerWindow.postMessage({
-              type: "sports-cave-image-viewer-open",
-              path: viewerRequest.path,
-              folder: viewerRequest.folder,
-              name: viewerRequest.name,
-            }, location.origin);
+            queueImageViewerRequest(viewerRequest);
             state.imageViewerWindow.focus();
             return;
           }
@@ -1711,13 +1772,14 @@
           showToast("The browser blocked the image viewer.", {
             kind: "error",
             duration: 0,
-            actionLabel: "Open image viewer",
-            action: () => openImageViewer(item),
+            actionLabel: "Open here",
+            action: () => location.assign(viewerUrl),
           });
           return;
         }
         state.imageViewerWindow = viewer;
         state.imageViewerReady = false;
+        queueImageViewerRequest(viewerRequest);
         viewer.focus();
       }
 
@@ -3004,6 +3066,7 @@
         hideFileTooltip();
         stopThumbnailLoading();
         abortStaleFolderRequests();
+        clearImageViewerDelivery();
         state.thumbnailCache.forEach(url => URL.revokeObjectURL(url));
         cancelExternalDrag();
       });
@@ -3052,11 +3115,40 @@
           event.origin !== location.origin
           || event.source !== state.imageViewerWindow
           || !event.data
-          || event.data.type !== "sports-cave-image-viewer-ready"
+          || event.data.version !== 1
         ) {
           return;
         }
-        state.imageViewerReady = true;
+        if (event.data.type === "sports-cave-image-viewer-ready") {
+          state.imageViewerReady = true;
+          try {
+            state.imageViewerWindow.postMessage({
+              type: "sports-cave-image-viewer-parent-ready",
+              version: 1,
+            }, location.origin);
+          } catch (_) {
+            state.imageViewerReady = false;
+            return;
+          }
+          const pending = state.imageViewerPending;
+          if (
+            pending
+            && event.data.path === pending.path
+            && event.data.folder === pending.folder
+            && event.data.name === pending.name
+          ) {
+            clearImageViewerDelivery(pending.requestId);
+          } else {
+            deliverPendingImageViewerRequest();
+          }
+          return;
+        }
+        if (
+          event.data.type === "sports-cave-image-viewer-opened"
+          && typeof event.data.requestId === "string"
+        ) {
+          clearImageViewerDelivery(event.data.requestId);
+        }
       });
 
       async function initialise() {

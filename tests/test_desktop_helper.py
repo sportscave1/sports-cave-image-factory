@@ -32,7 +32,7 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("Microsoft.Web.WebView2.Core.dll", self.install)
         self.assertIn("Microsoft.Web.WebView2.Wpf.dll", self.install)
         self.assertIn("WebView2Loader.dll", self.install)
-        self.assertIn("HelperVersion = 8", self.install)
+        self.assertIn("HelperVersion = 9", self.install)
         self.assertIn("SportsCaveFiles.ico", self.install)
         self.assertIn("$shortcut.IconLocation = $iconPath", self.install)
         self.assertIn("CurrentVersion\\Run", self.install)
@@ -79,6 +79,16 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn('part == "." || part == ".."', self.source)
         self.assertIn('"/files-image-viewer?path=" + Uri.EscapeDataString(path)', self.source)
         self.assertIn("private async Task OpenImageViewer", self.source)
+        self.assertIn("private Task browserInitializationTask", self.source)
+        self.assertIn("private bool browserConfigured", self.source)
+        self.assertIn("private bool browserInitialized", self.source)
+        self.assertIn("if (browserInitialized) return", self.source)
+        self.assertIn("Task pending = browserInitializationTask", self.source)
+        self.assertIn("await pending", self.source)
+        self.assertIn("browserInitializationTask = null", self.source)
+        self.assertIn("if (!browserConfigured)", self.source)
+        self.assertIn("browserConfigured = true", self.source)
+        self.assertIn("browserInitialized = true", self.source)
         self.assertIn("await child.InitializeBrowser()", self.source)
         self.assertIn("await imageViewerWindow.InitializeBrowser()", self.source)
         self.assertIn("imageViewerWindow.NavigateTrusted(viewerUrl)", self.source)
@@ -86,6 +96,8 @@ class DesktopHelperContractTests(unittest.TestCase):
         self.assertIn("new DesktopWindow(config, viewerUrl, false, environment)", self.source)
         self.assertIn("pendingTrustedNavigation = url", self.source)
         self.assertIn("browser.CoreWebView2.Navigate(pending)", self.source)
+        self.assertIn("windowArgs.Handled = true", self.source)
+        self.assertIn('DesktopLog.Write("newWindow", "failed"', self.source)
 
     def test_viewer_image_context_menu_routes_to_native_pixel_copy(self):
         self.assertIn("ContextMenuRequested += OnContextMenuRequested", self.source)
@@ -224,7 +236,7 @@ class DesktopWindowsBuildTests(unittest.TestCase):
                     "AppUrl": "http://127.0.0.1:8501/files-window",
                     "RootPath": "",
                     "AllowedOrigins": ["http://127.0.0.1:8501"],
-                    "HelperVersion": 8,
+                    "HelperVersion": 9,
                 }
             ),
             encoding="utf-8",

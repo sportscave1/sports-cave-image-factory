@@ -160,8 +160,9 @@
     </aside>
     <script>
       const IMAGE_VIEWER_MESSAGE = "sports-cave-image-viewer-open";
+      const IMAGE_VIEWER_PROTOCOL_VERSION = 1;
       const DESKTOP_MESSAGE_TYPE = "sports-cave-desktop";
-      const MINIMUM_DESKTOP_VERSION = 8;
+      const MINIMUM_DESKTOP_VERSION = 9;
       const elements = Object.fromEntries([
         "previousButton", "nextButton", "zoomOutButton", "zoomInButton", "fitButton", "actualButton",
         "rotateLeftButton", "rotateRightButton", "fileName", "copyImageButton", "copyFileButton", "downloadButton", "desktopButton", "closeButton",
@@ -191,6 +192,10 @@
         desktopCapabilities: new Set(),
         desktopPending: new Map(),
         desktopReady: false,
+        openerReadyAttempts: 0,
+        openerReadyTimer: 0,
+        openerReadyAcknowledged: false,
+        lastOpenRequestId: "",
       };
 
       function isMac() {
@@ -525,21 +530,109 @@
         state.fitScale = calculateFitScale();
         if (state.sizingMode === "fit") fitToScreen();
       });
+      function validRelativeValue(value, { required = false, maxLength = 1024 } = {}) {
+        if (typeof value !== "string" || value.length > maxLength) return false;
+        if (!value) return !required;
+        if (
+          value.startsWith("/")
+          || value.includes("\\")
+          || value.includes(":")
+          || /[\0\r\n]/.test(value)
+        ) {
+          return false;
+        }
+        return value.split("/").every(part => part && part !== "." && part !== "..");
+      }
+
+      function validViewerName(value) {
+        return (
+          typeof value === "string"
+          && value.length > 0
+          && value.length <= 260
+          && !/[\0\r\n]/.test(value)
+        );
+      }
+
+      function validViewerOpenMessage(event) {
+        const message = event && event.data;
+        if (
+          event.origin !== location.origin
+          || event.source !== window.opener
+          || !message
+          || typeof message !== "object"
+          || message.type !== IMAGE_VIEWER_MESSAGE
+          || message.version !== IMAGE_VIEWER_PROTOCOL_VERSION
+        ) {
+          return false;
+        }
+        const keys = Object.keys(message);
+        if (keys.some(key => !["type", "version", "requestId", "path", "folder", "name"].includes(key))) {
+          return false;
+        }
+        return (
+          typeof message.requestId === "string"
+          && /^[A-Za-z0-9-]{8,80}$/.test(message.requestId)
+          && validRelativeValue(message.path, { required: true })
+          && validRelativeValue(message.folder)
+          && validViewerName(message.name)
+        );
+      }
+
+      function postToOpener(message) {
+        try {
+          if (!window.opener || window.opener.closed) return false;
+          window.opener.postMessage(message, location.origin);
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      function acknowledgeViewerOpen(requestId) {
+        postToOpener({
+          type: "sports-cave-image-viewer-opened",
+          version: IMAGE_VIEWER_PROTOCOL_VERSION,
+          requestId,
+        });
+      }
+
       window.addEventListener("message", event => {
-        if (event.origin !== location.origin || !event.data || event.data.type !== IMAGE_VIEWER_MESSAGE) return;
-        loadImage(event.data.path, { folder: event.data.folder, name: event.data.name });
+        const message = event && event.data;
+        if (
+          event.origin === location.origin
+          && event.source === window.opener
+          && message
+          && message.type === "sports-cave-image-viewer-parent-ready"
+          && message.version === IMAGE_VIEWER_PROTOCOL_VERSION
+        ) {
+          state.openerReadyAcknowledged = true;
+          window.clearTimeout(state.openerReadyTimer);
+          state.openerReadyTimer = 0;
+          return;
+        }
+        if (!validViewerOpenMessage(event)) return;
+        if (message.requestId === state.lastOpenRequestId) {
+          acknowledgeViewerOpen(message.requestId);
+          return;
+        }
+        state.lastOpenRequestId = message.requestId;
+        loadImage(message.path, { folder: message.folder, name: message.name });
         loadFolderImages();
+        acknowledgeViewerOpen(message.requestId);
         window.focus();
       });
       function notifyOpenerReady() {
-        try {
-          if (window.opener && !window.opener.closed) {
-            window.opener.postMessage({
-              type: "sports-cave-image-viewer-ready",
-              path: state.path,
-            }, location.origin);
-          }
-        } catch (_) {}
+        if (state.openerReadyAcknowledged || state.openerReadyAttempts >= 20) return;
+        state.openerReadyAttempts += 1;
+        postToOpener({
+          type: "sports-cave-image-viewer-ready",
+          version: IMAGE_VIEWER_PROTOCOL_VERSION,
+          path: state.path,
+          folder: state.folder,
+          name: state.name,
+        });
+        window.clearTimeout(state.openerReadyTimer);
+        state.openerReadyTimer = window.setTimeout(notifyOpenerReady, 250);
       }
       function handleDesktopMessage(event) {
         const message = event && event.data;
@@ -590,7 +683,10 @@
         else if (event.key === "-") zoomBy(1 / 1.2);
         else if (event.key === "0") fitToScreen();
       });
-      window.addEventListener("beforeunload", () => { state.loadGeneration += 1; });
+      window.addEventListener("beforeunload", () => {
+        state.loadGeneration += 1;
+        window.clearTimeout(state.openerReadyTimer);
+      });
 
       loadImage(state.path, { folder: state.folder, name: state.name, replaceHistory: false });
       loadFolderImages();

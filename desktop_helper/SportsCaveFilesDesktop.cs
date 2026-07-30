@@ -22,16 +22,16 @@ using System.Windows.Media.Imaging;
 [assembly: System.Reflection.AssemblyDescription("Persistent native Windows host for Sports Cave OS")]
 [assembly: System.Reflection.AssemblyProduct("Sports Cave OS Desktop")]
 [assembly: System.Reflection.AssemblyCompany("Sports Cave")]
-[assembly: System.Reflection.AssemblyVersion("8.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("8.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("9.0.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("9.0.0.0")]
 
 internal static class Program
 {
-    internal const int HelperVersion = 8;
+    internal const int HelperVersion = 9;
     internal const string FilesAppUserModelId = "SportsCave.Files.Desktop";
-    private const string MutexName = @"Local\SportsCaveOSDesktop-v8";
-    private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v8";
-    private const string FilesEventName = @"Local\SportsCaveOSDesktop-Files-v8";
+    private const string MutexName = @"Local\SportsCaveOSDesktop-v9";
+    private const string ShowEventName = @"Local\SportsCaveOSDesktop-Show-v9";
+    private const string FilesEventName = @"Local\SportsCaveOSDesktop-Files-v9";
 
     private static string InstanceName(string baseName)
     {
@@ -298,7 +298,10 @@ internal sealed class DesktopWindow : Window
     private CoreWebView2Environment environment;
     private DesktopWindow imageViewerWindow;
     private string pendingTrustedNavigation = "";
-    private bool initialized;
+    private Task browserInitializationTask;
+    private bool browserConfigured;
+    private bool browserInitialized;
+    private bool browserFailureReported;
     private bool redirectedForSignIn;
     private bool navigateFilesWhenReady;
 
@@ -356,110 +359,145 @@ internal sealed class DesktopWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs args)
     {
-        await InitializeBrowser();
+        try
+        {
+            await InitializeBrowser();
+        }
+        catch (Exception error)
+        {
+            ReportBrowserFailure(error);
+        }
     }
 
     private async Task InitializeBrowser()
     {
-        if (initialized) return;
-        initialized = true;
+        if (browserInitialized) return;
+        if (browserInitializationTask == null)
+        {
+            browserInitializationTask = InitializeBrowserCore();
+        }
+        Task pending = browserInitializationTask;
         try
         {
-            if (browser.CoreWebView2 == null)
-            {
-                string userData = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "SportsCaveOS", "WebView2");
-                Directory.CreateDirectory(userData);
-                if (environment == null)
-                {
-                    environment = await CoreWebView2Environment.CreateAsync(null, userData);
-                }
-                await browser.EnsureCoreWebView2Async(environment);
-                browser.CoreWebView2.Settings.AreDevToolsEnabled = false;
-                browser.CoreWebView2.Settings.AreHostObjectsAllowed = false;
-                browser.CoreWebView2.Settings.IsPasswordAutosaveEnabled = true;
-                browser.CoreWebView2.Settings.IsGeneralAutofillEnabled = true;
-                browser.CoreWebView2.WebMessageReceived += OnWebMessage;
-                browser.CoreWebView2.NavigationStarting += delegate(
-                    object navigationSender, CoreWebView2NavigationStartingEventArgs navigationArgs)
-                {
-                    if (
-                        !navigationArgs.Uri.Equals("about:blank", StringComparison.OrdinalIgnoreCase)
-                        && !config.Allows(navigationArgs.Uri)
-                    )
-                    {
-                        navigationArgs.Cancel = true;
-                    }
-                };
-                browser.CoreWebView2.NavigationCompleted += delegate(
-                    object navigationSender, CoreWebView2NavigationCompletedEventArgs navigationArgs)
-                {
-                    Uri current = browser.Source;
-                    if (
-                        !redirectedForSignIn
-                        && navigationArgs.HttpStatusCode == 403
-                        && current != null
-                        && current.AbsolutePath.Equals(
-                            "/files-window", StringComparison.OrdinalIgnoreCase)
-                    )
-                    {
-                        redirectedForSignIn = true;
-                        browser.CoreWebView2.Navigate(
-                            current.GetLeftPart(UriPartial.Authority) + "/");
-                    }
-                };
-                browser.CoreWebView2.NewWindowRequested += async delegate(
-                    object windowSender, CoreWebView2NewWindowRequestedEventArgs windowArgs)
-                {
-                    CoreWebView2Deferral deferral = windowArgs.GetDeferral();
-                    try
-                    {
-                        bool blank = windowArgs.Uri.Equals(
-                            "about:blank", StringComparison.OrdinalIgnoreCase);
-                        if (blank || config.Allows(windowArgs.Uri))
-                        {
-                            var child = new DesktopWindow(
-                                config,
-                                blank ? "" : windowArgs.Uri,
-                                false,
-                                environment,
-                                blank);
-                            child.Show();
-                            await child.InitializeBrowser();
-                            windowArgs.NewWindow = child.browser.CoreWebView2;
-                        }
-                        windowArgs.Handled = true;
-                    }
-                    finally
-                    {
-                        deferral.Complete();
-                    }
-                };
-                browser.CoreWebView2.ContextMenuRequested += OnContextMenuRequested;
-                if (!deferInitialNavigation)
-                {
-                    browser.CoreWebView2.Navigate(initialUrl);
-                }
-                if (!String.IsNullOrWhiteSpace(pendingTrustedNavigation))
-                {
-                    string pending = pendingTrustedNavigation;
-                    pendingTrustedNavigation = "";
-                    browser.CoreWebView2.Navigate(pending);
-                }
-                if (navigateFilesWhenReady)
-                {
-                    NavigateToFiles(false);
-                }
-            }
+            await pending;
         }
-        catch (Exception error)
+        catch
         {
-            DesktopLog.Write("webview", "failed", error.GetType().Name, 0);
-            MessageBox.Show(
-                "Sports Cave Desktop could not start WebView2. Reinstall the desktop helper.",
-                "Sports Cave OS Desktop", MessageBoxButton.OK, MessageBoxImage.Error);
+            if (ReferenceEquals(browserInitializationTask, pending))
+            {
+                browserInitializationTask = null;
+            }
+            throw;
         }
+    }
+
+    private async Task InitializeBrowserCore()
+    {
+        string userData = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SportsCaveOS", "WebView2");
+        Directory.CreateDirectory(userData);
+        if (environment == null)
+        {
+            environment = await CoreWebView2Environment.CreateAsync(null, userData);
+        }
+        await browser.EnsureCoreWebView2Async(environment);
+        if (!browserConfigured)
+        {
+            browser.CoreWebView2.Settings.AreDevToolsEnabled = false;
+            browser.CoreWebView2.Settings.AreHostObjectsAllowed = false;
+            browser.CoreWebView2.Settings.IsPasswordAutosaveEnabled = true;
+            browser.CoreWebView2.Settings.IsGeneralAutofillEnabled = true;
+            browser.CoreWebView2.WebMessageReceived += OnWebMessage;
+            browser.CoreWebView2.NavigationStarting += delegate(
+                object navigationSender, CoreWebView2NavigationStartingEventArgs navigationArgs)
+            {
+                if (
+                    !navigationArgs.Uri.Equals("about:blank", StringComparison.OrdinalIgnoreCase)
+                    && !config.Allows(navigationArgs.Uri)
+                )
+                {
+                    navigationArgs.Cancel = true;
+                }
+            };
+            browser.CoreWebView2.NavigationCompleted += delegate(
+                object navigationSender, CoreWebView2NavigationCompletedEventArgs navigationArgs)
+            {
+                Uri current = browser.Source;
+                if (
+                    !redirectedForSignIn
+                    && navigationArgs.HttpStatusCode == 403
+                    && current != null
+                    && current.AbsolutePath.Equals(
+                        "/files-window", StringComparison.OrdinalIgnoreCase)
+                )
+                {
+                    redirectedForSignIn = true;
+                    browser.CoreWebView2.Navigate(
+                        current.GetLeftPart(UriPartial.Authority) + "/");
+                }
+            };
+            browser.CoreWebView2.NewWindowRequested += async delegate(
+                object windowSender, CoreWebView2NewWindowRequestedEventArgs windowArgs)
+            {
+                CoreWebView2Deferral deferral = windowArgs.GetDeferral();
+                DesktopWindow child = null;
+                windowArgs.Handled = true;
+                try
+                {
+                    bool blank = windowArgs.Uri.Equals(
+                        "about:blank", StringComparison.OrdinalIgnoreCase);
+                    if (blank || config.Allows(windowArgs.Uri))
+                    {
+                        child = new DesktopWindow(
+                            config,
+                            blank ? "" : windowArgs.Uri,
+                            false,
+                            environment,
+                            blank);
+                        child.Show();
+                        await child.InitializeBrowser();
+                        windowArgs.NewWindow = child.browser.CoreWebView2;
+                    }
+                }
+                catch (Exception error)
+                {
+                    if (child != null) child.Close();
+                    DesktopLog.Write("newWindow", "failed", error.GetType().Name, 0);
+                }
+                finally
+                {
+                    deferral.Complete();
+                }
+            };
+            browser.CoreWebView2.ContextMenuRequested += OnContextMenuRequested;
+            browserConfigured = true;
+        }
+        if (!deferInitialNavigation)
+        {
+            browser.CoreWebView2.Navigate(initialUrl);
+        }
+        if (!String.IsNullOrWhiteSpace(pendingTrustedNavigation))
+        {
+            string pending = pendingTrustedNavigation;
+            pendingTrustedNavigation = "";
+            browser.CoreWebView2.Navigate(pending);
+        }
+        if (navigateFilesWhenReady)
+        {
+            NavigateToFiles(false);
+        }
+        browserInitialized = true;
+    }
+
+    private void ReportBrowserFailure(Exception error)
+    {
+        DesktopLog.Write("webview", "failed", error.GetType().Name, 0);
+        if (browserFailureReported) return;
+        browserFailureReported = true;
+        MessageBox.Show(
+            "Sports Cave Desktop could not open this window. Reinstall the desktop helper.",
+            "Sports Cave OS Desktop", MessageBoxButton.OK, MessageBoxImage.Error);
     }
 
     internal void ShowAndFocus()
@@ -613,12 +651,29 @@ internal sealed class DesktopWindow : Window
                 }
             };
             child.Show();
-            await child.InitializeBrowser();
+            try
+            {
+                await child.InitializeBrowser();
+            }
+            catch
+            {
+                child.Close();
+                throw;
+            }
         }
         else
         {
-            await imageViewerWindow.InitializeBrowser();
-            imageViewerWindow.NavigateTrusted(viewerUrl);
+            try
+            {
+                await imageViewerWindow.InitializeBrowser();
+                imageViewerWindow.NavigateTrusted(viewerUrl);
+            }
+            catch
+            {
+                imageViewerWindow.Close();
+                imageViewerWindow = null;
+                throw;
+            }
         }
         imageViewerWindow.ShowAndFocus();
     }

@@ -167,7 +167,7 @@ class AccountAccessTests(unittest.TestCase):
                 }
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             os_accounts.can_delete_files(
                 {
                     **worker,
@@ -315,24 +315,21 @@ class AccountAccessTests(unittest.TestCase):
         )
         self.assertFalse(os_accounts.can_access_page(admin, os_accounts.REPORTING_PAGE_KEY))
 
-    def test_worker_sees_approved_pages_and_files_by_default(self):
+    def test_worker_only_sees_and_opens_approved_pages(self):
         worker = {
             "role": "worker",
             "is_active": True,
             "page_permissions": ["dashboard", "mockups"],
         }
 
-        self.assertEqual(
-            os_accounts.allowed_navigation_routes(worker),
-            ("Dashboard", "Mockups", "Files"),
-        )
+        self.assertEqual(os_accounts.allowed_navigation_routes(worker), ("Dashboard", "Mockups"))
         self.assertTrue(os_accounts.can_access_page(worker, "Mockups"))
-        self.assertTrue(os_accounts.can_access_page(worker, "Files"))
+        self.assertFalse(os_accounts.can_access_page(worker, "Files"))
         self.assertFalse(os_accounts.can_access_page(worker, "Orders"))
         self.assertTrue(os_accounts.can_access_page(worker, "Accounts & Access"))
         self.assertFalse(os_accounts.can_access_page(worker, "Developer"))
 
-    def test_files_is_available_to_active_workers_and_legacy_dropbox_permission_is_preserved(self):
+    def test_files_can_be_assigned_and_legacy_dropbox_permission_is_preserved(self):
         worker = {
             "role": "worker",
             "is_active": True,
@@ -343,6 +340,12 @@ class AccountAccessTests(unittest.TestCase):
         self.assertNotIn("Dropbox", os_accounts.allowed_navigation_routes(worker))
         self.assertTrue(os_accounts.can_access_page(worker, "Files"))
         self.assertTrue(os_accounts.can_access_page(worker, "Dropbox"))
+        self.assertTrue(
+            os_accounts.can_access_page(
+                {**worker, "page_permissions": ["Dashboard", "Dropbox"]},
+                "Files",
+            )
+        )
         self.assertEqual(os_accounts.normalise_route("Dropbox"), "Files")
         self.assertEqual(os_accounts.page_key_for_route("Dropbox"), "files")
 
@@ -631,7 +634,7 @@ class AccountAccessTests(unittest.TestCase):
         self.assertEqual(app_test.session_state["current_page"], "Mockups")
         self.assertEqual(app_test.session_state["selected_page"], "Mockups")
 
-    def test_worker_without_files_permission_can_render_files_page(self):
+    def test_blocked_worker_cannot_render_files_page(self):
         app_test = AppTest.from_file(str(ROOT / "app.py"))
         app_test.session_state["sports_cave_authenticated"] = True
         app_test.session_state["sports_cave_current_user"] = {
@@ -648,7 +651,7 @@ class AccountAccessTests(unittest.TestCase):
         app_test.run(timeout=20)
 
         self.assertFalse(app_test.exception)
-        self.assertNotIn("Access not approved", [title.value for title in app_test.title])
+        self.assertIn("Access not approved", [title.value for title in app_test.title])
 
     def test_admin_without_server_credentials_sees_clean_files_unavailable(self):
         with patch.dict(

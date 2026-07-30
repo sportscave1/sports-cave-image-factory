@@ -157,7 +157,7 @@ def page_key_for_route(route):
 
 
 def normalise_page_key(page_key):
-    clean_key = str(page_key or "").strip()
+    clean_key = str(page_key or "").strip().casefold()
     return PAGE_KEY_ALIASES.get(clean_key, clean_key)
 
 
@@ -278,8 +278,6 @@ def can_access_page(user, route_or_key):
             return True
         return social_media.SOCIAL_MEDIA_PAGE_KEY in permission_keys(user)
     if page and page["key"] == "accounts_access":
-        return True
-    if page and page["key"] == "files":
         return True
     if is_admin(user):
         return True

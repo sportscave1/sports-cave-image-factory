@@ -29,6 +29,31 @@ def get_request(path, query=None):
     )
 
 
+def authenticated_get_request(path, user_id):
+    token = files_upload_api.sc_auth.create_user_auth_token(
+        user_id,
+        password=files_upload_api.sc_auth.DEFAULT_APP_PASSWORD,
+    )
+    return files_upload_api.Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": path,
+            "query_string": b"",
+            "headers": [
+                (
+                    b"cookie",
+                    f"{files_upload_api.sc_auth.AUTH_COOKIE_NAME}={token}".encode(
+                        "ascii"
+                    ),
+                )
+            ],
+            "scheme": "https",
+            "server": ("sports-cave.test", 443),
+        }
+    )
+
+
 def json_request(path, payload):
     body = json.dumps(payload).encode("utf-8")
     sent = False
@@ -100,44 +125,74 @@ class FilesWindowApiTests(unittest.TestCase):
         self.assertNotIn("stSidebar", source)
         self.assertEqual(response.headers["cache-control"], "no-store")
 
-    def test_active_worker_without_files_permission_passes_files_window_auth_gate(self):
-        token = files_upload_api.sc_auth.create_user_auth_token(
-            "worker-no-files",
-            password=files_upload_api.sc_auth.DEFAULT_APP_PASSWORD,
-        )
-        request = files_upload_api.Request(
-            {
-                "type": "http",
-                "method": "GET",
-                "path": "/files-window",
-                "query_string": b"",
-                "headers": [
-                    (
-                        b"cookie",
-                        f"{files_upload_api.sc_auth.AUTH_COOKIE_NAME}={token}".encode(
-                            "ascii"
-                        ),
-                    )
-                ],
-                "scheme": "https",
-                "server": ("sports-cave.test", 443),
-            }
-        )
-        worker = {
+    def test_files_auth_gate_requires_explicit_permission_and_active_account(self):
+        allowed = {**self.user, "id": "worker-files"}
+        without_permission = {
             **self.user,
             "id": "worker-no-files",
             "page_permissions": ["dashboard"],
         }
+        inactive = {
+            **self.user,
+            "id": "worker-inactive",
+            "is_active": False,
+        }
+
+        with patch.object(
+            files_upload_api.os_accounts.DEFAULT_STORE,
+            "get_user",
+            return_value=allowed,
+        ):
+            user = files_upload_api._request_user(
+                authenticated_get_request("/files-window", allowed["id"])
+            )
+        self.assertEqual(user["id"], allowed["id"])
+
+        for blocked in (without_permission, inactive):
+            with self.subTest(user=blocked["id"]), patch.object(
+                files_upload_api.os_accounts.DEFAULT_STORE,
+                "get_user",
+                return_value=blocked,
+            ):
+                with self.assertRaises(files_upload_api.FilesUploadError) as caught:
+                    files_upload_api._request_user(
+                        authenticated_get_request("/files-window", blocked["id"])
+                    )
+                self.assertEqual(caught.exception.status_code, 403)
+                self.assertEqual(caught.exception.code, "access_denied")
+
+    def test_direct_files_window_route_cannot_bypass_permission_check(self):
+        worker = {
+            **self.user,
+            "id": "worker-direct-denied",
+            "page_permissions": ["dashboard"],
+        }
+        request = authenticated_get_request("/files-window", worker["id"])
 
         with patch.object(
             files_upload_api.os_accounts.DEFAULT_STORE,
             "get_user",
             return_value=worker,
         ):
-            user = files_upload_api._request_user(request)
+            response = asyncio.run(files_upload_api.files_window_page(request))
 
-        self.assertEqual(user["id"], "worker-no-files")
-        self.assertTrue(files_upload_api.os_accounts.can_access_page(user, "Files"))
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("Files access is not approved", response.body.decode("utf-8"))
+
+    def test_files_view_permission_does_not_grant_delete_permission(self):
+        viewer = {**self.user, "id": "worker-view-only"}
+        request = authenticated_get_request("/api/files-delete", viewer["id"])
+
+        with patch.object(
+            files_upload_api.os_accounts.DEFAULT_STORE,
+            "get_user",
+            return_value=viewer,
+        ):
+            with self.assertRaises(files_upload_api.FilesUploadError) as caught:
+                files_upload_api._request_files_delete_user(request)
+
+        self.assertEqual(caught.exception.status_code, 403)
+        self.assertEqual(caught.exception.code, "access_denied")
 
     def test_metadata_list_is_root_scoped_and_keeps_special_characters(self):
         path = f"{TEAM_ROOT}/Designs & Uploads"
@@ -1040,7 +1095,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
             ROOT / "components" / "files_image_viewer" / "index.html"
         ).read_text(encoding="utf-8")
 
-    def test_files_sidebar_opens_browser_window_for_all_signed_in_accounts(self):
+    def test_files_sidebar_opens_browser_window_for_approved_accounts(self):
         self.assertIn('window.open("/files-window"', self.launcher)
         self.assertIn('"sports-cave-files-window"', self.launcher)
         self.assertIn("popup.focus()", self.launcher)
@@ -1207,14 +1262,20 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('hasDesktopCapability("openViewer")', open_block)
         self.assertIn('desktopPost({ action: "openViewer"', open_block)
         self.assertIn("path: viewerRequest.path", open_block)
+        self.assertIn('new URL("/files-image-viewer", location.origin)', open_block)
         self.assertIn('window.open(viewerUrl, "sports-cave-image-viewer"', open_block)
         self.assertIn("state.imageViewerReady", open_block)
         self.assertIn("&& state.imageViewerReady", open_block)
-        self.assertIn("state.imageViewerWindow.postMessage", open_block)
+        self.assertIn("queueImageViewerRequest(viewerRequest)", open_block)
+        self.assertIn("deliverPendingImageViewerRequest", open_block)
+        self.assertIn("if (!pending || !viewer || viewer.closed || !state.imageViewerReady) return", open_block)
+        self.assertIn('type: "sports-cave-image-viewer-open"', open_block)
+        self.assertIn('type: "sports-cave-image-viewer-opened"', self.viewer)
         self.assertIn("state.imageViewerWindow.focus()", open_block)
         self.assertIn("state.imageViewerReady = false", open_block)
         self.assertIn('sports-cave-image-viewer-ready', self.client)
-        self.assertIn('actionLabel: "Open image viewer"', open_block)
+        self.assertIn('actionLabel: "Open here"', open_block)
+        self.assertIn("location.assign(viewerUrl)", open_block)
         self.assertIn('item.kind === "image"', open_block)
 
     def test_no_inline_image_preview_and_viewer_has_full_interaction_contract(self):
@@ -1247,6 +1308,21 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("if (generation !== state.loadGeneration) return", self.viewer)
         self.assertIn("function notifyOpenerReady", self.viewer)
         self.assertIn('type: "sports-cave-image-viewer-ready"', self.viewer)
+        self.assertIn("state.openerReadyAttempts >= 20", self.viewer)
+        self.assertIn("window.setTimeout(notifyOpenerReady, 250)", self.viewer)
+        self.assertIn('"sports-cave-image-viewer-parent-ready"', self.viewer)
+        self.assertIn('type: "sports-cave-image-viewer-parent-ready"', self.client)
+
+    def test_viewer_handshake_validates_origin_source_and_message_shape(self):
+        self.assertIn("event.origin !== location.origin", self.viewer)
+        self.assertIn("event.source !== window.opener", self.viewer)
+        self.assertIn("message.version !== IMAGE_VIEWER_PROTOCOL_VERSION", self.viewer)
+        self.assertIn("validRelativeValue(message.path, { required: true })", self.viewer)
+        self.assertIn("validRelativeValue(message.folder)", self.viewer)
+        self.assertIn("validViewerName(message.name)", self.viewer)
+        self.assertIn("keys.some(key => ![", self.viewer)
+        self.assertIn("state.lastOpenRequestId", self.viewer)
+        self.assertIn("acknowledgeViewerOpen(message.requestId)", self.viewer)
 
     def test_folder_listing_cache_deduplicates_requests_and_keeps_stale_navigation_guard(self):
         self.assertIn("folderCache: new Map()", self.client)
@@ -1414,7 +1490,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn('if (!window.chrome || !window.chrome.webview)', self.client)
         self.assertIn("Open in Sports Cave Desktop to drag or copy files", self.client)
         self.assertIn('elements.protocolLink.href = "sports-cave-files://app"', self.client)
-        self.assertIn("const MINIMUM_DESKTOP_VERSION = 8", self.client)
+        self.assertIn("const MINIMUM_DESKTOP_VERSION = 9", self.client)
         self.assertIn("desktop_outdated", self.client)
         self.assertIn('desktopError("", "desktop_outdated")', self.client)
         self.assertNotIn("Update Sports Cave Desktop to enable native drag and Copy.", self.client)
@@ -1445,7 +1521,7 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
         self.assertIn("window.sportsCaveCopyImagePixels = copyImagePixels", self.viewer)
         self.assertIn('hasDesktopCapability("drag")', self.viewer)
         self.assertIn('desktopRequest("drag")', self.viewer)
-        self.assertIn("const MINIMUM_DESKTOP_VERSION = 8", self.viewer)
+        self.assertIn("const MINIMUM_DESKTOP_VERSION = 9", self.viewer)
 
 
 if __name__ == "__main__":
