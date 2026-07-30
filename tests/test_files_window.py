@@ -100,6 +100,45 @@ class FilesWindowApiTests(unittest.TestCase):
         self.assertNotIn("stSidebar", source)
         self.assertEqual(response.headers["cache-control"], "no-store")
 
+    def test_active_worker_without_files_permission_passes_files_window_auth_gate(self):
+        token = files_upload_api.sc_auth.create_user_auth_token(
+            "worker-no-files",
+            password=files_upload_api.sc_auth.DEFAULT_APP_PASSWORD,
+        )
+        request = files_upload_api.Request(
+            {
+                "type": "http",
+                "method": "GET",
+                "path": "/files-window",
+                "query_string": b"",
+                "headers": [
+                    (
+                        b"cookie",
+                        f"{files_upload_api.sc_auth.AUTH_COOKIE_NAME}={token}".encode(
+                            "ascii"
+                        ),
+                    )
+                ],
+                "scheme": "https",
+                "server": ("sports-cave.test", 443),
+            }
+        )
+        worker = {
+            **self.user,
+            "id": "worker-no-files",
+            "page_permissions": ["dashboard"],
+        }
+
+        with patch.object(
+            files_upload_api.os_accounts.DEFAULT_STORE,
+            "get_user",
+            return_value=worker,
+        ):
+            user = files_upload_api._request_user(request)
+
+        self.assertEqual(user["id"], "worker-no-files")
+        self.assertTrue(files_upload_api.os_accounts.can_access_page(user, "Files"))
+
     def test_metadata_list_is_root_scoped_and_keeps_special_characters(self):
         path = f"{TEAM_ROOT}/Designs & Uploads"
         entries = [
@@ -1001,16 +1040,17 @@ class FilesWindowInteractionContractTests(unittest.TestCase):
             ROOT / "components" / "files_image_viewer" / "index.html"
         ).read_text(encoding="utf-8")
 
-    def test_files_sidebar_opens_desktop_without_false_popup_failure_flow(self):
-        self.assertIn('href="sports-cave-files://app"', self.launcher)
-        self.assertIn("desktopLink.click()", self.launcher)
+    def test_files_sidebar_opens_browser_window_for_all_signed_in_accounts(self):
+        self.assertIn('window.open("/files-window"', self.launcher)
+        self.assertIn('"sports-cave-files-window"', self.launcher)
+        self.assertIn("popup.focus()", self.launcher)
+        self.assertNotIn('href="sports-cave-files://app"', self.launcher)
+        self.assertNotIn("desktopLink.click()", self.launcher)
         self.assertNotIn("parentWindow.open", self.launcher)
-        self.assertNotIn("openBrowserFilesWindow", self.launcher)
-        self.assertNotIn("FILES_WINDOW_NAME", self.launcher)
+        self.assertIn("openBrowserFilesWindow", self.launcher)
         self.assertNotIn("fallbackTimer", self.launcher)
         self.assertNotIn("window.setTimeout", self.launcher)
         self.assertNotIn("Sports Cave Desktop did not open", self.launcher)
-        self.assertNotIn("blocked", self.launcher)
         branch = self.app[self.app.index('if page == "Files":') : self.app.index("if st.sidebar.button(", self.app.index('if page == "Files":'))]
         self.assertIn("_files_window_launcher_component", branch)
         self.assertIn("continue", branch)

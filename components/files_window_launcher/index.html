@@ -28,10 +28,8 @@
   </head>
   <body>
     <button id="launcher" type="button">Files</button>
-    <a id="desktopLink" href="sports-cave-files://app" hidden></a>
     <script>
       const button = document.getElementById("launcher");
-      const desktopLink = document.getElementById("desktopLink");
 
       function send(type, data) {
         window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, data || {}), "*");
@@ -41,8 +39,27 @@
         send("streamlit:setFrameHeight", { height });
       }
 
+      function openBrowserFilesWindow() {
+        const features = [
+          "popup=yes",
+          "width=1280",
+          "height=860",
+          "left=80",
+          "top=40",
+          "resizable=yes",
+          "scrollbars=yes",
+          "noopener=no"
+        ].join(",");
+        const popup = window.open("/files-window", "sports-cave-files-window", features);
+        if (popup) {
+          popup.focus();
+          return;
+        }
+        window.open("/files-window", "_blank");
+      }
+
       function openFilesWindow() {
-        desktopLink.click();
+        openBrowserFilesWindow();
       }
 
       button.addEventListener("click", openFilesWindow);
