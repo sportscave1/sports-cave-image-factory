@@ -26,6 +26,8 @@ TASK_GROUPS = (
     UPLOAD_TASK_GROUP,
     VARIANTS_TASK_GROUP,
 )
+DESIGN_TASK_VISIBLE_LIMIT = 3
+DESIGN_TASK_PREVIEW_WORD_LIMIT = 5
 REGIONS = ("Australia", "USA", "UK", "Canada", "New Zealand")
 ACTIVITY_LOG_LIMIT = 200
 TASK_CACHE_TTL_SECONDS = 15
@@ -198,6 +200,38 @@ def _normalise_task(task):
         "category": section,
         "section": section,
     }
+
+
+def _task_created_at_sort_key(task):
+    value = (task or {}).get("created_at")
+    try:
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(
+            str(value or "").replace("Z", "+00:00")
+        )
+    except (TypeError, ValueError):
+        parsed = datetime.max.replace(tzinfo=timezone.utc)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc), str((task or {}).get("id") or "")
+
+
+def ordered_task_group(tasks, group):
+    group_tasks = [
+        task for task in (tasks or []) if task.get("category") == group
+    ]
+    if group != DESIGN_TASK_GROUP:
+        return group_tasks
+    return sorted(group_tasks, key=_task_created_at_sort_key)
+
+
+def compact_design_task_preview(value, word_limit=DESIGN_TASK_PREVIEW_WORD_LIMIT):
+    words = str(value or "").split()
+    try:
+        safe_limit = max(int(word_limit), 1)
+    except (TypeError, ValueError):
+        safe_limit = DESIGN_TASK_PREVIEW_WORD_LIMIT
+    preview = " ".join(words[:safe_limit])
+    return f"{preview}..." if len(words) > safe_limit else preview
 
 
 def normalize_task_category(category):

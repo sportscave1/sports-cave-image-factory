@@ -358,6 +358,140 @@ class SportsCaveDashboardStateTests(unittest.TestCase):
         self.assertEqual(backend.task_status_calls, ["open"])
         self.assertEqual(backend.activity_calls, [])
 
+    def test_new_design_tasks_are_ordered_oldest_first(self):
+        tasks = [
+            {
+                "id": "newest",
+                "text": "Newest design",
+                "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "created_at": "2026-07-31T09:00:00+00:00",
+            },
+            {
+                "id": "oldest",
+                "text": "Oldest design",
+                "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "created_at": "2026-07-29T09:00:00+00:00",
+            },
+            {
+                "id": "middle",
+                "text": "Middle design",
+                "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "created_at": "2026-07-30T09:00:00Z",
+            },
+            {
+                "id": "second-oldest",
+                "text": "Second oldest design",
+                "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "created_at": "2026-07-29T10:00:00+00:00",
+            },
+            {
+                "id": "second-newest",
+                "text": "Second newest design",
+                "category": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "created_at": "2026-07-30T10:00:00+00:00",
+            },
+        ]
+
+        ordered = sports_cave_dashboard.ordered_task_group(
+            tasks,
+            sports_cave_dashboard.DESIGN_TASK_GROUP,
+        )
+
+        self.assertEqual(
+            [task["id"] for task in ordered],
+            ["oldest", "second-oldest", "middle", "second-newest", "newest"],
+        )
+        self.assertEqual(
+            [
+                task["id"]
+                for task in ordered[:sports_cave_dashboard.DESIGN_TASK_VISIBLE_LIMIT]
+            ],
+            ["oldest", "second-oldest", "middle"],
+        )
+
+    def test_non_design_task_groups_keep_existing_order(self):
+        tasks = [
+            {
+                "id": "newest",
+                "category": sports_cave_dashboard.COLLECTIONS_TASK_GROUP,
+                "created_at": "2026-07-31T09:00:00+00:00",
+            },
+            {
+                "id": "oldest",
+                "category": sports_cave_dashboard.COLLECTIONS_TASK_GROUP,
+                "created_at": "2026-07-29T09:00:00+00:00",
+            },
+        ]
+
+        ordered = sports_cave_dashboard.ordered_task_group(
+            tasks,
+            sports_cave_dashboard.COLLECTIONS_TASK_GROUP,
+        )
+
+        self.assertEqual([task["id"] for task in ordered], ["newest", "oldest"])
+
+    def test_design_overflow_preview_uses_only_first_five_words(self):
+        self.assertEqual(
+            sports_cave_dashboard.compact_design_task_preview(
+                "The Summer of 41 Williams versus DiMaggio"
+            ),
+            "The Summer of 41 Williams...",
+        )
+        self.assertEqual(
+            sports_cave_dashboard.compact_design_task_preview("Short design title"),
+            "Short design title",
+        )
+
+    def test_dashboard_renders_oldest_three_designs_with_compact_overflow(self):
+        backend = FakeDashboardBackend()
+        backend.tasks = [
+            {
+                "id": f"design-{index}",
+                "title": title,
+                "section": sports_cave_dashboard.DESIGN_TASK_GROUP,
+                "status": "open",
+                "created_at": created_at,
+            }
+            for index, title, created_at in (
+                (5, "Newest design five extra preview words", "2026-07-31T09:00:00+00:00"),
+                (1, "Oldest design one extra preview words", "2026-07-27T09:00:00+00:00"),
+                (3, "Middle design three extra preview words", "2026-07-29T09:00:00+00:00"),
+                (2, "Second design two extra preview words", "2026-07-28T09:00:00+00:00"),
+                (4, "Fourth design four extra preview words", "2026-07-30T09:00:00+00:00"),
+            )
+        ]
+        app_test = AppTest.from_file(str(ROOT / "app.py"))
+        app_test.session_state["sports_cave_authenticated"] = True
+        app_test.session_state["sports_cave_current_user"] = owner_user()
+        app_test.session_state["sports_cave_auth_checked_at"] = wall_time.monotonic()
+        app_test.session_state["selected_page"] = "Dashboard"
+
+        with patch.object(
+            sports_cave_dashboard,
+            "get_supabase_backend",
+            return_value=backend,
+        ):
+            app_test.run(timeout=20)
+
+        design_cards = [
+            str(item.value)
+            for item in app_test.markdown
+            if '<div class="sc-task-card sc-design-task-card">' in str(item.value)
+        ]
+        self.assertFalse(app_test.exception)
+        self.assertEqual(len(design_cards), 3)
+        self.assertIn("Oldest design one", design_cards[0])
+        self.assertIn("Second design two", design_cards[1])
+        self.assertIn("Middle design three", design_cards[2])
+        self.assertEqual(
+            len([button for button in app_test.button if button.label == "Complete"]),
+            3,
+        )
+        self.assertEqual(len(app_test.get("popover")), 1)
+        rendered = "\n".join(str(item.value) for item in app_test.markdown)
+        self.assertIn("Fourth design four extra preview...", rendered)
+        self.assertIn("Newest design five extra preview...", rendered)
+
     def test_task_complete_marks_complete_and_writes_activity_log(self):
         backend = FakeDashboardBackend()
 
@@ -1990,6 +2124,21 @@ class SportsCaveCalendarTests(unittest.TestCase):
 
 
 class DashboardRenderContractTests(unittest.TestCase):
+    def test_new_design_queue_is_compact_and_limits_visible_tasks(self):
+        source = (ROOT / "app.py").read_text(encoding="utf-8")
+        render_source = source[
+            source.index("def render_task_group") :
+            source.index("\n\ndef render_dashboard_tasks")
+        ]
+
+        self.assertIn("ordered_task_group(tasks, group)", render_source)
+        self.assertIn("DESIGN_TASK_VISIBLE_LIMIT", render_source)
+        self.assertIn("group_tasks[:sports_cave_dashboard.DESIGN_TASK_VISIBLE_LIMIT]", render_source)
+        self.assertIn('with st.popover(f"+{len(overflow_tasks)} more")', render_source)
+        self.assertIn("compact_design_task_preview", render_source)
+        self.assertIn("sc-design-overflow-list", render_source)
+        self.assertIn("sc-design-task-card", render_source)
+
     def test_dashboard_render_path_avoids_heavy_page_imports(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         dashboard_source = source[

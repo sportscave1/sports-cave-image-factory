@@ -3128,6 +3128,56 @@ def inject_styles():
             padding: 0.55rem 0.65rem;
         }
 
+        .sc-design-task-card {
+            border-radius: 6px;
+            margin: 0.2rem 0;
+            padding: 0.38rem 0.52rem;
+        }
+
+        .sc-design-task-card strong {
+            display: -webkit-box;
+            font-size: 0.84rem;
+            line-height: 1.25;
+            overflow: hidden;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+        }
+
+        .sc-design-task-card .sc-small-meta {
+            font-size: 0.66rem;
+            margin-top: 0.12rem;
+        }
+
+        div[data-testid="stHorizontalBlock"]:has(.sc-design-task-card) {
+            align-items: center;
+            gap: 0.45rem;
+        }
+
+        div[data-testid="stHorizontalBlock"]:has(.sc-design-task-card) button {
+            min-height: 2.25rem;
+            padding-bottom: 0.32rem;
+            padding-top: 0.32rem;
+        }
+
+        .sc-design-overflow-list {
+            max-height: 10rem;
+            min-width: 15rem;
+            overflow-y: auto;
+            padding-right: 0.2rem;
+        }
+
+        .sc-design-overflow-item {
+            border-bottom: 1px solid #E8E2D7;
+            color: #252321;
+            font-size: 0.78rem;
+            line-height: 1.25;
+            padding: 0.38rem 0.1rem;
+        }
+
+        .sc-design-overflow-item:last-child {
+            border-bottom: 0;
+        }
+
         .sc-task-card strong,
         .sc-log-row strong,
         .sc-calendar-row strong {
@@ -10559,7 +10609,7 @@ def render_daily_execution_panel(local_now, events, state, *, show_denied=True):
 
 def render_task_group(group, tasks):
     st.markdown(f"**{html.escape(group)}**")
-    group_tasks = [task for task in tasks if task.get("category") == group]
+    group_tasks = sports_cave_dashboard.ordered_task_group(tasks, group)
     if not group_tasks:
         st.markdown(
             '<div class="sc-empty-note">Nothing waiting.</div>',
@@ -10567,15 +10617,28 @@ def render_task_group(group, tasks):
         )
         return
 
-    for task in group_tasks:
+    is_design_group = group == sports_cave_dashboard.DESIGN_TASK_GROUP
+    visible_tasks = (
+        group_tasks[:sports_cave_dashboard.DESIGN_TASK_VISIBLE_LIMIT]
+        if is_design_group
+        else group_tasks
+    )
+    overflow_tasks = (
+        group_tasks[sports_cave_dashboard.DESIGN_TASK_VISIBLE_LIMIT:]
+        if is_design_group
+        else []
+    )
+
+    for task in visible_tasks:
         task_id = task.get("id") or ""
         task_text = task.get("text") or ""
         row = st.columns([5, 1.25])
         with row[0]:
+            card_class = "sc-task-card sc-design-task-card" if is_design_group else "sc-task-card"
             st.markdown(
                 f"""
-                <div class="sc-task-card">
-                    <strong>{html.escape(task_text)}</strong>
+                <div class="{card_class}">
+                    <strong title="{html.escape(task_text, quote=True)}">{html.escape(task_text)}</strong>
                     <span class="sc-small-meta">Added {html.escape(format_dashboard_timestamp(task.get("created_at")))}</span>
                 </div>
                 """,
@@ -10632,6 +10695,22 @@ def render_task_group(group, tasks):
                     st.session_state.pop("dashboard_pending_design_complete_task_id", None)
                     st.session_state.pop("dashboard_pending_design_complete_task_text", None)
                     st.rerun()
+
+    if overflow_tasks:
+        with st.popover(f"+{len(overflow_tasks)} more"):
+            preview_rows = "".join(
+                (
+                    '<div class="sc-design-overflow-item" '
+                    f'title="{html.escape(str(task.get("text") or ""), quote=True)}">'
+                    f'{html.escape(sports_cave_dashboard.compact_design_task_preview(task.get("text")))}'
+                    "</div>"
+                )
+                for task in overflow_tasks
+            )
+            st.markdown(
+                f'<div class="sc-design-overflow-list">{preview_rows}</div>',
+                unsafe_allow_html=True,
+            )
 
 
 def render_dashboard_tasks(state):
