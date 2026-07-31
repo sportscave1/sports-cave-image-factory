@@ -1,6 +1,10 @@
+import inspect
 import unittest
 
 from streamlit.testing.v1 import AppTest
+
+import social_media_creator
+import social_media_workspace
 
 
 READY_PAGE = r'''
@@ -89,6 +93,73 @@ class SocialMediaPageTests(unittest.TestCase):
         labels = [button.label for button in app.button]
         self.assertIn("Create this", labels)
         self.assertIn("Build Content Prompt", labels)
+
+    def test_create_form_is_compact_and_uses_editable_hook_and_cta_controls(self):
+        app = AppTest.from_string(READY_PAGE).run(timeout=15)
+
+        self.assertEqual(len(app.exception), 0)
+        self.assertNotIn("More details", [item.label for item in app.expander])
+        self.assertEqual([item.label for item in app.text_area], [])
+        labels = [item.label for item in app.text_input]
+        for removed_label in (
+            "Audience",
+            "Proof asset available",
+            "Accurate live edition count",
+            "Price",
+            "Shipping or delivery claim",
+            "Restrictions",
+            "Source-footage rights status",
+            "Additional VA notes",
+        ):
+            self.assertNotIn(removed_label, labels)
+        self.assertIn("Offer (optional)", labels)
+        self.assertIn(
+            "Offer end date (optional)",
+            [item.label for item in app.date_input],
+        )
+
+        selectboxes = {item.label: item for item in app.selectbox}
+        self.assertEqual(
+            set(selectboxes["Hook or content angle"].options),
+            set(social_media_creator.HOOK_OPTIONS),
+        )
+        self.assertEqual(
+            set(selectboxes["One CTA"].options),
+            set(social_media_creator.CTA_OPTIONS),
+        )
+        helper_source = inspect.getsource(
+            social_media_workspace._editable_selectbox
+        )
+        self.assertIn("accept_new_options=True", helper_source)
+        self.assertIn('filter_mode="fuzzy"', helper_source)
+
+    def test_custom_hook_and_cta_restore_in_editable_selectboxes(self):
+        source = READY_PAGE.replace(
+            "import social_media_page",
+            (
+                "import streamlit as st\n"
+                'st.session_state["social-create-hook"] = "Custom restored angle"\n'
+                'st.session_state["social-create-cta"] = "Custom restored CTA."\n'
+                "import social_media_page"
+            ),
+            1,
+        )
+        app = AppTest.from_string(source).run(timeout=15)
+        selectboxes = {item.label: item for item in app.selectbox}
+
+        self.assertEqual(
+            selectboxes["Hook or content angle"].value,
+            "Custom restored angle",
+        )
+        self.assertIn(
+            "Custom restored angle",
+            selectboxes["Hook or content angle"].options,
+        )
+        self.assertEqual(selectboxes["One CTA"].value, "Custom restored CTA.")
+        self.assertIn(
+            "Custom restored CTA.",
+            selectboxes["One CTA"].options,
+        )
 
     def test_tracking_preserves_each_existing_compact_view(self):
         app = AppTest.from_string(READY_PAGE).run(timeout=15)

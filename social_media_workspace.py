@@ -14,6 +14,7 @@ from activity_log import record_activity_log
 import dropbox_integration
 import os_accounts
 import social_media
+import social_media_branding
 import social_media_catalog
 import social_media_creator
 import social_media_store
@@ -50,16 +51,8 @@ FIELD_KEYS = {
     "funnel_stage": "social-create-funnel",
     "hook": "social-create-hook",
     "cta": "social-create-cta",
-    "audience": "social-create-audience",
-    "proof_asset": "social-create-proof",
-    "edition_count": "social-create-edition-count",
-    "price": "social-create-price",
     "offer": "social-create-offer",
     "offer_end_date": "social-create-offer-end",
-    "shipping_claim": "social-create-shipping",
-    "restrictions": "social-create-restrictions",
-    "rights_status": "social-create-rights",
-    "additional_notes": "social-create-notes",
 }
 
 
@@ -247,6 +240,23 @@ def _select_index(options, value, default=0):
         return default
 
 
+def _editable_selectbox(label, suggestions, *, key, placeholder):
+    current = str(st.session_state.get(key) or "").strip()
+    options = list(suggestions)
+    if current and current not in options:
+        options.insert(0, current)
+    value = st.selectbox(
+        label,
+        options,
+        index=_select_index(options, current) if current else None,
+        placeholder=placeholder,
+        accept_new_options=True,
+        filter_mode="fuzzy",
+        key=key,
+    )
+    return str(value or "").strip()
+
+
 def _product_option_id(product):
     return str(product.get("id") or product.get("handle") or product.get("title") or "")
 
@@ -312,16 +322,8 @@ def _consume_prefill(products):
         "funnel_stage": prefill.get("funnel_stage"),
         "hook": prefill.get("hook"),
         "cta": prefill.get("cta"),
-        "audience": prefill.get("audience"),
-        "proof_asset": prefill.get("proof_asset"),
-        "edition_count": prefill.get("edition_count"),
-        "price": prefill.get("price"),
         "offer": prefill.get("offer"),
         "offer_end_date": offer_end_date,
-        "shipping_claim": prefill.get("shipping_claim"),
-        "restrictions": prefill.get("restrictions"),
-        "rights_status": prefill.get("rights_status"),
-        "additional_notes": prefill.get("additional_notes"),
     }
     for field, value in mappings.items():
         if value not in (None, "", []):
@@ -378,7 +380,6 @@ def _assignment_from_store(user, target, store, account_store):
             if priority.get("event_drop"):
                 strategy["event"] = priority["event_drop"]
             strategy["offer"] = priority.get("approved_offer") or ""
-            strategy["restrictions"] = priority.get("restrictions") or ""
     return strategy
 
 
@@ -436,6 +437,11 @@ def _creator_payload_from_form(values, selected_product):
         ),
         "product_handle": selected_product.get("handle") or "",
         "product_image_url": selected_product.get("image_url") or "",
+        "edition_limit": selected_product.get("edition_limit"),
+        "edition_limit_verified": bool(
+            selected_product.get("edition_limit_verified")
+        ),
+        "edition_limit_source": selected_product.get("edition_limit_source") or "",
         "status": "Draft",
     }
 
@@ -609,56 +615,37 @@ def _render_creator_form(products):
             ),
             key=FIELD_KEYS["funnel_stage"],
         )
-        hook = st.text_area(
+        hook = _editable_selectbox(
             "Hook or content angle",
-            placeholder="One clear memory, question, collector truth or product angle",
-            height=80,
+            social_media_creator.recommended_hook_options(
+                objective=objective,
+                funnel_stage=funnel_stage,
+                series=series,
+                content_format=content_format,
+            ),
             key=FIELD_KEYS["hook"],
+            placeholder="Choose or type a content angle",
         )
-        cta = st.text_input(
+        cta = _editable_selectbox(
             "One CTA",
-            placeholder="See the complete edition.",
+            social_media_creator.recommended_cta_options(
+                objective=objective,
+                funnel_stage=funnel_stage,
+                series=series,
+            ),
             key=FIELD_KEYS["cta"],
+            placeholder="Choose or type one CTA",
         )
-        with st.expander("More details", expanded=False):
-            row = st.columns(2)
-            audience = row[0].text_area("Audience", height=75, key=FIELD_KEYS["audience"])
-            proof_asset = row[1].text_area(
-                "Proof asset available",
-                height=75,
-                key=FIELD_KEYS["proof_asset"],
-            )
-            row = st.columns(2)
-            edition_count = row[0].text_input(
-                "Accurate live edition count",
-                key=FIELD_KEYS["edition_count"],
-            )
-            price = row[1].text_input("Price", key=FIELD_KEYS["price"])
-            row = st.columns(2)
-            offer = row[0].text_input("Offer", key=FIELD_KEYS["offer"])
-            offer_end_date = row[1].date_input(
-                "Offer end date",
-                value=None,
-                key=FIELD_KEYS["offer_end_date"],
-            )
-            shipping_claim = st.text_input(
-                "Shipping or delivery claim",
-                key=FIELD_KEYS["shipping_claim"],
-            )
-            restrictions = st.text_area(
-                "Restrictions",
-                height=75,
-                key=FIELD_KEYS["restrictions"],
-            )
-            rights_status = st.text_input(
-                "Source-footage rights status",
-                key=FIELD_KEYS["rights_status"],
-            )
-            additional_notes = st.text_area(
-                "Additional VA notes",
-                height=75,
-                key=FIELD_KEYS["additional_notes"],
-            )
+        row = st.columns(2)
+        offer = row[0].text_input(
+            "Offer (optional)",
+            key=FIELD_KEYS["offer"],
+        )
+        offer_end_date = row[1].date_input(
+            "Offer end date (optional)",
+            value=None,
+            key=FIELD_KEYS["offer_end_date"],
+        )
         submitted = st.button(
             "Build Content Prompt",
             type="primary",
@@ -683,16 +670,8 @@ def _render_creator_form(products):
         "funnel_stage": funnel_stage,
         "hook": hook,
         "cta": cta,
-        "audience": audience,
-        "proof_asset": proof_asset,
-        "edition_count": edition_count,
-        "price": price,
         "offer": offer,
         "offer_end_date": offer_end_date.isoformat() if offer_end_date else "",
-        "shipping_claim": shipping_claim,
-        "restrictions": restrictions,
-        "rights_status": rights_status,
-        "additional_notes": additional_notes,
     }
     return _creator_payload_from_form(values, selected_product), submitted
 
@@ -744,6 +723,7 @@ def save_social_output(access_token, root_path, package, uploads=()):
         ("Social Copy.txt", social_media_creator.build_social_copy_text(package).encode("utf-8")),
     )
     outcomes = []
+    skipped = []
     for filename, data in text_items:
         metadata = dropbox_integration.upload_stream(
             access_token,
@@ -752,25 +732,102 @@ def save_social_output(access_token, root_path, package, uploads=()):
             size=len(data),
             conflict="replace",
         )
-        outcomes.append({"filename": filename, "metadata": metadata})
+        outcomes.append(
+            {"filename": filename, "metadata": metadata, "kind": "text"}
+        )
     for index, uploaded in enumerate(uploads or (), start=1):
         original_name = str(getattr(uploaded, "name", "") or "asset.bin")
         extension = PurePosixPath(original_name.replace("\\", "/")).suffix.lstrip(".")
-        filename = social_media_creator.asset_filename(
-            package["input"],
+        original_data = uploaded.getvalue()
+        branding_plan = social_media_creator.branding_plan_for_upload(
+            package,
             index=index,
             extension=extension,
-            platform="master",
         )
-        data = uploaded.getvalue()
+        clean_data = original_data
+        clean_extension = extension
+        clean_error = ""
+        try:
+            clean_data, clean_extension = social_media_branding.prepare_clean_asset(
+                original_data,
+                extension,
+                branding_plan,
+            )
+        except Exception as error:
+            logging.exception("Social Media clean-master normalization failed")
+            clean_error = str(error)
+        clean_filename = social_media_creator.asset_filename(
+            package["input"],
+            index=index,
+            extension=clean_extension,
+            platform="clean-master",
+        )
         metadata = dropbox_integration.upload_stream(
             access_token,
-            f"{destination}/{filename}",
-            io.BytesIO(data),
-            size=len(data),
+            f"{destination}/{clean_filename}",
+            io.BytesIO(clean_data),
+            size=len(clean_data),
             conflict="replace",
         )
-        outcomes.append({"filename": filename, "metadata": metadata})
+        outcomes.append(
+            {
+                "filename": clean_filename,
+                "metadata": metadata,
+                "kind": "clean_master",
+            }
+        )
+        if clean_error:
+            skipped.append(
+                {
+                    "index": index,
+                    "kind": "branded_final",
+                    "reason": (
+                        "The clean master was saved in its original format, but the "
+                        f"branded final could not be created: {clean_error}"
+                    ),
+                }
+            )
+            continue
+        try:
+            branded_data, branded_extension = (
+                social_media_branding.compose_branded_asset(
+                    clean_data,
+                    clean_extension,
+                    branding_plan,
+                )
+            )
+        except (
+            social_media_branding.SocialBrandAssetError,
+            social_media_branding.SocialBrandClaimError,
+        ) as error:
+            skipped.append(
+                {
+                    "index": index,
+                    "kind": "branded_final",
+                    "reason": str(error),
+                }
+            )
+            continue
+        branded_filename = social_media_creator.asset_filename(
+            package["input"],
+            index=index,
+            extension=branded_extension,
+            platform="branded-final",
+        )
+        branded_metadata = dropbox_integration.upload_stream(
+            access_token,
+            f"{destination}/{branded_filename}",
+            io.BytesIO(branded_data),
+            size=len(branded_data),
+            conflict="replace",
+        )
+        outcomes.append(
+            {
+                "filename": branded_filename,
+                "metadata": branded_metadata,
+                "kind": "branded_final",
+            }
+        )
     cache = st.session_state.setdefault("files_directory_cache", {})
     cache.pop(destination, None)
     cache.pop(dropbox_integration.normalize_dropbox_path(str(PurePosixPath(destination).parent)), None)
@@ -778,6 +835,7 @@ def save_social_output(access_token, root_path, package, uploads=()):
         "path": destination,
         "relative_folder": relative_folder,
         "outcomes": outcomes,
+        "skipped": skipped,
     }
 
 
@@ -961,8 +1019,14 @@ def _render_result(user, target, store, account_store, package):
         st.caption(
             f"Recommended: {package['recommended_asset_count']} ordered asset"
             f"{'s' if package['recommended_asset_count'] != 1 else ''}. "
-            "Partial saves are allowed."
+            "Each uploaded asset saves as a Clean Master and, when verification passes, "
+            "a Branded Final. Partial saves are allowed."
         )
+        if not package.get("publish_ready", True):
+            st.warning(
+                "The clean master can be saved, but the branded final is blocked until "
+                + " ".join(package.get("warnings") or ())
+            )
         uploads = st.file_uploader(
             "Finished images or videos",
             type=list(SOCIAL_UPLOAD_TYPES),
@@ -1025,6 +1089,8 @@ def _render_result(user, target, store, account_store, package):
                         f"Saved {len(saved['outcomes'])} file"
                         f"{'s' if len(saved['outcomes']) != 1 else ''}."
                     )
+                    for skipped in saved.get("skipped") or ():
+                        st.warning(skipped.get("reason") or "A branded final was skipped.")
                     record_activity_log(
                         "social_media_output_saved",
                         social_media.SOCIAL_MEDIA_ROUTE,
@@ -1111,7 +1177,6 @@ def _plan_prefill(series, content_format, hook, priority=None):
         "hook": hook,
         "cta": "See the complete edition.",
         "offer": priority.get("approved_offer") or "",
-        "restrictions": priority.get("restrictions") or "",
     }
 
 

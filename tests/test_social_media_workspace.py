@@ -24,7 +24,6 @@ def package():
             "funnel_stage": "Warm",
             "hook": "Some moments never leave you.",
             "cta": "See the complete edition.",
-            "rights_status": "Approved",
         }
     )
 
@@ -81,7 +80,7 @@ class SocialOutputSaveTests(unittest.TestCase):
         self.assertTrue(saved["relative_folder"].startswith("04_OUTPUT/social-media/"))
         ensure_folder.assert_called_once()
 
-    def test_ordered_assets_use_short_stable_master_filenames(self):
+    def test_ordered_assets_save_clean_and_branded_versions_with_stable_names(self):
         calls = []
 
         def upload_stream(_access_token, path, stream, *, size, conflict):
@@ -102,8 +101,18 @@ class SocialOutputSaveTests(unittest.TestCase):
                 "upload_stream",
                 side_effect=upload_stream,
             ),
+            mock.patch.object(
+                social_media_workspace.social_media_branding,
+                "prepare_clean_asset",
+                side_effect=((b"clean-image", "png"), (b"clean-video", "mp4")),
+            ),
+            mock.patch.object(
+                social_media_workspace.social_media_branding,
+                "compose_branded_asset",
+                side_effect=((b"branded-image", "png"), (b"branded-video", "mp4")),
+            ),
         ):
-            social_media_workspace.save_social_output(
+            saved = social_media_workspace.save_social_output(
                 "token",
                 "/Sportscave Team Folder",
                 package(),
@@ -114,11 +123,63 @@ class SocialOutputSaveTests(unittest.TestCase):
         self.assertEqual(
             asset_names,
             [
-                "senna-collector-s-edition__static-feed-post__master__01.png",
-                "senna-collector-s-edition__static-feed-post__master__02.mp4",
+                "senna-collector-s-edition__static-feed-post__clean-master__01.png",
+                "senna-collector-s-edition__static-feed-post__branded-final__01.png",
+                "senna-collector-s-edition__static-feed-post__clean-master__02.mp4",
+                "senna-collector-s-edition__static-feed-post__branded-final__02.mp4",
             ],
         )
+        self.assertEqual(saved["skipped"], [])
         self.assertTrue(all(mode == "replace" for _path, _data, _size, mode in calls))
+
+    def test_unverified_claim_saves_clean_master_but_skips_branded_final(self):
+        calls = []
+
+        def upload_stream(_access_token, path, stream, *, size, conflict):
+            calls.append((path, stream.read(), size, conflict))
+            return {"path_display": path}
+
+        blocked_package = social_media_creator.build_content_package(
+            {
+                **package()["input"],
+                "series": "ONLY 100",
+                "cta": "Only 100 Made",
+            }
+        )
+        with (
+            mock.patch.object(
+                social_media_workspace.dropbox_integration,
+                "ensure_folder_path",
+            ),
+            mock.patch.object(
+                social_media_workspace.dropbox_integration,
+                "upload_stream",
+                side_effect=upload_stream,
+            ),
+            mock.patch.object(
+                social_media_workspace.social_media_branding,
+                "prepare_clean_asset",
+                return_value=(b"clean-image", "png"),
+            ),
+        ):
+            saved = social_media_workspace.save_social_output(
+                "token",
+                "/Sportscave Team Folder",
+                blocked_package,
+                (FakeUpload("source.png", b"source"),),
+            )
+
+        names = [path.rsplit("/", 1)[-1] for path, _data, _size, _mode in calls]
+        self.assertIn(
+            "senna-collector-s-edition__static-feed-post__clean-master__01.png",
+            names,
+        )
+        self.assertFalse(any("branded-final" in name for name in names))
+        self.assertEqual(len(saved["skipped"]), 1)
+        self.assertIn(
+            "not publish-ready",
+            saved["skipped"][0]["reason"],
+        )
 
     def test_files_and_ai_reels_navigation_reuse_existing_routes(self):
         files_source = inspect.getsource(social_media_workspace._open_files_folder)
@@ -129,7 +190,7 @@ class SocialOutputSaveTests(unittest.TestCase):
         self.assertIn("social_media.AI_REELS_ROUTE", reels_source)
         self.assertIn('st.session_state["smrs_final_product_handle"]', reels_source)
 
-    def test_weekly_priority_offer_and_restrictions_prefill_create(self):
+    def test_weekly_priority_prefill_keeps_offer_but_ignores_restrictions(self):
         prefill = social_media_workspace._plan_prefill(
             "ONLY 100",
             "Feed carousel",
@@ -143,10 +204,7 @@ class SocialOutputSaveTests(unittest.TestCase):
         )
 
         self.assertEqual(prefill["offer"], "Verified free shipping")
-        self.assertEqual(
-            prefill["restrictions"],
-            "Do not invent a live edition count.",
-        )
+        self.assertNotIn("restrictions", prefill)
 
 
 class SocialCatalogueTests(unittest.TestCase):
@@ -160,6 +218,8 @@ class SocialCatalogueTests(unittest.TestCase):
                 "featured_image_url": "https://cdn.example.test/senna.jpg",
                 "product_type": "Motorsport Wall Art",
                 "collections": ["Motorsport", "Best Sellers"],
+                "edition_limit": 100,
+                "edition_limit_source": "Edition Ops product ledger",
             }
         )
 
@@ -173,6 +233,12 @@ class SocialCatalogueTests(unittest.TestCase):
         self.assertEqual(
             product["image_url"],
             "https://cdn.example.test/senna.jpg",
+        )
+        self.assertEqual(product["edition_limit"], 100)
+        self.assertTrue(product["edition_limit_verified"])
+        self.assertEqual(
+            product["edition_limit_source"],
+            "Edition Ops product ledger",
         )
 
     def test_collection_options_are_derived_without_duplicate_labels(self):

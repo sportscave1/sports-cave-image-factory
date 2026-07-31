@@ -21,6 +21,13 @@ def _clean_product(row):
         or row.get("id")
         or ""
     ).strip()
+    edition_limit = row.get("edition_limit") or row.get("edition_total")
+    try:
+        edition_limit = int(edition_limit)
+    except (TypeError, ValueError):
+        edition_limit = None
+    if edition_limit is not None and edition_limit <= 0:
+        edition_limit = None
     return {
         "id": product_id,
         "title": title or handle,
@@ -32,6 +39,12 @@ def _clean_product(row):
             or ""
         ).strip(),
         "product_type": str(row.get("product_type") or "").strip(),
+        "edition_limit": edition_limit,
+        "edition_limit_verified": bool(edition_limit),
+        "edition_limit_source": (
+            str(row.get("edition_limit_source") or "").strip()
+            or ("Edition Ops product ledger" if edition_limit else "")
+        ),
         "collections": tuple(
             str(value or "").strip()
             for value in row.get("collections") or ()
@@ -57,6 +70,12 @@ def _database_products():
                         COALESCE(sp.online_store_url, '') AS online_store_url,
                         COALESCE(sp.image_url, '') AS image_url,
                         COALESCE(sp.product_type, '') AS product_type,
+                        ep.edition_total AS edition_limit,
+                        CASE
+                            WHEN ep.edition_total IS NOT NULL
+                            THEN 'Edition Ops product ledger'
+                            ELSE ''
+                        END AS edition_limit_source,
                         COALESCE(
                             (
                                 SELECT array_agg(DISTINCT collection->>'title' ORDER BY collection->>'title')
