@@ -5,6 +5,7 @@ import unittest
 import os_accounts
 import run_migrations
 import social_media
+import social_media_creator
 import social_media_store
 
 
@@ -104,6 +105,8 @@ class SocialStorageContractTests(unittest.TestCase):
             "social_weekly_reports",
             "social_weekly_platform_metrics",
             "social_action_requests",
+            "social_weekly_priorities",
+            "social_content_jobs",
         ):
             self.assertIn(f"CREATE TABLE IF NOT EXISTS {table}", sql)
             self.assertIn(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY", sql)
@@ -131,6 +134,55 @@ class SocialStorageContractTests(unittest.TestCase):
         )
         with self.assertRaises(PermissionError):
             social_media_store.resolve_target_account(viewer, "worker-2")
+
+    def test_workers_cannot_set_weekly_priorities(self):
+        viewer = worker(
+            permissions=[social_media.SOCIAL_MEDIA_PAGE_KEY],
+            user_id="worker-1",
+        )
+
+        with self.assertRaisesRegex(PermissionError, "administrator"):
+            social_media_store.save_weekly_priority(
+                viewer,
+                payload={},
+                request_key_value="weekly-priority-test",
+            )
+
+    def test_workers_cannot_approve_content_jobs(self):
+        viewer = worker(
+            permissions=[social_media.SOCIAL_MEDIA_PAGE_KEY],
+            user_id="worker-1",
+        )
+        payload = {
+            "scheduled_date": "2026-07-31",
+            "content_focus": "Community/fan conversation",
+            "market": "Global",
+            "sport": "Other",
+            "format": "Static feed post",
+            "series": "CAVE DEBATE",
+            "platforms": ["Instagram"],
+            "objective": "Engagement",
+            "funnel_stage": "Warm",
+            "hook": "Which sporting rivalry still divides the fanbase?",
+            "cta": "Join the conversation.",
+            "status": "Approved",
+        }
+
+        with self.assertRaisesRegex(PermissionError, "administrator"):
+            social_media_store.save_content_job(
+                viewer,
+                payload=payload,
+                request_key_value="content-approval-test",
+            )
+
+        self.assertIn("Approved", social_media_creator.WORK_STATUS_OPTIONS)
+
+    def test_todays_assignment_only_loads_approved_or_active_work(self):
+        source = inspect.getsource(social_media_store.get_current_assignment)
+
+        self.assertIn("'Approved', 'In production', 'Scheduled', 'Published'", source)
+        self.assertNotIn("'Submitted'", source)
+        self.assertNotIn("'Draft'", source)
 
     def test_admin_can_only_select_active_authorised_social_staff(self):
         admin = {
@@ -228,6 +280,7 @@ class SocialHubUiContractTests(unittest.TestCase):
     def test_hub_is_compact_safe_and_has_all_workflow_views(self):
         source = (ROOT / "social_media_page.py").read_text(encoding="utf-8")
         self.assertIn("Sports Cave Social Media", source)
+        self.assertIn('"Create", "Plan", "Playbook", "Tracking"', source)
         self.assertIn("Today", source)
         self.assertIn("Post Tracker", source)
         self.assertIn("Weekly Check-In", source)
@@ -239,13 +292,15 @@ class SocialHubUiContractTests(unittest.TestCase):
         self.assertNotIn("password", source.casefold())
 
     def test_only_selected_view_loads_its_data(self):
-        source = inspect.getsource(
-            __import__("social_media_page").render_page
-        )
-        self.assertIn('if view == "Post Tracker"', source)
-        self.assertIn('elif view == "Weekly Check-In"', source)
-        self.assertIn('elif view == "History"', source)
-        self.assertIn("_render_today(", source)
+        module = __import__("social_media_page")
+        source = inspect.getsource(module.render_page)
+        tracking_source = inspect.getsource(module._render_tracking)
+        self.assertIn('default="Create"', source)
+        self.assertIn('elif view == "Tracking"', source)
+        self.assertIn('if view == "Post Tracker"', tracking_source)
+        self.assertIn('elif view == "Weekly Check-In"', tracking_source)
+        self.assertIn('elif view == "History"', tracking_source)
+        self.assertIn("_render_today(", tracking_source)
 
     def test_activity_logging_is_manual_and_idempotent(self):
         page_source = (ROOT / "social_media_page.py").read_text(encoding="utf-8")

@@ -8,6 +8,7 @@ from activity_log import record_activity_log
 import os_accounts
 import social_media
 import social_media_store
+import social_media_workspace
 
 
 HISTORY_PAGE_SIZE = 15
@@ -1067,17 +1068,36 @@ def _render_history(user, target, store, account_store):
         st.caption("No weekly check-ins match these filters.")
 
 
+def _render_tracking(user, target, store, account_store):
+    view = st.segmented_control(
+        "Tracking view",
+        ("Today", "Post Tracker", "Weekly Check-In", "History"),
+        default="Today",
+        key="social-media-tracking-view",
+        label_visibility="collapsed",
+    )
+    if view == "Post Tracker":
+        _render_post_tracker(user, target, store, account_store)
+    elif view == "Weekly Check-In":
+        _render_weekly(user, target, store, account_store)
+    elif view == "History":
+        _render_history(user, target, store, account_store)
+    else:
+        _render_today(user, target, store, account_store)
+
+
 def render_page(user, *, store=social_media_store, account_store=None):
     if not os_accounts.can_access_page(user, social_media.SOCIAL_MEDIA_ROUTE):
         st.title("Access not approved")
         st.caption("This page is not available for your account.")
         return
     _inject_styles()
+    social_media_workspace.inject_workspace_styles()
     st.markdown(
         """
         <div class="sc-social-header">
             <h1>Sports Cave Social Media</h1>
-            <p>Plan today's content, track what goes live and learn what performs.</p>
+            <p>Create today's content, follow the approved plan and track what performs.</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -1116,17 +1136,27 @@ def render_page(user, *, store=social_media_store, account_store=None):
         return
     target = _admin_staff_selector(user, staff)
     view = st.segmented_control(
-        "Social Media view",
-        ("Today", "Post Tracker", "Weekly Check-In", "History"),
-        default="Today",
-        key="social-media-view",
+        "Social Media workspace",
+        ("Create", "Plan", "Playbook", "Tracking"),
+        default="Create",
+        key="social-media-workspace-view",
         label_visibility="collapsed",
     )
-    if view == "Post Tracker":
-        _render_post_tracker(user, target, store, account_store)
-    elif view == "Weekly Check-In":
-        _render_weekly(user, target, store, account_store)
-    elif view == "History":
-        _render_history(user, target, store, account_store)
+    if view == "Plan":
+        social_media_workspace.render_plan(
+            user,
+            target,
+            store,
+            account_store,
+        )
+    elif view == "Playbook":
+        social_media_workspace.render_playbook()
+    elif view == "Tracking":
+        _render_tracking(user, target, store, account_store)
     else:
-        _render_today(user, target, store, account_store)
+        social_media_workspace.render_create(
+            user,
+            target,
+            store,
+            account_store,
+        )

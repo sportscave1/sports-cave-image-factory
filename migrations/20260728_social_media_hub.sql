@@ -157,6 +157,58 @@ CREATE TABLE IF NOT EXISTS social_action_requests (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS social_weekly_priorities (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    week_start DATE NOT NULL UNIQUE,
+    priority_market TEXT NOT NULL DEFAULT 'Global'
+        CHECK (priority_market IN (
+            'Global', 'Australia', 'New Zealand',
+            'United Kingdom', 'United States', 'Canada'
+        )),
+    hero_products JSONB NOT NULL DEFAULT '[]'::jsonb,
+    event_drop TEXT NOT NULL DEFAULT ''
+        CHECK (char_length(event_drop) <= 1000),
+    approved_offer TEXT NOT NULL DEFAULT ''
+        CHECK (char_length(approved_offer) <= 1000),
+    restrictions TEXT NOT NULL DEFAULT ''
+        CHECK (char_length(restrictions) <= 2000),
+    campaign_mode TEXT NOT NULL DEFAULT 'Normal month',
+    created_by UUID NOT NULL REFERENCES os_users(id),
+    updated_by UUID NOT NULL REFERENCES os_users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS social_content_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES os_users(id),
+    scheduled_date DATE NOT NULL,
+    title TEXT NOT NULL
+        CHECK (char_length(title) >= 1 AND char_length(title) <= 300),
+    status TEXT NOT NULL DEFAULT 'Draft'
+        CHECK (status IN (
+            'Draft', 'Submitted', 'Changes requested', 'Approved',
+            'In production', 'Scheduled', 'Published', 'Could not finish'
+        )),
+    content_format TEXT NOT NULL
+        CHECK (char_length(content_format) >= 1 AND char_length(content_format) <= 80),
+    series TEXT NOT NULL
+        CHECK (char_length(series) >= 1 AND char_length(series) <= 100),
+    market TEXT NOT NULL DEFAULT 'Global'
+        CHECK (char_length(market) >= 1 AND char_length(market) <= 80),
+    source_kind TEXT NOT NULL DEFAULT 'create'
+        CHECK (source_kind IN ('create', 'weekly_plan', 'strategy_template')),
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    generated_output JSONB NOT NULL DEFAULT '{}'::jsonb,
+    prompt_version TEXT NOT NULL DEFAULT '',
+    destination_path TEXT NOT NULL DEFAULT ''
+        CHECK (char_length(destination_path) <= 1000),
+    created_by UUID NOT NULL REFERENCES os_users(id),
+    updated_by UUID NOT NULL REFERENCES os_users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_social_daily_plans_user_date
     ON social_daily_plans(user_id, plan_date DESC);
 
@@ -181,6 +233,12 @@ CREATE INDEX IF NOT EXISTS idx_social_weekly_reports_status_week
 CREATE INDEX IF NOT EXISTS idx_social_weekly_metrics_platform
     ON social_weekly_platform_metrics(platform, updated_at DESC);
 
+CREATE INDEX IF NOT EXISTS idx_social_content_jobs_user_date
+    ON social_content_jobs(user_id, scheduled_date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_social_content_jobs_status_date
+    ON social_content_jobs(status, scheduled_date DESC);
+
 ALTER TABLE social_daily_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE social_daily_priorities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE social_posts ENABLE ROW LEVEL SECURITY;
@@ -188,3 +246,5 @@ ALTER TABLE social_post_platforms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE social_weekly_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE social_weekly_platform_metrics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE social_action_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE social_weekly_priorities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE social_content_jobs ENABLE ROW LEVEL SECURITY;

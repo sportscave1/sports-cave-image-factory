@@ -73,29 +73,31 @@ social_media_page.render_page(user, store=FakeSocialStore)
 
 
 class SocialMediaPageTests(unittest.TestCase):
-    def test_default_today_view_and_all_shortcuts_render(self):
+    def test_default_create_view_and_all_shortcuts_render(self):
         app = AppTest.from_string(READY_PAGE).run(timeout=15)
 
         self.assertEqual(len(app.exception), 0)
-        self.assertEqual([item.value for item in app.subheader], ["Today"])
+        self.assertEqual(app.segmented_control[0].value, "Create")
         markup = "\n".join(item.value for item in app.markdown)
         self.assertIn("Sports Cave Social Media", markup)
+        self.assertIn("Today's assignment", markup)
         for platform in ("Instagram", "Facebook", "Pinterest", "TikTok", "YouTube"):
             self.assertIn(platform, markup)
         self.assertIn('target="_blank"', markup)
         self.assertIn('rel="noopener noreferrer"', markup)
         self.assertNotIn("\n            <a", markup)
-        self.assertEqual(
-            [button.label for button in app.button],
-            ["Save today's plan", "Complete day"],
-        )
+        labels = [button.label for button in app.button]
+        self.assertIn("Create this", labels)
+        self.assertIn("Build Content Prompt", labels)
 
-    def test_each_compact_view_renders_without_loading_other_history(self):
+    def test_tracking_preserves_each_existing_compact_view(self):
         app = AppTest.from_string(READY_PAGE).run(timeout=15)
+        app.segmented_control[0].set_value("Tracking").run(timeout=15)
+        self.assertEqual([item.value for item in app.subheader], ["Today"])
 
         for view in ("Post Tracker", "Weekly Check-In", "History"):
             with self.subTest(view=view):
-                app.segmented_control[0].set_value(view).run(timeout=15)
+                app.segmented_control[1].set_value(view).run(timeout=15)
                 self.assertEqual(len(app.exception), 0)
                 self.assertEqual([item.value for item in app.subheader], [view])
 
@@ -175,7 +177,7 @@ social_media_page.render_page(user, store=UnavailableStore)
         )
         app.button[0].click().run(timeout=15)
         self.assertEqual(len(app.exception), 0)
-        self.assertEqual([item.value for item in app.subheader], ["Today"])
+        self.assertEqual(app.segmented_control[0].value, "Create")
 
 
 if __name__ == "__main__":

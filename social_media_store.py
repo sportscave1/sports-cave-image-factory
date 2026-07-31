@@ -4,11 +4,12 @@ import logging
 from pathlib import Path
 import threading
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import os_accounts
 import social_media
+import social_media_creator
 
 
 SOCIAL_MEDIA_MIGRATION = "20260728_social_media_hub.sql"
@@ -118,6 +119,39 @@ SOCIAL_MEDIA_REQUIRED_SCHEMA = {
         "entity_type",
         "entity_id",
         "created_at",
+    },
+    "social_weekly_priorities": {
+        "id",
+        "week_start",
+        "priority_market",
+        "hero_products",
+        "event_drop",
+        "approved_offer",
+        "restrictions",
+        "campaign_mode",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at",
+    },
+    "social_content_jobs": {
+        "id",
+        "user_id",
+        "scheduled_date",
+        "title",
+        "status",
+        "content_format",
+        "series",
+        "market",
+        "source_kind",
+        "payload",
+        "generated_output",
+        "prompt_version",
+        "destination_path",
+        "created_by",
+        "updated_by",
+        "created_at",
+        "updated_at",
     },
 }
 
@@ -2009,4 +2043,442 @@ def reporting_team_overview(social_summaries):
         "average_score": round(sum(scored) / len(scored), 1) if scored else 0.0,
         "outstanding_mips": sum(int(row.get("mips_outstanding") or 0) for row in rows),
         "blockers": sum(bool(str(row.get("blockers") or "").strip()) for row in rows),
+    }
+
+
+def _json_object(value, fallback):
+    if isinstance(value, type(fallback)):
+        return value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except (TypeError, ValueError):
+            return fallback
+        return decoded if isinstance(decoded, type(fallback)) else fallback
+    return fallback
+
+
+def _weekly_priority_row(row):
+    row = dict(row or {})
+    if not row:
+        return {}
+    row["id"] = str(row.get("id") or "")
+    row["hero_products"] = _json_object(row.get("hero_products"), [])
+    return row
+
+
+def get_weekly_priority(viewer, *, week_start=None):
+    require_social_access(viewer)
+    selected_start, _selected_end = social_media.sydney_week_bounds(week_start)
+    require_schema()
+    backend = _backend()
+    with backend.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM social_weekly_priorities
+                WHERE week_start=%s::date
+                LIMIT 1
+                """,
+                (str(selected_start),),
+            )
+            return _weekly_priority_row(cur.fetchone() or {})
+
+
+def save_weekly_priority(
+    viewer,
+    *,
+    payload,
+    request_key_value,
+):
+    viewer = require_social_access(viewer)
+    if not os_accounts.is_admin(viewer):
+        raise PermissionError("Only an administrator can set Social Media priorities.")
+    payload = dict(payload or {})
+    selected_start, _selected_end = social_media.sydney_week_bounds(
+        payload.get("week_start")
+    )
+    market = str(payload.get("priority_market") or "Global").strip()
+    if market not in social_media_creator.MARKET_OPTIONS:
+        raise social_media.SocialValidationError("Choose a valid priority market.")
+    campaign_mode = str(payload.get("campaign_mode") or "Normal month").strip()
+    if campaign_mode not in {"Normal month", "Product drop"}:
+        raise social_media.SocialValidationError("Choose a valid campaign mode.")
+    clean_payload = {
+        "week_start": selected_start,
+        "priority_market": market,
+        "hero_products": [
+            str(value or "").strip()[:300]
+            for value in payload.get("hero_products") or ()
+            if str(value or "").strip()
+        ][:12],
+        "event_drop": social_media._multiline_text(payload.get("event_drop"), limit=1000),
+        "approved_offer": social_media._multiline_text(
+            payload.get("approved_offer"),
+            limit=1000,
+        ),
+        "restrictions": social_media._multiline_text(
+            payload.get("restrictions"),
+            limit=2000,
+        ),
+        "campaign_mode": campaign_mode,
+    }
+    require_schema()
+    backend = _backend()
+    with backend.connect() as conn:
+        with conn.cursor() as cur:
+            request = _claim_request(
+                cur,
+                key=request_key_value,
+                actor_user_id=viewer["id"],
+                action_type="social_weekly_priority_saved",
+                entity_type="social_weekly_priority",
+            )
+            if not request:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM social_weekly_priorities
+                    WHERE week_start=%s::date
+                    LIMIT 1
+                    """,
+                    (str(selected_start),),
+                )
+                saved = _weekly_priority_row(cur.fetchone() or {})
+                conn.commit()
+                return {"priority": saved, "duplicate": True, "activity": None}
+            cur.execute(
+                """
+                INSERT INTO social_weekly_priorities(
+                    week_start, priority_market, hero_products, event_drop,
+                    approved_offer, restrictions, campaign_mode,
+                    created_by, updated_by
+                )
+                VALUES (%s::date, %s, %s::jsonb, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (week_start)
+                DO UPDATE SET
+                    priority_market=EXCLUDED.priority_market,
+                    hero_products=EXCLUDED.hero_products,
+                    event_drop=EXCLUDED.event_drop,
+                    approved_offer=EXCLUDED.approved_offer,
+                    restrictions=EXCLUDED.restrictions,
+                    campaign_mode=EXCLUDED.campaign_mode,
+                    updated_by=EXCLUDED.updated_by,
+                    updated_at=now()
+                RETURNING *
+                """,
+                (
+                    str(selected_start),
+                    market,
+                    json.dumps(clean_payload["hero_products"], ensure_ascii=False),
+                    clean_payload["event_drop"],
+                    clean_payload["approved_offer"],
+                    clean_payload["restrictions"],
+                    campaign_mode,
+                    viewer["id"],
+                    viewer["id"],
+                ),
+            )
+            saved = _weekly_priority_row(cur.fetchone() or {})
+            _set_request_entity(cur, request["id"], saved["id"])
+        conn.commit()
+    return {
+        "priority": saved,
+        "duplicate": False,
+        "activity": _activity_result(
+            "social_weekly_priority_saved",
+            "social_weekly_priority",
+            saved["id"],
+            f"Social Media weekly priorities updated for {selected_start}",
+            {
+                "week_start": str(selected_start),
+                "priority_market": market,
+                "campaign_mode": campaign_mode,
+                "status": "success",
+                "result": "success",
+            },
+            request_key_value,
+        ),
+    }
+
+
+def _content_job_row(row):
+    row = dict(row or {})
+    if not row:
+        return {}
+    row["id"] = str(row.get("id") or "")
+    row["user_id"] = str(row.get("user_id") or "")
+    row["payload"] = _json_object(row.get("payload"), {})
+    row["generated_output"] = _json_object(row.get("generated_output"), {})
+    return row
+
+
+def list_content_jobs(
+    viewer,
+    *,
+    target_user_id="",
+    start_date=None,
+    end_date=None,
+    status="",
+    limit=30,
+    account_store=None,
+):
+    target = resolve_target_account(
+        viewer,
+        target_user_id,
+        account_store=account_store,
+    )
+    start_date = start_date or social_media.sydney_today()
+    end_date = end_date or (start_date + timedelta(days=30))
+    if isinstance(start_date, str):
+        start_date = date.fromisoformat(start_date)
+    if isinstance(end_date, str):
+        end_date = date.fromisoformat(end_date)
+    selected_status = str(status or "").strip()
+    if selected_status and selected_status not in social_media_creator.WORK_STATUS_OPTIONS:
+        raise social_media.SocialValidationError("Choose a valid work status.")
+    require_schema()
+    backend = _backend()
+    with backend.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM social_content_jobs
+                WHERE user_id=%s
+                  AND scheduled_date >= %s::date
+                  AND scheduled_date <= %s::date
+                  AND (%s='' OR status=%s)
+                ORDER BY scheduled_date, created_at
+                LIMIT %s
+                """,
+                (
+                    target["id"],
+                    str(start_date),
+                    str(end_date),
+                    selected_status,
+                    selected_status,
+                    _safe_limit(limit, default=30),
+                ),
+            )
+            return [_content_job_row(row) for row in cur.fetchall() or ()]
+
+
+def get_current_assignment(
+    viewer,
+    *,
+    target_user_id="",
+    assignment_date=None,
+    account_store=None,
+):
+    target = resolve_target_account(
+        viewer,
+        target_user_id,
+        account_store=account_store,
+    )
+    selected_date = assignment_date or social_media.sydney_today()
+    if isinstance(selected_date, str):
+        selected_date = date.fromisoformat(selected_date)
+    require_schema()
+    backend = _backend()
+    with backend.connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT *
+                FROM social_content_jobs
+                WHERE user_id=%s
+                  AND scheduled_date=%s::date
+                  AND status IN (
+                    'Approved', 'In production', 'Scheduled', 'Published'
+                  )
+                ORDER BY
+                    CASE status
+                        WHEN 'Approved' THEN 1
+                        WHEN 'In production' THEN 2
+                        WHEN 'Scheduled' THEN 3
+                        ELSE 4
+                    END,
+                    updated_at DESC
+                LIMIT 1
+                """,
+                (target["id"], str(selected_date)),
+            )
+            return _content_job_row(cur.fetchone() or {})
+
+
+def save_content_job(
+    viewer,
+    *,
+    target_user_id="",
+    job_id="",
+    payload,
+    generated_output=None,
+    destination_path="",
+    source_kind="create",
+    request_key_value,
+    account_store=None,
+):
+    target = resolve_target_account(
+        viewer,
+        target_user_id,
+        account_store=account_store,
+    )
+    clean = social_media_creator.validate_creator_input(payload)
+    selected_status = clean["status"]
+    if (
+        not os_accounts.is_admin(viewer)
+        and selected_status in {"Approved", "Changes requested"}
+    ):
+        raise PermissionError("Only an administrator can approve or request changes.")
+    clean_source = str(source_kind or "create").strip()
+    if clean_source not in {"create", "weekly_plan", "strategy_template"}:
+        clean_source = "create"
+    generated = _json_safe(generated_output or {})
+    safe_payload = _json_safe(clean)
+    destination = str(destination_path or "").strip()
+    if destination:
+        social_media_creator.validate_relative_output_path(destination)
+    title = (
+        clean["product_title"]
+        or clean["collection"]
+        or clean["event"]
+        or clean["hook"]
+        or clean["series"]
+    )[:300]
+    prompt_version = str(
+        (generated_output or {}).get("contract_version")
+        or social_media_creator.SOCIAL_PROMPT_CONTRACT_VERSION
+    )[:200]
+    require_schema()
+    backend = _backend()
+    with backend.connect() as conn:
+        with conn.cursor() as cur:
+            request = _claim_request(
+                cur,
+                key=request_key_value,
+                actor_user_id=viewer.get("id"),
+                action_type="social_content_job_saved",
+                entity_type="social_content_job",
+            )
+            if not request:
+                duplicate_id = str(job_id or "") or _request_entity_id(
+                    cur,
+                    request_key_value,
+                )
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM social_content_jobs
+                    WHERE id=%s AND user_id=%s
+                    LIMIT 1
+                    """,
+                    (duplicate_id, target["id"]),
+                )
+                duplicate = _content_job_row(cur.fetchone() or {})
+                conn.commit()
+                return {"job": duplicate, "duplicate": True, "activity": None}
+            if job_id:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM social_content_jobs
+                    WHERE id=%s
+                    LIMIT 1
+                    FOR UPDATE
+                    """,
+                    (str(job_id),),
+                )
+                existing = cur.fetchone() or {}
+                if not existing or str(existing.get("user_id") or "") != target["id"]:
+                    raise PermissionError("That Social Media content job is not available.")
+                cur.execute(
+                    """
+                    UPDATE social_content_jobs
+                    SET scheduled_date=%s::date,
+                        title=%s,
+                        status=%s,
+                        content_format=%s,
+                        series=%s,
+                        market=%s,
+                        source_kind=%s,
+                        payload=%s::jsonb,
+                        generated_output=%s::jsonb,
+                        prompt_version=%s,
+                        destination_path=%s,
+                        updated_by=%s,
+                        updated_at=now()
+                    WHERE id=%s
+                    RETURNING *
+                    """,
+                    (
+                        str(clean["scheduled_date"]),
+                        title,
+                        selected_status,
+                        clean["format"],
+                        clean["series"],
+                        clean["market"],
+                        clean_source,
+                        json.dumps(safe_payload, ensure_ascii=False),
+                        json.dumps(generated, ensure_ascii=False),
+                        prompt_version,
+                        destination,
+                        viewer.get("id"),
+                        str(job_id),
+                    ),
+                )
+            else:
+                cur.execute(
+                    """
+                    INSERT INTO social_content_jobs(
+                        user_id, scheduled_date, title, status, content_format,
+                        series, market, source_kind, payload, generated_output,
+                        prompt_version, destination_path, created_by, updated_by
+                    )
+                    VALUES (
+                        %s, %s::date, %s, %s, %s, %s, %s, %s,
+                        %s::jsonb, %s::jsonb, %s, %s, %s, %s
+                    )
+                    RETURNING *
+                    """,
+                    (
+                        target["id"],
+                        str(clean["scheduled_date"]),
+                        title,
+                        selected_status,
+                        clean["format"],
+                        clean["series"],
+                        clean["market"],
+                        clean_source,
+                        json.dumps(safe_payload, ensure_ascii=False),
+                        json.dumps(generated, ensure_ascii=False),
+                        prompt_version,
+                        destination,
+                        viewer.get("id"),
+                        viewer.get("id"),
+                    ),
+                )
+            saved = _content_job_row(cur.fetchone() or {})
+            _set_request_entity(cur, request["id"], saved["id"])
+        conn.commit()
+    return {
+        "job": saved,
+        "duplicate": False,
+        "activity": _activity_result(
+            "social_content_job_saved",
+            "social_content_job",
+            saved["id"],
+            f"Social Media content job saved: {title}",
+            {
+                "target_user_id": target["id"],
+                "format": clean["format"],
+                "series": clean["series"],
+                "market": clean["market"],
+                "status": selected_status,
+                "destination_path": destination,
+                "result": "success",
+            },
+            request_key_value,
+        ),
     }
