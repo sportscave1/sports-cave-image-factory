@@ -57,6 +57,110 @@ def source_context():
     }
 
 
+class GuardedSessionState(dict):
+    def __init__(self):
+        super().__init__()
+        self.rendered_widget_keys = set()
+
+    def mark_widget_rendered(self, key):
+        self.rendered_widget_keys.add(key)
+
+    def __setitem__(self, key, value):
+        if key in self.rendered_widget_keys:
+            raise AssertionError(f"Widget key mutated after creation: {key}")
+        super().__setitem__(key, value)
+
+
+class FakeExpander:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+class ProductUploadFakeStreamlit:
+    def __init__(self, *, upload_type, product_name, submitted=False):
+        self.session_state = GuardedSessionState()
+        self.query_params = {}
+        self.upload_type = upload_type
+        self.product_name = product_name
+        self.submitted = submitted
+        self.warnings = []
+        self.widgets = []
+
+    def subheader(self, *args, **kwargs):
+        pass
+
+    def caption(self, *args, **kwargs):
+        pass
+
+    def expander(self, *args, **kwargs):
+        return FakeExpander()
+
+    def markdown(self, *args, **kwargs):
+        pass
+
+    def divider(self):
+        pass
+
+    def selectbox(self, label, options, *, key, **kwargs):
+        self.session_state.mark_widget_rendered(key)
+        self.widgets.append(("selectbox", label, tuple(options), key))
+        return self.upload_type
+
+    def text_input(self, label, *, key, **kwargs):
+        self.session_state.mark_widget_rendered(key)
+        self.widgets.append(("text_input", label, key))
+        return self.product_name
+
+    def button(self, label, **kwargs):
+        self.widgets.append(("button", label))
+        return self.submitted
+
+    def warning(self, message):
+        self.warnings.append(str(message))
+
+
+def render_product_uploads_page_for_test(
+    *,
+    upload_type=app.PRODUCT_UPLOAD_NEW_TYPE,
+    product_name="",
+    submitted=False,
+):
+    fake_st = ProductUploadFakeStreamlit(
+        upload_type=upload_type,
+        product_name=product_name,
+        submitted=submitted,
+    )
+    rendered_prompts = []
+
+    def capture_prompt(title, prompt_text, key, **kwargs):
+        prompt_transform = kwargs.get("prompt_transform")
+        final_prompt = prompt_transform(prompt_text) if prompt_transform else prompt_text
+        rendered_prompts.append(
+            {
+                "title": title,
+                "prompt_text": final_prompt,
+                "key": key,
+                "prompt_id": kwargs.get("prompt_id"),
+            }
+        )
+
+    with (
+        patch.object(app, "st", fake_st),
+        patch.object(app, "current_product_upload_source_metadata", return_value=source_context()),
+        patch.object(app, "current_os_user", return_value={"id": "user-123", "display_name": "Nathan"}),
+        patch.object(app, "log_app_memory"),
+        patch.object(app, "safe_startup_print"),
+        patch.object(app, "render_copyable_prompt", side_effect=capture_prompt) as render_prompt,
+        patch.object(app, "record_product_upload_prompt_generation") as record_prompt,
+    ):
+        app.render_product_uploads_page()
+
+    return fake_st, rendered_prompts, render_prompt, record_prompt
+
+
 class ProductUploadPromptReliabilityTests(unittest.TestCase):
     def new_prompt(self):
         return app.get_product_upload_prompt(source_context(), update_existing=False)
@@ -477,6 +581,95 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
         self.assertEqual(kwargs["metadata"]["status"], "success")
         self.assertTrue(kwargs["event_key"].startswith("product-upload-prompt:"))
 
+    def test_product_uploads_page_loads_without_mutating_widget_key_after_creation(self):
+        fake_st, rendered_prompts, _, _ = render_product_uploads_page_for_test(
+            product_name="",
+            submitted=False,
+        )
+
+        self.assertIn("product-upload-product-name", fake_st.session_state.rendered_widget_keys)
+        self.assertEqual(rendered_prompts[0]["title"], "New Shopify Product Prompt")
+        self.assertIn(
+            f"PRODUCT NAME: {app.PRODUCT_UPLOAD_PRODUCT_NAME_PREVIEW_PLACEHOLDER}",
+            rendered_prompts[0]["prompt_text"],
+        )
+
+    def test_product_upload_prompt_preview_is_visible_before_submit(self):
+        _, rendered_prompts, render_prompt, record_prompt = render_product_uploads_page_for_test(
+            submitted=False,
+        )
+
+        render_prompt.assert_called_once()
+        record_prompt.assert_not_called()
+        self.assertEqual(len(rendered_prompts), 1)
+        self.assertIn("SOP 07B", rendered_prompts[0]["prompt_text"])
+        self.assertNotIn("SOP 07C", rendered_prompts[0]["prompt_text"])
+
+    def test_update_existing_preview_shows_only_existing_prompt_before_submit(self):
+        _, rendered_prompts, _, record_prompt = render_product_uploads_page_for_test(
+            upload_type=app.PRODUCT_UPLOAD_EXISTING_TYPE,
+            submitted=False,
+        )
+
+        record_prompt.assert_not_called()
+        self.assertEqual(rendered_prompts[0]["title"], "Update Existing Product Prompt")
+        self.assertIn("SOP 07C", rendered_prompts[0]["prompt_text"])
+        self.assertNotIn("SOP 07B", rendered_prompts[0]["prompt_text"])
+
+    def test_switching_product_upload_operation_changes_visible_preview(self):
+        _, new_rendered, _, _ = render_product_uploads_page_for_test(
+            upload_type=app.PRODUCT_UPLOAD_NEW_TYPE,
+            product_name="Switch Test",
+        )
+        _, existing_rendered, _, _ = render_product_uploads_page_for_test(
+            upload_type=app.PRODUCT_UPLOAD_EXISTING_TYPE,
+            product_name="Switch Test",
+        )
+
+        self.assertEqual(new_rendered[0]["title"], "New Shopify Product Prompt")
+        self.assertEqual(existing_rendered[0]["title"], "Update Existing Product Prompt")
+        self.assertIn("SOP 07B", new_rendered[0]["prompt_text"])
+        self.assertIn("SOP 07C", existing_rendered[0]["prompt_text"])
+
+    def test_typing_product_name_updates_preview_before_submit(self):
+        _, rendered_prompts, _, record_prompt = render_product_uploads_page_for_test(
+            product_name="  O'Connor  SÃ£o-Paulo â€” Legends #9  ",
+            submitted=False,
+        )
+
+        record_prompt.assert_not_called()
+        prompt = rendered_prompts[0]["prompt_text"]
+        self.assertIn("PRODUCT NAME: O'Connor  SÃ£o-Paulo â€” Legends #9", prompt)
+        self.assertNotIn(app.PRODUCT_UPLOAD_PRODUCT_NAME_PREVIEW_PLACEHOLDER, prompt)
+
+    def test_blank_submission_is_rejected_without_hiding_preview(self):
+        fake_st, rendered_prompts, render_prompt, record_prompt = render_product_uploads_page_for_test(
+            product_name="   ",
+            submitted=True,
+        )
+
+        render_prompt.assert_called_once()
+        record_prompt.assert_not_called()
+        self.assertIn(app.PRODUCT_UPLOAD_PRODUCT_NAME_REQUIRED_MESSAGE, fake_st.warnings)
+        self.assertIn(
+            f"PRODUCT NAME: {app.PRODUCT_UPLOAD_PRODUCT_NAME_PREVIEW_PLACEHOLDER}",
+            rendered_prompts[0]["prompt_text"],
+        )
+
+    def test_valid_submission_records_exact_product_name_from_page(self):
+        _, rendered_prompts, _, record_prompt = render_product_uploads_page_for_test(
+            upload_type=app.PRODUCT_UPLOAD_EXISTING_TYPE,
+            product_name="  MÃ¼ller O'Connor â€” 1984 #7  ",
+            submitted=True,
+        )
+
+        self.assertIn("PRODUCT NAME: MÃ¼ller O'Connor â€” 1984 #7", rendered_prompts[0]["prompt_text"])
+        record_prompt.assert_called_once_with(
+            {"id": "user-123", "display_name": "Nathan"},
+            product_name="MÃ¼ller O'Connor â€” 1984 #7",
+            upload_type=app.PRODUCT_UPLOAD_EXISTING_TYPE,
+        )
+
     def test_product_upload_prompt_activity_populates_existing_dashboard_columns(self):
         record = app.sports_cave_dashboard.activity_table_record(
             {
@@ -509,8 +702,16 @@ class ProductUploadPromptReliabilityTests(unittest.TestCase):
         self.assertIn('"Product name"', page_source)
         self.assertIn('"Submit"', page_source)
         self.assertIn("PRODUCT_UPLOAD_PRODUCT_NAME_REQUIRED_MESSAGE", (ROOT / "app.py").read_text(encoding="utf-8"))
+        self.assertNotIn("st.form(", page_source)
+        self.assertNotIn("form_submit_button", page_source)
         self.assertEqual(page_source.count("render_copyable_prompt("), 1)
-        self.assertIn("generated[\"title\"]", page_source)
+        self.assertIn("config[\"title\"]", page_source)
+        self.assertIn("preview=True", page_source)
+        self.assertIn("PRODUCT_UPLOAD_PRODUCT_NAME_PREVIEW_PLACEHOLDER", source)
+        after_widget = page_source[page_source.index("product_name_input = st.text_input") :]
+        self.assertNotIn('st.session_state["product-upload-product-name"] =', after_widget)
+        self.assertIn('st.session_state["product-upload-submitted-prompt"]', page_source)
+        self.assertIn("record_product_upload_prompt_generation", page_source)
         self.assertIn("selecting the exact Dropbox product folder", page_source)
         self.assertIn("connected Dropbox and Shopify integrations", page_source)
         self.assertNotIn("shopify-uploads", page_source)

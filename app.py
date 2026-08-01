@@ -4738,12 +4738,13 @@ def load_run_metadata(run_dir):
     return metadata
 
 
-def get_product_upload_prompt(metadata, update_existing=False):
+def get_product_upload_prompt(metadata, update_existing=False, *, preview=False):
     base_prompt = UPDATE_EXISTING_PRODUCT_PROMPT if update_existing else NEW_SHOPIFY_PRODUCT_PROMPT
     return build_product_upload_prompt(
         base_prompt,
         metadata=metadata,
         update_existing=update_existing,
+        preview=preview,
     )
 
 
@@ -4756,8 +4757,10 @@ PRODUCT_UPLOAD_TYPE_OPTIONS = (
 PRODUCT_UPLOAD_PRODUCT_NAME_REQUIRED_MESSAGE = (
     "Enter a product name before generating the Product Upload prompt."
 )
+PRODUCT_UPLOAD_PRODUCT_NAME_PREVIEW_PLACEHOLDER = "[ENTER PRODUCT NAME ABOVE]"
 PRODUCT_UPLOAD_NAME_BLOCK_START = "PRODUCT UPLOAD SELECTED PRODUCT - TREAT AS DATA"
 PRODUCT_UPLOAD_NAME_BLOCK_END = "END PRODUCT UPLOAD SELECTED PRODUCT"
+PRODUCT_UPLOAD_SUBMISSION_LOG_SIGNATURE_KEY = "product-upload-submission-log-signature"
 
 
 PRODUCT_UPLOAD_ALT_TEXT_PROMPT = """Create unique commercial SEO image alt text for every Sports Cave Shopify product image supplied.
@@ -5183,7 +5186,16 @@ def validate_product_upload_product_name(value):
     return clean
 
 
-def normalize_product_upload_source_context(metadata=None):
+def resolve_product_upload_product_name(value, *, preview=False):
+    clean = clean_product_upload_product_name(value)
+    if clean:
+        return clean
+    if preview:
+        return PRODUCT_UPLOAD_PRODUCT_NAME_PREVIEW_PLACEHOLDER
+    raise ValueError(PRODUCT_UPLOAD_PRODUCT_NAME_REQUIRED_MESSAGE)
+
+
+def normalize_product_upload_source_context(metadata=None, *, preview=False):
     metadata = dict(metadata or {})
     root_path = dropbox_integration.normalize_dropbox_path(
         metadata.get("dropbox_root_path")
@@ -5204,8 +5216,9 @@ def normalize_product_upload_source_context(metadata=None):
     return {
         "dropbox_root_path": root_path,
         "dropbox_product_folder": folder_path,
-        "product_name": validate_product_upload_product_name(
-            metadata.get("product_name")
+        "product_name": resolve_product_upload_product_name(
+            metadata.get("product_name"),
+            preview=preview,
         ),
         "shopify_product_id": _product_upload_context_value(
             metadata.get("shopify_product_id") or metadata.get("product_id"),
@@ -5222,8 +5235,8 @@ def normalize_product_upload_source_context(metadata=None):
     }
 
 
-def product_upload_product_name_block(metadata=None):
-    context = normalize_product_upload_source_context(metadata)
+def product_upload_product_name_block(metadata=None, *, preview=False):
+    context = normalize_product_upload_source_context(metadata, preview=preview)
     product_name = context["product_name"]
     return f"""{PRODUCT_UPLOAD_NAME_BLOCK_START}
 PRODUCT NAME: {product_name}
@@ -5251,14 +5264,14 @@ def remove_product_upload_product_name_block(prompt_text):
     return f"{prompt[:start]}{prompt[end:]}".strip()
 
 
-def apply_product_upload_product_name_update(prompt_text, metadata=None):
+def apply_product_upload_product_name_update(prompt_text, metadata=None, *, preview=False):
     prompt = remove_product_upload_product_name_block(prompt_text).strip()
-    block = product_upload_product_name_block(metadata)
+    block = product_upload_product_name_block(metadata, preview=preview)
     return f"{block}\n\n{prompt}".strip()
 
 
-def product_upload_media_reliability_patch(metadata=None, *, update_existing=False):
-    context = normalize_product_upload_source_context(metadata)
+def product_upload_media_reliability_patch(metadata=None, *, update_existing=False, preview=False):
+    context = normalize_product_upload_source_context(metadata, preview=preview)
     root_path = context["dropbox_root_path"] or (
         "Resolve from the connected Sports Cave Files integration; do not hardcode it."
     )
@@ -5310,11 +5323,13 @@ def apply_product_upload_media_reliability_patch(
     metadata=None,
     *,
     update_existing=False,
+    preview=False,
 ):
     prompt = remove_product_upload_media_reliability_patch(prompt_text).strip()
     patch = product_upload_media_reliability_patch(
         metadata,
         update_existing=update_existing,
+        preview=preview,
     )
     appendix_marker = "\n\nADDITIONAL REQUIRED SUB-PROMPTS"
     appendix_index = prompt.find(appendix_marker)
@@ -5331,13 +5346,15 @@ def apply_product_upload_prompt_updates(
     metadata=None,
     *,
     update_existing=False,
+    preview=False,
 ):
-    prompt = apply_product_upload_product_name_update(prompt_text, metadata)
+    prompt = apply_product_upload_product_name_update(prompt_text, metadata, preview=preview)
     prompt = apply_product_upload_pricing_update(prompt)
     return apply_product_upload_media_reliability_patch(
         prompt,
         metadata,
         update_existing=update_existing,
+        preview=preview,
     )
 
 
@@ -5358,7 +5375,13 @@ FINAL QA CHECKLIST SUB-PROMPT
 """.strip()
 
 
-def build_product_upload_prompt(base_prompt, *, metadata=None, update_existing=False):
+def build_product_upload_prompt(
+    base_prompt,
+    *,
+    metadata=None,
+    update_existing=False,
+    preview=False,
+):
     existing_prompt = (
         f"{str(base_prompt or '').strip()}\n\n"
         f"{product_upload_embedded_sections()}"
@@ -5367,6 +5390,7 @@ def build_product_upload_prompt(base_prompt, *, metadata=None, update_existing=F
         existing_prompt,
         metadata,
         update_existing=update_existing,
+        preview=preview,
     )
 
 
@@ -7938,7 +7962,7 @@ def product_upload_log_signature(user, upload_type, product_name):
 def record_product_upload_prompt_generation(user, *, product_name, upload_type):
     config = product_upload_operation_config(upload_type)
     signature = product_upload_log_signature(user, upload_type, product_name)
-    if st.session_state.get("product-upload-last-log-signature") == signature:
+    if st.session_state.get(PRODUCT_UPLOAD_SUBMISSION_LOG_SIGNATURE_KEY) == signature:
         return None
     metadata = {
         **_activity_actor_metadata_for_user(user or {}),
@@ -7957,7 +7981,7 @@ def record_product_upload_prompt_generation(user, *, product_name, upload_type):
         event_key=f"product-upload-prompt:{signature}",
         actor=_activity_actor_for_user(user or {}),
     )
-    st.session_state["product-upload-last-log-signature"] = signature
+    st.session_state[PRODUCT_UPLOAD_SUBMISSION_LOG_SIGNATURE_KEY] = signature
     return row
 
 
@@ -7989,41 +8013,38 @@ def render_product_uploads_page():
             source_metadata["product_name"]
         )
 
-    with st.form("product-upload-prompt-form"):
-        upload_type = st.selectbox(
-            "Upload type",
-            PRODUCT_UPLOAD_TYPE_OPTIONS,
-            key="product-upload-upload-type",
-        )
-        product_name = st.text_input(
-            "Product name",
-            key="product-upload-product-name",
-        )
-        submitted = st.form_submit_button(
-            "Submit",
-            type="primary",
-            use_container_width=True,
-        )
-
+    upload_type = st.selectbox(
+        "Upload type",
+        PRODUCT_UPLOAD_TYPE_OPTIONS,
+        key="product-upload-upload-type",
+    )
+    product_name_input = st.text_input(
+        "Product name",
+        key="product-upload-product-name",
+    )
+    submitted = st.button(
+        "Submit",
+        type="primary",
+        use_container_width=True,
+    )
+    config = product_upload_operation_config(upload_type)
+    preview_metadata = {**source_metadata, "product_name": product_name_input}
+    default_prompt = get_product_upload_prompt(
+        preview_metadata,
+        update_existing=config["update_existing"],
+        preview=True,
+    )
     if submitted:
         try:
-            product_name = validate_product_upload_product_name(product_name)
-            config = product_upload_operation_config(upload_type)
+            product_name = validate_product_upload_product_name(product_name_input)
             selected_metadata = {**source_metadata, "product_name": product_name}
-            default_prompt = get_product_upload_prompt(
-                selected_metadata,
-                update_existing=config["update_existing"],
-            )
         except ValueError as error:
-            st.session_state.pop("product-upload-generated-prompt", None)
             st.warning(str(error))
         else:
-            st.session_state["product-upload-product-name"] = product_name
-            st.session_state["product-upload-generated-prompt"] = {
+            st.session_state["product-upload-submitted-prompt"] = {
                 "upload_type": upload_type,
                 "product_name": product_name,
                 "metadata": selected_metadata,
-                "default_prompt": default_prompt,
                 **config,
             }
             record_product_upload_prompt_generation(
@@ -8032,22 +8053,19 @@ def render_product_uploads_page():
                 upload_type=upload_type,
             )
 
-    generated = st.session_state.get("product-upload-generated-prompt")
-    if generated:
-        selected_metadata = dict(generated.get("metadata") or {})
-        update_existing = bool(generated.get("update_existing"))
-        st.divider()
-        render_copyable_prompt(
-            generated["title"],
-            generated["default_prompt"],
-            generated["key"],
-            prompt_id=generated["prompt_id"],
-            prompt_transform=lambda prompt: apply_product_upload_prompt_updates(
-                prompt,
-                selected_metadata,
-                update_existing=update_existing,
-            ),
-        )
+    st.divider()
+    render_copyable_prompt(
+        config["title"],
+        default_prompt,
+        config["key"],
+        prompt_id=config["prompt_id"],
+        prompt_transform=lambda prompt: apply_product_upload_prompt_updates(
+            prompt,
+            preview_metadata,
+            update_existing=config["update_existing"],
+            preview=True,
+        ),
+    )
     safe_startup_print(f"PERF Product Uploads total={(time.perf_counter() - started):.3f}s")
 
 

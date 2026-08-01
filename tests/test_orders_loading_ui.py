@@ -1426,15 +1426,16 @@ class EditionOpsUiTests(unittest.TestCase):
         self.assertNotIn("mockup-preview", mockup_actions)
         self.assertNotIn("Read-only preview", mockup_actions)
 
-    def test_product_uploads_shows_only_two_embedded_product_prompts(self):
+    def test_product_uploads_shows_only_selected_embedded_product_prompt(self):
         source = (ROOT / "app.py").read_text(encoding="utf-8")
         product_uploads = source[
             source.index("def render_product_uploads_page():") : source.index("\n\ndef test_google_drive_connection")
         ]
 
-        self.assertEqual(product_uploads.count("render_copyable_prompt("), 2)
-        self.assertIn("New Shopify Product Prompt", product_uploads)
-        self.assertIn("Update Existing Product Prompt", product_uploads)
+        self.assertEqual(product_uploads.count("render_copyable_prompt("), 1)
+        self.assertIn("PRODUCT_UPLOAD_TYPE_OPTIONS", product_uploads)
+        self.assertIn("config[\"title\"]", product_uploads)
+        self.assertIn("preview=True", product_uploads)
         self.assertNotIn("Image Alt Text Prompt", product_uploads)
         self.assertNotIn("Meta Title / Description Prompt", product_uploads)
         self.assertNotIn("Final QA Checklist Prompt", product_uploads)
