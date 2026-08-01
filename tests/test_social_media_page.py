@@ -98,6 +98,7 @@ class SocialMediaPageTests(unittest.TestCase):
         app = AppTest.from_string(READY_PAGE).run(timeout=15)
 
         self.assertEqual(len(app.exception), 0)
+        markup = "\n".join(item.value for item in app.markdown)
         self.assertNotIn("More details", [item.label for item in app.expander])
         self.assertEqual([item.label for item in app.text_area], [])
         labels = [item.label for item in app.text_input]
@@ -127,11 +128,51 @@ class SocialMediaPageTests(unittest.TestCase):
             set(selectboxes["One CTA"].options),
             set(social_media_creator.CTA_OPTIONS),
         )
+        self.assertIn("ROOM, WALL & CAMERA", markup)
+        self.assertIn("Product featured", markup)
+        for label, options in (
+            ("Room type", social_media_creator.ROOM_TYPE_OPTIONS),
+            ("Wall colour", social_media_creator.WALL_COLOUR_OPTIONS),
+            (
+                "Wall material/finish",
+                social_media_creator.WALL_MATERIAL_FINISH_OPTIONS,
+            ),
+            ("Camera angle", social_media_creator.CAMERA_ANGLE_OPTIONS),
+            (
+                "Shot distance / product prominence",
+                social_media_creator.SHOT_DISTANCE_PROMINENCE_OPTIONS,
+            ),
+            ("Lighting style", social_media_creator.LIGHTING_STYLE_OPTIONS),
+            (
+                "Variation behaviour",
+                social_media_creator.VARIATION_BEHAVIOUR_OPTIONS,
+            ),
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(set(selectboxes[label].options), set(options))
+        for hidden_custom_label in (
+            "Custom room type",
+            "Custom wall colour",
+            "Custom wall material/finish",
+            "Custom camera angle",
+            "Custom lighting style",
+        ):
+            self.assertNotIn(hidden_custom_label, labels)
         helper_source = inspect.getsource(
             social_media_workspace._editable_selectbox
         )
         self.assertIn("accept_new_options=True", helper_source)
         self.assertIn('filter_mode="fuzzy"', helper_source)
+
+    def test_scene_custom_inputs_only_appear_after_custom_selection(self):
+        app = AppTest.from_string(READY_PAGE).run(timeout=15)
+        selectboxes = {item.label: item for item in app.selectbox}
+
+        selectboxes["Room type"].set_value("Custom").run(timeout=15)
+        labels = [item.label for item in app.text_input]
+
+        self.assertIn("Custom room type", labels)
+        self.assertNotIn("Custom wall colour", labels)
 
     def test_custom_hook_and_cta_restore_in_editable_selectboxes(self):
         source = READY_PAGE.replace(

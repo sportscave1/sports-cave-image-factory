@@ -31,6 +31,147 @@ def base_payload(**overrides):
 
 
 class SocialPromptContractTests(unittest.TestCase):
+    def test_scene_variable_option_lists_are_complete(self):
+        self.assertEqual(
+            creator.ROOM_TYPE_OPTIONS,
+            (
+                "Auto — vary appropriately",
+                "Man Cave",
+                "Premium Living Room",
+                "Lounge",
+                "Apartment Living Room",
+                "Bedroom",
+                "Home Office",
+                "Executive Office",
+                "Study / Library",
+                "Garage",
+                "Premium Workshop",
+                "Home Bar",
+                "Sports Bar",
+                "Games Room",
+                "Pool Table Room",
+                "Media Room / Home Cinema",
+                "Listening / Music Room",
+                "Hallway",
+                "Entryway / Foyer",
+                "Staircase / Landing",
+                "Dining Room",
+                "Collector Gallery",
+                "Trophy Room",
+                "Club Lounge",
+                "Home Gym",
+                "Loft",
+                "Basement Retreat",
+                "No Room — Clean Studio Product Shot",
+                "Custom",
+            ),
+        )
+        self.assertEqual(
+            creator.WALL_COLOUR_OPTIONS,
+            (
+                "Auto — choose from approved palette",
+                "Sports Cave Black",
+                "Deep Charcoal",
+                "Graphite",
+                "Warm Off-White",
+                "Soft Greige",
+                "Stone Beige",
+                "Sandstone",
+                "Concrete Grey",
+                "Warm Taupe",
+                "Dark Walnut",
+                "Deep Navy",
+                "Forest Green",
+                "Muted Olive",
+                "Warm Clay",
+                "Natural Brick Red",
+                "Whitewashed Brick",
+                "Custom",
+            ),
+        )
+        self.assertEqual(
+            creator.WALL_MATERIAL_FINISH_OPTIONS,
+            (
+                "Auto — match the selected room",
+                "Smooth Painted Plaster",
+                "Fine Textured Plaster",
+                "Venetian Plaster",
+                "Painted Masonry",
+                "Exposed Red Brick",
+                "Charcoal Brick",
+                "Whitewashed Brick",
+                "Sandstone Block",
+                "Natural Limestone",
+                "Stone Cladding",
+                "Raw Concrete",
+                "Polished Concrete",
+                "Board-Formed Concrete",
+                "Dark Oak Wall Panels",
+                "Light Oak Wall Panels",
+                "Timber Slat Wall",
+                "Acoustic Timber Panels",
+                "Smooth Ceramic Tile",
+                "Matte Tile",
+                "Stone Tile",
+                "Subway Tile",
+                "Custom",
+            ),
+        )
+        self.assertEqual(
+            creator.CAMERA_ANGLE_OPTIONS,
+            (
+                "Auto — choose the strongest product-led angle",
+                "Straight-On Eye Level",
+                "Centred Symmetrical",
+                "Slight Left Three-Quarter — 15–25 Degrees",
+                "Slight Right Three-Quarter — 15–25 Degrees",
+                "Left Three-Quarter — 25–35 Degrees",
+                "Right Three-Quarter — 25–35 Degrees",
+                "Slight Low-Angle Hero",
+                "Slight Elevated View",
+                "Corner-of-Room View",
+                "Doorway / Entry Reveal",
+                "Over-Furniture Lifestyle View",
+                "Close Side-Depth Detail",
+                "Custom",
+            ),
+        )
+        self.assertEqual(
+            creator.SHOT_DISTANCE_PROMINENCE_OPTIONS,
+            (
+                "Close Product Hero — approximately 65–80% prominence",
+                "Medium-Close — approximately 55–70% prominence",
+                "Medium Lifestyle — approximately 45–60% prominence",
+                "Collector Detail — approximately 60–80% prominence",
+                "Auto — keep the product dominant",
+            ),
+        )
+        self.assertEqual(
+            creator.LIGHTING_STYLE_OPTIONS,
+            (
+                "Auto — match the room naturally",
+                "Soft Natural Daylight",
+                "Bright Diffused Daylight",
+                "Soft Overcast Daylight",
+                "Warm Late-Afternoon Light",
+                "Golden-Hour Light",
+                "Moody Evening Lamplight",
+                "Controlled Gallery Lighting",
+                "Mixed Natural Light and Warm Lamps",
+                "Custom",
+            ),
+        )
+        self.assertEqual(
+            creator.VARIATION_BEHAVIOUR_OPTIONS,
+            (
+                "Use Exact Selections",
+                "Vary Camera Angle Only",
+                "Vary Room and Wall",
+                "Vary Lighting",
+                "Vary All Approved Scene Variables",
+            ),
+        )
+
     def test_carousel_has_complete_standalone_prompts_for_every_slide(self):
         package = creator.build_content_package(base_payload())
 
@@ -153,10 +294,10 @@ class SocialPromptContractTests(unittest.TestCase):
         self.assertIn("Never fabricate a price", package["creative_prompt"])
         self.assertIn("if rights are uncertain", package["creative_prompt"])
 
-    def test_v4_brand_contract_is_complete_for_every_public_format(self):
+    def test_v5_brand_contract_is_complete_for_every_public_format(self):
         self.assertEqual(
             creator.SOCIAL_PROMPT_CONTRACT_VERSION,
-            "SOCIAL CONTENT PROMPT V4",
+            "SOCIAL CONTENT PROMPT V5",
         )
         for content_format in (
             "Static feed post",
@@ -239,6 +380,153 @@ class SocialPromptContractTests(unittest.TestCase):
                     )
                     for ads_term in ads_only_terms:
                         self.assertNotIn(ads_term, prompt["prompt"])
+
+    def test_selected_scene_values_appear_once_before_realism_rules(self):
+        package = creator.build_content_package(
+            base_payload(
+                format="Static feed post",
+                room_type="Man Cave",
+                wall_colour="Deep Charcoal",
+                wall_material_finish="Dark Oak Wall Panels",
+                camera_angle="Straight-On Eye Level",
+                shot_distance_product_prominence=(
+                    "Close Product Hero — approximately 65–80% prominence"
+                ),
+                lighting_style="Controlled Gallery Lighting",
+                variation_behaviour="Use Exact Selections",
+            )
+        )
+        prompt = package["visual_prompts"][0]["prompt"]
+
+        self.assertEqual(prompt.count(creator.SOCIAL_SCENE_VARIABLES_MARKER), 1)
+        self.assertLess(
+            prompt.index(creator.SOCIAL_SCENE_VARIABLES_MARKER),
+            prompt.index(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER),
+        )
+        for line in (
+            "Product featured: Brock Legends Collector's Edition",
+            "Room type: Man Cave",
+            "Wall colour: Deep Charcoal",
+            "Wall material/finish: Dark Oak Wall Panels",
+            "Camera angle: Straight-On Eye Level",
+            "Shot distance/product prominence: Close Product Hero — approximately 65–80% prominence",
+            "Lighting style: Controlled Gallery Lighting",
+            "Variation behaviour: Use Exact Selections",
+        ):
+            self.assertIn(line, prompt)
+        self.assertIn("PRODUCT AND ARTWORK LOCK - MANDATORY", prompt)
+
+    def test_every_product_social_image_format_receives_scene_variables(self):
+        for content_format in (
+            "Story sequence",
+            "Reel",
+            "Feed carousel",
+            "Static feed post",
+            "Pinterest Pin",
+            "UGC/collector proof",
+        ):
+            with self.subTest(content_format=content_format):
+                package = creator.build_content_package(
+                    base_payload(
+                        format=content_format,
+                        production_method=(
+                            "AI Reels Studio" if content_format == "Reel" else ""
+                        ),
+                    )
+                )
+                for prompt in package["visual_prompts"]:
+                    self.assertEqual(
+                        prompt["prompt"].count(creator.SOCIAL_SCENE_VARIABLES_MARKER),
+                        1,
+                    )
+                    self.assertIn(
+                        "Product featured: Brock Legends Collector's Edition",
+                        prompt["prompt"],
+                    )
+
+    def test_carousel_and_reel_variation_keeps_product_lock_authoritative(self):
+        for content_format in ("Feed carousel", "Reel"):
+            with self.subTest(content_format=content_format):
+                package = creator.build_content_package(
+                    base_payload(
+                        format=content_format,
+                        production_method=(
+                            "AI Reels Studio" if content_format == "Reel" else ""
+                        ),
+                        room_type="Auto — vary appropriately",
+                        wall_colour="Auto — choose from approved palette",
+                        wall_material_finish="Auto — match the selected room",
+                        camera_angle="Auto — choose the strongest product-led angle",
+                        lighting_style="Auto — match the room naturally",
+                        variation_behaviour="Vary All Approved Scene Variables",
+                    )
+                )
+                self.assertGreater(len(package["visual_prompts"]), 1)
+                for prompt in package["visual_prompts"]:
+                    text = prompt["prompt"]
+                    self.assertEqual(
+                        text.count(creator.SOCIAL_SCENE_VARIABLES_MARKER),
+                        1,
+                    )
+                    self.assertIn("Approved room types:", text)
+                    self.assertIn("Approved camera angles:", text)
+                    self.assertIn(
+                        "Variation must never override product lock",
+                        text,
+                    )
+                    self.assertIn("PRODUCT AND ARTWORK LOCK - MANDATORY", text)
+                    self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK", text)
+
+    def test_caption_only_outputs_do_not_receive_scene_variables(self):
+        package = creator.build_content_package(base_payload())
+
+        for caption in package["caption_variations"]:
+            self.assertNotIn(creator.SOCIAL_SCENE_VARIABLES_MARKER, caption)
+        self.assertNotIn(
+            creator.SOCIAL_SCENE_VARIABLES_MARKER,
+            creator.build_social_copy_text(package),
+        )
+
+    def test_no_room_clean_studio_mode_sets_wall_values_not_applicable(self):
+        package = creator.build_content_package(
+            base_payload(
+                format="Pinterest Pin",
+                room_type=creator.NO_ROOM_STUDIO_OPTION,
+                wall_colour="Custom",
+                wall_material_finish="Custom",
+                camera_angle="Centred Symmetrical",
+                lighting_style="Bright Diffused Daylight",
+            )
+        )
+        prompt = package["visual_prompts"][0]["prompt"]
+
+        self.assertIn(
+            f"Room type: {creator.NO_ROOM_STUDIO_OPTION}",
+            prompt,
+        )
+        self.assertIn("Wall colour: Not applicable", prompt)
+        self.assertIn("Wall material/finish: Not applicable", prompt)
+        self.assertIn("Do not invent a room", prompt)
+        self.assertIn("approved clean studio product background", prompt)
+
+    def test_non_product_social_visuals_do_not_get_room_instructions(self):
+        package = creator.build_content_package(
+            base_payload(
+                content_focus="Community/fan conversation",
+                product_id="",
+                product_title="",
+                product_handle="",
+                product_url="",
+                collection="",
+                format="Story sequence",
+                series="CAVE DEBATE",
+                hook="Which rivalry still divides the fanbase?",
+                objective="Engagement",
+            )
+        )
+
+        for prompt in package["visual_prompts"]:
+            self.assertNotIn(creator.SOCIAL_SCENE_VARIABLES_MARKER, prompt["prompt"])
 
     def test_story_branding_is_consistent_and_cta_is_final_only(self):
         package = creator.build_content_package(
@@ -506,6 +794,14 @@ class SocialPromptContractTests(unittest.TestCase):
         changed_offer_date = creator.input_signature(
             base_payload(offer_end_date="2026-08-31")
         )
+        changed_room = creator.input_signature(base_payload(room_type="Man Cave"))
+        changed_wall = creator.input_signature(base_payload(wall_colour="Deep Navy"))
+        changed_camera = creator.input_signature(
+            base_payload(camera_angle="Straight-On Eye Level")
+        )
+        changed_lighting = creator.input_signature(
+            base_payload(lighting_style="Controlled Gallery Lighting")
+        )
 
         self.assertNotEqual(first, changed_product)
         self.assertNotEqual(first, changed_format)
@@ -513,20 +809,24 @@ class SocialPromptContractTests(unittest.TestCase):
         self.assertNotEqual(first, changed_cta)
         self.assertNotEqual(first, changed_offer)
         self.assertNotEqual(first, changed_offer_date)
+        self.assertNotEqual(first, changed_room)
+        self.assertNotEqual(first, changed_wall)
+        self.assertNotEqual(first, changed_camera)
+        self.assertNotEqual(first, changed_lighting)
         self.assertEqual(
             creator.build_content_package(base_payload())["contract_version"],
             creator.SOCIAL_PROMPT_CONTRACT_VERSION,
         )
 
-    def test_v3_cached_prompt_signature_is_invalidated(self):
+    def test_v4_cached_prompt_signature_is_invalidated(self):
         with mock.patch.object(
             creator,
             "SOCIAL_PROMPT_CONTRACT_VERSION",
-            "SOCIAL CONTENT PROMPT V3",
+            "SOCIAL CONTENT PROMPT V4",
         ):
-            v3_signature = creator.input_signature(base_payload())
+            v4_signature = creator.input_signature(base_payload())
 
-        self.assertNotEqual(v3_signature, creator.input_signature(base_payload()))
+        self.assertNotEqual(v4_signature, creator.input_signature(base_payload()))
 
     def test_custom_hook_and_exactly_one_custom_cta_are_preserved(self):
         hook = "The night the Mountain fell silent"
@@ -613,6 +913,11 @@ class SocialPromptContractTests(unittest.TestCase):
         self.assertEqual(clean["cta"], "Custom saved CTA.")
         self.assertEqual(clean["offer"], "Verified saved offer")
         self.assertEqual(clean["offer_end_date"], "2026-09-01")
+        self.assertEqual(clean["room_type"], "Auto — vary appropriately")
+        self.assertEqual(
+            clean["shot_distance_product_prominence"],
+            "Auto — keep the product dominant",
+        )
         self.assertEqual(prefill["hook"], "Custom saved angle")
         self.assertEqual(prefill["cta"], "Custom saved CTA.")
         self.assertEqual(prefill["offer"], "Verified saved offer")
@@ -625,6 +930,33 @@ class SocialPromptContractTests(unittest.TestCase):
         ):
             self.assertNotIn(legacy_field, clean)
             self.assertNotIn(legacy_field, prefill)
+
+        saved = base_payload(
+            room_type="Executive Office",
+            wall_colour="Graphite",
+            wall_material_finish="Fine Textured Plaster",
+            camera_angle="Slight Right Three-Quarter — 15–25 Degrees",
+            shot_distance_product_prominence="Medium-Close — approximately 55–70% prominence",
+            lighting_style="Soft Natural Daylight",
+            variation_behaviour="Vary Camera Angle Only",
+        )
+        restored = creator.prefill_from_assignment(
+            creator.normalise_creator_input(saved)
+        )
+
+        self.assertEqual(restored["room_type"], "Executive Office")
+        self.assertEqual(restored["wall_colour"], "Graphite")
+        self.assertEqual(restored["wall_material_finish"], "Fine Textured Plaster")
+        self.assertEqual(
+            restored["camera_angle"],
+            "Slight Right Three-Quarter — 15–25 Degrees",
+        )
+        self.assertEqual(
+            restored["shot_distance_product_prominence"],
+            "Medium-Close — approximately 55–70% prominence",
+        )
+        self.assertEqual(restored["lighting_style"], "Soft Natural Daylight")
+        self.assertEqual(restored["variation_behaviour"], "Vary Camera Angle Only")
 
     def test_community_post_does_not_require_a_product(self):
         package = creator.build_content_package(

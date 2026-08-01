@@ -47,12 +47,43 @@ FIELD_KEYS = {
     "series": "social-create-series",
     "platforms": "social-create-platforms",
     "production_method": "social-create-production-method",
+    "room_type": "social-create-room-type",
+    "room_type_custom": "social-create-room-type-custom",
+    "wall_colour": "social-create-wall-colour",
+    "wall_colour_custom": "social-create-wall-colour-custom",
+    "wall_material_finish": "social-create-wall-material-finish",
+    "wall_material_finish_custom": "social-create-wall-material-finish-custom",
+    "camera_angle": "social-create-camera-angle",
+    "camera_angle_custom": "social-create-camera-angle-custom",
+    "shot_distance_product_prominence": "social-create-shot-distance-prominence",
+    "lighting_style": "social-create-lighting-style",
+    "lighting_style_custom": "social-create-lighting-style-custom",
+    "variation_behaviour": "social-create-variation-behaviour",
     "objective": "social-create-objective",
     "funnel_stage": "social-create-funnel",
     "hook": "social-create-hook",
     "cta": "social-create-cta",
     "offer": "social-create-offer",
     "offer_end_date": "social-create-offer-end",
+}
+
+WALL_COLOUR_SWATCHES = {
+    "Sports Cave Black": social_media_branding.BRAND_COLOURS["near_black"],
+    "Deep Charcoal": social_media_branding.BRAND_COLOURS["charcoal"],
+    "Graphite": "#34343A",
+    "Warm Off-White": social_media_branding.BRAND_COLOURS["off_white"],
+    "Soft Greige": "#CCC4B7",
+    "Stone Beige": "#C8B79B",
+    "Sandstone": "#BDA77E",
+    "Concrete Grey": "#8E908C",
+    "Warm Taupe": "#8B7A6B",
+    "Dark Walnut": "#3B2B22",
+    "Deep Navy": "#172235",
+    "Forest Green": "#243829",
+    "Muted Olive": "#59634C",
+    "Warm Clay": "#9B624A",
+    "Natural Brick Red": "#8F3E2F",
+    "Whitewashed Brick": "#D9D2C6",
 }
 
 
@@ -139,6 +170,38 @@ def inject_workspace_styles():
         .sc-social-selected-product span {
             color: #706a60;
             font-size: 0.72rem;
+        }
+        .sc-social-scene-product {
+            background: #f7f5ef;
+            border: 1px solid #ded9cd;
+            border-radius: 6px;
+            color: #171717;
+            font-size: 0.82rem;
+            margin: 0.25rem 0 0.55rem;
+            padding: 0.5rem 0.65rem;
+        }
+        .sc-social-scene-product span {
+            color: #706a60;
+            display: block;
+            font-size: 0.68rem;
+            font-weight: 760;
+            letter-spacing: 0;
+            text-transform: uppercase;
+        }
+        .sc-social-swatch {
+            align-items: center;
+            color: #706a60;
+            display: flex;
+            font-size: 0.72rem;
+            gap: 0.35rem;
+            margin: -0.25rem 0 0.45rem;
+        }
+        .sc-social-swatch-chip {
+            border: 1px solid rgba(0,0,0,0.18);
+            border-radius: 4px;
+            display: inline-block;
+            height: 0.8rem;
+            width: 1.25rem;
         }
         .sc-social-plan-row {
             border-top: 1px solid #e6e1d7;
@@ -257,6 +320,43 @@ def _editable_selectbox(label, suggestions, *, key, placeholder):
     return str(value or "").strip()
 
 
+def _scene_custom_input(selection, label, *, key, placeholder):
+    if selection == social_media_creator.SCENE_CUSTOM_OPTION:
+        return st.text_input(
+            label,
+            placeholder=placeholder,
+            key=key,
+        )
+    return st.session_state.get(key, "")
+
+
+def _product_featured_display(focus, selected_product, manual_product, collection):
+    if selected_product.get("title"):
+        return selected_product["title"]
+    if manual_product:
+        return manual_product
+    if focus == "Collection" and collection:
+        return f"Collection: {collection} — product identified per visual"
+    if collection:
+        return f"Collection: {collection}"
+    return "Select a product or collection for product-based prompts"
+
+
+def _render_wall_colour_swatch(wall_colour):
+    colour = WALL_COLOUR_SWATCHES.get(wall_colour)
+    if not colour:
+        return
+    st.markdown(
+        f"""
+        <div class="sc-social-swatch">
+          <span class="sc-social-swatch-chip" style="background:{html.escape(colour)}"></span>
+          <span>{html.escape(wall_colour)}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _product_option_id(product):
     return str(product.get("id") or product.get("handle") or product.get("title") or "")
 
@@ -318,6 +418,20 @@ def _consume_prefill(products):
         "series": prefill.get("series"),
         "platforms": list(prefill.get("platforms") or ()),
         "production_method": prefill.get("production_method"),
+        "room_type": prefill.get("room_type"),
+        "room_type_custom": prefill.get("room_type_custom"),
+        "wall_colour": prefill.get("wall_colour"),
+        "wall_colour_custom": prefill.get("wall_colour_custom"),
+        "wall_material_finish": prefill.get("wall_material_finish"),
+        "wall_material_finish_custom": prefill.get("wall_material_finish_custom"),
+        "camera_angle": prefill.get("camera_angle"),
+        "camera_angle_custom": prefill.get("camera_angle_custom"),
+        "shot_distance_product_prominence": prefill.get(
+            "shot_distance_product_prominence"
+        ),
+        "lighting_style": prefill.get("lighting_style"),
+        "lighting_style_custom": prefill.get("lighting_style_custom"),
+        "variation_behaviour": prefill.get("variation_behaviour"),
         "objective": prefill.get("objective"),
         "funnel_stage": prefill.get("funnel_stage"),
         "hook": prefill.get("hook"),
@@ -595,6 +709,168 @@ def _render_creator_form(products):
                 key=FIELD_KEYS["production_method"],
             )
 
+        st.markdown('<div class="sc-social-stage"><div class="sc-social-stage-title">ROOM, WALL & CAMERA</div></div>', unsafe_allow_html=True)
+        product_featured = _product_featured_display(
+            focus,
+            selected_product,
+            manual_product,
+            collection,
+        )
+        st.markdown(
+            f"""
+            <div class="sc-social-scene-product">
+              <span>Product featured</span>
+              {html.escape(product_featured)}
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        row = st.columns(2)
+        room_type = row[0].selectbox(
+            "Room type",
+            social_media_creator.ROOM_TYPE_OPTIONS,
+            index=_select_index(
+                social_media_creator.ROOM_TYPE_OPTIONS,
+                st.session_state.get(
+                    FIELD_KEYS["room_type"],
+                    social_media_creator.ROOM_TYPE_OPTIONS[0],
+                ),
+            ),
+            filter_mode="fuzzy",
+            key=FIELD_KEYS["room_type"],
+        )
+        wall_controls_disabled = (
+            room_type == social_media_creator.NO_ROOM_STUDIO_OPTION
+        )
+        camera_angle = row[1].selectbox(
+            "Camera angle",
+            social_media_creator.CAMERA_ANGLE_OPTIONS,
+            index=_select_index(
+                social_media_creator.CAMERA_ANGLE_OPTIONS,
+                st.session_state.get(
+                    FIELD_KEYS["camera_angle"],
+                    social_media_creator.CAMERA_ANGLE_OPTIONS[0],
+                ),
+            ),
+            filter_mode="fuzzy",
+            key=FIELD_KEYS["camera_angle"],
+        )
+        room_type_custom = _scene_custom_input(
+            room_type,
+            "Custom room type",
+            key=FIELD_KEYS["room_type_custom"],
+            placeholder="Describe the approved Sports Cave room type",
+        )
+        camera_angle_custom = _scene_custom_input(
+            camera_angle,
+            "Custom camera angle",
+            key=FIELD_KEYS["camera_angle_custom"],
+            placeholder="Describe the controlled product-led camera angle",
+        )
+
+        row = st.columns(2)
+        wall_colour = row[0].selectbox(
+            "Wall colour",
+            social_media_creator.WALL_COLOUR_OPTIONS,
+            index=_select_index(
+                social_media_creator.WALL_COLOUR_OPTIONS,
+                st.session_state.get(
+                    FIELD_KEYS["wall_colour"],
+                    social_media_creator.WALL_COLOUR_OPTIONS[0],
+                ),
+            ),
+            filter_mode="fuzzy",
+            key=FIELD_KEYS["wall_colour"],
+            disabled=wall_controls_disabled,
+        )
+        wall_material_finish = row[1].selectbox(
+            "Wall material/finish",
+            social_media_creator.WALL_MATERIAL_FINISH_OPTIONS,
+            index=_select_index(
+                social_media_creator.WALL_MATERIAL_FINISH_OPTIONS,
+                st.session_state.get(
+                    FIELD_KEYS["wall_material_finish"],
+                    social_media_creator.WALL_MATERIAL_FINISH_OPTIONS[0],
+                ),
+            ),
+            filter_mode="fuzzy",
+            key=FIELD_KEYS["wall_material_finish"],
+            disabled=wall_controls_disabled,
+        )
+        if wall_controls_disabled:
+            st.caption(
+                "Wall colour and wall material/finish will be Not applicable for a clean studio product shot."
+            )
+        else:
+            _render_wall_colour_swatch(wall_colour)
+        wall_colour_custom = (
+            ""
+            if wall_controls_disabled
+            else _scene_custom_input(
+                wall_colour,
+                "Custom wall colour",
+                key=FIELD_KEYS["wall_colour_custom"],
+                placeholder="Describe the approved wall colour",
+            )
+        )
+        wall_material_finish_custom = (
+            ""
+            if wall_controls_disabled
+            else _scene_custom_input(
+                wall_material_finish,
+                "Custom wall material/finish",
+                key=FIELD_KEYS["wall_material_finish_custom"],
+                placeholder="Describe the physical wall material or finish",
+            )
+        )
+
+        row = st.columns(2)
+        shot_distance_product_prominence = row[0].selectbox(
+            "Shot distance / product prominence",
+            social_media_creator.SHOT_DISTANCE_PROMINENCE_OPTIONS,
+            index=_select_index(
+                social_media_creator.SHOT_DISTANCE_PROMINENCE_OPTIONS,
+                st.session_state.get(
+                    FIELD_KEYS["shot_distance_product_prominence"],
+                    social_media_creator.SHOT_DISTANCE_PROMINENCE_OPTIONS[-1],
+                ),
+                default=len(social_media_creator.SHOT_DISTANCE_PROMINENCE_OPTIONS) - 1,
+            ),
+            filter_mode="fuzzy",
+            key=FIELD_KEYS["shot_distance_product_prominence"],
+        )
+        lighting_style = row[1].selectbox(
+            "Lighting style",
+            social_media_creator.LIGHTING_STYLE_OPTIONS,
+            index=_select_index(
+                social_media_creator.LIGHTING_STYLE_OPTIONS,
+                st.session_state.get(
+                    FIELD_KEYS["lighting_style"],
+                    social_media_creator.LIGHTING_STYLE_OPTIONS[0],
+                ),
+            ),
+            filter_mode="fuzzy",
+            key=FIELD_KEYS["lighting_style"],
+        )
+        lighting_style_custom = _scene_custom_input(
+            lighting_style,
+            "Custom lighting style",
+            key=FIELD_KEYS["lighting_style_custom"],
+            placeholder="Describe the photographic lighting style",
+        )
+        variation_behaviour = st.selectbox(
+            "Variation behaviour",
+            social_media_creator.VARIATION_BEHAVIOUR_OPTIONS,
+            index=_select_index(
+                social_media_creator.VARIATION_BEHAVIOUR_OPTIONS,
+                st.session_state.get(
+                    FIELD_KEYS["variation_behaviour"],
+                    social_media_creator.VARIATION_BEHAVIOUR_OPTIONS[0],
+                ),
+            ),
+            key=FIELD_KEYS["variation_behaviour"],
+        )
+
         st.markdown('<div class="sc-social-stage"><div class="sc-social-stage-title">3. Brief details</div></div>', unsafe_allow_html=True)
         row = st.columns(2)
         objective = row[0].selectbox(
@@ -666,6 +942,18 @@ def _render_creator_form(products):
         "series": series,
         "platforms": platforms,
         "production_method": production_method,
+        "room_type": room_type,
+        "room_type_custom": room_type_custom,
+        "wall_colour": wall_colour,
+        "wall_colour_custom": wall_colour_custom,
+        "wall_material_finish": wall_material_finish,
+        "wall_material_finish_custom": wall_material_finish_custom,
+        "camera_angle": camera_angle,
+        "camera_angle_custom": camera_angle_custom,
+        "shot_distance_product_prominence": shot_distance_product_prominence,
+        "lighting_style": lighting_style,
+        "lighting_style_custom": lighting_style_custom,
+        "variation_behaviour": variation_behaviour,
         "objective": objective,
         "funnel_stage": funnel_stage,
         "hook": hook,

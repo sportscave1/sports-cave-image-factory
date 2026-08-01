@@ -206,6 +206,30 @@ class SocialOutputSaveTests(unittest.TestCase):
         self.assertEqual(prefill["offer"], "Verified free shipping")
         self.assertNotIn("restrictions", prefill)
 
+    def test_scene_settings_use_existing_create_payload_and_prefill_paths(self):
+        form_source = inspect.getsource(social_media_workspace._render_creator_form)
+        prefill_source = inspect.getsource(social_media_workspace._consume_prefill)
+        payload_source = inspect.getsource(
+            social_media_workspace._creator_payload_from_form
+        )
+
+        for field in (
+            "room_type",
+            "wall_colour",
+            "wall_material_finish",
+            "camera_angle",
+            "shot_distance_product_prominence",
+            "lighting_style",
+            "variation_behaviour",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, form_source)
+                self.assertIn(field, prefill_source)
+                self.assertIn("**values", payload_source)
+
+        self.assertIn("Product featured", form_source)
+        self.assertIn("ROOM, WALL & CAMERA", form_source)
+
 
 class SocialCatalogueTests(unittest.TestCase):
     def test_catalogue_product_preserves_protected_identity_and_url(self):

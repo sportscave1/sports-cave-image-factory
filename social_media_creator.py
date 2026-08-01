@@ -9,7 +9,7 @@ import social_media_branding
 from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
 
 
-SOCIAL_PROMPT_CONTRACT_VERSION = "SOCIAL CONTENT PROMPT V4"
+SOCIAL_PROMPT_CONTRACT_VERSION = "SOCIAL CONTENT PROMPT V5"
 SOCIAL_OUTPUT_ROOT = "04_OUTPUT/social-media"
 
 CONTENT_FOCUS_OPTIONS = (
@@ -79,6 +79,127 @@ PRODUCTION_METHOD_OPTIONS = (
     "AI Reels Studio",
     "Film and edit manually",
     "Existing/UGC footage",
+)
+SOCIAL_SCENE_VARIABLES_MARKER = "SPORTS CAVE SCENE VARIABLES — FOLLOW EXACTLY"
+SCENE_CUSTOM_OPTION = "Custom"
+NO_ROOM_STUDIO_OPTION = "No Room — Clean Studio Product Shot"
+ROOM_TYPE_OPTIONS = (
+    "Auto — vary appropriately",
+    "Man Cave",
+    "Premium Living Room",
+    "Lounge",
+    "Apartment Living Room",
+    "Bedroom",
+    "Home Office",
+    "Executive Office",
+    "Study / Library",
+    "Garage",
+    "Premium Workshop",
+    "Home Bar",
+    "Sports Bar",
+    "Games Room",
+    "Pool Table Room",
+    "Media Room / Home Cinema",
+    "Listening / Music Room",
+    "Hallway",
+    "Entryway / Foyer",
+    "Staircase / Landing",
+    "Dining Room",
+    "Collector Gallery",
+    "Trophy Room",
+    "Club Lounge",
+    "Home Gym",
+    "Loft",
+    "Basement Retreat",
+    NO_ROOM_STUDIO_OPTION,
+    SCENE_CUSTOM_OPTION,
+)
+WALL_COLOUR_OPTIONS = (
+    "Auto — choose from approved palette",
+    "Sports Cave Black",
+    "Deep Charcoal",
+    "Graphite",
+    "Warm Off-White",
+    "Soft Greige",
+    "Stone Beige",
+    "Sandstone",
+    "Concrete Grey",
+    "Warm Taupe",
+    "Dark Walnut",
+    "Deep Navy",
+    "Forest Green",
+    "Muted Olive",
+    "Warm Clay",
+    "Natural Brick Red",
+    "Whitewashed Brick",
+    SCENE_CUSTOM_OPTION,
+)
+WALL_MATERIAL_FINISH_OPTIONS = (
+    "Auto — match the selected room",
+    "Smooth Painted Plaster",
+    "Fine Textured Plaster",
+    "Venetian Plaster",
+    "Painted Masonry",
+    "Exposed Red Brick",
+    "Charcoal Brick",
+    "Whitewashed Brick",
+    "Sandstone Block",
+    "Natural Limestone",
+    "Stone Cladding",
+    "Raw Concrete",
+    "Polished Concrete",
+    "Board-Formed Concrete",
+    "Dark Oak Wall Panels",
+    "Light Oak Wall Panels",
+    "Timber Slat Wall",
+    "Acoustic Timber Panels",
+    "Smooth Ceramic Tile",
+    "Matte Tile",
+    "Stone Tile",
+    "Subway Tile",
+    SCENE_CUSTOM_OPTION,
+)
+CAMERA_ANGLE_OPTIONS = (
+    "Auto — choose the strongest product-led angle",
+    "Straight-On Eye Level",
+    "Centred Symmetrical",
+    "Slight Left Three-Quarter — 15–25 Degrees",
+    "Slight Right Three-Quarter — 15–25 Degrees",
+    "Left Three-Quarter — 25–35 Degrees",
+    "Right Three-Quarter — 25–35 Degrees",
+    "Slight Low-Angle Hero",
+    "Slight Elevated View",
+    "Corner-of-Room View",
+    "Doorway / Entry Reveal",
+    "Over-Furniture Lifestyle View",
+    "Close Side-Depth Detail",
+    SCENE_CUSTOM_OPTION,
+)
+SHOT_DISTANCE_PROMINENCE_OPTIONS = (
+    "Close Product Hero — approximately 65–80% prominence",
+    "Medium-Close — approximately 55–70% prominence",
+    "Medium Lifestyle — approximately 45–60% prominence",
+    "Collector Detail — approximately 60–80% prominence",
+    "Auto — keep the product dominant",
+)
+LIGHTING_STYLE_OPTIONS = (
+    "Auto — match the room naturally",
+    "Soft Natural Daylight",
+    "Bright Diffused Daylight",
+    "Soft Overcast Daylight",
+    "Warm Late-Afternoon Light",
+    "Golden-Hour Light",
+    "Moody Evening Lamplight",
+    "Controlled Gallery Lighting",
+    "Mixed Natural Light and Warm Lamps",
+    SCENE_CUSTOM_OPTION,
+)
+VARIATION_BEHAVIOUR_OPTIONS = (
+    "Use Exact Selections",
+    "Vary Camera Angle Only",
+    "Vary Room and Wall",
+    "Vary Lighting",
+    "Vary All Approved Scene Variables",
 )
 OBJECTIVE_OPTIONS = ("Reach", "Engagement", "Trust", "Product click", "Sale")
 FUNNEL_OPTIONS = ("Cold", "Warm", "Hot")
@@ -508,6 +629,30 @@ def _is_true(value):
     return str(value or "").strip().casefold() in {"1", "true", "yes", "on"}
 
 
+def _normalise_scene_option(value, options, default):
+    clean = _single_line(value, 180)
+    return clean if clean in options else default
+
+
+def _scene_custom_value(payload, key):
+    return _single_line(payload.get(key), 240)
+
+
+def _scene_option_value(payload, option_key, custom_key):
+    value = payload.get(option_key) or ""
+    if value == SCENE_CUSTOM_OPTION:
+        custom = payload.get(custom_key) or ""
+        return f"{SCENE_CUSTOM_OPTION} — {custom}" if custom else SCENE_CUSTOM_OPTION
+    return value
+
+
+def social_scene_variables_apply(payload):
+    return bool(
+        str(payload.get("product_title") or "").strip()
+        or str(payload.get("collection") or "").strip()
+    )
+
+
 def normalise_creator_input(payload):
     payload = dict(payload or {})
     content_format = _single_line(payload.get("format"), 60)
@@ -542,6 +687,49 @@ def normalise_creator_input(payload):
         "series": _single_line(payload.get("series"), 80),
         "platforms": platforms,
         "production_method": _single_line(payload.get("production_method"), 80),
+        "room_type": _normalise_scene_option(
+            payload.get("room_type"),
+            ROOM_TYPE_OPTIONS,
+            ROOM_TYPE_OPTIONS[0],
+        ),
+        "room_type_custom": _scene_custom_value(payload, "room_type_custom"),
+        "wall_colour": _normalise_scene_option(
+            payload.get("wall_colour"),
+            WALL_COLOUR_OPTIONS,
+            WALL_COLOUR_OPTIONS[0],
+        ),
+        "wall_colour_custom": _scene_custom_value(payload, "wall_colour_custom"),
+        "wall_material_finish": _normalise_scene_option(
+            payload.get("wall_material_finish"),
+            WALL_MATERIAL_FINISH_OPTIONS,
+            WALL_MATERIAL_FINISH_OPTIONS[0],
+        ),
+        "wall_material_finish_custom": _scene_custom_value(
+            payload,
+            "wall_material_finish_custom",
+        ),
+        "camera_angle": _normalise_scene_option(
+            payload.get("camera_angle"),
+            CAMERA_ANGLE_OPTIONS,
+            CAMERA_ANGLE_OPTIONS[0],
+        ),
+        "camera_angle_custom": _scene_custom_value(payload, "camera_angle_custom"),
+        "shot_distance_product_prominence": _normalise_scene_option(
+            payload.get("shot_distance_product_prominence"),
+            SHOT_DISTANCE_PROMINENCE_OPTIONS,
+            SHOT_DISTANCE_PROMINENCE_OPTIONS[-1],
+        ),
+        "lighting_style": _normalise_scene_option(
+            payload.get("lighting_style"),
+            LIGHTING_STYLE_OPTIONS,
+            LIGHTING_STYLE_OPTIONS[0],
+        ),
+        "lighting_style_custom": _scene_custom_value(payload, "lighting_style_custom"),
+        "variation_behaviour": _normalise_scene_option(
+            payload.get("variation_behaviour"),
+            VARIATION_BEHAVIOUR_OPTIONS,
+            VARIATION_BEHAVIOUR_OPTIONS[0],
+        ),
         "objective": _single_line(payload.get("objective"), 60),
         "funnel_stage": _single_line(payload.get("funnel_stage"), 40),
         "hook": _single_line(payload.get("hook"), 500),
@@ -594,6 +782,24 @@ def validate_creator_input(payload):
         errors.append("Choose a product, collection, event or clear community objective.")
     if clean["format"] == "Reel" and clean["production_method"] not in PRODUCTION_METHOD_OPTIONS:
         errors.append("Choose a Reel production method.")
+    no_room = clean["room_type"] == NO_ROOM_STUDIO_OPTION
+    custom_scene_fields = (
+        ("room_type", "room_type_custom", "custom room type"),
+        ("camera_angle", "camera_angle_custom", "custom camera angle"),
+        ("lighting_style", "lighting_style_custom", "custom lighting style"),
+    )
+    if not no_room:
+        custom_scene_fields = custom_scene_fields + (
+            ("wall_colour", "wall_colour_custom", "custom wall colour"),
+            (
+                "wall_material_finish",
+                "wall_material_finish_custom",
+                "custom wall material/finish",
+            ),
+        )
+    for option_key, custom_key, label in custom_scene_fields:
+        if clean[option_key] == SCENE_CUSTOM_OPTION and not clean[custom_key]:
+            errors.append(f"Enter the {label}.")
     if errors:
         raise SocialCreatorValidationError(" ".join(errors))
     return clean
@@ -649,6 +855,31 @@ def prefill_from_assignment(assignment):
         "series": assignment.get("series") or "THE MOMENT",
         "platforms": tuple(assignment.get("platforms") or ("All suitable platforms",)),
         "production_method": assignment.get("production_method") or "AI Reels Studio",
+        "room_type": assignment.get("room_type") or ROOM_TYPE_OPTIONS[0],
+        "room_type_custom": assignment.get("room_type_custom") or "",
+        "wall_colour": assignment.get("wall_colour") or WALL_COLOUR_OPTIONS[0],
+        "wall_colour_custom": assignment.get("wall_colour_custom") or "",
+        "wall_material_finish": (
+            assignment.get("wall_material_finish")
+            or WALL_MATERIAL_FINISH_OPTIONS[0]
+        ),
+        "wall_material_finish_custom": (
+            assignment.get("wall_material_finish_custom") or ""
+        ),
+        "camera_angle": assignment.get("camera_angle") or CAMERA_ANGLE_OPTIONS[0],
+        "camera_angle_custom": assignment.get("camera_angle_custom") or "",
+        "shot_distance_product_prominence": (
+            assignment.get("shot_distance_product_prominence")
+            or SHOT_DISTANCE_PROMINENCE_OPTIONS[-1]
+        ),
+        "lighting_style": (
+            assignment.get("lighting_style") or LIGHTING_STYLE_OPTIONS[0]
+        ),
+        "lighting_style_custom": assignment.get("lighting_style_custom") or "",
+        "variation_behaviour": (
+            assignment.get("variation_behaviour")
+            or VARIATION_BEHAVIOUR_OPTIONS[0]
+        ),
         "objective": assignment.get("objective") or "Reach",
         "funnel_stage": assignment.get("funnel_stage") or "Cold",
         "hook": assignment.get("hook") or "",
@@ -795,6 +1026,160 @@ def _structured_context(payload):
             "source": payload.get("edition_limit_source") or "approved product catalogue",
         }
     return json.dumps(values, indent=2, ensure_ascii=False)
+
+
+def _model_approved_choices(options):
+    return tuple(
+        value
+        for value in options
+        if value != SCENE_CUSTOM_OPTION and not value.startswith("Auto")
+    )
+
+
+def _product_featured_scene_label(payload):
+    if payload.get("product_title"):
+        return payload["product_title"]
+    if payload.get("collection"):
+        return (
+            f"Collection: {payload['collection']} — identify the exact product "
+            "featured in this visual or Carousel card from the selected collection "
+            "and state it clearly."
+        )
+    return "Not applicable"
+
+
+def _scene_variable_values(payload):
+    no_room = payload.get("room_type") == NO_ROOM_STUDIO_OPTION
+    return {
+        "Product featured": _product_featured_scene_label(payload),
+        "Room type": _scene_option_value(payload, "room_type", "room_type_custom"),
+        "Wall colour": (
+            "Not applicable"
+            if no_room
+            else _scene_option_value(payload, "wall_colour", "wall_colour_custom")
+        ),
+        "Wall material/finish": (
+            "Not applicable"
+            if no_room
+            else _scene_option_value(
+                payload,
+                "wall_material_finish",
+                "wall_material_finish_custom",
+            )
+        ),
+        "Camera angle": _scene_option_value(
+            payload,
+            "camera_angle",
+            "camera_angle_custom",
+        ),
+        "Shot distance/product prominence": payload[
+            "shot_distance_product_prominence"
+        ],
+        "Lighting style": _scene_option_value(
+            payload,
+            "lighting_style",
+            "lighting_style_custom",
+        ),
+        "Variation behaviour": payload["variation_behaviour"],
+    }
+
+
+def _has_auto_scene_selection(payload):
+    return any(
+        str(payload.get(key) or "").startswith("Auto")
+        for key in (
+            "room_type",
+            "wall_colour",
+            "wall_material_finish",
+            "camera_angle",
+            "shot_distance_product_prominence",
+            "lighting_style",
+        )
+    )
+
+
+def _needs_approved_scene_lists(payload):
+    return (
+        _has_auto_scene_selection(payload)
+        or payload.get("variation_behaviour") != "Use Exact Selections"
+    )
+
+
+def _scene_variation_note(payload):
+    behaviour = payload.get("variation_behaviour")
+    if behaviour == "Use Exact Selections":
+        return (
+            "Use the selected scene variables exactly for this visual. Do not vary room, "
+            "wall, camera or lighting unless the selected value itself is Auto."
+        )
+    if behaviour == "Vary Camera Angle Only":
+        return (
+            "For multi-image formats, only the camera angle may vary between cards or "
+            "scenes. Keep room, wall colour, wall material/finish, lighting and product "
+            "prominence aligned with the selected values."
+        )
+    if behaviour == "Vary Room and Wall":
+        return (
+            "For multi-image formats, room type, wall colour and wall material/finish "
+            "may vary between cards or scenes using only the approved lists. Camera "
+            "angle, lighting and product prominence remain controlled by the selected values."
+        )
+    if behaviour == "Vary Lighting":
+        return (
+            "For multi-image formats, only the lighting style may vary between cards or "
+            "scenes using the approved lighting list. Keep room, wall, camera and product "
+            "prominence aligned with the selected values."
+        )
+    return (
+        "For multi-image formats, approved room, wall, camera and lighting variables "
+        "may vary between cards or scenes using only the approved lists. Variation must "
+        "never override product lock, artwork accuracy, frame geometry, badge or plaque "
+        "accuracy, realistic glass, product dominance, platform dimensions or Social branding."
+    )
+
+
+def _scene_variables_block(payload):
+    values = _scene_variable_values(payload)
+    lines = [SOCIAL_SCENE_VARIABLES_MARKER]
+    lines.extend(f"{label}: {value}" for label, value in values.items())
+    lines.extend(
+        (
+            "",
+            "Scene variable authority: follow this block exactly. If it conflicts with creative direction, this block wins; the Sports Cave product-lock and photorealism rules below remain the highest priority.",
+            "Rooms must remain premium, masculine, believable, restrained and suitable for Sports Cave collector wall art. Do not generate generic AI luxury mansions, excessive clutter or rooms that overpower the framed product.",
+            "Wall colour and wall material/finish must work together naturally. Do not describe one surface as two incompatible materials unless the user supplied that as a deliberate Custom requirement. Materials must have believable texture, joins, scale and light response; no repeating AI textures or melted brick, tile, stone or timber.",
+            "All camera angles must retain rigid, physically correct frame geometry. No fisheye, extreme wide-angle distortion, extreme Dutch angles, bent frame edges, conflicting artwork and room perspective, unreadable artwork, hidden frame edges or cropped frame edges.",
+            "Sports Cave is selling the framed edition, not the room. Keep the complete frame visible and dominant; make it larger by moving the camera closer, never by cropping its outer edges.",
+            "Lighting must remain photographic and physically consistent: no artificial glow, excessive HDR, neon colour cast, blown-out glass glare or CGI lighting.",
+            _scene_variation_note(payload),
+        )
+    )
+    if _needs_approved_scene_lists(payload):
+        lines.extend(
+            (
+                "Auto or permitted variation selections: choose only from the approved lists below and state the resolved choice clearly in the planned visual output before generation.",
+                "Approved room types: " + "; ".join(_model_approved_choices(ROOM_TYPE_OPTIONS)),
+                "Approved wall colours: " + "; ".join(_model_approved_choices(WALL_COLOUR_OPTIONS)),
+                "Approved wall material/finish choices: " + "; ".join(_model_approved_choices(WALL_MATERIAL_FINISH_OPTIONS)),
+                "Approved camera angles: " + "; ".join(_model_approved_choices(CAMERA_ANGLE_OPTIONS)),
+                "Approved shot distance/product prominence choices: " + "; ".join(_model_approved_choices(SHOT_DISTANCE_PROMINENCE_OPTIONS)),
+                "Approved lighting styles: " + "; ".join(_model_approved_choices(LIGHTING_STYLE_OPTIONS)),
+            )
+        )
+    if payload.get("room_type") == NO_ROOM_STUDIO_OPTION:
+        lines.append(
+            "No-room studio mode: wall colour and wall material/finish are Not applicable. Do not invent a room, furniture, windows or wall scene; preserve the exact product against an approved clean studio product background."
+        )
+    return "\n".join(str(line).strip() for line in lines).strip()
+
+
+def _append_scene_variables(prompt_text, payload):
+    text = str(prompt_text or "").strip()
+    if not social_scene_variables_apply(payload):
+        return text
+    if SOCIAL_SCENE_VARIABLES_MARKER.casefold() in text.casefold():
+        return text
+    return f"{text}\n\n{_scene_variables_block(payload)}" if text else _scene_variables_block(payload)
 
 
 def _overlay_hook(payload):
@@ -1028,6 +1413,7 @@ STAGE 2 - SPORTS CAVE BRANDED COMPOSITION
 
 FINAL QUALITY CHECK
 Verify the exact aspect ratio and dimensions, the supplied product is unchanged, the complete frame is physically convincing, no unsupported claim or third-party asset was introduced, the composition has one clear focal point, and the result has no obvious AI artefacts. Retain the clean master, then use the deterministic export layer to create the separate branded final."""
+    prompt = _append_scene_variables(prompt, payload)
     return append_sports_cave_image_realism_rules(
         prompt,
         include_product_lock=True,
