@@ -12,6 +12,7 @@ from streamlit.testing.v1 import AppTest
 
 import ads_page
 import image_factory
+from sports_cave_prompt_blocks import SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1988,6 +1989,10 @@ PRIMARY TEXT VARIATIONS
             "ad_notes": {
                 "headlines": "Six Laps\nRace Memory",
                 "descriptions": "Built For Fans\nLimited Run",
+                "primary_text_variations": (
+                    "A collector’s wall deserves this.\n\n"
+                    "O’Neal’s legacy — unchanged."
+                ),
                 "cards": "Card 1: Identity\nCard 2: Moment",
             },
         }
@@ -1995,10 +2000,23 @@ PRIMARY TEXT VARIATIONS
         carousel_notes = ads_page.build_ads_setup_notes_text(carousel_result, carousel_workflow)
 
         self.assertIn("Campaign type: Carousel", carousel_notes)
-        self.assertIn("Six Laps\nRace Memory", carousel_notes)
-        self.assertIn("Card 1: Identity\nCard 2: Moment", carousel_notes)
+        self.assertIn("Six Laps\r\nRace Memory", carousel_notes)
+        self.assertIn("Card 1: Identity\r\nCard 2: Moment", carousel_notes)
+        self.assertIn(
+            "A collector’s wall deserves this.\r\n\r\nO’Neal’s legacy — unchanged.",
+            carousel_notes,
+        )
         self.assertIn("Carousel setup checklist", carousel_notes)
         self.assertIn("Use exactly 5 carousel cards", carousel_notes)
+        headings = (
+            "HEADLINES",
+            "DESCRIPTIONS",
+            "PRIMARY TEXT VARIATIONS",
+            "CAROUSEL CARDS / AD SETUP",
+        )
+        positions = [carousel_notes.index(heading) for heading in headings]
+        self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("\n", carousel_notes.replace("\r\n", ""))
 
         instant_result = ads_page.build_ads_result_record(
             "Final Whistle Glory",
@@ -2018,9 +2036,44 @@ PRIMARY TEXT VARIATIONS
         instant_notes = ads_page.build_ads_setup_notes_text(instant_result, instant_workflow)
 
         self.assertIn("Campaign type: Instant Experience", instant_notes)
-        self.assertIn("Instant Experience copy / setup", instant_notes)
+        self.assertIn("CAROUSEL CARDS / AD SETUP", instant_notes)
+        self.assertIn("Instant Experience setup from ChatGPT", instant_notes)
         self.assertIn("Use cover 1 as the main Instant Experience cover.", instant_notes)
         self.assertNotIn("Use exactly 5 carousel cards", instant_notes)
+
+    def test_ads_setup_notes_preserve_user_spacing_and_empty_optional_sections(self):
+        result = ads_page.build_ads_result_record(
+            "Unicode Collector",
+            "Football",
+            "UK",
+            "Carousel",
+            variation_token="notes-preservation",
+        )
+        workflow = {
+            "export_date": "2026-07-31",
+            "slots": {},
+            "outcomes": {},
+            "ad_notes": {
+                "headlines": "  Keep leading spaces\nLine with  two spaces  ",
+                "descriptions": "",
+                "primary_text_variations": "Don’t rewrite this — ever.\n\nCafé supporters’ choice",
+                "cards": "Card 1:\tExact tab",
+            },
+        }
+
+        notes = ads_page.build_ads_setup_notes_text(result, workflow)
+
+        self.assertIn(
+            "HEADLINES\r\n\r\n  Keep leading spaces\r\nLine with  two spaces  ",
+            notes,
+        )
+        self.assertIn("DESCRIPTIONS\r\n\r\n[not supplied]", notes)
+        self.assertIn(
+            "PRIMARY TEXT VARIATIONS\r\n\r\n"
+            "Don’t rewrite this — ever.\r\n\r\nCafé supporters’ choice",
+            notes,
+        )
+        self.assertIn("CAROUSEL CARDS / AD SETUP\r\n\r\nCard 1:\tExact tab", notes)
 
     def test_generic_carousel_visual_contract_preserves_approved_generic_roles(self):
         prompt = ads_page.build_ads_prompt(
@@ -2081,6 +2134,51 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("exact generated headline, exact generated description, creative direction", contract)
         self.assertIn("Do not use abstract room symbolism", contract)
         self.assertIn("Never crop the outer frame", contract)
+
+    def test_every_carousel_prompt_has_sequential_photo_variation_lock(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Six Laps Ahead",
+                "Motorsport",
+                "Australia",
+                "Carousel",
+                variation_token="sequential-photo-test",
+            )
+        )
+        sections = carousel_prompt_card_sections(contract)
+
+        self.assertEqual(
+            contract.count("SEQUENTIAL PHOTO VARIATION — MANDATORY"),
+            ads_page.CAROUSEL_CARD_COUNT,
+        )
+        self.assertIn(
+            "establish the sequence's closest and most product-dominant viewpoint",
+            sections[1],
+        )
+        for index in range(2, ads_page.CAROUSEL_CARD_COUNT + 1):
+            with self.subTest(card=index):
+                self.assertIn(
+                    f"visibly different from the preceding Card {index - 1}",
+                    sections[index],
+                )
+                self.assertIn(
+                    "Never create variation by zooming too far out or making the product smaller.",
+                    sections[index],
+                )
+
+    def test_non_carousel_prompts_do_not_receive_sequential_photo_variation(self):
+        for campaign_type in ("Instant Experience", "Single Image / Video"):
+            with self.subTest(campaign_type=campaign_type):
+                contract = visual_contract(
+                    ads_page.build_ads_prompt(
+                        "Final Whistle Glory",
+                        "Football",
+                        "UK",
+                        campaign_type,
+                        variation_token="no-sequential-photo-test",
+                    )
+                )
+                self.assertNotIn("SEQUENTIAL PHOTO VARIATION — MANDATORY", contract)
 
     def test_last_image_variation_lock_is_required_inside_every_carousel_prompt(self):
         contract = visual_contract(
@@ -2143,6 +2241,32 @@ PRIMARY TEXT VARIATIONS
                 self.assertIn("correct ceiling and wall geometry", contract)
                 self.assertIn("SPORT AND COUNTRY VISUAL ADAPTATION", contract)
                 self.assertIn("Selected country: New Zealand", contract)
+                self.assertEqual(contract.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+                self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", contract)
+                self.assertIn("GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY", contract)
+
+    def test_ads_visual_contracts_do_not_receive_social_specific_instructions(self):
+        social_only_terms = (
+            "SPORTS CAVE BRANDING AND OVERLAY PLAN",
+            "Native platform stickers",
+            "deterministic branded-composition stage",
+            "Clean master plus deterministic branded final",
+            "Social Media Reels",
+        )
+        for campaign_type in ("Carousel", "Instant Experience", "Single Image / Video"):
+            with self.subTest(campaign_type=campaign_type):
+                contract = visual_contract(
+                    ads_page.build_ads_prompt(
+                        "Collector Test Product",
+                        "Cricket",
+                        "New Zealand",
+                        campaign_type,
+                        variation_token="no-social-leak-test",
+                    )
+                )
+                self.assertEqual(contract.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+                for social_term in social_only_terms:
+                    self.assertNotIn(social_term, contract)
 
     def test_every_ads_prompt_requires_text_first_no_automatic_image_generation(self):
         for campaign_type in ("Carousel", "Instant Experience", "Single Image / Video"):
@@ -2495,6 +2619,9 @@ PRIMARY TEXT VARIATIONS
         self.assertIn('st.expander("Ad setup notes (optional)"', source)
         self.assertIn("Paste the 5 headlines, one per line.", source)
         self.assertIn("Paste the 5 descriptions, one per line.", source)
+        self.assertIn('"Primary Text Variations"', source)
+        self.assertIn("ads-notes-primary-text::", source)
+        self.assertIn(".st-key-ads-setup-notes [data-testid=\"stHorizontalBlock\"]", source)
         self.assertLess(
             supported_result_source.index("_render_ads_image_slots(result, workflow)"),
             supported_result_source.index("_render_ads_setup_notes(result, workflow)"),
@@ -2503,6 +2630,19 @@ PRIMARY TEXT VARIATIONS
             supported_result_source.index("_render_ads_setup_notes(result, workflow)"),
             supported_result_source.index("_render_ads_image_save(result, workflow)"),
         )
+
+        app_test = run_ads_page()
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Carousel")
+        set_product_url(app_test)
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+        note_labels = [text_area.label for text_area in app_test.text_area]
+        self.assertIn("Headlines", note_labels)
+        self.assertIn("Descriptions", note_labels)
+        self.assertIn("Carousel cards / ad setup", note_labels)
+        self.assertIn("Primary Text Variations", note_labels)
 
     def test_submit_supported_result_renders_compact_sections_with_url_parameters(self):
         app_test = run_ads_page()

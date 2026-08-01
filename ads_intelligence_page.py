@@ -6,6 +6,7 @@ from decimal import Decimal
 import streamlit as st
 
 import meta_ads_client
+from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
 import supabase_backend
 import ui_styles
 
@@ -556,7 +557,19 @@ def _prompt_for(
             "Be direct. Recommend what to kill, scale, refresh, and create next. Include the reasoning and a practical next-action list.",
         ]
     )
-    return "\n".join(lines)
+    prompt = "\n".join(lines)
+    if template in {
+        "Country Creative Report",
+        "New Ad Copy Generator",
+        "New Image/Mockup Brief Generator",
+        "New Creative Based on Product Winners",
+        "Country/Product Creative Plan",
+    }:
+        prompt = append_sports_cave_image_realism_rules(
+            prompt,
+            include_product_lock=True,
+        )
+    return prompt
 
 
 def _sync_meta_ads(range_label, days, sync_base=True, sync_country=False, sync_age_gender=False, sync_platform=False, sync_type="performance"):

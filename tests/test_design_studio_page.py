@@ -2,6 +2,7 @@ from pathlib import Path
 import unittest
 
 import design_studio_page
+from sports_cave_prompt_blocks import SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +26,7 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         self.assertNotIn("strong enough to sell", prompt.casefold())
         self.assertNotIn("bestseller", prompt.casefold())
         self.assertIn("Do not generate the final artwork yet.", prompt)
+        self.assertNotIn(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER, prompt)
 
     def test_image_prompt_only_requests_image_carousel(self):
         prompt = design_studio_page.build_design_image_carousel_prompt(
@@ -53,6 +55,7 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         self.assertNotIn("recommendations, or creative direction", prompt.split("Only find and display the images.")[1])
         self.assertNotIn("display approximately 10-12 strong images", prompt)
         self.assertNotIn("Limited-edition plaque position", prompt)
+        self.assertNotIn(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER, prompt)
 
     def test_design_generation_prompt_uses_research_context_and_design_system(self):
         prompt = design_studio_page.build_design_generation_prompt("Bathurst Brock tribute")
@@ -76,6 +79,11 @@ class DesignStudioResearchPromptTests(unittest.TestCase):
         self.assertIn("It must never overpower the subject.", prompt)
         self.assertIn("If motorsport: realistic race cars", prompt)
         self.assertIn("Refine toward realism, emotion, collectibility, and wall-worthy bestseller potential.", prompt)
+        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+        self.assertIn("GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY", prompt)
+        self.assertIn("ORIGINAL ARTWORK MODE - PRODUCT LOCK EXCLUSION", prompt)
+        self.assertNotIn("Treat the uploaded full-resolution product as an immutable physical asset.", prompt)
+        self.assertNotIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", prompt)
         self.assertNotIn("Continue with this Sports Cave design system:", prompt)
         self.assertNotIn("Sports Cave Master Design System Prompt", prompt)
 

@@ -9,6 +9,7 @@ import streamlit.components.v1 as components
 
 from activity_log import record_activity_log
 import prompt_store
+from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -1456,6 +1457,12 @@ PROMPT_BOXES = {
     ),
 }
 
+ORIGINAL_ARTWORK_REALISM_PROMPT_KEYS = {
+    "upgrade-existing-design",
+    "expired-edition-next-chapter",
+    "create-sports-cave-style-artwork",
+}
+
 
 def _clean_prompt(prompt):
     return textwrap.dedent(prompt).strip()
@@ -1508,9 +1515,13 @@ def build_design_image_carousel_prompt(task_text: str, research_answer: str) -> 
 
 
 def build_design_generation_prompt(task_text: str) -> str:
-    return _clean_prompt(DESIGN_GENERATION_PROMPT_TEMPLATE).replace(
+    prompt = _clean_prompt(DESIGN_GENERATION_PROMPT_TEMPLATE).replace(
         "[PASTED TASK]",
         _task_or_placeholder(task_text),
+    )
+    return append_sports_cave_image_realism_rules(
+        prompt,
+        include_product_lock=False,
     )
 
 
@@ -1692,6 +1703,11 @@ def render_copy_prompt_box(
 ):
     prompt_id = _design_studio_prompt_id(key)
     effective_prompt = prompt_store.get_prompt(prompt_id, _clean_prompt(default_prompt_text))
+    if key in ORIGINAL_ARTWORK_REALISM_PROMPT_KEYS:
+        effective_prompt = append_sports_cave_image_realism_rules(
+            effective_prompt,
+            include_product_lock=False,
+        )
     source_record = prompt_store.get_prompt_source(
         prompt_id,
         _clean_prompt(default_prompt_text),

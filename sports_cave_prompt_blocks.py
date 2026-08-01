@@ -1,6 +1,148 @@
 from __future__ import annotations
 
 
+SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER = "SPORTS_CAVE_IMAGE_REALISM_RULES_V1"
+
+
+SPORTS_CAVE_GLOBAL_PHOTOGRAPHIC_REALISM_BLOCK = """GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY
+PHOTOREALISM AND HUMAN REALISM - MANDATORY
+These rules apply to every ChatGPT request that creates, transforms, extends, composites, animates or otherwise produces a Sports Cave image or visual. These rules override any conflicting creative direction, style request, workflow note, room idea, camera idea, campaign concept or platform instruction.
+
+The final output must look like genuine professional photography or physically believable real-world footage. It must not look AI-generated, CGI, rendered, illustrated, painted, plastic, glossy, video-game-like, synthetic, over-smoothed, over-sharpened or fake.
+
+Use natural professional photography:
+- believable camera perspective, scale, lens choice and depth
+- straight architectural lines and physically possible room geometry
+- realistic furniture, wall, floor, ceiling and material proportions
+- natural textures on timber, paper, glass, plaster, fabric, metal and skin
+- consistent light direction, colour temperature, reflections and shadows
+- realistic contact shadows, ambient occlusion and object weight
+- no excessive HDR, bloom, glow, sharpening, fisheye distortion, fake blur or synthetic colour grading
+- no floating, melted, duplicated, malformed, impossible, intersecting or physically incoherent objects
+- no warped walls, bent shelves, impossible windows, distorted furniture, fake luxury clutter or random generated props
+
+When people appear, they must look like real people photographed in the scene:
+- Faces must remain natural, recognisable and anatomically correct
+- realistic faces, skin texture, hair, eyes, teeth, hands, fingers, wrists, arms, anatomy, posture and clothing
+- natural asymmetry and believable imperfections
+- correct number of limbs and fingers
+- no waxy skin, mannequin bodies, duplicated fingers, melted hands, disconnected limbs, uncanny eyes, fake smiles or stock-model posing
+- people, hands, furniture, glare, logos, branding and overlays must never cover the hero product or important product details unless the workflow explicitly asks for a separate deterministic branded export layer
+
+Respect the requested output format exactly:
+- use the exact requested dimensions and aspect ratio
+- compose for that canvas from the start rather than cropping from another format
+- keep all critical subject matter inside platform-safe areas when safe areas are supplied
+- before returning, inspect the final result for correct dimensions, clean geometry, realistic materials, consistent light, readable product details and absence of obvious AI artifacts"""
+
+
+SPORTS_CAVE_PRODUCT_MOCKUP_LOCK_BLOCK = """SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY
+PRODUCT LOCK:
+PRODUCT AND ARTWORK LOCK - MANDATORY
+Apply this product lock whenever an uploaded Sports Cave product, artwork, framed product, framed mockup or product reference image is used as the source.
+
+Treat the uploaded full-resolution product as an immutable physical asset. Use the uploaded image directly as the source, not a screenshot, thumbnail, compressed preview, metadata description, memory of the image, rough approximation or AI recreation.
+
+Preserve the complete artwork exactly:
+- every athlete, face, body, team, vehicle, stadium, crowd, background, equipment and supporting image
+- every word, letter, number, logo, signature, title, subtitle, font, colour, border, crop, layout and design element
+- every limited-edition badge, plaque, collector badge, numbered detail and edition plate exactly as supplied
+- the exact artwork aspect ratio inside the frame
+- the exact frame colour, material, thickness, depth, proportions, crop and outer geometry
+- the exact black frame colour, material, thickness and proportions when the supplied product uses a black frame
+
+Never fabricate, repair, replace or invent product details:
+- Do not redesign the artwork.
+- Do not change the athlete, subject, team, colours, text, typography, badge, edition plate, plaque, layout, crop, frame colour, frame shape, or composition inside the frame.
+- Never invent or change an edition number.
+- no fake edition numbers, unreadable plaque information, invented signatures, fake logos, new team marks, new sporting details or made-up text
+- do not recolour, enhance, repaint, sharpen, soften, upscale, regenerate, reinterpret, redraw, approximate or create a lookalike version of the artwork
+- do not mirror the artwork if it reverses text, numbers, logos, livery, jersey details or signatures
+- do not crop, zoom, stretch, squash, bend, bow, twist, curve, taper, warp, blur, melt, reshape or distort the product, artwork, frame, glass, plaque, badge or typography
+
+FRAME REALISM:
+Lock the frame geometry:
+- keep all four outer frame edges straight and all corners structurally correct
+- keep the complete outer frame visible whenever the product is shown as a framed product
+- preserve the rectangular landscape proportions of the frame and artwork
+- natural camera perspective may affect the whole product only as one rigid rectangular physical object
+- never allow conflicting perspective between the frame, artwork, glass, wall, furniture and room
+- never make the product larger by cutting off its outer edges; move the camera closer while preserving the complete frame
+
+Require genuine physical frame construction:
+- believable timber or frame depth
+- consistent thickness on all visible sides
+- sharp square corners and clean mitred joins
+- subtle realistic frame texture
+- realistic bevels, edges, weight and scale
+- physical mounting, contact shadows, ambient occlusion and light direction that match the room
+
+GLASS REALISM:
+Require realistic transparent glass:
+- genuine clear glass over the artwork, not fake shine or missing glazing
+- restrained room-based reflections, subtle natural glare and realistic highlight falloff
+- reflections consistent with the windows, lights and camera angle
+- glass must never obscure, wash out, rewrite, distort or hide faces, typography, logos, artwork, badge, plaque or edition details
+
+ROOM REALISM:
+Require believable placement:
+- the product must look mounted, held or placed naturally in the room
+- it must never float, sink into a wall, intersect furniture, bend around a corner, detach from shadows or look digitally pasted on
+- wall shadows, contact shadows and ambient occlusion must match the product size, mounting depth and room lighting
+
+Keep the Sports Cave product as the visual hero:
+- the room supports the product; Sports Cave is selling the framed edition, not the room
+- keep the framed product prominent, dominant and large enough to understand on mobile
+- avoid distant wide-room compositions that make the frame small or secondary
+- prevent people, hands, furniture, glare, decor, branding, overlays or platform UI space from covering the product or important details
+
+Mandatory final product inspection:
+- confirm the uploaded artwork and frame remain unchanged
+- confirm every face, word, number, colour, logo, signature, badge, plaque and edition plate is preserved
+- confirm the product is straight, rigid, complete, correctly proportioned, physically mounted or held, realistically lit, protected by transparent glass and free from obvious AI artifacts"""
+
+
+def build_sports_cave_image_realism_rules(*, include_product_lock: bool = True) -> str:
+    sections = [
+        SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER,
+        "AUTHORITATIVE SPORTS CAVE IMAGE REALISM RULES",
+        "This shared master block is mandatory and overrides conflicting creative direction.",
+        SPORTS_CAVE_GLOBAL_PHOTOGRAPHIC_REALISM_BLOCK,
+    ]
+    if include_product_lock:
+        sections.append(SPORTS_CAVE_PRODUCT_MOCKUP_LOCK_BLOCK)
+    else:
+        sections.append(
+            "ORIGINAL ARTWORK MODE - PRODUCT LOCK EXCLUSION\n"
+            "This prompt creates a brand-new Sports Cave artwork or reference search output rather than placing an existing completed framed product into a scene. Apply the global photographic realism and accuracy rules above, but do not treat a nonexistent completed product as immutable."
+        )
+    return "\n\n".join(section.strip() for section in sections if str(section).strip())
+
+
+def prompt_has_sports_cave_image_realism_rules(prompt_text: str) -> bool:
+    return SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER.casefold() in str(prompt_text or "").casefold()
+
+
+def append_sports_cave_image_realism_rules(
+    prompt_text: str,
+    *,
+    include_product_lock: bool = True,
+    required_ending: str = "",
+) -> str:
+    prompt_text = str(prompt_text or "").strip()
+    if prompt_has_sports_cave_image_realism_rules(prompt_text):
+        return prompt_text
+
+    block = build_sports_cave_image_realism_rules(
+        include_product_lock=include_product_lock
+    )
+    ending = str(required_ending or "").strip()
+    if ending and prompt_text.rstrip().endswith(ending):
+        body = prompt_text.rstrip()[: -len(ending)].rstrip()
+        return f"{body}\n\n{block}\n\n{ending}" if body else f"{block}\n\n{ending}"
+    return f"{prompt_text}\n\n{block}" if prompt_text else block
+
+
 SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK = """UGC HUMAN REALISM REQUIREMENTS:
 If a person appears in the scene, make them look like a real everyday customer captured on a modern phone camera, not a model, actor, mannequin, stock-photo subject, or AI-generated person.
 
@@ -79,36 +221,7 @@ The final scene should look like a real happy customer has just installed, recei
 A viewer should feel the product is real, the room is real, the person is real, and the moment is believable."""
 
 
-SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK = """SPORTS CAVE PRODUCT LOCK:
-Keep the uploaded Sports Cave artwork and frame exactly the same.
-Do not redesign the artwork.
-Do not change the athlete, subject, colours, text, badge, edition plate, plaque, layout, crop, frame colour, frame shape, or composition inside the frame.
-Do not blur, stretch, warp, bend, squash, distort, repaint, redraw, replace, or reinterpret the artwork.
-The artwork must remain sharp, rectangular, correctly aligned, and physically believable inside the frame.
-
-FRAME REALISM:
-The black frame must look like a real premium framed product:
-- realistic timber or frame depth
-- sharp square corners
-- believable glass over the artwork
-- soft natural reflections
-- subtle glare that does not hide the artwork
-- realistic wall shadow
-- accurate perspective
-- correct scale relative to the person and room
-
-ROOM REALISM:
-The room must remain realistic, premium, and believable.
-Do not distort walls, furniture, lamps, sofas, curtains, shelves, floors, or architecture.
-No warped walls.
-No impossible furniture.
-No random logos.
-No fake trophies.
-No clutter.
-No messy room.
-No obvious AI room.
-No neon signs unless very subtle.
-The framed artwork must look mounted, held, or placed naturally in the room, not pasted on."""
+SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK = SPORTS_CAVE_PRODUCT_MOCKUP_LOCK_BLOCK
 
 
 SPORTS_CAVE_UGC_VIDEO_REALISM_BLOCK = """UGC VIDEO REALISM:
@@ -276,8 +389,10 @@ def append_sports_cave_prompt_blocks(
     result = str(prompt_text or "").strip()
     if include_human:
         result = append_unique_block(result, SPORTS_CAVE_UGC_HUMAN_REALISM_BLOCK)
-    if include_product_lock:
-        result = append_unique_block(result, SPORTS_CAVE_PRODUCT_AND_ROOM_LOCK_BLOCK)
+    result = append_sports_cave_image_realism_rules(
+        result,
+        include_product_lock=include_product_lock,
+    )
     if include_video:
         result = append_unique_block(result, SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK)
     if include_human and include_video:

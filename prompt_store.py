@@ -6,7 +6,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 PROMPT_OVERRIDES_PATH = BASE_DIR / "output" / "_cache" / "prompt_overrides.json"
-PROMPT_STORE_VERSION = 2
+PROMPT_STORE_VERSION = 3
 ENABLE_LOCAL_PROMPT_FILE_WRITES = (
     os.getenv("ENABLE_LOCAL_PROMPT_FILE_WRITES", "").strip().casefold() == "true"
 )

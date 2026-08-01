@@ -6,9 +6,10 @@ from pathlib import PurePosixPath
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import social_media_branding
+from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
 
 
-SOCIAL_PROMPT_CONTRACT_VERSION = "SOCIAL CONTENT PROMPT V3"
+SOCIAL_PROMPT_CONTRACT_VERSION = "SOCIAL CONTENT PROMPT V4"
 SOCIAL_OUTPUT_ROOT = "04_OUTPUT/social-media"
 
 CONTENT_FOCUS_OPTIONS = (
@@ -389,12 +390,6 @@ LAUNCH_SEQUENCE = (
     ("D+5", "Use the accurate claimed count and answer objections."),
     ("D+10", "Use a room or gift angle, or retire the campaign if attention has dropped."),
 )
-
-PRODUCT_LOCK = """PRODUCT AND ARTWORK LOCK - MANDATORY
-Use the uploaded Sports Cave artwork or framed-product reference as the exact compositing source. Preserve the athlete or subject, team colours, typography, badge, plaque, edition plate, signature, crop, border and every part of the internal composition exactly. Preserve the exact black frame colour, shape, timber depth, thickness, proportions and crop. Never redesign, replace, redraw, rewrite, blur, stretch, bend, warp, squash or distort the artwork or frame. Never invent or change an edition number. Never place generated content beyond the original artwork or frame boundary. Keep the complete outer frame visible whenever a framed product is shown."""
-
-REALISM_LOCK = """PHOTOREALISM AND HUMAN REALISM - MANDATORY
-Create premium real-world photography, not an obvious AI render. The frame needs convincing timber depth, sharp square corners and joins, believable mounting, natural glass thickness, restrained reflections and physically accurate contact shadows. Architecture, rooms, furniture, materials, scale, perspective, lighting and shadows must be coherent and realistic. Faces must remain natural, recognisable and anatomically correct. Any person must have accurate eyes, hands, fingers, teeth, limbs, skin texture and proportions. Reject waxy skin, duplicated fingers, melted details, floating objects, warped walls, malformed furniture, impossible reflections, synthetic textures, excessive HDR or artificial glow. A generated room is lifestyle/mockup content and must never be described as a real customer home."""
 
 RIGHTS_AND_CLAIMS_LOCK = """ACCURACY, RIGHTS AND CLAIMS - MANDATORY
 Never fabricate a price, live edition count, deadline, offer, delivery claim, review, customer story, result, athlete endorsement or official affiliation. Use only claims explicitly supplied in the structured brief. Do not use or suggest unlicensed broadcast clips, athlete photography or third-party creator footage. Use only source material whose usage rights are already approved; if rights are uncertain, stop and request confirmation rather than using the asset. Keep product, athlete, team, event, artwork and competition names exactly as supplied."""
@@ -1005,7 +1000,7 @@ def _visual_prompt(
         if sequence_rule.strip()
         else ""
     )
-    return f"""Create the final {label} visual for Sports Cave.
+    prompt = f"""Create the final {label} visual for Sports Cave.
 
 OUTPUT FORMAT
 Create exactly one {aspect_ratio} image at {target_size}. Compose for the full target canvas and keep all important content away from platform UI edges.
@@ -1018,10 +1013,6 @@ CREATIVE DIRECTION
 
 PRODUCT PROMINENCE
 The framed Sports Cave edition is the product being sold. It must remain the dominant, immediately readable visual subject. The environment supplies scale, aspiration and atmosphere but never becomes the subject. Do not make the product smaller merely to show more room.
-
-{PRODUCT_LOCK}
-
-{REALISM_LOCK}
 
 {CLEAN_VISUAL_GENERATION_LOCK}
 
@@ -1037,6 +1028,10 @@ STAGE 2 - SPORTS CAVE BRANDED COMPOSITION
 
 FINAL QUALITY CHECK
 Verify the exact aspect ratio and dimensions, the supplied product is unchanged, the complete frame is physically convincing, no unsupported claim or third-party asset was introduced, the composition has one clear focal point, and the result has no obvious AI artefacts. Retain the clean master, then use the deterministic export layer to create the separate branded final."""
+    return append_sports_cave_image_realism_rules(
+        prompt,
+        include_product_lock=True,
+    )
 
 
 def _carousel_prompts(payload):
@@ -1225,11 +1220,7 @@ def _video_prompts(payload, still_prompts):
     )
     for index, still in enumerate(still_prompts, start=1):
         branding_plan = still["branding_plan"]
-        prompts.append(
-            {
-                "label": f"Image-to-video {index}",
-                "branding_plan": branding_plan,
-                "prompt": f"""Create a photorealistic vertical image-to-video shot from the exact supplied {still['label']} image.
+        prompt_text = f"""Create a photorealistic vertical image-to-video shot from the exact supplied {still['label']} image.
 
 Duration: 4-6 seconds. Output: 1080 x 1920, 9:16, high-quality vertical video.
 Camera: {movement[index - 1]}. Movement must be smooth, physically plausible and subtle.
@@ -1240,6 +1231,15 @@ STAGE 2 - BRANDED VIDEO COMPOSITION
 {social_media_branding.branding_plan_text(branding_plan)}
 
 Final check: the exact Sports Cave product remains unchanged throughout every frame. Retain the clean video master, then apply the exact website logo and supplied copy through the deterministic export layer."""
+        prompt_text = append_sports_cave_image_realism_rules(
+            prompt_text,
+            include_product_lock=True,
+        )
+        prompts.append(
+            {
+                "label": f"Image-to-video {index}",
+                "branding_plan": branding_plan,
+                "prompt": prompt_text,
             }
         )
     return prompts

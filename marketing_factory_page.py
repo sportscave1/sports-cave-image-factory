@@ -10,6 +10,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 import supabase_backend
+from sports_cave_prompt_blocks import append_sports_cave_image_realism_rules
 
 
 COUNTRY_RULES = {
@@ -635,7 +636,7 @@ def _build_prompt(inputs):
     angle_rules = ANGLE_RULES.get(inputs["primary_angle"], "")
     secondary = ", ".join(inputs["secondary_angles"]) if inputs["secondary_angles"] else "None"
     exact_rule = "Exact edition number is enabled. Only use it if the ad will be updated when numbers move." if inputs["include_exact"] else "Do not mention exact edition number unless I explicitly ask."
-    return f"""START PROMPT
+    prompt = f"""START PROMPT
 
 You are my Sports Cave Meta Ads strategist and copywriter.
 
@@ -783,6 +784,10 @@ Do not use:
 {chr(10).join(HARD_AVOID)}
 
 END PROMPT"""
+    return append_sports_cave_image_realism_rules(
+        prompt,
+        include_product_lock=True,
+    )
 
 
 def _build_pack(inputs):
@@ -858,6 +863,10 @@ def _build_pack(inputs):
             "- Avoid clutter, fake logos, unrelated athletes, and warped frames.",
             f"- Notes: {inputs['mockup_notes'] or 'Use clean product and room mockups.'}",
         ]
+    )
+    mockup = append_sports_cave_image_realism_rules(
+        mockup,
+        include_product_lock=True,
     )
     checklist = "\n".join(f"- {item}" for item in QUALITY_CHECKS)
     return {
@@ -1436,6 +1445,11 @@ def _render_prompt_library_tab():
         key="mf-template-vars",
     )
     preview = f"{selected}\n\nPurpose:\n{templates[selected]}\n\nVariables:\n{variables}\n\nRules:\n- No OpenAI call from Sports Cave OS.\n- Paste this into ChatGPT with product artwork.\n- Avoid: {', '.join(HARD_AVOID)}"
+    if selected == "Mockup/Image Brief":
+        preview = append_sports_cave_image_realism_rules(
+            preview,
+            include_product_lock=True,
+        )
     with _card("Preview", "Copy this prompt template or save it as a pack."):
         _copy_button(preview, f"template-{selected}", "Copy Template")
         st.text_area("Template preview", value=preview, height=320, key="mf-template-preview", label_visibility="collapsed")

@@ -10,6 +10,7 @@ from PIL import Image
 
 import prompt_store
 import social_media_reels_studio_page as reels
+from sports_cave_prompt_blocks import SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -230,6 +231,9 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertIn("Use the uploaded black framed Sports Cave product mockup", payload["background_prompt"])
         self.assertIn("Image A is the exact Sports Cave black framed product mockup.", payload["image_prompt"])
         self.assertIn("PRODUCT LOCK", payload["image_prompt"])
+        self.assertEqual(payload["background_prompt"].count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+        self.assertEqual(payload["image_prompt"].count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+        self.assertEqual(payload["video_prompt"].count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
         self.assertIn("Create an ultra-realistic 5 second cinematic lifestyle video", payload["video_prompt"])
         self.assertEqual(payload["product_handle"], "athlete-name-product-handle")
         self.assertEqual(payload["prompt_product_handle"], "[PRODUCT HANDLE]")
@@ -755,6 +759,8 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         )
 
         for prompt in prompts.values():
+            self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+            self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", prompt)
             for text in required_text:
                 with self.subTest(text=text):
                     self.assertIn(text, prompt)
@@ -859,6 +865,8 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         )
 
         for prompt in prompts.values():
+            self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+            self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", prompt)
             for text in required_text:
                 with self.subTest(text=text):
                     self.assertIn(text, prompt)
@@ -992,6 +1000,9 @@ class SocialMediaReelsStudioPageTests(unittest.TestCase):
         self.assertIn("Use the uploaded black framed Sports Cave product mockup as the product reference.", prompt)
         self.assertIn("Analyse the uploaded product image directly instead of relying on product metadata.", prompt)
         self.assertIn("Use the supplied image, not a screenshot or compressed preview.", prompt)
+        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+        self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", prompt)
+        self.assertIn("Treat the uploaded full-resolution product as an immutable physical asset.", prompt)
         self.assertNotIn("Product handle:", prompt)
         self.assertNotIn("Product title:", prompt)
         self.assertNotIn("Sport category:", prompt)

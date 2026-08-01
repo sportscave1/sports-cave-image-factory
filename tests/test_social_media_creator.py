@@ -4,6 +4,7 @@ from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
 import social_media_creator as creator
+from sports_cave_prompt_blocks import SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER
 
 
 def base_payload(**overrides):
@@ -36,8 +37,11 @@ class SocialPromptContractTests(unittest.TestCase):
         self.assertEqual(len(package["visual_prompts"]), 6)
         for prompt in package["visual_prompts"]:
             text = prompt["prompt"]
+            self.assertEqual(text.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
             self.assertIn("PRODUCT AND ARTWORK LOCK - MANDATORY", text)
+            self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", text)
             self.assertIn("PHOTOREALISM AND HUMAN REALISM - MANDATORY", text)
+            self.assertIn("GLOBAL PHOTOGRAPHIC REALISM RULES - MANDATORY", text)
             self.assertIn("Create exactly one 4:5 image at 1080 x 1350", text)
             self.assertIn("exact black frame colour", text)
             self.assertIn("Never invent or change an edition number", text)
@@ -122,7 +126,12 @@ class SocialPromptContractTests(unittest.TestCase):
                     )
                 )
                 for prompt in package["visual_prompts"]:
+                    self.assertEqual(
+                        prompt["prompt"].count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER),
+                        1,
+                    )
                     self.assertIn("PRODUCT AND ARTWORK LOCK - MANDATORY", prompt["prompt"])
+                    self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", prompt["prompt"])
                     self.assertIn("PHOTOREALISM AND HUMAN REALISM - MANDATORY", prompt["prompt"])
                     self.assertIn("Faces must remain natural", prompt["prompt"])
                     self.assertIn("STAGE 1 - CLEAN VISUAL GENERATION", prompt["prompt"])
@@ -144,10 +153,10 @@ class SocialPromptContractTests(unittest.TestCase):
         self.assertIn("Never fabricate a price", package["creative_prompt"])
         self.assertIn("if rights are uncertain", package["creative_prompt"])
 
-    def test_v3_brand_contract_is_complete_for_every_public_format(self):
+    def test_v4_brand_contract_is_complete_for_every_public_format(self):
         self.assertEqual(
             creator.SOCIAL_PROMPT_CONTRACT_VERSION,
-            "SOCIAL CONTENT PROMPT V3",
+            "SOCIAL CONTENT PROMPT V4",
         )
         for content_format in (
             "Static feed post",
@@ -196,6 +205,40 @@ class SocialPromptContractTests(unittest.TestCase):
                         "Restrained UGC treatment",
                         package["visual_prompts"][0]["prompt"],
                     )
+
+    def test_social_image_prompts_have_shared_marker_without_ads_instructions(self):
+        ads_only_terms = (
+            "CAROUSEL CARD CHARACTER LIMIT",
+            "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT",
+            "INSTANT EXPERIENCE SETUP",
+            "META URL PARAMETERS",
+            "Would you like me to generate Card 1?",
+        )
+        for content_format in (
+            "Story sequence",
+            "Reel",
+            "Feed carousel",
+            "Static feed post",
+            "Pinterest Pin",
+            "UGC/collector proof",
+        ):
+            with self.subTest(content_format=content_format):
+                package = creator.build_content_package(
+                    base_payload(
+                        format=content_format,
+                        production_method=(
+                            "AI Reels Studio" if content_format == "Reel" else ""
+                        ),
+                        platforms=["All suitable platforms"],
+                    )
+                )
+                for prompt in package["visual_prompts"]:
+                    self.assertEqual(
+                        prompt["prompt"].count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER),
+                        1,
+                    )
+                    for ads_term in ads_only_terms:
+                        self.assertNotIn(ads_term, prompt["prompt"])
 
     def test_story_branding_is_consistent_and_cta_is_final_only(self):
         package = creator.build_content_package(
@@ -475,15 +518,15 @@ class SocialPromptContractTests(unittest.TestCase):
             creator.SOCIAL_PROMPT_CONTRACT_VERSION,
         )
 
-    def test_v1_cached_prompt_signature_is_invalidated(self):
+    def test_v3_cached_prompt_signature_is_invalidated(self):
         with mock.patch.object(
             creator,
             "SOCIAL_PROMPT_CONTRACT_VERSION",
-            "SOCIAL CONTENT PROMPT V1",
+            "SOCIAL CONTENT PROMPT V3",
         ):
-            v1_signature = creator.input_signature(base_payload())
+            v3_signature = creator.input_signature(base_payload())
 
-        self.assertNotEqual(v1_signature, creator.input_signature(base_payload()))
+        self.assertNotEqual(v3_signature, creator.input_signature(base_payload()))
 
     def test_custom_hook_and_exactly_one_custom_cta_are_preserved(self):
         hook = "The night the Mountain fell silent"

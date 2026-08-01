@@ -21,7 +21,10 @@ import streamlit.components.v1 as components
 
 from activity_log import record_activity_log
 import prompt_store
-from sports_cave_prompt_blocks import SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK
+from sports_cave_prompt_blocks import (
+    SPORTS_CAVE_VIDEO_ARTWORK_FREEZE_LOCK,
+    append_sports_cave_image_realism_rules,
+)
 
 BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "output" / "runs"
@@ -162,15 +165,11 @@ Where helpful, make the scene feel suited to {product_title} for a {sport_catego
 Additional VA direction is {creative_notes}."""
 
 
-IMAGE_PRODUCT_LOCK = """PRODUCT LOCK
+IMAGE_PRODUCT_SOURCE_NOTE = """PRODUCT SOURCE NOTE
 
-Keep the uploaded Sports Cave artwork and black frame exactly the same.
-
-Do not redesign the artwork.
-Do not change the athlete, subject, team, colours, text, typography, badge, edition plate, plaque, layout, crop, frame colour, frame shape, or composition inside the frame.
-Do not blur, stretch, warp, bend, squash, distort, repaint, redraw, replace, regenerate, or reinterpret the artwork.
-
-The artwork must remain sharp, rectangular, correctly aligned, and physically believable inside the frame."""
+Use Image A as the supplied Sports Cave product source for this scene.
+Use Image B as the supplied background/reference room source for this scene.
+The shared Sports Cave image realism block below controls the immutable product lock, artwork lock, frame geometry, glass, mounting, shadows, room realism and final inspection requirements."""
 
 
 IMAGE_PERSON_REALISM_HOLDING = """PERSON REALISM
@@ -1365,7 +1364,7 @@ def _build_image_prompt_default(scene: dict, product_handle: str, product_title:
     if slug == "collector-admire":
         return f"""{opening}
 
-{IMAGE_PRODUCT_LOCK}
+{IMAGE_PRODUCT_SOURCE_NOTE}
 
 SCENE
 
@@ -1480,7 +1479,7 @@ Photorealistic premium Sports Cave collector-room mockup with a realistic custom
     if slug == "wall-hanging-adjust":
         return f"""{opening}
 
-{IMAGE_PRODUCT_LOCK}
+{IMAGE_PRODUCT_SOURCE_NOTE}
 
 SCENE
 
@@ -1598,7 +1597,7 @@ Photorealistic premium Sports Cave installation mockup showing a realistic custo
     if slug == "wall-admire":
         return f"""{opening}
 
-{IMAGE_PRODUCT_LOCK}
+{IMAGE_PRODUCT_SOURCE_NOTE}
 
 SCENE
 
@@ -1710,7 +1709,7 @@ Photorealistic premium Sports Cave lifestyle mockup showing the exact uploaded f
 
     return f"""{opening}
 
-{IMAGE_PRODUCT_LOCK}
+{IMAGE_PRODUCT_SOURCE_NOTE}
 
 SCENE
 
@@ -1856,6 +1855,10 @@ def _compose_social_reels_prompt(
             SPORTS_CAVE_FRAME_ARTWORK_FREEZE_LOCK,
             "SPORTS CAVE FRAME + ARTWORK FREEZE LOCK",
         )
+    result = append_sports_cave_image_realism_rules(
+        result,
+        include_product_lock=True,
+    )
     return result
 
 
@@ -2006,12 +2009,16 @@ def build_background_finder_prompt(
             f"\n\nAdditional creative direction from the VA: {GENERIC_PRODUCT_ANGLE_PLACEHOLDER}",
             "",
         )
-    return _render_prompt_placeholders(
+    rendered = _render_prompt_placeholders(
         template,
         product_handle,
         product_title,
         sport_category,
         creative_notes,
+    )
+    return append_sports_cave_image_realism_rules(
+        rendered,
+        include_product_lock=True,
     )
 
 

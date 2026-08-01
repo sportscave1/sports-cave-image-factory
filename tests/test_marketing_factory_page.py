@@ -1,6 +1,7 @@
 import unittest
 
 import marketing_factory_page as marketing_factory
+from sports_cave_prompt_blocks import SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER
 
 
 class MarketingFactoryPageTests(unittest.TestCase):
@@ -48,6 +49,12 @@ class MarketingFactoryPageTests(unittest.TestCase):
         self.assertIn("OUTPUT EXACTLY:", prompt)
         self.assertIn("Manual carousel card copy", prompt)
         self.assertIn("Instant Experience version", prompt)
+        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+        self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", prompt)
+        self.assertEqual(
+            pack["mockup_brief"].count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER),
+            1,
+        )
 
     def test_manual_carousel_outputs_mobile_sized_banks(self):
         pack = marketing_factory._build_pack(self._inputs())

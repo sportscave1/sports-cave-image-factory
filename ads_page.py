@@ -20,6 +20,7 @@ from ads_product_catalog import load_live_edition_product_rows
 import dropbox_integration
 import image_factory
 import os_accounts
+from sports_cave_prompt_blocks import build_sports_cave_image_realism_rules
 
 
 CATEGORY_OPTIONS = [
@@ -96,10 +97,11 @@ EDITION_OPS_ROWS_SESSION_KEY = "edition_ops_rows"
 CAROUSEL_CARD_MAX_CHARACTERS = 17
 CAROUSEL_CARD_COUNT = 5
 META_WINNER_COPY_BLOCK_VERSION = "SPORTS CAVE META WINNER COPY UPGRADE V1"
-ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V2"
+ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V4"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
+ADS_COPY_FILENAME = "Ad Copy.txt"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
 PRODUCT_URL_ERROR = "Enter a valid product page URL before submitting."
@@ -1352,6 +1354,26 @@ def build_carousel_photorealism_lock():
 Make the room, frame and product placement resemble a genuine high-end interior photograph, not an AI-generated room or digital render. Use believable architecture, correct perspective, natural proportions and physically accurate scale. Create realistic contact shadows behind and below the frame. Use subtle, controlled glass reflections without obscuring the artwork. Give the frame convincing timber depth, sharp corners, natural texture and accurate mounting. Use realistic natural or practical lighting with consistent direction and colour temperature. Avoid plastic-looking surfaces, excessive HDR, artificial glow, oversharpening and cinematic effects that make the image look generated. Avoid warped walls, bent furniture, duplicate objects, melted textures, impossible shadows, distorted decor, floating objects and inconsistent reflections. Keep room styling restrained and believable with a small number of purposeful objects rather than AI-generated clutter. Do not add people unless the individual carousel concept explicitly requires them; if people are required, they must look anatomically and photographically realistic."""
 
 
+def build_carousel_sequential_photo_variation_lock(index):
+    preceding_card_rule = (
+        "As Card 1, establish the sequence's closest and most product-dominant viewpoint."
+        if index == 1
+        else (
+            f"As Card {index}, use a camera viewpoint and artwork placement that are visibly "
+            f"different from the preceding Card {index - 1}."
+        )
+    )
+    return f"""SEQUENTIAL PHOTO VARIATION — MANDATORY
+
+This image must look like a genuinely different photograph from the other carousel cards—not the same room mockup with minor styling changes. Give this card a clearly distinct camera viewpoint, artwork position and composition. Vary naturally between perspectives such as a subtle left three-quarter angle, right three-quarter angle, straight-on view, slightly higher or lower camera position, or a different off-centre placement. These are examples only; choose the most realistic premium composition for each card.
+
+Every card after Card 1 must be visibly different from the preceding card in camera angle and frame placement. Do not repeat nearly identical crops, wall positions, room layouts or viewing angles.
+
+{preceding_card_rule}
+
+The framed artwork must remain dominant and large enough to recognise immediately in a Facebook carousel. Never create variation by zooming too far out or making the product smaller. The room should enhance the artwork, never compete with it. Preserve all existing product-lock, photorealism, square-format and card-specific prominence requirements."""
+
+
 def build_carousel_image_prompt_schema(
     index,
     role,
@@ -1380,6 +1402,7 @@ def build_carousel_image_prompt_schema(
     room_realism_rules = build_room_realism_visual_rules()
     photorealism_lock = build_carousel_photorealism_lock()
     variation_lock = build_last_image_variation_visual_rules()
+    sequential_variation_lock = build_carousel_sequential_photo_variation_lock(index)
     sport_country_adaptation = build_sport_country_visual_adaptation(
         category,
         selected_country,
@@ -1427,6 +1450,8 @@ Card-specific visual purpose: {required_purposes[index]}
 {photorealism_lock}
 
 {variation_lock}
+
+{sequential_variation_lock}
 
 {sport_country_adaptation}{campaign_moment_visual_block}
 
@@ -1499,6 +1524,8 @@ For every card, make the exact generated headline, exact generated description, 
 Privately develop a fresh visual concept from the selected product before writing the five prompts. Do not output that reasoning.
 
 Across the five prompts deliberately vary room type, architecture, wall finish, material palette, furniture style, lighting direction, time of day, camera height, camera distance, camera angle, artwork placement, emotional intensity, negative space, framing and composition, and how the room expresses the card's message without zooming out so far that the framed artwork becomes small. For Card 1, variation means restrained wall material, wall colour, lighting and frame-depth treatment only; do not create a full room scene for Card 1.
+
+Coordinate the five prompts as a deliberately varied photographic sequence. Each card after Card 1 must use a visibly different camera viewpoint and artwork placement from the preceding card while preserving Card 1 as the closest product hero, Cards 2-4 as product-dominant medium or medium-close lifestyle images, and Card 5 as a close, dramatic scarcity image.
 
 No two cards may repeat the room type, house architecture, wall treatment, wall colour family, main furniture layout, lighting setup, time-of-day treatment, camera composition, camera height or artwork placement. Card 1 is intentionally a close-up wall product shot, so do not force it into a living room, entry gallery, office, man cave, home bar or other room type for the sake of variety.
 
@@ -2128,6 +2155,8 @@ Treat the creative variation token only as a cue for a fresh interpretation. Nev
 {build_sport_country_visual_adaptation(category, country)}
 
 {campaign_requirements}
+
+{build_sports_cave_image_realism_rules(include_product_lock=True)}
 
 FINAL RESPONSE TERMINATION - MANDATORY
 
@@ -4650,11 +4679,7 @@ def build_ads_export_folder_name(result, workflow):
 
 
 def build_ads_notes_filename(result, workflow):
-    folder_name = build_ads_export_folder_name(result, workflow)
-    return ads_image_workflow.sanitize_product_filename(
-        f"{folder_name} - Ad Setup Notes.txt",
-        max_length=210,
-    )
+    return ADS_COPY_FILENAME
 
 
 def _ads_export_folder_path(destination, result, workflow):
@@ -4667,16 +4692,15 @@ def _ads_export_folder_path(destination, result, workflow):
 
 def _ads_notes_for_workflow(workflow):
     notes = dict((workflow or {}).get("ad_notes") or {})
-    def clean_multiline(value):
-        text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
-        text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", " ", text)
-        lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.split("\n")]
-        return "\n".join(lines).strip()
+
+    def preserve_multiline(value):
+        return str(value or "").replace("\r\n", "\n").replace("\r", "\n")
 
     return {
-        "headlines": clean_multiline(notes.get("headlines")),
-        "descriptions": clean_multiline(notes.get("descriptions")),
-        "cards": clean_multiline(notes.get("cards")),
+        "headlines": preserve_multiline(notes.get("headlines")),
+        "descriptions": preserve_multiline(notes.get("descriptions")),
+        "primary_text_variations": preserve_multiline(notes.get("primary_text_variations")),
+        "cards": preserve_multiline(notes.get("cards")),
     }
 
 
@@ -4711,17 +4735,18 @@ def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
     else:
         lines.append("- No generated image upload slots for this campaign type.")
 
-    lines.extend(["", "Pasted headlines"])
+    lines.extend(["", "HEADLINES", ""])
     lines.append(notes["headlines"] or "[not supplied]")
-    lines.extend(["", "Pasted descriptions"])
+    lines.extend(["", "DESCRIPTIONS", ""])
     lines.append(notes["descriptions"] or "[not supplied]")
+    lines.extend(["", "PRIMARY TEXT VARIATIONS", ""])
+    lines.append(notes["primary_text_variations"] or "[not supplied]")
+    lines.extend(["", "CAROUSEL CARDS / AD SETUP", ""])
+    lines.append(notes["cards"] or "[not supplied]")
 
     if campaign_type == "Carousel":
         lines.extend(
             [
-                "",
-                "Carousel card copy / setup",
-                notes["cards"] or "[not supplied]",
                 "",
                 "Carousel setup checklist",
                 "- Use exactly 5 carousel cards in the generated order.",
@@ -4734,9 +4759,6 @@ def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
         lines.extend(
             [
                 "",
-                "Instant Experience copy / setup",
-                notes["cards"] or "[not supplied]",
-                "",
                 "Instant Experience setup checklist",
                 "- Use cover 1 as the main Instant Experience cover.",
                 "- Optional cover variations can be used for testing when supplied.",
@@ -4748,9 +4770,6 @@ def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
     else:
         lines.extend(
             [
-                "",
-                "Single Image / Video copy / setup",
-                notes["cards"] or "[not supplied]",
                 "",
                 "Single Image / Video setup checklist",
                 "- Use the pasted primary text, headline, description, CTA and URL parameters from the ChatGPT output.",
@@ -4776,7 +4795,7 @@ def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
                 f"- Included in image prompts: {'yes' if moment.get('include_in_image_prompts') else 'no'}",
             ]
         )
-    return "\r\n".join(lines).strip() + "\r\n"
+    return "\n".join(lines).rstrip("\n").replace("\n", "\r\n") + "\r\n"
 
 
 def _ads_setup_notes_signature(result, workflow, *, image_outcomes=None):
@@ -4793,35 +4812,46 @@ def _render_ads_setup_notes(result, workflow):
     if not ads_image_workflow.campaign_image_slots(result.get("campaign_type")):
         return
     notes = dict(workflow.get("ad_notes") or {})
-    with st.expander("Ad setup notes (optional)", expanded=False):
-        st.caption("Paste the final ChatGPT ad copy here. A text file will save beside the uploaded images.")
-        first, second = st.columns(2)
-        with first:
-            notes["headlines"] = st.text_area(
-                "Headlines",
-                value=str(notes.get("headlines") or ""),
-                placeholder="Paste the 5 headlines, one per line.",
-                height=90,
-                key=f"ads-notes-headlines::{result['context_key']}",
-            )
-        with second:
-            notes["descriptions"] = st.text_area(
-                "Descriptions",
-                value=str(notes.get("descriptions") or ""),
-                placeholder="Paste the 5 descriptions, one per line.",
-                height=90,
-                key=f"ads-notes-descriptions::{result['context_key']}",
-            )
-        notes["cards"] = st.text_area(
-            "Carousel cards / ad setup",
-            value=str(notes.get("cards") or ""),
-            placeholder=(
-                "Paste carousel card copy, primary text, CTA, Instant Experience setup, "
-                "or any final Meta build details from ChatGPT."
-            ),
-            height=110,
-            key=f"ads-notes-cards::{result['context_key']}",
-        )
+    with st.container(key="ads-setup-notes"):
+        with st.expander("Ad setup notes (optional)", expanded=False):
+            st.caption("Paste the final ChatGPT ad copy here. A text file will save beside the uploaded images.")
+            first, second = st.columns(2)
+            with first:
+                notes["headlines"] = st.text_area(
+                    "Headlines",
+                    value=str(notes.get("headlines") or ""),
+                    placeholder="Paste the 5 headlines, one per line.",
+                    height=90,
+                    key=f"ads-notes-headlines::{result['context_key']}",
+                )
+            with second:
+                notes["descriptions"] = st.text_area(
+                    "Descriptions",
+                    value=str(notes.get("descriptions") or ""),
+                    placeholder="Paste the 5 descriptions, one per line.",
+                    height=90,
+                    key=f"ads-notes-descriptions::{result['context_key']}",
+                )
+            third, fourth = st.columns(2)
+            with third:
+                notes["cards"] = st.text_area(
+                    "Carousel cards / ad setup",
+                    value=str(notes.get("cards") or ""),
+                    placeholder=(
+                        "Paste carousel card copy, CTA, Instant Experience setup, "
+                        "or any final Meta build details from ChatGPT."
+                    ),
+                    height=120,
+                    key=f"ads-notes-cards::{result['context_key']}",
+                )
+            with fourth:
+                notes["primary_text_variations"] = st.text_area(
+                    "Primary Text Variations",
+                    value=str(notes.get("primary_text_variations") or ""),
+                    placeholder="Paste the primary ad text variations.",
+                    height=120,
+                    key=f"ads-notes-primary-text::{result['context_key']}",
+                )
     workflow["ad_notes"] = notes
     st.session_state[ADS_IMAGE_STATE_KEY] = workflow
 
@@ -5145,14 +5175,15 @@ def save_ads_images_to_dropbox(
             }
     notes_filename = build_ads_notes_filename(result, workflow)
     notes_text = build_ads_setup_notes_text(result, workflow, image_outcomes=outcomes)
+    notes_bytes = notes_text.encode("utf-8")
     notes_result = dropbox_integration.upload_batch(
         access_token,
         export_folder,
         [
             {
                 "relative_path": notes_filename,
-                "data": notes_text.encode("utf-8"),
-                "size": len(notes_text.encode("utf-8")),
+                "data": notes_bytes,
+                "size": len(notes_bytes),
             }
         ],
         conflict="replace",
@@ -6030,6 +6061,14 @@ def render_page():
             .sc-ad-review-score {
                 align-items: flex-start;
                 flex-direction: column;
+            }
+            .st-key-ads-setup-notes [data-testid="stHorizontalBlock"] {
+                flex-direction: column;
+            }
+            .st-key-ads-setup-notes [data-testid="stColumn"] {
+                flex: 1 1 100% !important;
+                min-width: 0 !important;
+                width: 100% !important;
             }
         }
         </style>
