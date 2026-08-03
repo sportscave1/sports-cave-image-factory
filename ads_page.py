@@ -101,10 +101,18 @@ ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V4"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
+ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V2"
 ADS_COPY_FILENAME = "Ad Copy.txt"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
 PRODUCT_URL_ERROR = "Enter a valid product page URL before submitting."
+NO_EDITION_OPS_PRODUCT_URL_MESSAGE = (
+    "No product URL is saved in Edition Ops. Add it there or enter it manually."
+)
+ADS_PRODUCT_NAME_KEY = "ads_product_name"
+ADS_PRODUCT_URL_KEY = "ads_product_url"
+ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY = "ads_product_url_autofill_product_key"
+ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY = "ads_product_url_last_auto_value"
 
 FINAL_REVIEW_HOW_TO_STEPS = (
     "1. Finish setting up the complete campaign in Meta Ads Manager.",
@@ -382,6 +390,13 @@ IMAGE_ORDER = [
     ("Scarcity", "Artwork close-up, edition badge, plaque or numbered-run detail."),
 ]
 
+INSTANT_EXPERIENCE_COPY_GROUPS = (
+    ("primary_text", "PRIMARY TEXT", "Primary Text", "Primary text option {index}"),
+    ("headlines", "HEADLINE", "Headline", "Headline option {index}"),
+    ("call_to_action", "CALL TO ACTION", "Call to Action", "Shop Now"),
+)
+INSTANT_EXPERIENCE_COPY_OPTION_COUNT = 5
+
 META_BUILD_ORDER = [
     "Create a Carousel ad.",
     "Upload the five mockups in the displayed order.",
@@ -566,6 +581,24 @@ def _edition_ops_product_id_from_row(row):
     )
 
 
+def _edition_ops_product_page_url_from_row(row):
+    if not isinstance(row, dict):
+        return ""
+    for field in (
+        "online_store_url",
+        "Open live product",
+        "live_product_url",
+        "product_page_url",
+        "product_url",
+        "storefront_url",
+        "url",
+    ):
+        clean_url = _clean_product_url(row.get(field))
+        if clean_url and is_valid_product_page_url(clean_url):
+            return clean_url
+    return ""
+
+
 def _edition_ops_product_option_label(row, duplicate_titles=None):
     product_name = _product_name_from_edition_ops_row(row)
     handle = _edition_ops_product_handle_from_row(row)
@@ -573,6 +606,66 @@ def _edition_ops_product_option_label(row, duplicate_titles=None):
     if product_name and handle and product_name.casefold() in duplicate_titles:
         return f"{product_name} ({handle})"
     return product_name or handle
+
+
+def _edition_ops_duplicate_title_keys(rows):
+    title_counts = {}
+    for row in rows or ():
+        product_name = _product_name_from_edition_ops_row(row)
+        if product_name:
+            key = product_name.casefold()
+            title_counts[key] = title_counts.get(key, 0) + 1
+    return {key for key, count in title_counts.items() if count > 1}
+
+
+def _edition_ops_product_record_key(row):
+    if not isinstance(row, dict):
+        return ""
+    for value in (
+        _edition_ops_product_id_from_row(row),
+        row.get("shopify_product_gid"),
+        row.get("product_gid"),
+        _edition_ops_product_handle_from_row(row),
+    ):
+        clean = _normalise_option_label(value)
+        if clean:
+            return clean
+    return ""
+
+
+def resolve_edition_ops_product_row(product_name, *, rows=None):
+    selected = _normalise_option_label(product_name)
+    if not selected:
+        return None
+    rows = list(load_edition_ops_product_rows() if rows is None else rows)
+    duplicate_titles = _edition_ops_duplicate_title_keys(rows)
+    for row in rows:
+        option_label = _edition_ops_product_option_label(row, duplicate_titles)
+        if selected.casefold() == option_label.casefold():
+            return row
+    return None
+
+
+def resolve_edition_ops_product_selection(product_name, *, rows=None):
+    selected = _normalise_option_label(product_name)
+    row = resolve_edition_ops_product_row(selected, rows=rows)
+    if not row:
+        manual_key = f"manual::{selected.casefold()}" if selected else ""
+        return {
+            "selected_label": selected,
+            "row": None,
+            "record_key": manual_key,
+            "product_id": "",
+            "product_url": "",
+        }
+    record_key = _edition_ops_product_record_key(row)
+    return {
+        "selected_label": selected,
+        "row": row,
+        "record_key": record_key,
+        "product_id": _edition_ops_product_id_from_row(row),
+        "product_url": _edition_ops_product_page_url_from_row(row),
+    }
 
 
 def _edition_ops_rows_from_local_snapshot(snapshot_path=EDITION_OPS_SNAPSHOT_PATH):
@@ -634,13 +727,7 @@ def load_edition_ops_product_name_options(
 
     options = []
     seen = set()
-    title_counts = {}
-    for row in unique_rows:
-        product_name = _product_name_from_edition_ops_row(row)
-        if product_name:
-            key = product_name.casefold()
-            title_counts[key] = title_counts.get(key, 0) + 1
-    duplicate_titles = {key for key, count in title_counts.items() if count > 1}
+    duplicate_titles = _edition_ops_duplicate_title_keys(unique_rows)
 
     for row in unique_rows:
         option_label = _edition_ops_product_option_label(row, duplicate_titles)
@@ -652,21 +739,62 @@ def load_edition_ops_product_name_options(
 
 
 def resolve_edition_ops_product_id(product_name):
-    selected = _normalise_option_label(product_name)
-    if not selected:
-        return ""
-    rows = load_edition_ops_product_rows()
-    title_counts = {}
-    for row in rows:
-        title = _product_name_from_edition_ops_row(row)
-        if title:
-            title_counts[title.casefold()] = title_counts.get(title.casefold(), 0) + 1
-    duplicate_titles = {key for key, count in title_counts.items() if count > 1}
-    for row in rows:
-        option_label = _edition_ops_product_option_label(row, duplicate_titles)
-        if selected.casefold() == option_label.casefold():
-            return _edition_ops_product_id_from_row(row)
-    return ""
+    return resolve_edition_ops_product_selection(product_name).get("product_id") or ""
+
+
+def _ads_result_matches_selection(result, selection, product_name):
+    if not isinstance(result, dict):
+        return False
+    result_product_id = _normalise_option_label(result.get("product_id"))
+    selection_product_id = _normalise_option_label(selection.get("product_id"))
+    if result_product_id and selection_product_id:
+        return result_product_id.casefold() == selection_product_id.casefold()
+    return _clean_product_name(result.get("product_name")).casefold() == _clean_product_name(product_name).casefold()
+
+
+def prepare_ads_product_url_state(product_name, *, result=None, rows=None):
+    selection = resolve_edition_ops_product_selection(product_name, rows=rows)
+    selected_label = selection.get("selected_label") or ""
+    record_key = selection.get("record_key") or ""
+    selected_url = selection.get("product_url") or ""
+    current_url = _clean_product_url(st.session_state.get(ADS_PRODUCT_URL_KEY))
+    last_record_key = str(st.session_state.get(ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY) or "")
+
+    if ADS_PRODUCT_URL_KEY not in st.session_state and _ads_result_matches_selection(
+        result,
+        selection,
+        product_name,
+    ):
+        draft_url = _clean_product_url((result or {}).get("product_url"))
+        if draft_url:
+            st.session_state[ADS_PRODUCT_URL_KEY] = draft_url
+            st.session_state[ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = record_key
+            st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = selected_url
+            current_url = draft_url
+            last_record_key = record_key
+
+    if not selected_label:
+        if current_url or last_record_key:
+            st.session_state[ADS_PRODUCT_URL_KEY] = ""
+        st.session_state[ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = ""
+        st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = ""
+        return {**selection, "message": ""}
+
+    if record_key != last_record_key:
+        if selection.get("row"):
+            st.session_state[ADS_PRODUCT_URL_KEY] = selected_url
+            st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = selected_url
+        else:
+            last_auto_value = _clean_product_url(
+                st.session_state.get(ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY)
+            )
+            if current_url and current_url == last_auto_value:
+                st.session_state[ADS_PRODUCT_URL_KEY] = ""
+            st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = ""
+        st.session_state[ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = record_key
+
+    message = NO_EDITION_OPS_PRODUCT_URL_MESSAGE if selection.get("row") and not selected_url else ""
+    return {**selection, "message": message}
 
 
 def render_prompt_copy_button(prompt_text, key, label="Copy Prompt", success_label="Prompt copied"):
@@ -892,7 +1020,12 @@ def _campaign_moment_context_key(campaign_moment, selected_country=""):
     }
 
 
-def build_campaign_moment_copy_relevance_block(campaign_moment, *, selected_country=""):
+def build_campaign_moment_copy_relevance_block(
+    campaign_moment,
+    *,
+    selected_country="",
+    campaign_type="",
+):
     moment = normalize_campaign_moment(campaign_moment, selected_country=selected_country)
     if not campaign_moment_is_active(moment):
         return ""
@@ -900,6 +1033,32 @@ def build_campaign_moment_copy_relevance_block(campaign_moment, *, selected_coun
     date_line = moment["date"] or "not supplied"
     type_line = moment["type"] or "not supplied"
     strength = moment["strength"]
+    if campaign_type == "Instant Experience":
+        field_rules = """HEADLINE AND CALL-TO-ACTION RULES
+
+The selected moment may influence headlines and call-to-action button-label choices only when it improves relevance, sounds natural and does not replace the product identity or scarcity message across the entire set.
+
+For Instant Experience campaigns:
+- Preserve exactly five Primary Text options.
+- Preserve exactly five Headlines.
+- Preserve exactly five Call To Action button-label options.
+- Do not create or request Description fields.
+- Do not force the event into every option.
+- Use the Campaign Moment in no more than one primary-text option unless the user selects Campaign-led.
+- Even when Campaign-led is selected, retain product identity and edition scarcity across the set.
+- Use valid Meta-style CTA button labels rather than sentence-style buttons."""
+    else:
+        field_rules = f"""HEADLINE AND DESCRIPTION RULES
+
+The selected moment may influence headlines and description lines only when it improves relevance, fits the existing character limits, sounds natural and does not replace the product identity or scarcity message across the entire set.
+
+For Carousel campaigns:
+- Preserve all existing {CAROUSEL_CARD_MAX_CHARACTERS}-character headline and description limits.
+- Do not force the event into every card.
+- Use the Campaign Moment on no more than one carousel card unless the user selects Campaign-led.
+- Even when Campaign-led is selected, retain product identity and edition scarcity across the sequence.
+- Do not weaken the existing five-card roles or product-dominance rules.
+- Never lengthen text beyond existing platform limits to fit an event name."""
     return f"""CAMPAIGN MOMENT — OPTIONAL RELEVANCE LAYER
 
 A campaign moment has been supplied for timely relevance.
@@ -939,17 +1098,7 @@ Make one variation primarily built around the selected moment or buying occasion
 
 The timely variation must sound human and emotionally relevant. Avoid mechanical lines such as "Father’s Day is approaching. Buy now." Do not hard-code examples into every generated result.
 
-HEADLINE AND DESCRIPTION RULES
-
-The selected moment may influence headlines and description lines only when it improves relevance, fits the existing character limits, sounds natural and does not replace the product identity or scarcity message across the entire set.
-
-For Carousel campaigns:
-- Preserve all existing 17-character headline and description limits.
-- Do not force the event into every card.
-- Use the Campaign Moment on no more than one carousel card unless the user selects Campaign-led.
-- Even when Campaign-led is selected, retain product identity and edition scarcity across the sequence.
-- Do not weaken the existing five-card roles or product-dominance rules.
-- Never lengthen text beyond existing platform limits to fit an event name.
+{field_rules}
 
 ACCURACY AND OFFER SAFETY
 
@@ -973,12 +1122,19 @@ def build_campaign_moment_visual_context(campaign_moment, *, selected_country=""
 The selected campaign moment is {moment["name"]} for {moment["resolved_market"]}. Use it only as restrained, premium and believable visual context when it naturally supports the product. The framed artwork must remain the visual hero. Do not make an event prop or seasonal decoration more prominent than the framed artwork. Do not automatically place the event name as text inside the image. Do not add official event logos, trademarks, branded graphics, athlete endorsements, prices, discounts, buttons, banners or promotional stickers. Do not make every room look themed. Preserve all current product locks, square-format locks, card composition rules, room variation rules and photorealism requirements."""
 
 
-def apply_campaign_moment_copy_relevance_layer(prompt, campaign_moment, *, selected_country=""):
+def apply_campaign_moment_copy_relevance_layer(
+    prompt,
+    campaign_moment,
+    *,
+    selected_country="",
+    campaign_type="",
+):
     if not prompt:
         return prompt
     block = build_campaign_moment_copy_relevance_block(
         campaign_moment,
         selected_country=selected_country,
+        campaign_type=campaign_type,
     )
     if not block or "CAMPAIGN MOMENT — OPTIONAL RELEVANCE LAYER" in prompt:
         return prompt
@@ -1956,9 +2112,9 @@ def build_instant_experience_visual_output_requirements(
 
     return f"""INSTANT EXPERIENCE VISUAL REQUIREMENTS
 
-After every existing Instant Experience copy, headline, description, CTA, setup and URL-parameter field, output exactly one complete cover-image prompt. Do not output five prompts.
+After every existing Instant Experience primary-text, headline, call-to-action, setup and URL-parameter field, output exactly one complete cover-image prompt. Do not output five prompts.
 
-Tailor the cover to the selected product name, selected sport, selected country, generated Instant Experience headline, generated supporting copy, approved scarcity claim, existing CTA, emotional theme and uploaded framed artwork. It must not be a generic reusable collector-room prompt.
+Tailor the cover to the selected product name, selected sport, selected country, generated Instant Experience headline, generated primary text, approved scarcity claim, selected CTA, emotional theme and uploaded framed artwork. It must not be a generic reusable collector-room prompt.
 
 The response is incomplete unless it contains the exact image-generation section heading shown below followed by the complete Instant Experience cover prompt heading. Write the entire production-ready cover prompt in full. Do not replace it with Creative direction, a short cover brief, a shared base prompt, a list of changes or a reference to rules elsewhere.
 
@@ -2032,8 +2188,10 @@ def build_ads_text_first_image_generation_gate(campaign_type):
     elif campaign_type == "Instant Experience":
         format_detail = (
             "For Instant Experience campaigns, the first text-only response must include the complete campaign "
-            "strategy, copy package, Instant Experience setup details and one complete, separately copyable, "
-            "production-ready cover image prompt before asking for approval to generate anything."
+            "strategy, exactly five Primary Text options, exactly five Headlines, exactly five Call To Action "
+            "button-label options, Instant Experience setup details and one complete, separately copyable, "
+            "production-ready cover image prompt before asking for approval to generate anything. Do not include "
+            "Description fields for Instant Experience."
         )
     elif campaign_type == "Single Image / Video":
         format_detail = (
@@ -2048,14 +2206,20 @@ def build_ads_text_first_image_generation_gate(campaign_type):
             "approval to generate anything."
         )
 
-    return f"""TEXT-FIRST IMAGE-GENERATION GATE - MANDATORY
-
-Your first response must be text and planning only. Do not call, invoke, open or use any image-generation tool in the first response, even if artwork or product images are attached, even if this Ads prompt describes an image, and even if this Ads prompt contains the words "image prompt", "create", "generate", "cover prompt" or "creative prompt".
-
-Having artwork attached, describing an image or including production-ready image prompt wording must not be treated as permission to create an image automatically. Any imperative wording inside an image-prompt block is copy that you must print for the user; it is not an instruction to generate an image during the first response.
-
-The first response must provide the complete ad campaign package in chat before any image generation:
-1. Campaign objective and funnel stage.
+    if campaign_type == "Instant Experience":
+        ad_package_items = """1. Campaign objective and funnel stage.
+2. Target market and audience.
+3. Main emotional/creative angle.
+4. Five Primary Text options.
+5. Five Headlines.
+6. Five Call To Action button-label options.
+7. Optional event or seasonal integration, when supplied.
+8. Instant Experience setup strategy.
+9. The text shown on each creative, where applicable.
+10. One complete production-ready Instant Experience cover image prompt.
+11. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions."""
+    else:
+        ad_package_items = """1. Campaign objective and funnel stage.
 2. Target market and audience.
 3. Main emotional/creative angle.
 4. Primary ad text variants.
@@ -2066,7 +2230,16 @@ The first response must provide the complete ad campaign package in chat before 
 9. Card-by-card or creative-by-creative strategy.
 10. The text shown on each creative, where applicable.
 11. A complete production-ready image prompt for every required image.
-12. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions.
+12. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions."""
+
+    return f"""TEXT-FIRST IMAGE-GENERATION GATE - MANDATORY
+
+Your first response must be text and planning only. Do not call, invoke, open or use any image-generation tool in the first response, even if artwork or product images are attached, even if this Ads prompt describes an image, and even if this Ads prompt contains the words "image prompt", "create", "generate", "cover prompt" or "creative prompt".
+
+Having artwork attached, describing an image or including production-ready image prompt wording must not be treated as permission to create an image automatically. Any imperative wording inside an image-prompt block is copy that you must print for the user; it is not an instruction to generate an image during the first response.
+
+The first response must provide the complete ad campaign package in chat before any image generation:
+{ad_package_items}
 
 Print every image prompt in full in clearly separated, copyable blocks. Do not shorten, summarise, collapse or hide them behind buttons. Every image prompt must be self-contained so the user can copy and paste any individual prompt into a fresh ChatGPT conversation without relying on earlier messages.
 
@@ -2115,10 +2288,23 @@ def build_campaign_visual_output_contract(
         )
     else:
         return ""
+    contract_version = ads_prompt_contract_version_for_campaign(campaign_type).replace("; ", "\n")
+    if campaign_type == "Instant Experience":
+        copy_schema_preservation = (
+            "Return the finished existing ad-copy output first, in its existing required schema and order. "
+            "Preserve every existing Instant Experience primary-text, headline, call-to-action, setup instruction, "
+            "destination rule and URL parameter. Do not add Description fields to Instant Experience."
+        )
+    else:
+        copy_schema_preservation = (
+            "Return the finished existing ad-copy output first, in its existing required schema and order. "
+            "Preserve every existing copy field, card role, primary-text variation, headline, description, CTA, "
+            "setup instruction, destination rule and URL parameter."
+        )
 
     return f"""MASTER RESPONSE AND VISUAL OUTPUT CONTRACT
 
-{ADS_PROMPT_CONTRACT_VERSION}
+{contract_version}
 
 Selected product name: {product_name}
 Selected sport category: {category}
@@ -2126,7 +2312,7 @@ Selected country: {country}
 Selected campaign type: {campaign_type}
 Creative variation token: {variation_token}
 
-Return the finished existing ad-copy output first, in its existing required schema and order. Preserve every existing copy field, card role, primary-text variation, headline, description, CTA, setup instruction, destination rule and URL parameter.
+{copy_schema_preservation}
 
 Directly beneath that complete existing output, return the campaign-specific visual section required below.
 
@@ -2617,7 +2803,17 @@ def apply_campaign_copy_rule_blocks(prompt, campaign_type, include_primary_text_
     return prompt
 
 
-def build_shared_meta_winner_copy_upgrade():
+def build_shared_meta_winner_copy_upgrade(campaign_type=""):
+    single_primary_rule = (
+        "Instant Experience must always preserve exactly five Primary Text options, "
+        "five Headlines and five Call To Action button-label options."
+        if campaign_type == "Instant Experience"
+        else (
+            "If the approved campaign-specific template requires exactly one primary text rather than five, "
+            "preserve that quantity. Silently consider these angles and return only the strongest compatible "
+            "final version in the existing schema."
+        )
+    )
     return f"""{META_WINNER_COPY_BLOCK_VERSION}
 
 This block strengthens copy selection only. Preserve the current campaign's approved output schema, field count, card labels, CTA, URL parameters, localisation, claim safeguards and all campaign-specific winner instructions.
@@ -2672,7 +2868,7 @@ Variation 5 - Collector Scarcity Or Gifting
 - Use gifting only when it naturally strengthens the selected product and audience.
 - Do not repeat the scarcity sentence used by another variation.
 
-If the approved campaign-specific template requires exactly one primary text rather than five, preserve that quantity. Silently consider these angles and return only the strongest compatible final version in the existing schema.
+{single_primary_rule}
 
 UNIVERSAL PRIMARY-TEXT QUALITY
 
@@ -2701,7 +2897,7 @@ def apply_shared_meta_winner_copy_upgrade(prompt, campaign_type):
         return prompt
     if META_WINNER_COPY_BLOCK_VERSION in prompt:
         return prompt
-    return f"{prompt.rstrip()}\n\n{build_shared_meta_winner_copy_upgrade()}"
+    return f"{prompt.rstrip()}\n\n{build_shared_meta_winner_copy_upgrade(campaign_type)}"
 
 
 def compose_final_ads_prompt(
@@ -2730,6 +2926,7 @@ def compose_final_ads_prompt(
         prompt,
         campaign_moment,
         selected_country=country,
+        campaign_type=campaign_type,
     )
     prompt = apply_meta_url_parameters_guidance(prompt)
     if product_name:
@@ -3269,16 +3466,14 @@ OBJECTIVE
 
 Create one ultimate high-converting Sports Cave Meta Instant Experience ad package for a Baseball product.
 
-This is not a five-variation campaign.
-
 Generate exactly:
 
-- one best primary text
-- one best headline
-- one CTA
+- five complete Primary Text options
+- five Headline options
+- five Call To Action button-label options
 - one clear Meta Instant Experience setup guide
 
-Do not generate multiple primary-text versions, alternate headlines, carousel cards, optional copy, rejected alternatives or writing notes.
+Do not generate descriptions, carousel cards, optional rejected alternatives or writing notes.
 
 The copy must feel:
 
@@ -3299,9 +3494,9 @@ Opening brand line:
 
 Greatness doesn’t fade. It gets framed.
 
-Keep this exact Sports Cave line as the opening unless an existing protected brand-setting system supplies an approved alternative.
+Use this exact Sports Cave line in at least one Primary Text option unless an existing protected brand-setting system supplies an approved alternative.
 
-Then add one short product-specific identity and legacy paragraph.
+Across the five options, create five genuinely different product-specific identity and legacy angles.
 
 Analyse:
 
@@ -3330,7 +3525,7 @@ Close with this line:
 
 Strictly limited. Claim your number before the next one is gone.
 
-Use the exact closing line unless the shared country-language rules require only a minor spelling or terminology adjustment.
+Use the exact closing line in at least one option unless the shared country-language rules require only a minor spelling or terminology adjustment. Do not repeat the same closing line or scarcity sentence across every option.
 
 IDENTITY AND OWNERSHIP RULES
 
@@ -3363,7 +3558,7 @@ Use selective identity language where appropriate, such as:
 
 Do not force the same phrase into every product.
 
-Choose the strongest single angle or strongest compatible blend for the actual artwork.
+Choose the strongest distinct angles or compatible blends for the actual artwork.
 
 BASEBALL-SPECIFIC WRITING DIRECTION
 
@@ -3388,7 +3583,7 @@ Authentic baseball terms must remain baseball-specific in every country, includi
 
 Country-language rules change spelling, phrasing, retail language and tone. They do not change player identity, baseball facts, official product title, artwork text or verified commercial claims.
 
-ONE BEST VERSION RULE
+FIVE OPTION QUALITY RULE
 
 Before answering, internally consider several possible angles:
 
@@ -3401,11 +3596,11 @@ Before answering, internally consider several possible angles:
 - collector ownership
 - scarcity
 
-Choose only the strongest angle or strongest compatible blend.
+Choose the five strongest distinct angles or compatible blends.
 
-Return one final primary text only.
+Return exactly five finished Primary Text options.
 
-Do not show rejected alternatives.
+Do not show rejected alternatives or writing notes.
 
 Apply this test:
 
@@ -3413,7 +3608,7 @@ If this copy could work for almost any baseball artwork, rewrite it with stronge
 
 HEADLINE RULES
 
-Generate exactly one headline.
+Generate exactly five headline options.
 
 The headline must be:
 
@@ -3426,7 +3621,7 @@ The headline must be:
 
 Good headline directions include the product title, recognised milestone, rivalry identity, era identity, ownership or scarcity.
 
-Use the actual product.
+Use the actual product and make the five options meaningfully different.
 
 Do not invent facts.
 
@@ -3434,9 +3629,11 @@ Do not apply Carousel character limits to the Instant Experience headline.
 
 CALL TO ACTION
 
-Use exactly:
+Generate exactly five valid Meta-style CTA button-label options.
 
-{BASEBALL_INSTANT_EXPERIENCE_CTA}
+Include {BASEBALL_INSTANT_EXPERIENCE_CTA} only if it is an approved button label in the user's Meta account. Otherwise use valid Meta-style button labels such as Shop Now, Learn More, View Shop, See More or Get Offer.
+
+Do not invent sentence-style button copy.
 
 INSTANT EXPERIENCE SETUP GUIDE
 
@@ -3461,11 +3658,11 @@ Use this exact workflow in the generated setup section:
 8. Under Product headline, use:
    product.name
 
-9. Under Product description, use:
+9. Under any catalogue descriptor or subtitle field that Meta requires, use:
    Limited Edition
 
 10. Under Fixed button, set the label to:
-    {BASEBALL_INSTANT_EXPERIENCE_CTA}
+    one of the generated CALL TO ACTION button-label options.
 
 11. Set the Fixed button destination to the exact selected product-page URL supplied in the campaign form:
     {product_url}
@@ -3493,15 +3690,27 @@ OUTPUT THE AD-COPY PORTION IN THIS FORMAT
 
 PRIMARY TEXT
 
-[one complete primary-text ad]
+1. [complete primary text]
+2. [complete primary text]
+3. [complete primary text]
+4. [complete primary text]
+5. [complete primary text]
 
-HEADLINE
+HEADLINES
 
-[one strongest headline]
+1. [headline]
+2. [headline]
+3. [headline]
+4. [headline]
+5. [headline]
 
 CALL TO ACTION
 
-{BASEBALL_INSTANT_EXPERIENCE_CTA}
+1. [Meta CTA label]
+2. [Meta CTA label]
+3. [Meta CTA label]
+4. [Meta CTA label]
+5. [Meta CTA label]
 
 INSTANT EXPERIENCE SETUP
 
@@ -3511,15 +3720,16 @@ FINAL QUALITY CHECK
 
 Before returning the output, confirm:
 
-- Exactly one primary text is provided.
-- Exactly one headline is provided.
-- CTA is {BASEBALL_INSTANT_EXPERIENCE_CTA}.
+- Exactly 5 Primary Text options are provided.
+- Exactly 5 Headlines are provided.
+- Exactly 5 Call To Action button-label options are provided.
+- No Description section or Description fields are present.
 - Instant Experience setup instructions are included.
 - The generated Instant Experience cover upload step is specified.
 - Shopify Product Catalog is specified.
 - {BASEBALL_INSTANT_EXPERIENCE_PRODUCT_SET_NAME} product set is specified.
 - Product headline is product.name.
-- Product description is Limited Edition.
+- Catalogue descriptor is Limited Edition when Meta requires one.
 - The fixed-button destination uses the supplied product URL.
 - The URL parameters field uses the exact supplied Meta URL parameters.
 - The copy feels written for genuine baseball fans.
@@ -3531,7 +3741,6 @@ Before returning the output, confirm:
 - Country spelling and terminology are correct.
 - Baseball terminology remains authentic.
 - No unsupported fact has been invented.
-- No five-copy variation block is returned.
 - No Carousel rules have been applied to the Instant Experience headline."""
 
 
@@ -3624,7 +3833,7 @@ def build_category_winner_angle_block(category, campaign_type, country):
 - Instant Experience setting: {angle["ie_setting"]}.
 - Catalogue/cards underneath should feel like a connected {category} collector range, not one isolated product.
 - Strong short-line examples for this category: {angle["headline_examples"]}.
-- Short description examples for this category: {angle["description_examples"]}.
+- Additional short copy cues for this category: {angle["description_examples"]}.
 - {angle["country_note"]}"""
     else:
         strategy = f"""CATEGORY-SPECIFIC SINGLE IMAGE / VIDEO WINNER ANGLE
@@ -3717,25 +3926,26 @@ Generate exactly these sections:
 
 1. Primary Text
 2. Headline
-3. Description
+3. Call To Action
 4. Instant Experience Cover Prompt
-5. CTA Guidance
+5. Instant Experience Setup
 
 PRIMARY TEXT
 
-Create 5 strong variants.
+Create exactly 5 strong options.
 
 Rules:
 - Each variant must be short, emotional and collector-driven.
 - Use nostalgia, identity, scarcity and ownership.
 - Mention limited editions naturally.
 - Adapt each variant to the selected product title, moment, player, team, rivalry, event or visual identity.
+- Make the five options genuinely different angles, not minor rewrites.
 - Do not use generic AI phrases such as elevate your space, ultimate tribute or perfect addition.
 - Do not over-explain.
 
-HEADLINE
+HEADLINES
 
-Create 5 headline options.
+Create exactly 5 headline options.
 
 Rules:
 - 4 to 6 words max.
@@ -3743,13 +3953,15 @@ Rules:
 - For Football, use football-specific urgency.
 - Strong style examples: Football Glory Framed; Only 100 Made; Claim Your Edition; For Real Football Fans; Legends Belong Framed.
 
-DESCRIPTION
+CALL TO ACTION
 
-Create 5 short description lines.
+Create exactly 5 valid Meta-style CTA button-label options.
 
 Rules:
-- Scarcity-driven and premium.
-- Examples of style: Limited collector wall art; Once gone it's gone; Built for real fans; Claim your numbered edition; Premium football wall art.
+- Use short button labels suitable for Meta, such as Shop Now, Learn More, View Shop, See More or Get Offer.
+- Do not invent sentence-style button copy.
+- Make the CTA labels work with the same Instant Experience creative and destination.
+- Avoid repeating the same scarcity wording across every option.
 
 INSTANT EXPERIENCE COVER PROMPT
 
@@ -3759,10 +3971,9 @@ The image prompt must use this upgraded default Instant Experience cover prompt:
 
 {default_cover_prompt}
 
-CTA GUIDANCE
+INSTANT EXPERIENCE SETUP
 
-Use:
-Claim Your Edition
+Create one concise setup guide for Meta Instant Experience using the Product template, the selected product-page URL and the generated cover prompt. Do not add Description fields.
 
 Catalogue/cards below the Instant Experience should feel like a connected collector range, not one isolated product.
 
@@ -3770,22 +3981,13 @@ OUTPUT THE AD-COPY PORTION IN THIS FORMAT
 
 PRIMARY TEXT
 
-Variant 1:
-[copy]
+1. [complete primary text]
+2. [complete primary text]
+3. [complete primary text]
+4. [complete primary text]
+5. [complete primary text]
 
-Variant 2:
-[copy]
-
-Variant 3:
-[copy]
-
-Variant 4:
-[copy]
-
-Variant 5:
-[copy]
-
-HEADLINE
+HEADLINES
 
 1. [headline]
 2. [headline]
@@ -3793,29 +3995,30 @@ HEADLINE
 4. [headline]
 5. [headline]
 
-DESCRIPTION
+CALL TO ACTION
 
-1. [description]
-2. [description]
-3. [description]
-4. [description]
-5. [description]
+1. [Meta CTA label]
+2. [Meta CTA label]
+3. [Meta CTA label]
+4. [Meta CTA label]
+5. [Meta CTA label]
 
 INSTANT EXPERIENCE COVER PROMPT
 
 [one image prompt]
 
-CTA GUIDANCE
+INSTANT EXPERIENCE SETUP
 
-Claim Your Edition
+[the required setup instructions]
 
 FINAL QUALITY CHECK
 
-- Exactly 5 primary text variants are present.
-- Exactly 5 headline options are present.
-- Exactly 5 description lines are present.
+- Exactly 5 Primary Text options are present.
+- Exactly 5 Headlines are present.
+- Exactly 5 Call To Action button-label options are present.
+- No Description section or Description fields are present.
 - Instant Experience Cover Prompt is present.
-- CTA guidance is present.
+- Instant Experience Setup is present.
 - The cover prompt uses top 60-68% hero artwork and bottom 32-40% black/gold CTA panel.
 - The cover prompt includes Claim Your Edition and uses LIMITED TO 100 WORLDWIDE only when the quantity is verified.
 - The cover prompt may use Once it sells out, it's gone. only when it matches the approved generated copy.
@@ -4195,12 +4398,12 @@ def render_product_name_input():
             placeholder="Example: Six Laps Ahead",
             accept_new_options=True,
             filter_mode="fuzzy",
-            key="ads_product_name",
+            key=ADS_PRODUCT_NAME_KEY,
         )
     return st.text_input(
         "Product name",
         placeholder="Example: Six Laps Ahead",
-        key="ads_product_name",
+        key=ADS_PRODUCT_NAME_KEY,
     )
 
 
@@ -4376,16 +4579,23 @@ def build_ads_result_record(
         "product_url": _clean_product_url(product_url),
         "variation_token": clean_variation_token,
         "campaign_moment": clean_campaign_moment,
-        "prompt_contract_version": ADS_PROMPT_CONTRACT_VERSION,
+        "prompt_contract_version": ads_prompt_contract_version_for_campaign(campaign_type),
         "master_prompt": master_prompt,
         "generated_ad_output": master_prompt,
     }
 
 
+def ads_prompt_contract_version_for_campaign(campaign_type):
+    if campaign_type == "Instant Experience":
+        return f"{ADS_PROMPT_CONTRACT_VERSION}; {ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION}"
+    return ADS_PROMPT_CONTRACT_VERSION
+
+
 def ensure_current_ads_result_prompt(result):
     if not isinstance(result, dict) or not result.get("master_prompt"):
         return result
-    if result.get("prompt_contract_version") == ADS_PROMPT_CONTRACT_VERSION:
+    expected_version = ads_prompt_contract_version_for_campaign(result.get("campaign_type"))
+    if result.get("prompt_contract_version") == expected_version:
         return result
     old_master_prompt = str(result.get("master_prompt") or "")
     old_generated_output = str(result.get("generated_ad_output") or "")
@@ -4704,6 +4914,46 @@ def _ads_notes_for_workflow(workflow):
     }
 
 
+def _instant_experience_copy_notes_from_workflow(workflow):
+    notes = dict((workflow or {}).get("ad_notes") or {})
+    instant_notes = notes.get("instant_experience")
+    instant_notes = dict(instant_notes) if isinstance(instant_notes, dict) else {}
+
+    def values_for(group_key):
+        raw_values = instant_notes.get(group_key)
+        if raw_values is None and group_key == "primary_text":
+            raw_values = instant_notes.get("primary_texts")
+        if isinstance(raw_values, str):
+            values = raw_values.splitlines()
+        elif isinstance(raw_values, (list, tuple)):
+            values = list(raw_values)
+        else:
+            values = []
+        values = [str(value or "").replace("\r\n", "\n").replace("\r", "\n") for value in values]
+        values.extend([""] * (INSTANT_EXPERIENCE_COPY_OPTION_COUNT - len(values)))
+        return values[:INSTANT_EXPERIENCE_COPY_OPTION_COUNT]
+
+    return {
+        group_key: values_for(group_key)
+        for group_key, _heading, _label, _placeholder in INSTANT_EXPERIENCE_COPY_GROUPS
+    }
+
+
+def _instant_experience_copy_export_lines(workflow):
+    notes = _instant_experience_copy_notes_from_workflow(workflow)
+    lines = ["INSTANT EXPERIENCE AD COPY", ""]
+    export_headings = {
+        "primary_text": "PRIMARY TEXT",
+        "headlines": "HEADLINES",
+        "call_to_action": "CALL TO ACTION",
+    }
+    for group_key, _heading, _label, _placeholder in INSTANT_EXPERIENCE_COPY_GROUPS:
+        lines.extend([export_headings[group_key], ""])
+        for index, value in enumerate(notes[group_key], start=1):
+            lines.extend([f"OPTION {index}", value, ""])
+    return lines
+
+
 def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
     notes = _ads_notes_for_workflow(workflow)
     campaign_type = str(result.get("campaign_type") or "")
@@ -4735,6 +4985,27 @@ def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
     else:
         lines.append("- No generated image upload slots for this campaign type.")
 
+    if campaign_type == "Instant Experience":
+        lines.extend(["", *_instant_experience_copy_export_lines(workflow)])
+        moment = normalize_campaign_moment(
+            result.get("campaign_moment"),
+            selected_country=result.get("country"),
+        )
+        if campaign_moment_is_active(moment):
+            lines.extend(
+                [
+                    "Campaign moment",
+                    f"- Type: {moment.get('type') or 'not supplied'}",
+                    f"- Name: {moment.get('name') or 'not supplied'}",
+                    f"- Market: {moment.get('resolved_market') or 'not supplied'}",
+                    f"- Date/end date: {moment.get('date') or 'not supplied'}",
+                    f"- Promotion: {moment.get('promotion') or 'none supplied'}",
+                    f"- Strength: {moment.get('strength') or 'Subtle'}",
+                    f"- Included in image prompts: {'yes' if moment.get('include_in_image_prompts') else 'no'}",
+                ]
+            )
+        return "\n".join(lines).rstrip("\n").replace("\n", "\r\n") + "\r\n"
+
     lines.extend(["", "HEADLINES", ""])
     lines.append(notes["headlines"] or "[not supplied]")
     lines.extend(["", "DESCRIPTIONS", ""])
@@ -4753,18 +5024,6 @@ def build_ads_setup_notes_text(result, workflow, *, image_outcomes=None):
                 f"- Keep each carousel headline and description within {CAROUSEL_CARD_MAX_CHARACTERS} characters.",
                 "- Match each saved image to its corresponding card number.",
                 "- Use the pasted primary text, card copy, CTA and URL parameters from the ChatGPT output.",
-            ]
-        )
-    elif campaign_type == "Instant Experience":
-        lines.extend(
-            [
-                "",
-                "Instant Experience setup checklist",
-                "- Use cover 1 as the main Instant Experience cover.",
-                "- Optional cover variations can be used for testing when supplied.",
-                "- Product headline should use the selected product name.",
-                "- Product description should use Limited Edition unless the prompt output gives a verified alternative.",
-                "- Use the pasted primary text, headline option, description, CTA and URL parameters from the ChatGPT output.",
             ]
         )
     else:
@@ -4811,6 +5070,38 @@ def _ads_setup_notes_signature(result, workflow, *, image_outcomes=None):
 def _render_ads_setup_notes(result, workflow):
     if not ads_image_workflow.campaign_image_slots(result.get("campaign_type")):
         return
+    if _is_instant_experience_result(result):
+        notes = dict(workflow.get("ad_notes") or {})
+        instant_notes = _instant_experience_copy_notes_from_workflow(workflow)
+        with st.container(key="ads-setup-notes"):
+            st.markdown("**Instant Experience copy**")
+            columns = st.columns(3)
+            for column, (group_key, heading, field_label, placeholder) in zip(
+                columns,
+                INSTANT_EXPERIENCE_COPY_GROUPS,
+            ):
+                with column:
+                    st.markdown(f"**{heading}**")
+                    values = []
+                    for index in range(1, INSTANT_EXPERIENCE_COPY_OPTION_COUNT + 1):
+                        values.append(
+                            st.text_area(
+                                f"{field_label} {index}",
+                                value=instant_notes[group_key][index - 1],
+                                placeholder=placeholder.format(index=index),
+                                height=48,
+                                key=(
+                                    f"ads-ie-copy-field::{group_key}::"
+                                    f"{result['context_key']}::{index}"
+                                ),
+                            )
+                        )
+                    instant_notes[group_key] = values
+        notes["instant_experience"] = instant_notes
+        workflow["ad_notes"] = notes
+        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        return
+
     notes = dict(workflow.get("ad_notes") or {})
     with st.container(key="ads-setup-notes"):
         with st.expander("Ad setup notes (optional)", expanded=False):
@@ -6057,6 +6348,15 @@ def render_page():
             background: #F5F5F5;
             color: #555555;
         }
+        div[class*="st-key-ads-ie-copy-field"] textarea {
+            min-height: 42px !important;
+            height: 42px !important;
+            max-height: 42px !important;
+            overflow-y: auto !important;
+            resize: none !important;
+            line-height: 1.35 !important;
+            white-space: pre-wrap !important;
+        }
         @media (max-width: 720px) {
             .sc-ad-review-score {
                 align-items: flex-start;
@@ -6091,35 +6391,44 @@ def render_page():
             "Use the product name as the identity source. ChatGPT must not guess a person, event or achievement from the image."
         )
 
-    with st.form("ads-builder-form"):
-        product_name = render_product_name_input()
-        category_col, country_col, campaign_col = st.columns(3)
-        with category_col:
-            category = st.selectbox("Category", CATEGORY_OPTIONS, key="ads_category")
-        with country_col:
-            country = st.selectbox("Country", COUNTRY_OPTIONS, key="ads_country")
-        with campaign_col:
-            campaign_type = st.selectbox(
-                "Campaign type",
-                CAMPAIGN_TYPE_OPTIONS,
-                key="ads_campaign_type",
-            )
-        product_url = st.text_input(
-            "Product page URL *",
-            placeholder="https://sportscave.com.au/products/example",
-            key="ads_product_url",
-        )
-        if product_url and not is_valid_product_page_url(product_url):
-            st.error(PRODUCT_URL_ERROR)
-        campaign_moment = render_campaign_moment_section()
-        clear_col, submit_col = st.columns([1, 2])
-        clear_moment = clear_col.form_submit_button("Clear moment")
-        submitted = submit_col.form_submit_button(
-            "Submit",
-            type="primary",
-        )
-
     result = st.session_state.get(ADS_RESULT_STATE_KEY)
+    if (
+        ADS_PRODUCT_NAME_KEY not in st.session_state
+        and isinstance(result, dict)
+        and result.get("product_name")
+    ):
+        st.session_state[ADS_PRODUCT_NAME_KEY] = result.get("product_name")
+
+    product_name = render_product_name_input()
+    category_col, country_col, campaign_col = st.columns(3)
+    with category_col:
+        category = st.selectbox("Category", CATEGORY_OPTIONS, key="ads_category")
+    with country_col:
+        country = st.selectbox("Country", COUNTRY_OPTIONS, key="ads_country")
+    with campaign_col:
+        campaign_type = st.selectbox(
+            "Campaign type",
+            CAMPAIGN_TYPE_OPTIONS,
+            key="ads_campaign_type",
+        )
+    product_url_state = prepare_ads_product_url_state(product_name, result=result)
+    product_url = st.text_input(
+        "Product page URL *",
+        placeholder="https://sportscave.com.au/products/example",
+        key=ADS_PRODUCT_URL_KEY,
+    )
+    if product_url_state.get("message") and not _clean_product_url(product_url):
+        st.caption(product_url_state["message"])
+    if product_url and not is_valid_product_page_url(product_url):
+        st.error(PRODUCT_URL_ERROR)
+    campaign_moment = render_campaign_moment_section()
+    clear_col, submit_col = st.columns([1, 2])
+    clear_moment = clear_col.button("Clear moment")
+    submitted = submit_col.button(
+        "Submit",
+        type="primary",
+    )
+
     if clear_moment:
         clear_campaign_moment_state()
         st.rerun()

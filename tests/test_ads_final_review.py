@@ -35,6 +35,7 @@ def select_option(app_test, label, value):
     for selectbox in app_test.selectbox:
         if selectbox.label == label:
             selectbox.select(value)
+            app_test.run(timeout=20)
             return
     raise AssertionError(f"{label} was not rendered.")
 
@@ -46,6 +47,7 @@ def set_product_name(app_test, value):
                 widget.select(value if value in widget.options else widget.options[0])
             else:
                 widget.set_value(value)
+            app_test.run(timeout=20)
             return
     raise AssertionError("Product name was not rendered.")
 
@@ -54,6 +56,7 @@ def set_product_url(app_test, value="https://sportscave.com.au/products/six-laps
     for widget in app_test.text_input:
         if widget.label == "Product page URL *":
             widget.set_value(value)
+            app_test.run(timeout=20)
             return
     raise AssertionError("Product page URL field was not rendered.")
 

@@ -30,6 +30,7 @@ def set_product_name(app_test, value):
     for text_input in app_test.text_input:
         if text_input.label == "Product name":
             text_input.set_value(value)
+            app_test.run(timeout=20)
             return
     for selectbox in app_test.selectbox:
         if selectbox.label == "Product name":
@@ -39,6 +40,7 @@ def set_product_name(app_test, value):
                 selectbox.select(value)
             else:
                 selectbox.set_value(value)
+            app_test.run(timeout=20)
             return
     raise AssertionError("Product name widget was not rendered.")
 
@@ -47,6 +49,7 @@ def select_option(app_test, label, value):
     for selectbox in app_test.selectbox:
         if selectbox.label == label:
             selectbox.select(value)
+            app_test.run(timeout=20)
             return
     raise AssertionError(f"{label} selectbox was not rendered.")
 
@@ -55,6 +58,7 @@ def set_product_url(app_test, value="https://sportscave.com.au/products/six-laps
     for text_input in app_test.text_input:
         if text_input.label == "Product page URL *":
             text_input.set_value(value)
+            app_test.run(timeout=20)
             return
     raise AssertionError("Product page URL field was not rendered.")
 
@@ -384,7 +388,7 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("FINAL PRIMARY-TEXT QUALITY CHECK", primary_text_section)
         self.assertNotIn("PRIMARY-TEXT RULES", primary_text_section)
 
-    def test_baseball_instant_experience_prompt_outputs_one_best_package(self):
+    def test_baseball_instant_experience_prompt_outputs_five_copy_groups(self):
         prompt = ads_page.build_ads_prompt(
             "Shohei Ohtani 50/50 Season",
             "Baseball",
@@ -397,16 +401,21 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Product name: Shohei Ohtani 50/50 Season", prompt)
         self.assertIn("Product page URL: https://sportscave.com.au/products/ohtani-50-50", prompt)
         self.assertIn("Generate exactly:", prompt)
-        self.assertIn("- one best primary text", prompt)
-        self.assertIn("- one best headline", prompt)
-        self.assertIn("- one CTA", prompt)
-        self.assertIn("Return one final primary text only.", prompt)
-        self.assertIn("Generate exactly one headline.", prompt)
-        self.assertIn("CALL TO ACTION\n\nClaim Your Edition", prompt)
-        self.assertIn("PRIMARY TEXT\n\n[one complete primary-text ad]", prompt)
-        self.assertIn("HEADLINE\n\n[one strongest headline]", prompt)
+        self.assertIn("- five complete Primary Text options", prompt)
+        self.assertIn("- five Headline options", prompt)
+        self.assertIn("- five Call To Action button-label options", prompt)
+        self.assertIn("Return exactly five finished Primary Text options.", prompt)
+        self.assertIn("Generate exactly five headline options.", prompt)
+        self.assertIn("Generate exactly five valid Meta-style CTA button-label options.", prompt)
+        self.assertIn("PRIMARY TEXT\n\n1. [complete primary text]", prompt)
+        self.assertIn("HEADLINES\n\n1. [headline]", prompt)
+        self.assertIn("CALL TO ACTION\n\n1. [Meta CTA label]", prompt)
         self.assertIn("INSTANT EXPERIENCE SETUP\n\n[the required setup instructions]", prompt)
+        self.assertIn("No Description section or Description fields are present.", prompt)
         self.assertNotIn("Create exactly five genuinely different Meta primary-text variations.", prompt)
+        self.assertNotIn("Return one final primary text only.", prompt)
+        self.assertNotIn("Generate exactly one headline.", prompt)
+        self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
         self.assertNotIn("CAROUSEL CARDS\n\nCard 1", prompt)
         self.assertNotIn("CAROUSEL CARD CHARACTER LIMIT", prompt)
         self.assertNotIn("13 characters", prompt)
@@ -473,8 +482,14 @@ class AdsPageTests(unittest.TestCase):
         self.assertNotIn("Social Media Reels", prompt)
         self.assertIn("Automatically group into relevant sections turned OFF", prompt)
         self.assertIn("Under Product headline, use:\n   product.name", prompt)
-        self.assertIn("Under Product description, use:\n   Limited Edition", prompt)
-        self.assertIn("Under Fixed button, set the label to:\n    Claim Your Edition", prompt)
+        self.assertIn(
+            "Under any catalogue descriptor or subtitle field that Meta requires, use:\n   Limited Edition",
+            prompt,
+        )
+        self.assertIn(
+            "Under Fixed button, set the label to:\n    one of the generated CALL TO ACTION button-label options.",
+            prompt,
+        )
         self.assertIn("Under URL parameters, use:\n    " + ads_page.META_AD_URL_PARAMETERS, prompt)
         self.assertIn("https://sportscave.com.au/products/summer-98", prompt)
         self.assertIn("Do not invent the destination URL.", prompt)
@@ -525,9 +540,10 @@ class AdsPageTests(unittest.TestCase):
                 self.assertIn(f"Market: {country}", prompt)
                 self.assertIn(expected_terms[country], prompt)
                 self.assertIn("PRIMARY TEXT", prompt)
-                self.assertIn("Variant 5:", prompt)
-                self.assertIn("HEADLINE", prompt)
-                self.assertIn("DESCRIPTION", prompt)
+                self.assertIn("5. [complete primary text]", prompt)
+                self.assertIn("HEADLINES", prompt)
+                self.assertIn("CALL TO ACTION", prompt)
+                self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
                 self.assertIn("INSTANT EXPERIENCE COVER PROMPT", prompt)
                 self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
                 self.assertIn("Once it sells out, it’s gone.", prompt)
@@ -602,7 +618,10 @@ class AdsPageTests(unittest.TestCase):
                             prompt,
                         )
                         self.assertIn("CATEGORY-SPECIFIC INSTANT EXPERIENCE WINNER ANGLE", prompt)
-                        self.assertIn("Variant 5:", prompt)
+                        self.assertIn("PRIMARY TEXT\n\n1. [complete primary text]", prompt)
+                        self.assertIn("HEADLINES\n\n1. [headline]", prompt)
+                        self.assertIn("CALL TO ACTION\n\n1. [Meta CTA label]", prompt)
+                        self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
                         self.assertIn("INSTANT EXPERIENCE COVER PROMPT", prompt)
                         self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
                         self.assertIn("Once it sells out, it’s gone.", prompt)
@@ -959,12 +978,18 @@ class AdsPageTests(unittest.TestCase):
         self.assertEqual(once, twice)
         self.assertEqual(once.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
         self.assertIn(custom_prompt, once)
+        self.assertIn("If the approved campaign-specific template requires exactly one primary text", once)
+        self.assertNotIn("Instant Experience must always preserve exactly five Primary Text options", once)
+        self.assertIn(
+            "Instant Experience must always preserve exactly five Primary Text options",
+            ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Instant Experience"),
+        )
         self.assertEqual(
             ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Single Image / Video"),
             custom_prompt,
         )
 
-    def test_dedicated_baseball_instant_experience_keeps_approved_single_copy_schema(self):
+    def test_dedicated_baseball_instant_experience_keeps_approved_five_option_schema(self):
         prompt = ads_page.build_ads_prompt(
             "Shohei Ohtani 50/50 Season",
             "Baseball",
@@ -974,9 +999,11 @@ class AdsPageTests(unittest.TestCase):
         )
 
         self.assertEqual(prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
-        self.assertIn("If the approved campaign-specific template requires exactly one primary text", prompt)
-        self.assertIn("Return one final primary text only.", prompt)
+        self.assertIn("Instant Experience must always preserve exactly five Primary Text options", prompt)
+        self.assertIn("Return exactly five finished Primary Text options.", prompt)
+        self.assertIn("Exactly 5 Call To Action button-label options are provided.", prompt)
         self.assertNotIn("PRIMARY TEXT VARIATIONS\n\nVariation 1:", prompt)
+        self.assertNotIn("Return one final primary text only.", prompt)
 
     def test_baseball_instant_experience_receives_country_localisation_without_changing_baseball_terms(self):
         countries = {
@@ -1699,6 +1726,164 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(result["product_name"], "Six Laps Ahead")
         self.assertEqual(result["variation_token"], "product-id-test")
 
+    def test_selected_edition_ops_product_url_autofills_from_record(self):
+        rows = [
+            {
+                "product_id": "product-123",
+                "product_title": "Six Laps Ahead",
+                "shopify_handle": "six-laps-ahead",
+                "online_store_url": "https://sportscave.com.au/products/six-laps-ahead",
+            }
+        ]
+        session_state = {}
+
+        with patch.object(ads_page.st, "session_state", session_state):
+            state = ads_page.prepare_ads_product_url_state("Six Laps Ahead", rows=rows)
+
+        self.assertEqual(state["product_id"], "product-123")
+        self.assertEqual(
+            session_state[ads_page.ADS_PRODUCT_URL_KEY],
+            "https://sportscave.com.au/products/six-laps-ahead",
+        )
+        self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY], "product-123")
+        self.assertEqual(state["message"], "")
+
+    def test_ads_product_url_manual_edit_survives_reruns_until_product_changes(self):
+        rows = [
+            {
+                "product_id": "product-123",
+                "product_title": "Six Laps Ahead",
+                "online_store_url": "https://sportscave.com.au/products/six-laps-ahead",
+            },
+            {
+                "product_id": "product-456",
+                "product_title": "Bathurst Winner",
+                "online_store_url": "https://sportscave.com.au/products/bathurst-winner",
+            },
+        ]
+        session_state = {}
+
+        with patch.object(ads_page.st, "session_state", session_state):
+            ads_page.prepare_ads_product_url_state("Six Laps Ahead", rows=rows)
+            session_state[ads_page.ADS_PRODUCT_URL_KEY] = "https://sportscave.com.au/products/manual-campaign-url"
+            ads_page.prepare_ads_product_url_state("Six Laps Ahead", rows=rows)
+
+            self.assertEqual(
+                session_state[ads_page.ADS_PRODUCT_URL_KEY],
+                "https://sportscave.com.au/products/manual-campaign-url",
+            )
+
+            ads_page.prepare_ads_product_url_state("Bathurst Winner", rows=rows)
+
+        self.assertEqual(
+            session_state[ads_page.ADS_PRODUCT_URL_KEY],
+            "https://sportscave.com.au/products/bathurst-winner",
+        )
+        self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY], "product-456")
+
+    def test_ads_product_url_handles_missing_url_and_cleared_product(self):
+        rows = [
+            {
+                "product_id": "product-empty",
+                "product_title": "No URL Product",
+                "online_store_url": "not-a-url",
+            }
+        ]
+        session_state = {
+            ads_page.ADS_PRODUCT_URL_KEY: "https://sportscave.com.au/products/manual-url",
+            ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY: "previous-product",
+        }
+
+        with patch.object(ads_page.st, "session_state", session_state):
+            state = ads_page.prepare_ads_product_url_state("No URL Product", rows=rows)
+
+            self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_KEY], "")
+            self.assertEqual(state["message"], ads_page.NO_EDITION_OPS_PRODUCT_URL_MESSAGE)
+
+            session_state[ads_page.ADS_PRODUCT_URL_KEY] = "https://sportscave.com.au/products/manual-url"
+            session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = "product-empty"
+            ads_page.prepare_ads_product_url_state("", rows=rows)
+
+        self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_KEY], "")
+        self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY], "")
+
+    def test_existing_ads_draft_preserves_saved_url_until_product_changes(self):
+        rows = [
+            {
+                "product_id": "product-123",
+                "product_title": "Six Laps Ahead",
+                "online_store_url": "https://sportscave.com.au/products/edition-ops-url",
+            },
+            {
+                "product_id": "product-456",
+                "product_title": "Bathurst Winner",
+                "online_store_url": "https://sportscave.com.au/products/bathurst-winner",
+            },
+        ]
+        result = {
+            "product_id": "product-123",
+            "product_name": "Six Laps Ahead",
+            "product_url": "https://sportscave.com.au/products/saved-draft-url",
+        }
+        session_state = {}
+
+        with patch.object(ads_page.st, "session_state", session_state):
+            ads_page.prepare_ads_product_url_state("Six Laps Ahead", result=result, rows=rows)
+
+            self.assertEqual(
+                session_state[ads_page.ADS_PRODUCT_URL_KEY],
+                "https://sportscave.com.au/products/saved-draft-url",
+            )
+
+            ads_page.prepare_ads_product_url_state("Bathurst Winner", result=result, rows=rows)
+
+        self.assertEqual(
+            session_state[ads_page.ADS_PRODUCT_URL_KEY],
+            "https://sportscave.com.au/products/bathurst-winner",
+        )
+
+    def test_duplicate_ads_product_names_resolve_url_through_stable_record(self):
+        rows = [
+            {
+                "product_id": "product-a",
+                "product_title": "Untitled Product",
+                "shopify_handle": "legends-never-die",
+                "online_store_url": "https://sportscave.com.au/products/legends-never-die",
+            },
+            {
+                "product_id": "product-b",
+                "product_title": "Untitled Product",
+                "shopify_handle": "goat-debate-wall-art",
+                "online_store_url": "https://sportscave.com.au/products/goat-debate-wall-art",
+            },
+        ]
+
+        selection = ads_page.resolve_edition_ops_product_selection(
+            "Untitled Product (goat-debate-wall-art)",
+            rows=rows,
+        )
+
+        self.assertEqual(selection["product_id"], "product-b")
+        self.assertEqual(selection["record_key"], "product-b")
+        self.assertEqual(
+            selection["product_url"],
+            "https://sportscave.com.au/products/goat-debate-wall-art",
+        )
+
+    def test_ads_product_url_state_is_prepared_before_widget_render(self):
+        source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
+        render_page_source = source[source.index("def render_page") :]
+        prepare_call = "product_url_state = prepare_ads_product_url_state(product_name, result=result)"
+        url_widget = 'product_url = st.text_input(\n        "Product page URL *"'
+
+        self.assertIn(prepare_call, render_page_source)
+        self.assertIn(url_widget, render_page_source)
+        self.assertLess(render_page_source.index(prepare_call), render_page_source.index(url_widget))
+        self.assertNotIn(
+            "st.session_state[ADS_PRODUCT_URL_KEY]",
+            render_page_source[render_page_source.index(url_widget) :],
+        )
+
     def test_carousel_visual_contract_has_exactly_five_card_matched_prompts(self):
         prompt = ads_page.build_ads_prompt(
             "Six Laps Ahead",
@@ -2030,15 +2215,43 @@ PRIMARY TEXT VARIATIONS
             "export_date": "2026-07-29",
             "slots": {},
             "outcomes": {},
-            "ad_notes": {"cards": "Instant Experience setup from ChatGPT"},
+            "ad_notes": {
+                "instant_experience": {
+                    "primary_text": [
+                        "Primary option 1",
+                        "Primary option 2\nwith preserved second line",
+                        "Primary option 3",
+                        "Primary option 4",
+                        "Primary option 5",
+                    ],
+                    "headlines": [
+                        "Headline 1",
+                        "Headline 2",
+                        "Headline 3",
+                        "Headline 4",
+                        "Headline 5",
+                    ],
+                    "call_to_action": [
+                        "Shop Now",
+                        "Learn More",
+                        "View Shop",
+                        "See More",
+                        "Get Offer",
+                    ],
+                }
+            },
         }
 
         instant_notes = ads_page.build_ads_setup_notes_text(instant_result, instant_workflow)
 
         self.assertIn("Campaign type: Instant Experience", instant_notes)
-        self.assertIn("CAROUSEL CARDS / AD SETUP", instant_notes)
-        self.assertIn("Instant Experience setup from ChatGPT", instant_notes)
-        self.assertIn("Use cover 1 as the main Instant Experience cover.", instant_notes)
+        self.assertIn("INSTANT EXPERIENCE AD COPY", instant_notes)
+        self.assertIn("PRIMARY TEXT\r\n\r\nOPTION 1\r\nPrimary option 1", instant_notes)
+        self.assertIn("OPTION 2\r\nPrimary option 2\r\nwith preserved second line", instant_notes)
+        self.assertIn("HEADLINES\r\n\r\nOPTION 1\r\nHeadline 1", instant_notes)
+        self.assertIn("CALL TO ACTION\r\n\r\nOPTION 1\r\nShop Now", instant_notes)
+        self.assertNotIn("DESCRIPTIONS", instant_notes)
+        self.assertNotIn("CAROUSEL CARDS / AD SETUP", instant_notes)
         self.assertNotIn("Use exactly 5 carousel cards", instant_notes)
 
     def test_ads_setup_notes_preserve_user_spacing_and_empty_optional_sections(self):
@@ -2352,6 +2565,26 @@ PRIMARY TEXT VARIATIONS
             "The complete text-only package must end with the generation approval question.",
         )
 
+    def test_instant_experience_text_first_contract_uses_five_copy_groups_no_description(self):
+        contract = visual_contract(
+            ads_page.build_ads_prompt(
+                "Collector Test Product",
+                "Cricket",
+                "UK",
+                "Instant Experience",
+                variation_token="instant-text-first-test",
+            )
+        )
+
+        self.assertIn("exactly five Primary Text options", contract)
+        self.assertIn("exactly five Headlines", contract)
+        self.assertIn("exactly five Call To Action button-label options", contract)
+        self.assertIn("Five Primary Text options.", contract)
+        self.assertIn("Five Headlines.", contract)
+        self.assertIn("Five Call To Action button-label options.", contract)
+        self.assertIn("Do not include Description fields for Instant Experience.", contract)
+        self.assertNotIn("6. Description lines.", contract)
+
     def test_old_cached_result_is_refreshed_to_current_full_visual_prompt_contract(self):
         current = ads_page.build_ads_result_record(
             "Six Laps Ahead",
@@ -2393,6 +2626,37 @@ PRIMARY TEXT VARIATIONS
                 f"CARD {index} IMAGE GENERATION PROMPT",
                 refreshed["master_prompt"],
             )
+
+    def test_old_instant_experience_cached_result_refreshes_to_five_option_contract(self):
+        current = ads_page.build_ads_result_record(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Instant Experience",
+            product_id="product-999",
+            product_url="https://sportscave.com.au/products/final-whistle-glory",
+            variation_token="cached-ie-result-test",
+        )
+        legacy = {
+            **current,
+            "prompt_contract_version": ads_page.ADS_PROMPT_CONTRACT_VERSION,
+            "master_prompt": "OLD INSTANT EXPERIENCE PROMPT\n\nDESCRIPTION\n\n1. [description]",
+            "generated_ad_output": "OLD INSTANT EXPERIENCE PROMPT\n\nDESCRIPTION\n\n1. [description]",
+        }
+
+        refreshed = ads_page.ensure_current_ads_result_prompt(legacy)
+
+        self.assertEqual(
+            refreshed["prompt_contract_version"],
+            ads_page.ads_prompt_contract_version_for_campaign("Instant Experience"),
+        )
+        self.assertEqual(refreshed["product_id"], "product-999")
+        self.assertEqual(refreshed["variation_token"], "cached-ie-result-test")
+        self.assertNotIn("OLD INSTANT EXPERIENCE PROMPT", refreshed["master_prompt"])
+        self.assertIn("PRIMARY TEXT\n\n1. [complete primary text]", refreshed["master_prompt"])
+        self.assertIn("HEADLINES\n\n1. [headline]", refreshed["master_prompt"])
+        self.assertIn("CALL TO ACTION\n\n1. [Meta CTA label]", refreshed["master_prompt"])
+        self.assertNotIn("DESCRIPTION\n\n1. [description]", refreshed["master_prompt"])
 
     def test_non_carousel_text_first_contract_requires_one_copyable_prompt(self):
         for campaign_type, expected in (
@@ -2643,6 +2907,39 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Descriptions", note_labels)
         self.assertIn("Carousel cards / ad setup", note_labels)
         self.assertIn("Primary Text Variations", note_labels)
+
+    def test_instant_experience_copy_fields_are_five_compact_groups_only(self):
+        source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
+
+        self.assertIn("INSTANT_EXPERIENCE_COPY_GROUPS", source)
+        self.assertIn("ads-ie-copy-field::", source)
+        self.assertIn("height: 42px", source)
+        self.assertIn("overflow-y: auto", source)
+
+        app_test = run_ads_page()
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test)
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        note_labels = [text_area.label for text_area in app_test.text_area]
+        self.assertEqual(
+            [label for label in note_labels if label.startswith("Primary Text ")],
+            [f"Primary Text {index}" for index in range(1, 6)],
+        )
+        self.assertEqual(
+            [label for label in note_labels if label.startswith("Headline ")],
+            [f"Headline {index}" for index in range(1, 6)],
+        )
+        self.assertEqual(
+            [label for label in note_labels if label.startswith("Call to Action ")],
+            [f"Call to Action {index}" for index in range(1, 6)],
+        )
+        self.assertNotIn("Descriptions", note_labels)
+        self.assertNotIn("Carousel cards / ad setup", note_labels)
+        self.assertNotIn("Primary Text Variations", note_labels)
 
     def test_submit_supported_result_renders_compact_sections_with_url_parameters(self):
         app_test = run_ads_page()
