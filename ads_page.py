@@ -1,10 +1,12 @@
 import hashlib
 import html
+import io
 import json
 import logging
 import re
 import secrets
 import time
+import zipfile
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
@@ -104,9 +106,9 @@ ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V4"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
-ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V2"
+ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V3"
 ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE ROUTES V1"
-ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V1"
+ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V2"
 ADS_COPY_FILENAME = "Ad Copy.txt"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
@@ -400,6 +402,15 @@ IMAGE_ORDER = [
     ("The Cave", "Man cave, home bar, garage or masculine collector setting."),
     ("Scarcity", "Artwork close-up, edition badge, plaque or numbered-run detail."),
 ]
+
+INSTANT_EXPERIENCE_CONCEPTS = ads_image_workflow.INSTANT_EXPERIENCE_CONCEPTS
+INSTANT_EXPERIENCE_COPY_FIELDS = (
+    ("primary_text", "Primary Text"),
+    ("headline", "Headline"),
+    ("cta", "CTA"),
+)
+INSTANT_EXPERIENCE_COPY_VARIATION_COUNT = 3
+INSTANT_EXPERIENCE_PREVIEW_DISPLAY_WIDTH = 300
 
 INSTANT_EXPERIENCE_COPY_GROUPS = (
     ("primary_text", "PRIMARY TEXT", "Primary Text", "Primary text option {index}"),
@@ -2795,19 +2806,14 @@ def build_default_instant_experience_cover_prompt_requirements(product_name, cat
     )
 
 
-INSTANT_EXPERIENCE_STANDARD_COPY_ANGLES = (
-    ("1", "Nostalgia / Moment"),
-    ("2", "Fan Identity"),
-    ("3", "Ownership / Display"),
-    ("4", "Product-Specific Angle"),
-    ("5", "Collector / Scarcity"),
-)
-
 INSTANT_EXPERIENCE_STANDARD_VISUALS = (
     {
-        "heading": "IMAGE PROMPT 1 — NOSTALGIA / MOMENT",
-        "route": "Nostalgia / Moment",
-        "copy_row": "Ad 1",
+        "concept_id": "nostalgia",
+        "group_heading": "GROUP 1 — NOSTALGIA",
+        "prompt_heading": "IMAGE GENERATION PROMPT",
+        "route": "Nostalgia",
+        "supporting_label": "Moment & Memory",
+        "copy_row": "Nostalgia Copy Variation 1",
         "purpose": "Make the fan feel the memory, emotion, awe or anticipation before selling the product.",
         "room_type": "intimate collector study",
         "wall_colour": "warm mineral grey",
@@ -2820,7 +2826,7 @@ INSTANT_EXPERIENCE_STANDARD_VISUALS = (
         "time_of_day": "late afternoon",
         "overlay_position": "restrained negative space beside or below the frame, never across the artwork",
         "composition": "near-full-bleed editorial product-led cover with no hard black scarcity panel",
-        "overlay_rule": "Use the exact finished Headline and CTA from Ad 1 only. Do not place the full Primary Text on the image.",
+        "overlay_rule": "Use the exact finished Headline and CTA from Nostalgia Copy Variation 1 only. State those exact strings inside this image prompt. Do not place the full Primary Text on the image.",
         "extra_rules": (
             "- No scarcity language, no offer, no discount, no price and no hard black panel.\n"
             "- The frame must remain close, emotionally immersive and clearly readable on mobile.\n"
@@ -2828,9 +2834,12 @@ INSTANT_EXPERIENCE_STANDARD_VISUALS = (
         ),
     },
     {
-        "heading": "IMAGE PROMPT 2 — IDENTITY / OWNERSHIP",
-        "route": "Identity / Ownership",
-        "copy_row": "Ad 2 or Ad 3, whichever best matches the chosen overlay",
+        "concept_id": "ownership",
+        "group_heading": "GROUP 2 — OWNERSHIP",
+        "prompt_heading": "IMAGE GENERATION PROMPT",
+        "route": "Ownership",
+        "supporting_label": "Identity & Display",
+        "copy_row": "Ownership Copy Variation 1",
         "purpose": "Make the fan picture the exact artwork as part of their home, office, sports room or personal collection.",
         "room_type": "premium media room or home office",
         "wall_colour": "deep charcoal with warm neutral architectural contrast",
@@ -2843,7 +2852,7 @@ INSTANT_EXPERIENCE_STANDARD_VISUALS = (
         "time_of_day": "dusk",
         "overlay_position": "genuine architectural negative space on the open wall area",
         "composition": "asymmetrical lifestyle composition that is visibly different from Prompt 1",
-        "overlay_rule": "Use the stronger matching finished Headline and CTA from Ad 2 or Ad 3. State exactly which row was chosen and reproduce the exact wording.",
+        "overlay_rule": "Use the exact finished Headline and CTA from Ownership Copy Variation 1 only. State those exact strings inside this image prompt. Do not place the full Primary Text on the image.",
         "extra_rules": (
             "- No black scarcity panel and no aggressive FOMO.\n"
             "- The room must be believable and lived in, not a furniture catalogue or sports-themed showroom.\n"
@@ -2851,9 +2860,12 @@ INSTANT_EXPERIENCE_STANDARD_VISUALS = (
         ),
     },
     {
-        "heading": "IMAGE PROMPT 3 — COLLECTOR / SCARCITY",
-        "route": "Collector / Scarcity",
-        "copy_row": "Ad 5",
+        "concept_id": "scarcity",
+        "group_heading": "GROUP 3 — SCARCITY",
+        "prompt_heading": "IMAGE GENERATION PROMPT",
+        "route": "Scarcity",
+        "supporting_label": "Collector & Limited Edition",
+        "copy_row": "Scarcity Copy Variation 1",
         "purpose": "Preserve the proven Sports Cave collector conversion cover.",
         "room_type": "premium collector room with restrained black-and-gold campaign treatment",
         "wall_colour": "deep charcoal, warm off-white or muted taupe chosen to keep the product dominant",
@@ -2866,7 +2878,7 @@ INSTANT_EXPERIENCE_STANDARD_VISUALS = (
         "time_of_day": "evening or late afternoon",
         "overlay_position": "bottom collector panel",
         "composition": "approximately 64-68% premium lifestyle/product area and 32-36% deep matte-black collector panel",
-        "overlay_rule": "Use these exact three collector-panel lines when the 100-edition limit is verified: LIMITED TO 100 WORLDWIDE / Once it sells out, it’s gone. / CLAIM YOUR EDITION.",
+        "overlay_rule": "Use the exact finished Headline and CTA from Scarcity Copy Variation 1 as the concept overlay when not using the verified collector panel. When the 100-edition limit is verified, use these exact three collector-panel lines instead: LIMITED TO 100 WORLDWIDE / Once it sells out, it’s gone. / CLAIM YOUR EDITION.",
         "extra_rules": (
             "- Use restrained metallic-gold dividing detail and a premium black panel.\n"
             "- Do not add an unverified remaining count, price, discount, shipping claim or certificate claim.\n"
@@ -2889,7 +2901,7 @@ def standard_instant_experience_fingerprint(index, visual, *, category=""):
         "cover_layout": visual["composition"],
         "urgency_placement": (
             "collector panel only"
-            if visual["route"] == "Collector / Scarcity"
+            if visual["concept_id"] == "scarcity"
             else "none in feed creative"
         ),
         "creative_cta": visual["copy_row"],
@@ -2964,7 +2976,7 @@ def build_standard_instant_experience_image_prompt(
         category=category,
     )
     scarcity_panel_lines = "\n".join(BASEBALL_INSTANT_EXPERIENCE_COVER_LINES)
-    if visual["route"] == "Collector / Scarcity":
+    if visual["concept_id"] == "scarcity":
         collector_control_block = f"""COLLECTOR CONTROL PANEL COPY
 
 Use these exact three panel lines only when the 100-edition limit is verified:
@@ -2975,10 +2987,10 @@ Do not add an unverified remaining count, price, discount, shipping claim or cer
     else:
         collector_control_block = """COLLECTOR CONTROL PANEL COPY
 
-Do not use the Collector / Scarcity control panel in this route.
+Do not use the Scarcity collector panel in this route.
 
 No hard black scarcity panel, no scarcity overlay wording, no price, no discount and no offer language."""
-    return f"""{visual["heading"]}
+    return f"""{visual["prompt_heading"]}
 
 Copy this prompt into a fresh image-generation conversation with the exact uploaded Sports Cave product image attached.
 
@@ -2990,8 +3002,9 @@ PRODUCT AND CAMPAIGN
 - Sport/category: {category}
 - Country/market: {country}
 - Destination URL for ad setup only: {product_url or "[exact product-page URL from the Ads form]"}
-- Active image route: {visual["route"]}
+- Creative concept: {visual["route"]} — {visual["supporting_label"]}
 - Copy source row: {visual["copy_row"]}
+- On-image wording source: use the exact Headline and CTA from {visual["copy_row"]}. Print those exact finished strings in this standalone prompt before the composition notes. Do not leave placeholders.
 
 PSYCHOLOGICAL PURPOSE
 
@@ -3064,6 +3077,47 @@ def build_standard_instant_experience_visual_prompts(
         for index, visual in enumerate(INSTANT_EXPERIENCE_STANDARD_VISUALS, start=1)
     ]
     return "\n\n".join(prompts)
+
+
+def build_instant_experience_copy_variation_table_contract(concept_name):
+    return f"""COPY VARIATIONS
+
+| Variation | Primary Text | Headline | CTA |
+| --------- | ------------ | -------- | --- |
+| 1 | Complete {concept_name} primary text | Complete {concept_name} headline | Complete {concept_name} CTA |
+| 2 | Complete {concept_name} primary text | Complete {concept_name} headline | Complete {concept_name} CTA |
+| 3 | Complete {concept_name} primary text | Complete {concept_name} headline | Complete {concept_name} CTA |"""
+
+
+def build_standard_instant_experience_group_output_contract(
+    *,
+    product_name,
+    category,
+    country,
+    product_url="",
+    campaign_moment=None,
+    recent_fingerprints=None,
+):
+    group_sections = []
+    for index, visual in enumerate(INSTANT_EXPERIENCE_STANDARD_VISUALS, start=1):
+        image_prompt = build_standard_instant_experience_image_prompt(
+            index,
+            visual,
+            product_name=product_name,
+            category=category,
+            country=country,
+            product_url=product_url,
+            campaign_moment=campaign_moment,
+            recent_fingerprints=recent_fingerprints,
+        )
+        group_sections.append(
+            f"""{visual["group_heading"]}
+
+{image_prompt}
+
+{build_instant_experience_copy_variation_table_contract(visual["route"])}"""
+        )
+    return "\n\n".join(group_sections)
 
 
 def _ie_visual_value(settings, key, fallback):
@@ -3568,14 +3622,6 @@ def build_instant_experience_visual_output_requirements(
 ):
     product_name = _clean_product_name(product_name)
     product_url = _clean_product_url(product_url)
-    visual_prompts = build_standard_instant_experience_visual_prompts(
-        product_name=product_name,
-        category=category,
-        country=country,
-        product_url=product_url,
-        campaign_moment=campaign_moment,
-        recent_fingerprints=recent_instant_experience_fingerprints,
-    )
     campaign_moment_visual_context = build_campaign_moment_visual_context(
         campaign_moment,
         selected_country=country,
@@ -3587,7 +3633,7 @@ def build_instant_experience_visual_output_requirements(
     )
     return f"""INSTANT EXPERIENCE VISUAL REQUIREMENTS
 
-Return exactly three complete, standalone Instant Experience cover-image prompts in the standard order: Nostalgia / Moment, Identity / Ownership, then Collector / Scarcity.
+Return exactly three complete grouped Instant Experience concepts in the standard order: Nostalgia, Ownership, then Scarcity.
 
 Do not output a fourth prompt.
 Do not output one shared prompt with variations.
@@ -3603,17 +3649,25 @@ The three covers must visibly differ in composition, room type, wall colour/mate
 {build_standard_instant_experience_freshness_block(category=category, recent_fingerprints=recent_instant_experience_fingerprints)}
 {campaign_moment_visual_block}
 
-IMAGE GENERATION PROMPTS — COPY ONE AT A TIME
+GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE CONCEPT AT A TIME
 
-{visual_prompts}
+{build_standard_instant_experience_group_output_contract(
+    product_name=product_name,
+    category=category,
+    country=country,
+    product_url=product_url,
+    campaign_moment=campaign_moment,
+    recent_fingerprints=recent_instant_experience_fingerprints,
+)}
 
 FINAL INSTANT EXPERIENCE IMAGE CHECK
 
-- Exactly three image prompts are present.
-- Prompt 1 contains no black scarcity panel and no scarcity language.
-- Prompt 2 is a visibly different lifestyle/ownership composition.
-- Prompt 3 preserves the original black-and-gold collector-control treatment.
-- Each prompt includes exact product identity, selected sport, selected country, exact overlay-row mapping, product/artwork lock, frame and glass realism, physical mounting, room realism, square 1024 x 1024 composition and no automatic image generation.
+- Exactly three group sections are present.
+- Each group contains exactly one IMAGE GENERATION PROMPT and exactly one three-row COPY VARIATIONS table.
+- Nostalgia contains no black scarcity panel and no scarcity language.
+- Ownership is a visibly different lifestyle/ownership composition.
+- Scarcity preserves the original black-and-gold collector-control treatment.
+- Each prompt includes exact product identity, selected sport, selected country, exact overlay-row mapping from Copy Variation 1, product/artwork lock, frame and glass realism, physical mounting, room realism, square 1024 x 1024 composition and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
 
     settings = normalize_instant_experience_settings(instant_experience_settings)
@@ -3799,9 +3853,9 @@ def build_ads_text_first_image_generation_gate(campaign_type, instant_experience
     elif campaign_type == "Instant Experience":
         format_detail = (
             "For Instant Experience campaigns, the first text-only response must include exactly one easy-to-copy "
-            "Markdown table with five complete rows for Primary Text, Headline and CTA; exactly one shared Instant "
-            "Experience setup block; and exactly three complete, separately copyable, production-ready cover image "
-            "prompts for Nostalgia / Moment, Identity / Ownership and Collector / Scarcity. "
+            "grouped package for Nostalgia, Ownership and Scarcity. Each group must contain one complete standalone "
+            "cover image prompt followed by a three-row Markdown table for Primary Text, Headline and CTA. The response "
+            "must contain nine total ad-copy combinations and one shared Instant Experience setup block after the groups. "
             "Do not include Description fields, Meta Ad Description fields, "
             "Campaign Strategy essays, route-selection packages, rejected alternatives or follow-up generation questions."
         )
@@ -3819,11 +3873,11 @@ def build_ads_text_first_image_generation_gate(campaign_type, instant_experience
         )
 
     if campaign_type == "Instant Experience":
-        ad_package_items = """1. one Markdown table headed INSTANT EXPERIENCE AD COPY.
-2. Exactly five completed table rows: Nostalgia / Moment, Fan Identity, Ownership / Display, Product-Specific Angle and Collector / Scarcity.
-3. Exactly one Primary Text, one Headline and one CTA in each row.
-4. Exactly one shared INSTANT EXPERIENCE SETUP block.
-5. Exactly three complete production-ready cover image prompts.
+        ad_package_items = """1. GROUP 1 — NOSTALGIA with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+2. GROUP 2 — OWNERSHIP with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+3. GROUP 3 — SCARCITY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+4. Exactly nine complete ad-copy combinations total.
+5. Exactly one shared INSTANT EXPERIENCE SETUP block after the three groups.
 6. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions.
 
 No Description or Meta Ad Description field is allowed."""
@@ -3844,7 +3898,7 @@ No Description or Meta Ad Description field is allowed."""
     approval_question = "Would you like me to generate Card 1?"
     if campaign_type == "Instant Experience":
         completion_instruction = (
-            "After the third Collector / Scarcity cover prompt is complete, stop. "
+            "After GROUP 3 — SCARCITY and the shared INSTANT EXPERIENCE SETUP block are complete, stop. "
             "Do not ask which cover to generate and do not ask a follow-up generation question."
         )
     else:
@@ -3854,7 +3908,7 @@ No Description or Meta Ad Description field is allowed."""
             f'"{approval_question}"'
         )
     direct_instruction_examples = (
-        '"generate the image now", "generate the Nostalgia / Moment Cover" or "generate the Collector / Scarcity Cover"'
+        '"generate the image now", "generate the Nostalgia Cover" or "generate the Scarcity Cover"'
         if campaign_type == "Instant Experience"
         else '"generate the image now", "generate Card 1" or "generate FEEL"'
     )
@@ -3923,9 +3977,10 @@ def build_campaign_visual_output_contract(
     contract_version = ads_prompt_contract_version_for_campaign(campaign_type).replace("; ", "\n")
     if campaign_type == "Instant Experience":
         copy_schema_preservation = (
-            "Return the finished standard Instant Experience output first, in this order: one five-row Markdown "
-            "ad-copy table, one shared Instant Experience setup block, then the three standalone cover prompts. "
-            "Preserve every Primary Text, Headline, CTA, setup instruction, destination rule and URL parameter. "
+            "Return the finished standard Instant Experience output in this order: GROUP 1 — NOSTALGIA, "
+            "GROUP 2 — OWNERSHIP, GROUP 3 — SCARCITY, then one shared INSTANT EXPERIENCE SETUP block. "
+            "Each group must contain one standalone image-generation prompt followed by three matching "
+            "Primary Text, Headline and CTA variations. Preserve every setup instruction, destination rule and URL parameter. "
             "Do not add Description, Meta Ad Description, route-package, multi-route mode or old control-mode sections."
         )
     else:
@@ -3933,6 +3988,22 @@ def build_campaign_visual_output_contract(
             "Return the finished existing ad-copy output first, in its existing required schema and order. "
             "Preserve every existing copy field, card role, primary-text variation, headline, description, CTA, "
             "setup instruction, destination rule and URL parameter."
+        )
+    if campaign_type == "Instant Experience":
+        visual_section_intro = (
+            "Use the campaign-specific grouped concept section below as the single final Instant Experience output. "
+            "It already contains the standalone image-generation prompt and three matching copy variations for each concept. "
+            "Do not output a separate duplicate copy package before or after it."
+        )
+        final_output_instruction = (
+            "Do not repeat the research, explain decisions, show internal reasoning, provide rejected alternatives "
+            "or give general creative advice. Return only the three grouped concept sections and the shared setup block."
+        )
+    else:
+        visual_section_intro = "Directly beneath that complete existing output, return the campaign-specific visual section required below."
+        final_output_instruction = (
+            "Do not repeat the research, explain decisions, show internal reasoning, provide rejected alternatives "
+            "or give general creative advice. Return only the finished ad output followed by the finished visual prompt or prompts."
         )
 
     if campaign_type == "Instant Experience":
@@ -3953,8 +4024,8 @@ def build_campaign_visual_output_contract(
         final_question = "Would you like me to generate Card 1?"
     if campaign_type == "Instant Experience":
         final_response_termination = (
-            "Only after the complete Instant Experience copy table, setup block and "
-            "the third Collector / Scarcity cover prompt has been printed, stop. "
+            "Only after GROUP 1 — NOSTALGIA, GROUP 2 — OWNERSHIP, GROUP 3 — SCARCITY "
+            "and the shared INSTANT EXPERIENCE SETUP block have been printed, stop. "
             "Do not ask a follow-up question and do not generate images."
         )
     else:
@@ -3976,7 +4047,7 @@ Creative variation token: {variation_token}
 
 {copy_schema_preservation}
 
-Directly beneath that complete existing output, return the campaign-specific visual section required below.
+{visual_section_intro}
 
 This response-order rule controls placement only. It does not replace, rewrite, weaken or omit any earlier approved copy instruction.
 
@@ -3986,7 +4057,7 @@ Any earlier "OUTPUT EXACTLY IN THIS FORMAT" instruction controls only the ad-cop
 
 If an earlier campaign schema already names an image prompt, cover prompt, creative prompt or Creative direction field, treat that earlier field as supplementary specification for the final visual section below. Move and upgrade that visual guidance to the final position. Do not output a preliminary brief, duplicate visual field or second prompt. The final campaign-specific visual heading, exact headings and prompt count below are authoritative.
 
-Do not repeat the research, explain decisions, show internal reasoning, provide rejected alternatives or give general creative advice. Return only the finished ad output followed by the finished visual prompt or prompts.
+{final_output_instruction}
 
 Treat the creative variation token only as a cue for a fresh interpretation. Never display it in ad copy or inside an image.
 
@@ -4505,30 +4576,33 @@ def build_shared_meta_winner_copy_upgrade(campaign_type="", instant_experience_s
     if campaign_type == "Instant Experience":
         return f"""{META_WINNER_COPY_BLOCK_VERSION}
 
-This block strengthens the standard Instant Experience copy table only. Preserve the approved output order, the five table rows, CTA column, setup block, URL parameters, localisation, claim safeguards and all product-accuracy protections.
+This block strengthens the standard Instant Experience grouped concept output only. Preserve the approved output order, three concept groups, three copy variations per concept, CTA column, setup block, URL parameters, localisation, claim safeguards and all product-accuracy protections.
 
-STANDARD INSTANT EXPERIENCE COPY DIVERSITY
+STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY
 
-- Return exactly one Markdown table under INSTANT EXPERIENCE AD COPY.
-- The table must contain exactly five completed rows: Nostalgia / Moment, Fan Identity, Ownership / Display, Product-Specific Angle and Collector / Scarcity.
+- Return exactly three grouped concepts: GROUP 1 — NOSTALGIA, GROUP 2 — OWNERSHIP and GROUP 3 — SCARCITY.
+- Each concept must contain exactly one IMAGE GENERATION PROMPT and one COPY VARIATIONS table.
+- Each concept table must contain exactly three completed rows.
 - Each row must contain one complete Primary Text, one Headline and one CTA.
+- The full response must contain exactly nine complete ad-copy combinations.
 - No Description or Meta Ad Description field is allowed.
 - No row may be placeholder copy.
 - No shared opening sentence.
 - No duplicated headline.
 - No duplicated CTA.
-- Scarcity must be concentrated in the Collector / Scarcity row.
-- Nostalgia / Moment must not contain scarcity or discount language.
-- Product-Specific Angle may use an entered offer only when the exact offer is supplied and fact-safe.
+- Scarcity must be concentrated in the Scarcity concept.
+- Nostalgia must not contain scarcity, offer or discount language.
+- Ownership must stay identity/display-led and avoid hard FOMO.
+- A supplied offer may be used only when the exact offer is supplied and fact-safe.
 - Every claim must remain supported by the product title, supplied facts, visible artwork or approved claim path.
 - Use natural selected-country English.
 
 SILENT COPY SELECTION
 
-Before returning the campaign, privately compare several product-specific candidates for each table row. Reject generic, repetitive, fact-unsafe or unnatural writing. Return only the strongest finished copy in the approved table format. Do not expose candidates, scoring notes, research or reasoning."""
+Before returning the campaign, privately compare several product-specific candidates for each concept variation. Reject generic, repetitive, fact-unsafe or unnatural writing. Return only the strongest finished copy in the approved grouped format. Do not expose candidates, scoring notes, research or reasoning."""
     single_primary_rule = (
-        "Instant Experience must always preserve exactly five Primary Text options, "
-        "five Headlines and five Call To Action button-label options."
+        "Instant Experience must always preserve exactly three concept groups with three Primary Text, "
+        "three Headline and three CTA options inside each group."
         if campaign_type == "Instant Experience"
         else (
             "If the approved campaign-specific template requires exactly one primary text rather than five, "
@@ -5647,10 +5721,6 @@ def build_standard_instant_experience_prompt(
         if category == "Baseball"
         else ""
     )
-    copy_rows = "\n".join(
-        f"| {row_number} | {angle} | write complete 3-5 sentence copy here | write one distinct 4-6 word headline here | write one distinct 2-4 word creative CTA here |"
-        for row_number, angle in INSTANT_EXPERIENCE_STANDARD_COPY_ANGLES
-    )
     return f"""{pattern_heading}
 
 PRODUCT
@@ -5681,90 +5751,104 @@ PROMOTION OR OFFER
 
 Exact Promotion or Offer entered: {exact_offer or "None supplied"}
 
-Serialize this field independently of Moment Type. If a non-empty offer is supplied, preserve it exactly and use it only in Ad 4 when the product facts and campaign context support an offer-led product-specific angle. Never invent, rewrite, improve or expand the offer.
+Serialize this field independently of Moment Type. If a non-empty offer is supplied, preserve it exactly. Do not use it in Nostalgia or Ownership. Use it only in Scarcity variation 3 if the product facts and campaign context support an offer-led collector test. Never invent, rewrite, improve or expand the offer.
 
 OBJECTIVE
 
-Create one standard Meta Instant Experience ad package for this Sports Cave product.
+Create one standard Meta Instant Experience package grouped into three clear concepts:
+
+1. NOSTALGIA
+2. OWNERSHIP
+3. SCARCITY
 
 Return exactly these sections in this order:
 
-1. INSTANT EXPERIENCE AD COPY
-2. INSTANT EXPERIENCE SETUP
-3. The Nostalgia / Moment cover-image prompt
-4. The Identity / Ownership cover-image prompt
-5. The Collector / Scarcity cover-image prompt
+1. GROUP 1 — NOSTALGIA
+2. GROUP 2 — OWNERSHIP
+3. GROUP 3 — SCARCITY
+4. INSTANT EXPERIENCE SETUP
 
-Do not output three separate ad packages.
-Do not output Campaign Strategy essays, rejected alternatives, placeholder copy, Meta Ad Description fields, Description fields, separate creative/fixed CTA fields, route selectors, multi-route mode language, old control-mode labels or collection-page routing.
+Do not output five global copy variations.
+Do not output one global copy table disconnected from the images.
+Do not output Campaign Strategy essays, rejected alternatives, placeholder copy, Meta Ad Description fields, Description fields, separate creative/fixed CTA fields, FEEL/BELONG/ACT packages, route selectors, multi-route mode language, old control-mode labels or collection-page routing.
 Do not ask which image to generate.
 Do not generate images.
 
-INSTANT EXPERIENCE AD COPY
+GROUP OUTPUT CONTRACT
 
-Output exactly one Markdown table with exactly five completed rows and these columns:
+For each group, output exactly this structure:
 
-| Ad | Angle | Primary Text | Headline | CTA |
-| -- | ----- | ------------ | -------- | --- |
-{copy_rows}
+GROUP [number] — [CONCEPT]
 
-Column meaning: PRIMARY TEXT, HEADLINE and CALL TO ACTION.
+IMAGE GENERATION PROMPT
 
-The returned table must contain finished customer-facing copy, not instructions, notes or placeholders.
+[one complete standalone image-generation prompt for this concept]
+
+COPY VARIATIONS
+
+| Variation | Primary Text | Headline | CTA |
+| --------- | ------------ | -------- | --- |
+| 1 | Complete copy | Complete headline | Complete CTA |
+| 2 | Complete copy | Complete headline | Complete CTA |
+| 3 | Complete copy | Complete headline | Complete CTA |
+
+Every group table must contain exactly three completed rows. Across all groups, output exactly nine complete ad-copy combinations.
 
 Table rules:
-- Keep each table cell on one line so Nathan can copy and paste the rows into the app.
+- Keep each table cell on one line so Nathan can copy and paste into the matching concept section in the app.
 - Escape any vertical-bar characters that would break the Markdown table.
-- Never leave placeholders such as Primary text option 2, Headline option 3, Shop Now repeated five times, Add copy here or To be generated.
-- Map row 1 to Primary Text 1, Headline 1 and Call to Action 1.
-- Map row 2 to Primary Text 2, Headline 2 and Call to Action 2.
-- Continue through row 5.
+- Never leave placeholders such as Primary text option 2, Headline option 3, Shop Now repeated, Add copy here, Complete copy or To be generated in the returned answer.
+- Copy Variation 1 in each concept supplies the exact on-image Headline and CTA for that concept's image prompt.
+- Copy Variations 2 and 3 are alternative Meta copy combinations for testing with the same concept image.
+- Do not put the full Primary Text on any image.
 
-COPY ANGLES
+CONCEPT-SPECIFIC COPY RULES
 
-Ad 1 — Nostalgia / Moment:
-- Use pure emotion, memory, appreciation, awe or anticipation.
-- No scarcity, no offer, no discount and no words such as claim, only, gone, selling fast or miss out.
-- Make the fan remember why the subject mattered. If the subject is current or future-facing, use excitement, awe or anticipation instead of false nostalgia.
+NOSTALGIA — Moment & Memory:
+- Purpose: make the fan remember the athlete, rivalry, race, match, era or sporting moment.
+- All three Nostalgia variations must lead with emotion, memory or recognition.
+- Feel product-specific and use three different opening hooks.
+- Contain no hard scarcity, no offer and no discount language.
+- Avoid claim, only, selling fast, gone, last chance and miss out.
+- Avoid generic product-description openings and polished corporate ad language.
+- Adapt current or future sporting subjects to awe, anticipation or excitement instead of pretending they are nostalgic.
+- Suitable CTA territory: Remember the Moment, See the Edition, Relive It, See It Framed.
 
-Ad 2 — Fan Identity:
-- Make the correct fan feel recognised through loyalty, belonging, shared history or what the athlete, team or moment means to fans.
-- Do not turn this into an interior-design advertisement.
-- Use no more than one soft product or collector cue.
+OWNERSHIP — Identity & Display:
+- Purpose: make the fan picture the artwork on their wall and feel that owning it says something about who they are.
+- All three Ownership variations must focus on identity, belonging, pride or personal display.
+- Keep the artwork and sporting subject as the emotional centre.
+- Avoid turning the copy into an interior-design advertisement.
+- Avoid hard FOMO.
+- Use no more than one restrained collector cue.
+- Use three materially different opening hooks.
+- Suitable CTA territory: Make It Yours, Own the Moment, Bring It Home, Put It on Your Wall.
 
-Ad 3 — Ownership / Display:
-- Help the fan picture the exact artwork on their wall.
-- Keep the artwork as the emotional centre.
-- Focus on owning, displaying or living with the moment without over-describing the room.
-
-Ad 4 — Product-Specific Angle:
-- Automatically select the strongest fact-supported angle from legacy, achievement, milestone, rivalry, national pride, gift, current sporting relevance or the exact entered offer.
-- Rivalry requires a genuine rivalry or dual-subject product.
-- Milestone requires a verified achievement or number.
-- National pride requires a real connection to the subject, not merely the selected advertising country.
-- Offer language requires the exact entered offer.
-- Never invent history, achievements, product facts or sporting events.
-
-Ad 5 — Collector / Scarcity:
-- Use the proven Sports Cave collector-control structure.
-- When verified by product data or the approved edition-claim path, preserve limited to 100 worldwide, once it sells out it's gone and Claim Your Edition.
-- Never invent remaining inventory counts.
-- Numbered certificate language requires approved product data.
+SCARCITY — Collector & Limited Edition:
+- Purpose: convert established desire using verified limited-edition collector scarcity.
+- All three Scarcity variations must feel urgent and collector-focused.
+- Use different hooks and sentence structures.
+- Use only verified product facts.
+- Never invent remaining quantities, sales velocity, certificate claims or offers.
+- Preserve "Limited to 100 worldwide" only when verified for the selected product.
+- Preserve "Once it sells out, it's gone" where approved.
+- Suitable CTA territory: Claim Your Edition, Secure Yours, Don't Miss This One, Claim Your Number.
 
 COPY QUALITY RULES
 
 - Every Primary Text must contain 3-5 short, mobile-readable sentences.
 - Every Primary Text must sound human, emotional and collector-focused.
-- Every row must use a different opening hook and a materially different psychological job.
+- Every variation must use a different opening hook and a materially different psychological job inside its concept.
 - Every Headline must contain no more than 4-6 words and be distinct. 4 to 6 words max.
-- Every CTA must contain approximately 2-4 words, match its angle and differ across the five rows.
+- Every CTA must contain approximately 2-4 words, match its concept and avoid blind repetition.
 - Keep the fixed Meta/Instant Experience button as: Shop Now.
+- Never invent history, achievements, product facts or sporting events.
 - Avoid generic AI language including elevate, transform, ultimate, unleash, must-have, masterpiece, conversation starter, bring your walls to life, perfect addition and celebrate in style.
 - Use natural selected-country English.
 
 INSTANT EXPERIENCE SETUP
 
-After the five-row table, output one shared setup block only.
+After the three grouped concept packages, output one shared setup block only.
 
 The setup block must include:
 - Use the Meta Instant Experience Product template.
@@ -5782,13 +5866,14 @@ The setup block must include:
 
 FINAL COPY CHECK
 
-- The output contains exactly one Markdown table.
-- The table has exactly five completed rows.
+- The output contains exactly three grouped concept sections.
+- Each concept contains one image-generation prompt and one three-row copy-variation table.
+- The output contains exactly nine complete ad-copy combinations.
 - No Description or Meta Ad Description field is present.
 - No placeholder copy remains.
-- The five ad angles are clearly different.
-- Scarcity is concentrated in Ad 5.
-- The Nostalgia / Moment row contains no scarcity or discount language.
+- Nostalgia contains no hard scarcity, offer or discount language.
+- Ownership focuses on identity and display without hard FOMO.
+- Scarcity retains the verified collector treatment.
 - Promotion or Offer has been preserved exactly when used.
 - Product URL and UTM parameters remain exact."""
 
@@ -6625,7 +6710,19 @@ INSTANT_EXPERIENCE_LEGACY_SLOT_IDS = (
     "instant-experience",
     "instant_experience",
     "instant_experience_image",
+    "instant-experience-01",
+    "instant-experience-02",
+    "instant-experience-03",
 )
+
+INSTANT_EXPERIENCE_LEGACY_SLOT_MAP = {
+    "instant-experience": "instant-experience-nostalgia",
+    "instant_experience": "instant-experience-nostalgia",
+    "instant_experience_image": "instant-experience-nostalgia",
+    "instant-experience-01": "instant-experience-nostalgia",
+    "instant-experience-02": "instant-experience-ownership",
+    "instant-experience-03": "instant-experience-scarcity",
+}
 
 
 def _is_instant_experience_result(result):
@@ -6642,8 +6739,9 @@ def _compact_instant_experience_slots(workflow):
         workflow["slots"] = {}
         return
     if slots.get("data") or slots.get("valid"):
-        slots = {"instant-experience-01": dict(slots)}
+        slots = {"instant-experience": dict(slots)}
     slot_specs = _instant_experience_slots_by_position()
+    slot_by_id = {slot["id"]: slot for slot in slot_specs}
     outcomes = workflow.setdefault("outcomes", {})
     new_slots = {}
     new_outcomes = {}
@@ -6655,29 +6753,48 @@ def _compact_instant_experience_slots(workflow):
                 {
                     "slot_id": slot["id"],
                     "label": slot["label"],
+                    "concept_id": slot.get("concept_id"),
+                    "display_name": slot.get("display_name"),
+                    "supporting_label": slot.get("supporting_label"),
                     "position": slot["position"],
                 }
             )
             new_slots[slot_id] = slot_data
             outcome = dict(outcomes.get(slot_id) or {})
             if outcome:
-                outcome.update({"label": slot["label"]})
+                outcome.update(
+                    {
+                        "label": slot["label"],
+                        "concept_id": slot.get("concept_id"),
+                        "concept": slot.get("display_name"),
+                    }
+                )
                 new_outcomes[slot_id] = outcome
     for slot_id in INSTANT_EXPERIENCE_LEGACY_SLOT_IDS:
-        if slot_id in slots and "instant-experience-01" not in new_slots:
-            slot = slot_specs[0]
+        mapped_slot_id = INSTANT_EXPERIENCE_LEGACY_SLOT_MAP.get(slot_id)
+        if slot_id in slots and mapped_slot_id and mapped_slot_id not in new_slots:
+            slot = slot_by_id.get(mapped_slot_id) or slot_specs[0]
             slot_data = dict(slots[slot_id])
             slot_data.update(
                 {
                     "slot_id": slot["id"],
                     "label": slot["label"],
+                    "concept_id": slot.get("concept_id"),
+                    "display_name": slot.get("display_name"),
+                    "supporting_label": slot.get("supporting_label"),
                     "position": slot["position"],
                 }
             )
             new_slots[slot["id"]] = slot_data
             outcome = dict(outcomes.get(slot_id) or {})
             if outcome:
-                outcome.update({"label": slot["label"]})
+                outcome.update(
+                    {
+                        "label": slot["label"],
+                        "concept_id": slot.get("concept_id"),
+                        "concept": slot.get("display_name"),
+                    }
+                )
                 new_outcomes[slot["id"]] = outcome
     workflow["slots"] = new_slots
     workflow["outcomes"] = new_outcomes
@@ -6760,20 +6877,43 @@ def _process_ads_image_upload(result, workflow, slot, uploaded_file):
         return
     try:
         is_instant_experience = _is_instant_experience_result(result)
-        processed = ads_image_workflow.optimize_meta_image(
-            source_bytes,
-            original_name=uploaded_file.name,
-            output_edge=(
-                ads_image_workflow.INSTANT_EXPERIENCE_IMAGE_EDGE
-                if is_instant_experience
-                else ads_image_workflow.META_IMAGE_EDGE
-            ),
-            output_format="PNG" if is_instant_experience else "JPEG",
-        )
+        if is_instant_experience:
+            original_details = ads_image_workflow.inspect_instant_experience_original(
+                source_bytes,
+                original_name=uploaded_file.name,
+            )
+            preview_details = {}
+            preview_error = ""
+            try:
+                preview_details = ads_image_workflow.build_instant_experience_preview_thumbnail(
+                    source_bytes,
+                    source_hash=original_details["source_hash"],
+                )
+            except Exception as error:
+                logging.warning("Instant Experience preview generation failed: %s", error)
+                preview_error = "Preview could not be generated. The original full-resolution image is still available."
+            processed = {
+                **original_details,
+                **preview_details,
+                "data": source_bytes,
+                "output_format": original_details["source_format"],
+                "output_width": original_details["source_width"],
+                "output_height": original_details["source_height"],
+                "output_size": original_details["source_size"],
+                "preview_error": preview_error,
+            }
+        else:
+            processed = ads_image_workflow.optimize_meta_image(
+                source_bytes,
+                original_name=uploaded_file.name,
+            )
         processed.update(
             {
                 "slot_id": slot["id"],
                 "label": slot["label"],
+                "concept_id": slot.get("concept_id"),
+                "display_name": slot.get("display_name"),
+                "supporting_label": slot.get("supporting_label"),
                 "position": slot["position"],
                 "valid": True,
                 "error": "",
@@ -6783,6 +6923,9 @@ def _process_ads_image_upload(result, workflow, slot, uploaded_file):
         processed = {
             "slot_id": slot["id"],
             "label": slot["label"],
+            "concept_id": slot.get("concept_id"),
+            "display_name": slot.get("display_name"),
+            "supporting_label": slot.get("supporting_label"),
             "position": slot["position"],
             "source_hash": source_hash,
             "original_name": str(uploaded_file.name or "image"),
@@ -6819,6 +6962,13 @@ def ads_images_ready(result, workflow=None):
 
 
 def _meta_output_filename(result, workflow, slot):
+    if _is_instant_experience_result(result):
+        saved_slot = (workflow.get("slots") or {}).get(slot.get("id")) or {}
+        return ads_image_workflow.build_instant_experience_original_filename(
+            slot,
+            saved_slot.get("original_name"),
+            saved_slot.get("source_format") or saved_slot.get("output_format"),
+        )
     filename = ads_image_workflow.build_meta_image_filename(
         result["product_name"],
         result["campaign_type"],
@@ -6886,7 +7036,45 @@ def _ads_notes_for_workflow(workflow):
     }
 
 
-def _instant_experience_copy_notes_from_workflow(workflow):
+def _preserve_multiline_text(value):
+    return str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _human_file_size(size):
+    try:
+        size = int(size or 0)
+    except (TypeError, ValueError):
+        size = 0
+    if size >= 1024 * 1024:
+        return f"{size / (1024 * 1024):.2f} MB"
+    if size >= 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size} B"
+
+
+def _blank_instant_experience_variations():
+    return [
+        {field_key: "" for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS}
+        for _index in range(INSTANT_EXPERIENCE_COPY_VARIATION_COUNT)
+    ]
+
+
+def _normalise_instant_experience_variations(raw_variations):
+    variations = []
+    if isinstance(raw_variations, (list, tuple)):
+        for raw in raw_variations:
+            if isinstance(raw, dict):
+                variations.append(
+                    {
+                        field_key: _preserve_multiline_text(raw.get(field_key))
+                        for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS
+                    }
+                )
+    variations.extend(_blank_instant_experience_variations())
+    return variations[:INSTANT_EXPERIENCE_COPY_VARIATION_COUNT]
+
+
+def _legacy_instant_experience_copy_notes(workflow):
     notes = dict((workflow or {}).get("ad_notes") or {})
     instant_notes = notes.get("instant_experience")
     instant_notes = dict(instant_notes) if isinstance(instant_notes, dict) else {}
@@ -6911,18 +7099,128 @@ def _instant_experience_copy_notes_from_workflow(workflow):
     }
 
 
-def _instant_experience_copy_export_lines(workflow):
-    notes = _instant_experience_copy_notes_from_workflow(workflow)
-    lines = ["INSTANT EXPERIENCE AD COPY", ""]
-    export_headings = {
-        "primary_text": "PRIMARY TEXT",
-        "headlines": "HEADLINES",
-        "call_to_action": "CALL TO ACTION",
+def _instant_experience_concept_copy_notes_from_workflow(workflow):
+    notes = dict((workflow or {}).get("ad_notes") or {})
+    concept_notes = notes.get("instant_experience_concepts")
+    if isinstance(concept_notes, dict):
+        return {
+            concept["id"]: _normalise_instant_experience_variations(
+                concept_notes.get(concept["id"])
+            )
+            for concept in INSTANT_EXPERIENCE_CONCEPTS
+        }
+
+    legacy = _legacy_instant_experience_copy_notes(workflow)
+    primary = legacy.get("primary_text") or []
+    headlines = legacy.get("headlines") or []
+    ctas = legacy.get("call_to_action") or []
+    mapped = {
+        concept["id"]: _blank_instant_experience_variations()
+        for concept in INSTANT_EXPERIENCE_CONCEPTS
     }
-    for group_key, _heading, _label, _placeholder in INSTANT_EXPERIENCE_COPY_GROUPS:
-        lines.extend([export_headings[group_key], ""])
-        for index, value in enumerate(notes[group_key], start=1):
-            lines.extend([f"OPTION {index}", value, ""])
+    legacy_rows = {
+        "nostalgia": [0],
+        "ownership": [1, 2],
+        "scarcity": [4],
+    }
+    for concept_id, source_indexes in legacy_rows.items():
+        for target_index, source_index in enumerate(source_indexes):
+            if target_index >= INSTANT_EXPERIENCE_COPY_VARIATION_COUNT:
+                break
+            mapped[concept_id][target_index] = {
+                "primary_text": _preserve_multiline_text(
+                    primary[source_index] if source_index < len(primary) else ""
+                ),
+                "headline": _preserve_multiline_text(
+                    headlines[source_index] if source_index < len(headlines) else ""
+                ),
+                "cta": _preserve_multiline_text(
+                    ctas[source_index] if source_index < len(ctas) else ""
+                ),
+            }
+    return mapped
+
+
+def _instant_experience_variation_complete(variation):
+    return all(
+        str((variation or {}).get(field_key) or "").strip()
+        for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS
+    )
+
+
+def _instant_experience_concept_complete_count(workflow, concept_id):
+    notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
+    return sum(
+        1
+        for variation in notes.get(concept_id, [])
+        if _instant_experience_variation_complete(variation)
+    )
+
+
+def instant_experience_copy_complete(workflow):
+    notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
+    return all(
+        _instant_experience_variation_complete(variation)
+        for concept in INSTANT_EXPERIENCE_CONCEPTS
+        for variation in notes.get(concept["id"], [])
+    )
+
+
+def _instant_experience_concept_ad_copy_text(result, workflow, concept):
+    notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
+    variations = notes.get(concept["id"]) or _blank_instant_experience_variations()
+    lines = [
+        "SPORTS CAVE INSTANT EXPERIENCE",
+        "",
+        "PRODUCT:",
+        str(result.get("product_name") or ""),
+        "",
+        "CONCEPT:",
+        str(concept.get("display_name") or ""),
+        "",
+    ]
+    for index, variation in enumerate(variations, start=1):
+        lines.extend(
+            [
+                f"VARIATION {index}",
+                "",
+                "PRIMARY TEXT:",
+                _preserve_multiline_text(variation.get("primary_text")),
+                "",
+                "HEADLINE:",
+                _preserve_multiline_text(variation.get("headline")),
+                "",
+                "CTA:",
+                _preserve_multiline_text(variation.get("cta")),
+                "",
+            ]
+        )
+    return "\n".join(lines).rstrip("\n").replace("\n", "\r\n") + "\r\n"
+
+
+def _instant_experience_copy_export_lines(workflow):
+    notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
+    lines = ["INSTANT EXPERIENCE AD COPY", ""]
+    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+        lines.extend(
+            [
+                f"{concept['display_name'].upper()} — {concept['supporting_label']}",
+                "",
+            ]
+        )
+        for index, variation in enumerate(notes.get(concept["id"], []), start=1):
+            lines.extend(
+                [
+                    f"VARIATION {index}",
+                    "PRIMARY TEXT:",
+                    _preserve_multiline_text(variation.get("primary_text")),
+                    "HEADLINE:",
+                    _preserve_multiline_text(variation.get("headline")),
+                    "CTA:",
+                    _preserve_multiline_text(variation.get("cta")),
+                    "",
+                ]
+            )
     return lines
 
 
@@ -7039,39 +7337,227 @@ def _ads_setup_notes_signature(result, workflow, *, image_outcomes=None):
     ).hexdigest()
 
 
+def _instant_experience_slot_for_concept(concept):
+    return {
+        slot["concept_id"]: slot
+        for slot in ads_image_workflow.campaign_image_slots("Instant Experience")
+    }.get(concept["id"], {})
+
+
+def _instant_experience_image_ready_count(workflow):
+    _compact_instant_experience_slots(workflow)
+    slots = workflow.get("slots") or {}
+    return sum(
+        1
+        for slot in ads_image_workflow.campaign_image_slots("Instant Experience")
+        if (slots.get(slot["id"]) or {}).get("valid")
+        and (slots.get(slot["id"]) or {}).get("data")
+    )
+
+
+def _instant_experience_status_rows(workflow):
+    rows = []
+    slots = workflow.get("slots") or {}
+    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+        slot = _instant_experience_slot_for_concept(concept)
+        slot_data = slots.get(slot.get("id")) or {}
+        rows.append(
+            {
+                "concept": concept,
+                "slot": slot,
+                "slot_data": slot_data,
+                "image_ready": bool(slot_data.get("valid") and slot_data.get("data")),
+                "copy_complete_count": _instant_experience_concept_complete_count(
+                    workflow,
+                    concept["id"],
+                ),
+            }
+        )
+    return rows
+
+
+def instant_experience_package_ready(result, workflow):
+    if not _is_instant_experience_result(result):
+        return False
+    return _instant_experience_image_ready_count(workflow) == len(INSTANT_EXPERIENCE_CONCEPTS) and instant_experience_copy_complete(workflow)
+
+
+def _instant_experience_package_items(result, workflow):
+    _compact_instant_experience_slots(workflow)
+    slots = workflow.get("slots") or {}
+    items = []
+    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+        slot = _instant_experience_slot_for_concept(concept)
+        slot_data = slots.get(slot.get("id")) or {}
+        if not slot_data.get("valid") or not slot_data.get("data"):
+            raise ValueError(f"{concept['display_name']} needs a valid full-resolution cover.")
+        copy_text = _instant_experience_concept_ad_copy_text(result, workflow, concept)
+        copy_bytes = copy_text.encode("utf-8")
+        image_filename = ads_image_workflow.build_instant_experience_original_filename(
+            concept,
+            slot_data.get("original_name"),
+            slot_data.get("source_format") or slot_data.get("output_format"),
+        )
+        image_relative_path = f"{concept['folder']}/{image_filename}"
+        copy_relative_path = f"{concept['folder']}/ad-copy.txt"
+        items.append(
+            {
+                "kind": "image",
+                "asset_type": "meta_ads",
+                "slot_id": slot["id"],
+                "concept_id": concept["id"],
+                "concept": concept["display_name"],
+                "label": slot["label"],
+                "relative_path": image_relative_path,
+                "filename": image_filename,
+                "data": slot_data["data"],
+                "size": len(slot_data["data"]),
+                "original_name": slot_data.get("original_name") or "",
+                "source_hash": slot_data.get("source_hash") or "",
+                "source_format": slot_data.get("source_format") or slot_data.get("output_format") or "",
+                "source_width": slot_data.get("source_width") or slot_data.get("output_width") or 0,
+                "source_height": slot_data.get("source_height") or slot_data.get("output_height") or 0,
+                "copy_variation_count": INSTANT_EXPERIENCE_COPY_VARIATION_COUNT,
+            }
+        )
+        items.append(
+            {
+                "kind": "copy",
+                "asset_type": "meta_ads_copy",
+                "slot_id": f"{concept['id']}:ad-copy",
+                "concept_id": concept["id"],
+                "concept": concept["display_name"],
+                "label": f"{concept['display_name']} ad copy",
+                "relative_path": copy_relative_path,
+                "filename": "ad-copy.txt",
+                "data": copy_bytes,
+                "size": len(copy_bytes),
+                "copy_variation_count": INSTANT_EXPERIENCE_COPY_VARIATION_COUNT,
+            }
+        )
+    return items
+
+
+def build_instant_experience_package_zip(result, workflow):
+    if not instant_experience_package_ready(result, workflow):
+        raise ValueError("Upload all three covers and complete all nine copy variations before downloading the package.")
+    buffer = io.BytesIO()
+    package_root = build_ads_export_folder_name(result, workflow)
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for item in _instant_experience_package_items(result, workflow):
+            archive.writestr(f"{package_root}/{item['relative_path']}", item["data"])
+    return buffer.getvalue()
+
+
+def _instant_experience_package_signature(result, workflow):
+    digest = hashlib.sha256()
+    digest.update(str(result.get("context_key") or "").encode("utf-8"))
+    for item in _instant_experience_package_items(result, workflow):
+        digest.update(item["relative_path"].encode("utf-8"))
+        digest.update(hashlib.sha256(item["data"]).hexdigest().encode("ascii"))
+    return digest.hexdigest()
+
+
+def _save_instant_experience_package_to_dropbox(
+    access_token,
+    export_folder,
+    result,
+    workflow,
+    *,
+    progress_callback=None,
+):
+    items = _instant_experience_package_items(result, workflow)
+    items_by_path = {item["relative_path"]: item for item in items}
+
+    def on_upload_progress(row_index, row_total, relative_path, uploaded, file_total):
+        if progress_callback:
+            item = items_by_path.get(relative_path) or {}
+            progress_callback(
+                row_index,
+                row_total,
+                item.get("label") or relative_path,
+                uploaded,
+                file_total,
+            )
+
+    upload_result = dropbox_integration.upload_batch(
+        access_token,
+        export_folder,
+        items,
+        conflict="replace",
+        progress_callback=on_upload_progress,
+    )
+    outcomes = dict(workflow.get("outcomes") or {})
+    successes = list(upload_result.get("successes") or ())
+    failures = list(upload_result.get("failures") or ())
+    for success in successes:
+        relative_path = str(success.get("relative_path") or "")
+        item = items_by_path.get(relative_path) or {}
+        metadata = dict(success.get("metadata") or {})
+        saved_path = str(
+            metadata.get("path_display")
+            or metadata.get("path_lower")
+            or dropbox_integration.join_upload_path(export_folder, relative_path)
+        )
+        outcomes[item.get("slot_id") or relative_path] = {
+            "status": "saved",
+            "label": item.get("label") or relative_path,
+            "filename": item.get("filename") or PurePosixPath(relative_path).name,
+            "relative_path": relative_path,
+            "path": saved_path,
+            "metadata": metadata,
+            "asset_type": item.get("asset_type") or "meta_ads",
+            "concept_id": item.get("concept_id"),
+            "concept": item.get("concept"),
+            "source_hash": item.get("source_hash") or "",
+            "source_format": item.get("source_format") or "",
+            "source_width": item.get("source_width") or 0,
+            "source_height": item.get("source_height") or 0,
+            "copy_variation_count": item.get("copy_variation_count") or 0,
+        }
+    for failure in failures:
+        relative_path = str(failure.get("relative_path") or "")
+        item = items_by_path.get(relative_path) or {}
+        outcomes[item.get("slot_id") or relative_path] = {
+            "status": "failed",
+            "label": item.get("label") or relative_path,
+            "filename": item.get("filename") or PurePosixPath(relative_path).name,
+            "relative_path": relative_path,
+            "error": str(failure.get("error") or "Upload failed."),
+            "asset_type": item.get("asset_type") or "meta_ads",
+            "concept_id": item.get("concept_id"),
+            "concept": item.get("concept"),
+        }
+    package_saved = not failures and len(successes) == len(items)
+    if package_saved:
+        outcomes["_instant_experience_package"] = {
+            "status": "saved",
+            "label": "Instant Experience package",
+            "filename": build_ads_export_folder_name(result, workflow),
+            "path": export_folder,
+            "asset_type": "meta_ads_package",
+            "signature": _instant_experience_package_signature(result, workflow),
+        }
+    else:
+        outcomes["_instant_experience_package"] = {
+            "status": "failed",
+            "label": "Instant Experience package",
+            "filename": build_ads_export_folder_name(result, workflow),
+            "path": export_folder,
+            "asset_type": "meta_ads_package",
+            "error": "One or more concept files failed to upload.",
+        }
+    workflow["saved_folder_path"] = export_folder
+    workflow["instant_experience_package_signature"] = (
+        outcomes.get("_instant_experience_package") or {}
+    ).get("signature") or ""
+    return outcomes
+
+
 def _render_ads_setup_notes(result, workflow):
     if not ads_image_workflow.campaign_image_slots(result.get("campaign_type")):
         return
     if _is_instant_experience_result(result):
-        notes = dict(workflow.get("ad_notes") or {})
-        instant_notes = _instant_experience_copy_notes_from_workflow(workflow)
-        with st.container(key="ads-setup-notes"):
-            st.markdown("**Instant Experience copy**")
-            columns = st.columns(3)
-            for column, (group_key, heading, field_label, placeholder) in zip(
-                columns,
-                INSTANT_EXPERIENCE_COPY_GROUPS,
-            ):
-                with column:
-                    st.markdown(f"**{heading}**")
-                    values = []
-                    for index in range(1, INSTANT_EXPERIENCE_COPY_OPTION_COUNT + 1):
-                        values.append(
-                            st.text_area(
-                                f"{field_label} {index}",
-                                value=instant_notes[group_key][index - 1],
-                                placeholder=placeholder.format(index=index),
-                                height=48,
-                                key=(
-                                    f"ads-ie-copy-field::{group_key}::"
-                                    f"{result['context_key']}::{index}"
-                                ),
-                            )
-                        )
-                    instant_notes[group_key] = values
-        notes["instant_experience"] = instant_notes
-        workflow["ad_notes"] = notes
-        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
         return
 
     notes = dict(workflow.get("ad_notes") or {})
@@ -7115,6 +7601,137 @@ def _render_ads_setup_notes(result, workflow):
                     height=120,
                     key=f"ads-notes-primary-text::{result['context_key']}",
                 )
+    workflow["ad_notes"] = notes
+    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+
+
+def _render_instant_experience_concepts(result, workflow):
+    _compact_instant_experience_slots(workflow)
+    slot_specs = ads_image_workflow.campaign_image_slots("Instant Experience")
+    slot_by_concept = {slot.get("concept_id"): slot for slot in slot_specs}
+    concept_notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
+    st.subheader("Generated Ad Images")
+    st.caption("Upload one cover for each Instant Experience concept, then paste the three matching copy variations beneath it.")
+
+    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+        concept_id = concept["id"]
+        slot = slot_by_concept.get(concept_id) or {}
+        heading = f"{concept['display_name'].upper()} — {concept['supporting_label']}"
+        with st.container(border=True, key=f"ads-ie-concept::{result['context_key']}::{concept_id}"):
+            st.markdown(f"**{heading}**")
+            image_column, copy_column = st.columns([1, 2])
+            with image_column:
+                uploaded_file = st.file_uploader(
+                    slot.get("label") or f"{concept['display_name']} Cover",
+                    type=["jpg", "jpeg", "png", "webp"],
+                    key=_slot_upload_key(result, workflow, slot["id"]),
+                    max_upload_size=20,
+                    label_visibility="collapsed",
+                )
+                _process_ads_image_upload(result, workflow, slot, uploaded_file)
+                saved_slot = (workflow.get("slots") or {}).get(slot["id"]) or {}
+                if saved_slot.get("valid"):
+                    preview_data = saved_slot.get("preview_data")
+                    if preview_data:
+                        st.image(
+                            preview_data,
+                            width=INSTANT_EXPERIENCE_PREVIEW_DISPLAY_WIDTH,
+                        )
+                    elif saved_slot.get("preview_error"):
+                        st.warning(saved_slot["preview_error"])
+                    else:
+                        st.caption("Preview not available. The original image is still retained.")
+                    original_name = saved_slot.get("original_name") or "Uploaded cover"
+                    st.caption(f"Filename: {original_name}")
+                    st.caption(
+                        "Original: "
+                        f"{saved_slot.get('source_width') or saved_slot.get('output_width')} x "
+                        f"{saved_slot.get('source_height') or saved_slot.get('output_height')} px"
+                    )
+                    st.caption(f"Original size: {_human_file_size(saved_slot.get('source_size') or len(saved_slot.get('data') or b''))}")
+                    output_filename = _meta_output_filename(result, workflow, slot)
+                    st.download_button(
+                        "Download Full-Resolution Cover",
+                        data=saved_slot["data"],
+                        file_name=output_filename,
+                        mime=ads_image_workflow.mime_type_for_image_filename(
+                            output_filename,
+                            source_format=saved_slot.get("source_format") or saved_slot.get("output_format") or "",
+                        ),
+                        key=f"ads-ie-cover-download::{result['context_key']}::{concept_id}",
+                        use_container_width=True,
+                    )
+                    outcome = (workflow.get("outcomes") or {}).get(slot["id"]) or {}
+                    if outcome.get("status") == "saved":
+                        st.success("Saved")
+                    elif outcome.get("status") == "failed":
+                        st.error(outcome.get("error") or "Upload failed.")
+                    if st.button(
+                        "Remove",
+                        icon=":material/delete:",
+                        key=f"ads-image-remove::{result['context_key']}::{slot['id']}",
+                        use_container_width=True,
+                    ):
+                        _remove_ads_image_slot(result, slot["id"])
+                        st.rerun()
+                    st.caption("Drop or browse for a replacement at any time.")
+                elif saved_slot.get("error"):
+                    st.error(saved_slot["error"])
+                    if st.button(
+                        "Remove",
+                        icon=":material/delete:",
+                        key=f"ads-image-remove-invalid::{result['context_key']}::{slot['id']}",
+                        use_container_width=True,
+                    ):
+                        _remove_ads_image_slot(result, slot["id"])
+                        st.rerun()
+                else:
+                    st.caption("Upload the finished full-resolution cover for this concept.")
+
+            with copy_column:
+                variations = concept_notes.get(concept_id) or _blank_instant_experience_variations()
+                for index in range(1, INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1):
+                    variation = variations[index - 1]
+                    st.markdown(f"**Copy Variation {index}**")
+                    field_columns = st.columns([2, 1, 1])
+                    for field_column, (field_key, field_label) in zip(
+                        field_columns,
+                        INSTANT_EXPERIENCE_COPY_FIELDS,
+                    ):
+                        with field_column:
+                            variation[field_key] = st.text_area(
+                                field_label,
+                                value=_preserve_multiline_text(variation.get(field_key)),
+                                placeholder=(
+                                    f"Primary text option {index}"
+                                    if field_key == "primary_text"
+                                    else f"Headline option {index}"
+                                    if field_key == "headline"
+                                    else f"CTA option {index}"
+                                ),
+                                height=50,
+                                key=(
+                                    f"ads-ie-concept-copy-field::{result['context_key']}::"
+                                    f"{concept_id}::{field_key}::{index}"
+                                ),
+                            )
+                    variations[index - 1] = variation
+                concept_notes[concept_id] = variations
+                complete_count = sum(
+                    1 for variation in variations if _instant_experience_variation_complete(variation)
+                )
+                image_ready = bool(
+                    ((workflow.get("slots") or {}).get(slot["id"]) or {}).get("valid")
+                    and ((workflow.get("slots") or {}).get(slot["id"]) or {}).get("data")
+                )
+                st.caption(
+                    f"{concept['display_name']}: "
+                    f"{'Image ready' if image_ready else 'Image needed'} · "
+                    f"{complete_count} of {INSTANT_EXPERIENCE_COPY_VARIATION_COUNT} copy variations complete"
+                )
+
+    notes = dict(workflow.get("ad_notes") or {})
+    notes["instant_experience_concepts"] = concept_notes
     workflow["ad_notes"] = notes
     st.session_state[ADS_IMAGE_STATE_KEY] = workflow
 
@@ -7358,9 +7975,16 @@ def save_ads_images_to_dropbox(
         export_folder,
         root_path=clean_root,
     )
-    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
     if _is_instant_experience_result(result):
         _compact_instant_experience_slots(workflow)
+        return _save_instant_experience_package_to_dropbox(
+            access_token,
+            export_folder,
+            result,
+            workflow,
+            progress_callback=progress_callback,
+        )
+    slot_specs = ads_image_workflow.campaign_image_slots(result.get("campaign_type"))
     valid_slot_ids = {slot["id"] for slot in _ads_image_valid_slots(result, workflow)}
     outcomes = dict(workflow.get("outcomes") or {})
     pending_slots = [
@@ -7530,11 +8154,207 @@ def _open_ads_files_folder(path):
     st.rerun()
 
 
+def _render_instant_experience_package_save(result, workflow):
+    _compact_instant_experience_slots(workflow)
+    ready_count = _instant_experience_image_ready_count(workflow)
+    required_count = len(INSTANT_EXPERIENCE_CONCEPTS)
+    st.caption(f"{ready_count} of {required_count} images ready.")
+    for row in _instant_experience_status_rows(workflow):
+        concept = row["concept"]
+        st.caption(
+            f"{concept['display_name']}: "
+            f"{'Image ready' if row['image_ready'] else 'Image needed'} · "
+            f"{row['copy_complete_count']} of {INSTANT_EXPERIENCE_COPY_VARIATION_COUNT} copy variations complete"
+        )
+
+    package_ready = instant_experience_package_ready(result, workflow)
+    package_signature = ""
+    package_saved = False
+    if package_ready:
+        package_signature = _instant_experience_package_signature(result, workflow)
+        package_outcome = (workflow.get("outcomes") or {}).get("_instant_experience_package") or {}
+        package_saved = (
+            package_outcome.get("status") == "saved"
+            and package_outcome.get("signature") == package_signature
+        )
+        try:
+            zip_data = build_instant_experience_package_zip(result, workflow)
+        except Exception:
+            zip_data = b""
+            package_ready = False
+    else:
+        zip_data = b""
+
+    package_filename = f"{build_ads_export_folder_name(result, workflow)}.zip"
+    st.download_button(
+        "Download Instant Experience Package",
+        data=zip_data,
+        file_name=package_filename,
+        mime="application/zip",
+        key=f"ads-ie-package-download::{result['context_key']}",
+        disabled=not package_ready,
+        use_container_width=True,
+    )
+    if not package_ready:
+        st.caption("Complete all three covers and all nine copy variations before saving or downloading the package.")
+
+    if st.button(
+        "Save Images",
+        type="primary",
+        icon=":material/save:",
+        key=f"ads-images-save-open::{result['context_key']}",
+        disabled=bool(workflow.get("saving")) or package_saved or not package_ready,
+        use_container_width=True,
+    ):
+        workflow["save_open"] = True
+        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.rerun()
+    if not workflow.get("save_open"):
+        return
+
+    user = current_ads_user()
+    if not os_accounts.can_access_page(user, "Files"):
+        st.info("Files access is not approved for this account.")
+        return
+    try:
+        access_token, root_path = _ads_dropbox_connection()
+        locked_destination = str(workflow.get("destination_path") or "")
+        destination = locked_destination or _render_ads_folder_picker(
+            access_token,
+            root_path,
+            result,
+            workflow,
+        )
+    except Exception as error:
+        logging.warning("Ads Dropbox destination unavailable: %s", error)
+        st.info("Dropbox is unavailable right now.")
+        return
+
+    st.caption(f"Destination: {destination}")
+    action_label = "All concepts saved" if package_saved else "Save Instant Experience Package here"
+    action_columns = st.columns([1, 1])
+    if action_columns[0].button(
+        action_label,
+        key=f"ads-images-save-confirm::{result['context_key']}",
+        disabled=bool(workflow.get("saving")) or package_saved or not package_ready,
+        use_container_width=True,
+    ):
+        workflow["saving"] = True
+        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        progress = st.progress(0, text="Saving Instant Experience package...")
+
+        def update_progress(index, total, label, uploaded, file_total):
+            file_fraction = uploaded / file_total if file_total else 1
+            overall = ((index - 1) + min(1, file_fraction)) / max(1, total)
+            progress.progress(min(1.0, overall), text=f"Saving {label}")
+
+        try:
+            workflow["destination_path"] = destination
+            previous_saved = {
+                slot_id
+                for slot_id, outcome in (workflow.get("outcomes") or {}).items()
+                if outcome.get("status") == "saved" and not str(slot_id).startswith("_")
+            }
+            outcomes = save_ads_images_to_dropbox(
+                access_token,
+                root_path,
+                destination,
+                result,
+                workflow,
+                progress_callback=update_progress,
+            )
+            workflow["outcomes"] = outcomes
+            workflow["destination_path"] = workflow.get("saved_folder_path") or destination
+            _save_ads_upload_metadata(
+                {
+                    slot_id: outcome
+                    for slot_id, outcome in outcomes.items()
+                    if slot_id not in previous_saved
+                },
+                user,
+            )
+            slot_ids = {
+                slot["id"]
+                for slot in ads_image_workflow.campaign_image_slots("Instant Experience")
+            }
+            successful = [
+                row
+                for slot_id, row in outcomes.items()
+                if slot_id in slot_ids and row.get("status") == "saved"
+            ]
+            failed = [
+                row
+                for slot_id, row in outcomes.items()
+                if slot_id in slot_ids and row.get("status") == "failed"
+            ]
+            _ads_clear_directory_cache(destination, workflow["destination_path"])
+            record_activity_log(
+                "ad_images_saved",
+                "Ads",
+                f"Saved Instant Experience package: {result['product_name']}",
+                entity_type="dropbox_folder",
+                entity_id=workflow["destination_path"],
+                metadata={
+                    "count": len(successful),
+                    "failed_count": len(failed),
+                    "campaign_type": result["campaign_type"],
+                    "destination": workflow["destination_path"],
+                    "concepts": [
+                        {
+                            "concept": row.get("concept"),
+                            "filename": row.get("filename"),
+                            "original_dimensions": [
+                                row.get("source_width") or 0,
+                                row.get("source_height") or 0,
+                            ],
+                            "copy_variations": row.get("copy_variation_count") or 0,
+                            "path": row.get("relative_path") or row.get("path"),
+                        }
+                        for row in successful
+                    ],
+                    "files": [row.get("relative_path") or row.get("filename") for row in successful],
+                },
+            )
+        except Exception as error:
+            logging.warning("Instant Experience package save failed: %s", error)
+            st.warning("The Instant Experience package could not be saved.")
+        finally:
+            progress.empty()
+            workflow["saving"] = False
+            st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.rerun()
+    if action_columns[1].button(
+        "Cancel",
+        key=f"ads-images-save-cancel::{result['context_key']}",
+        use_container_width=True,
+    ):
+        workflow["save_open"] = False
+        st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+        st.rerun()
+
+    outcomes = workflow.get("outcomes") or {}
+    package_outcome = outcomes.get("_instant_experience_package") or {}
+    if package_outcome.get("status") == "saved":
+        st.success(f"Instant Experience package saved to {workflow['destination_path']}.")
+        if st.button(
+            "Open folder",
+            icon=":material/folder_open:",
+            key=f"ads-images-open-folder::{result['context_key']}",
+        ):
+            _open_ads_files_folder(workflow["destination_path"])
+    elif package_outcome.get("status") == "failed":
+        st.error(package_outcome.get("error") or "The Instant Experience package could not be saved.")
+    for row in (workflow.get("outcomes") or {}).values():
+        if row.get("status") == "failed" and row.get("concept"):
+            st.error(f"{row.get('concept')}: {row.get('error') or 'Upload failed.'}")
+
+
 def _render_ads_image_save(result, workflow):
     if not ads_image_workflow.campaign_image_slots(result.get("campaign_type")):
         return
     if _is_instant_experience_result(result):
-        _compact_instant_experience_slots(workflow)
+        _render_instant_experience_package_save(result, workflow)
+        return
     ready = ads_images_ready(result, workflow)
     valid_slots = _ads_image_valid_slots(result, workflow)
     has_valid_upload = bool(valid_slots)
@@ -8187,8 +9007,7 @@ def render_supported_result(result):
             f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
         )
 
-        _render_ads_image_slots(result, workflow)
-        _render_ads_setup_notes(result, workflow)
+        _render_instant_experience_concepts(result, workflow)
         _render_ads_image_save(result, workflow)
         st.subheader("2. Build it in Meta")
         st.caption("Follow the INSTANT EXPERIENCE SETUP section inside the generated prompt.")
@@ -8202,8 +9021,7 @@ def render_supported_result(result):
             f"ads-prompt::{category}::{country}::{campaign_type}::{product_name}",
         )
 
-        _render_ads_image_slots(result, workflow)
-        _render_ads_setup_notes(result, workflow)
+        _render_instant_experience_concepts(result, workflow)
         _render_ads_image_save(result, workflow)
         st.subheader("2. Build it in Meta")
         st.caption("Upload the three Instant Experience covers generated from the prompt above.")
@@ -8322,6 +9140,15 @@ def render_page():
             min-height: 42px !important;
             height: 42px !important;
             max-height: 42px !important;
+            overflow-y: auto !important;
+            resize: none !important;
+            line-height: 1.35 !important;
+            white-space: pre-wrap !important;
+        }
+        div[class*="st-key-ads-ie-concept-copy-field"] textarea {
+            min-height: 50px !important;
+            height: 50px !important;
+            max-height: 50px !important;
             overflow-y: auto !important;
             resize: none !important;
             line-height: 1.35 !important;

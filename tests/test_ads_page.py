@@ -399,7 +399,7 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("FINAL PRIMARY-TEXT QUALITY CHECK", primary_text_section)
         self.assertNotIn("PRIMARY-TEXT RULES", primary_text_section)
 
-    def test_baseball_instant_experience_prompt_outputs_five_copy_groups(self):
+    def test_baseball_instant_experience_prompt_outputs_three_grouped_concepts(self):
         prompt = ads_page.build_ads_prompt(
             "Shohei Ohtani 50/50 Season",
             "Baseball",
@@ -412,20 +412,19 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Product name: Shohei Ohtani 50/50 Season", prompt)
         self.assertIn("Destination guidance: Use this selected product page URL", prompt)
         self.assertIn("https://sportscave.com.au/products/ohtani-50-50", prompt)
-        self.assertIn("INSTANT EXPERIENCE AD COPY", prompt)
-        self.assertIn("| Ad | Angle | Primary Text | Headline | CTA |", prompt)
-        for angle in (
-            "Nostalgia / Moment",
-            "Fan Identity",
-            "Ownership / Display",
-            "Product-Specific Angle",
-            "Collector / Scarcity",
+        for heading in (
+            "GROUP 1 — NOSTALGIA",
+            "GROUP 2 — OWNERSHIP",
+            "GROUP 3 — SCARCITY",
         ):
-            self.assertIn(angle, prompt)
+            self.assertIn(heading, prompt)
+        self.assertIn("| Variation | Primary Text | Headline | CTA |", prompt)
+        self.assertIn("Every group table must contain exactly three completed rows.", prompt)
+        self.assertIn("Across all groups, output exactly nine complete ad-copy combinations.", prompt)
         self.assertIn("INSTANT EXPERIENCE SETUP", prompt)
-        self.assertEqual(prompt.count("IMAGE PROMPT 1 — NOSTALGIA / MOMENT"), 1)
-        self.assertEqual(prompt.count("IMAGE PROMPT 2 — IDENTITY / OWNERSHIP"), 1)
-        self.assertEqual(prompt.count("IMAGE PROMPT 3 — COLLECTOR / SCARCITY"), 1)
+        self.assertEqual(prompt.count("Creative concept: Nostalgia"), 1)
+        self.assertEqual(prompt.count("Creative concept: Ownership"), 1)
+        self.assertEqual(prompt.count("Creative concept: Scarcity"), 1)
         self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
         self.assertNotIn("Create exactly five genuinely different Meta primary-text variations.", prompt)
         self.assertNotIn("Return one final primary text only.", prompt)
@@ -437,7 +436,7 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("META URL PARAMETERS", prompt)
         self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
 
-    def test_baseball_instant_experience_uses_brand_opening_identity_and_ownership_rules(self):
+    def test_baseball_instant_experience_uses_grouped_copy_rules(self):
         prompt = ads_page.build_ads_prompt(
             "Ohtani Judge The Titans",
             "Baseball",
@@ -446,13 +445,12 @@ class AdsPageTests(unittest.TestCase):
             product_url="https://sportscave.com.au/products/the-titans",
         )
 
-        self.assertIn("Ad 1 — Nostalgia / Moment", prompt)
-        self.assertIn("Ad 2 — Fan Identity", prompt)
-        self.assertIn("Ad 3 — Ownership / Display", prompt)
-        self.assertIn("Ad 5 — Collector / Scarcity", prompt)
-        self.assertIn("Make the fan remember why the subject mattered.", prompt)
-        self.assertIn("Make the correct fan feel recognised", prompt)
-        self.assertIn("Help the fan picture the exact artwork on their wall.", prompt)
+        self.assertIn("NOSTALGIA — Moment & Memory", prompt)
+        self.assertIn("OWNERSHIP — Identity & Display", prompt)
+        self.assertIn("SCARCITY — Collector & Limited Edition", prompt)
+        self.assertIn("make the fan remember the athlete", prompt)
+        self.assertIn("make the fan picture the artwork on their wall", prompt)
+        self.assertIn("convert established desire using verified limited-edition collector scarcity", prompt)
         self.assertIn("ballpark memory", prompt)
         self.assertIn("generations", prompt)
         self.assertIn("swing and legacy", prompt)
@@ -546,14 +544,15 @@ class AdsPageTests(unittest.TestCase):
                 self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE STANDARD WORKFLOW", prompt)
                 self.assertIn(f"Market: {country}", prompt)
                 self.assertIn(expected_terms[country], prompt)
-                self.assertIn("INSTANT EXPERIENCE AD COPY", prompt)
-                self.assertIn("| Ad | Angle | Primary Text | Headline | CTA |", prompt)
-                self.assertIn("| 5 | Collector / Scarcity |", prompt)
-                self.assertIn("CALL TO ACTION", prompt)
+                self.assertIn("GROUP 1 — NOSTALGIA", prompt)
+                self.assertIn("GROUP 2 — OWNERSHIP", prompt)
+                self.assertIn("GROUP 3 — SCARCITY", prompt)
+                self.assertIn("| Variation | Primary Text | Headline | CTA |", prompt)
+                self.assertIn("COPY VARIATIONS", prompt)
                 self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
-                self.assertIn("IMAGE PROMPT 1", prompt)
-                self.assertIn("IMAGE PROMPT 2", prompt)
-                self.assertIn("IMAGE PROMPT 3", prompt)
+                self.assertIn("Creative concept: Nostalgia", prompt)
+                self.assertIn("Creative concept: Ownership", prompt)
+                self.assertIn("Creative concept: Scarcity", prompt)
                 self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
                 self.assertIn("Once it sells out", prompt)
                 self.assertIn("CLAIM YOUR EDITION", prompt)
@@ -627,13 +626,14 @@ class AdsPageTests(unittest.TestCase):
                             prompt,
                         )
                         self.assertIn("CATEGORY-SPECIFIC INSTANT EXPERIENCE WINNER ANGLE", prompt)
-                        self.assertIn("| Ad | Angle | Primary Text | Headline | CTA |", prompt)
-                        self.assertIn("| 1 | Nostalgia / Moment |", prompt)
-                        self.assertIn("| 5 | Collector / Scarcity |", prompt)
+                        self.assertIn("GROUP 1 — NOSTALGIA", prompt)
+                        self.assertIn("GROUP 2 — OWNERSHIP", prompt)
+                        self.assertIn("GROUP 3 — SCARCITY", prompt)
+                        self.assertIn("| Variation | Primary Text | Headline | CTA |", prompt)
                         self.assertNotIn("DESCRIPTION\n\n1. [description]", prompt)
-                        self.assertIn("IMAGE PROMPT 1", prompt)
-                        self.assertIn("IMAGE PROMPT 2", prompt)
-                        self.assertIn("IMAGE PROMPT 3", prompt)
+                        self.assertIn("Creative concept: Nostalgia", prompt)
+                        self.assertIn("Creative concept: Ownership", prompt)
+                        self.assertIn("Creative concept: Scarcity", prompt)
                         self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
                         self.assertIn("Once it sells out", prompt)
                         self.assertIn("deep matte-black collector panel", prompt)
@@ -661,7 +661,8 @@ class AdsPageTests(unittest.TestCase):
 
         self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE STANDARD WORKFLOW", prompt)
         self.assertIn("Football collector wall art", prompt)
-        self.assertIn("IMAGE PROMPT 3", prompt)
+        self.assertIn("GROUP 3 — SCARCITY", prompt)
+        self.assertIn("Creative concept: Scarcity", prompt)
         self.assertIn("deep matte-black collector panel", prompt)
         self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
         self.assertIn("Once it sells out", prompt)
@@ -959,10 +960,11 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("Use the product title and supplied artwork as the factual source of truth.", carousel_prompt)
 
         self.assertEqual(instant_prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
-        self.assertIn("STANDARD INSTANT EXPERIENCE COPY DIVERSITY", instant_prompt)
-        self.assertIn("The table must contain exactly five completed rows", instant_prompt)
+        self.assertIn("STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY", instant_prompt)
+        self.assertIn("Each concept table must contain exactly three completed rows.", instant_prompt)
+        self.assertIn("The full response must contain exactly nine complete ad-copy combinations.", instant_prompt)
         self.assertIn("No Description or Meta Ad Description field is allowed.", instant_prompt)
-        self.assertIn("Scarcity must be concentrated in the Collector / Scarcity row.", instant_prompt)
+        self.assertIn("Scarcity must be concentrated in the Scarcity concept.", instant_prompt)
 
         self.assertNotIn(ads_page.META_WINNER_COPY_BLOCK_VERSION, single_prompt)
 
@@ -994,9 +996,9 @@ class AdsPageTests(unittest.TestCase):
         self.assertEqual(once.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
         self.assertIn(custom_prompt, once)
         self.assertIn("If the approved campaign-specific template requires exactly one primary text", once)
-        self.assertNotIn("STANDARD INSTANT EXPERIENCE COPY DIVERSITY", once)
+        self.assertNotIn("STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY", once)
         self.assertIn(
-            "STANDARD INSTANT EXPERIENCE COPY DIVERSITY",
+            "STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY",
             ads_page.apply_shared_meta_winner_copy_upgrade(custom_prompt, "Instant Experience"),
         )
         self.assertEqual(
@@ -1004,7 +1006,7 @@ class AdsPageTests(unittest.TestCase):
             custom_prompt,
         )
 
-    def test_dedicated_baseball_instant_experience_keeps_approved_five_option_schema(self):
+    def test_dedicated_baseball_instant_experience_keeps_grouped_copy_schema(self):
         prompt = ads_page.build_ads_prompt(
             "Shohei Ohtani 50/50 Season",
             "Baseball",
@@ -1014,8 +1016,9 @@ class AdsPageTests(unittest.TestCase):
         )
 
         self.assertEqual(prompt.count(ads_page.META_WINNER_COPY_BLOCK_VERSION), 1)
-        self.assertIn("STANDARD INSTANT EXPERIENCE COPY DIVERSITY", prompt)
-        self.assertIn("The table must contain exactly five completed rows", prompt)
+        self.assertIn("STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY", prompt)
+        self.assertIn("Each concept table must contain exactly three completed rows.", prompt)
+        self.assertIn("The full response must contain exactly nine complete ad-copy combinations.", prompt)
         self.assertIn("No row may be placeholder copy.", prompt)
         self.assertNotIn("PRIMARY TEXT VARIATIONS\n\nVariation 1:", prompt)
         self.assertNotIn("Return one final primary text only.", prompt)
@@ -2261,10 +2264,13 @@ PRIMARY TEXT VARIATIONS
 
         self.assertIn("Campaign type: Instant Experience", instant_notes)
         self.assertIn("INSTANT EXPERIENCE AD COPY", instant_notes)
-        self.assertIn("PRIMARY TEXT\r\n\r\nOPTION 1\r\nPrimary option 1", instant_notes)
-        self.assertIn("OPTION 2\r\nPrimary option 2\r\nwith preserved second line", instant_notes)
-        self.assertIn("HEADLINES\r\n\r\nOPTION 1\r\nHeadline 1", instant_notes)
-        self.assertIn("CALL TO ACTION\r\n\r\nOPTION 1\r\nShop Now", instant_notes)
+        self.assertIn("NOSTALGIA — Moment & Memory", instant_notes)
+        self.assertIn("VARIATION 1\r\nPRIMARY TEXT:\r\nPrimary option 1", instant_notes)
+        self.assertIn("OWNERSHIP — Identity & Display", instant_notes)
+        self.assertIn("VARIATION 1\r\nPRIMARY TEXT:\r\nPrimary option 2\r\nwith preserved second line", instant_notes)
+        self.assertIn("VARIATION 2\r\nPRIMARY TEXT:\r\nPrimary option 3", instant_notes)
+        self.assertIn("SCARCITY — Collector & Limited Edition", instant_notes)
+        self.assertIn("VARIATION 1\r\nPRIMARY TEXT:\r\nPrimary option 5", instant_notes)
         self.assertNotIn("DESCRIPTIONS", instant_notes)
         self.assertNotIn("CAROUSEL CARDS / AD SETUP", instant_notes)
         self.assertNotIn("Use exactly 5 carousel cards", instant_notes)
@@ -2537,7 +2543,7 @@ PRIMARY TEXT VARIATIONS
                 self.assertIn("must not be treated as permission to create an image automatically", contract)
                 self.assertIn("Any imperative wording inside an image-prompt block is copy", contract)
                 if campaign_type == "Instant Experience":
-                    self.assertIn("After the third Collector / Scarcity cover prompt is complete, stop.", contract)
+                    self.assertIn("After GROUP 3 — SCARCITY and the shared INSTANT EXPERIENCE SETUP block are complete, stop.", contract)
                     self.assertNotIn("Would you like me", contract)
                 else:
                     self.assertIn('"Would you like me to generate Card 1?"', contract)
@@ -2605,7 +2611,7 @@ PRIMARY TEXT VARIATIONS
             "The complete text-only package must end with the generation approval question.",
         )
 
-    def test_instant_experience_text_first_contract_uses_five_copy_groups_no_description(self):
+    def test_instant_experience_text_first_contract_uses_grouped_concepts_no_description(self):
         contract = visual_contract(
             ads_page.build_ads_prompt(
                 "Collector Test Product",
@@ -2616,11 +2622,11 @@ PRIMARY TEXT VARIATIONS
             )
         )
 
-        self.assertIn("one Markdown table headed INSTANT EXPERIENCE AD COPY", contract)
-        self.assertIn("Exactly five completed table rows", contract)
-        self.assertIn("Exactly one Primary Text, one Headline and one CTA in each row.", contract)
-        self.assertIn("Exactly one shared INSTANT EXPERIENCE SETUP block.", contract)
-        self.assertIn("Exactly three complete production-ready cover image prompts.", contract)
+        self.assertIn("GROUP 1 — NOSTALGIA with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.", contract)
+        self.assertIn("GROUP 2 — OWNERSHIP with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.", contract)
+        self.assertIn("GROUP 3 — SCARCITY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.", contract)
+        self.assertIn("Exactly nine complete ad-copy combinations total.", contract)
+        self.assertIn("Exactly one shared INSTANT EXPERIENCE SETUP block after the three groups.", contract)
         self.assertIn("No Description or Meta Ad Description field is allowed.", contract)
         self.assertNotIn("6. Description lines.", contract)
 
@@ -2692,17 +2698,18 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(refreshed["product_id"], "product-999")
         self.assertEqual(refreshed["variation_token"], "cached-ie-result-test")
         self.assertNotIn("OLD INSTANT EXPERIENCE PROMPT", refreshed["master_prompt"])
-        self.assertIn("| Ad | Angle | Primary Text | Headline | CTA |", refreshed["master_prompt"])
-        self.assertIn("Nostalgia / Moment", refreshed["master_prompt"])
-        self.assertIn("Collector / Scarcity", refreshed["master_prompt"])
-        self.assertEqual(refreshed["master_prompt"].count("IMAGE PROMPT 1 — NOSTALGIA / MOMENT"), 1)
-        self.assertEqual(refreshed["master_prompt"].count("IMAGE PROMPT 2 — IDENTITY / OWNERSHIP"), 1)
-        self.assertEqual(refreshed["master_prompt"].count("IMAGE PROMPT 3 — COLLECTOR / SCARCITY"), 1)
+        self.assertIn("GROUP 1 — NOSTALGIA", refreshed["master_prompt"])
+        self.assertIn("GROUP 2 — OWNERSHIP", refreshed["master_prompt"])
+        self.assertIn("GROUP 3 — SCARCITY", refreshed["master_prompt"])
+        self.assertIn("| Variation | Primary Text | Headline | CTA |", refreshed["master_prompt"])
+        self.assertEqual(refreshed["master_prompt"].count("Creative concept: Nostalgia"), 1)
+        self.assertEqual(refreshed["master_prompt"].count("Creative concept: Ownership"), 1)
+        self.assertEqual(refreshed["master_prompt"].count("Creative concept: Scarcity"), 1)
         self.assertNotIn("DESCRIPTION\n\n1. [description]", refreshed["master_prompt"])
 
     def test_non_carousel_text_first_contract_requires_one_copyable_prompt(self):
         for campaign_type, expected in (
-            ("Instant Experience", "exactly three complete, separately copyable, production-ready cover image"),
+            ("Instant Experience", "one complete standalone cover image prompt followed by a three-row Markdown table"),
             ("Single Image / Video", "one complete, separately copyable, production-ready creative prompt"),
         ):
             with self.subTest(campaign_type=campaign_type):
@@ -2718,12 +2725,12 @@ PRIMARY TEXT VARIATIONS
 
                 self.assertIn(expected, contract)
                 if campaign_type == "Instant Experience":
-                    self.assertIn("After the third Collector / Scarcity cover prompt is complete, stop.", contract)
+                    self.assertIn("After GROUP 3 — SCARCITY and the shared INSTANT EXPERIENCE SETUP block are complete, stop.", contract)
                 else:
                     self.assertIn("before asking for approval to generate anything", contract)
                 self.assertNotIn("CARD 1 IMAGE GENERATION PROMPT", contract)
 
-    def test_instant_experience_visual_contract_returns_three_standard_cover_prompts(self):
+    def test_instant_experience_visual_contract_returns_three_grouped_concept_prompts(self):
         prompt = ads_page.build_ads_prompt(
             "fg",
             "AFL",
@@ -2733,15 +2740,15 @@ PRIMARY TEXT VARIATIONS
         )
         contract = visual_contract(prompt)
 
-        self.assertEqual(contract.count("IMAGE PROMPT 1 — NOSTALGIA / MOMENT"), 1)
-        self.assertEqual(contract.count("IMAGE PROMPT 2 — IDENTITY / OWNERSHIP"), 1)
-        self.assertEqual(contract.count("IMAGE PROMPT 3 — COLLECTOR / SCARCITY"), 1)
-        self.assertEqual(
-            contract.count("IMAGE GENERATION PROMPTS — COPY ONE AT A TIME"),
-            1,
-        )
+        self.assertIn("GROUP 1 — NOSTALGIA", contract)
+        self.assertIn("GROUP 2 — OWNERSHIP", contract)
+        self.assertIn("GROUP 3 — SCARCITY", contract)
+        self.assertEqual(contract.count("Creative concept: Nostalgia"), 1)
+        self.assertEqual(contract.count("Creative concept: Ownership"), 1)
+        self.assertEqual(contract.count("Creative concept: Scarcity"), 1)
+        self.assertIn("GROUPED INSTANT EXPERIENCE OUTPUT — COPY ONE CONCEPT AT A TIME", contract)
         self.assertNotIn("IMAGE PROMPTS — GENERATE IN THIS ORDER", contract)
-        self.assertIn("Return exactly three complete, standalone Instant Experience cover-image prompts", contract)
+        self.assertIn("Return exactly three complete grouped Instant Experience concepts", contract)
         self.assertIn("Product name: fg", contract)
         self.assertIn("Sport/category: AFL", contract)
         self.assertIn("Country/market: Australia", contract)
@@ -2753,12 +2760,12 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("CLAIM YOUR EDITION", contract)
         self.assertIn("Selected product name: fg", contract)
         self.assertEqual(contract.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 3)
-        for heading in (
-            "IMAGE PROMPT 1 — NOSTALGIA / MOMENT",
-            "IMAGE PROMPT 2 — IDENTITY / OWNERSHIP",
-            "IMAGE PROMPT 3 — COLLECTOR / SCARCITY",
+        for concept_line in (
+            "Creative concept: Nostalgia",
+            "Creative concept: Ownership",
+            "Creative concept: Scarcity",
         ):
-            cover = contract[contract.index(heading) :]
+            cover = contract[contract.index(concept_line) :]
             self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", cover)
             self.assertIn("SPORT AND COUNTRY VISUAL ADAPTATION", cover)
         self.assertNotIn("Social Media Reels", contract)
@@ -2776,9 +2783,12 @@ PRIMARY TEXT VARIATIONS
         contract = visual_contract(prompt)
 
         self.assertIn("INSTANT EXPERIENCE COVER PROMPT", prompt)
-        self.assertEqual(contract.count("IMAGE PROMPT 1 — NOSTALGIA / MOMENT"), 1)
-        self.assertEqual(contract.count("IMAGE PROMPT 2 — IDENTITY / OWNERSHIP"), 1)
-        self.assertEqual(contract.count("IMAGE PROMPT 3 — COLLECTOR / SCARCITY"), 1)
+        self.assertIn("GROUP 1 — NOSTALGIA", contract)
+        self.assertIn("GROUP 2 — OWNERSHIP", contract)
+        self.assertIn("GROUP 3 — SCARCITY", contract)
+        self.assertEqual(contract.count("Creative concept: Nostalgia"), 1)
+        self.assertEqual(contract.count("Creative concept: Ownership"), 1)
+        self.assertEqual(contract.count("Creative concept: Scarcity"), 1)
         self.assertIn("Product name: Masters Sunday Frame", contract)
         self.assertIn("Sport/category: Golf", contract)
         self.assertIn("Country/market: Canada", contract)
@@ -2801,9 +2811,12 @@ PRIMARY TEXT VARIATIONS
         )
         contract = visual_contract(prompt)
 
-        self.assertEqual(contract.count("IMAGE PROMPT 1 — NOSTALGIA / MOMENT"), 1)
-        self.assertEqual(contract.count("IMAGE PROMPT 2 — IDENTITY / OWNERSHIP"), 1)
-        self.assertEqual(contract.count("IMAGE PROMPT 3 — COLLECTOR / SCARCITY"), 1)
+        self.assertIn("GROUP 1 — NOSTALGIA", contract)
+        self.assertIn("GROUP 2 — OWNERSHIP", contract)
+        self.assertIn("GROUP 3 — SCARCITY", contract)
+        self.assertEqual(contract.count("Creative concept: Nostalgia"), 1)
+        self.assertEqual(contract.count("Creative concept: Ownership"), 1)
+        self.assertEqual(contract.count("Creative concept: Scarcity"), 1)
         self.assertIn("LIMITED TO 100 WORLDWIDE", contract)
         self.assertNotIn("Mockups ZIP", prompt)
         self.assertNotIn("Social Media Reels", prompt)
@@ -2824,10 +2837,12 @@ PRIMARY TEXT VARIATIONS
         )
 
         self.assertIn("SPORTS CAVE BASEBALL INSTANT EXPERIENCE AD", prompt)
-        self.assertIn("| Ad | Angle | Primary Text | Headline | CTA |", prompt)
-        self.assertEqual(prompt.count("IMAGE PROMPT 1 — NOSTALGIA / MOMENT"), 1)
-        self.assertEqual(prompt.count("IMAGE PROMPT 2 — IDENTITY / OWNERSHIP"), 1)
-        self.assertEqual(prompt.count("IMAGE PROMPT 3 — COLLECTOR / SCARCITY"), 1)
+        self.assertIn("GROUP 1 — NOSTALGIA", prompt)
+        self.assertIn("GROUP 2 — OWNERSHIP", prompt)
+        self.assertIn("GROUP 3 — SCARCITY", prompt)
+        self.assertEqual(prompt.count("Creative concept: Nostalgia"), 1)
+        self.assertEqual(prompt.count("Creative concept: Ownership"), 1)
+        self.assertEqual(prompt.count("Creative concept: Scarcity"), 1)
         self.assertNotIn("OPTION A", prompt)
         self.assertNotIn("OUTPUT EXACTLY FOR THIS OPTION", prompt)
         self.assertNotIn("META AD DESCRIPTION\n", prompt)
@@ -2844,10 +2859,10 @@ PRIMARY TEXT VARIATIONS
             variation_token="standard-angle-test",
         )
         prompt_one = prompt[
-            prompt.index("IMAGE PROMPT 1 — NOSTALGIA / MOMENT") :
-            prompt.index("IMAGE PROMPT 2 — IDENTITY / OWNERSHIP")
+            prompt.index("GROUP 1 — NOSTALGIA\n\nIMAGE GENERATION PROMPT") :
+            prompt.index("GROUP 2 — OWNERSHIP\n\nIMAGE GENERATION PROMPT")
         ]
-        prompt_three = prompt[prompt.index("IMAGE PROMPT 3 — COLLECTOR / SCARCITY") :]
+        prompt_three = prompt[prompt.index("GROUP 3 — SCARCITY\n\nIMAGE GENERATION PROMPT") :]
 
         self.assertIn("No scarcity language, no offer, no discount", prompt_one)
         self.assertIn("no hard black panel", prompt_one)
@@ -2870,7 +2885,7 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("PROMOTION OR OFFER", prompt)
         self.assertIn("Exact Promotion or Offer entered: 15% off 2+ editions", prompt)
         self.assertIn("Serialize this field independently of Moment Type.", prompt)
-        self.assertIn("use it only in Ad 4", prompt)
+        self.assertIn("Use it only in Scarcity variation 3", prompt)
 
     def test_instant_experience_does_not_use_obsolete_collection_destination(self):
         settings = instant_experience_settings(
@@ -2909,7 +2924,7 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(len(fingerprints), 3)
         self.assertEqual(
             {fingerprint["route"] for fingerprint in fingerprints},
-            {"Nostalgia / Moment", "Identity / Ownership", "Collector / Scarcity"},
+            {"Nostalgia", "Ownership", "Scarcity"},
         )
         self.assertGreaterEqual(
             len({fingerprint["cover_layout"] for fingerprint in fingerprints}),
@@ -3049,14 +3064,11 @@ PRIMARY TEXT VARIATIONS
         self.assertIn('"Primary Text Variations"', source)
         self.assertIn("ads-notes-primary-text::", source)
         self.assertIn(".st-key-ads-setup-notes [data-testid=\"stHorizontalBlock\"]", source)
-        self.assertLess(
-            supported_result_source.index("_render_ads_image_slots(result, workflow)"),
-            supported_result_source.index("_render_ads_setup_notes(result, workflow)"),
-        )
-        self.assertLess(
-            supported_result_source.index("_render_ads_setup_notes(result, workflow)"),
-            supported_result_source.index("_render_ads_image_save(result, workflow)"),
-        )
+        carousel_slots_index = supported_result_source.rindex("_render_ads_image_slots(result, workflow)")
+        carousel_notes_index = supported_result_source.rindex("_render_ads_setup_notes(result, workflow)")
+        carousel_save_index = supported_result_source.rindex("_render_ads_image_save(result, workflow)")
+        self.assertLess(carousel_slots_index, carousel_notes_index)
+        self.assertLess(carousel_notes_index, carousel_save_index)
 
         app_test = run_ads_page()
         set_product_name(app_test, "Six Laps Ahead")
@@ -3071,12 +3083,12 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Carousel cards / ad setup", note_labels)
         self.assertIn("Primary Text Variations", note_labels)
 
-    def test_instant_experience_copy_fields_are_five_compact_groups_only(self):
+    def test_instant_experience_copy_fields_are_grouped_by_three_concepts(self):
         source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
 
-        self.assertIn("INSTANT_EXPERIENCE_COPY_GROUPS", source)
-        self.assertIn("ads-ie-copy-field::", source)
-        self.assertIn("height: 42px", source)
+        self.assertIn("INSTANT_EXPERIENCE_CONCEPTS", source)
+        self.assertIn("ads-ie-concept-copy-field::", source)
+        self.assertIn("height: 50px", source)
         self.assertIn("overflow-y: auto", source)
 
         app_test = run_ads_page()
@@ -3101,17 +3113,18 @@ PRIMARY TEXT VARIATIONS
 
         note_labels = [text_area.label for text_area in app_test.text_area]
         self.assertEqual(
-            [label for label in note_labels if label.startswith("Primary Text ")],
-            [f"Primary Text {index}" for index in range(1, 6)],
+            [label for label in note_labels if label == "Primary Text"],
+            ["Primary Text"] * 9,
         )
         self.assertEqual(
-            [label for label in note_labels if label.startswith("Headline ")],
-            [f"Headline {index}" for index in range(1, 6)],
+            [label for label in note_labels if label == "Headline"],
+            ["Headline"] * 9,
         )
         self.assertEqual(
-            [label for label in note_labels if label.startswith("Call to Action ")],
-            [f"Call to Action {index}" for index in range(1, 6)],
+            [label for label in note_labels if label == "CTA"],
+            ["CTA"] * 9,
         )
+        self.assertNotIn("Call to Action 1", note_labels)
         self.assertNotIn("Descriptions", note_labels)
         self.assertNotIn("Carousel cards / ad setup", note_labels)
         self.assertNotIn("Primary Text Variations", note_labels)
@@ -3227,12 +3240,12 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(
             [uploader.label for uploader in app_test.file_uploader],
             [
-                "Nostalgia / Moment Cover",
-                "Identity / Ownership Cover",
-                "Collector / Scarcity Cover",
+                "Nostalgia Cover",
+                "Ownership Cover",
+                "Scarcity Cover",
             ],
         )
-        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
+        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
         self.assertTrue(any("0 of 3 images ready." in caption.value for caption in app_test.caption))
         for index in range(1, 4):
             app_test.file_uploader[index - 1].set_value(
@@ -3242,13 +3255,13 @@ PRIMARY TEXT VARIATIONS
             self.assertEqual(
                 [uploader.label for uploader in app_test.file_uploader],
                 [
-                    "Nostalgia / Moment Cover",
-                    "Identity / Ownership Cover",
-                    "Collector / Scarcity Cover",
+                    "Nostalgia Cover",
+                    "Ownership Cover",
+                    "Scarcity Cover",
                 ],
             )
             self.assertTrue(any(f"{index} of 3 images ready." in caption.value for caption in app_test.caption))
-            self.assertFalse(button_by_label(app_test, "Save Images").disabled)
+            self.assertTrue(button_by_label(app_test, "Save Images").disabled)
         self.assertEqual(len(app_test.exception), 0)
 
     def test_instant_experience_preview_remove_replace_and_rerun_persistence(self):
@@ -3265,36 +3278,36 @@ PRIMARY TEXT VARIATIONS
         )
         app_test.run(timeout=30)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
-        self.assertTrue(workflow["slots"]["instant-experience-01"]["valid"])
-        self.assertEqual(workflow["slots"]["instant-experience-01"]["original_name"], "uploaded-filename.png")
-        self.assertTrue(any("1024 x 1024 PNG" in caption.value for caption in app_test.caption))
+        self.assertTrue(workflow["slots"]["instant-experience-nostalgia"]["valid"])
+        self.assertEqual(workflow["slots"]["instant-experience-nostalgia"]["original_name"], "uploaded-filename.png")
+        self.assertTrue(any("Original: 96 x 96 px" in caption.value for caption in app_test.caption))
         result = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]
         filename = ads_page._meta_output_filename(
             result,
             workflow,
             ads_page.ads_image_workflow.campaign_image_slots("Instant Experience")[0],
         )
-        self.assertIn(" - Instant Experience 01 - ", filename)
+        self.assertEqual(filename, "nostalgia-cover-original.png")
         self.assertTrue(filename.endswith(".png"))
-        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
+        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
 
         app_test.run(timeout=20)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
-        self.assertIn("instant-experience-01", workflow["slots"])
-        self.assertEqual(workflow["slots"]["instant-experience-01"]["original_name"], "uploaded-filename.png")
+        self.assertIn("instant-experience-nostalgia", workflow["slots"])
+        self.assertEqual(workflow["slots"]["instant-experience-nostalgia"]["original_name"], "uploaded-filename.png")
 
         button_by_label(app_test, "Remove").click().run(timeout=20)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         self.assertEqual(workflow["slots"], {})
-        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
+        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
 
         app_test.file_uploader[0].set_value(
             [("replacement.webp", square_png_bytes(color=(90, 120, 150)), "image/webp")]
         )
         app_test.run(timeout=30)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
-        self.assertEqual(workflow["slots"]["instant-experience-01"]["original_name"], "replacement.webp")
-        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
+        self.assertEqual(workflow["slots"]["instant-experience-nostalgia"]["original_name"], "replacement.webp")
+        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
 
     def test_instant_experience_remove_middle_cover_preserves_route_slots(self):
         app_test = run_ads_page()
@@ -3315,18 +3328,18 @@ PRIMARY TEXT VARIATIONS
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         self.assertEqual(
             list(workflow["slots"].keys()),
-            ["instant-experience-01", "instant-experience-03"],
+            ["instant-experience-nostalgia", "instant-experience-scarcity"],
         )
         self.assertEqual(
-            workflow["slots"]["instant-experience-03"]["original_name"],
+            workflow["slots"]["instant-experience-scarcity"]["original_name"],
             "variation-3.png",
         )
         self.assertEqual(
             [uploader.label for uploader in app_test.file_uploader],
             [
-                "Nostalgia / Moment Cover",
-                "Identity / Ownership Cover",
-                "Collector / Scarcity Cover",
+                "Nostalgia Cover",
+                "Ownership Cover",
+                "Scarcity Cover",
             ],
         )
 
@@ -3345,7 +3358,7 @@ PRIMARY TEXT VARIATIONS
         app_test.run(timeout=20)
 
         self.assertTrue(any("corrupt" in error.value for error in app_test.error))
-        self.assertFalse(button_by_label(app_test, "Save Images").disabled)
+        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
         self.assertEqual(len(app_test.exception), 0)
 
     def test_new_campaign_submit_resets_only_incompatible_ads_upload_state(self):
@@ -3374,9 +3387,9 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(
             [uploader.label for uploader in app_test.file_uploader],
             [
-                "Nostalgia / Moment Cover",
-                "Identity / Ownership Cover",
-                "Collector / Scarcity Cover",
+                "Nostalgia Cover",
+                "Ownership Cover",
+                "Scarcity Cover",
             ],
         )
 
@@ -3409,9 +3422,9 @@ PRIMARY TEXT VARIATIONS
         }
 
         self.assertFalse(ads_page.ads_images_ready(result, workflow))
-        self.assertEqual(list(workflow["slots"].keys()), ["instant-experience-01"])
-        self.assertEqual(workflow["slots"]["instant-experience-01"]["original_name"], "legacy.png")
-        self.assertEqual(workflow["slots"]["instant-experience-01"]["label"], "Nostalgia / Moment Cover")
+        self.assertEqual(list(workflow["slots"].keys()), ["instant-experience-nostalgia"])
+        self.assertEqual(workflow["slots"]["instant-experience-nostalgia"]["original_name"], "legacy.png")
+        self.assertEqual(workflow["slots"]["instant-experience-nostalgia"]["label"], "Nostalgia Cover")
 
     def test_valid_category_campaign_country_combinations_never_have_insufficient_winner_data(self):
         for category in ads_page.SUPPORTED_AD_CATEGORIES:

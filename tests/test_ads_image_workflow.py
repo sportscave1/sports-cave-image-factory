@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+import hashlib
 import io
 import unittest
+import zipfile
 from unittest.mock import patch
 
 from PIL import Image
@@ -21,19 +23,42 @@ def image_bytes(image_format="PNG", size=(96, 96), color=(34, 68, 102), *, exif=
 def processed_slots(campaign_type, *, count=None):
     source = image_bytes()
     slot_specs = ads_image_workflow.campaign_image_slots(campaign_type)
-    optimize_kwargs = {}
     if campaign_type == "Instant Experience":
-        slot_specs = slot_specs[: 1 if count is None else count]
-        optimize_kwargs = {
-            "output_edge": ads_image_workflow.INSTANT_EXPERIENCE_IMAGE_EDGE,
-            "output_format": "PNG",
-        }
+        slot_specs = slot_specs[: len(slot_specs) if count is None else count]
+
+        def processed_instant_slot(slot):
+            details = ads_image_workflow.inspect_instant_experience_original(
+                source,
+                original_name=f"{slot['concept_id']}.png",
+            )
+            preview = ads_image_workflow.build_instant_experience_preview_thumbnail(
+                source,
+                source_hash=details["source_hash"],
+            )
+            return {
+                **details,
+                **preview,
+                "data": source,
+                "output_format": details["source_format"],
+                "output_width": details["source_width"],
+                "output_height": details["source_height"],
+                "output_size": details["source_size"],
+                "slot_id": slot["id"],
+                "label": slot["label"],
+                "concept_id": slot["concept_id"],
+                "display_name": slot["display_name"],
+                "supporting_label": slot["supporting_label"],
+                "position": slot["position"],
+                "valid": True,
+                "error": "",
+            }
+
+        return {slot["id"]: processed_instant_slot(slot) for slot in slot_specs}
     return {
         slot["id"]: {
             **ads_image_workflow.optimize_meta_image(
                 source,
                 original_name=f"{slot['id']}.png",
-                **optimize_kwargs,
             ),
             "slot_id": slot["id"],
             "label": slot["label"],
@@ -42,6 +67,22 @@ def processed_slots(campaign_type, *, count=None):
             "error": "",
         }
         for slot in slot_specs
+    }
+
+
+def instant_experience_ad_notes():
+    return {
+        "instant_experience_concepts": {
+            concept["id"]: [
+                {
+                    "primary_text": f"{concept['display_name']} primary {index}\n\nSecond paragraph.",
+                    "headline": f"{concept['display_name']} headline {index}",
+                    "cta": f"{concept['display_name']} CTA {index}",
+                }
+                for index in range(1, 4)
+            ]
+            for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
+        }
     }
 
 
@@ -54,12 +95,52 @@ class AdsImageProcessingTests(unittest.TestCase):
         self.assertEqual(
             [slot["label"] for slot in ads_image_workflow.campaign_image_slots("Instant Experience")],
             [
-                "Nostalgia / Moment Cover",
-                "Identity / Ownership Cover",
-                "Collector / Scarcity Cover",
+                "Nostalgia Cover",
+                "Ownership Cover",
+                "Scarcity Cover",
             ],
         )
         self.assertEqual(ads_image_workflow.campaign_image_slots("Single Image / Video"), ())
+
+    def test_instant_experience_originals_are_inspected_without_reencoding(self):
+        source = image_bytes("PNG", size=(1024, 1024), color=(12, 34, 56))
+
+        details = ads_image_workflow.inspect_instant_experience_original(
+            source,
+            original_name="nostalgia.png",
+        )
+
+        self.assertEqual(details["source_width"], 1024)
+        self.assertEqual(details["source_height"], 1024)
+        self.assertEqual(details["source_format"], "PNG")
+        self.assertEqual(details["source_size"], len(source))
+        self.assertEqual(details["source_hash"], hashlib.sha256(source).hexdigest())
+
+    def test_instant_experience_preview_thumbnail_is_lightweight_cached_and_not_cropped(self):
+        ads_image_workflow.instant_experience_preview_cache_clear()
+        source = image_bytes("PNG", size=(1600, 1200), color=(12, 34, 56))
+        source_hash = ads_image_workflow.source_image_signature(source)
+
+        first = ads_image_workflow.build_instant_experience_preview_thumbnail(
+            source,
+            source_hash=source_hash,
+        )
+        cache_after_first = ads_image_workflow.instant_experience_preview_cache_info()
+        second = ads_image_workflow.build_instant_experience_preview_thumbnail(
+            source,
+            source_hash=source_hash,
+        )
+        cache_after_second = ads_image_workflow.instant_experience_preview_cache_info()
+
+        self.assertLessEqual(max(first["preview_width"], first["preview_height"]), 460)
+        self.assertEqual(first["preview_width"], 460)
+        self.assertEqual(first["preview_height"], 345)
+        self.assertEqual(first["preview_data"], second["preview_data"])
+        self.assertGreater(cache_after_second.hits, cache_after_first.hits)
+        self.assertLess(len(first["preview_data"]), len(source))
+        with Image.open(io.BytesIO(first["preview_data"])) as preview:
+            preview.load()
+            self.assertEqual(preview.size, (460, 345))
 
     def test_jpeg_png_and_webp_become_verified_srgb_1080_jpegs(self):
         for image_format in ("JPEG", "PNG", "WEBP"):
@@ -206,6 +287,8 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
                 "cards": "Card 1: Six Laps Ahead\nCard 2: Race-day memory",
             },
         }
+        if campaign_type == "Instant Experience":
+            workflow["ad_notes"] = instant_experience_ad_notes()
         return result, workflow
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
@@ -479,31 +562,33 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertEqual(second["_ad_setup_notes"]["filename"], "Ad Copy.txt")
 
     @patch("ads_page.dropbox_integration.windows_numbered_path")
-    @patch("ads_page.dropbox_integration.get_metadata_if_exists")
     @patch("ads_page.dropbox_integration.upload_batch")
-    def test_collision_uses_numbered_name_without_overwrite(
+    def test_instant_experience_package_uses_concept_folders_and_replace_conflict(
         self,
         upload_batch,
-        metadata,
         numbered_path,
     ):
         result, workflow = self.build_result_and_workflow("Instant Experience")
-        metadata.return_value = {".tag": "file"}
-        numbered_path.return_value = (
-            "/Sportscave Team Folder/04_OUTPUT/product-images/"
-            "Shohei Ohtani 50_50 Wall Art - Instant Experience 01 - 2026-07-25 (2).png"
-        )
-        upload_batch.return_value = {
-            "successes": [
-                {
-                    "relative_path": "numbered.jpg",
-                    "metadata": {"path_display": numbered_path.return_value},
-                }
-            ],
-            "failures": [],
-        }
 
-        ads_page.save_ads_images_to_dropbox(
+        def upload_success(_token, destination, items, **_kwargs):
+            return {
+                "successes": [
+                    {
+                        "relative_path": item["relative_path"],
+                        "metadata": {
+                            "name": item["relative_path"].split("/")[-1],
+                            "path_display": f"{destination}/{item['relative_path']}",
+                            "size": item["size"],
+                        },
+                    }
+                    for item in items
+                ],
+                "failures": [],
+            }
+
+        upload_batch.side_effect = upload_success
+
+        outcomes = ads_page.save_ads_images_to_dropbox(
             "token",
             "/Sportscave Team Folder",
             "/Sportscave Team Folder/04_OUTPUT/product-images",
@@ -511,58 +596,46 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             workflow,
         )
 
-        self.assertEqual(upload_batch.call_count, 2)
-        image_call = upload_batch.call_args_list[0]
-        self.assertEqual(image_call.kwargs["conflict"], "cancel")
-        self.assertTrue(
-            image_call.args[2][0]["relative_path"].endswith("(2).png")
+        numbered_path.assert_not_called()
+        self.assertEqual(upload_batch.call_count, 1)
+        self.assertEqual(upload_batch.call_args.kwargs["conflict"], "replace")
+        self.assertEqual(
+            [item["relative_path"] for item in upload_batch.call_args.args[2]],
+            [
+                "01-nostalgia/nostalgia-cover-original.png",
+                "01-nostalgia/ad-copy.txt",
+                "02-ownership/ownership-cover-original.png",
+                "02-ownership/ad-copy.txt",
+                "03-scarcity/scarcity-cover-original.png",
+                "03-scarcity/ad-copy.txt",
+            ],
         )
-        self.assertEqual(upload_batch.call_args_list[1].kwargs["conflict"], "replace")
+        self.assertEqual(outcomes["_instant_experience_package"]["status"], "saved")
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")
-    def test_instant_experience_ad_copy_export_includes_all_fifteen_values(
+    def test_instant_experience_ad_copy_exports_three_variations_per_concept(
         self,
         upload_batch,
         _metadata,
     ):
         result, workflow = self.build_result_and_workflow("Instant Experience")
-        workflow["slots"] = {}
         long_primary = "Opening line\n\nSecond paragraph with O'Neal, J\u00fcrgen and exact spacing."
-        workflow["ad_notes"] = {
-            "instant_experience": {
-                "primary_text": [
-                    long_primary,
-                    "Primary 2",
-                    "Primary 3",
-                    "Primary 4",
-                    "Primary 5",
-                ],
-                "headlines": [
-                    "Headline 1",
-                    "Headline 2",
-                    "Headline 3",
-                    "Headline 4",
-                    "Headline 5",
-                ],
-                "call_to_action": [
-                    "Shop Now",
-                    "Learn More",
-                    "View Shop",
-                    "See More",
-                    "Get Offer",
-                ],
-            }
+        workflow["ad_notes"] = instant_experience_ad_notes()
+        workflow["ad_notes"]["instant_experience_concepts"]["nostalgia"][0] = {
+            "primary_text": long_primary,
+            "headline": "Remember The Kid",
+            "cta": "See the Edition",
         }
 
         def upload_success(_token, destination, items, **_kwargs):
-            filename = items[0]["relative_path"]
             return {
                 "successes": [
                     {
-                        "relative_path": filename,
-                        "metadata": {"path_display": f"{destination}/{filename}"},
+                        "relative_path": item["relative_path"],
+                        "metadata": {"path_display": f"{destination}/{item['relative_path']}"},
                     }
+                    for item in items
                 ],
                 "failures": [],
             }
@@ -576,50 +649,56 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             workflow,
         )
 
-        notes_item = upload_batch.call_args.args[2][0]
+        notes_item = next(
+            item
+            for item in upload_batch.call_args.args[2]
+            if item["relative_path"] == "01-nostalgia/ad-copy.txt"
+        )
         notes_text = notes_item["data"].decode("utf-8")
-        self.assertEqual(notes_item["relative_path"], "Ad Copy.txt")
-        self.assertIn("INSTANT EXPERIENCE AD COPY", notes_text)
+        self.assertEqual(notes_item["relative_path"], "01-nostalgia/ad-copy.txt")
+        self.assertIn("SPORTS CAVE INSTANT EXPERIENCE", notes_text)
+        self.assertIn("CONCEPT:\r\nNostalgia", notes_text)
         self.assertIn(
-            "PRIMARY TEXT\r\n\r\nOPTION 1\r\n"
+            "VARIATION 1\r\n\r\nPRIMARY TEXT:\r\n"
             "Opening line\r\n\r\nSecond paragraph with O'Neal, J\u00fcrgen and exact spacing.",
             notes_text,
         )
-        self.assertIn("OPTION 5\r\nPrimary 5", notes_text)
-        self.assertIn("HEADLINES\r\n\r\nOPTION 1\r\nHeadline 1", notes_text)
-        self.assertIn("OPTION 5\r\nHeadline 5", notes_text)
-        self.assertIn("CALL TO ACTION\r\n\r\nOPTION 1\r\nShop Now", notes_text)
-        self.assertIn("OPTION 5\r\nGet Offer", notes_text)
+        self.assertIn("HEADLINE:\r\nRemember The Kid", notes_text)
+        self.assertIn("CTA:\r\nSee the Edition", notes_text)
+        self.assertIn("VARIATION 3", notes_text)
+        self.assertNotIn("VARIATION 4", notes_text)
         self.assertNotIn("DESCRIPTIONS", notes_text)
         self.assertNotIn("CAROUSEL CARDS / AD SETUP", notes_text)
         self.assertNotIn("\n", notes_text.replace("\r\n", ""))
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")
-    def test_instant_experience_save_uses_selected_product_not_uploaded_filename(
+    def test_instant_experience_individual_items_preserve_original_cover_bytes(
         self,
         upload_batch,
         _metadata,
     ):
         result, workflow = self.build_result_and_workflow("Instant Experience")
-        workflow["slots"]["instant-experience-01"]["original_name"] = "random-chatgpt-cover.png"
+        original_hash = hashlib.sha256(
+            workflow["slots"]["instant-experience-nostalgia"]["data"]
+        ).hexdigest()
         progress_events = []
 
         def upload_success(_token, destination, items, **kwargs):
             if kwargs.get("progress_callback"):
-                kwargs["progress_callback"](1, 1, items[0]["relative_path"], 5, 10)
-                kwargs["progress_callback"](1, 1, items[0]["relative_path"], 10, 10)
-            filename = items[0]["relative_path"]
+                kwargs["progress_callback"](1, len(items), items[0]["relative_path"], 5, 10)
+                kwargs["progress_callback"](1, len(items), items[0]["relative_path"], 10, 10)
             return {
                 "successes": [
                     {
-                        "relative_path": filename,
+                        "relative_path": item["relative_path"],
                         "metadata": {
-                            "name": filename,
-                            "path_display": f"{destination}/{filename}",
-                            "size": items[0]["size"],
+                            "name": item["relative_path"].split("/")[-1],
+                            "path_display": f"{destination}/{item['relative_path']}",
+                            "size": item["size"],
                         },
                     }
+                    for item in items
                 ],
                 "failures": [],
             }
@@ -636,17 +715,18 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(upload_batch.call_count, 2)
-        filename = upload_batch.call_args_list[0].args[2][0]["relative_path"]
-        self.assertEqual(
-            filename,
-            "Shohei Ohtani 50_50 Wall Art - Instant Experience 01 - 2026-07-25.png",
+        self.assertEqual(upload_batch.call_count, 1)
+        nostalgia_item = next(
+            item
+            for item in upload_batch.call_args.args[2]
+            if item["relative_path"] == "01-nostalgia/nostalgia-cover-original.png"
         )
-        self.assertNotIn("random-chatgpt-cover", filename)
-        self.assertEqual(outcomes["instant-experience-01"]["status"], "saved")
+        self.assertEqual(hashlib.sha256(nostalgia_item["data"]).hexdigest(), original_hash)
+        self.assertEqual(outcomes["instant-experience-nostalgia"]["status"], "saved")
+        self.assertEqual(outcomes["instant-experience-nostalgia"]["concept"], "Nostalgia")
         self.assertEqual(
             [(event[0], event[1], event[2]) for event in progress_events],
-            [(1, 1, "Nostalgia / Moment Cover"), (1, 1, "Nostalgia / Moment Cover")],
+            [(1, 6, "Nostalgia Cover"), (1, 6, "Nostalgia Cover")],
         )
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
@@ -660,13 +740,13 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         workflow["slots"] = processed_slots("Instant Experience", count=3)
 
         def upload_success(_token, destination, items, **_kwargs):
-            filename = items[0]["relative_path"]
             return {
                 "successes": [
                     {
-                        "relative_path": filename,
-                        "metadata": {"path_display": f"{destination}/{filename}"},
+                        "relative_path": item["relative_path"],
+                        "metadata": {"path_display": f"{destination}/{item['relative_path']}"},
                     }
+                    for item in items
                 ],
                 "failures": [],
             }
@@ -681,20 +761,61 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         )
 
         filenames = [
-            call.args[2][0]["relative_path"]
-            for call in upload_batch.call_args_list
-            if str(call.args[2][0]["relative_path"]).endswith(".png")
+            item["relative_path"]
+            for item in upload_batch.call_args.args[2]
+            if str(item["relative_path"]).endswith(".png")
         ]
         self.assertEqual(len(filenames), 3)
         self.assertEqual(len(set(filenames)), 3)
         self.assertEqual(
             filenames,
             [
-                f"Shohei Ohtani 50_50 Wall Art - Instant Experience {index:02d} - 2026-07-25.png"
-                for index in range(1, 4)
+                "01-nostalgia/nostalgia-cover-original.png",
+                "02-ownership/ownership-cover-original.png",
+                "03-scarcity/scarcity-cover-original.png",
             ],
         )
         self.assertTrue(all(row["status"] == "saved" for row in outcomes.values()))
+
+    def test_instant_experience_package_zip_contains_three_folders_and_originals(self):
+        result, workflow = self.build_result_and_workflow("Instant Experience")
+        source_hashes = {
+            concept["id"]: hashlib.sha256(
+                workflow["slots"][f"instant-experience-{concept['id']}"]["data"]
+            ).hexdigest()
+            for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
+        }
+
+        archive_bytes = ads_page.build_instant_experience_package_zip(result, workflow)
+
+        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
+            names = archive.namelist()
+            root = ads_page.build_ads_export_folder_name(result, workflow)
+            self.assertEqual(
+                names,
+                [
+                    f"{root}/01-nostalgia/nostalgia-cover-original.png",
+                    f"{root}/01-nostalgia/ad-copy.txt",
+                    f"{root}/02-ownership/ownership-cover-original.png",
+                    f"{root}/02-ownership/ad-copy.txt",
+                    f"{root}/03-scarcity/scarcity-cover-original.png",
+                    f"{root}/03-scarcity/ad-copy.txt",
+                ],
+            )
+            self.assertFalse(any("preview" in name.casefold() for name in names))
+            for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS:
+                image_name = (
+                    f"{root}/{concept['folder']}/"
+                    f"{concept['filename_prefix']}.png"
+                )
+                self.assertEqual(
+                    hashlib.sha256(archive.read(image_name)).hexdigest(),
+                    source_hashes[concept["id"]],
+                )
+                copy_text = archive.read(f"{root}/{concept['folder']}/ad-copy.txt").decode("utf-8")
+                self.assertIn("VARIATION 1\r\n", copy_text)
+                self.assertIn("VARIATION 3\r\n", copy_text)
+                self.assertNotIn("VARIATION 4", copy_text)
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")
@@ -705,21 +826,24 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
     ):
         result, workflow = self.build_result_and_workflow("Instant Experience")
         workflow["slots"] = processed_slots("Instant Experience", count=3)
-        call_index = {"value": 0}
 
         def partial_upload(_token, destination, items, **_kwargs):
-            call_index["value"] += 1
-            filename = items[0]["relative_path"]
-            if call_index["value"] == 2:
-                return {"successes": [], "failures": [{"relative_path": filename, "error": "rate limited"}]}
+            successes = []
+            failures = []
+            for item in items:
+                filename = item["relative_path"]
+                if filename == "02-ownership/ownership-cover-original.png":
+                    failures.append({"relative_path": filename, "error": "rate limited"})
+                else:
+                    successes.append(
+                        {
+                            "relative_path": filename,
+                            "metadata": {"path_display": f"{destination}/{filename}"},
+                        }
+                    )
             return {
-                "successes": [
-                    {
-                        "relative_path": filename,
-                        "metadata": {"path_display": f"{destination}/{filename}"},
-                    }
-                ],
-                "failures": [],
+                "successes": successes,
+                "failures": failures,
             }
 
         upload_batch.side_effect = partial_upload
@@ -735,12 +859,12 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             sum(
                 row["status"] == "saved"
                 for slot_id, row in outcomes.items()
-                if not slot_id.startswith("_")
+                if slot_id.startswith("instant-experience-")
             ),
             2,
         )
-        self.assertEqual(outcomes["instant-experience-02"]["status"], "failed")
-        self.assertIn("rate limited", outcomes["instant-experience-02"]["error"])
+        self.assertEqual(outcomes["instant-experience-ownership"]["status"], "failed")
+        self.assertIn("rate limited", outcomes["instant-experience-ownership"]["error"])
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")
