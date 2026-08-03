@@ -1,3 +1,4 @@
+import csv
 import hashlib
 import html
 import io
@@ -102,13 +103,13 @@ EDITION_OPS_ROWS_SESSION_KEY = "edition_ops_rows"
 CAROUSEL_CARD_MAX_CHARACTERS = 17
 CAROUSEL_CARD_COUNT = 5
 META_WINNER_COPY_BLOCK_VERSION = "SPORTS CAVE META WINNER COPY UPGRADE V1"
-ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V4"
+ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V5"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
 ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V3"
 ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE ROUTES V1"
-ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V3"
+ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V4"
 ADS_COPY_FILENAME = "Ad Copy.txt"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
@@ -117,10 +118,14 @@ NO_EDITION_OPS_PRODUCT_URL_MESSAGE = (
     "No product URL is saved in Edition Ops. Add it there or enter it manually."
 )
 ADS_PRODUCT_NAME_KEY = "ads_product_name"
+ADS_PRODUCT_SELECTOR_KEY = "ads_product_selector"
 ADS_PRODUCT_URL_KEY = "ads_product_url"
 ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY = "ads_product_url_autofill_product_key"
 ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY = "ads_product_url_autofill_selection"
+ADS_PRODUCT_URL_PREVIOUS_PRODUCT_KEY = "ads_product_url_previous_product_key"
 ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY = "ads_product_url_last_auto_value"
+ADS_PRODUCT_URL_MANUALLY_EDITED_KEY = "ads_product_url_manually_edited"
+ADS_PRODUCT_URL_INITIALIZED_KEY = "ads_product_url_initialized"
 ADS_IE_RECENT_FINGERPRINTS_KEY = "ads_instant_experience_recent_fingerprints"
 
 FINAL_REVIEW_HOW_TO_STEPS = (
@@ -412,6 +417,43 @@ INSTANT_EXPERIENCE_COPY_FIELDS = (
 )
 INSTANT_EXPERIENCE_COPY_VARIATION_COUNT = 3
 INSTANT_EXPERIENCE_PREVIEW_DISPLAY_WIDTH = 300
+INSTANT_EXPERIENCE_COPY_CSV_SCHEMA_VERSION = "1"
+INSTANT_EXPERIENCE_COPY_CSV_CAMPAIGN_TYPE = "instant_experience"
+INSTANT_EXPERIENCE_COPY_CSV_STANDARD_OUTPUT_MODE = "standard_three_concepts"
+INSTANT_EXPERIENCE_COPY_CSV_HEADERS = (
+    "schema_version",
+    "campaign_type",
+    "output_mode",
+    "route_key",
+    "route_label",
+    "variation",
+    "primary_text",
+    "headline",
+    "cta",
+)
+INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION = (
+    "If a Sports Cave Instant Experience copy CSV template is attached in this conversation, "
+    "transfer the matching copy into the primary_text, headline and cta columns. Match by "
+    "route_key and variation. Preserve all headers, schema fields, row order and identity "
+    "columns exactly. Return the completed CSV as a downloadable .csv file. Do not place "
+    "image-prompt wording inside the copy columns."
+)
+
+SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1 = """SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1
+
+FACTUAL AND CONTEXTUAL WORDING CHECK — MANDATORY
+
+Before finalizing any customer-visible Primary Text, Headline, Description, CTA, copy variation, Carousel card, Instant Experience cover, Single Image / Video ad, setup wording, image-generation prompt or on-image wording, read the complete product title and all supplied artwork, sport/category, market, campaign, route, offer, scarcity and verified product variables. Identify what the artwork genuinely represents: an athlete, team, teammates, opponents, event, era, achievement, vehicle, record, emotional theme or collector subject.
+
+Validate every line against that exact context and against every other line. A sporting claim may be used only when supported by the complete product title, user-supplied verified facts, authoritative product or catalogue data, clearly readable artwork wording, or authoritative external verification when browsing is available. Never guess a fact from an image, and never treat an ambiguous title as proof.
+
+Two named people or a title containing "vs" does not by itself prove rivalry, opposition, hostility or a historical head-to-head event. The subjects may be teammates, contemporaries, comparisons or opposing subjects. Rivalry, enemies, battle, duel, went head-to-head or equivalent relationship wording is permitted only when that relationship is explicitly supported by verified facts. Teammate context must never be contradicted by invented rivalry or hostility.
+
+Never invent or imply a victory, championship, record, historic moment, venue, date, rivalry status, hostile relationship, greatest-ever status or achievement. Do not use relive, remember, historic, legacy or similar past-event language unless the product genuinely represents a confirmed past moment or era. Exact user-provided wording remains authoritative only when it is factually supported.
+
+If a line is uncertain, misleading, overly specific or inconsistent, rewrite only that line with a simpler emotional phrase that remains specific to the product, sport and selected creative route. Safe territory may include pressure, anticipation, identity, pride, loyalty, atmosphere, race day, game day, collector ownership, display and the feeling of being a fan, but it must still be tailored to the actual product. Do not fall back to generic retail language such as "Elevate your space", "Ultimate tribute", "Must-have" or "Perfect addition". Do not hardcode one replacement phrase or universal CTA; resolve truthful wording dynamically for each ad.
+
+After validation, propagate the exact approved wording consistently everywhere it appears, including copy tables, setup copy where relevant and the corresponding image-generation prompt. The exact Headline, CTA and supporting wording approved for an image must match the wording written inside that image prompt. Perform this check silently when generating the ad output. Do not output warnings, research notes, rejected alternatives or internal reasoning. In Final Ad Review, apply the same factual check inside the existing review fields without adding or removing review sections."""
 
 INSTANT_EXPERIENCE_COPY_GROUPS = (
     ("primary_text", "PRIMARY TEXT", "Primary Text", "Primary text option {index}"),
@@ -962,6 +1004,91 @@ def _edition_ops_product_record_key(row):
     return ""
 
 
+def _edition_ops_product_explicit_id_from_row(row):
+    if not isinstance(row, dict):
+        return ""
+    return _normalise_option_label(
+        row.get("product_id")
+        or row.get("Product ID")
+        or row.get("shopify_product_id")
+        or row.get("shopify_product_gid")
+        or row.get("product_gid")
+        or row.get("id")
+    )
+
+
+def _edition_ops_product_selector_identity(row):
+    product_id = _edition_ops_product_explicit_id_from_row(row)
+    if product_id:
+        return f"id::{product_id}"
+    record_key = _edition_ops_product_record_key(row)
+    if record_key:
+        return f"key::{record_key}"
+    handle = _edition_ops_product_handle_from_row(row)
+    if handle:
+        return f"handle::{handle}"
+    product_name = _product_name_from_edition_ops_row(row)
+    if product_name:
+        return f"label::{_normalise_product_match_value(product_name)}"
+    return ""
+
+
+def build_ads_product_selector_records(rows):
+    rows = list(rows or ())
+    duplicate_titles = _edition_ops_duplicate_title_keys(rows)
+    records = []
+    seen_identities = set()
+    for row in rows:
+        identity = _edition_ops_product_selector_identity(row)
+        label = _edition_ops_product_option_label(row, duplicate_titles)
+        if not identity or not label or identity in seen_identities:
+            continue
+        records.append(
+            {
+                "identity": identity,
+                "label": label,
+                "row": row,
+                "record_key": _edition_ops_product_record_key(row),
+                "product_id": _edition_ops_product_id_from_row(row),
+                "product_url": _edition_ops_product_page_url_from_row(row),
+            }
+        )
+        seen_identities.add(identity)
+    return records
+
+
+def resolve_ads_product_selector_value(selector_value, *, rows=None, records=None):
+    selected_value = _normalise_option_label(selector_value)
+    records = list(
+        build_ads_product_selector_records(rows)
+        if records is None
+        else records
+    )
+    for record in records:
+        if selected_value == record["identity"]:
+            return {
+                "selected_label": record["label"],
+                "selector_identity": record["identity"],
+                "row": record["row"],
+                "record_key": record["record_key"],
+                "product_id": record["product_id"],
+                "product_url": record["product_url"],
+            }
+
+    selection = resolve_edition_ops_product_selection(selected_value, rows=rows)
+    if selection.get("row"):
+        selection["selector_identity"] = _edition_ops_product_selector_identity(
+            selection["row"]
+        )
+    else:
+        selection["selector_identity"] = (
+            f"manual::{_normalise_product_match_value(selected_value)}"
+            if selected_value
+            else ""
+        )
+    return selection
+
+
 def resolve_edition_ops_product_row(
     product_name,
     *,
@@ -1145,64 +1272,109 @@ def _ads_result_matches_selection(result, selection, product_name):
     return _clean_product_name(result.get("product_name")).casefold() == _clean_product_name(product_name).casefold()
 
 
-def prepare_ads_product_url_state(product_name, *, result=None, rows=None):
-    current_url = _clean_product_url(st.session_state.get(ADS_PRODUCT_URL_KEY))
-    last_record_key = str(st.session_state.get(ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY) or "")
-    selected_match_key = _normalise_product_match_value(product_name)
-    last_selection_key = _normalise_product_match_value(
-        st.session_state.get(ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY)
-    )
-    result_product_id = ""
-    if (
-        isinstance(result, dict)
-        and selected_match_key
-        == _normalise_product_match_value(result.get("product_name"))
-    ):
-        result_product_id = result.get("product_id") or ""
-    selection = resolve_edition_ops_product_selection(
-        product_name,
-        rows=rows,
-        product_id=result_product_id,
-        record_key=last_record_key if selected_match_key == last_selection_key else "",
-    )
+def _synchronise_ads_product_url_state(selection):
     selected_label = selection.get("selected_label") or ""
-    record_key = selection.get("record_key") or ""
+    selected_identity = selection.get("selector_identity") or ""
     selected_url = selection.get("product_url") or ""
-
-    if ADS_PRODUCT_URL_KEY not in st.session_state and _ads_result_matches_selection(
-        result,
-        selection,
-        product_name,
-    ):
-        draft_url = _clean_product_url((result or {}).get("product_url"))
-        if draft_url:
-            st.session_state[ADS_PRODUCT_URL_KEY] = draft_url
-            st.session_state[ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = record_key
-            st.session_state[ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY] = selected_label
-            st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = selected_url
-            current_url = draft_url
-            last_record_key = record_key
+    current_identity = str(
+        st.session_state.get(ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY) or ""
+    )
+    selection_changed = selected_identity != current_identity
 
     if not selected_label:
-        if current_url or last_record_key:
-            st.session_state[ADS_PRODUCT_URL_KEY] = ""
+        st.session_state[ADS_PRODUCT_URL_PREVIOUS_PRODUCT_KEY] = current_identity
+        st.session_state[ADS_PRODUCT_URL_KEY] = ""
         st.session_state[ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = ""
         st.session_state[ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY] = ""
         st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = ""
-        return {**selection, "message": ""}
+        st.session_state[ADS_PRODUCT_URL_MANUALLY_EDITED_KEY] = False
+        st.session_state[ADS_PRODUCT_URL_INITIALIZED_KEY] = False
+        return
 
-    if record_key != last_record_key:
-        if selection.get("row"):
-            st.session_state[ADS_PRODUCT_URL_KEY] = selected_url
-            st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = selected_url
-        else:
-            st.session_state[ADS_PRODUCT_URL_KEY] = ""
-            st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = ""
-        st.session_state[ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = record_key
+    initialized = bool(st.session_state.get(ADS_PRODUCT_URL_INITIALIZED_KEY))
+    manually_edited = bool(
+        st.session_state.get(ADS_PRODUCT_URL_MANUALLY_EDITED_KEY)
+    )
+    if selection_changed:
+        st.session_state[ADS_PRODUCT_URL_PREVIOUS_PRODUCT_KEY] = current_identity
+        st.session_state[ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = selected_identity
         st.session_state[ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY] = selected_label
+        st.session_state[ADS_PRODUCT_URL_KEY] = selected_url
+        st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = selected_url
+        st.session_state[ADS_PRODUCT_URL_MANUALLY_EDITED_KEY] = False
+        st.session_state[ADS_PRODUCT_URL_INITIALIZED_KEY] = True
+        return
 
+    if not initialized or not manually_edited:
+        st.session_state[ADS_PRODUCT_URL_KEY] = selected_url
+        st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = selected_url
+        st.session_state[ADS_PRODUCT_URL_MANUALLY_EDITED_KEY] = False
+        st.session_state[ADS_PRODUCT_URL_INITIALIZED_KEY] = True
+
+
+def prepare_ads_product_url_state(
+    product_name,
+    *,
+    result=None,
+    rows=None,
+    selection=None,
+):
+    del result
+    if selection is None:
+        selection = resolve_edition_ops_product_selection(product_name, rows=rows)
+        selection["selector_identity"] = (
+            _edition_ops_product_selector_identity(selection.get("row"))
+            if selection.get("row")
+            else (
+                f"manual::{_normalise_product_match_value(product_name)}"
+                if _normalise_option_label(product_name)
+                else ""
+            )
+        )
+    _synchronise_ads_product_url_state(selection)
+
+    selected_label = selection.get("selected_label") or ""
+    selected_url = selection.get("product_url") or ""
     message = NO_EDITION_OPS_PRODUCT_URL_MESSAGE if selected_label and not selected_url else ""
     return {**selection, "message": message}
+
+
+def _on_ads_product_url_changed():
+    if st.session_state.get(ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY):
+        st.session_state[ADS_PRODUCT_URL_MANUALLY_EDITED_KEY] = True
+        st.session_state[ADS_PRODUCT_URL_INITIALIZED_KEY] = True
+
+
+def _on_ads_product_selector_changed(rows):
+    selection = resolve_ads_product_selector_value(
+        st.session_state.get(ADS_PRODUCT_SELECTOR_KEY),
+        rows=rows,
+    )
+    st.session_state[ADS_PRODUCT_NAME_KEY] = selection.get("selected_label") or ""
+    _synchronise_ads_product_url_state(selection)
+
+
+def prepare_ads_product_selector_state(rows, *, result=None):
+    if ADS_PRODUCT_SELECTOR_KEY in st.session_state:
+        return
+    saved_name = _normalise_option_label(
+        st.session_state.get(ADS_PRODUCT_NAME_KEY)
+        or ((result or {}).get("product_name") if isinstance(result, dict) else "")
+    )
+    saved_product_id = (
+        (result or {}).get("product_id") if isinstance(result, dict) else ""
+    )
+    selection = resolve_edition_ops_product_selection(
+        saved_name,
+        rows=rows,
+        product_id=saved_product_id,
+    )
+    if selection.get("row"):
+        st.session_state[ADS_PRODUCT_SELECTOR_KEY] = (
+            _edition_ops_product_selector_identity(selection["row"])
+        )
+    elif saved_name:
+        st.session_state[ADS_PRODUCT_SELECTOR_KEY] = saved_name
 
 
 def render_prompt_copy_button(prompt_text, key, label="Copy Prompt", success_label="Prompt copied"):
@@ -4407,7 +4579,8 @@ def build_campaign_visual_output_contract(
             "GROUP 2 — OWNERSHIP, GROUP 3 — SCARCITY, then one shared INSTANT EXPERIENCE SETUP block. "
             "Each group must contain one standalone image-generation prompt followed by three matching "
             "Primary Text, Headline and CTA variations. Preserve every setup instruction, destination rule and URL parameter. "
-            "Do not add Description, Meta Ad Description, route-package, multi-route mode or old control-mode sections."
+            "Do not add Description, Meta Ad Description, route-package, multi-route mode or old control-mode sections.\n\n"
+            f"{INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION}"
         )
     else:
         copy_schema_preservation = (
@@ -4470,6 +4643,8 @@ Selected sport category: {category}
 Selected country: {country}
 Selected campaign type: {campaign_type}
 Creative variation token: {variation_token}
+
+{SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1}
 
 {copy_schema_preservation}
 
@@ -6825,23 +7000,42 @@ def render_meta_url_parameters_section(section_number):
     st.code(META_AD_URL_PARAMETERS, language="text")
 
 
-def render_product_name_input(*, rows=None):
-    product_options = load_edition_ops_product_name_options(rows=rows)
-    if product_options:
-        return st.selectbox(
+def render_product_name_input(*, rows=None, result=None):
+    rows = list(rows or ())
+    records = build_ads_product_selector_records(rows)
+    records_by_identity = {record["identity"]: record for record in records}
+    prepare_ads_product_selector_state(rows, result=result)
+    if records:
+        selector_value = st.selectbox(
             "Product name",
-            options=product_options,
+            options=tuple(records_by_identity),
             index=None,
             placeholder="Example: Six Laps Ahead",
             accept_new_options=True,
             filter_mode="fuzzy",
-            key=ADS_PRODUCT_NAME_KEY,
+            format_func=lambda identity: (
+                records_by_identity.get(identity, {}).get("label") or identity
+            ),
+            key=ADS_PRODUCT_SELECTOR_KEY,
+            on_change=_on_ads_product_selector_changed,
+            args=(rows,),
         )
-    return st.text_input(
-        "Product name",
-        placeholder="Example: Six Laps Ahead",
-        key=ADS_PRODUCT_NAME_KEY,
+    else:
+        selector_value = st.text_input(
+            "Product name",
+            placeholder="Example: Six Laps Ahead",
+            key=ADS_PRODUCT_SELECTOR_KEY,
+            on_change=_on_ads_product_selector_changed,
+            args=(rows,),
+        )
+    selection = resolve_ads_product_selector_value(
+        selector_value,
+        rows=rows,
+        records=records,
     )
+    product_name = selection.get("selected_label") or ""
+    st.session_state[ADS_PRODUCT_NAME_KEY] = product_name
+    return product_name, selection
 
 
 def render_campaign_moment_section():
@@ -7481,6 +7675,275 @@ def _blank_instant_experience_variations():
     ]
 
 
+class InstantExperienceCopyCSVError(ValueError):
+    pass
+
+
+def _instant_experience_copy_widget_key(
+    context_key,
+    concept_id,
+    field_key,
+    variation,
+):
+    return (
+        f"ads-ie-concept-copy-field::{context_key}::"
+        f"{concept_id}::{field_key}::{variation}"
+    )
+
+
+def _instant_experience_copy_csv_output_mode(result):
+    settings = (
+        (result or {}).get("instant_experience_settings")
+        if isinstance(result, dict)
+        else None
+    )
+    raw_mode = (
+        settings.get("output_mode")
+        if isinstance(settings, dict)
+        else (result or {}).get("output_mode")
+        if isinstance(result, dict)
+        else ""
+    )
+    known_modes = {
+        IE_MODE_SMART: "smart_3_pack",
+        IE_MODE_SELECTED: "one_selected_route",
+        IE_MODE_CLASSIC: "classic_collector",
+    }
+    if raw_mode in known_modes:
+        return known_modes[raw_mode]
+    if raw_mode:
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(raw_mode).casefold()).strip("_")
+        if normalized:
+            return normalized
+    return INSTANT_EXPERIENCE_COPY_CSV_STANDARD_OUTPUT_MODE
+
+
+def _instant_experience_copy_csv_route_label(concept):
+    return (
+        f"{str(concept.get('display_name') or '').upper()} \u2014 "
+        f"{concept.get('supporting_label') or ''}"
+    )
+
+
+def _instant_experience_copy_notes_with_widget_state(result, workflow):
+    notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
+    context_key = str((result or {}).get("context_key") or "")
+    merged = {
+        concept["id"]: [dict(variation) for variation in notes.get(concept["id"], [])]
+        for concept in INSTANT_EXPERIENCE_CONCEPTS
+    }
+    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+        variations = merged[concept["id"]]
+        for variation_number in range(1, INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1):
+            variation = variations[variation_number - 1]
+            for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS:
+                widget_key = _instant_experience_copy_widget_key(
+                    context_key,
+                    concept["id"],
+                    field_key,
+                    variation_number,
+                )
+                if widget_key in st.session_state:
+                    variation[field_key] = _preserve_multiline_text(
+                        st.session_state.get(widget_key)
+                    )
+    return merged
+
+
+def build_instant_experience_copy_csv(
+    result,
+    workflow=None,
+    *,
+    blank=False,
+    concept_notes=None,
+):
+    if concept_notes is None:
+        concept_notes = (
+            {
+                concept["id"]: _blank_instant_experience_variations()
+                for concept in INSTANT_EXPERIENCE_CONCEPTS
+            }
+            if blank
+            else _instant_experience_copy_notes_with_widget_state(result, workflow or {})
+        )
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=INSTANT_EXPERIENCE_COPY_CSV_HEADERS,
+        lineterminator="\r\n",
+    )
+    writer.writeheader()
+    output_mode = _instant_experience_copy_csv_output_mode(result)
+    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+        variations = _normalise_instant_experience_variations(
+            concept_notes.get(concept["id"])
+        )
+        for variation_number, variation in enumerate(variations, start=1):
+            writer.writerow(
+                {
+                    "schema_version": INSTANT_EXPERIENCE_COPY_CSV_SCHEMA_VERSION,
+                    "campaign_type": INSTANT_EXPERIENCE_COPY_CSV_CAMPAIGN_TYPE,
+                    "output_mode": output_mode,
+                    "route_key": concept["id"],
+                    "route_label": _instant_experience_copy_csv_route_label(concept),
+                    "variation": str(variation_number),
+                    "primary_text": "" if blank else _preserve_multiline_text(variation.get("primary_text")),
+                    "headline": "" if blank else _preserve_multiline_text(variation.get("headline")),
+                    "cta": "" if blank else _preserve_multiline_text(variation.get("cta")),
+                }
+            )
+    return output.getvalue().encode("utf-8-sig")
+
+
+def _instant_experience_copy_csv_expected_rows(result):
+    output_mode = _instant_experience_copy_csv_output_mode(result)
+    return [
+        {
+            "schema_version": INSTANT_EXPERIENCE_COPY_CSV_SCHEMA_VERSION,
+            "campaign_type": INSTANT_EXPERIENCE_COPY_CSV_CAMPAIGN_TYPE,
+            "output_mode": output_mode,
+            "route_key": concept["id"],
+            "route_label": _instant_experience_copy_csv_route_label(concept),
+            "variation": str(variation_number),
+        }
+        for concept in INSTANT_EXPERIENCE_CONCEPTS
+        for variation_number in range(1, INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1)
+    ]
+
+
+def parse_instant_experience_copy_csv(data, result):
+    source_bytes = bytes(data or b"")
+    if not source_bytes:
+        raise InstantExperienceCopyCSVError("Choose a completed Instant Experience CSV file.")
+    if len(source_bytes) > 2 * 1024 * 1024:
+        raise InstantExperienceCopyCSVError("The copy CSV must be smaller than 2 MB.")
+    try:
+        decoded = source_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise InstantExperienceCopyCSVError("Save the copy CSV as UTF-8 and try again.") from error
+    if "\x00" in decoded:
+        raise InstantExperienceCopyCSVError("The copy CSV contains invalid text data.")
+    try:
+        reader = csv.DictReader(io.StringIO(decoded, newline=""))
+        headers = list(reader.fieldnames or ())
+        if len(headers) != len(set(headers)):
+            raise InstantExperienceCopyCSVError("The copy CSV contains duplicate column headers.")
+        if set(headers) != set(INSTANT_EXPERIENCE_COPY_CSV_HEADERS):
+            required = ", ".join(INSTANT_EXPERIENCE_COPY_CSV_HEADERS)
+            raise InstantExperienceCopyCSVError(
+                f"Use the Instant Experience CSV headers exactly: {required}."
+            )
+        rows = list(reader)
+    except csv.Error as error:
+        raise InstantExperienceCopyCSVError(
+            "The copy CSV could not be read. Check its quoting and line breaks."
+        ) from error
+
+    expected_rows = _instant_experience_copy_csv_expected_rows(result)
+    if len(rows) != len(expected_rows):
+        raise InstantExperienceCopyCSVError(
+            f"The copy CSV must contain exactly {len(expected_rows)} copy rows."
+        )
+
+    parsed = {
+        concept["id"]: _blank_instant_experience_variations()
+        for concept in INSTANT_EXPERIENCE_CONCEPTS
+    }
+    seen = set()
+    for row_number, (row, expected) in enumerate(zip(rows, expected_rows), start=2):
+        if None in row or any(value is None for value in row.values()):
+            raise InstantExperienceCopyCSVError(
+                f"CSV row {row_number} has an unexpected or missing value."
+            )
+        for field in (
+            "schema_version",
+            "campaign_type",
+            "output_mode",
+            "route_key",
+            "route_label",
+            "variation",
+        ):
+            if str(row.get(field) or "").strip() != expected[field]:
+                raise InstantExperienceCopyCSVError(
+                    f"CSV row {row_number} has an incompatible {field}. Download a fresh template."
+                )
+        row_key = (expected["route_key"], int(expected["variation"]))
+        if row_key in seen:
+            raise InstantExperienceCopyCSVError(
+                f"CSV row {row_number} duplicates {expected['route_key']} variation {expected['variation']}."
+            )
+        seen.add(row_key)
+        parsed[expected["route_key"]][row_key[1] - 1] = {
+            field_key: _preserve_multiline_text(row.get(field_key))
+            for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS
+        }
+    return parsed
+
+
+def apply_instant_experience_copy_csv(result, workflow, data):
+    parsed = parse_instant_experience_copy_csv(data, result)
+    context_key = str((result or {}).get("context_key") or "")
+    widget_updates = {}
+    for concept in INSTANT_EXPERIENCE_CONCEPTS:
+        for variation_number, variation in enumerate(
+            parsed[concept["id"]],
+            start=1,
+        ):
+            for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS:
+                widget_updates[
+                    _instant_experience_copy_widget_key(
+                        context_key,
+                        concept["id"],
+                        field_key,
+                        variation_number,
+                    )
+                ] = variation[field_key]
+
+    for widget_key, value in widget_updates.items():
+        st.session_state[widget_key] = value
+    notes = dict((workflow or {}).get("ad_notes") or {})
+    notes["instant_experience_concepts"] = parsed
+    workflow["ad_notes"] = notes
+    return {
+        "concept_notes": parsed,
+        "variation_count": len(INSTANT_EXPERIENCE_CONCEPTS)
+        * INSTANT_EXPERIENCE_COPY_VARIATION_COUNT,
+        "field_count": len(widget_updates),
+    }
+
+
+def _process_instant_experience_copy_csv_upload(result, workflow, uploaded_file):
+    if uploaded_file is None:
+        return None
+    source_bytes = bytes(uploaded_file.getvalue() or b"")
+    digest = hashlib.sha256(source_bytes).hexdigest()
+    if workflow.get("copy_csv_import_digest") == digest:
+        return workflow.get("copy_csv_import_status")
+    try:
+        imported = apply_instant_experience_copy_csv(result, workflow, source_bytes)
+        status = {
+            "ok": True,
+            "message": (
+                f"Imported {imported['variation_count']} copy variations into "
+                f"{imported['field_count']} fields."
+            ),
+        }
+    except InstantExperienceCopyCSVError as error:
+        status = {"ok": False, "message": str(error)}
+    workflow["copy_csv_import_digest"] = digest
+    workflow["copy_csv_import_status"] = status
+    st.session_state[ADS_IMAGE_STATE_KEY] = workflow
+    return status
+
+
+def _instant_experience_current_copy_csv_filename(result):
+    product_name = ads_image_workflow.sanitize_product_filename(
+        (result or {}).get("product_name"),
+        max_length=90,
+    )
+    return f"Sports Cave - {product_name} - Instant Experience Copy.csv"
+
+
 def _normalise_instant_experience_variations(raw_variations):
     variations = []
     if isinstance(raw_variations, (list, tuple)):
@@ -8027,12 +8490,72 @@ def _render_ads_setup_notes(result, workflow):
     st.session_state[ADS_IMAGE_STATE_KEY] = workflow
 
 
+def _render_instant_experience_copy_csv_control(result, workflow):
+    context_key = str(result.get("context_key") or "")
+    import_key = f"ads-ie-copy-csv-import::{context_key}"
+    pending_upload = st.session_state.get(import_key)
+    if pending_upload is not None:
+        _process_instant_experience_copy_csv_upload(
+            result,
+            workflow,
+            pending_upload,
+        )
+
+    heading_column, control_column = st.columns(
+        [5, 1],
+        vertical_alignment="center",
+    )
+    heading_column.subheader("Generated Ad Images")
+    with control_column:
+        with st.popover("Copy CSV", icon=":material/table_view:"):
+            st.download_button(
+                "Download blank CSV",
+                data=build_instant_experience_copy_csv(
+                    result,
+                    workflow,
+                    blank=True,
+                ),
+                file_name="sports-cave-instant-experience-copy-template.csv",
+                mime="text/csv",
+                key=f"ads-ie-copy-csv-blank::{context_key}",
+                use_container_width=True,
+            )
+            current_download_slot = st.empty()
+            uploaded_file = st.file_uploader(
+                "Import completed CSV",
+                type=["csv"],
+                key=import_key,
+                label_visibility="visible",
+            )
+            if uploaded_file is not None:
+                _process_instant_experience_copy_csv_upload(
+                    result,
+                    workflow,
+                    uploaded_file,
+                )
+            current_download_slot.download_button(
+                "Download current CSV",
+                data=build_instant_experience_copy_csv(result, workflow),
+                file_name=_instant_experience_current_copy_csv_filename(result),
+                mime="text/csv",
+                key=f"ads-ie-copy-csv-current::{context_key}",
+                use_container_width=True,
+            )
+            status = workflow.get("copy_csv_import_status")
+            if isinstance(status, dict) and status.get("message"):
+                if status.get("ok"):
+                    st.success(status["message"])
+                else:
+                    st.error(status["message"])
+
+
 def _render_instant_experience_concepts(result, workflow):
     _compact_instant_experience_slots(workflow)
     slot_specs = ads_image_workflow.campaign_image_slots("Instant Experience")
     slot_by_concept = {slot.get("concept_id"): slot for slot in slot_specs}
     concept_notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
-    st.subheader("Generated Ad Images")
+    _render_instant_experience_copy_csv_control(result, workflow)
+    concept_notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
     st.caption("Upload one cover for each Instant Experience concept, then paste the three matching copy variations beneath it.")
 
     for concept in INSTANT_EXPERIENCE_CONCEPTS:
@@ -8121,22 +8644,28 @@ def _render_instant_experience_concepts(result, workflow):
                         INSTANT_EXPERIENCE_COPY_FIELDS,
                     ):
                         with field_column:
-                            variation[field_key] = st.text_area(
-                                field_label,
-                                value=_preserve_multiline_text(variation.get(field_key)),
-                                placeholder=(
+                            widget_key = _instant_experience_copy_widget_key(
+                                result["context_key"],
+                                concept_id,
+                                field_key,
+                                index,
+                            )
+                            widget_args = {
+                                "placeholder": (
                                     f"Primary text option {index}"
                                     if field_key == "primary_text"
                                     else f"Headline option {index}"
                                     if field_key == "headline"
                                     else f"CTA option {index}"
                                 ),
-                                height=50,
-                                key=(
-                                    f"ads-ie-concept-copy-field::{result['context_key']}::"
-                                    f"{concept_id}::{field_key}::{index}"
-                                ),
-                            )
+                                "height": 50,
+                                "key": widget_key,
+                            }
+                            if widget_key not in st.session_state:
+                                widget_args["value"] = _preserve_multiline_text(
+                                    variation.get(field_key)
+                                )
+                            variation[field_key] = st.text_area(field_label, **widget_args)
                     variations[index - 1] = variation
                 concept_notes[concept_id] = variations
                 complete_count = sum(
@@ -9025,6 +9554,7 @@ def build_final_ad_review_copy_prompt(result, *, resolved_prompt=None):
     landing_page_block = build_final_ad_review_landing_page_block(context.get("product_url") or "")
     return (
         f"{base_prompt.rstrip()}\n\n"
+        f"{SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1}\n\n"
         "CAMPAIGN CONTEXT\n\n"
         f"{context_text}\n\n"
         f"{landing_page_block}"
@@ -9619,7 +10149,10 @@ def render_page():
         st.session_state[ADS_PRODUCT_NAME_KEY] = result.get("product_name")
 
     product_rows = load_edition_ops_product_rows()
-    product_name = render_product_name_input(rows=product_rows)
+    product_name, product_selection = render_product_name_input(
+        rows=product_rows,
+        result=result,
+    )
     category_col, country_col, campaign_col = st.columns(3)
     with category_col:
         category = st.selectbox("Category", CATEGORY_OPTIONS, key="ads_category")
@@ -9635,11 +10168,13 @@ def render_page():
         product_name,
         result=result,
         rows=product_rows,
+        selection=product_selection,
     )
     product_url = st.text_input(
         "Product page URL *",
         placeholder="https://sportscave.com.au/products/example",
         key=ADS_PRODUCT_URL_KEY,
+        on_change=_on_ads_product_url_changed,
     )
     if product_url_state.get("message") and not _clean_product_url(product_url):
         st.caption(product_url_state["message"])

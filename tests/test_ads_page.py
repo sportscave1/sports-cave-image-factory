@@ -1,3 +1,4 @@
+import csv
 import importlib
 import io
 import json
@@ -25,6 +26,17 @@ def run_ads_page():
     app_test.session_state["sports_cave_authenticated"] = True
     app_test.session_state["selected_page"] = "Ads"
     app_test.session_state["startup_shell_loaded"] = True
+    return app_test.run(timeout=20)
+
+
+def run_ads_page_with_product_rows(rows, **session_values):
+    app_test = AppTest.from_file(str(ROOT / "app.py"))
+    app_test.session_state["sports_cave_authenticated"] = True
+    app_test.session_state["selected_page"] = "Ads"
+    app_test.session_state["startup_shell_loaded"] = True
+    app_test.session_state[ads_page.EDITION_OPS_ROWS_SESSION_KEY] = list(rows)
+    for key, value in session_values.items():
+        app_test.session_state[key] = value
     return app_test.run(timeout=20)
 
 
@@ -91,6 +103,46 @@ def square_png_bytes(color=(46, 76, 112)):
     return buffer.getvalue()
 
 
+def instant_experience_csv_result(output_mode=None):
+    result = {
+        "context_key": "instant-experience-csv-test",
+        "product_name": "Senna’s Legacy — Collector Edition",
+        "campaign_type": "Instant Experience",
+    }
+    if output_mode:
+        result["instant_experience_settings"] = {"output_mode": output_mode}
+    return result
+
+
+def instant_experience_csv_notes():
+    return {
+        concept["id"]: [
+            {
+                "primary_text": (
+                    f"{concept['display_name']} variation {variation}, first line.\n"
+                    "Second line with \"quotes\", apostrophe’s, ampersand & emoji 🏁."
+                ),
+                "headline": f"{concept['display_name']} Headline {variation}",
+                "cta": f"{concept['display_name']} CTA {variation}",
+            }
+            for variation in range(1, ads_page.INSTANT_EXPERIENCE_COPY_VARIATION_COUNT + 1)
+        ]
+        for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
+    }
+
+
+def csv_bytes_from_rows(rows, headers=None):
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=list(headers or ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS),
+        lineterminator="\r\n",
+    )
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8-sig")
+
+
 def instant_experience_settings(output_mode=ads_page.IE_MODE_SMART, **overrides):
     settings = ads_page.default_instant_experience_settings(output_mode=output_mode)
     settings.update(overrides)
@@ -118,6 +170,18 @@ def uploader_by_label(app_test, label):
         if uploader.label == label:
             return uploader
     raise AssertionError(f"{label} uploader was not rendered.")
+
+
+def instant_experience_cover_uploaders(app_test):
+    cover_labels = {
+        f"{concept['display_name']} Cover"
+        for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
+    }
+    return [
+        uploader
+        for uploader in app_test.file_uploader
+        if uploader.label in cover_labels
+    ]
 
 
 class AdsPageTests(unittest.TestCase):
@@ -973,6 +1037,109 @@ class AdsPageTests(unittest.TestCase):
 
         self.assertNotIn(ads_page.META_WINNER_COPY_BLOCK_VERSION, single_prompt)
 
+    def test_factual_wording_gate_is_injected_once_into_every_ads_request(self):
+        marker = ads_page.SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1.splitlines()[0]
+        for campaign_type in (
+            "Carousel",
+            "Instant Experience",
+            "Single Image / Video",
+        ):
+            with self.subTest(campaign_type=campaign_type):
+                prompt = ads_page.build_ads_prompt(
+                    "Papaya Pressure: Piastri vs Norris Wall Art",
+                    "Motorsport",
+                    "Australia",
+                    campaign_type,
+                    product_url="https://sportscave.com.au/products/papaya-pressure",
+                    variation_token="factual-wording-gate",
+                )
+                self.assertEqual(prompt.count(marker), 1)
+                self.assertIn(
+                    ads_page.SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1,
+                    prompt,
+                )
+
+        result = ads_page.build_ads_result_record(
+            "Papaya Pressure: Piastri vs Norris Wall Art",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            product_url="https://sportscave.com.au/products/papaya-pressure",
+            variation_token="factual-review-gate",
+        )
+        review_prompt = ads_page.build_final_ad_review_copy_prompt(result)
+        self.assertEqual(review_prompt.count(marker), 1)
+
+    def test_factual_wording_gate_treats_vs_and_teammates_as_ambiguous(self):
+        gate = ads_page.SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1
+        prompt = ads_page.build_ads_prompt(
+            "Papaya Pressure: Piastri vs Norris Wall Art",
+            "Motorsport",
+            "Australia",
+            "Instant Experience",
+            variation_token="ambiguous-vs",
+        )
+
+        self.assertIn("Papaya Pressure: Piastri vs Norris Wall Art", prompt)
+        self.assertIn(
+            'Two named people or a title containing "vs" does not by itself prove rivalry',
+            gate,
+        )
+        self.assertIn(
+            "The subjects may be teammates, contemporaries, comparisons or opposing subjects.",
+            gate,
+        )
+        self.assertIn(
+            "Teammate context must never be contradicted by invented rivalry or hostility.",
+            gate,
+        )
+        self.assertNotIn("Piastri", gate)
+        self.assertNotIn("Norris", gate)
+
+    def test_factual_wording_gate_allows_verified_rivalry_and_simplifies_unsupported_claims(self):
+        gate = ads_page.SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1
+
+        self.assertIn(
+            "equivalent relationship wording is permitted only when that relationship is explicitly supported by verified facts",
+            gate,
+        )
+        self.assertIn(
+            "Never invent or imply a victory, championship, record, historic moment, venue, date, rivalry status",
+            gate,
+        )
+        self.assertIn(
+            "rewrite only that line with a simpler emotional phrase",
+            gate,
+        )
+        self.assertIn(
+            "Do not hardcode one replacement phrase or universal CTA",
+            gate,
+        )
+
+    def test_factual_wording_gate_propagates_exact_approved_copy_to_image_prompts(self):
+        gate = ads_page.SPORTS_CAVE_ADS_FACTUAL_WORDING_GATE_V1
+
+        self.assertIn(
+            "propagate the exact approved wording consistently everywhere it appears",
+            gate,
+        )
+        self.assertIn(
+            "including copy tables, setup copy where relevant and the corresponding image-generation prompt",
+            gate,
+        )
+        self.assertIn(
+            "The exact Headline, CTA and supporting wording approved for an image must match the wording written inside that image prompt.",
+            gate,
+        )
+        self.assertIn(
+            "Perform this check silently when generating the ad output. Do not output warnings, research notes, rejected alternatives or internal reasoning.",
+            gate,
+        )
+        self.assertIn(
+            "In Final Ad Review, apply the same factual check inside the existing review fields without adding or removing review sections.",
+            gate,
+        )
+
     def test_staccato_and_framed_greatness_rules_are_reusable_and_fact_safe(self):
         rules = ads_page.build_shared_meta_winner_copy_upgrade()
         opening = "Greatness doesn’t fade.\nIt gets framed."
@@ -1684,10 +1851,12 @@ PRIMARY TEXT VARIATIONS
         source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
 
         self.assertIn("def render_product_name_input", source)
-        self.assertIn("load_edition_ops_product_name_options(rows=rows)", source)
+        self.assertIn("build_ads_product_selector_records(rows)", source)
         self.assertIn('st.selectbox(\n            "Product name"', source)
         self.assertIn("accept_new_options=True", source)
         self.assertIn('filter_mode="fuzzy"', source)
+        self.assertIn("format_func=lambda identity", source)
+        self.assertIn("key=ADS_PRODUCT_SELECTOR_KEY", source)
         self.assertIn("EDITION_OPS_SNAPSHOT_PATH", source)
         self.assertNotIn("import edition_ops", source)
 
@@ -1832,7 +2001,7 @@ PRIMARY TEXT VARIATIONS
             session_state[ads_page.ADS_PRODUCT_URL_KEY],
             "https://sportscave.com.au/products/six-laps-ahead",
         )
-        self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY], "product-123")
+        self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY], "id::product-123")
         self.assertEqual(state["message"], "")
 
     def test_ads_product_url_manual_edit_survives_reruns_until_product_changes(self):
@@ -1853,6 +2022,7 @@ PRIMARY TEXT VARIATIONS
         with patch.object(ads_page.st, "session_state", session_state):
             ads_page.prepare_ads_product_url_state("Six Laps Ahead", rows=rows)
             session_state[ads_page.ADS_PRODUCT_URL_KEY] = "https://sportscave.com.au/products/manual-campaign-url"
+            ads_page._on_ads_product_url_changed()
             ads_page.prepare_ads_product_url_state("Six Laps Ahead", rows=rows)
 
             self.assertEqual(
@@ -1866,7 +2036,7 @@ PRIMARY TEXT VARIATIONS
             session_state[ads_page.ADS_PRODUCT_URL_KEY],
             "https://sportscave.com.au/products/bathurst-winner",
         )
-        self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY], "product-456")
+        self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY], "id::product-456")
 
     def test_ads_product_url_handles_missing_url_and_cleared_product(self):
         rows = [
@@ -1894,7 +2064,7 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_KEY], "")
         self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY], "")
 
-    def test_existing_ads_draft_preserves_saved_url_until_product_changes(self):
+    def test_draft_restoration_does_not_override_authoritative_selected_product_url(self):
         rows = [
             {
                 "product_id": "product-123",
@@ -1919,7 +2089,7 @@ PRIMARY TEXT VARIATIONS
 
             self.assertEqual(
                 session_state[ads_page.ADS_PRODUCT_URL_KEY],
-                "https://sportscave.com.au/products/saved-draft-url",
+                "https://sportscave.com.au/products/edition-ops-url",
             )
 
             ads_page.prepare_ads_product_url_state("Bathurst Winner", result=result, rows=rows)
@@ -2059,12 +2229,183 @@ PRIMARY TEXT VARIATIONS
 
         self.assertIn(prepare_call, render_page_source)
         self.assertIn("rows=product_rows", render_page_source)
+        self.assertIn("selection=product_selection", render_page_source)
         self.assertIn(url_widget, render_page_source)
+        self.assertIn("key=ADS_PRODUCT_URL_KEY", render_page_source)
+        self.assertIn("on_change=_on_ads_product_url_changed", render_page_source)
         self.assertLess(render_page_source.index(prepare_call), render_page_source.index(url_widget))
         self.assertNotIn(
             "st.session_state[ADS_PRODUCT_URL_KEY]",
             render_page_source[render_page_source.index(url_widget) :],
         )
+
+    def test_rendered_ads_selector_autofills_switches_clears_and_preserves_real_manual_edits(self):
+        rows = [
+            {
+                "product_id": "product-a",
+                "product_title": "Product A",
+                "shopify_handle": "product-a",
+                "online_store_url": "https://sportscave.com.au/products/product-a",
+            },
+            {
+                "product_id": "product-b",
+                "product_title": "Product B",
+                "shopify_handle": "product-b",
+                "online_store_url": "https://sportscave.com.au/products/product-b",
+            },
+        ]
+        app_test = run_ads_page_with_product_rows(rows)
+        product_selector = next(
+            selectbox for selectbox in app_test.selectbox if selectbox.label == "Product name"
+        )
+        product_selector.select("Product A")
+        app_test.run(timeout=20)
+        product_url = next(
+            text_input
+            for text_input in app_test.text_input
+            if text_input.label == "Product page URL *"
+        )
+        self.assertEqual(
+            product_url.value,
+            "https://sportscave.com.au/products/product-a",
+        )
+
+        product_url.set_value("https://sportscave.com.au/products/product-a-campaign")
+        app_test.run(timeout=20)
+        select_option(app_test, "Category", "Motorsport")
+        product_url = next(
+            text_input
+            for text_input in app_test.text_input
+            if text_input.label == "Product page URL *"
+        )
+        self.assertEqual(
+            product_url.value,
+            "https://sportscave.com.au/products/product-a-campaign",
+        )
+
+        product_url.set_value("")
+        app_test.run(timeout=20)
+        select_option(app_test, "Country", "Australia")
+        product_url = next(
+            text_input
+            for text_input in app_test.text_input
+            if text_input.label == "Product page URL *"
+        )
+        self.assertEqual(product_url.value, "")
+        self.assertTrue(
+            app_test.session_state[ads_page.ADS_PRODUCT_URL_MANUALLY_EDITED_KEY]
+        )
+
+        product_selector = next(
+            selectbox for selectbox in app_test.selectbox if selectbox.label == "Product name"
+        )
+        product_selector.select("Product B")
+        app_test.run(timeout=20)
+        self.assertEqual(
+            next(
+                text_input
+                for text_input in app_test.text_input
+                if text_input.label == "Product page URL *"
+            ).value,
+            "https://sportscave.com.au/products/product-b",
+        )
+
+        product_selector = next(
+            selectbox for selectbox in app_test.selectbox if selectbox.label == "Product name"
+        )
+        product_selector.select(None)
+        app_test.run(timeout=20)
+        self.assertEqual(
+            next(
+                text_input
+                for text_input in app_test.text_input
+                if text_input.label == "Product page URL *"
+            ).value,
+            "",
+        )
+        self.assertEqual(
+            app_test.session_state[ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY],
+            "",
+        )
+        self.assertEqual(len(app_test.exception), 0)
+
+    def test_rendered_ads_page_repairs_stale_blank_url_for_selected_product(self):
+        rows = [
+            {
+                "product_id": "product-a",
+                "product_title": "Product A",
+                "shopify_handle": "product-a",
+                "online_store_url": "https://sportscave.com.au/products/product-a",
+            }
+        ]
+        app_test = run_ads_page_with_product_rows(
+            rows,
+            **{
+                ads_page.ADS_PRODUCT_SELECTOR_KEY: "id::product-a",
+                ads_page.ADS_PRODUCT_NAME_KEY: "Product A",
+                ads_page.ADS_PRODUCT_URL_KEY: "",
+                ads_page.ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY: "id::product-a",
+                ads_page.ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY: "Product A",
+                ads_page.ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY: (
+                    "https://sportscave.com.au/products/product-a"
+                ),
+            },
+        )
+
+        product_url = next(
+            text_input
+            for text_input in app_test.text_input
+            if text_input.label == "Product page URL *"
+        )
+        self.assertEqual(
+            product_url.value,
+            "https://sportscave.com.au/products/product-a",
+        )
+        self.assertTrue(
+            app_test.session_state[ads_page.ADS_PRODUCT_URL_INITIALIZED_KEY]
+        )
+        self.assertFalse(
+            app_test.session_state[ads_page.ADS_PRODUCT_URL_MANUALLY_EDITED_KEY]
+        )
+        self.assertEqual(len(app_test.exception), 0)
+
+    def test_rendered_ads_product_without_url_stays_editable_and_shows_message(self):
+        rows = [
+            {
+                "product_id": "product-empty",
+                "product_title": "No URL Product",
+                "shopify_handle": "no-url-product",
+                "online_store_url": "",
+            }
+        ]
+        app_test = run_ads_page_with_product_rows(rows)
+        product_selector = next(
+            selectbox for selectbox in app_test.selectbox if selectbox.label == "Product name"
+        )
+        product_selector.select("No URL Product")
+        app_test.run(timeout=20)
+
+        product_url = next(
+            text_input
+            for text_input in app_test.text_input
+            if text_input.label == "Product page URL *"
+        )
+        self.assertEqual(product_url.value, "")
+        self.assertIn(
+            ads_page.NO_EDITION_OPS_PRODUCT_URL_MESSAGE,
+            [caption.value for caption in app_test.caption],
+        )
+        product_url.set_value("https://sportscave.com.au/products/manual-destination")
+        app_test.run(timeout=20)
+        self.assertEqual(
+            next(
+                text_input
+                for text_input in app_test.text_input
+                if text_input.label == "Product page URL *"
+            ).value,
+            "https://sportscave.com.au/products/manual-destination",
+        )
+        self.assertEqual(len(app_test.exception), 0)
 
     def test_carousel_visual_contract_has_exactly_five_card_matched_prompts(self):
         prompt = ads_page.build_ads_prompt(
@@ -2836,7 +3177,7 @@ PRIMARY TEXT VARIATIONS
                 refreshed["master_prompt"],
             )
 
-    def test_old_instant_experience_cached_result_refreshes_to_v3_quality_contract(self):
+    def test_old_instant_experience_cached_result_refreshes_to_v4_contract(self):
         current = ads_page.build_ads_result_record(
             "Final Whistle Glory",
             "Football",
@@ -2849,8 +3190,8 @@ PRIMARY TEXT VARIATIONS
         legacy = {
             **current,
             "prompt_contract_version": current["prompt_contract_version"].replace(
+                "ADS INSTANT EXPERIENCE STANDARD V4",
                 "ADS INSTANT EXPERIENCE STANDARD V3",
-                "ADS INSTANT EXPERIENCE STANDARD V2",
             ),
             "master_prompt": "OLD INSTANT EXPERIENCE PROMPT\n\nDESCRIPTION\n\n1. [description]",
             "generated_ad_output": "OLD INSTANT EXPERIENCE PROMPT\n\nDESCRIPTION\n\n1. [description]",
@@ -2869,7 +3210,7 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("GROUP 2 — OWNERSHIP", refreshed["master_prompt"])
         self.assertIn("GROUP 3 — SCARCITY", refreshed["master_prompt"])
         self.assertIn("| Variation | Primary Text | Headline | CTA |", refreshed["master_prompt"])
-        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V3", refreshed["master_prompt"])
+        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V4", refreshed["master_prompt"])
         self.assertIn("SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2", refreshed["master_prompt"])
         self.assertEqual(refreshed["master_prompt"].count("Creative concept: Nostalgia"), 1)
         self.assertEqual(refreshed["master_prompt"].count("Creative concept: Ownership"), 1)
@@ -2982,7 +3323,7 @@ PRIMARY TEXT VARIATIONS
             contract.count("| Variation | Primary Text | Headline | CTA |"),
             3,
         )
-        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V3", contract)
+        self.assertIn("ADS INSTANT EXPERIENCE STANDARD V4", contract)
 
     def test_instant_experience_v2_image_contract_strengthens_source_and_room_physics(self):
         prompt = ads_page.build_ads_prompt(
@@ -3546,6 +3887,299 @@ PRIMARY TEXT VARIATIONS
         self.assertNotIn("Carousel cards / ad setup", note_labels)
         self.assertNotIn("Primary Text Variations", note_labels)
 
+    def test_instant_experience_blank_copy_csv_uses_current_concept_structure(self):
+        result = instant_experience_csv_result()
+        data = ads_page.build_instant_experience_copy_csv(
+            result,
+            {},
+            blank=True,
+        )
+        rows = list(
+            csv.DictReader(io.StringIO(data.decode("utf-8-sig"), newline=""))
+        )
+
+        self.assertTrue(data.startswith(b"\xef\xbb\xbf"))
+        self.assertEqual(
+            tuple(rows[0]),
+            ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS,
+        )
+        self.assertEqual(len(rows), 9)
+        self.assertEqual(
+            [(row["route_key"], row["variation"]) for row in rows],
+            [
+                (concept["id"], str(variation))
+                for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
+                for variation in range(1, 4)
+            ],
+        )
+        self.assertTrue(
+            all(
+                row["primary_text"] == row["headline"] == row["cta"] == ""
+                for row in rows
+            )
+        )
+
+    def test_instant_experience_current_copy_csv_round_trips_multiline_utf8(self):
+        result = instant_experience_csv_result()
+        expected = instant_experience_csv_notes()
+        data = ads_page.build_instant_experience_copy_csv(
+            result,
+            concept_notes=expected,
+        )
+
+        parsed = ads_page.parse_instant_experience_copy_csv(data, result)
+
+        self.assertEqual(parsed, expected)
+        self.assertIn(b"\r\n", data)
+        rows = list(
+            csv.DictReader(io.StringIO(data.decode("utf-8-sig"), newline=""))
+        )
+        reordered = csv_bytes_from_rows(
+            rows,
+            headers=reversed(ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS),
+        )
+        self.assertEqual(
+            ads_page.parse_instant_experience_copy_csv(reordered, result),
+            expected,
+        )
+        self.assertEqual(
+            ads_page.parse_instant_experience_copy_csv(
+                data.replace(b"\r\n", b"\n"),
+                result,
+            ),
+            expected,
+        )
+        self.assertIn("emoji 🏁", data.decode("utf-8-sig"))
+
+    def test_instant_experience_copy_csv_round_trips_every_supported_output_mode(self):
+        for output_mode in (
+            ads_page.IE_MODE_SMART,
+            ads_page.IE_MODE_SELECTED,
+            ads_page.IE_MODE_CLASSIC,
+        ):
+            with self.subTest(output_mode=output_mode):
+                result = instant_experience_csv_result(output_mode)
+                expected = instant_experience_csv_notes()
+                data = ads_page.build_instant_experience_copy_csv(
+                    result,
+                    concept_notes=expected,
+                )
+                rows = list(
+                    csv.DictReader(io.StringIO(data.decode("utf-8-sig"), newline=""))
+                )
+
+                self.assertEqual(
+                    ads_page.parse_instant_experience_copy_csv(data, result),
+                    expected,
+                )
+                self.assertEqual(
+                    {row["output_mode"] for row in rows},
+                    {ads_page._instant_experience_copy_csv_output_mode(result)},
+                )
+
+    def test_instant_experience_copy_csv_rejects_invalid_identity_rows(self):
+        result = instant_experience_csv_result()
+        valid_data = ads_page.build_instant_experience_copy_csv(
+            result,
+            concept_notes=instant_experience_csv_notes(),
+        )
+        valid_rows = list(
+            csv.DictReader(io.StringIO(valid_data.decode("utf-8-sig"), newline=""))
+        )
+        invalid_cases = {}
+
+        missing = [dict(row) for row in valid_rows[:-1]]
+        invalid_cases["missing row"] = csv_bytes_from_rows(missing)
+
+        duplicate = [dict(row) for row in valid_rows]
+        duplicate[1] = dict(duplicate[0])
+        invalid_cases["duplicate row"] = csv_bytes_from_rows(duplicate)
+
+        unknown_route = [dict(row) for row in valid_rows]
+        unknown_route[0]["route_key"] = "unknown"
+        invalid_cases["unknown route"] = csv_bytes_from_rows(unknown_route)
+
+        wrong_campaign = [dict(row) for row in valid_rows]
+        wrong_campaign[0]["campaign_type"] = "carousel"
+        invalid_cases["wrong campaign"] = csv_bytes_from_rows(wrong_campaign)
+
+        wrong_mode = [dict(row) for row in valid_rows]
+        wrong_mode[0]["output_mode"] = "classic_collector"
+        invalid_cases["wrong mode"] = csv_bytes_from_rows(wrong_mode)
+
+        wrong_schema = [dict(row) for row in valid_rows]
+        wrong_schema[0]["schema_version"] = "999"
+        invalid_cases["wrong schema"] = csv_bytes_from_rows(wrong_schema)
+
+        missing_header_rows = [
+            {key: value for key, value in row.items() if key != "cta"}
+            for row in valid_rows
+        ]
+        invalid_cases["missing header"] = csv_bytes_from_rows(
+            missing_header_rows,
+            headers=[
+                header
+                for header in ads_page.INSTANT_EXPERIENCE_COPY_CSV_HEADERS
+                if header != "cta"
+            ],
+        )
+
+        unexpected = [dict(row) for row in valid_rows]
+        unexpected.append(dict(valid_rows[-1]))
+        invalid_cases["unexpected row"] = csv_bytes_from_rows(unexpected)
+
+        for label, data in invalid_cases.items():
+            with self.subTest(label=label):
+                with self.assertRaises(ads_page.InstantExperienceCopyCSVError):
+                    ads_page.parse_instant_experience_copy_csv(data, result)
+
+    def test_instant_experience_copy_csv_import_is_transactional_and_not_replayed(self):
+        result = instant_experience_csv_result()
+        expected = instant_experience_csv_notes()
+        valid_data = ads_page.build_instant_experience_copy_csv(
+            result,
+            concept_notes=expected,
+        )
+        invalid_rows = list(
+            csv.DictReader(io.StringIO(valid_data.decode("utf-8-sig"), newline=""))
+        )
+        invalid_rows[0]["route_key"] = "not-a-route"
+        invalid_data = csv_bytes_from_rows(invalid_rows)
+        first_key = ads_page._instant_experience_copy_widget_key(
+            result["context_key"],
+            "nostalgia",
+            "primary_text",
+            1,
+        )
+        session_state = {first_key: "Keep this existing value"}
+        workflow = {"ad_notes": {}}
+
+        with patch.object(ads_page.st, "session_state", session_state):
+            with self.assertRaises(ads_page.InstantExperienceCopyCSVError):
+                ads_page.apply_instant_experience_copy_csv(
+                    result,
+                    workflow,
+                    invalid_data,
+                )
+            self.assertEqual(session_state, {first_key: "Keep this existing value"})
+            self.assertEqual(workflow, {"ad_notes": {}})
+
+            status = ads_page._process_instant_experience_copy_csv_upload(
+                result,
+                workflow,
+                io.BytesIO(valid_data),
+            )
+            self.assertTrue(status["ok"])
+            self.assertEqual(status["message"], "Imported 9 copy variations into 27 fields.")
+            self.assertTrue(ads_page.instant_experience_copy_complete(workflow))
+            for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS:
+                self.assertEqual(
+                    ads_page._instant_experience_concept_complete_count(
+                        workflow,
+                        concept["id"],
+                    ),
+                    3,
+                )
+
+            session_state[first_key] = "Manual change after import"
+            ads_page._process_instant_experience_copy_csv_upload(
+                result,
+                workflow,
+                io.BytesIO(valid_data),
+            )
+            self.assertEqual(session_state[first_key], "Manual change after import")
+
+    def test_rendered_instant_experience_csv_import_populates_existing_fields(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Six Laps Ahead")
+        select_option(app_test, "Category", "Motorsport")
+        select_option(app_test, "Country", "Australia")
+        select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(app_test)
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+        result = dict(app_test.session_state[ads_page.ADS_RESULT_STATE_KEY])
+        expected = instant_experience_csv_notes()
+        data = ads_page.build_instant_experience_copy_csv(
+            result,
+            concept_notes=expected,
+        )
+
+        uploader_by_label(app_test, "Import completed CSV").set_value(
+            [("instant-experience-copy.csv", data, "text/csv")]
+        )
+        app_test.run(timeout=30)
+
+        primary_values = [
+            text_area.value
+            for text_area in app_test.text_area
+            if text_area.label == "Primary Text"
+        ]
+        headline_values = [
+            text_area.value
+            for text_area in app_test.text_area
+            if text_area.label == "Headline"
+        ]
+        cta_values = [
+            text_area.value
+            for text_area in app_test.text_area
+            if text_area.label == "CTA"
+        ]
+        self.assertEqual(len(primary_values), 9)
+        self.assertEqual(primary_values[0], expected["nostalgia"][0]["primary_text"])
+        self.assertEqual(primary_values[-1], expected["scarcity"][2]["primary_text"])
+        self.assertEqual(headline_values[4], expected["ownership"][1]["headline"])
+        self.assertEqual(cta_values[8], expected["scarcity"][2]["cta"])
+        self.assertTrue(
+            all(
+                any(
+                    f"{concept['display_name']}: " in caption.value
+                    and "3 of 3 copy variations complete" in caption.value
+                    for caption in app_test.caption
+                )
+                for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
+            )
+        )
+        self.assertEqual(len(app_test.exception), 0)
+
+    def test_instant_experience_csv_control_is_compact_and_prompt_instruction_is_once(self):
+        source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
+        csv_control_source = source[
+            source.index("def _render_instant_experience_copy_csv_control") :
+            source.index("def _render_instant_experience_concepts")
+        ]
+        instant_prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/six-laps-ahead",
+            variation_token="copy-csv-test",
+        )
+        carousel_prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Carousel",
+            variation_token="copy-csv-control",
+        )
+
+        self.assertIn('st.popover("Copy CSV"', csv_control_source)
+        self.assertIn("Download blank CSV", csv_control_source)
+        self.assertIn("Download current CSV", csv_control_source)
+        self.assertIn("Import completed CSV", csv_control_source)
+        self.assertNotIn("st.expander", csv_control_source)
+        self.assertNotIn("st.dataframe", csv_control_source)
+        self.assertEqual(
+            instant_prompt.count(
+                ads_page.INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION
+            ),
+            1,
+        )
+        self.assertNotIn(
+            ads_page.INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION,
+            carousel_prompt,
+        )
+
     def test_submit_supported_result_renders_compact_sections_with_url_parameters(self):
         app_test = run_ads_page()
         set_product_name(app_test, "Six Laps Ahead")
@@ -3655,7 +4289,7 @@ PRIMARY TEXT VARIATIONS
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
         self.assertEqual(
-            [uploader.label for uploader in app_test.file_uploader],
+            [uploader.label for uploader in instant_experience_cover_uploaders(app_test)],
             [
                 "Nostalgia Cover",
                 "Ownership Cover",
@@ -3665,12 +4299,12 @@ PRIMARY TEXT VARIATIONS
         self.assertTrue(button_by_label(app_test, "Save Images").disabled)
         self.assertTrue(any("0 of 3 images ready." in caption.value for caption in app_test.caption))
         for index in range(1, 4):
-            app_test.file_uploader[index - 1].set_value(
+            instant_experience_cover_uploaders(app_test)[index - 1].set_value(
                 [(f"instant-{index}.png", square_png_bytes(color=(40 + index, 70, 110)), "image/png")]
             )
             app_test.run(timeout=30)
             self.assertEqual(
-                [uploader.label for uploader in app_test.file_uploader],
+                [uploader.label for uploader in instant_experience_cover_uploaders(app_test)],
                 [
                     "Nostalgia Cover",
                     "Ownership Cover",
@@ -3690,7 +4324,7 @@ PRIMARY TEXT VARIATIONS
         set_product_url(app_test, "https://sportscave.com.au/products/final-whistle-glory")
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
-        app_test.file_uploader[0].set_value(
+        instant_experience_cover_uploaders(app_test)[0].set_value(
             [("uploaded-filename.png", square_png_bytes(), "image/png")]
         )
         app_test.run(timeout=30)
@@ -3718,7 +4352,7 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(workflow["slots"], {})
         self.assertTrue(button_by_label(app_test, "Save Images").disabled)
 
-        app_test.file_uploader[0].set_value(
+        instant_experience_cover_uploaders(app_test)[0].set_value(
             [("replacement.webp", square_png_bytes(color=(90, 120, 150)), "image/webp")]
         )
         app_test.run(timeout=30)
@@ -3736,7 +4370,7 @@ PRIMARY TEXT VARIATIONS
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
         for index in range(1, 4):
-            app_test.file_uploader[index - 1].set_value(
+            instant_experience_cover_uploaders(app_test)[index - 1].set_value(
                 [(f"variation-{index}.png", square_png_bytes(color=(40 + index, 80, 120)), "image/png")]
             )
             app_test.run(timeout=30)
@@ -3752,7 +4386,7 @@ PRIMARY TEXT VARIATIONS
             "variation-3.png",
         )
         self.assertEqual(
-            [uploader.label for uploader in app_test.file_uploader],
+            [uploader.label for uploader in instant_experience_cover_uploaders(app_test)],
             [
                 "Nostalgia Cover",
                 "Ownership Cover",
@@ -3769,7 +4403,7 @@ PRIMARY TEXT VARIATIONS
         set_product_url(app_test, "https://sportscave.com.au/products/final-whistle-glory")
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
-        app_test.file_uploader[0].set_value(
+        instant_experience_cover_uploaders(app_test)[0].set_value(
             [("broken.png", b"not an image", "image/png")]
         )
         app_test.run(timeout=20)
@@ -3802,7 +4436,7 @@ PRIMARY TEXT VARIATIONS
         self.assertEqual(new_workflow["context_key"], new_result["context_key"])
         self.assertEqual(new_workflow["slots"], {})
         self.assertEqual(
-            [uploader.label for uploader in app_test.file_uploader],
+            [uploader.label for uploader in instant_experience_cover_uploaders(app_test)],
             [
                 "Nostalgia Cover",
                 "Ownership Cover",
