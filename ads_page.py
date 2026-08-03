@@ -108,7 +108,7 @@ ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
 ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V3"
 ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE ROUTES V1"
-ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V2"
+ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V3"
 ADS_COPY_FILENAME = "Ad Copy.txt"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
@@ -1739,6 +1739,28 @@ def instant_experience_sport_direction(category):
     )
 
 
+def resolved_instant_experience_sport_atmosphere(category):
+    category_key = str(category or "").strip()
+    directions = {
+        "Baseball": "ballpark memory, generations, swing and legacy expressed through restrained warmth; no sporting props",
+        "NBA": "basketball mentality, energy, greatness and fan identity expressed through contemporary restraint; no sporting props",
+        "Football": "club history, rivalry, matchday belonging and supporter loyalty expressed through architectural confidence; no sporting props",
+        "Motorsport": "speed, mechanical precision, raw race memory and rivalry expressed through controlled material tension; no vehicles or novelty props",
+        "Cricket": "summer memory, heritage and verified national connection expressed through calm natural character; no sporting props",
+        "Golf": "prestige, history, focus and reverence expressed through quiet formal restraint; no sporting props",
+        "Horse Racing": "race-day prestige, history and reverence expressed through quiet formal restraint; no sporting props",
+        "Ice Hockey": "grit, loyalty and resilience expressed through cool controlled atmosphere; no sporting props",
+        "Combat": "discipline, pressure, grit and resilience expressed through controlled architectural weight; no sporting props",
+        "NFL": "tradition, Sunday intensity and game-day belonging expressed through warm restrained atmosphere; no sporting props",
+        "Rugby Union": "tradition, test-match pressure and supporter belonging expressed through warm restrained atmosphere; no sporting props",
+        "Tennis": "focus, pressure, sporting poise and reverence expressed through quiet refined atmosphere; no sporting props",
+    }
+    return directions.get(
+        category_key,
+        "collector memory, identity and premium ownership expressed through quiet believable atmosphere; no sporting props",
+    )
+
+
 def instant_experience_fingerprint(
     route_id,
     *,
@@ -1780,7 +1802,7 @@ def instant_experience_fingerprint(
         "time_of_day": advanced.get("time_of_day")
         if settings["visual_direction"] == "Manual Overrides"
         else route["lighting_family"],
-        "sport_family": instant_experience_sport_direction(category),
+        "sport_family": resolved_instant_experience_sport_atmosphere(category),
     }
 
 
@@ -2813,6 +2835,126 @@ def build_default_instant_experience_cover_prompt_requirements(product_name, cat
     )
 
 
+SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2 = """SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2
+INSTANT EXPERIENCE CORE IMAGE QUALITY - MANDATORY
+
+VARIABLE PRECEDENCE
+
+Apply requirements in this order:
+1. Product fidelity and factual accuracy.
+2. Exact user-provided wording and verified claims.
+3. Explicit user-selected Instant Experience variables.
+4. The active route layout contract.
+5. These shared quality principles.
+6. Route defaults and automatic creative choices.
+
+An explicit selected value must be used exactly unless it conflicts with product preservation, factual accuracy or platform safety. Every Auto or Smart value must be resolved to one specific choice before the final standalone image prompt is returned. Never leave paired alternatives such as "room A or room B", "colour A or colour B", "morning or evening" or "beside or beneath" in the final prompt.
+
+PRODUCT SOURCE-ASSET FIDELITY
+
+- Treat the uploaded full-resolution Sports Cave product as one immutable photographic source asset.
+- Isolate the complete product from its original surrounding wall, then composite that exact isolated product into the resolved environment.
+- Retain the uploaded product pixels wherever technically possible instead of regenerating, approximating or reconstructing the artwork.
+- Preserve every face, person, vehicle, colour, word, letter, number, name, title, signature graphic, badge, plaque, border, crop and edition detail.
+- Preserve the exact frame colour, timber character, depth, thickness, mitred corners, proportions and landscape geometry.
+- Keep all four outside frame edges visible.
+- Apply natural perspective to the complete framed product only as one rigid rectangular object.
+- Never redraw, repair, reinterpret, sharpen, recolour, mirror, crop, zoom, stretch, bend, taper, bow, squash, blur or warp the artwork or frame.
+- Never change a visible edition number.
+- Never add a frame to an unframed or solid-border product unless explicitly requested.
+- Never create competing artwork.
+- The installed product must look physically present in the room, never pasted on, floating, embedded in the wall or intersecting another object.
+
+PROFESSIONAL INTERIOR-PHOTOGRAPHY REALISM
+
+- Produce genuine premium interior photography, never AI art, CGI, illustration or a 3D render.
+- Use physically possible room geometry, believable product scale and natural perspective matching the resolved camera and lens.
+- Render plaster, timber, metal, fabric and glass with real material response, subtle imperfections and ordinary signs of a constructed room.
+- Keep exposure, white balance and colour temperature consistent.
+- Use restrained depth of field appropriate to the resolved lens and shot distance; the artwork and frame must remain readable.
+- Preserve visible detail in the black frame without crushing it into the artwork.
+- Use realistic contact shadows, ambient occlusion and object weight.
+- No excessive HDR, artificial bloom, fake blur, heavy vignette, over-sharpening, plastic material, synthetic orange-and-teal grade, warped architecture, distorted furniture, duplicated objects, nonsensical decor, fake branding or unreadable environmental signage.
+
+LIGHTING, GLASS AND MOUNTING PHYSICS
+
+- Use one identifiable primary light source and no more than one secondary practical light source unless an explicit selected variable requires more.
+- All wall shadows, frame shadows, highlights and reflections must agree with those light sources.
+- Mount the frame with believable separation approximately 8-15 mm from the wall.
+- Cast a natural soft shadow behind and slightly below or away from the frame according to the primary light direction.
+- Framed products require transparent protective glass with enough restrained reflection to feel physically real and premium.
+- Glass reflections must originate from visible or physically plausible room light sources, remain confined to the glass surface and never continue across the timber frame or wall.
+- For near-front views use extremely restrained broad reflections. For three-quarter views allow a slightly stronger reflection on the far side only.
+- No glare may obscure faces, wording, vehicles, signatures, plaques, badges or edition details.
+- A dramatic wall sunbeam without a corresponding physically consistent glass response is a realism failure.
+
+ANTI-AI INTERIOR CONTROL
+
+- Do not use the generic AI luxury-room formula of greige plaster, perfect walnut desk, black metal shelving, potted plant, stacked books, notebook, coffee cup, decorative pen and a dramatic diagonal golden-hour beam.
+- Use no more than two secondary decorative objects unless an explicit selected variable genuinely requires more.
+- Avoid perfectly spaced objects, symmetrical catalogue styling, repeated procedural textures, meaningless luxury clutter, oversized filler plants, generic object-filled shelving, competing furniture and impossibly pristine surfaces.
+- The environment must remain quiet, believable and secondary to the Sports Cave product; it must not resemble a showroom, furniture catalogue or AI staging template."""
+
+
+SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2 = """SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2
+INSTANT EXPERIENCE CORE FACEBOOK COPY QUALITY - MANDATORY
+
+Preserve the approved three-group response structure, the current three variations per concept, the existing fields and the shared setup block.
+
+Every copy option must:
+- sound written by a knowledgeable human sports fan
+- be product-specific and match the selected sport and market
+- use only verified facts from the product name, supplied facts, visible artwork or an approved claim path
+- lead with an emotional or collector-relevant hook
+- give a clear reason to own the product
+- use short, natural, mobile-readable sentences
+- end with a concise route-matched CTA
+- use a distinct opening and a materially different idea rather than synonym-swapping another option
+- preserve exact user-provided wording character-for-character when supplied
+
+Never invent history, achievements, product facts or sporting events.
+
+Nostalgia must reawaken a specific supported memory, feeling, awe or anticipation and finish with a memory-led action. It must not use generic nostalgia that could fit any athlete or product.
+
+Ownership must make ownership express identity, loyalty or collector status, help the customer imagine the product commanding their room and finish with an ownership-led action. It must not become generic home-decor copy.
+
+Scarcity must use only approved verified scarcity, feel final and collector-led rather than cheap or panicked and finish with a decisive collector CTA. Never invent remaining quantities, sales velocity, certificates, edition limits, offers or product facts. Premium retirement language such as "Once sold out, it retires for good" may be used only when compatible with the verified product rules and exact approved wording.
+
+Primary Text must contain approximately 3-5 short sentences. Headlines must be concise, natural, emotionally clear on first read, product-specific where possible and no longer than the approved 4-6 word limit. CTAs must be short, action-led, route-matched and unique across routes. Do not rewrite an exact user-provided Headline or CTA.
+
+Reject generic AI retail language including: Elevate your space; Transform your room; Perfect addition; Ultimate tribute; Stunning masterpiece; Must-have; Wall worthy; Your wall deserves this; Don't miss this one; Another print; Once gone it stays gone; unleash; conversation starter; bring your walls to life; celebrate in style.
+
+Do not describe Sports Cave wall art as "another print". Do not use awkward grammar, merge two names into one person, exaggerate claims or repeat another route's opening hook, Headline or CTA.
+
+Before returning the response, silently compare the nine copy combinations. Rewrite any option that is generic, repetitive, fact-unsafe, weak on mobile or mismatched to its concept. Do not print candidates, scores or reasoning."""
+
+
+SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2 = "SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2"
+SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2 = "SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2"
+
+
+SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2 = """SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2
+MANDATORY FINAL CORRECTION AND 10/10 QUALITY GATE
+
+Inspect and correct the composed image before returning it. Reject and regenerate or correct the result when:
+- the artwork or frame changed, looks regenerated or loses any outside frame edge
+- the frame is warped, incorrectly proportioned, missing realistic depth or not rigid
+- the product misses this route's exact prominence band or resolved position
+- the room does not match every resolved scene variable or looks like generic AI staging
+- architecture, furniture, lighting direction, shadows or reflections are physically inconsistent
+- glass is absent, crosses onto the frame or wall, or obscures product details
+- the frame floats, intersects objects, sits flush without believable mounting depth or looks digitally pasted on
+- on-image wording is misspelled, incomplete, duplicated, re-punctuated, substituted or joined by extra text
+- another route's Headline, CTA or supporting wording appears
+- typography looks painted, engraved, embossed, glowing or physically attached to the wall
+- mobile readability, safe margins, visual hierarchy or product dominance is weak
+- the output is not a true square or the final delivered file is not exactly 1024 x 1024 pixels
+
+If native generation returns another square size, resize the approved square composition deterministically to exactly 1024 x 1024 sRGB before delivery. Never stretch a non-square image; regenerate or correct its square composition first.
+
+Silently assess the finished route against this production rubric: product fidelity 25 points, photographic realism 20, route distinctness 15, exact typography and wording 15, mobile hierarchy and product prominence 10, copy quality 10, brand and factual compliance 5. Revise every hard failure and anything below the intended production-ready 10/10 standard. Do not print the score, checklist result or reasoning. The workflow must correct failures, not merely claim the checks passed."""
+
+
 INSTANT_EXPERIENCE_STANDARD_VISUALS = (
     {
         "concept_id": "nostalgia",
@@ -2828,10 +2970,12 @@ INSTANT_EXPERIENCE_STANDARD_VISUALS = (
         "camera_side": "near-front with an extremely mild right three-quarter angle",
         "camera_height": "eye level",
         "shot_distance": "close product hero, frame occupying approximately 65-75% of usable width",
-        "lens": "65-85mm natural interior-photography character",
-        "lighting": "warm side daylight with restrained late-afternoon softness",
+        "lens": "75mm natural interior-photography character",
+        "lighting": "warm window daylight from camera-left with no secondary practical light",
         "time_of_day": "late afternoon",
-        "overlay_position": "restrained negative space beside or below the frame, never across the artwork",
+        "overlay_position": "upper-left architectural negative space beside the frame, never across the artwork",
+        "product_position": "slightly right of centre within the image region",
+        "architectural_cue": "one shallow plaster return at the far left edge",
         "composition": "near-full-bleed editorial product-led cover with no hard black scarcity panel",
         "overlay_rule": "Use the exact finished Headline and CTA from Nostalgia Copy Variation 1 only. State those exact strings inside this image prompt. Do not place the full Primary Text on the image.",
         "extra_rules": (
@@ -2848,16 +2992,18 @@ INSTANT_EXPERIENCE_STANDARD_VISUALS = (
         "supporting_label": "Identity & Display",
         "copy_row": "Ownership Copy Variation 1",
         "purpose": "Make the fan picture the exact artwork as part of their home, office, sports room or personal collection.",
-        "room_type": "premium media room or home office",
-        "wall_colour": "deep charcoal with warm neutral architectural contrast",
-        "wall_material": "smooth painted plaster with restrained timber detail",
+        "room_type": "premium home office",
+        "wall_colour": "deep charcoal",
+        "wall_material": "smooth painted plaster",
         "camera_side": "restrained left three-quarter interior-photography angle",
         "camera_height": "chest height",
         "shot_distance": "medium lifestyle context, frame occupying approximately 50-60% of usable width",
-        "lens": "45-55mm natural lens character",
-        "lighting": "soft dusk daylight with one warm practical light source",
+        "lens": "50mm natural interior-photography character",
+        "lighting": "soft dusk window light from camera-right with one restrained warm desk lamp as the secondary practical",
         "time_of_day": "dusk",
         "overlay_position": "genuine architectural negative space on the open wall area",
+        "product_position": "left of centre with open wall space on the right",
+        "architectural_cue": "one dark-oak doorway reveal on the far left",
         "composition": "asymmetrical lifestyle composition that is visibly different from Prompt 1",
         "overlay_rule": "Use the exact finished Headline and CTA from Ownership Copy Variation 1 only. State those exact strings inside this image prompt. Do not place the full Primary Text on the image.",
         "extra_rules": (
@@ -2874,31 +3020,178 @@ INSTANT_EXPERIENCE_STANDARD_VISUALS = (
         "supporting_label": "Collector & Limited Edition",
         "copy_row": "Scarcity Copy Variation 1",
         "purpose": "Preserve the proven Sports Cave collector conversion cover.",
-        "room_type": "premium collector room with restrained black-and-gold campaign treatment",
-        "wall_colour": "deep charcoal, warm off-white or muted taupe chosen to keep the product dominant",
-        "wall_material": "real textured plaster, timber or concrete that supports the black-and-gold bottom strip",
+        "room_type": "premium collector lounge",
+        "wall_colour": "warm off-white",
+        "wall_material": "fine textured plaster",
         "camera_side": "near-front interior-photography position with only mild natural perspective and correct rigid frame geometry",
         "camera_height": "eye level",
         "shot_distance": "product-dominant collector cover, frame occupying approximately 74-82% of usable canvas width inside the upper image region",
-        "lens": "natural interior lens without wide-angle distortion",
-        "lighting": "soft natural light plus restrained warm practical lighting",
-        "time_of_day": "evening or late afternoon",
+        "lens": "70mm natural interior-photography character without wide-angle distortion",
+        "lighting": "soft natural window light from camera-right with one restrained warm wall light as the secondary practical",
+        "time_of_day": "early evening",
         "overlay_position": "full-width bottom matte-black scarcity strip only",
+        "product_position": "centred within the full-width upper image region",
+        "architectural_cue": "one quiet vertical wall recess at the far right edge",
         "composition": "full-width upper lifestyle/product image across approximately 76-78% of the square canvas, with a shallow full-width matte-black scarcity strip across the bottom approximately 22-24%",
         "overlay_rule": "Use only the exact three approved bottom-strip lines for the Scarcity image: LIMITED TO 100 WORLDWIDE / Once it sells out, it’s gone. / CLAIM YOUR EDITION. Do not use the Scarcity copy table headline or CTA as replacement overlay text.",
         "extra_rules": (
             "- Add a thin restrained metallic-gold divider across the top edge of the black strip.\n"
             "- All scarcity wording must be contained inside the bottom strip; no wording may appear beside or over the product image.\n"
             "- No left/right split, no right sidebar and no vertical scarcity panel.\n"
-            "- Use the full width of the bottom strip so the wording never looks squeezed; centre the complete text hierarchy horizontally and vertically.\n"
-            "- Keep LIMITED TO 100 WORLDWIDE together as one unified single-line headline; do not isolate or unnaturally enlarge 100.\n"
-            "- Place Once it sells out, it’s gone. beneath it in smaller warm-white or ivory text.\n"
-            "- Place CLAIM YOUR EDITION beneath that as controlled metallic-gold text typography, not a large fake button.\n"
-            "- Do not compress, squash, stretch, use excessively narrow typography or break individual words.\n"
             "- Do not add an unverified remaining count, price, discount, shipping claim or certificate claim."
         ),
     },
 )
+
+
+INSTANT_EXPERIENCE_DIFFERENTIATION_FIELDS = (
+    "room_type",
+    "wall_colour",
+    "wall_material",
+    "camera_side",
+    "shot_distance",
+    "lighting",
+    "overlay_position",
+    "architectural_cue",
+)
+
+
+def _instant_experience_pairwise_difference_count(first, second):
+    return sum(
+        str(first.get(field) or "").casefold()
+        != str(second.get(field) or "").casefold()
+        for field in INSTANT_EXPERIENCE_DIFFERENTIATION_FIELDS
+    )
+
+
+def validate_instant_experience_set_differentiation(visuals=None):
+    visuals = tuple(visuals or INSTANT_EXPERIENCE_STANDARD_VISUALS)
+    for index, first in enumerate(visuals):
+        for second in visuals[index + 1 :]:
+            difference_count = _instant_experience_pairwise_difference_count(
+                first,
+                second,
+            )
+            if difference_count < 5:
+                raise ValueError(
+                    "Instant Experience concepts must differ across at least five "
+                    f"resolved visual dimensions: {first['route']} and {second['route']} "
+                    f"differ across {difference_count}."
+                )
+    return True
+
+
+def build_instant_experience_typography_quality_rules(visual):
+    if visual["concept_id"] == "scarcity":
+        route_rules = """APPROVED SCARCITY STRIP TYPOGRAPHY
+
+- Preserve the current full-width horizontal bottom strip, current upper product-region proportions and thin gold divider.
+- Keep all advertising wording inside the strip. Never create a side panel, vertical panel or narrow copy column.
+- Use a spacious centred hierarchy across the full strip width.
+- Keep LIMITED TO 100 WORLDWIDE as one unified single-line Headline; never isolate or disproportionately enlarge 100.
+- Set Once it sells out, it’s gone. beneath it in smaller warm ivory text.
+- Set CLAIM YOUR EDITION beneath that as controlled muted-gold typography, not a fake button.
+- Never squeeze, stretch, condense, split or break words."""
+    else:
+        route_rules = """APPROVED FLOATING LIFESTYLE TYPOGRAPHY
+
+- Add the exact wording as a crisp, flat, post-production-style graphic overlay only after the room and product are composed.
+- Use Montserrat SemiBold for the Headline and Montserrat Medium or SemiBold for the CTA where compatible with current Sports Cave branding.
+- Use warm ivory for the Headline and controlled muted gold for the CTA unless exact user-provided wording or an approved route colour requires otherwise.
+- Keep the Headline to a maximum of two lines and the CTA on one line.
+- Maintain at least a 7% safe margin from every canvas edge.
+- Keep every advertising word outside the product and away from faces, artwork text, logos, signatures, badges, plaques and edition details.
+- Preserve clean natural negative space around the wording.
+- Do not use a drop shadow, bevel, glow, fake metallic extrusion, fake interface button or typography painted, embossed, engraved, illuminated or physically attached to the wall."""
+    return f"""{SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2}
+INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - MANDATORY
+
+{route_rules}
+
+Any misspelling, missing word, duplicated word, changed punctuation, wrong CTA, extra generated text or weak mobile readability is a hard failure. Preserve exact user-supplied wording character-for-character."""
+
+
+def _instant_experience_route_wording_rules(visual):
+    if visual["concept_id"] == "scarcity":
+        own_wording = """- Exact permitted on-image Headline: LIMITED TO 100 WORLDWIDE
+- Exact permitted supporting line: Once it sells out, it’s gone.
+- Exact permitted on-image CTA: CLAIM YOUR EDITION"""
+    else:
+        own_wording = f"""- Exact permitted on-image Headline: copy the complete finished Headline from {visual['copy_row']} character-for-character.
+- Exact permitted supporting line: none.
+- Exact permitted on-image CTA: copy the complete finished CTA from {visual['copy_row']} character-for-character."""
+
+    forbidden_sources = []
+    for other in INSTANT_EXPERIENCE_STANDARD_VISUALS:
+        if other["concept_id"] == visual["concept_id"]:
+            continue
+        if other["concept_id"] == "scarcity":
+            forbidden_sources.append(
+                "Scarcity: LIMITED TO 100 WORLDWIDE / Once it sells out, it’s gone. / CLAIM YOUR EDITION"
+            )
+        else:
+            forbidden_sources.append(
+                f"{other['route']}: the exact finished Headline and CTA from {other['copy_row']}"
+            )
+    forbidden_text = "\n".join(f"  - {source}" for source in forbidden_sources)
+    return f"""ROUTE WORDING LOCK - RESOLVE BEFORE RETURNING
+
+Route identity: {visual['route']} - {visual['supporting_label']}
+{own_wording}
+
+These are the only permitted advertising words for this cover. Never place Primary Text on the image.
+
+Forbidden other-route wording:
+{forbidden_text}
+
+Before printing the final standalone image prompt, replace every copy-row source reference above with the actual finished Headline and CTA strings generated for that row. Print the exact permitted and forbidden strings inside the standalone prompt. Do not leave brackets, placeholders or unresolved source references. Reject and regenerate if any other route's wording appears."""
+
+
+def build_instant_experience_set_differentiation_rules(visual):
+    sibling_lines = []
+    for sibling in INSTANT_EXPERIENCE_STANDARD_VISUALS:
+        if sibling["concept_id"] == visual["concept_id"]:
+            continue
+        sibling_lines.append(
+            "- {route}: room={room}; wall={colour}; material={material}; "
+            "camera={camera}; prominence={prominence}; lighting={lighting}; "
+            "text={text}; architecture={architecture}.".format(
+                route=sibling["route"],
+                room=sibling["room_type"],
+                colour=sibling["wall_colour"],
+                material=sibling["wall_material"],
+                camera=sibling["camera_side"],
+                prominence=sibling["shot_distance"],
+                lighting=sibling["lighting"],
+                text=sibling["overlay_position"],
+                architecture=sibling["architectural_cue"],
+            )
+        )
+    return f"""{SPORTS_CAVE_IE_SET_DIFFERENTIATION_RULES_V2}
+INSTANT EXPERIENCE SET DIFFERENTIATION - MANDATORY
+
+This cover's emotional advertising job is {visual['purpose']}
+
+Resolved sibling fingerprints supplied for comparison:
+{chr(10).join(sibling_lines)}
+
+Keep this route's resolved scene and approved layout. Across every pair in the three-cover set, at least five of these attributes must differ: room type, wall colour, wall material, camera side or angle, product prominence or position, lighting condition, text position, supporting architectural element.
+
+Do not repeat the same desk, shelves, plant, wall palette, camera relationship, lighting and typography composition with cosmetic changes. If an explicit user selection matches another route, preserve it and create differentiation through the remaining automatic attributes. Nostalgia remains memory-led editorial lifestyle; Ownership remains identity and display-led; Scarcity remains direct-response collector urgency with its approved bottom strip. Never force the Scarcity strip onto another route.
+
+{_instant_experience_route_wording_rules(visual)}"""
+
+
+def build_instant_experience_image_quality_contract(visual):
+    validate_instant_experience_set_differentiation()
+    return "\n\n".join(
+        (
+            SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2,
+            build_instant_experience_typography_quality_rules(visual),
+            build_instant_experience_set_differentiation_rules(visual),
+            SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2,
+        )
+    )
 
 
 def _standard_instant_experience_exact_offer(campaign_moment=None):
@@ -2926,13 +3219,16 @@ def standard_instant_experience_fingerprint(index, visual, *, category=""):
         "lighting_direction": visual["lighting"],
         "time_of_day": visual["time_of_day"],
         "overlay_position": visual["overlay_position"],
+        "product_position": visual["product_position"],
+        "architectural_cue": visual["architectural_cue"],
         "cover_composition": visual["composition"],
-        "sport_family": instant_experience_sport_direction(category),
+        "sport_family": resolved_instant_experience_sport_atmosphere(category),
         "prompt_number": index,
     }
 
 
 def build_standard_instant_experience_fingerprints(*, category=""):
+    validate_instant_experience_set_differentiation()
     return [
         standard_instant_experience_fingerprint(index, visual, category=category)
         for index, visual in enumerate(INSTANT_EXPERIENCE_STANDARD_VISUALS, start=1)
@@ -2974,6 +3270,7 @@ def build_standard_instant_experience_image_prompt(
     country = _normalise_option_label(country) or "selected market"
     product_url = _clean_product_url(product_url)
     shared_realism_rules = build_sports_cave_image_realism_rules(include_product_lock=True)
+    ie_quality_contract = build_instant_experience_image_quality_contract(visual)
     campaign_moment_visual_context = build_campaign_moment_visual_context(
         campaign_moment,
         selected_country=country,
@@ -3000,14 +3297,7 @@ Use these exact three lines inside the bottom strip only when the 100-edition li
 
 {scarcity_panel_lines}
 
-Typography and placement are mandatory:
-- Use the full width of the bottom strip; never squeeze the wording into a side panel.
-- Centre the complete hierarchy horizontally and vertically.
-- Keep "LIMITED TO 100 WORLDWIDE" as one unified single-line headline.
-- Do not isolate or unnaturally enlarge "100".
-- Keep "Once it sells out, it’s gone." beneath it in smaller warm-white or ivory text.
-- Keep "CLAIM YOUR EDITION" beneath that as controlled metallic-gold text, not a large fake button.
-- Do not add an unverified remaining count, price, discount, shipping claim or certificate claim."""
+Do not add, remove, rewrite, localise or reorder these words. Do not add an unverified remaining count, price, discount, shipping claim or certificate claim."""
     else:
         on_image_wording_source = (
             f"- On-image wording source: use the exact Headline and CTA from {visual['copy_row']}. "
@@ -3050,8 +3340,11 @@ RESOLVED AUTOMATIC SCENE FINGERPRINT — FOLLOW EXACTLY
 - Lighting direction: {visual["lighting"]}
 - Time of day: {visual["time_of_day"]}
 - Overlay position: {visual["overlay_position"]}
+- Product position: {visual["product_position"]}
+- Primary architectural cue: {visual["architectural_cue"]}
 - Cover composition: {visual["composition"]}
-- Sport atmosphere guide: {instant_experience_sport_direction(category)}
+- Resolved sport atmosphere for language and subtle material character only: {resolved_instant_experience_sport_atmosphere(category)}
+- The sport atmosphere guide must not replace or broaden any resolved room, wall, camera, product-position, lighting or time-of-day value above.
 
 Fingerprint for this cover:
 {json.dumps(fingerprint, ensure_ascii=False, indent=2)}
@@ -3067,19 +3360,21 @@ COMPOSITION AND OVERLAY
 
 {collector_control_block}
 
-IMAGE SAFETY AND PRODUCT LOCK
+INSTANT EXPERIENCE CORE QUALITY CONTRACTS
+
+{ie_quality_contract}
+
+AUTHORITATIVE APP-WIDE PRODUCT AND REALISM LOCK
 
 {shared_realism_rules}
 
 {build_sport_country_visual_adaptation(category, country)}{campaign_moment_visual_block}
 
-FINAL IMAGE CHECK
+ROUTE-SPECIFIC FINAL CONDITIONS
 
-- Output target is 1024 x 1024, true 1:1 square, sRGB-ready PNG.
-- Do not stretch a non-square result; if the generated result is not square, regenerate or export a square crop without changing composition.
 - Product facts, athlete identity, team identity, manufacturing origin and edition details must not change because of the selected country.
 - No fake memorabilia, no extra artwork, no unofficial branding, no platform watermark, no fake UI button and no generated sporting props.
-- The finished image must look like genuine professional photography, not AI art, CGI or a render."""
+- Return only after the mandatory V2 correction gate and the authoritative app-wide realism lock both pass."""
 
 
 def build_standard_instant_experience_visual_prompts(
@@ -3694,7 +3989,7 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 
 - Exactly three group sections are present.
 - Each group contains exactly one IMAGE GENERATION PROMPT and exactly one three-row COPY VARIATIONS table.
-- Nostalgia contains no black scarcity panel and no scarcity language.
+- Nostalgia contains no permitted or rendered scarcity language; scarcity wording may appear only inside its explicit forbidden-wording list.
 - Ownership is a visibly different lifestyle/ownership composition.
 - Scarcity uses the full-width upper product image and full-width bottom black-and-gold collector strip treatment.
 - Each prompt includes exact product identity, selected sport, selected country, exact overlay-row mapping from Copy Variation 1, product/artwork lock, frame and glass realism, physical mounting, room realism, square 1024 x 1024 composition and no automatic image generation.
@@ -4608,6 +4903,8 @@ def build_shared_meta_winner_copy_upgrade(campaign_type="", instant_experience_s
 
 This block strengthens the standard Instant Experience grouped concept output only. Preserve the approved output order, three concept groups, three copy variations per concept, CTA column, setup block, URL parameters, localisation, claim safeguards and all product-accuracy protections.
 
+{SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2}
+
 STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY
 
 - Return exactly three grouped concepts: GROUP 1 — NOSTALGIA, GROUP 2 — OWNERSHIP and GROUP 3 — SCARCITY.
@@ -4623,13 +4920,11 @@ STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY
 - Scarcity must be concentrated in the Scarcity concept.
 - Nostalgia must not contain scarcity, offer or discount language.
 - Ownership must stay identity/display-led and avoid hard FOMO.
-- A supplied offer may be used only when the exact offer is supplied and fact-safe.
+- A supplied offer may be used only when the exact offer is supplied, fact-safe and permitted by the existing Scarcity route contract.
 - Every claim must remain supported by the product title, supplied facts, visible artwork or approved claim path.
 - Use natural selected-country English.
-
-SILENT COPY SELECTION
-
-Before returning the campaign, privately compare several product-specific candidates for each concept variation. Reject generic, repetitive, fact-unsafe or unnatural writing. Return only the strongest finished copy in the approved grouped format. Do not expose candidates, scoring notes, research or reasoning."""
+- Copy Variation 1 supplies the exact on-image Headline and CTA for Nostalgia and Ownership. Scarcity keeps its exact approved three-line strip wording.
+- Generate all copy first in working memory so each standalone image prompt can print its exact permitted wording and the exact forbidden Headline/CTA strings assigned to the other concepts. Do not expose this working order or change the approved response order."""
     single_primary_rule = (
         "Instant Experience must always preserve exactly three concept groups with three Primary Text, "
         "three Headline and three CTA options inside each group."
@@ -5862,19 +6157,15 @@ SCARCITY — Collector & Limited Edition:
 - Never invent remaining quantities, sales velocity, certificate claims or offers.
 - Preserve "Limited to 100 worldwide" only when verified for the selected product.
 - Preserve "Once it sells out, it's gone" where approved.
-- Suitable CTA territory: Claim Your Edition, Secure Yours, Don't Miss This One, Claim Your Number.
+- Suitable CTA territory: Claim Your Edition, Secure Yours, Claim Your Number, Reserve Your Edition.
 
-COPY QUALITY RULES
+COPY FIELD FORMAT RULES
 
 - Every Primary Text must contain 3-5 short, mobile-readable sentences.
-- Every Primary Text must sound human, emotional and collector-focused.
-- Every variation must use a different opening hook and a materially different psychological job inside its concept.
-- Every Headline must contain no more than 4-6 words and be distinct. 4 to 6 words max.
-- Every CTA must contain approximately 2-4 words, match its concept and avoid blind repetition.
+- Every Headline must contain no more than 4-6 words. 4 to 6 words max.
+- Every CTA must contain approximately 2-4 words.
 - Keep the fixed Meta/Instant Experience button as: Shop Now.
-- Never invent history, achievements, product facts or sporting events.
-- Avoid generic AI language including elevate, transform, ultimate, unleash, must-have, masterpiece, conversation starter, bring your walls to life, perfect addition and celebrate in style.
-- Use natural selected-country English.
+- Preserve the current Primary Text, Headline and CTA columns and all existing row counts.
 
 INSTANT EXPERIENCE SETUP
 
