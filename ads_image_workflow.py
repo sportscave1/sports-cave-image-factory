@@ -35,18 +35,25 @@ def campaign_image_slots(campaign_type):
             for index in range(1, 6)
         )
     if campaign_type == "Instant Experience":
-        return tuple(
+        return (
             {
-                "id": f"instant-experience-{index:02d}",
-                "label": (
-                    "Instant Experience cover 1"
-                    if index == 1
-                    else f"Cover variation {index} - optional"
-                ),
-                "position": index,
-                "required": index == 1,
-            }
-            for index in range(1, 6)
+                "id": "instant-experience-01",
+                "label": "Nostalgia / Moment Cover",
+                "position": 1,
+                "required": True,
+            },
+            {
+                "id": "instant-experience-02",
+                "label": "Identity / Ownership Cover",
+                "position": 2,
+                "required": True,
+            },
+            {
+                "id": "instant-experience-03",
+                "label": "Collector / Scarcity Cover",
+                "position": 3,
+                "required": True,
+            },
         )
     return ()
 

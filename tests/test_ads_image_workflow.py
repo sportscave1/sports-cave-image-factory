@@ -54,11 +54,9 @@ class AdsImageProcessingTests(unittest.TestCase):
         self.assertEqual(
             [slot["label"] for slot in ads_image_workflow.campaign_image_slots("Instant Experience")],
             [
-                "Instant Experience cover 1",
-                "Cover variation 2 - optional",
-                "Cover variation 3 - optional",
-                "Cover variation 4 - optional",
-                "Cover variation 5 - optional",
+                "Nostalgia / Moment Cover",
+                "Identity / Ownership Cover",
+                "Collector / Scarcity Cover",
             ],
         )
         self.assertEqual(ads_image_workflow.campaign_image_slots("Single Image / Video"), ())
@@ -648,58 +646,55 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertEqual(outcomes["instant-experience-01"]["status"], "saved")
         self.assertEqual(
             [(event[0], event[1], event[2]) for event in progress_events],
-            [(1, 1, "Instant Experience cover 1"), (1, 1, "Instant Experience cover 1")],
+            [(1, 1, "Nostalgia / Moment Cover"), (1, 1, "Nostalgia / Moment Cover")],
         )
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")
-    def test_instant_experience_saves_two_to_five_populated_variations_without_overwrite(
+    def test_instant_experience_saves_three_populated_covers_without_overwrite(
         self,
         upload_batch,
         _metadata,
     ):
-        for count in range(2, 6):
-            with self.subTest(count=count):
-                result, workflow = self.build_result_and_workflow("Instant Experience")
-                workflow["slots"] = processed_slots("Instant Experience", count=count)
+        result, workflow = self.build_result_and_workflow("Instant Experience")
+        workflow["slots"] = processed_slots("Instant Experience", count=3)
 
-                def upload_success(_token, destination, items, **_kwargs):
-                    filename = items[0]["relative_path"]
-                    return {
-                        "successes": [
-                            {
-                                "relative_path": filename,
-                                "metadata": {"path_display": f"{destination}/{filename}"},
-                            }
-                        ],
-                        "failures": [],
+        def upload_success(_token, destination, items, **_kwargs):
+            filename = items[0]["relative_path"]
+            return {
+                "successes": [
+                    {
+                        "relative_path": filename,
+                        "metadata": {"path_display": f"{destination}/{filename}"},
                     }
+                ],
+                "failures": [],
+            }
 
-                upload_batch.reset_mock()
-                upload_batch.side_effect = upload_success
-                outcomes = ads_page.save_ads_images_to_dropbox(
-                    "token",
-                    "/Sportscave Team Folder",
-                    "/Sportscave Team Folder/04_OUTPUT/product-images",
-                    result,
-                    workflow,
-                )
+        upload_batch.side_effect = upload_success
+        outcomes = ads_page.save_ads_images_to_dropbox(
+            "token",
+            "/Sportscave Team Folder",
+            "/Sportscave Team Folder/04_OUTPUT/product-images",
+            result,
+            workflow,
+        )
 
-                filenames = [
-                    call.args[2][0]["relative_path"]
-                    for call in upload_batch.call_args_list
-                    if str(call.args[2][0]["relative_path"]).endswith(".png")
-                ]
-                self.assertEqual(len(filenames), count)
-                self.assertEqual(len(set(filenames)), count)
-                self.assertEqual(
-                    filenames,
-                    [
-                        f"Shohei Ohtani 50_50 Wall Art - Instant Experience {index:02d} - 2026-07-25.png"
-                        for index in range(1, count + 1)
-                    ],
-                )
-                self.assertTrue(all(row["status"] == "saved" for row in outcomes.values()))
+        filenames = [
+            call.args[2][0]["relative_path"]
+            for call in upload_batch.call_args_list
+            if str(call.args[2][0]["relative_path"]).endswith(".png")
+        ]
+        self.assertEqual(len(filenames), 3)
+        self.assertEqual(len(set(filenames)), 3)
+        self.assertEqual(
+            filenames,
+            [
+                f"Shohei Ohtani 50_50 Wall Art - Instant Experience {index:02d} - 2026-07-25.png"
+                for index in range(1, 4)
+            ],
+        )
+        self.assertTrue(all(row["status"] == "saved" for row in outcomes.values()))
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")
