@@ -11,7 +11,9 @@ from PIL import Image
 from streamlit.testing.v1 import AppTest
 
 import ads_page
+import ads_product_catalog
 import image_factory
+import social_media_catalog
 from sports_cave_prompt_blocks import SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER
 
 
@@ -1682,12 +1684,76 @@ PRIMARY TEXT VARIATIONS
         source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
 
         self.assertIn("def render_product_name_input", source)
-        self.assertIn("load_edition_ops_product_name_options()", source)
+        self.assertIn("load_edition_ops_product_name_options(rows=rows)", source)
         self.assertIn('st.selectbox(\n            "Product name"', source)
         self.assertIn("accept_new_options=True", source)
         self.assertIn('filter_mode="fuzzy"', source)
         self.assertIn("EDITION_OPS_SNAPSHOT_PATH", source)
         self.assertNotIn("import edition_ops", source)
+
+    def test_shared_live_catalogue_joins_authoritative_product_url(self):
+        captured = {}
+        expected_rows = [
+            {
+                "shopify_product_id": "product-123",
+                "product_title": "Six Laps Ahead",
+                "product_handle": "six-laps-ahead",
+                "online_store_url": "https://sportscave.com.au/products/six-laps-ahead",
+            }
+        ]
+
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def execute(self, query):
+                captured["query"] = query
+
+            def fetchall(self):
+                return expected_rows
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def cursor(self):
+                return FakeCursor()
+
+        ads_product_catalog.load_live_edition_product_rows.clear()
+        try:
+            with (
+                patch("supabase_backend.is_configured", return_value=True),
+                patch("supabase_backend.connect", return_value=FakeConnection()),
+            ):
+                rows = ads_product_catalog.load_live_edition_product_rows()
+        finally:
+            ads_product_catalog.load_live_edition_product_rows.clear()
+
+        self.assertEqual(rows, expected_rows)
+        self.assertIn("FULL OUTER JOIN shopify_products", captured["query"])
+        self.assertIn("sp.online_store_url", captured["query"])
+
+    def test_social_media_and_ads_share_the_authoritative_product_rows(self):
+        rows = [
+            {
+                "shopify_product_id": "product-123",
+                "product_title": "Six Laps Ahead",
+                "online_store_url": "https://sportscave.com.au/products/six-laps-ahead",
+            }
+        ]
+
+        with patch.object(
+            social_media_catalog,
+            "load_live_edition_product_rows",
+            return_value=rows,
+        ):
+            self.assertEqual(social_media_catalog._database_products(), rows)
 
     def test_edition_ops_dropdown_combines_live_catalogue_with_snapshot_fallback(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1891,13 +1957,108 @@ PRIMARY TEXT VARIATIONS
             "https://sportscave.com.au/products/goat-debate-wall-art",
         )
 
+    def test_stable_product_id_resolves_ambiguous_display_name(self):
+        rows = [
+            {
+                "product_id": "product-a",
+                "product_title": "Untitled Product",
+                "shopify_handle": "legends-never-die",
+                "online_store_url": "https://sportscave.com.au/products/legends-never-die",
+            },
+            {
+                "product_id": "product-b",
+                "product_title": "Untitled Product",
+                "shopify_handle": "goat-debate-wall-art",
+                "online_store_url": "https://sportscave.com.au/products/goat-debate-wall-art",
+            },
+        ]
+
+        unresolved = ads_page.resolve_edition_ops_product_selection(
+            "Untitled Product",
+            rows=rows,
+        )
+        resolved = ads_page.resolve_edition_ops_product_selection(
+            "Untitled Product",
+            rows=rows,
+            product_id="product-b",
+        )
+
+        self.assertIsNone(unresolved["row"])
+        self.assertEqual(resolved["product_id"], "product-b")
+        self.assertEqual(
+            resolved["product_url"],
+            "https://sportscave.com.au/products/goat-debate-wall-art",
+        )
+
+    def test_legacy_exact_name_matching_handles_punctuation_without_fuzzy_collisions(self):
+        rows = [
+            {
+                "product_title": "Driver’s Legacy – 1998",
+                "online_store_url": "https://sportscave.com.au/products/drivers-legacy-1998",
+            },
+            {
+                "product_title": "Driver’s Legacy – 1998 Revisited",
+                "online_store_url": "https://sportscave.com.au/products/drivers-legacy-revisited",
+            },
+        ]
+
+        selection = ads_page.resolve_edition_ops_product_selection(
+            "  DRIVER'S LEGACY - 1998  ",
+            rows=rows,
+        )
+        similar_name = ads_page.resolve_edition_ops_product_selection(
+            "Driver's Legacy",
+            rows=rows,
+        )
+
+        self.assertEqual(
+            selection["product_url"],
+            "https://sportscave.com.au/products/drivers-legacy-1998",
+        )
+        self.assertIsNone(similar_name["row"])
+
+    def test_unknown_product_change_clears_previous_manual_url_and_shows_message(self):
+        rows = [
+            {
+                "product_id": "product-a",
+                "product_title": "Known Product",
+                "online_store_url": "https://sportscave.com.au/products/known-product",
+            }
+        ]
+        session_state = {}
+
+        with patch.object(ads_page.st, "session_state", session_state):
+            ads_page.prepare_ads_product_url_state("Known Product", rows=rows)
+            session_state[ads_page.ADS_PRODUCT_URL_KEY] = (
+                "https://sportscave.com.au/products/manual-campaign-url"
+            )
+            state = ads_page.prepare_ads_product_url_state("Unknown Product", rows=rows)
+
+        self.assertEqual(session_state[ads_page.ADS_PRODUCT_URL_KEY], "")
+        self.assertEqual(state["message"], ads_page.NO_EDITION_OPS_PRODUCT_URL_MESSAGE)
+
+    def test_product_url_flows_to_ads_and_instant_experience_destination_output(self):
+        product_url = "https://sportscave.com.au/products/six-laps-ahead"
+        prompt = ads_page.build_ads_prompt(
+            "Six Laps Ahead",
+            "Motorsport",
+            "Australia",
+            "Instant Experience",
+            product_url=product_url,
+            variation_token="product-url-flow",
+        )
+
+        self.assertIn(product_url, prompt)
+        self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
+
     def test_ads_product_url_state_is_prepared_before_widget_render(self):
         source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
         render_page_source = source[source.index("def render_page") :]
-        prepare_call = "product_url_state = prepare_ads_product_url_state(product_name, result=result)"
+        prepare_call = "product_url_state = prepare_ads_product_url_state("
         url_widget = 'product_url = st.text_input(\n        "Product page URL *"'
 
         self.assertIn(prepare_call, render_page_source)
+        self.assertIn("rows=product_rows", render_page_source)
         self.assertIn(url_widget, render_page_source)
         self.assertLess(render_page_source.index(prepare_call), render_page_source.index(url_widget))
         self.assertNotIn(

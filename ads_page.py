@@ -119,6 +119,7 @@ NO_EDITION_OPS_PRODUCT_URL_MESSAGE = (
 ADS_PRODUCT_NAME_KEY = "ads_product_name"
 ADS_PRODUCT_URL_KEY = "ads_product_url"
 ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY = "ads_product_url_autofill_product_key"
+ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY = "ads_product_url_autofill_selection"
 ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY = "ads_product_url_last_auto_value"
 ADS_IE_RECENT_FINGERPRINTS_KEY = "ads_instant_experience_recent_fingerprints"
 
@@ -851,6 +852,27 @@ def _normalise_option_label(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def _normalise_product_match_value(value):
+    return (
+        _normalise_option_label(value)
+        .translate(
+            str.maketrans(
+                {
+                    "\u2018": "'",
+                    "\u2019": "'",
+                    "\u02bc": "'",
+                    "\u2010": "-",
+                    "\u2011": "-",
+                    "\u2012": "-",
+                    "\u2013": "-",
+                    "\u2014": "-",
+                }
+            )
+        )
+        .casefold()
+    )
+
+
 def _product_name_from_edition_ops_row(row):
     if not isinstance(row, dict):
         return ""
@@ -940,22 +962,85 @@ def _edition_ops_product_record_key(row):
     return ""
 
 
-def resolve_edition_ops_product_row(product_name, *, rows=None):
+def resolve_edition_ops_product_row(
+    product_name,
+    *,
+    rows=None,
+    product_id="",
+    record_key="",
+    handle="",
+):
     selected = _normalise_option_label(product_name)
     if not selected:
         return None
     rows = list(load_edition_ops_product_rows() if rows is None else rows)
     duplicate_titles = _edition_ops_duplicate_title_keys(rows)
-    for row in rows:
-        option_label = _edition_ops_product_option_label(row, duplicate_titles)
-        if selected.casefold() == option_label.casefold():
-            return row
+    selected_key = _normalise_product_match_value(selected)
+
+    stable_lookups = (
+        (product_id, _edition_ops_product_id_from_row),
+        (record_key, _edition_ops_product_record_key),
+        (handle, _edition_ops_product_handle_from_row),
+    )
+    for identity, getter in stable_lookups:
+        identity_key = _normalise_product_match_value(identity)
+        if not identity_key:
+            continue
+        for row in rows:
+            if identity_key == _normalise_product_match_value(getter(row)):
+                return row
+
+    for getter in (
+        _edition_ops_product_id_from_row,
+        _edition_ops_product_record_key,
+        _edition_ops_product_handle_from_row,
+    ):
+        matches = [
+            row
+            for row in rows
+            if selected_key == _normalise_product_match_value(getter(row))
+        ]
+        if len(matches) == 1:
+            return matches[0]
+
+    option_matches = [
+        row
+        for row in rows
+        if selected_key
+        == _normalise_product_match_value(
+            _edition_ops_product_option_label(row, duplicate_titles)
+        )
+    ]
+    if len(option_matches) == 1:
+        return option_matches[0]
+
+    title_matches = [
+        row
+        for row in rows
+        if selected_key
+        == _normalise_product_match_value(_product_name_from_edition_ops_row(row))
+    ]
+    if len(title_matches) == 1:
+        return title_matches[0]
     return None
 
 
-def resolve_edition_ops_product_selection(product_name, *, rows=None):
+def resolve_edition_ops_product_selection(
+    product_name,
+    *,
+    rows=None,
+    product_id="",
+    record_key="",
+    handle="",
+):
     selected = _normalise_option_label(product_name)
-    row = resolve_edition_ops_product_row(selected, rows=rows)
+    row = resolve_edition_ops_product_row(
+        selected,
+        rows=rows,
+        product_id=product_id,
+        record_key=record_key,
+        handle=handle,
+    )
     if not row:
         manual_key = f"manual::{selected.casefold()}" if selected else ""
         return {
@@ -1026,8 +1111,9 @@ def load_edition_ops_product_name_options(
     snapshot_path=EDITION_OPS_SNAPSHOT_PATH,
     *,
     live_loader=None,
+    rows=None,
 ):
-    unique_rows = load_edition_ops_product_rows(
+    unique_rows = list(rows) if rows is not None else load_edition_ops_product_rows(
         snapshot_path,
         live_loader=live_loader,
     )
@@ -1045,8 +1131,8 @@ def load_edition_ops_product_name_options(
     return options
 
 
-def resolve_edition_ops_product_id(product_name):
-    return resolve_edition_ops_product_selection(product_name).get("product_id") or ""
+def resolve_edition_ops_product_id(product_name, *, rows=None):
+    return resolve_edition_ops_product_selection(product_name, rows=rows).get("product_id") or ""
 
 
 def _ads_result_matches_selection(result, selection, product_name):
@@ -1060,12 +1146,28 @@ def _ads_result_matches_selection(result, selection, product_name):
 
 
 def prepare_ads_product_url_state(product_name, *, result=None, rows=None):
-    selection = resolve_edition_ops_product_selection(product_name, rows=rows)
+    current_url = _clean_product_url(st.session_state.get(ADS_PRODUCT_URL_KEY))
+    last_record_key = str(st.session_state.get(ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY) or "")
+    selected_match_key = _normalise_product_match_value(product_name)
+    last_selection_key = _normalise_product_match_value(
+        st.session_state.get(ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY)
+    )
+    result_product_id = ""
+    if (
+        isinstance(result, dict)
+        and selected_match_key
+        == _normalise_product_match_value(result.get("product_name"))
+    ):
+        result_product_id = result.get("product_id") or ""
+    selection = resolve_edition_ops_product_selection(
+        product_name,
+        rows=rows,
+        product_id=result_product_id,
+        record_key=last_record_key if selected_match_key == last_selection_key else "",
+    )
     selected_label = selection.get("selected_label") or ""
     record_key = selection.get("record_key") or ""
     selected_url = selection.get("product_url") or ""
-    current_url = _clean_product_url(st.session_state.get(ADS_PRODUCT_URL_KEY))
-    last_record_key = str(st.session_state.get(ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY) or "")
 
     if ADS_PRODUCT_URL_KEY not in st.session_state and _ads_result_matches_selection(
         result,
@@ -1076,6 +1178,7 @@ def prepare_ads_product_url_state(product_name, *, result=None, rows=None):
         if draft_url:
             st.session_state[ADS_PRODUCT_URL_KEY] = draft_url
             st.session_state[ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = record_key
+            st.session_state[ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY] = selected_label
             st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = selected_url
             current_url = draft_url
             last_record_key = record_key
@@ -1084,6 +1187,7 @@ def prepare_ads_product_url_state(product_name, *, result=None, rows=None):
         if current_url or last_record_key:
             st.session_state[ADS_PRODUCT_URL_KEY] = ""
         st.session_state[ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = ""
+        st.session_state[ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY] = ""
         st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = ""
         return {**selection, "message": ""}
 
@@ -1092,15 +1196,12 @@ def prepare_ads_product_url_state(product_name, *, result=None, rows=None):
             st.session_state[ADS_PRODUCT_URL_KEY] = selected_url
             st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = selected_url
         else:
-            last_auto_value = _clean_product_url(
-                st.session_state.get(ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY)
-            )
-            if current_url and current_url == last_auto_value:
-                st.session_state[ADS_PRODUCT_URL_KEY] = ""
+            st.session_state[ADS_PRODUCT_URL_KEY] = ""
             st.session_state[ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY] = ""
         st.session_state[ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY] = record_key
+        st.session_state[ADS_PRODUCT_URL_AUTOFILL_SELECTION_KEY] = selected_label
 
-    message = NO_EDITION_OPS_PRODUCT_URL_MESSAGE if selection.get("row") and not selected_url else ""
+    message = NO_EDITION_OPS_PRODUCT_URL_MESSAGE if selected_label and not selected_url else ""
     return {**selection, "message": message}
 
 
@@ -6724,8 +6825,8 @@ def render_meta_url_parameters_section(section_number):
     st.code(META_AD_URL_PARAMETERS, language="text")
 
 
-def render_product_name_input():
-    product_options = load_edition_ops_product_name_options()
+def render_product_name_input(*, rows=None):
+    product_options = load_edition_ops_product_name_options(rows=rows)
     if product_options:
         return st.selectbox(
             "Product name",
@@ -9517,7 +9618,8 @@ def render_page():
     ):
         st.session_state[ADS_PRODUCT_NAME_KEY] = result.get("product_name")
 
-    product_name = render_product_name_input()
+    product_rows = load_edition_ops_product_rows()
+    product_name = render_product_name_input(rows=product_rows)
     category_col, country_col, campaign_col = st.columns(3)
     with category_col:
         category = st.selectbox("Category", CATEGORY_OPTIONS, key="ads_category")
@@ -9529,7 +9631,11 @@ def render_page():
             CAMPAIGN_TYPE_OPTIONS,
             key="ads_campaign_type",
         )
-    product_url_state = prepare_ads_product_url_state(product_name, result=result)
+    product_url_state = prepare_ads_product_url_state(
+        product_name,
+        result=result,
+        rows=product_rows,
+    )
     product_url = st.text_input(
         "Product page URL *",
         placeholder="https://sportscave.com.au/products/example",
@@ -9587,7 +9693,7 @@ def render_page():
         elif not get_winner_pattern_key(category, campaign_type):
             render_insufficient_winner_data()
         else:
-            product_id = resolve_edition_ops_product_id(product_name)
+            product_id = product_url_state.get("product_id") or ""
             context_key = ads_result_context_key(
                 product_id,
                 product_name,
