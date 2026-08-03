@@ -102,6 +102,7 @@ ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
 ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V2"
+ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE ROUTES V1"
 ADS_COPY_FILENAME = "Ad Copy.txt"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
@@ -113,6 +114,7 @@ ADS_PRODUCT_NAME_KEY = "ads_product_name"
 ADS_PRODUCT_URL_KEY = "ads_product_url"
 ADS_PRODUCT_URL_AUTOFILL_PRODUCT_KEY = "ads_product_url_autofill_product_key"
 ADS_PRODUCT_URL_LAST_AUTO_VALUE_KEY = "ads_product_url_last_auto_value"
+ADS_IE_RECENT_FINGERPRINTS_KEY = "ads_instant_experience_recent_fingerprints"
 
 FINAL_REVIEW_HOW_TO_STEPS = (
     "1. Finish setting up the complete campaign in Meta Ads Manager.",
@@ -375,6 +377,11 @@ TEMPLATES_WITH_PRIMARY_TEXT_VARIATIONS = {
 
 BASEBALL_INSTANT_EXPERIENCE_PRODUCT_SET_NAME = "Baseball Wall Art"
 BASEBALL_INSTANT_EXPERIENCE_CTA = "Claim Your Edition"
+BASEBALL_INSTANT_EXPERIENCE_COVER_LINES = (
+    "LIMITED TO 100 WORLDWIDE",
+    "Once it sells out, it’s gone.",
+    "CLAIM YOUR EDITION",
+)
 BASEBALL_INSTANT_EXPERIENCE_APPROVED_CLAIMS = (
     "✔ Only 100 editions.",
     "✔ Numbered C.O.A. included.",
@@ -396,6 +403,291 @@ INSTANT_EXPERIENCE_COPY_GROUPS = (
     ("call_to_action", "CALL TO ACTION", "Call to Action", "Shop Now"),
 )
 INSTANT_EXPERIENCE_COPY_OPTION_COUNT = 5
+
+IE_MODE_SMART = "Smart 3-Pack — Recommended"
+IE_MODE_SELECTED = "One Selected Route"
+IE_MODE_CLASSIC = "Classic Collector — Current Control"
+IE_CREATIVE_OUTPUT_MODES = (
+    IE_MODE_SMART,
+    IE_MODE_SELECTED,
+    IE_MODE_CLASSIC,
+)
+IE_AUDIENCE_MINDSETS = (
+    "Auto-match",
+    "Lifelong fan",
+    "Active fan",
+    "Collector",
+    "Gift buyer",
+    "Wall upgrader",
+    "Multi-buy shopper",
+    "Warm product viewer",
+    "Hot retargeting visitor",
+)
+IE_PRIMARY_CREATIVE_ANGLES = (
+    "Auto-match",
+    "Moment / Memory",
+    "Fan Identity",
+    "Ownership / Display",
+    "Legacy / Achievement",
+    "Milestone",
+    "Rivalry / Allegiance",
+    "Collector / Rarity",
+    "Gift",
+    "Build a Collection",
+    "Offer / Sale",
+)
+IE_URGENCY_PLACEMENTS = (
+    "Auto-match route",
+    "None in feed creative",
+    "Meta description only",
+    "Soft final line in primary text",
+    "Strong cover and primary text",
+)
+IE_DESTINATION_SCOPES = (
+    "Featured product page + catalogue",
+    "Curated collection page + catalogue",
+)
+IE_VISUAL_DIRECTIONS = (
+    "Auto — Match the Creative Route",
+    "Manual Overrides",
+)
+IE_FIXED_BUTTON_CTA_MODES = (
+    "Hold fixed-button CTA constant across all routes",
+    "Auto-match fixed-button CTA",
+)
+IE_ROUTE_IDS = ("FEEL", "BELONG", "ACT", "BUILD")
+IE_SMART_ROUTE_KEYS = ("route_a", "route_b", "route_c")
+IE_ROUTE_LABELS = {
+    "FEEL": "FEEL — Moment / Memory",
+    "BELONG": "BELONG — Fan Identity / Ownership",
+    "ACT": "ACT — Collector Scarcity / Current Conversion Control",
+    "BUILD": "BUILD — Build a Collection / Offer",
+}
+IE_SMART_OPTION_HEADINGS = {
+    "route_a": "OPTION A",
+    "route_b": "OPTION B",
+    "route_c": "OPTION C",
+}
+IE_DEFAULT_SMART_ROUTES = {
+    "route_a": "FEEL",
+    "route_b": "BELONG",
+    "route_c": "ACT",
+}
+IE_SCARCITY_TERMS = (
+    "limited",
+    "only",
+    "gone",
+    "miss out",
+    "claim",
+    "secure",
+    "rare",
+    "last chance",
+    "selling fast",
+    "countdown",
+)
+IE_AUTO_FRESH_MATCH = "Auto — Choose a Fresh Match"
+IE_ADVANCED_VISUAL_OPTION_SETS = {
+    "room_type": (
+        IE_AUTO_FRESH_MATCH,
+        "Premium Living Room",
+        "Collector Study",
+        "Home Office",
+        "Media Room",
+        "Restrained Home Bar",
+        "Garage Lounge",
+        "Foyer / Entry Gallery",
+        "Library",
+        "Sports Room",
+    ),
+    "wall_colour_family": (
+        IE_AUTO_FRESH_MATCH,
+        "Warm Off-White",
+        "Deep Charcoal",
+        "Graphite",
+        "Soft Greige",
+        "Walnut Brown",
+        "Deep Navy",
+        "Muted Olive",
+        "Stone Beige",
+    ),
+    "wall_material": (
+        IE_AUTO_FRESH_MATCH,
+        "Smooth Painted Plaster",
+        "Mineral Plaster",
+        "Limewash",
+        "Microcement",
+        "Restrained Brick",
+        "Pale Stone",
+        "Dark Oak Panels",
+        "Walnut Slats",
+        "Charcoal Masonry",
+    ),
+    "camera_family": (
+        IE_AUTO_FRESH_MATCH,
+        "Near-Front",
+        "Mild Left Three-Quarter",
+        "Mild Right Three-Quarter",
+        "Asymmetrical Editorial",
+        "Straight-On Control",
+        "Corner Reveal",
+    ),
+    "camera_height": (
+        IE_AUTO_FRESH_MATCH,
+        "Eye Level",
+        "Slightly Below Eye Level",
+        "Chest Height",
+        "Slightly Elevated",
+    ),
+    "shot_distance": (
+        IE_AUTO_FRESH_MATCH,
+        "Close Hero 65–75%",
+        "Product-Dominant 60–70%",
+        "Medium Room Context 50–60%",
+        "Editorial Detail 65–80%",
+    ),
+    "lens_character": (
+        IE_AUTO_FRESH_MATCH,
+        "45–55mm Natural",
+        "65–85mm Natural Portrait",
+        "50mm Editorial",
+        "70mm Compressed Interior",
+    ),
+    "lighting_direction": (
+        IE_AUTO_FRESH_MATCH,
+        "Warm Side Light",
+        "Soft Window Light",
+        "Dusk Practical Light",
+        "Directional Gallery Light",
+        "Diffuse Daylight",
+    ),
+    "time_of_day": (
+        IE_AUTO_FRESH_MATCH,
+        "Morning",
+        "Late Afternoon",
+        "Dusk",
+        "Overcast Day",
+        "Evening",
+    ),
+    "cover_layout": (
+        IE_AUTO_FRESH_MATCH,
+        "Full-Bleed Editorial",
+        "Editorial Caption Region",
+        "Asymmetrical Room Negative Space",
+        "Classic Scarcity Panel",
+        "Collection Wall",
+    ),
+    "overlay_text_treatment": (
+        IE_AUTO_FRESH_MATCH,
+        "Short Editorial Hook",
+        "Identity Hook + CTA",
+        "Classic Three-Line Scarcity",
+        "Minimal Caption",
+        "Collection Offer",
+    ),
+}
+
+INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
+    "FEEL": {
+        "name": "FEEL",
+        "angle": "Moment / Memory",
+        "psychological_job": "Make the correct fan remember why the athlete, era, race, match, achievement or moment mattered.",
+        "funnel": "Cold to warm audiences where emotional recall and product-specific memory matter more than urgency.",
+        "primary_text_structure": "Lead with a sensory memory, defining feeling or verified product-specific moment. No generic product-description opening.",
+        "headline_style": "Memory-led, editorial and product-specific.",
+        "meta_description_role": "Supporting context only; do not hide essential commercial information here unless the user selected Meta description only.",
+        "proof_intensity": "No proof checklist.",
+        "scarcity_intensity": "No scarcity in feed creative when urgency is disabled.",
+        "on_image_message_type": "One short product-specific hook and at most one supporting line.",
+        "creative_cta_family": ("See the Edition", "Relive the Moment", "Remember This", "See It Framed"),
+        "fixed_button_cta": "Shop Now",
+        "cover_composition": "Full-bleed or near-full-bleed editorial lifestyle composition with no hard black scarcity panel.",
+        "panel_treatment": "No large hard black scarcity panel.",
+        "product_prominence": "Frame occupies approximately 65–75% of usable width.",
+        "room_family": "Intimate office, reading room or lived-in residential wall.",
+        "wall_family": "Walnut, mineral plaster, limewash or warm neutral architectural finish.",
+        "camera_family": "Eye-level or slightly below eye-level; near-front or very mild three-quarter perspective.",
+        "lens_family": "65–85mm natural lens character.",
+        "lighting_family": "Intimate morning or late-afternoon natural light.",
+        "destination": "Featured product page preferred.",
+        "required_data": "Verified product identity and completed/past event before using relive language.",
+        "prohibited_language": "Greatness doesn’t fade; proof checklist; discount language; hard-sell language.",
+    },
+    "BELONG": {
+        "name": "BELONG",
+        "angle": "Fan Identity / Ownership",
+        "psychological_job": "Make the fan feel that owning the artwork says something real about who they are and what the subject means to them.",
+        "funnel": "Cold, warm and retargeting audiences where identity, wall ownership and display desire matter.",
+        "primary_text_structure": "Lead with belonging, recognition or shared fan identity, then show the product in the customer’s life.",
+        "headline_style": "Identity-led, direct and human.",
+        "meta_description_role": "A small supporting proof or display cue.",
+        "proof_intensity": "No proof checklist; use no more than one verified proof or scarcity cue.",
+        "scarcity_intensity": "Restrained unless strong urgency is deliberately selected.",
+        "on_image_message_type": "Identity-led hook, one short support line and one restrained creative CTA.",
+        "creative_cta_family": ("Make It Yours", "Own the Moment", "Put It on Your Wall", "Bring It Home"),
+        "fixed_button_cta": "Shop Now",
+        "cover_composition": "Wider real-room context with asymmetrical editorial composition and architectural negative space.",
+        "panel_treatment": "Avoid the current centered black scarcity panel.",
+        "product_prominence": "Frame occupies approximately 50–60% of usable width.",
+        "room_family": "Den, home office, sports room, restrained home bar or collection wall.",
+        "wall_family": "Contemporary plaster, dark timber, restrained brick or material contrast.",
+        "camera_family": "Chest-height restrained left or right three-quarter view.",
+        "lens_family": "45–55mm natural lens character.",
+        "lighting_family": "Dusk daylight plus restrained practical lighting is allowed.",
+        "destination": "Featured product page preferred.",
+        "required_data": "Verified product identity and audience mindset that supports ownership or fan identity.",
+        "prohibited_language": "Aggressive gone-forever language unless explicitly selected; interior-design ad copy.",
+    },
+    "ACT": {
+        "name": "ACT",
+        "angle": "Collector Scarcity / Current Conversion Control",
+        "psychological_job": "Convert established desire through verified edition scarcity and collector proof.",
+        "funnel": "Warm product viewers, hot retargeting visitors and current conversion-control testing.",
+        "primary_text_structure": "Classic Sports Cave collector opener, product-specific paragraph, approved proof and scarcity close.",
+        "headline_style": "Collector-conversion headline tied to the exact product.",
+        "meta_description_role": "Supporting scarcity or proof line.",
+        "proof_intensity": "Approved proof checklist only.",
+        "scarcity_intensity": "Strong verified scarcity.",
+        "on_image_message_type": "Exact three-line scarcity panel.",
+        "creative_cta_family": ("Claim Your Edition",),
+        "fixed_button_cta": BASEBALL_INSTANT_EXPERIENCE_CTA,
+        "cover_composition": "Classic 64–68% lifestyle section and 32–36% black-and-gold scarcity panel.",
+        "panel_treatment": "Deep matte black with restrained metallic-gold detailing.",
+        "product_prominence": "Frame dominates the lifestyle section.",
+        "room_family": "Current premium collector-room control.",
+        "wall_family": "Restrained residential palette from the current control.",
+        "camera_family": "Natural interior-photography camera position.",
+        "lens_family": "Natural interior lens.",
+        "lighting_family": "Soft natural light plus restrained warm practical lighting.",
+        "destination": "Featured product page plus catalogue.",
+        "required_data": "Approved edition claim path and product URL.",
+        "prohibited_language": "Only X remaining unless current timestamped inventory data exists.",
+    },
+    "BUILD": {
+        "name": "BUILD",
+        "angle": "Build a Collection / Offer",
+        "psychological_job": "Make customers want to choose more than one relevant edition and build a collection.",
+        "funnel": "Multi-buy, offer-aware and collection-browsing audiences only.",
+        "primary_text_structure": "Lead with collection intent and the exact verified offer when supplied.",
+        "headline_style": "Collection-building headline, not single-product scarcity.",
+        "meta_description_role": "Exact offer or collection support when verified.",
+        "proof_intensity": "No invented product count, discount or catalogue breadth.",
+        "scarcity_intensity": "Offer-led only when exact offer is entered and verified.",
+        "on_image_message_type": "Collection or offer message, never fake multi-product artwork.",
+        "creative_cta_family": ("Choose Your Legends", "Build Your Wall", "Shop the Collection", "Shop the Offer"),
+        "fixed_button_cta": "Shop Now",
+        "cover_composition": "Collection-wall or collection-browsing cover only when exact reference assets are supplied.",
+        "panel_treatment": "No fake scarcity panel; offer treatment only when exact offer is supplied.",
+        "product_prominence": "The featured product remains exact; multi-product promises require exact product references.",
+        "room_family": "Collection wall, study or premium gallery area.",
+        "wall_family": "Structured gallery wall with believable material finish.",
+        "camera_family": "Editorial collection view without making products small.",
+        "lens_family": "50mm editorial or 70mm compressed interior.",
+        "lighting_family": "Controlled gallery or soft residential light.",
+        "destination": "Curated collection page plus catalogue only.",
+        "required_data": "Collection name, collection URL, exact product-set name, at least four eligible products, and exact offer for offer routes.",
+        "prohibited_language": "Broad collection URL, invented products, lookalike artwork or multi-product wall without references.",
+    },
+}
 
 META_BUILD_ORDER = [
     "Create a Carousel ad.",
@@ -1007,17 +1299,21 @@ def campaign_moment_from_result(result, *, selected_country=""):
 
 def _campaign_moment_context_key(campaign_moment, selected_country=""):
     moment = normalize_campaign_moment(campaign_moment, selected_country=selected_country)
-    if not campaign_moment_is_active(moment):
+    if not campaign_moment_is_active(moment) and not moment["promotion"]:
         return {}
-    return {
-        "type": moment["type"],
-        "name": moment["name"],
-        "market": moment["market"],
-        "date": moment["date"],
-        "promotion": moment["promotion"],
-        "strength": moment["strength"],
-        "include_in_image_prompts": bool(moment["include_in_image_prompts"]),
-    }
+    key = {"promotion": moment["promotion"]}
+    if campaign_moment_is_active(moment):
+        key.update(
+            {
+                "type": moment["type"],
+                "name": moment["name"],
+                "market": moment["market"],
+                "date": moment["date"],
+                "strength": moment["strength"],
+                "include_in_image_prompts": bool(moment["include_in_image_prompts"]),
+            }
+        )
+    return key
 
 
 def build_campaign_moment_copy_relevance_block(
@@ -1164,6 +1460,531 @@ def campaign_moment_from_form_state():
 def clear_campaign_moment_state():
     for key in CAMPAIGN_MOMENT_SESSION_KEYS:
         st.session_state.pop(key, None)
+
+
+def _normalise_ie_option(value, options, default):
+    clean_value = _normalise_option_label(value)
+    for option in options:
+        if clean_value.casefold() == str(option).casefold():
+            return option
+    return default
+
+
+def _normalise_ie_route(value, default="FEEL", *, allow_build=True):
+    route = str(value or "").strip().upper()
+    if route not in IE_ROUTE_IDS:
+        route = default
+    if route == "BUILD" and not allow_build:
+        route = default if default != "BUILD" else "ACT"
+    return route
+
+
+def _normalise_positive_int(value, default=0):
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return default
+
+
+def default_instant_experience_settings(*, output_mode=IE_MODE_CLASSIC):
+    return {
+        "output_mode": output_mode,
+        "audience_mindset": "Auto-match",
+        "primary_angle": "Auto-match",
+        "urgency_placement": "Auto-match route",
+        "destination_scope": "Featured product page + catalogue",
+        "collection_name": "",
+        "collection_url": "",
+        "collection_product_set_name": "",
+        "collection_exact_offer": "",
+        "eligible_product_count": 0,
+        "multi_product_reference_count": 0,
+        "visual_direction": "Auto — Match the Creative Route",
+        "fixed_button_cta_mode": "Hold fixed-button CTA constant across all routes",
+        "route_a": "FEEL",
+        "route_b": "BELONG",
+        "route_c": "ACT",
+        "advanced_visual": {
+            key: IE_AUTO_FRESH_MATCH for key in IE_ADVANCED_VISUAL_OPTION_SETS
+        },
+    }
+
+
+def normalize_instant_experience_settings(settings=None):
+    source = settings if isinstance(settings, dict) else {}
+    normalized = default_instant_experience_settings()
+    normalized["output_mode"] = _normalise_ie_option(
+        source.get("output_mode"),
+        IE_CREATIVE_OUTPUT_MODES,
+        normalized["output_mode"],
+    )
+    normalized["audience_mindset"] = _normalise_ie_option(
+        source.get("audience_mindset"),
+        IE_AUDIENCE_MINDSETS,
+        normalized["audience_mindset"],
+    )
+    normalized["primary_angle"] = _normalise_ie_option(
+        source.get("primary_angle"),
+        IE_PRIMARY_CREATIVE_ANGLES,
+        normalized["primary_angle"],
+    )
+    normalized["urgency_placement"] = _normalise_ie_option(
+        source.get("urgency_placement"),
+        IE_URGENCY_PLACEMENTS,
+        normalized["urgency_placement"],
+    )
+    normalized["destination_scope"] = _normalise_ie_option(
+        source.get("destination_scope"),
+        IE_DESTINATION_SCOPES,
+        normalized["destination_scope"],
+    )
+    normalized["visual_direction"] = _normalise_ie_option(
+        source.get("visual_direction"),
+        IE_VISUAL_DIRECTIONS,
+        normalized["visual_direction"],
+    )
+    normalized["fixed_button_cta_mode"] = _normalise_ie_option(
+        source.get("fixed_button_cta_mode"),
+        IE_FIXED_BUTTON_CTA_MODES,
+        normalized["fixed_button_cta_mode"],
+    )
+    for text_key in (
+        "collection_name",
+        "collection_url",
+        "collection_product_set_name",
+        "collection_exact_offer",
+    ):
+        normalized[text_key] = _clean_campaign_moment_value(source.get(text_key))
+    normalized["eligible_product_count"] = _normalise_positive_int(
+        source.get("eligible_product_count")
+    )
+    normalized["multi_product_reference_count"] = _normalise_positive_int(
+        source.get("multi_product_reference_count")
+    )
+    collection_valid = instant_experience_collection_destination_is_valid(normalized)
+    used_routes = set()
+    for key in IE_SMART_ROUTE_KEYS:
+        default_route = IE_DEFAULT_SMART_ROUTES[key]
+        route = _normalise_ie_route(
+            source.get(key, default_route),
+            default_route,
+            allow_build=key == "route_c" and collection_valid,
+        )
+        if route in used_routes:
+            route = next(
+                candidate
+                for candidate in ("FEEL", "BELONG", "ACT", "BUILD")
+                if candidate not in used_routes
+                and (candidate != "BUILD" or (key == "route_c" and collection_valid))
+            )
+        normalized[key] = route
+        used_routes.add(route)
+    advanced_source = source.get("advanced_visual") if isinstance(source.get("advanced_visual"), dict) else {}
+    for key, options in IE_ADVANCED_VISUAL_OPTION_SETS.items():
+        normalized["advanced_visual"][key] = _normalise_ie_option(
+            advanced_source.get(key),
+            options,
+            IE_AUTO_FRESH_MATCH,
+        )
+    return normalized
+
+
+def instant_experience_collection_destination_is_valid(settings):
+    return (
+        settings.get("destination_scope") == "Curated collection page + catalogue"
+        and bool(settings.get("collection_name"))
+        and is_valid_product_page_url(settings.get("collection_url"))
+        and bool(settings.get("collection_product_set_name"))
+    )
+
+
+def exact_offer_from_inputs(campaign_moment=None, instant_experience_settings=None):
+    settings = normalize_instant_experience_settings(instant_experience_settings)
+    collection_offer = _clean_campaign_moment_value(settings.get("collection_exact_offer"))
+    moment = normalize_campaign_moment(campaign_moment)
+    return collection_offer or moment.get("promotion") or ""
+
+
+def instant_experience_route_supports_offer(route_id):
+    return route_id == "BUILD"
+
+
+def instant_experience_selected_routes(settings):
+    settings = normalize_instant_experience_settings(settings)
+    if settings["output_mode"] == IE_MODE_CLASSIC:
+        return [("CLASSIC COLLECTOR", "ACT")]
+    if settings["output_mode"] == IE_MODE_SELECTED:
+        return [("SELECTED ROUTE", route_for_primary_angle(settings["primary_angle"], settings))]
+    return [
+        (IE_SMART_OPTION_HEADINGS[key], settings[key])
+        for key in IE_SMART_ROUTE_KEYS
+    ]
+
+
+def route_for_primary_angle(primary_angle, settings=None):
+    settings = normalize_instant_experience_settings(settings)
+    if primary_angle in {"Moment / Memory", "Legacy / Achievement", "Milestone"}:
+        return "FEEL"
+    if primary_angle in {"Fan Identity", "Ownership / Display", "Rivalry / Allegiance", "Gift"}:
+        return "BELONG"
+    if primary_angle in {"Collector / Rarity"}:
+        return "ACT"
+    if primary_angle in {"Build a Collection", "Offer / Sale"}:
+        return "BUILD" if instant_experience_collection_destination_is_valid(settings) else "ACT"
+    return "FEEL"
+
+
+def instant_experience_settings_context_key(settings):
+    settings = normalize_instant_experience_settings(settings)
+    payload = {
+        "output_mode": settings["output_mode"],
+        "audience_mindset": settings["audience_mindset"],
+        "primary_angle": settings["primary_angle"],
+        "urgency_placement": settings["urgency_placement"],
+        "destination_scope": settings["destination_scope"],
+        "collection_name": settings["collection_name"],
+        "collection_url": settings["collection_url"],
+        "collection_product_set_name": settings["collection_product_set_name"],
+        "collection_exact_offer": settings["collection_exact_offer"],
+        "eligible_product_count": settings["eligible_product_count"],
+        "multi_product_reference_count": settings["multi_product_reference_count"],
+        "visual_direction": settings["visual_direction"],
+        "fixed_button_cta_mode": settings["fixed_button_cta_mode"],
+        "fixed_routes": {key: settings[key] for key in IE_SMART_ROUTE_KEYS},
+        "advanced_visual": settings["advanced_visual"],
+    }
+    return payload
+
+
+def instant_experience_output_suffix(settings):
+    settings = normalize_instant_experience_settings(settings)
+    if settings["output_mode"] == IE_MODE_SMART:
+        route_names = [
+            settings[key]
+            for key in IE_SMART_ROUTE_KEYS
+        ]
+        return (
+            "Which Instant Experience cover would you like me to generate: "
+            f"{', '.join(route_names[:-1])} or {route_names[-1]}?"
+        )
+    if settings["output_mode"] == IE_MODE_SELECTED:
+        route = route_for_primary_angle(settings["primary_angle"], settings)
+        return f"Would you like me to generate the {route} Instant Experience cover?"
+    return "Would you like me to generate the Classic Collector Instant Experience cover?"
+
+
+def validate_instant_experience_settings(settings, campaign_moment=None):
+    settings = normalize_instant_experience_settings(settings)
+    if settings["output_mode"] == IE_MODE_CLASSIC:
+        return ""
+    exact_offer = exact_offer_from_inputs(campaign_moment, settings)
+    routes = [route for _label, route in instant_experience_selected_routes(settings)]
+    if settings["destination_scope"] == "Curated collection page + catalogue":
+        if not settings["collection_name"]:
+            return "Enter a collection name for the Instant Experience collection destination."
+        if not is_valid_product_page_url(settings["collection_url"]):
+            return "Enter a valid collection URL for the Instant Experience collection destination."
+        if not settings["collection_product_set_name"]:
+            return "Enter the exact product-set name for the Instant Experience collection destination."
+    if "BUILD" in routes:
+        if not instant_experience_collection_destination_is_valid(settings):
+            return "Build a Collection requires a valid collection name, collection URL and exact product-set name."
+        if settings["eligible_product_count"] < 4:
+            return "Build a Collection requires at least four eligible catalogue products."
+        if settings["multi_product_reference_count"] < 2:
+            return "Build a Collection requires at least two exact product reference assets for multi-product cover promises."
+    if settings["primary_angle"] == "Offer / Sale" and not exact_offer:
+        return "Offer / Sale requires an exact verified offer."
+    if "BUILD" in routes and settings["primary_angle"] == "Offer / Sale" and not exact_offer:
+        return "Build offer routes require the exact verified offer."
+    if settings["primary_angle"] == "Gift" and settings["audience_mindset"] not in {"Gift buyer", "Auto-match"}:
+        return "Gift language requires Gift buyer targeting or Auto-match."
+    return ""
+
+
+def instant_experience_sport_direction(category):
+    category_key = str(category or "").strip()
+    directions = {
+        "Baseball": "ballpark memory, generations, swing and legacy; walnut, mineral plaster, intimate office or reading room, warm side light",
+        "NBA": "mentality, energy, greatness and identity; charcoal limewash, concrete and oak, contemporary media room or home office, dusk",
+        "Football": "history, rivalry and club belonging; limewash, restrained brick or stone, study or stair landing, diffuse light",
+        "Motorsport": "speed, raw memory and rivalry; microcement, blackened steel and walnut, garage lounge without vehicles or novelty props, directional light",
+        "Cricket": "summer memory, heritage and national pride only when verified; linen, plaster and warm timber, calm daylight",
+        "Golf": "prestige, history and reverence; pale stone or dark oak, foyer, library or study, soft formal light",
+        "Horse Racing": "prestige, history and reverence; pale stone or dark oak, foyer, library or study, soft formal light",
+        "Ice Hockey": "grit, loyalty and resilience; masonry, charcoal and oak, media room or basement lounge, cool daylight plus restrained practical light",
+        "Combat": "grit, loyalty and resilience; masonry, charcoal and oak, media room or basement lounge, cool daylight plus restrained practical light",
+        "NFL": "loyalty, tradition and game-day belonging; plaster, dark timber, den or restrained home bar, warm evening",
+        "Rugby Union": "loyalty, tradition and game-day belonging; plaster, dark timber, den or restrained home bar, warm evening",
+        "Tennis": "prestige, focus and sporting reverence; mineral plaster, pale stone and warm timber, study or gallery landing, soft daylight",
+    }
+    return directions.get(
+        category_key,
+        "collector memory, identity and premium ownership; believable residential architecture, restrained wall material, natural light",
+    )
+
+
+def instant_experience_fingerprint(
+    route_id,
+    *,
+    settings=None,
+    category="",
+    sub_angle="",
+    creative_cta="",
+):
+    settings = normalize_instant_experience_settings(settings)
+    route = INSTANT_EXPERIENCE_ROUTE_CONFIGS.get(route_id, INSTANT_EXPERIENCE_ROUTE_CONFIGS["ACT"])
+    advanced = settings["advanced_visual"]
+    return {
+        "route": route_id,
+        "sub_angle": sub_angle or route["angle"],
+        "hook_family": route["primary_text_structure"],
+        "cover_layout": advanced.get("cover_layout")
+        if settings["visual_direction"] == "Manual Overrides"
+        else route["cover_composition"],
+        "urgency_placement": settings["urgency_placement"],
+        "creative_cta": creative_cta or route["creative_cta_family"][0],
+        "room_type": advanced.get("room_type")
+        if settings["visual_direction"] == "Manual Overrides"
+        else route["room_family"],
+        "wall_colour_family": advanced.get("wall_colour_family")
+        if settings["visual_direction"] == "Manual Overrides"
+        else route["wall_family"],
+        "wall_material": advanced.get("wall_material")
+        if settings["visual_direction"] == "Manual Overrides"
+        else route["wall_family"],
+        "camera_family": advanced.get("camera_family")
+        if settings["visual_direction"] == "Manual Overrides"
+        else route["camera_family"],
+        "shot_distance": advanced.get("shot_distance")
+        if settings["visual_direction"] == "Manual Overrides"
+        else route["product_prominence"],
+        "lighting_direction": advanced.get("lighting_direction")
+        if settings["visual_direction"] == "Manual Overrides"
+        else route["lighting_family"],
+        "time_of_day": advanced.get("time_of_day")
+        if settings["visual_direction"] == "Manual Overrides"
+        else route["lighting_family"],
+        "sport_family": instant_experience_sport_direction(category),
+    }
+
+
+def build_instant_experience_fingerprints(settings, *, category=""):
+    return [
+        instant_experience_fingerprint(route, settings=settings, category=category)
+        for _label, route in instant_experience_selected_routes(settings)
+    ]
+
+
+def update_recent_instant_experience_fingerprints(fingerprints):
+    if not fingerprints:
+        return
+    recent = st.session_state.get(ADS_IE_RECENT_FINGERPRINTS_KEY)
+    recent = list(recent) if isinstance(recent, list) else []
+    for fingerprint in fingerprints:
+        if fingerprint not in recent:
+            recent.insert(0, fingerprint)
+    st.session_state[ADS_IE_RECENT_FINGERPRINTS_KEY] = recent[:12]
+
+
+def _fingerprints_text(fingerprints):
+    if not fingerprints:
+        return "No recent Instant Experience fingerprints are available in this session."
+    return json.dumps(fingerprints[:12], ensure_ascii=False, indent=2)
+
+
+IE_WIDGET_KEYS = {
+    "output_mode": "ads_ie_output_mode",
+    "audience_mindset": "ads_ie_audience_mindset",
+    "primary_angle": "ads_ie_primary_angle",
+    "urgency_placement": "ads_ie_urgency_placement",
+    "destination_scope": "ads_ie_destination_scope",
+    "collection_name": "ads_ie_collection_name",
+    "collection_url": "ads_ie_collection_url",
+    "collection_product_set_name": "ads_ie_collection_product_set_name",
+    "collection_exact_offer": "ads_ie_collection_exact_offer",
+    "eligible_product_count": "ads_ie_eligible_product_count",
+    "multi_product_reference_count": "ads_ie_multi_product_reference_count",
+    "visual_direction": "ads_ie_visual_direction",
+    "fixed_button_cta_mode": "ads_ie_fixed_button_cta_mode",
+    "route_a": "ads_ie_route_a",
+    "route_b": "ads_ie_route_b",
+    "route_c": "ads_ie_route_c",
+}
+for _advanced_key in IE_ADVANCED_VISUAL_OPTION_SETS:
+    IE_WIDGET_KEYS[f"advanced_{_advanced_key}"] = f"ads_ie_advanced_{_advanced_key}"
+
+
+def initialise_instant_experience_widget_defaults():
+    defaults = default_instant_experience_settings(output_mode=IE_MODE_SMART)
+    for key, widget_key in IE_WIDGET_KEYS.items():
+        if key.startswith("advanced_"):
+            advanced_key = key.removeprefix("advanced_")
+            st.session_state.setdefault(widget_key, defaults["advanced_visual"][advanced_key])
+        else:
+            st.session_state.setdefault(widget_key, defaults.get(key, ""))
+    current = collect_instant_experience_settings_from_state()
+    normalized = normalize_instant_experience_settings(current)
+    for key in IE_SMART_ROUTE_KEYS:
+        widget_key = IE_WIDGET_KEYS[key]
+        if st.session_state.get(widget_key) != normalized[key]:
+            st.session_state[widget_key] = normalized[key]
+
+
+def collect_instant_experience_settings_from_state():
+    advanced = {
+        key: st.session_state.get(IE_WIDGET_KEYS[f"advanced_{key}"], IE_AUTO_FRESH_MATCH)
+        for key in IE_ADVANCED_VISUAL_OPTION_SETS
+    }
+    return normalize_instant_experience_settings(
+        {
+            "output_mode": st.session_state.get(IE_WIDGET_KEYS["output_mode"]),
+            "audience_mindset": st.session_state.get(IE_WIDGET_KEYS["audience_mindset"]),
+            "primary_angle": st.session_state.get(IE_WIDGET_KEYS["primary_angle"]),
+            "urgency_placement": st.session_state.get(IE_WIDGET_KEYS["urgency_placement"]),
+            "destination_scope": st.session_state.get(IE_WIDGET_KEYS["destination_scope"]),
+            "collection_name": st.session_state.get(IE_WIDGET_KEYS["collection_name"]),
+            "collection_url": st.session_state.get(IE_WIDGET_KEYS["collection_url"]),
+            "collection_product_set_name": st.session_state.get(IE_WIDGET_KEYS["collection_product_set_name"]),
+            "collection_exact_offer": st.session_state.get(IE_WIDGET_KEYS["collection_exact_offer"]),
+            "eligible_product_count": st.session_state.get(IE_WIDGET_KEYS["eligible_product_count"]),
+            "multi_product_reference_count": st.session_state.get(IE_WIDGET_KEYS["multi_product_reference_count"]),
+            "visual_direction": st.session_state.get(IE_WIDGET_KEYS["visual_direction"]),
+            "fixed_button_cta_mode": st.session_state.get(IE_WIDGET_KEYS["fixed_button_cta_mode"]),
+            "route_a": st.session_state.get(IE_WIDGET_KEYS["route_a"]),
+            "route_b": st.session_state.get(IE_WIDGET_KEYS["route_b"]),
+            "route_c": st.session_state.get(IE_WIDGET_KEYS["route_c"]),
+            "advanced_visual": advanced,
+        }
+    )
+
+
+def _route_options_for_position(position_key, selected_routes, *, collection_valid):
+    base = ["FEEL", "BELONG", "ACT"]
+    if position_key == "route_c" and collection_valid:
+        base.append("BUILD")
+    blocked = {
+        route
+        for key, route in selected_routes.items()
+        if key != position_key
+    }
+    options = [route for route in base if route not in blocked]
+    current = selected_routes.get(position_key)
+    if current and current not in options and (current != "BUILD" or collection_valid):
+        options.insert(0, current)
+    return options or [IE_DEFAULT_SMART_ROUTES[position_key]]
+
+
+def render_instant_experience_creative_panel(campaign_type):
+    if campaign_type != "Instant Experience":
+        return None
+    initialise_instant_experience_widget_defaults()
+    with st.container(border=True):
+        st.markdown("**Instant Experience Creative Direction**")
+        mode_col, audience_col, angle_col = st.columns(3)
+        with mode_col:
+            st.selectbox(
+                "Creative output mode",
+                IE_CREATIVE_OUTPUT_MODES,
+                key=IE_WIDGET_KEYS["output_mode"],
+            )
+        with audience_col:
+            st.selectbox(
+                "Audience mindset",
+                IE_AUDIENCE_MINDSETS,
+                key=IE_WIDGET_KEYS["audience_mindset"],
+            )
+        with angle_col:
+            st.selectbox(
+                "Primary creative angle",
+                IE_PRIMARY_CREATIVE_ANGLES,
+                key=IE_WIDGET_KEYS["primary_angle"],
+            )
+        urgency_col, destination_col, visual_col = st.columns(3)
+        with urgency_col:
+            st.selectbox(
+                "Urgency placement",
+                IE_URGENCY_PLACEMENTS,
+                key=IE_WIDGET_KEYS["urgency_placement"],
+            )
+            if st.session_state.get(IE_WIDGET_KEYS["urgency_placement"]) == "Meta description only":
+                st.caption(
+                    "Meta may not display the Description field in every placement. Verified scarcity will remain visible after the click."
+                )
+        with destination_col:
+            st.selectbox(
+                "Destination scope",
+                IE_DESTINATION_SCOPES,
+                key=IE_WIDGET_KEYS["destination_scope"],
+            )
+        with visual_col:
+            st.selectbox(
+                "Visual direction",
+                IE_VISUAL_DIRECTIONS,
+                key=IE_WIDGET_KEYS["visual_direction"],
+            )
+        st.selectbox(
+            "Fixed-button CTA handling",
+            IE_FIXED_BUTTON_CTA_MODES,
+            key=IE_WIDGET_KEYS["fixed_button_cta_mode"],
+        )
+        if st.session_state.get(IE_WIDGET_KEYS["destination_scope"]) == "Curated collection page + catalogue":
+            collection_cols = st.columns(3)
+            with collection_cols[0]:
+                st.text_input("Collection name", key=IE_WIDGET_KEYS["collection_name"])
+            with collection_cols[1]:
+                st.text_input("Collection URL", key=IE_WIDGET_KEYS["collection_url"])
+            with collection_cols[2]:
+                st.text_input("Exact product-set name", key=IE_WIDGET_KEYS["collection_product_set_name"])
+            offer_cols = st.columns(3)
+            with offer_cols[0]:
+                st.text_input("Exact verified offer", key=IE_WIDGET_KEYS["collection_exact_offer"])
+            with offer_cols[1]:
+                st.number_input(
+                    "Eligible catalogue products",
+                    min_value=0,
+                    step=1,
+                    key=IE_WIDGET_KEYS["eligible_product_count"],
+                )
+            with offer_cols[2]:
+                st.number_input(
+                    "Exact reference assets supplied",
+                    min_value=0,
+                    step=1,
+                    key=IE_WIDGET_KEYS["multi_product_reference_count"],
+                )
+        settings = collect_instant_experience_settings_from_state()
+        if settings["output_mode"] == IE_MODE_SMART:
+            st.caption("Smart 3-Pack uses three different psychological jobs. Duplicate routes are filtered out.")
+            selected_routes = {key: settings[key] for key in IE_SMART_ROUTE_KEYS}
+            route_cols = st.columns(3)
+            collection_valid = instant_experience_collection_destination_is_valid(settings)
+            for column, key in zip(route_cols, IE_SMART_ROUTE_KEYS):
+                with column:
+                    options = _route_options_for_position(
+                        key,
+                        selected_routes,
+                        collection_valid=collection_valid,
+                    )
+                    st.selectbox(
+                        IE_SMART_OPTION_HEADINGS[key],
+                        options,
+                        format_func=lambda option: IE_ROUTE_LABELS[option],
+                        key=IE_WIDGET_KEYS[key],
+                    )
+        if st.session_state.get(IE_WIDGET_KEYS["visual_direction"]) == "Manual Overrides":
+            with st.expander("Advanced Visual Controls", expanded=False):
+                visual_items = list(IE_ADVANCED_VISUAL_OPTION_SETS.items())
+                for offset in range(0, len(visual_items), 3):
+                    cols = st.columns(3)
+                    for column, (key, options) in zip(cols, visual_items[offset : offset + 3]):
+                        with column:
+                            st.selectbox(
+                                key.replace("_", " ").title(),
+                                options,
+                                key=IE_WIDGET_KEYS[f"advanced_{key}"],
+                            )
+    return collect_instant_experience_settings_from_state()
 
 
 def _template_slug(value):
@@ -2078,6 +2899,486 @@ def build_default_instant_experience_cover_prompt_requirements(product_name, cat
     )
 
 
+def _ie_visual_value(settings, key, fallback):
+    settings = normalize_instant_experience_settings(settings)
+    if settings["visual_direction"] == "Manual Overrides":
+        value = settings.get("advanced_visual", {}).get(key)
+        if value and value != IE_AUTO_FRESH_MATCH:
+            return value
+    return fallback
+
+
+def instant_experience_creative_cta_for_route(route_id, *, settings=None, exact_offer=""):
+    route = INSTANT_EXPERIENCE_ROUTE_CONFIGS.get(route_id, INSTANT_EXPERIENCE_ROUTE_CONFIGS["ACT"])
+    if route_id == "BUILD" and exact_offer:
+        return "Shop the Offer"
+    return route["creative_cta_family"][0]
+
+
+def instant_experience_fixed_button_cta_for_route(route_id, *, settings=None):
+    settings = normalize_instant_experience_settings(settings)
+    route = INSTANT_EXPERIENCE_ROUTE_CONFIGS.get(route_id, INSTANT_EXPERIENCE_ROUTE_CONFIGS["ACT"])
+    if settings["fixed_button_cta_mode"] == "Hold fixed-button CTA constant across all routes":
+        return "Shop Now"
+    return route["fixed_button_cta"]
+
+
+def build_instant_experience_offer_serialization_block(
+    campaign_moment=None,
+    settings=None,
+    *,
+    selected_routes=None,
+):
+    exact_offer = exact_offer_from_inputs(campaign_moment, settings)
+    route_ids = selected_routes or [route for _label, route in instant_experience_selected_routes(settings)]
+    supported_routes = [
+        route_id for route_id in route_ids if instant_experience_route_supports_offer(route_id)
+    ]
+    offer_value = exact_offer or "None supplied"
+    if exact_offer and supported_routes:
+        use_rule = (
+            "The exact offer may be used only inside these active offer-compatible routes: "
+            f"{', '.join(supported_routes)}."
+        )
+    elif exact_offer:
+        use_rule = (
+            "The exact offer is serialized for review, but no active route supports offer language. "
+            "Do not use it in primary text, headline, cover, creative CTA or Meta Description."
+        )
+    else:
+        use_rule = "No offer may be invented or implied."
+    return f"""EXACT OFFER SERIALIZATION
+
+Exact offer entered: {offer_value}
+
+This field is serialized independently of Moment Type. If it is non-empty, preserve the wording exactly.
+
+{use_rule}"""
+
+
+def build_instant_experience_route_gate_block(settings=None):
+    settings = normalize_instant_experience_settings(settings)
+    return f"""INSTANT EXPERIENCE ANGLE GATES
+
+- Destination scope selected: {settings["destination_scope"]}.
+- Rivalry requires a verified dual-subject or rivalry product.
+- Milestone requires a verified milestone, number or event.
+- Collector/Rarity requires verified edition information.
+- Gift requires Gift Buyer targeting or an explicitly selected gifting strategy.
+- Sale requires an exact entered offer.
+- National-pride language requires a verified connection between the subject and nation; selected advertising country alone is insufficient.
+- "Made in the USA" must come from approved manufacturing data, never the selected target market.
+- Country selection controls language, terminology and residential cues. It must not alter product facts.
+- Sport selection controls emotional vocabulary and visual atmosphere. It must not introduce fake sporting props or unsupported history.
+- "Only X remaining" requires current timestamped inventory data.
+- Numbered certificate language requires approved product data.
+- Never invent scarcity, offers, sporting details or product facts."""
+
+
+def build_instant_experience_freshness_block(
+    settings=None,
+    *,
+    category="",
+    recent_fingerprints=None,
+):
+    current_fingerprints = build_instant_experience_fingerprints(settings, category=category)
+    return f"""STRUCTURED INSTANT EXPERIENCE CREATIVE FRESHNESS
+
+Current route fingerprints:
+{_fingerprints_text(current_fingerprints)}
+
+Recent Instant Experience fingerprints to avoid repeating:
+{_fingerprints_text(recent_fingerprints or [])}
+
+A new creative should differ from recent work in at least five of these dimensions: psychological angle, opening-hook structure, cover layout, urgency placement, room type, wall colour/material family, camera family, lighting/time of day.
+
+Within a Smart 3-Pack:
+- Use three distinct layout/camera families.
+- Use at least two different room categories.
+- Do not repeat the same wall material.
+- Do not repeat the same time of day.
+- Do not use the same overlay hierarchy.
+- Make the difference visible at thumbnail size."""
+
+
+def build_instant_experience_route_visual_brief(
+    route_id,
+    *,
+    settings=None,
+    category="",
+):
+    route = INSTANT_EXPERIENCE_ROUTE_CONFIGS.get(route_id, INSTANT_EXPERIENCE_ROUTE_CONFIGS["ACT"])
+    room_type = _ie_visual_value(settings, "room_type", route["room_family"])
+    wall_colour = _ie_visual_value(settings, "wall_colour_family", route["wall_family"])
+    wall_material = _ie_visual_value(settings, "wall_material", route["wall_family"])
+    camera_family = _ie_visual_value(settings, "camera_family", route["camera_family"])
+    camera_height = _ie_visual_value(settings, "camera_height", route["camera_family"])
+    shot_distance = _ie_visual_value(settings, "shot_distance", route["product_prominence"])
+    lens_character = _ie_visual_value(settings, "lens_character", route["lens_family"])
+    lighting_direction = _ie_visual_value(settings, "lighting_direction", route["lighting_family"])
+    time_of_day = _ie_visual_value(settings, "time_of_day", route["lighting_family"])
+    cover_layout = _ie_visual_value(settings, "cover_layout", route["cover_composition"])
+    overlay_treatment = _ie_visual_value(settings, "overlay_text_treatment", route["on_image_message_type"])
+    return f"""Route visual brief:
+- Room type: {room_type}
+- Wall colour family: {wall_colour}
+- Wall material/finish: {wall_material}
+- Camera side and angle: {camera_family}
+- Camera height: {camera_height}
+- Shot distance/product prominence: {shot_distance}
+- Lens character: {lens_character}
+- Lighting direction: {lighting_direction}
+- Time of day: {time_of_day}
+- Cover layout: {cover_layout}
+- Overlay text treatment: {overlay_treatment}
+- Sport atmosphere guide: {instant_experience_sport_direction(category)}
+- No generated sporting props, fake memorabilia, team-coloured clutter, extra artwork, neon signs or unofficial branding."""
+
+
+def build_instant_experience_route_copy_rules(
+    route_id,
+    *,
+    settings=None,
+    campaign_moment=None,
+):
+    settings = normalize_instant_experience_settings(settings)
+    route = INSTANT_EXPERIENCE_ROUTE_CONFIGS.get(route_id, INSTANT_EXPERIENCE_ROUTE_CONFIGS["ACT"])
+    exact_offer = exact_offer_from_inputs(campaign_moment, settings)
+    if route_id == "FEEL":
+        urgency_line = (
+            "When urgency placement is None in feed creative or Meta description only, keep the primary text, headline and cover free of FOMO wording."
+            if settings["urgency_placement"] in {"None in feed creative", "Meta description only"}
+            else "Use urgency only if it remains soft, verified and secondary to the memory-led hook."
+        )
+        return f"""FEEL ROUTE RULES
+
+Psychological job: {route["psychological_job"]}
+
+Copy:
+- Lead with a sensory memory, defining feeling or verified product-specific moment.
+- No generic product description opening.
+- No proof checklist.
+- No discount language.
+- No hard-sell language.
+- Do not use "Greatness doesn't fade" in this route.
+- Do not force nostalgia onto a future or current event.
+- For a current achievement, adapt FEEL to awe, triumph or anticipation.
+- "Relive" may only be used for a completed event.
+- {urgency_line}
+
+Cover:
+- Full-bleed or near-full-bleed editorial lifestyle composition.
+- No large hard black panel.
+- Lifestyle/product region approximately 78-84%.
+- Optional restrained editorial caption region approximately 16-22%.
+- The frame should occupy approximately 65-75% of the usable width.
+- Eye-level or slightly below eye-level.
+- Near-front or very mild three-quarter perspective.
+- 65-85mm natural lens character.
+- Intimate morning or late-afternoon natural light.
+- Use one short product-specific hook and, at most, one supporting line.
+- Maximum approximately 14 total overlay words.
+- No feed urgency CTA on the cover when feed urgency is disabled."""
+    if route_id == "BELONG":
+        return f"""BELONG ROUTE RULES
+
+Psychological job: {route["psychological_job"]}
+
+Copy:
+- Lead with belonging, recognition or shared fan identity.
+- Help the customer picture the artwork in their home, office, sports room or collection.
+- Do not make the room the product.
+- Do not use a proof checklist.
+- Use no more than one verified proof or scarcity cue.
+- Do not use aggressive gone-forever language unless explicitly selected.
+- Do not reuse the FEEL opening structure.
+- Do not use "Greatness doesn't fade" unless this route has explicitly been chosen as the one permitted route to use it.
+- Do not invent an offer. Exact offer entered for this run: {exact_offer or "None"}.
+
+Cover:
+- Wider real-room context than FEEL.
+- Asymmetrical editorial composition.
+- Use genuine architectural negative space for typography.
+- Avoid the current centered black scarcity panel.
+- Frame approximately 50-60% of usable width.
+- Chest-height camera.
+- Restrained left or right three-quarter view.
+- 45-55mm natural lens character.
+- Contemporary but believable wall/material contrast.
+- Dusk daylight plus restrained practical lighting is allowed.
+- Use an identity-led hook, one short support line and one restrained CTA.
+- Maximum approximately 16 total overlay words."""
+    if route_id == "BUILD":
+        return f"""BUILD ROUTE RULES
+
+Psychological job: {route["psychological_job"]}
+
+Copy:
+- Only use this route for a precise curated collection destination.
+- Lead with choosing more than one relevant edition and building a collection.
+- Use the exact entered multi-buy or collection offer only when supplied and verified: {exact_offer or "None supplied"}.
+- Do not generate invented or lookalike artworks to create a multi-product wall.
+- A multi-product promise must not link to one unrelated PDP.
+- Valid creative CTA territory includes Choose Your Legends, Build Your Wall, Shop the Collection and Shop the Offer.
+
+Cover:
+- If the cover displays multiple products, two to four exact product reference assets must be supplied.
+- Never invent additional framed editions.
+- Keep the featured product exact and dominant enough to understand on mobile.
+- Use collection-wall or collection-browsing composition only when exact references are supplied."""
+    overlay_lines = "\n".join(BASEBALL_INSTANT_EXPERIENCE_COVER_LINES)
+    return f"""ACT ROUTE RULES
+
+Psychological job: {route["psychological_job"]}
+
+This is the Classic Collector current conversion control.
+
+Preserve the existing:
+- Copy opener.
+- Product-specific paragraph rules.
+- Approved proof checklist.
+- Scarcity close.
+- Headline logic.
+- CTA.
+- Setup.
+- Black-and-gold panel.
+- Existing room direction and visual safeguards.
+
+Use this current-control opening:
+Greatness doesn't fade. It gets framed.
+
+Use this current-control creative CTA:
+{BASEBALL_INSTANT_EXPERIENCE_CTA}
+
+Use these exact cover lines:
+{overlay_lines}
+
+Cover:
+- Current 64-68% lifestyle / 32-36% scarcity-panel direction.
+- Current black-and-gold visual treatment.
+- Deep matte black panel with restrained metallic-gold detailing.
+- Never invent scarcity.
+- "Only X remaining" requires current timestamped inventory data."""
+
+
+def build_instant_experience_route_package_contract(
+    label,
+    route_id,
+    *,
+    settings=None,
+    product_name="",
+    category="",
+    country="",
+    product_url="",
+    campaign_moment=None,
+):
+    settings = normalize_instant_experience_settings(settings)
+    route = INSTANT_EXPERIENCE_ROUTE_CONFIGS.get(route_id, INSTANT_EXPERIENCE_ROUTE_CONFIGS["ACT"])
+    exact_offer = exact_offer_from_inputs(campaign_moment, settings)
+    creative_cta = instant_experience_creative_cta_for_route(
+        route_id,
+        settings=settings,
+        exact_offer=exact_offer,
+    )
+    fixed_button_cta = instant_experience_fixed_button_cta_for_route(
+        route_id,
+        settings=settings,
+    )
+    option_heading = f"{label} — {route_id}"
+    if label == "CLASSIC COLLECTOR":
+        option_heading = "CLASSIC COLLECTOR — CURRENT CONTROL"
+    elif label == "SELECTED ROUTE":
+        option_heading = f"SELECTED ROUTE — {route_id}"
+    return f"""{option_heading}
+
+Route name: {IE_ROUTE_LABELS.get(route_id, route_id)}
+Psychological job: {route["psychological_job"]}
+Funnel suitability: {route["funnel"]}
+Creative CTA family: {", ".join(route["creative_cta_family"])}
+Default creative CTA for this route: {creative_cta}
+Fixed button CTA for this route: {fixed_button_cta}
+Destination compatibility: {route["destination"]}
+Required data: {route["required_data"]}
+Prohibited language: {route["prohibited_language"]}
+
+{build_instant_experience_route_copy_rules(route_id, settings=settings, campaign_moment=campaign_moment)}
+
+{build_instant_experience_route_visual_brief(route_id, settings=settings, category=category)}
+
+OUTPUT EXACTLY FOR THIS OPTION
+
+PRIMARY TEXT
+[one complete primary text]
+
+HEADLINE
+[one headline]
+
+META AD DESCRIPTION
+[one supporting Meta ad description]
+
+CREATIVE CTA
+[{creative_cta} or another valid creative CTA from the route family]
+
+FIXED BUTTON CTA
+[{fixed_button_cta}]
+
+CAMPAIGN STRATEGY
+[one concise route-specific strategy summary]
+
+INSTANT EXPERIENCE SETUP
+[one complete setup block using product.name as the catalogue product headline, Limited Edition as the catalogue descriptor, the exact destination URL, and {META_AD_URL_PARAMETERS}]
+
+IMAGE GENERATION PROMPTS — COPY ONE AT A TIME
+
+INSTANT EXPERIENCE COVER IMAGE PROMPT
+[one complete standalone cover prompt for {product_name}, {category}, {country}, active route {route_id}, exact route overlay wording, exact destination scope and the exact uploaded framed product reference]"""
+
+
+def build_instant_experience_route_prompt(
+    product_name,
+    category,
+    country,
+    campaign_type,
+    product_url="",
+    *,
+    instant_experience_settings=None,
+    campaign_moment=None,
+    recent_instant_experience_fingerprints=None,
+    specific_pattern=False,
+):
+    product_name = _clean_product_name(product_name)
+    product_url = _clean_product_url(product_url)
+    settings = normalize_instant_experience_settings(instant_experience_settings)
+    selected_routes = instant_experience_selected_routes(settings)
+    route_ids = [route for _label, route in selected_routes]
+    if specific_pattern:
+        pattern_heading = f"SPORTS CAVE {str(category or '').upper()} INSTANT EXPERIENCE ROUTE SYSTEM"
+    else:
+        pattern_heading = "SPORTS CAVE INSTANT EXPERIENCE ROUTE SYSTEM"
+    if settings["output_mode"] == IE_MODE_SMART:
+        objective = "Create exactly three complete Instant Experience ads, one per selected route. These are separate concepts, not five rewrites inside one ad."
+    else:
+        objective = "Create exactly one complete Instant Experience ad for the selected route."
+    route_contracts = "\n\n".join(
+        build_instant_experience_route_package_contract(
+            label,
+            route,
+            settings=settings,
+            product_name=product_name,
+            category=category,
+            country=country,
+            product_url=product_url,
+            campaign_moment=campaign_moment,
+        )
+        for label, route in selected_routes
+    )
+    smart_rule = (
+        "\nSMART 3-PACK ORDER\nReturn exactly three complete packages in the selected route order. Do not output rejected alternatives inside any option.\n"
+        if settings["output_mode"] == IE_MODE_SMART
+        else ""
+    )
+    collection_block = ""
+    if settings["destination_scope"] == "Curated collection page + catalogue":
+        collection_block = f"""
+CURATED COLLECTION DESTINATION
+
+Collection name: {settings["collection_name"]}
+Collection URL: {settings["collection_url"]}
+Exact product-set name: {settings["collection_product_set_name"]}
+Eligible catalogue products: {settings["eligible_product_count"]}
+Exact product reference assets supplied: {settings["multi_product_reference_count"]}
+
+Never silently use a broad collection URL. A multi-product promise must use this collection destination and exact product set."""
+    fixed_button_rule = (
+        "Hold the fixed button CTA constant across all returned routes. The creative/on-image CTA may vary by route."
+        if settings["fixed_button_cta_mode"] == "Hold fixed-button CTA constant across all routes"
+        else "Auto-match the fixed button CTA to each active route using valid Meta or Instant Experience button labels."
+    )
+    return f"""{pattern_heading}
+
+PRODUCT
+Product name: {product_name}
+Category: {category}
+Market: {country}
+Campaign type: {campaign_type}
+Destination guidance: {build_product_url_instruction(product_url)}
+Creative output mode: {settings["output_mode"]}
+Audience mindset: {settings["audience_mindset"]}
+Primary creative angle override: {settings["primary_angle"]}
+Urgency placement: {settings["urgency_placement"]}
+Destination scope: {settings["destination_scope"]}
+Visual direction: {settings["visual_direction"]}
+Fixed-button CTA handling: {settings["fixed_button_cta_mode"]}
+
+I have attached the exact Sports Cave product image being advertised.
+
+Analyse the attached image and product title before writing.
+
+Use the supplied product name as the source of identity. Do not identify or guess a person, club, country, achievement, year, record, final, trophy or rivalry solely from the image.
+
+{build_country_campaign_localisation_note(category, country)}
+
+{build_universal_sports_cave_rules(category)}
+
+{build_category_winner_angle_block(category, campaign_type, country)}
+
+OBJECTIVE
+
+{objective}
+{smart_rule}
+Do not generate images. Return text, setup and production-ready cover prompts only.
+
+SEPARATE CTA TYPES
+
+- Emotional angle: controlled by the active route.
+- On-image creative CTA: generated under CREATIVE CTA.
+- Meta/Instant Experience fixed-button CTA: generated under FIXED BUTTON CTA.
+- Primary-text close: must match the active route.
+- Offer: may be used only when the active route supports it and the exact offer is supplied.
+- Destination: use the exact product or collection destination supplied in this prompt.
+
+{fixed_button_rule}
+
+{build_instant_experience_offer_serialization_block(campaign_moment, settings, selected_routes=route_ids)}
+
+{build_instant_experience_route_gate_block(settings)}
+{collection_block}
+
+COPY DIVERSITY RULES
+
+- Each option must have one dominant psychological job.
+- No shared opening sentence.
+- No duplicated headline.
+- No duplicated creative CTA.
+- Only ACT may use the existing scarcity panel.
+- Only one option may use "Greatness doesn't fade."
+- FEEL must not sound like ACT with urgency lines removed.
+- BELONG must not sound like an interior-design advertisement.
+- Do not repeat the same proof sentence across all options.
+- Use short mobile-readable paragraphs.
+- Avoid generic AI language including elevate, transform, ultimate, unleash, must-have, masterpiece, conversation starter and bring your walls to life.
+- Every product claim must remain fact-safe.
+- Use natural selected-country English.
+
+{build_instant_experience_freshness_block(settings, category=category, recent_fingerprints=recent_instant_experience_fingerprints)}
+
+ROUTE OUTPUT CONTRACTS
+
+{route_contracts}
+
+FINAL QUALITY CHECK
+
+- The output count matches the selected Creative output mode.
+- Every option contains exactly one Primary Text, one Headline, one Meta Ad Description, one Creative CTA, one Fixed Button CTA, one Campaign Strategy, one Instant Experience Setup block and one complete standalone cover prompt.
+- No Description section is used except the clearly labelled META AD DESCRIPTION field.
+- product.name is used as the catalogue product headline.
+- Limited Edition is used as the catalogue product description.
+- The exact supplied destination URL is used: {product_url or "[selected product URL]"}.
+- The exact URL parameters are used: {META_AD_URL_PARAMETERS}.
+- Product, artwork, frame, glass and realism safeguards are preserved.
+- No automatic image generation is triggered."""
+
+
 def build_instant_experience_visual_output_requirements(
     template_key,
     *,
@@ -2085,7 +3386,85 @@ def build_instant_experience_visual_output_requirements(
     category="",
     country="",
     campaign_moment=None,
+    instant_experience_settings=None,
+    recent_instant_experience_fingerprints=None,
 ):
+    settings = normalize_instant_experience_settings(instant_experience_settings)
+    if settings["output_mode"] != IE_MODE_CLASSIC:
+        selected_routes = instant_experience_selected_routes(settings)
+        route_prompt_count = len(selected_routes)
+        route_labels = ", ".join(
+            f"{label} — {route}" for label, route in selected_routes
+        )
+        package_count_rule = (
+            "Return exactly three complete Instant Experience packages and three standalone cover prompts."
+            if settings["output_mode"] == IE_MODE_SMART
+            else "Return exactly one complete Instant Experience package and one standalone cover prompt."
+        )
+        route_visuals = "\n\n".join(
+            f"""{label} — {route} COVER DIRECTION
+
+{build_instant_experience_route_copy_rules(route, settings=settings, campaign_moment=campaign_moment)}
+
+{build_instant_experience_route_visual_brief(route, settings=settings, category=category)}"""
+            for label, route in selected_routes
+        )
+        shared_realism_rules = build_sports_cave_image_realism_rules(
+            include_product_lock=True
+        )
+        campaign_moment_visual_context = build_campaign_moment_visual_context(
+            campaign_moment,
+            selected_country=country,
+        )
+        campaign_moment_visual_block = (
+            f"\n\n{campaign_moment_visual_context}"
+            if campaign_moment_visual_context
+            else ""
+        )
+        return f"""INSTANT EXPERIENCE VISUAL REQUIREMENTS
+
+Active route outputs: {route_labels}
+
+{package_count_rule}
+
+Each returned cover prompt must remain fully standalone and must contain:
+- Exact product identity: {product_name}
+- Exact selected sport and country: {category}, {country}
+- Active creative route.
+- Exact approved overlay wording for that option.
+- Route-specific room, wall, material, camera, shot, lens and lighting direction.
+- Product/artwork lock.
+- Frame and glass realism.
+- Correct physical mounting.
+- Room realism.
+- Structured freshness instructions.
+- Sport/country adaptation.
+- Exact 1:1 composition for a 1024 x 1024 square cover.
+- No automatic image generation.
+
+Do not claim that prompt wording alone guarantees exact pixels. The returned asset must be checked before upload; if Sports Cave OS imports the generated image, it must validate that the asset is square before export.
+
+IMAGE GENERATION PROMPTS — COPY ONE AT A TIME
+
+Print one complete "INSTANT EXPERIENCE COVER IMAGE PROMPT" inside each returned option. Do not merge the prompts. Do not refer to rules elsewhere in the returned cover prompt.
+
+SHARED PRODUCT AND REALISM BLOCK — COPY INTO EACH RETURNED COVER PROMPT EXACTLY ONCE
+
+{shared_realism_rules}
+
+{build_instant_experience_freshness_block(settings, category=category, recent_fingerprints=recent_instant_experience_fingerprints)}
+
+{build_instant_experience_route_gate_block(settings)}
+{campaign_moment_visual_block}
+
+ROUTE-SPECIFIC COVER REQUIREMENTS
+
+{route_visuals}
+
+Never invent edition quantities, sale prices, discounts, signatures, logos, athlete names, achievements, dates, rivalries, product details or scarcity facts.
+
+The response is incomplete unless it contains {route_prompt_count} complete standalone Instant Experience cover prompt(s)."""
+
     layout_rules = build_default_instant_experience_cover_prompt_requirements(
         product_name,
         category,
@@ -2098,6 +3477,9 @@ def build_instant_experience_visual_output_requirements(
     sport_country_adaptation = build_sport_country_visual_adaptation(
         category,
         country,
+    )
+    shared_realism_rules = build_sports_cave_image_realism_rules(
+        include_product_lock=True
     )
     scarcity_rules = """Use the exact default overlay text supplied above. Do not replace it with generated copy, alternate scarcity wording, a different CTA, a fake button or an inferred edition claim."""
     campaign_moment_visual_context = build_campaign_moment_visual_context(
@@ -2133,6 +3515,8 @@ INSTANT EXPERIENCE COVER IMAGE PROMPT
 {variation_lock}
 
 {sport_country_adaptation}
+
+{shared_realism_rules}
 
 {scarcity_rules}{campaign_moment_visual_block}
 
@@ -2172,7 +3556,7 @@ Return exactly one creative prompt.""".format(
     )
 
 
-def build_ads_text_first_image_generation_gate(campaign_type):
+def build_ads_text_first_image_generation_gate(campaign_type, instant_experience_settings=None):
     campaign_type = _normalise_option_label(campaign_type) or "selected campaign"
     if campaign_type == "Carousel":
         format_detail = (
@@ -2186,13 +3570,30 @@ def build_ads_text_first_image_generation_gate(campaign_type):
             "relevance, strict artwork lock, frame realism, product dominance and photorealism rules."
         )
     elif campaign_type == "Instant Experience":
-        format_detail = (
-            "For Instant Experience campaigns, the first text-only response must include the complete campaign "
-            "strategy, exactly five Primary Text options, exactly five Headlines, exactly five Call To Action "
-            "button-label options, Instant Experience setup details and one complete, separately copyable, "
-            "production-ready cover image prompt before asking for approval to generate anything. Do not include "
-            "Description fields for Instant Experience."
-        )
+        settings = normalize_instant_experience_settings(instant_experience_settings)
+        if settings["output_mode"] == IE_MODE_SMART:
+            format_detail = (
+                "For Instant Experience Smart 3-Pack campaigns, the first text-only response must include exactly "
+                "three complete ad packages. Each package must include one Primary Text, one Headline, one Meta Ad "
+                "Description, one Creative CTA, one Fixed Button CTA, one Campaign Strategy, one Instant Experience "
+                "setup block and one complete, separately copyable, production-ready cover image prompt before asking "
+                "for approval to generate anything."
+            )
+        elif settings["output_mode"] == IE_MODE_SELECTED:
+            format_detail = (
+                "For One Selected Route Instant Experience campaigns, the first text-only response must include exactly "
+                "one complete ad package with one Primary Text, one Headline, one Meta Ad Description, one Creative CTA, "
+                "one Fixed Button CTA, one Campaign Strategy, one Instant Experience setup block and one complete, "
+                "separately copyable, production-ready cover image prompt before asking for approval to generate anything."
+            )
+        else:
+            format_detail = (
+                "For Classic Collector Instant Experience campaigns, the first text-only response must include the complete "
+                "current-control campaign strategy, exactly five Primary Text options, exactly five Headlines, exactly five "
+                "Call To Action button-label options, Instant Experience setup details and one complete, separately copyable, "
+                "production-ready cover image prompt before asking for approval to generate anything. Do not include generic "
+                "Description fields for Classic Collector Instant Experience."
+            )
     elif campaign_type == "Single Image / Video":
         format_detail = (
             "For Single Image / Video campaigns, the first text-only response must include the complete campaign "
@@ -2207,7 +3608,9 @@ def build_ads_text_first_image_generation_gate(campaign_type):
         )
 
     if campaign_type == "Instant Experience":
-        ad_package_items = """1. Campaign objective and funnel stage.
+        settings = normalize_instant_experience_settings(instant_experience_settings)
+        if settings["output_mode"] == IE_MODE_CLASSIC:
+            ad_package_items = """1. Campaign objective and funnel stage.
 2. Target market and audience.
 3. Main emotional/creative angle.
 4. Five Primary Text options.
@@ -2217,6 +3620,18 @@ def build_ads_text_first_image_generation_gate(campaign_type):
 8. Instant Experience setup strategy.
 9. The text shown on each creative, where applicable.
 10. One complete production-ready Instant Experience cover image prompt.
+11. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions."""
+        else:
+            ad_package_items = """1. Campaign objective and funnel stage.
+2. Target market and audience.
+3. Active Instant Experience creative route.
+4. One Primary Text for each returned route.
+5. One Headline for each returned route.
+6. One Meta Ad Description for each returned route.
+7. One Creative CTA and one Fixed Button CTA for each returned route.
+8. Optional event or exact offer integration only where the active route supports it.
+9. Instant Experience setup strategy for each returned route.
+10. One complete production-ready Instant Experience cover image prompt for each returned route.
 11. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions."""
     else:
         ad_package_items = """1. Campaign objective and funnel stage.
@@ -2232,6 +3647,12 @@ def build_ads_text_first_image_generation_gate(campaign_type):
 11. A complete production-ready image prompt for every required image.
 12. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions."""
 
+    approval_question = (
+        instant_experience_output_suffix(instant_experience_settings)
+        if campaign_type == "Instant Experience"
+        else "Would you like me to generate Card 1?"
+    )
+
     return f"""TEXT-FIRST IMAGE-GENERATION GATE - MANDATORY
 
 Your first response must be text and planning only. Do not call, invoke, open or use any image-generation tool in the first response, even if artwork or product images are attached, even if this Ads prompt describes an image, and even if this Ads prompt contains the words "image prompt", "create", "generate", "cover prompt" or "creative prompt".
@@ -2246,11 +3667,11 @@ Print every image prompt in full in clearly separated, copyable blocks. Do not s
 {format_detail}
 
 After presenting the entire campaign package and every required image prompt, finish the response with exactly:
-"Would you like me to generate Card 1?"
+"{approval_question}"
 
-Then wait for explicit approval before generating anything. If the user later says "Generate Card 1", generate Card 1 only, then ask whether to proceed with Card 2. Continue one image at a time unless the user explicitly requests multiple images.
+Then wait for explicit approval before generating anything. If the user later asks for a specific cover or card, generate only that requested image, then ask whether to proceed. Continue one image at a time unless the user explicitly requests multiple images.
 
-A direct and unmistakable instruction such as "generate the image now" or "generate Card 1" is permission to generate only that requested image immediately. Do not treat general campaign setup, attached artwork, image-prompt text or pasted Ads prompts as that permission."""
+A direct and unmistakable instruction such as "generate the image now", "generate Card 1" or "generate FEEL" is permission to generate only that requested image immediately. Do not treat general campaign setup, attached artwork, image-prompt text or pasted Ads prompts as that permission."""
 
 
 def build_campaign_visual_output_contract(
@@ -2262,6 +3683,8 @@ def build_campaign_visual_output_contract(
     template_key=None,
     variation_token="",
     campaign_moment=None,
+    instant_experience_settings=None,
+    recent_instant_experience_fingerprints=None,
 ):
     product_name = _clean_product_name(product_name)
     variation_token = _normalise_option_label(variation_token) or "standard"
@@ -2280,6 +3703,8 @@ def build_campaign_visual_output_contract(
             category=category,
             country=country,
             campaign_moment=campaign_moment,
+            instant_experience_settings=instant_experience_settings,
+            recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
         )
     elif campaign_type == "Single Image / Video":
         campaign_requirements = build_single_image_video_visual_output_requirements(
@@ -2290,17 +3715,42 @@ def build_campaign_visual_output_contract(
         return ""
     contract_version = ads_prompt_contract_version_for_campaign(campaign_type).replace("; ", "\n")
     if campaign_type == "Instant Experience":
-        copy_schema_preservation = (
-            "Return the finished existing ad-copy output first, in its existing required schema and order. "
-            "Preserve every existing Instant Experience primary-text, headline, call-to-action, setup instruction, "
-            "destination rule and URL parameter. Do not add Description fields to Instant Experience."
-        )
+        settings = normalize_instant_experience_settings(instant_experience_settings)
+        if settings["output_mode"] == IE_MODE_CLASSIC:
+            copy_schema_preservation = (
+                "Return the finished Classic Collector current-control ad-copy output first, in its existing required schema and order. "
+                "Preserve every existing Instant Experience primary-text, headline, call-to-action, setup instruction, "
+                "destination rule and URL parameter. Do not add generic Description fields to Classic Collector Instant Experience."
+            )
+        else:
+            copy_schema_preservation = (
+                "Return the finished route-based Instant Experience output first, in the active route schema and order. "
+                "Preserve every route label, Primary Text, Headline, META AD DESCRIPTION, CREATIVE CTA, FIXED BUTTON CTA, "
+                "setup instruction, destination rule and URL parameter. Do not output rejected alternatives."
+            )
     else:
         copy_schema_preservation = (
             "Return the finished existing ad-copy output first, in its existing required schema and order. "
             "Preserve every existing copy field, card role, primary-text variation, headline, description, CTA, "
             "setup instruction, destination rule and URL parameter."
         )
+
+    if campaign_type == "Instant Experience":
+        visual_safeguards = ""
+        final_question = instant_experience_output_suffix(instant_experience_settings)
+    else:
+        visual_safeguards = f"""{build_product_lock_visual_rules()}
+
+{build_frame_and_glass_visual_rules()}
+
+{build_room_realism_visual_rules()}
+
+{build_last_image_variation_visual_rules()}
+
+{build_sport_country_visual_adaptation(category, country)}
+
+{build_sports_cave_image_realism_rules(include_product_lock=True)}"""
+        final_question = "Would you like me to generate Card 1?"
 
     return f"""MASTER RESPONSE AND VISUAL OUTPUT CONTRACT
 
@@ -2328,27 +3778,17 @@ Do not repeat the research, explain decisions, show internal reasoning, provide 
 
 Treat the creative variation token only as a cue for a fresh interpretation. Never display it in ad copy or inside an image.
 
-{build_ads_text_first_image_generation_gate(campaign_type)}
+{build_ads_text_first_image_generation_gate(campaign_type, instant_experience_settings)}
 
-{build_product_lock_visual_rules()}
-
-{build_frame_and_glass_visual_rules()}
-
-{build_room_realism_visual_rules()}
-
-{build_last_image_variation_visual_rules()}
-
-{build_sport_country_visual_adaptation(category, country)}
+{visual_safeguards}
 
 {campaign_requirements}
-
-{build_sports_cave_image_realism_rules(include_product_lock=True)}
 
 FINAL RESPONSE TERMINATION - MANDATORY
 
 Only after the complete campaign package and every full image-generation prompt above have been printed, end the first response with exactly this sentence and nothing after it:
 
-Would you like me to generate Card 1?"""
+{final_question}"""
 
 
 def apply_campaign_visual_output_contract(
@@ -2361,11 +3801,16 @@ def apply_campaign_visual_output_contract(
     template_key=None,
     variation_token="",
     campaign_moment=None,
+    instant_experience_settings=None,
+    recent_instant_experience_fingerprints=None,
 ):
     if not prompt:
         return prompt
     marker = "MASTER RESPONSE AND VISUAL OUTPUT CONTRACT"
-    if ADS_PROMPT_CONTRACT_VERSION in prompt:
+    expected_version = ads_prompt_contract_version_for_campaign(campaign_type)
+    if expected_version in prompt:
+        return prompt
+    if campaign_type != "Instant Experience" and ADS_PROMPT_CONTRACT_VERSION in prompt:
         return prompt
     if marker in prompt:
         prompt = prompt[:prompt.index(marker)].rstrip()
@@ -2377,6 +3822,8 @@ def apply_campaign_visual_output_contract(
         template_key=template_key,
         variation_token=variation_token,
         campaign_moment=campaign_moment,
+        instant_experience_settings=instant_experience_settings,
+        recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
     )
     return f"{prompt.rstrip()}\n\n{contract}" if contract else prompt
 
@@ -2803,7 +4250,50 @@ def apply_campaign_copy_rule_blocks(prompt, campaign_type, include_primary_text_
     return prompt
 
 
-def build_shared_meta_winner_copy_upgrade(campaign_type=""):
+def build_instant_experience_route_copy_diversity_rules(settings=None):
+    settings = normalize_instant_experience_settings(settings)
+    selected_routes = ", ".join(route for _label, route in instant_experience_selected_routes(settings))
+    return f"""{META_WINNER_COPY_BLOCK_VERSION}
+
+This block strengthens Instant Experience route selection only. Preserve the active route output schema, CTA separation, URL parameters, localisation, claim safeguards and all product-accuracy protections.
+
+INSTANT EXPERIENCE ROUTE COPY DIVERSITY
+
+- Active route set: {selected_routes}.
+- Each returned option must have one dominant psychological job.
+- No shared opening sentence.
+- No duplicated headline.
+- No duplicated creative CTA.
+- Only ACT may use the existing black scarcity panel.
+- Only one option may use "Greatness doesn't fade."
+- FEEL must not sound like ACT with scarcity lines removed.
+- BELONG must not sound like an interior-design advertisement.
+- Reject identical first-four-word openings.
+- Reject high phrase overlap.
+- Do not repeat the same proof sentence across every option.
+- Do not blend nostalgia, gifting, ownership, discount and scarcity into every option.
+- Use short mobile-readable paragraphs.
+- Avoid generic AI language including elevate, transform, ultimate, unleash, must-have, masterpiece, conversation starter and bring your walls to life.
+- Every product claim must remain fact-safe.
+- Use natural selected-country English.
+
+CLAIM AND OFFER SAFETY
+
+- Never invent edition quantities, remaining inventory, certificates, signatures, manufacturing claims, sport details, milestones, rivalry details, discounts or product facts.
+- Only use an offer when the active route explicitly supports offer language and the exact offer has been supplied.
+- Treat the Meta Ad Description as supporting copy because it may not display in every placement.
+- Do not place essential commercial information only in the Description unless the selected urgency placement deliberately chooses Meta description only.
+
+SILENT COPY SELECTION
+
+Before returning the campaign, privately compare several product-specific candidates for each active route. Reject generic, repetitive, fact-unsafe or unnatural writing. Return only the strongest finished copy in the current approved output format. Do not expose candidates, scoring notes, research or reasoning."""
+
+
+def build_shared_meta_winner_copy_upgrade(campaign_type="", instant_experience_settings=None):
+    if campaign_type == "Instant Experience":
+        settings = normalize_instant_experience_settings(instant_experience_settings)
+        if settings["output_mode"] != IE_MODE_CLASSIC:
+            return build_instant_experience_route_copy_diversity_rules(settings)
     single_primary_rule = (
         "Instant Experience must always preserve exactly five Primary Text options, "
         "five Headlines and five Call To Action button-label options."
@@ -2892,12 +4382,12 @@ SILENT COPY SELECTION
 Before returning the campaign, privately compare several product-specific candidates for each required angle. Reject generic, repetitive, fact-unsafe or unnatural writing. Return only the strongest finished copy in the current approved output format. Do not expose candidates, scoring notes, research or reasoning."""
 
 
-def apply_shared_meta_winner_copy_upgrade(prompt, campaign_type):
+def apply_shared_meta_winner_copy_upgrade(prompt, campaign_type, instant_experience_settings=None):
     if campaign_type not in {"Carousel", "Instant Experience"} or not prompt:
         return prompt
     if META_WINNER_COPY_BLOCK_VERSION in prompt:
         return prompt
-    return f"{prompt.rstrip()}\n\n{build_shared_meta_winner_copy_upgrade(campaign_type)}"
+    return f"{prompt.rstrip()}\n\n{build_shared_meta_winner_copy_upgrade(campaign_type, instant_experience_settings)}"
 
 
 def compose_final_ads_prompt(
@@ -2911,6 +4401,8 @@ def compose_final_ads_prompt(
     template_key=None,
     variation_token="",
     campaign_moment=None,
+    instant_experience_settings=None,
+    recent_instant_experience_fingerprints=None,
 ):
     if not prompt:
         return prompt
@@ -2920,7 +4412,11 @@ def compose_final_ads_prompt(
         include_primary_text_variations=include_primary_text_variations,
         category=category,
     )
-    prompt = apply_shared_meta_winner_copy_upgrade(prompt, campaign_type)
+    prompt = apply_shared_meta_winner_copy_upgrade(
+        prompt,
+        campaign_type,
+        instant_experience_settings,
+    )
     prompt = apply_country_language_guidance(prompt, country)
     prompt = apply_campaign_moment_copy_relevance_layer(
         prompt,
@@ -2939,6 +4435,8 @@ def compose_final_ads_prompt(
             template_key=template_key,
             variation_token=variation_token,
             campaign_moment=campaign_moment,
+            instant_experience_settings=instant_experience_settings,
+            recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
         )
     return prompt
 
@@ -4317,9 +5815,31 @@ def build_ads_prompt(
     *,
     variation_token="",
     campaign_moment=None,
+    instant_experience_settings=None,
+    recent_instant_experience_fingerprints=None,
 ):
     template_key = get_template_key(category, campaign_type)
-    if template_key == "motorsport_carousel":
+    if campaign_type == "Instant Experience":
+        settings = normalize_instant_experience_settings(instant_experience_settings)
+    else:
+        settings = None
+    if (
+        campaign_type == "Instant Experience"
+        and settings
+        and settings["output_mode"] != IE_MODE_CLASSIC
+    ):
+        prompt = build_instant_experience_route_prompt(
+            product_name,
+            category,
+            country,
+            campaign_type,
+            product_url=product_url,
+            instant_experience_settings=settings,
+            campaign_moment=campaign_moment,
+            recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
+            specific_pattern=bool(template_key),
+        )
+    elif template_key == "motorsport_carousel":
         prompt = build_motorsport_carousel_prompt(product_name, category, country, campaign_type)
     elif template_key == "baseball_instant_experience":
         prompt = build_baseball_instant_experience_prompt(
@@ -4369,6 +5889,8 @@ def build_ads_prompt(
         template_key=template_key,
         variation_token=variation_token,
         campaign_moment=campaign_moment,
+        instant_experience_settings=settings,
+        recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
     )
 
 
@@ -4480,17 +6002,32 @@ def render_campaign_moment_section():
     return campaign_moment_from_form_state()
 
 
-def record_ad_prompt_generated(product_name, category, country, campaign_type):
+def record_ad_prompt_generated(
+    product_name,
+    category,
+    country,
+    campaign_type,
+    *,
+    instant_experience_settings=None,
+    instant_experience_fingerprints=None,
+):
+    metadata = {
+        "category": category,
+        "country": country,
+        "campaign_type": campaign_type,
+    }
+    if campaign_type == "Instant Experience":
+        metadata["instant_experience_settings"] = instant_experience_settings_context_key(
+            instant_experience_settings
+        )
+        if instant_experience_fingerprints:
+            metadata["instant_experience_fingerprints"] = instant_experience_fingerprints
     record_activity_log(
         "ad_prompt_generated",
         "Ads",
         f"Generated ad prompt: {product_name}",
         entity_type="ad_prompt",
-        metadata={
-            "category": category,
-            "country": country,
-            "campaign_type": campaign_type,
-        },
+        metadata=metadata,
     )
 
 
@@ -4517,6 +6054,7 @@ def ads_result_context_key(
     country,
     campaign_type,
     campaign_moment=None,
+    instant_experience_settings=None,
 ):
     payload_data = {
         "product_id": str(product_id or ""),
@@ -4531,6 +6069,10 @@ def ads_result_context_key(
     )
     if moment_key:
         payload_data["campaign_moment"] = moment_key
+    if campaign_type == "Instant Experience":
+        payload_data["instant_experience_settings"] = instant_experience_settings_context_key(
+            instant_experience_settings
+        )
     payload = json.dumps(payload_data, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
 
@@ -4545,6 +6087,8 @@ def build_ads_result_record(
     product_url="",
     variation_token="",
     campaign_moment=None,
+    instant_experience_settings=None,
+    recent_instant_experience_fingerprints=None,
 ):
     clean_product_name = _clean_product_name(product_name)
     clean_product_id = str(product_id or "").strip()
@@ -4552,6 +6096,19 @@ def build_ads_result_record(
     clean_campaign_moment = normalize_campaign_moment(
         campaign_moment,
         selected_country=country,
+    )
+    clean_instant_experience_settings = (
+        normalize_instant_experience_settings(instant_experience_settings)
+        if campaign_type == "Instant Experience"
+        else None
+    )
+    instant_experience_fingerprints = (
+        build_instant_experience_fingerprints(
+            clean_instant_experience_settings,
+            category=category,
+        )
+        if campaign_type == "Instant Experience"
+        else []
     )
     master_prompt = build_ads_prompt(
         clean_product_name,
@@ -4561,6 +6118,8 @@ def build_ads_result_record(
         product_url=product_url,
         variation_token=clean_variation_token,
         campaign_moment=clean_campaign_moment,
+        instant_experience_settings=clean_instant_experience_settings,
+        recent_instant_experience_fingerprints=recent_instant_experience_fingerprints,
     )
     return {
         "context_key": ads_result_context_key(
@@ -4570,6 +6129,7 @@ def build_ads_result_record(
             country,
             campaign_type,
             clean_campaign_moment,
+            clean_instant_experience_settings,
         ),
         "product_id": clean_product_id,
         "product_name": clean_product_name,
@@ -4579,6 +6139,13 @@ def build_ads_result_record(
         "product_url": _clean_product_url(product_url),
         "variation_token": clean_variation_token,
         "campaign_moment": clean_campaign_moment,
+        "instant_experience_settings": clean_instant_experience_settings,
+        "instant_experience_fingerprints": instant_experience_fingerprints,
+        "recent_instant_experience_fingerprints": (
+            list(recent_instant_experience_fingerprints or [])
+            if campaign_type == "Instant Experience"
+            else []
+        ),
         "prompt_contract_version": ads_prompt_contract_version_for_campaign(campaign_type),
         "master_prompt": master_prompt,
         "generated_ad_output": master_prompt,
@@ -4587,7 +6154,11 @@ def build_ads_result_record(
 
 def ads_prompt_contract_version_for_campaign(campaign_type):
     if campaign_type == "Instant Experience":
-        return f"{ADS_PROMPT_CONTRACT_VERSION}; {ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION}"
+        return (
+            f"{ADS_PROMPT_CONTRACT_VERSION}; "
+            f"{ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION}; "
+            f"{ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION}"
+        )
     return ADS_PROMPT_CONTRACT_VERSION
 
 
@@ -4608,6 +6179,8 @@ def ensure_current_ads_result_prompt(result):
         product_url=result.get("product_url"),
         variation_token=result.get("variation_token"),
         campaign_moment=result.get("campaign_moment"),
+        instant_experience_settings=result.get("instant_experience_settings"),
+        recent_instant_experience_fingerprints=result.get("recent_instant_experience_fingerprints", []),
     )
     merged = {**result, **refreshed}
     if old_generated_output and old_generated_output != old_master_prompt:
@@ -4799,9 +6372,16 @@ def _process_ads_image_upload(result, workflow, slot, uploaded_file):
     if existing.get("source_hash") == source_hash:
         return
     try:
+        is_instant_experience = _is_instant_experience_result(result)
         processed = ads_image_workflow.optimize_meta_image(
             source_bytes,
             original_name=uploaded_file.name,
+            output_edge=(
+                ads_image_workflow.INSTANT_EXPERIENCE_IMAGE_EDGE
+                if is_instant_experience
+                else ads_image_workflow.META_IMAGE_EDGE
+            ),
+            output_format="PNG" if is_instant_experience else "JPEG",
         )
         processed.update(
             {
@@ -4851,12 +6431,16 @@ def ads_images_ready(result, workflow=None):
 
 
 def _meta_output_filename(result, workflow, slot):
-    return ads_image_workflow.build_meta_image_filename(
+    filename = ads_image_workflow.build_meta_image_filename(
         result["product_name"],
         result["campaign_type"],
         position=slot["position"],
         iso_date=workflow["export_date"],
     )
+    saved_slot = (workflow.get("slots") or {}).get(slot.get("id")) or {}
+    if saved_slot.get("output_format") == "PNG":
+        return re.sub(r"\.jpg$", ".png", filename)
+    return filename
 
 
 def _ads_export_date_compact(workflow):
@@ -5179,8 +6763,12 @@ def _render_ads_image_slots(result, workflow):
             saved_slot = (workflow.get("slots") or {}).get(slot["id"]) or {}
             if saved_slot.get("valid"):
                 st.image(saved_slot["data"], width="stretch")
+                output_label = (
+                    f"{saved_slot.get('output_width')} x {saved_slot.get('output_height')} "
+                    f"{saved_slot.get('output_format')}"
+                )
                 st.caption(
-                    f"1080 x 1080 JPEG | {saved_slot['output_size'] / (1024 * 1024):.2f} MB"
+                    f"{output_label} | {saved_slot['output_size'] / (1024 * 1024):.2f} MB"
                 )
                 st.caption(_meta_output_filename(result, workflow, slot))
                 outcome = (workflow.get("outcomes") or {}).get(slot["id"]) or {}
@@ -6421,6 +8009,7 @@ def render_page():
         st.caption(product_url_state["message"])
     if product_url and not is_valid_product_page_url(product_url):
         st.error(PRODUCT_URL_ERROR)
+    instant_experience_settings = render_instant_experience_creative_panel(campaign_type)
     campaign_moment = render_campaign_moment_section()
     clear_col, submit_col = st.columns([1, 2])
     clear_moment = clear_col.button("Clear moment")
@@ -6444,8 +8033,18 @@ def render_page():
             campaign_moment,
             selected_country=country,
         )
+        instant_experience_validation_message = (
+            validate_instant_experience_settings(
+                instant_experience_settings,
+                campaign_moment,
+            )
+            if campaign_type == "Instant Experience"
+            else ""
+        )
         if campaign_moment_message:
             st.warning(campaign_moment_message)
+        elif instant_experience_validation_message:
+            st.warning(instant_experience_validation_message)
         elif validation_message:
             if validation_message == PRODUCT_URL_ERROR:
                 st.error(validation_message)
@@ -6477,6 +8076,7 @@ def render_page():
                 country,
                 campaign_type,
                 campaign_moment,
+                instant_experience_settings,
             )
             existing_result = result if isinstance(result, dict) else {}
             if existing_result.get("context_key") == context_key:
@@ -6500,6 +8100,11 @@ def render_page():
                         product_url=product_url,
                         variation_token=existing_result.get("variation_token"),
                         campaign_moment=campaign_moment,
+                        instant_experience_settings=instant_experience_settings,
+                        recent_instant_experience_fingerprints=st.session_state.get(
+                            ADS_IE_RECENT_FINGERPRINTS_KEY,
+                            [],
+                        ),
                     )
                 else:
                     result = existing_result
@@ -6513,10 +8118,30 @@ def render_page():
                     product_url=product_url,
                     variation_token=build_visual_variation_token(),
                     campaign_moment=campaign_moment,
+                    instant_experience_settings=instant_experience_settings,
+                    recent_instant_experience_fingerprints=st.session_state.get(
+                        ADS_IE_RECENT_FINGERPRINTS_KEY,
+                        [],
+                    ),
                 )
                 _reset_ads_image_workflow(result)
             st.session_state[ADS_RESULT_STATE_KEY] = result
-            record_ad_prompt_generated(product_name, category, country, campaign_type)
+            if campaign_type == "Instant Experience":
+                update_recent_instant_experience_fingerprints(
+                    result.get("instant_experience_fingerprints")
+                )
+            record_ad_prompt_generated(
+                product_name,
+                category,
+                country,
+                campaign_type,
+                instant_experience_settings=instant_experience_settings,
+                instant_experience_fingerprints=(
+                    result.get("instant_experience_fingerprints")
+                    if isinstance(result, dict)
+                    else None
+                ),
+            )
 
     result = st.session_state.get(ADS_RESULT_STATE_KEY)
     refreshed_result = ensure_current_ads_result_prompt(result)

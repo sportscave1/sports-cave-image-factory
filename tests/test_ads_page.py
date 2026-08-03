@@ -89,6 +89,17 @@ def square_png_bytes(color=(46, 76, 112)):
     return buffer.getvalue()
 
 
+def instant_experience_settings(output_mode=ads_page.IE_MODE_SMART, **overrides):
+    settings = ads_page.default_instant_experience_settings(output_mode=output_mode)
+    settings.update(overrides)
+    if "advanced_visual" in overrides:
+        settings["advanced_visual"] = {
+            **ads_page.default_instant_experience_settings()["advanced_visual"],
+            **overrides["advanced_visual"],
+        }
+    return settings
+
+
 def button_by_label(app_test, label):
     for button in app_test.button:
         if button.label == label:
@@ -2500,7 +2511,12 @@ PRIMARY TEXT VARIATIONS
                 self.assertIn("Having artwork attached", contract)
                 self.assertIn("must not be treated as permission to create an image automatically", contract)
                 self.assertIn("Any imperative wording inside an image-prompt block is copy", contract)
-                self.assertIn('"Would you like me to generate Card 1?"', contract)
+                expected_question = (
+                    '"Would you like me to generate the Classic Collector Instant Experience cover?"'
+                    if campaign_type == "Instant Experience"
+                    else '"Would you like me to generate Card 1?"'
+                )
+                self.assertIn(expected_question, contract)
                 self.assertIn("Then wait for explicit approval before generating anything.", contract)
                 self.assertIn('"generate the image now"', contract)
                 self.assertIn("generate only that requested image immediately", contract)
@@ -2582,7 +2598,7 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Five Primary Text options.", contract)
         self.assertIn("Five Headlines.", contract)
         self.assertIn("Five Call To Action button-label options.", contract)
-        self.assertIn("Do not include Description fields for Instant Experience.", contract)
+        self.assertIn("Do not include generic Description fields for Classic Collector Instant Experience.", contract)
         self.assertNotIn("6. Description lines.", contract)
 
     def test_old_cached_result_is_refreshed_to_current_full_visual_prompt_contract(self):
@@ -2766,6 +2782,226 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("SPORTS CAVE BASEBALL INSTANT EXPERIENCE AD", prompt)
         self.assertIn("INSTANT EXPERIENCE SETUP", prompt)
 
+    def test_instant_experience_classic_collector_preserves_current_control(self):
+        settings = instant_experience_settings(output_mode=ads_page.IE_MODE_CLASSIC)
+        prompt = ads_page.build_ads_prompt(
+            "Shohei Ohtani 50/50 Season",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/ohtani-50-50",
+            variation_token="classic-control-test",
+            instant_experience_settings=settings,
+        )
+        contract = visual_contract(prompt)
+
+        self.assertIn("Classic Collector", contract)
+        self.assertIn("Greatness doesn", prompt)
+        self.assertIn("Strictly limited. Claim your number before the next one is gone.", prompt)
+        self.assertIn(ads_page.BASEBALL_INSTANT_EXPERIENCE_CTA, prompt)
+        for line in ads_page.BASEBALL_INSTANT_EXPERIENCE_COVER_LINES:
+            self.assertIn(line, contract)
+        self.assertIn("Top lifestyle section: approximately 64", contract)
+        self.assertIn("Bottom scarcity panel: approximately 32", contract)
+        self.assertIn(ads_page.BASEBALL_INSTANT_EXPERIENCE_PRODUCT_SET_NAME, prompt)
+        self.assertIn("product.name", prompt)
+        self.assertIn("Limited Edition", prompt)
+        self.assertIn("https://sportscave.com.au/products/ohtani-50-50", prompt)
+        self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
+        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+
+    def test_instant_experience_smart_three_pack_outputs_three_route_packages(self):
+        settings = instant_experience_settings(output_mode=ads_page.IE_MODE_SMART)
+        prompt = ads_page.build_ads_prompt(
+            "Shohei Ohtani 50/50 Season",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/ohtani-50-50",
+            variation_token="smart-three-pack-test",
+            instant_experience_settings=settings,
+        )
+        contract = visual_contract(prompt)
+
+        self.assertIn("SPORTS CAVE BASEBALL INSTANT EXPERIENCE ROUTE SYSTEM", prompt)
+        self.assertIn("OPTION A \u2014 FEEL", prompt)
+        self.assertIn("OPTION B \u2014 BELONG", prompt)
+        self.assertIn("OPTION C \u2014 ACT", prompt)
+        self.assertEqual(prompt.count("OUTPUT EXACTLY FOR THIS OPTION"), 3)
+        self.assertEqual(prompt.count("PRIMARY TEXT\n[one complete primary text]"), 3)
+        self.assertGreaterEqual(prompt.count("META AD DESCRIPTION"), 3)
+        self.assertEqual(prompt.count("IMAGE GENERATION PROMPTS \u2014 COPY ONE AT A TIME"), 4)
+        self.assertIn("Return exactly three complete Instant Experience packages", contract)
+        self.assertEqual(prompt.count(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER), 1)
+        self.assertTrue(
+            prompt.rstrip().endswith(
+                "Which Instant Experience cover would you like me to generate: FEEL, BELONG or ACT?"
+            )
+        )
+        self.assertNotIn("Would you like me to generate Card 1?", contract)
+
+    def test_instant_experience_feel_none_in_feed_blocks_scarcity_creative(self):
+        settings = instant_experience_settings(
+            output_mode=ads_page.IE_MODE_SELECTED,
+            primary_angle="Moment / Memory",
+            urgency_placement="None in feed creative",
+        )
+        prompt = ads_page.build_ads_prompt(
+            "Final Whistle Glory",
+            "Football",
+            "UK",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/final-whistle-glory",
+            variation_token="feel-none-test",
+            instant_experience_settings=settings,
+        )
+        route_section = prompt[prompt.index("SELECTED ROUTE \u2014 FEEL") : prompt.index("MASTER RESPONSE")]
+
+        self.assertIn("FEEL ROUTE RULES", route_section)
+        self.assertIn("keep the primary text, headline and cover free of FOMO wording", route_section)
+        self.assertIn("No large hard black panel.", route_section)
+        self.assertIn('Do not use "Greatness doesn\'t fade" in this route.', route_section)
+        for line in ads_page.BASEBALL_INSTANT_EXPERIENCE_COVER_LINES:
+            self.assertNotIn(line, route_section)
+
+    def test_instant_experience_belong_is_identity_led_without_invented_offer(self):
+        settings = instant_experience_settings(
+            output_mode=ads_page.IE_MODE_SELECTED,
+            primary_angle="Fan Identity",
+        )
+        prompt = ads_page.build_ads_prompt(
+            "Derby Night Framed",
+            "Football",
+            "Australia",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/derby-night-framed",
+            variation_token="belong-test",
+            instant_experience_settings=settings,
+        )
+        route_section = prompt[prompt.index("SELECTED ROUTE \u2014 BELONG") : prompt.index("MASTER RESPONSE")]
+
+        self.assertIn("BELONG ROUTE RULES", route_section)
+        self.assertIn("Lead with belonging, recognition or shared fan identity.", route_section)
+        self.assertIn("Do not make the room the product.", route_section)
+        self.assertIn("Do not invent an offer. Exact offer entered for this run: None.", route_section)
+        self.assertNotIn("SHOP THE OFFER", route_section)
+
+    def test_instant_experience_route_gates_validate_offer_build_and_gift(self):
+        sale_settings = instant_experience_settings(
+            output_mode=ads_page.IE_MODE_SELECTED,
+            primary_angle="Offer / Sale",
+        )
+        self.assertEqual(
+            ads_page.validate_instant_experience_settings(sale_settings),
+            "Offer / Sale requires an exact verified offer.",
+        )
+
+        build_settings = instant_experience_settings(
+            output_mode=ads_page.IE_MODE_SMART,
+            destination_scope="Curated collection page + catalogue",
+            collection_name="Baseball Icons",
+            collection_url="https://sportscave.com.au/collections/baseball-icons",
+            collection_product_set_name="Baseball Icons Set",
+            eligible_product_count=4,
+            multi_product_reference_count=0,
+            route_c="BUILD",
+        )
+        self.assertEqual(
+            ads_page.validate_instant_experience_settings(build_settings),
+            "Build a Collection requires at least two exact product reference assets for multi-product cover promises.",
+        )
+
+        gift_settings = instant_experience_settings(
+            output_mode=ads_page.IE_MODE_SELECTED,
+            primary_angle="Gift",
+            audience_mindset="Collector",
+        )
+        self.assertEqual(
+            ads_page.validate_instant_experience_settings(gift_settings),
+            "Gift language requires Gift buyer targeting or Auto-match.",
+        )
+
+    def test_instant_experience_offer_serializes_without_moment_type(self):
+        settings = instant_experience_settings(output_mode=ads_page.IE_MODE_SMART)
+        prompt = ads_page.build_ads_prompt(
+            "Collector Pair",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/collector-pair",
+            variation_token="offer-serialization-test",
+            instant_experience_settings=settings,
+            campaign_moment={"promotion": "15% off 2+ editions"},
+        )
+
+        self.assertIn("EXACT OFFER SERIALIZATION", prompt)
+        self.assertIn("Exact offer entered: 15% off 2+ editions", prompt)
+        self.assertIn("serialized independently of Moment Type", prompt)
+        self.assertIn("no active route supports offer language", prompt)
+
+    def test_instant_experience_collection_destination_does_not_replace_product_url(self):
+        settings = instant_experience_settings(
+            output_mode=ads_page.IE_MODE_SMART,
+            destination_scope="Curated collection page + catalogue",
+            collection_name="Baseball Icons",
+            collection_url="https://sportscave.com.au/collections/baseball-icons",
+            collection_product_set_name="Baseball Icons Set",
+            eligible_product_count=4,
+            multi_product_reference_count=2,
+            route_c="BUILD",
+        )
+        prompt = ads_page.build_ads_prompt(
+            "Ohtani Hero",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            product_url="https://sportscave.com.au/products/ohtani-hero",
+            variation_token="collection-url-test",
+            instant_experience_settings=settings,
+        )
+
+        self.assertIn("Collection URL: https://sportscave.com.au/collections/baseball-icons", prompt)
+        self.assertIn("Destination guidance: Use this selected product page URL", prompt)
+        self.assertIn("https://sportscave.com.au/products/ohtani-hero", prompt)
+        self.assertIn("Never silently use a broad collection URL", prompt)
+
+    def test_instant_experience_sport_country_and_fingerprint_controls_are_structured(self):
+        baseball = ads_page.instant_experience_sport_direction("Baseball")
+        basketball = ads_page.instant_experience_sport_direction("NBA")
+        self.assertIn("ballpark memory", baseball)
+        self.assertIn("charcoal limewash", basketball)
+        self.assertNotIn("vehicles", baseball)
+
+        settings = instant_experience_settings(output_mode=ads_page.IE_MODE_SMART)
+        fingerprints = ads_page.build_instant_experience_fingerprints(settings, category="Baseball")
+        self.assertEqual(len(fingerprints), 3)
+        self.assertEqual({fingerprint["route"] for fingerprint in fingerprints}, {"FEEL", "BELONG", "ACT"})
+        self.assertGreaterEqual(
+            len({fingerprint["cover_layout"] for fingerprint in fingerprints}),
+            3,
+        )
+        self.assertGreaterEqual(
+            len({fingerprint["camera_family"] for fingerprint in fingerprints}),
+            3,
+        )
+
+    def test_instant_experience_widget_keys_are_unique_and_initialized_before_render(self):
+        source = (ROOT / "ads_page.py").read_text(encoding="utf-8")
+        render_page_source = source[source.index("def render_page") :]
+        panel_source = source[source.index("def render_instant_experience_creative_panel") : source.index("def _template_slug")]
+
+        self.assertEqual(len(ads_page.IE_WIDGET_KEYS.values()), len(set(ads_page.IE_WIDGET_KEYS.values())))
+        self.assertIn("initialise_instant_experience_widget_defaults()", panel_source)
+        self.assertLess(
+            panel_source.index("initialise_instant_experience_widget_defaults()"),
+            panel_source.index("st.selectbox("),
+        )
+        self.assertIn("instant_experience_settings = render_instant_experience_creative_panel(campaign_type)", render_page_source)
+        self.assertLess(
+            render_page_source.index("render_instant_experience_creative_panel(campaign_type)"),
+            render_page_source.index("campaign_moment = render_campaign_moment_section()"),
+        )
+
     def test_single_image_video_preserves_one_creative_prompt_route(self):
         prompt = ads_page.build_ads_prompt(
             "The Ashes Final Session",
@@ -2922,6 +3158,19 @@ PRIMARY TEXT VARIATIONS
         select_option(app_test, "Country", "Australia")
         select_option(app_test, "Campaign type", "Instant Experience")
         set_product_url(app_test)
+
+        select_labels = [selectbox.label for selectbox in app_test.selectbox]
+        for label in (
+            "Creative output mode",
+            "Audience mindset",
+            "Primary creative angle",
+            "Urgency placement",
+            "Destination scope",
+            "Visual direction",
+        ):
+            self.assertIn(label, select_labels)
+        self.assertIn(ads_page.IE_MODE_SMART, [selectbox.value for selectbox in app_test.selectbox])
+
         button_by_label(app_test, "Submit").click().run(timeout=20)
 
         note_labels = [text_area.label for text_area in app_test.text_area]
@@ -3093,7 +3342,7 @@ PRIMARY TEXT VARIATIONS
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         self.assertTrue(workflow["slots"]["instant-experience-01"]["valid"])
         self.assertEqual(workflow["slots"]["instant-experience-01"]["original_name"], "uploaded-filename.png")
-        self.assertTrue(any("1080 x 1080 JPEG" in caption.value for caption in app_test.caption))
+        self.assertTrue(any("1024 x 1024 PNG" in caption.value for caption in app_test.caption))
         result = app_test.session_state[ads_page.ADS_RESULT_STATE_KEY]
         filename = ads_page._meta_output_filename(
             result,
@@ -3101,7 +3350,7 @@ PRIMARY TEXT VARIATIONS
             ads_page.ads_image_workflow.campaign_image_slots("Instant Experience")[0],
         )
         self.assertIn(" - Instant Experience 01 - ", filename)
-        self.assertTrue(filename.endswith(".jpg"))
+        self.assertTrue(filename.endswith(".png"))
         self.assertFalse(button_by_label(app_test, "Save Images").disabled)
 
         app_test.run(timeout=20)

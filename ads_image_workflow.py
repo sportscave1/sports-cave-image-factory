@@ -11,6 +11,7 @@ from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
 
 
 META_IMAGE_EDGE = 1080
+INSTANT_EXPERIENCE_IMAGE_EDGE = 1024
 META_IMAGE_QUALITY = 91
 META_IMAGE_MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 META_IMAGE_MAX_SOURCE_PIXELS = 25_000_000
@@ -86,7 +87,19 @@ def srgb_profile_bytes():
     return ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB")).tobytes()
 
 
-def optimize_meta_image(data, *, original_name=""):
+def optimize_meta_image(
+    data,
+    *,
+    original_name="",
+    output_edge=META_IMAGE_EDGE,
+    output_format="JPEG",
+):
+    output_edge = int(output_edge or META_IMAGE_EDGE)
+    if output_edge <= 0:
+        raise AdsImageValidationError("The requested output size is invalid.")
+    clean_output_format = str(output_format or "JPEG").upper()
+    if clean_output_format not in {"JPEG", "PNG"}:
+        raise AdsImageValidationError("The requested output format is invalid.")
     source_bytes = bytes(data or b"")
     if not source_bytes:
         raise AdsImageValidationError("This image is empty. Upload a valid JPEG, PNG or WebP image.")
@@ -123,37 +136,46 @@ def optimize_meta_image(data, *, original_name=""):
 
         converted = _convert_to_srgb(oriented)
         resized = converted.resize(
-            (META_IMAGE_EDGE, META_IMAGE_EDGE),
+            (output_edge, output_edge),
             Image.Resampling.LANCZOS,
         )
         output = io.BytesIO()
-        resized.save(
-            output,
-            format="JPEG",
-            quality=META_IMAGE_QUALITY,
-            optimize=True,
-            progressive=True,
-            subsampling=0,
-            icc_profile=srgb_profile_bytes(),
-        )
+        if clean_output_format == "PNG":
+            resized.save(
+                output,
+                format="PNG",
+                optimize=False,
+                compress_level=6,
+                icc_profile=srgb_profile_bytes(),
+            )
+        else:
+            resized.save(
+                output,
+                format="JPEG",
+                quality=META_IMAGE_QUALITY,
+                optimize=True,
+                progressive=True,
+                subsampling=0,
+                icc_profile=srgb_profile_bytes(),
+            )
         output_bytes = output.getvalue()
         with Image.open(io.BytesIO(output_bytes)) as check:
             check.load()
-            if check.format != "JPEG" or check.mode != "RGB" or check.size != (
-                META_IMAGE_EDGE,
-                META_IMAGE_EDGE,
+            if check.format != clean_output_format or check.mode != "RGB" or check.size != (
+                output_edge,
+                output_edge,
             ):
-                raise AdsImageValidationError("The Meta-ready JPEG could not be verified.")
+                raise AdsImageValidationError("The Meta-ready image could not be verified.")
         return {
             "source_hash": source_image_signature(source_bytes),
             "original_name": str(original_name or "image"),
             "source_format": source_format,
             "source_width": oriented.width,
             "source_height": oriented.height,
-            "output_format": "JPEG",
+            "output_format": clean_output_format,
             "output_mode": "RGB",
-            "output_width": META_IMAGE_EDGE,
-            "output_height": META_IMAGE_EDGE,
+            "output_width": output_edge,
+            "output_height": output_edge,
             "output_size": len(output_bytes),
             "data": output_bytes,
         }

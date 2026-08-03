@@ -21,13 +21,19 @@ def image_bytes(image_format="PNG", size=(96, 96), color=(34, 68, 102), *, exif=
 def processed_slots(campaign_type, *, count=None):
     source = image_bytes()
     slot_specs = ads_image_workflow.campaign_image_slots(campaign_type)
+    optimize_kwargs = {}
     if campaign_type == "Instant Experience":
         slot_specs = slot_specs[: 1 if count is None else count]
+        optimize_kwargs = {
+            "output_edge": ads_image_workflow.INSTANT_EXPERIENCE_IMAGE_EDGE,
+            "output_format": "PNG",
+        }
     return {
         slot["id"]: {
             **ads_image_workflow.optimize_meta_image(
                 source,
                 original_name=f"{slot['id']}.png",
+                **optimize_kwargs,
             ),
             "slot_id": slot["id"],
             "label": slot["label"],
@@ -72,6 +78,29 @@ class AdsImageProcessingTests(unittest.TestCase):
                     self.assertTrue(output.info.get("icc_profile"))
                     self.assertTrue(output.info.get("progressive") or output.info.get("progression"))
                     self.assertEqual(len(output.getexif()), 0)
+
+    def test_instant_experience_target_export_is_verified_srgb_1024_png(self):
+        first = ads_image_workflow.optimize_meta_image(
+            image_bytes("WEBP"),
+            original_name="instant.webp",
+            output_edge=ads_image_workflow.INSTANT_EXPERIENCE_IMAGE_EDGE,
+            output_format="PNG",
+        )
+        second = ads_image_workflow.optimize_meta_image(
+            image_bytes("WEBP"),
+            original_name="instant.webp",
+            output_edge=ads_image_workflow.INSTANT_EXPERIENCE_IMAGE_EDGE,
+            output_format="PNG",
+        )
+
+        self.assertEqual(first["data"], second["data"])
+        self.assertEqual(first["output_format"], "PNG")
+        with Image.open(io.BytesIO(first["data"])) as output:
+            output.load()
+            self.assertEqual(output.format, "PNG")
+            self.assertEqual(output.mode, "RGB")
+            self.assertEqual(output.size, (1024, 1024))
+            self.assertTrue(output.info.get("icc_profile"))
 
     def test_corrupt_unsupported_and_non_square_images_are_rejected(self):
         with self.assertRaisesRegex(ads_image_workflow.AdsImageValidationError, "corrupt"):
@@ -464,7 +493,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         metadata.return_value = {".tag": "file"}
         numbered_path.return_value = (
             "/Sportscave Team Folder/04_OUTPUT/product-images/"
-            "Shohei Ohtani 50_50 Wall Art - Instant Experience 01 - 2026-07-25 (2).jpg"
+            "Shohei Ohtani 50_50 Wall Art - Instant Experience 01 - 2026-07-25 (2).png"
         )
         upload_batch.return_value = {
             "successes": [
@@ -488,7 +517,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         image_call = upload_batch.call_args_list[0]
         self.assertEqual(image_call.kwargs["conflict"], "cancel")
         self.assertTrue(
-            image_call.args[2][0]["relative_path"].endswith("(2).jpg")
+            image_call.args[2][0]["relative_path"].endswith("(2).png")
         )
         self.assertEqual(upload_batch.call_args_list[1].kwargs["conflict"], "replace")
 
@@ -613,7 +642,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         filename = upload_batch.call_args_list[0].args[2][0]["relative_path"]
         self.assertEqual(
             filename,
-            "Shohei Ohtani 50_50 Wall Art - Instant Experience 01 - 2026-07-25.jpg",
+            "Shohei Ohtani 50_50 Wall Art - Instant Experience 01 - 2026-07-25.png",
         )
         self.assertNotIn("random-chatgpt-cover", filename)
         self.assertEqual(outcomes["instant-experience-01"]["status"], "saved")
@@ -659,14 +688,14 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
                 filenames = [
                     call.args[2][0]["relative_path"]
                     for call in upload_batch.call_args_list
-                    if str(call.args[2][0]["relative_path"]).endswith(".jpg")
+                    if str(call.args[2][0]["relative_path"]).endswith(".png")
                 ]
                 self.assertEqual(len(filenames), count)
                 self.assertEqual(len(set(filenames)), count)
                 self.assertEqual(
                     filenames,
                     [
-                        f"Shohei Ohtani 50_50 Wall Art - Instant Experience {index:02d} - 2026-07-25.jpg"
+                        f"Shohei Ohtani 50_50 Wall Art - Instant Experience {index:02d} - 2026-07-25.png"
                         for index in range(1, count + 1)
                     ],
                 )
