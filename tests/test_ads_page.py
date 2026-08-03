@@ -556,8 +556,8 @@ class AdsPageTests(unittest.TestCase):
                 self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
                 self.assertIn("Once it sells out", prompt)
                 self.assertIn("CLAIM YOUR EDITION", prompt)
-                self.assertIn("approximately 64-68% premium lifestyle/product area", prompt)
-                self.assertIn("32-36% deep matte-black collector panel", prompt)
+                self.assertIn("full-width upper lifestyle/product image across approximately 76-78%", prompt)
+                self.assertIn("full-width matte-black scarcity strip across the bottom approximately 22-24%", prompt)
                 self.assertIn("META URL PARAMETERS", prompt)
                 self.assertIn(ads_page.META_AD_URL_PARAMETERS, prompt)
                 self.assertNotEqual(prompt, "")
@@ -636,9 +636,9 @@ class AdsPageTests(unittest.TestCase):
                         self.assertIn("Creative concept: Scarcity", prompt)
                         self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
                         self.assertIn("Once it sells out", prompt)
-                        self.assertIn("deep matte-black collector panel", prompt)
-                        self.assertIn("approximately 64-68% premium lifestyle/product area", prompt)
-                        self.assertIn("32-36% deep matte-black collector panel", prompt)
+                        self.assertIn("full-width upper lifestyle/product image across approximately 76-78%", prompt)
+                        self.assertIn("full-width matte-black scarcity strip across the bottom approximately 22-24%", prompt)
+                        self.assertIn("No left/right split, no right sidebar and no vertical scarcity panel.", prompt)
                         self.assertIn("CLAIM YOUR EDITION", prompt)
 
     def test_football_carousel_has_football_specific_winner_angle_and_five_cards(self):
@@ -656,14 +656,17 @@ class AdsPageTests(unittest.TestCase):
         self.assertIn("No commas", prompt)
         self.assertIn("No full stops", prompt)
 
-    def test_football_instant_experience_uses_black_gold_panel_and_collector_framing(self):
+    def test_football_instant_experience_uses_bottom_strip_and_collector_framing(self):
         prompt = ads_page.build_ads_prompt("Messi World Cup Night", "Football", "USA", "Instant Experience")
 
         self.assertIn("SPORTS CAVE FOOTBALL INSTANT EXPERIENCE STANDARD WORKFLOW", prompt)
         self.assertIn("Football collector wall art", prompt)
         self.assertIn("GROUP 3 — SCARCITY", prompt)
         self.assertIn("Creative concept: Scarcity", prompt)
-        self.assertIn("deep matte-black collector panel", prompt)
+        self.assertIn("full-width upper lifestyle/product image across approximately 76-78%", prompt)
+        self.assertIn("full-width matte-black scarcity strip across the bottom approximately 22-24%", prompt)
+        self.assertIn("thin restrained metallic-gold divider across the top edge of the black strip", prompt)
+        self.assertIn("No left/right split, no right sidebar and no vertical scarcity panel.", prompt)
         self.assertIn("LIMITED TO 100 WORLDWIDE", prompt)
         self.assertIn("Once it sells out", prompt)
         self.assertIn("CLAIM YOUR EDITION", prompt)
@@ -2753,8 +2756,8 @@ PRIMARY TEXT VARIATIONS
         self.assertIn("Sport/category: AFL", contract)
         self.assertIn("Country/market: Australia", contract)
         self.assertIn("1024 x 1024 square Meta Instant Experience cover", contract)
-        self.assertIn("approximately 64-68% premium lifestyle/product area", contract)
-        self.assertIn("32-36% deep matte-black collector panel", contract)
+        self.assertIn("full-width upper lifestyle/product image across approximately 76-78%", contract)
+        self.assertIn("full-width matte-black scarcity strip across the bottom approximately 22-24%", contract)
         self.assertIn("LIMITED TO 100 WORLDWIDE", contract)
         self.assertIn("Once it sells out", contract)
         self.assertIn("CLAIM YOUR EDITION", contract)
@@ -2770,6 +2773,53 @@ PRIMARY TEXT VARIATIONS
             self.assertIn("SPORT AND COUNTRY VISUAL ADAPTATION", cover)
         self.assertNotIn("Social Media Reels", contract)
         self.assertNotIn("Six Laps Ahead", contract)
+
+    def test_instant_experience_scarcity_prompt_uses_bottom_strip_layout(self):
+        prompt = ads_page.build_ads_prompt(
+            "Collector Test Product",
+            "Baseball",
+            "USA",
+            "Instant Experience",
+            variation_token="scarcity-bottom-strip-test",
+        )
+        contract = visual_contract(prompt)
+        scarcity_start = contract.index("GROUP 3 — SCARCITY\n\nIMAGE GENERATION PROMPT")
+        scarcity_prompt = contract[
+            scarcity_start : contract.index("COPY VARIATIONS", scarcity_start)
+        ]
+
+        self.assertIn(
+            "full-width upper lifestyle/product image across approximately 76-78%",
+            scarcity_prompt,
+        )
+        self.assertIn(
+            "full-width matte-black scarcity strip across the bottom approximately 22-24%",
+            scarcity_prompt,
+        )
+        self.assertIn(
+            "thin restrained metallic-gold divider across the top edge of the black strip",
+            scarcity_prompt,
+        )
+        self.assertIn(
+            "frame occupying approximately 74-82% of usable canvas width inside the upper image region",
+            scarcity_prompt,
+        )
+        self.assertIn(
+            "All scarcity wording must be contained inside the bottom strip; no wording may appear beside or over the product image.",
+            scarcity_prompt,
+        )
+        self.assertIn("No left/right split, no right sidebar and no vertical scarcity panel.", scarcity_prompt)
+        self.assertIn("LIMITED TO 100 WORLDWIDE", scarcity_prompt)
+        self.assertIn("Once it sells out, it’s gone.", scarcity_prompt)
+        self.assertIn("CLAIM YOUR EDITION", scarcity_prompt)
+        self.assertIn("SPORTS CAVE PRODUCT AND MOCKUP LOCK - MANDATORY", scarcity_prompt)
+        self.assertIn("FRAME REALISM:", scarcity_prompt)
+        self.assertIn("GLASS REALISM:", scarcity_prompt)
+        self.assertIn(SPORTS_CAVE_IMAGE_REALISM_RULES_MARKER, scarcity_prompt)
+        self.assertNotIn("64-68% lifestyle", scarcity_prompt)
+        self.assertNotIn("32-36% deep matte-black collector panel", scarcity_prompt)
+        self.assertNotIn("right-side black panel", scarcity_prompt)
+        self.assertNotIn("lifestyle/panel division remains", scarcity_prompt)
 
     def test_old_instant_experience_prompt_schema_gets_upgraded_default_contract(self):
         prompt = ads_page.compose_final_ads_prompt(
@@ -2862,12 +2912,20 @@ PRIMARY TEXT VARIATIONS
             prompt.index("GROUP 1 — NOSTALGIA\n\nIMAGE GENERATION PROMPT") :
             prompt.index("GROUP 2 — OWNERSHIP\n\nIMAGE GENERATION PROMPT")
         ]
+        prompt_two = prompt[
+            prompt.index("GROUP 2 — OWNERSHIP\n\nIMAGE GENERATION PROMPT") :
+            prompt.index("GROUP 3 — SCARCITY\n\nIMAGE GENERATION PROMPT")
+        ]
         prompt_three = prompt[prompt.index("GROUP 3 — SCARCITY\n\nIMAGE GENERATION PROMPT") :]
 
         self.assertIn("No scarcity language, no offer, no discount", prompt_one)
         self.assertIn("no hard black panel", prompt_one)
         self.assertNotIn("32-36% deep matte-black collector panel", prompt_one)
-        self.assertIn("32-36% deep matte-black collector panel", prompt_three)
+        self.assertNotIn("full-width matte-black scarcity strip across the bottom", prompt_one)
+        self.assertIn("asymmetrical lifestyle composition", prompt_two)
+        self.assertNotIn("full-width matte-black scarcity strip across the bottom", prompt_two)
+        self.assertIn("full-width matte-black scarcity strip across the bottom approximately 22-24%", prompt_three)
+        self.assertIn("No left/right split, no right sidebar and no vertical scarcity panel.", prompt_three)
         for line in ads_page.BASEBALL_INSTANT_EXPERIENCE_COVER_LINES:
             self.assertIn(line, prompt_three)
 

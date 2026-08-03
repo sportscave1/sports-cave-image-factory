@@ -662,12 +662,12 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
         "meta_description_role": "Supporting scarcity or proof line.",
         "proof_intensity": "Approved proof checklist only.",
         "scarcity_intensity": "Strong verified scarcity.",
-        "on_image_message_type": "Exact three-line scarcity panel.",
+        "on_image_message_type": "Exact three-line bottom scarcity strip.",
         "creative_cta_family": ("Claim Your Edition",),
         "fixed_button_cta": BASEBALL_INSTANT_EXPERIENCE_CTA,
-        "cover_composition": "Classic 64–68% lifestyle section and 32–36% black-and-gold scarcity panel.",
-        "panel_treatment": "Deep matte black with restrained metallic-gold detailing.",
-        "product_prominence": "Frame dominates the lifestyle section.",
+        "cover_composition": "Full-width upper lifestyle/product image region approximately 76-78% of the square canvas, with a shallow full-width matte-black scarcity strip across the bottom approximately 22-24%.",
+        "panel_treatment": "Deep matte-black bottom strip with a thin restrained metallic-gold divider across its top edge.",
+        "product_prominence": "Frame occupies approximately 74-82% of usable canvas width inside the upper image region.",
         "room_family": "Current premium collector-room control.",
         "wall_family": "Restrained residential palette from the current control.",
         "camera_family": "Natural interior-photography camera position.",
@@ -2473,12 +2473,13 @@ The artwork must remain the unmistakable hero.
 
 APPROVED COMPOSITION
 
-Divide the square canvas into two visually connected sections:
+Use a stacked full-width square composition with two visually connected sections:
 
-Top lifestyle section: approximately 64–68% of the canvas.
-Bottom scarcity panel: approximately 32–36% of the canvas.
+Upper lifestyle/product image region: approximately 76-78% of the square canvas.
+Bottom scarcity strip: approximately 22-24% of the square canvas.
 
-Do not allow the bottom panel to overpower the product.
+Do not create a left/right split, right sidebar, vertical scarcity panel or any copy beside the product image.
+Do not allow the bottom strip to overpower the product.
 
 The framed artwork must be the largest and most immediately recognizable element in the image.
 
@@ -2537,9 +2538,9 @@ Do not use sports props to explain the sport. The supplied artwork must carry th
 
 ARTWORK PROMINENCE
 
-The framed artwork must dominate the lifestyle section.
+The framed artwork must dominate the upper lifestyle/product image region.
 
-It should occupy approximately 48–62% of the available width in the top section, depending on the room and camera angle.
+It should occupy approximately 74-82% of the usable canvas width inside the upper region, depending on the room and camera angle.
 
 It must remain:
 
@@ -2648,13 +2649,13 @@ Avoid:
 * Perfect front-facing artificial symmetry.
 * Camera positions that make the artwork appear small.
 
-BOTTOM SCARCITY PANEL
+BOTTOM SCARCITY STRIP
 
-Add an integrated collector-grade panel across the bottom 32–36% of the square canvas.
+Add an integrated collector-grade full-width matte-black scarcity strip across the bottom 22-24% of the square canvas.
 
-The panel must feel like part of a premium Sports Cave campaign—not a separate cheap promotional banner.
+The strip must feel like part of a premium Sports Cave campaign--not a separate cheap promotional banner.
 
-Panel styling:
+Strip styling:
 
 * Deep matte black.
 * Subtle black material texture.
@@ -2667,7 +2668,7 @@ Panel styling:
 * No neon effects.
 * No discount-store styling.
 
-Separate the lifestyle section and panel with one restrained gold hairline, subtle metallic edge or controlled warm light transition.
+Separate the upper lifestyle/product image region and bottom strip with one thin restrained metallic-gold divider across the top edge of the black strip.
 
 Do not use a large artificial lens flare.
 
@@ -2730,9 +2731,15 @@ Line three:
 * Slightly smaller than the main scarcity headline.
 * Styled as a premium campaign command, not a fake website button.
 
+Use the full width of the bottom strip so the wording never looks squeezed.
+Centre the complete text hierarchy horizontally and vertically inside the strip.
+Keep "LIMITED TO 100 WORLDWIDE" together as one unified single-line headline.
+Do not isolate or unnaturally enlarge "100".
 Keep all text centred, correctly spelled and safely inside the mobile margins.
+Do not compress, squash, stretch or use excessively narrow typography.
+Do not break individual words.
 
-The panel must feel urgent through restraint, spacing and hierarchy—not through oversized graphics or aggressive sales styling.
+The strip must feel urgent through restraint, spacing and hierarchy--not through oversized graphics or aggressive sales styling.
 
 SPORT AND MARKET ADAPTATION
 
@@ -2776,7 +2783,7 @@ Before returning the image, confirm that:
 * Wall, floor, ceiling and furniture geometry are believable.
 * The three approved text lines are spelled correctly.
 * No additional text or claims have been introduced.
-* The scarcity panel feels premium rather than promotional.
+* The bottom scarcity strip feels premium rather than promotional.
 * The overall image remains clear and persuasive at mobile size.
 
 Avoid warped walls, impossible windows, crooked ceilings, bent furniture, floating objects, duplicate objects, plastic materials, fake luxury, excessive blur, overprocessed HDR, unrealistic reflections, malformed lighting, perfect artificial symmetry and any obvious AI-showroom appearance.
@@ -2785,7 +2792,7 @@ FINAL RESULT
 
 Create a photorealistic, premium 1024 × 1024 Sports Cave Instant Experience cover featuring the exact uploaded framed artwork displayed prominently in a genuine high-end residential interior.
 
-The final image must make the artwork feel like a real limited-edition collector piece already hanging in a desirable home—then use the restrained black-and-gold scarcity panel to make the viewer feel they should claim one of the 100 editions before it is gone."""
+The final image must make the artwork feel like a real limited-edition collector piece already hanging in a desirable home, then use the restrained full-width black-and-gold bottom scarcity strip to make the viewer feel they should claim one of the 100 editions before it is gone."""
 
 
 def build_default_instant_experience_cover_prompt_requirements(product_name, category, country):
@@ -2869,20 +2876,26 @@ INSTANT_EXPERIENCE_STANDARD_VISUALS = (
         "purpose": "Preserve the proven Sports Cave collector conversion cover.",
         "room_type": "premium collector room with restrained black-and-gold campaign treatment",
         "wall_colour": "deep charcoal, warm off-white or muted taupe chosen to keep the product dominant",
-        "wall_material": "real textured plaster, timber or concrete that supports the black-and-gold panel",
-        "camera_side": "natural interior-photography camera position with correct rigid frame perspective",
+        "wall_material": "real textured plaster, timber or concrete that supports the black-and-gold bottom strip",
+        "camera_side": "near-front interior-photography position with only mild natural perspective and correct rigid frame geometry",
         "camera_height": "eye level",
-        "shot_distance": "product-dominant collector cover, frame dominating the lifestyle region",
+        "shot_distance": "product-dominant collector cover, frame occupying approximately 74-82% of usable canvas width inside the upper image region",
         "lens": "natural interior lens without wide-angle distortion",
         "lighting": "soft natural light plus restrained warm practical lighting",
         "time_of_day": "evening or late afternoon",
-        "overlay_position": "bottom collector panel",
-        "composition": "approximately 64-68% premium lifestyle/product area and 32-36% deep matte-black collector panel",
-        "overlay_rule": "Use the exact finished Headline and CTA from Scarcity Copy Variation 1 as the concept overlay when not using the verified collector panel. When the 100-edition limit is verified, use these exact three collector-panel lines instead: LIMITED TO 100 WORLDWIDE / Once it sells out, it’s gone. / CLAIM YOUR EDITION.",
+        "overlay_position": "full-width bottom matte-black scarcity strip only",
+        "composition": "full-width upper lifestyle/product image across approximately 76-78% of the square canvas, with a shallow full-width matte-black scarcity strip across the bottom approximately 22-24%",
+        "overlay_rule": "Use only the exact three approved bottom-strip lines for the Scarcity image: LIMITED TO 100 WORLDWIDE / Once it sells out, it’s gone. / CLAIM YOUR EDITION. Do not use the Scarcity copy table headline or CTA as replacement overlay text.",
         "extra_rules": (
-            "- Use restrained metallic-gold dividing detail and a premium black panel.\n"
-            "- Do not add an unverified remaining count, price, discount, shipping claim or certificate claim.\n"
-            "- Do not modify the three approved collector-panel lines when they are used."
+            "- Add a thin restrained metallic-gold divider across the top edge of the black strip.\n"
+            "- All scarcity wording must be contained inside the bottom strip; no wording may appear beside or over the product image.\n"
+            "- No left/right split, no right sidebar and no vertical scarcity panel.\n"
+            "- Use the full width of the bottom strip so the wording never looks squeezed; centre the complete text hierarchy horizontally and vertically.\n"
+            "- Keep LIMITED TO 100 WORLDWIDE together as one unified single-line headline; do not isolate or unnaturally enlarge 100.\n"
+            "- Place Once it sells out, it’s gone. beneath it in smaller warm-white or ivory text.\n"
+            "- Place CLAIM YOUR EDITION beneath that as controlled metallic-gold text typography, not a large fake button.\n"
+            "- Do not compress, squash, stretch, use excessively narrow typography or break individual words.\n"
+            "- Do not add an unverified remaining count, price, discount, shipping claim or certificate claim."
         ),
     },
 )
@@ -2900,7 +2913,7 @@ def standard_instant_experience_fingerprint(index, visual, *, category=""):
         "hook_family": visual["purpose"],
         "cover_layout": visual["composition"],
         "urgency_placement": (
-            "collector panel only"
+            "bottom scarcity strip only"
             if visual["concept_id"] == "scarcity"
             else "none in feed creative"
         ),
@@ -2977,17 +2990,32 @@ def build_standard_instant_experience_image_prompt(
     )
     scarcity_panel_lines = "\n".join(BASEBALL_INSTANT_EXPERIENCE_COVER_LINES)
     if visual["concept_id"] == "scarcity":
-        collector_control_block = f"""COLLECTOR CONTROL PANEL COPY
+        on_image_wording_source = (
+            "- On-image wording source: use the exact approved three-line bottom scarcity strip copy. "
+            "Do not replace it with the Scarcity copy table headline or CTA."
+        )
+        collector_control_block = f"""BOTTOM SCARCITY STRIP COPY
 
-Use these exact three panel lines only when the 100-edition limit is verified:
+Use these exact three lines inside the bottom strip only when the 100-edition limit is verified:
 
 {scarcity_panel_lines}
 
-Do not add an unverified remaining count, price, discount, shipping claim or certificate claim."""
+Typography and placement are mandatory:
+- Use the full width of the bottom strip; never squeeze the wording into a side panel.
+- Centre the complete hierarchy horizontally and vertically.
+- Keep "LIMITED TO 100 WORLDWIDE" as one unified single-line headline.
+- Do not isolate or unnaturally enlarge "100".
+- Keep "Once it sells out, it’s gone." beneath it in smaller warm-white or ivory text.
+- Keep "CLAIM YOUR EDITION" beneath that as controlled metallic-gold text, not a large fake button.
+- Do not add an unverified remaining count, price, discount, shipping claim or certificate claim."""
     else:
-        collector_control_block = """COLLECTOR CONTROL PANEL COPY
+        on_image_wording_source = (
+            f"- On-image wording source: use the exact Headline and CTA from {visual['copy_row']}. "
+            "Print those exact finished strings in this standalone prompt before the composition notes. Do not leave placeholders."
+        )
+        collector_control_block = """SCARCITY STRIP RULE
 
-Do not use the Scarcity collector panel in this route.
+Do not use the Scarcity bottom strip in this route.
 
 No hard black scarcity panel, no scarcity overlay wording, no price, no discount and no offer language."""
     return f"""{visual["prompt_heading"]}
@@ -3004,7 +3032,7 @@ PRODUCT AND CAMPAIGN
 - Destination URL for ad setup only: {product_url or "[exact product-page URL from the Ads form]"}
 - Creative concept: {visual["route"]} — {visual["supporting_label"]}
 - Copy source row: {visual["copy_row"]}
-- On-image wording source: use the exact Headline and CTA from {visual["copy_row"]}. Print those exact finished strings in this standalone prompt before the composition notes. Do not leave placeholders.
+{on_image_wording_source}
 
 PSYCHOLOGICAL PURPOSE
 
@@ -3362,7 +3390,7 @@ Preserve the existing:
 - Headline logic.
 - CTA.
 - Setup.
-- Black-and-gold panel.
+- Black-and-gold bottom scarcity strip.
 - Existing room direction and visual safeguards.
 
 Use this current-control opening:
@@ -3375,9 +3403,11 @@ Use these exact cover lines:
 {overlay_lines}
 
 Cover:
-- Current 64-68% lifestyle / 32-36% scarcity-panel direction.
+- Full-width upper lifestyle/product image region across approximately 76-78% of the square canvas.
+- Shallow full-width matte-black scarcity strip across the bottom approximately 22-24% of the square canvas.
+- Thin restrained metallic-gold divider across the top edge of the black strip.
+- No left/right split, no right sidebar and no vertical scarcity panel.
 - Current black-and-gold visual treatment.
-- Deep matte black panel with restrained metallic-gold detailing.
 - Never invent scarcity.
 - "Only X remaining" requires current timestamped inventory data."""
 
@@ -3580,7 +3610,7 @@ COPY DIVERSITY RULES
 - No shared opening sentence.
 - No duplicated headline.
 - No duplicated creative CTA.
-- Only ACT may use the existing scarcity panel.
+- Only ACT may use the black-and-gold bottom scarcity strip.
 - Only one option may use "Greatness doesn't fade."
 - FEEL must not sound like ACT with urgency lines removed.
 - BELONG must not sound like an interior-design advertisement.
@@ -3666,7 +3696,7 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 - Each group contains exactly one IMAGE GENERATION PROMPT and exactly one three-row COPY VARIATIONS table.
 - Nostalgia contains no black scarcity panel and no scarcity language.
 - Ownership is a visibly different lifestyle/ownership composition.
-- Scarcity preserves the original black-and-gold collector-control treatment.
+- Scarcity uses the full-width upper product image and full-width bottom black-and-gold collector strip treatment.
 - Each prompt includes exact product identity, selected sport, selected country, exact overlay-row mapping from Copy Variation 1, product/artwork lock, frame and glass realism, physical mounting, room realism, square 1024 x 1024 composition and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
 
@@ -4547,7 +4577,7 @@ INSTANT EXPERIENCE ROUTE COPY DIVERSITY
 - No shared opening sentence.
 - No duplicated headline.
 - No duplicated creative CTA.
-- Only ACT may use the existing black scarcity panel.
+- Only ACT may use the black-and-gold bottom scarcity strip.
 - Only one option may use "Greatness doesn't fade."
 - FEEL must not sound like ACT with scarcity lines removed.
 - BELONG must not sound like an interior-design advertisement.
