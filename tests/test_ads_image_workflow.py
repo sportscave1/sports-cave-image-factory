@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 import hashlib
 import io
 import unittest
-import zipfile
 from unittest.mock import patch
 
 from PIL import Image
@@ -776,46 +775,6 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             ],
         )
         self.assertTrue(all(row["status"] == "saved" for row in outcomes.values()))
-
-    def test_instant_experience_package_zip_contains_three_folders_and_originals(self):
-        result, workflow = self.build_result_and_workflow("Instant Experience")
-        source_hashes = {
-            concept["id"]: hashlib.sha256(
-                workflow["slots"][f"instant-experience-{concept['id']}"]["data"]
-            ).hexdigest()
-            for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
-        }
-
-        archive_bytes = ads_page.build_instant_experience_package_zip(result, workflow)
-
-        with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
-            names = archive.namelist()
-            root = ads_page.build_ads_export_folder_name(result, workflow)
-            self.assertEqual(
-                names,
-                [
-                    f"{root}/01-nostalgia/nostalgia-cover-original.png",
-                    f"{root}/01-nostalgia/ad-copy.txt",
-                    f"{root}/02-ownership/ownership-cover-original.png",
-                    f"{root}/02-ownership/ad-copy.txt",
-                    f"{root}/03-scarcity/scarcity-cover-original.png",
-                    f"{root}/03-scarcity/ad-copy.txt",
-                ],
-            )
-            self.assertFalse(any("preview" in name.casefold() for name in names))
-            for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS:
-                image_name = (
-                    f"{root}/{concept['folder']}/"
-                    f"{concept['filename_prefix']}.png"
-                )
-                self.assertEqual(
-                    hashlib.sha256(archive.read(image_name)).hexdigest(),
-                    source_hashes[concept["id"]],
-                )
-                copy_text = archive.read(f"{root}/{concept['folder']}/ad-copy.txt").decode("utf-8")
-                self.assertIn("VARIATION 1\r\n", copy_text)
-                self.assertIn("VARIATION 3\r\n", copy_text)
-                self.assertNotIn("VARIATION 4", copy_text)
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
     @patch("ads_page.dropbox_integration.upload_batch")

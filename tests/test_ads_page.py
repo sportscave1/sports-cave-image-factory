@@ -4296,7 +4296,11 @@ PRIMARY TEXT VARIATIONS
                 "Scarcity Cover",
             ],
         )
-        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+        button_labels = [button.label for button in app_test.button]
+        self.assertEqual(button_labels.count("Save Instant Experience Package"), 1)
+        self.assertNotIn("Download Instant Experience Package", button_labels)
+        self.assertNotIn("Save Images", button_labels)
+        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
         self.assertTrue(any("0 of 3 images ready." in caption.value for caption in app_test.caption))
         for index in range(1, 4):
             instant_experience_cover_uploaders(app_test)[index - 1].set_value(
@@ -4312,7 +4316,59 @@ PRIMARY TEXT VARIATIONS
                 ],
             )
             self.assertTrue(any(f"{index} of 3 images ready." in caption.value for caption in app_test.caption))
-            self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+            self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
+        self.assertEqual(len(app_test.exception), 0)
+
+    def test_instant_experience_save_package_button_opens_existing_destination_workflow(self):
+        app_test = run_ads_page()
+        set_product_name(app_test, "Final Whistle Glory")
+        select_option(app_test, "Category", "Football")
+        select_option(app_test, "Country", "UK")
+        select_option(app_test, "Campaign type", "Instant Experience")
+        set_product_url(
+            app_test,
+            "https://sportscave.com.au/products/final-whistle-glory",
+        )
+        button_by_label(app_test, "Submit").click().run(timeout=20)
+
+        result = dict(app_test.session_state[ads_page.ADS_RESULT_STATE_KEY])
+        copy_csv = ads_page.build_instant_experience_copy_csv(
+            result,
+            concept_notes=instant_experience_csv_notes(),
+        )
+        uploader_by_label(app_test, "Import completed CSV").set_value(
+            [("instant-experience-copy.csv", copy_csv, "text/csv")]
+        )
+        app_test.run(timeout=30)
+        for index in range(3):
+            instant_experience_cover_uploaders(app_test)[index].set_value(
+                [
+                    (
+                        f"instant-{index + 1}.png",
+                        square_png_bytes(color=(60 + index, 80, 120)),
+                        "image/png",
+                    )
+                ]
+            )
+            app_test.run(timeout=30)
+
+        save_button = button_by_label(app_test, "Save Instant Experience Package")
+        self.assertFalse(save_button.disabled)
+        self.assertEqual(
+            [button.label for button in app_test.button].count(
+                "Save Instant Experience Package"
+            ),
+            1,
+        )
+        self.assertNotIn(
+            "Download Instant Experience Package",
+            [button.label for button in app_test.button],
+        )
+
+        save_button.click().run(timeout=20)
+
+        workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
+        self.assertTrue(workflow["save_open"])
         self.assertEqual(len(app_test.exception), 0)
 
     def test_instant_experience_preview_remove_replace_and_rerun_persistence(self):
@@ -4340,7 +4396,7 @@ PRIMARY TEXT VARIATIONS
         )
         self.assertEqual(filename, "nostalgia-cover-original.png")
         self.assertTrue(filename.endswith(".png"))
-        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
 
         app_test.run(timeout=20)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
@@ -4350,7 +4406,7 @@ PRIMARY TEXT VARIATIONS
         button_by_label(app_test, "Remove").click().run(timeout=20)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         self.assertEqual(workflow["slots"], {})
-        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
 
         instant_experience_cover_uploaders(app_test)[0].set_value(
             [("replacement.webp", square_png_bytes(color=(90, 120, 150)), "image/webp")]
@@ -4358,7 +4414,7 @@ PRIMARY TEXT VARIATIONS
         app_test.run(timeout=30)
         workflow = app_test.session_state[ads_page.ADS_IMAGE_STATE_KEY]
         self.assertEqual(workflow["slots"]["instant-experience-nostalgia"]["original_name"], "replacement.webp")
-        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
 
     def test_instant_experience_remove_middle_cover_preserves_route_slots(self):
         app_test = run_ads_page()
@@ -4409,7 +4465,7 @@ PRIMARY TEXT VARIATIONS
         app_test.run(timeout=20)
 
         self.assertTrue(any("corrupt" in error.value for error in app_test.error))
-        self.assertTrue(button_by_label(app_test, "Save Images").disabled)
+        self.assertTrue(button_by_label(app_test, "Save Instant Experience Package").disabled)
         self.assertEqual(len(app_test.exception), 0)
 
     def test_new_campaign_submit_resets_only_incompatible_ads_upload_state(self):

@@ -7,7 +7,6 @@ import logging
 import re
 import secrets
 import time
-import zipfile
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
@@ -8323,17 +8322,6 @@ def _instant_experience_package_items(result, workflow):
     return items
 
 
-def build_instant_experience_package_zip(result, workflow):
-    if not instant_experience_package_ready(result, workflow):
-        raise ValueError("Upload all three covers and complete all nine copy variations before downloading the package.")
-    buffer = io.BytesIO()
-    package_root = build_ads_export_folder_name(result, workflow)
-    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for item in _instant_experience_package_items(result, workflow):
-            archive.writestr(f"{package_root}/{item['relative_path']}", item["data"])
-    return buffer.getvalue()
-
-
 def _instant_experience_package_signature(result, workflow):
     digest = hashlib.sha256()
     digest.update(str(result.get("context_key") or "").encode("utf-8"))
@@ -9128,29 +9116,11 @@ def _render_instant_experience_package_save(result, workflow):
             package_outcome.get("status") == "saved"
             and package_outcome.get("signature") == package_signature
         )
-        try:
-            zip_data = build_instant_experience_package_zip(result, workflow)
-        except Exception:
-            zip_data = b""
-            package_ready = False
-    else:
-        zip_data = b""
-
-    package_filename = f"{build_ads_export_folder_name(result, workflow)}.zip"
-    st.download_button(
-        "Download Instant Experience Package",
-        data=zip_data,
-        file_name=package_filename,
-        mime="application/zip",
-        key=f"ads-ie-package-download::{result['context_key']}",
-        disabled=not package_ready,
-        use_container_width=True,
-    )
     if not package_ready:
-        st.caption("Complete all three covers and all nine copy variations before saving or downloading the package.")
+        st.caption("Complete all three covers and all nine copy variations before saving the package.")
 
     if st.button(
-        "Save Images",
+        "Save Instant Experience Package",
         type="primary",
         icon=":material/save:",
         key=f"ads-images-save-open::{result['context_key']}",
