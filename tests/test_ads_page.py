@@ -1136,7 +1136,7 @@ class AdsPageTests(unittest.TestCase):
             gate,
         )
         self.assertIn(
-            "In Final Ad Review, apply the same factual check inside the existing review fields without adding or removing review sections.",
+            "In review requests, apply the same factual check inside the existing review fields without adding or removing review sections.",
             gate,
         )
 
