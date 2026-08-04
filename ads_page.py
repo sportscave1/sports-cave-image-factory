@@ -106,9 +106,9 @@ ADS_PROMPT_CONTRACT_VERSION = "ADS FULL VISUAL PROMPTS V5"
 ADS_RESULT_STATE_KEY = "ads_generated_result"
 ADS_IMAGE_STATE_KEY = "ads_generated_image_workflow"
 ADS_REVIEW_STATE_KEY = "ads_final_review_workflow"
-ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V3"
+ADS_INSTANT_EXPERIENCE_COPY_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE COPY V5"
 ADS_INSTANT_EXPERIENCE_ROUTE_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE ROUTES V1"
-ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V4"
+ADS_INSTANT_EXPERIENCE_STANDARD_CONTRACT_VERSION = "ADS INSTANT EXPERIENCE STANDARD V5"
 ADS_COPY_FILENAME = "Ad Copy.txt"
 ADS_DIRECTORY_CACHE_SECONDS = 3 * 60
 ADS_PRODUCT_IMAGES_FOLDER = "04_OUTPUT/product-images"
@@ -393,6 +393,11 @@ BASEBALL_INSTANT_EXPERIENCE_COVER_LINES = (
     "Once it sells out, it’s gone.",
     "CLAIM YOUR EDITION",
 )
+NUMBERED_COLLECTOR_PROOF_COVER_LINES = (
+    "ONLY 100 WILL EVER EXIST",
+    "When the final edition is claimed, it retires forever.",
+    "SECURE YOUR EDITION",
+)
 BASEBALL_INSTANT_EXPERIENCE_APPROVED_CLAIMS = (
     "✔ Only 100 editions.",
     "✔ Numbered C.O.A. included.",
@@ -430,6 +435,23 @@ INSTANT_EXPERIENCE_COPY_CSV_HEADERS = (
     "headline",
     "cta",
 )
+INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS = (
+    "Claim Your Edition",
+    "Secure Your Edition",
+    "Own This Edition",
+    "Claim Yours Before It’s Gone",
+)
+INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS = {
+    "Claim Your Edition": "Claim your edition.",
+    "Secure Your Edition": "Secure your edition.",
+    "Own This Edition": "Own this edition.",
+    "Claim Yours Before It’s Gone": "Claim yours before it’s gone.",
+}
+INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS = {
+    "nostalgia": "Secure Your Edition",
+    "ownership": "Claim Your Edition",
+    "scarcity": "Secure Your Edition",
+}
 INSTANT_EXPERIENCE_COPY_CSV_SUPPORT_INSTRUCTION = (
     "If a Sports Cave Instant Experience copy CSV template is attached in this conversation, "
     "transfer the matching copy into the primary_text, headline and cta columns. Match by "
@@ -655,7 +677,7 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
         "proof_intensity": "No proof checklist.",
         "scarcity_intensity": "No scarcity in feed creative when urgency is disabled.",
         "on_image_message_type": "One short product-specific hook and at most one supporting line.",
-        "creative_cta_family": ("See the Edition", "Relive the Moment", "Remember This", "See It Framed"),
+        "creative_cta_family": INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS,
         "fixed_button_cta": "Shop Now",
         "cover_composition": "Full-bleed or near-full-bleed editorial lifestyle composition with no hard black scarcity panel.",
         "panel_treatment": "No large hard black scarcity panel.",
@@ -680,7 +702,7 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
         "proof_intensity": "No proof checklist; use no more than one verified proof or scarcity cue.",
         "scarcity_intensity": "Restrained unless strong urgency is deliberately selected.",
         "on_image_message_type": "Identity-led hook, one short support line and one restrained creative CTA.",
-        "creative_cta_family": ("Make It Yours", "Own the Moment", "Put It on Your Wall", "Bring It Home"),
+        "creative_cta_family": INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS,
         "fixed_button_cta": "Shop Now",
         "cover_composition": "Wider real-room context with asymmetrical editorial composition and architectural negative space.",
         "panel_treatment": "Avoid the current centered black scarcity panel.",
@@ -705,8 +727,8 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
         "proof_intensity": "Approved proof checklist only.",
         "scarcity_intensity": "Strong verified scarcity.",
         "on_image_message_type": "Exact three-line bottom scarcity strip.",
-        "creative_cta_family": ("Claim Your Edition",),
-        "fixed_button_cta": BASEBALL_INSTANT_EXPERIENCE_CTA,
+        "creative_cta_family": INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS,
+        "fixed_button_cta": "Shop Now",
         "cover_composition": "Full-width upper lifestyle/product image region approximately 76-78% of the square canvas, with a shallow full-width matte-black scarcity strip across the bottom approximately 22-24%.",
         "panel_treatment": "Deep matte-black bottom strip with a thin restrained metallic-gold divider across its top edge.",
         "product_prominence": "Frame occupies approximately 74-82% of usable canvas width inside the upper image region.",
@@ -730,7 +752,7 @@ INSTANT_EXPERIENCE_ROUTE_CONFIGS = {
         "proof_intensity": "No invented product count, discount or catalogue breadth.",
         "scarcity_intensity": "Offer-led only when exact offer is entered and verified.",
         "on_image_message_type": "Collection or offer message, never fake multi-product artwork.",
-        "creative_cta_family": ("Choose Your Legends", "Build Your Wall", "Shop the Collection", "Shop the Offer"),
+        "creative_cta_family": INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS,
         "fixed_button_cta": "Shop Now",
         "cover_composition": "Collection-wall or collection-browsing cover only when exact reference assets are supplied.",
         "panel_treatment": "No fake scarcity panel; offer treatment only when exact offer is supplied.",
@@ -3186,19 +3208,77 @@ Every copy option must:
 
 Never invent history, achievements, product facts or sporting events.
 
-Nostalgia must reawaken a specific supported memory, feeling, awe or anticipation and finish with a memory-led action. It must not use generic nostalgia that could fit any athlete or product.
+Framed Greatness Scarcity must begin every Primary Text with exactly "Greatness doesn’t fade. It gets framed." Follow it with one short product-specific, fact-supported nostalgia sentence, then pivot immediately into the verified 100-edition limit and supported permanent retirement. Scarcity remains the dominant sales message.
 
-Ownership must make ownership express identity, loyalty or collector status, help the customer imagine the product commanding their room and finish with an ownership-led action. It must not become generic home-decor copy.
+Pure Limited-Release Scarcity must begin with verified scarcity immediately. It must not open with nostalgia, identity, ownership, room transformation or emotional display language. State the verified 100-edition limit, supported no-second-run or permanent-retirement finality, and a direct edition-acquisition CTA.
 
-Scarcity must use only approved verified scarcity, feel final and collector-led rather than cheap or panicked and finish with a decisive collector CTA. Never invent remaining quantities, sales velocity, certificates, edition limits, offers or product facts. Premium retirement language such as "Once sold out, it retires for good" may be used only when compatible with the verified product rules and exact approved wording.
+Numbered Collector Proof Scarcity must use one brief product-specific, fact-supported nostalgia sentence, then pivot immediately into the finite collector release, verified hand-numbered certificate or approved limited-edition proof, and supported permanent retirement. Never invent a certificate, edition number or remaining quantity when the product data does not verify it.
 
-Primary Text must contain approximately 3-5 short sentences. Headlines must be concise, natural, emotionally clear on first read, product-specific where possible and no longer than the approved 4-6 word limit. CTAs must be short, action-led, route-matched and unique across routes. Do not rewrite an exact user-provided Headline or CTA.
+All three routes are scarcity-first. Never invent memories, rivalries, records, venues, championships, dates, relationships, remaining quantities, sales velocity, certificates, edition limits, offers or product facts. Premium retirement language such as "Once sold out, it retires for good" may be used only when compatible with the verified product rules and exact approved wording.
+
+Primary Text must contain approximately 3-5 short sentences. Headlines must be concise, natural, emotionally clear on first read, product-specific where possible and no longer than the approved 4-6 word limit. Creative CTAs must follow the central Instant Experience CTA contract. Do not rewrite an exact user-provided Headline unless factual correction is required.
 
 Reject generic AI retail language including: Elevate your space; Transform your room; Perfect addition; Ultimate tribute; Stunning masterpiece; Must-have; Wall worthy; Your wall deserves this; Don't miss this one; Another print; Once gone it stays gone; unleash; conversation starter; bring your walls to life; celebrate in style.
 
-Do not describe Sports Cave wall art as "another print". Do not use awkward grammar, merge two names into one person, exaggerate claims or repeat another route's opening hook, Headline or CTA.
+Do not describe Sports Cave wall art as "another print". Do not use awkward grammar, merge two names into one person, exaggerate claims or repeat the same supporting language, Headline or CTA across all three routes.
 
 Before returning the response, silently compare the nine copy combinations. Rewrite any option that is generic, repetitive, fact-unsafe, weak on mobile or mismatched to its concept. Do not print candidates, scores or reasoning."""
+
+
+SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1 = "SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1"
+
+
+def build_instant_experience_creative_cta_rules(concept_id=None):
+    approved_ctas = ", ".join(INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS)
+    approved_endings = "; ".join(
+        f'{cta} -> "{ending}"'
+        for cta, ending in INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS.items()
+    )
+    shared_rules = f"""{SPORTS_CAVE_IE_CREATIVE_CTA_RULES_V1}
+INSTANT EXPERIENCE CREATIVE CTA AND PRIMARY-TEXT ENDING CONTRACT - MANDATORY
+
+- Every customer-facing Instant Experience creative CTA must be exactly one of: {approved_ctas}.
+- The rule applies to every copy-table CTA, every Primary Text close, every on-image CTA, every standalone image-generation prompt, every exact-wording block, every copy correction and every package-ready copy value.
+- Do not generate a softer or indirect CTA. Every creative CTA must use one approved direct edition-acquisition phrase exactly.
+- The CTA field and the final sentence of its matching Primary Text must agree exactly: {approved_endings}
+- Preserve CTA capitalisation by location: title case in the CTA field, sentence case in Primary Text and uppercase on-image.
+- The native Meta/Instant Experience platform button remains Shop Now. Never replace Shop Now with a creative CTA.
+- Headlines remain route-specific and emotional; do not force CTA wording into every Headline.
+- Silently correct any CTA or Primary Text ending outside this contract before returning the response. Do not expose rejected wording or reasoning."""
+
+    if concept_id == "nostalgia":
+        route_rules = """FRAMED GREATNESS SCARCITY CTA APPLICATION
+
+- Every Primary Text begins with exactly: Greatness doesn’t fade. It gets framed.
+- Sentence 2 is one short product-specific nostalgia line supported by the product title, supplied facts or verified artwork information.
+- Pivot immediately into the verified 100-edition limit and supported permanent retirement; scarcity remains dominant.
+- Copy Variation 1 must use CTA field Secure Your Edition and end with "Secure your edition." so its on-image CTA is exact.
+- Never invent achievements, venues, rivalries, statistics, dates or historical details."""
+    elif concept_id == "ownership":
+        route_rules = """PURE LIMITED-RELEASE SCARCITY CTA APPLICATION
+
+- Begin every Primary Text with verified scarcity immediately; do not open with nostalgia, identity, ownership, room transformation or emotional display language.
+- State the verified 100-edition limit and supported no-second-run or permanent-retirement finality.
+- Copy Variation 1 must use CTA field Claim Your Edition and end with "Claim your edition." so it matches the fixed bottom strip.
+- Never invent a remaining quantity, sales velocity, offer or edition fact."""
+    elif concept_id == "scarcity":
+        route_rules = """NUMBERED COLLECTOR PROOF SCARCITY CTA APPLICATION
+
+- Sentence 1 is one short product-specific nostalgia line supported by the product title, supplied facts or verified artwork information. Do not use the Framed Greatness opener.
+- Pivot immediately into the verified finite collector release, verified hand-numbered certificate or approved edition proof, and supported permanent retirement.
+- Copy Variation 1 must use CTA field Secure Your Edition and end with "Secure your edition." so it matches the fixed proof-cover CTA.
+- Never invent a certificate, edition number, remaining quantity, achievement, venue, rivalry, statistic, date or subject relationship."""
+    else:
+        route_rules = """COPY-SET APPLICATION
+
+- Generate only Framed Greatness Scarcity, Pure Limited-Release Scarcity and Numbered Collector Proof Scarcity.
+- Framed Greatness always uses its exact opener, one factual nostalgia sentence and then dominant verified scarcity.
+- Pure Limited-Release begins with scarcity immediately and uses no nostalgia or ownership opening.
+- Numbered Collector Proof uses one factual nostalgia sentence, then verified finite-release and certificate/proof scarcity.
+- Copy Variation 1 uses the route's fixed approved CTA so its image wording and Primary Text ending agree.
+- Validate all completed rows before returning them. If a CTA or matching final sentence is non-compliant, correct that route and variation only."""
+
+    return f"{shared_rules}\n\n{route_rules}"
 
 
 SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2 = "SPORTS_CAVE_IE_TYPOGRAPHY_RULES_V2"
@@ -3217,6 +3297,8 @@ Inspect and correct the composed image before returning it. Reject and regenerat
 - glass is absent, crosses onto the frame or wall, or obscures product details
 - the frame floats, intersects objects, sits flush without believable mounting depth or looks digitally pasted on
 - on-image wording is misspelled, incomplete, duplicated, re-punctuated, substituted or joined by extra text
+- the creative CTA is not exactly Claim Your Edition, Secure Your Edition, Own This Edition or Claim Yours Before It’s Gone in the capitalisation required by its location
+- a Primary Text close and its corresponding CTA field do not use the matching approved wording
 - another route's Headline, CTA or supporting wording appears
 - typography looks painted, engraved, embossed, glowing or physically attached to the wall
 - mobile readability, safe margins, visual hierarchy or product dominance is weak
@@ -3230,87 +3312,94 @@ Silently assess the finished route against this production rubric: product fidel
 INSTANT_EXPERIENCE_STANDARD_VISUALS = (
     {
         "concept_id": "nostalgia",
-        "group_heading": "GROUP 1 — NOSTALGIA",
+        "group_heading": "GROUP 1 — FRAMED GREATNESS SCARCITY",
         "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "Nostalgia",
-        "supporting_label": "Moment & Memory",
-        "copy_row": "Nostalgia Copy Variation 1",
-        "purpose": "Make the fan feel the memory, emotion, awe or anticipation before selling the product.",
-        "room_type": "intimate collector study",
-        "wall_colour": "warm mineral grey",
-        "wall_material": "fine mineral plaster",
-        "camera_side": "near-front with an extremely mild right three-quarter angle",
-        "camera_height": "eye level",
-        "shot_distance": "close product hero, frame occupying approximately 65-75% of usable width",
-        "lens": "75mm natural interior-photography character",
-        "lighting": "warm window daylight from camera-left with no secondary practical light",
-        "time_of_day": "late afternoon",
-        "overlay_position": "upper-left architectural negative space beside the frame, never across the artwork",
-        "product_position": "slightly right of centre within the image region",
-        "architectural_cue": "one shallow plaster return at the far left edge",
-        "composition": "near-full-bleed editorial product-led cover with no hard black scarcity panel",
-        "overlay_rule": "Use the exact finished Headline and CTA from Nostalgia Copy Variation 1 only. State those exact strings inside this image prompt. Do not place the full Primary Text on the image.",
+        "route": "Framed Greatness Scarcity",
+        "supporting_label": "Collector Shrine",
+        "copy_row": "Framed Greatness Scarcity Copy Variation 1",
+        "purpose": "Use one fact-supported sporting memory to create desire, then make the verified finite release and permanent retirement the dominant sales message.",
+        "room_type": "premium sport-specific collector room",
+        "wall_colour": "deep mineral charcoal",
+        "wall_material": "fine mineral plaster with one dark-oak display ledge",
+        "camera_side": "restrained right three-quarter interior-photography angle",
+        "camera_height": "slightly below eye level",
+        "shot_distance": "wider emotional collector display, with the complete frame occupying approximately 62-72% of usable width",
+        "lens": "58mm natural interior-photography character",
+        "lighting": "soft warm side light from camera-left with one restrained picture light as the secondary practical",
+        "time_of_day": "early evening",
+        "overlay_position": "restrained integrated matte-black typography area in architectural negative space at upper left, never across the product",
+        "product_position": "right of centre and dominant within the collector display",
+        "architectural_cue": "one low dark-oak display ledge with no more than two verified reference-backed collector objects",
+        "composition": "Collector Shrine composition with a wide emotional sport-specific display and integrated premium scarcity typography, never a full-width bottom strip",
+        "overlay_rule": "Use the exact finished scarcity-led Headline and the same approved CTA words from Framed Greatness Scarcity Copy Variation 1 only. Preserve the Headline exactly and render the on-image CTA in uppercase. State both resolved strings inside this image prompt. Do not place the full Primary Text on the image.",
+        "fixed_overlay_lines": (),
+        "typography_mode": "floating",
         "extra_rules": (
-            "- No scarcity language, no offer, no discount, no price and no hard black panel.\n"
-            "- The frame must remain close, emotionally immersive and clearly readable on mobile.\n"
-            "- Use one short headline and one restrained CTA, with approximately 14 total overlay words or fewer."
+            "- The visible sales message must be scarcity-led even though the room carries restrained sporting memory.\n"
+            "- Any sport-specific object must be supplied or fact-supported, contain no invented branding and never compete with or cover the artwork.\n"
+            "- Use one short scarcity headline and one aggressive approved CTA, with approximately 14 total overlay words or fewer."
         ),
     },
     {
         "concept_id": "ownership",
-        "group_heading": "GROUP 2 — OWNERSHIP",
+        "group_heading": "GROUP 2 — PURE LIMITED-RELEASE SCARCITY",
         "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "Ownership",
-        "supporting_label": "Identity & Display",
-        "copy_row": "Ownership Copy Variation 1",
-        "purpose": "Make the fan picture the exact artwork as part of their home, office, sports room or personal collection.",
-        "room_type": "premium home office",
-        "wall_colour": "deep charcoal",
-        "wall_material": "smooth painted plaster",
-        "camera_side": "restrained left three-quarter interior-photography angle",
-        "camera_height": "chest height",
-        "shot_distance": "medium lifestyle context, frame occupying approximately 50-60% of usable width",
-        "lens": "50mm natural interior-photography character",
-        "lighting": "soft dusk window light from camera-right with one restrained warm desk lamp as the secondary practical",
-        "time_of_day": "dusk",
-        "overlay_position": "genuine architectural negative space on the open wall area",
-        "product_position": "left of centre with open wall space on the right",
-        "architectural_cue": "one dark-oak doorway reveal on the far left",
-        "composition": "asymmetrical lifestyle composition that is visibly different from Prompt 1",
-        "overlay_rule": "Use the exact finished Headline and CTA from Ownership Copy Variation 1 only. State those exact strings inside this image prompt. Do not place the full Primary Text on the image.",
-        "extra_rules": (
-            "- No black scarcity panel and no aggressive FOMO.\n"
-            "- The room must be believable and lived in, not a furniture catalogue or sports-themed showroom.\n"
-            "- Do not over-describe the room; the artwork remains the emotional centre."
-        ),
-    },
-    {
-        "concept_id": "scarcity",
-        "group_heading": "GROUP 3 — SCARCITY",
-        "prompt_heading": "IMAGE GENERATION PROMPT",
-        "route": "Scarcity",
-        "supporting_label": "Collector & Limited Edition",
-        "copy_row": "Scarcity Copy Variation 1",
-        "purpose": "Preserve the proven Sports Cave collector conversion cover.",
-        "room_type": "premium collector lounge",
+        "route": "Pure Limited-Release Scarcity",
+        "supporting_label": "Limited Release Wall",
+        "copy_row": "Pure Limited-Release Scarcity Copy Variation 1",
+        "purpose": "Lead immediately with the verified finite release and permanent sell-out finality, without nostalgia, identity or ownership framing.",
+        "room_type": "restrained premium gallery wall",
         "wall_colour": "warm off-white",
         "wall_material": "fine textured plaster",
         "camera_side": "near-front interior-photography position with only mild natural perspective and correct rigid frame geometry",
         "camera_height": "eye level",
-        "shot_distance": "product-dominant collector cover, frame occupying approximately 74-82% of usable canvas width inside the upper image region",
+        "shot_distance": "product-dominant limited-release cover, frame occupying approximately 74-82% of usable canvas width inside the upper image region",
         "lens": "70mm natural interior-photography character without wide-angle distortion",
-        "lighting": "soft natural window light from camera-right with one restrained warm wall light as the secondary practical",
-        "time_of_day": "early evening",
+        "lighting": "soft diffused window light from camera-right with no secondary practical light",
+        "time_of_day": "bright overcast morning",
         "overlay_position": "full-width bottom matte-black scarcity strip only",
         "product_position": "centred within the full-width upper image region",
         "architectural_cue": "one quiet vertical wall recess at the far right edge",
-        "composition": "full-width upper lifestyle/product image across approximately 76-78% of the square canvas, with a shallow full-width matte-black scarcity strip across the bottom approximately 22-24%",
-        "overlay_rule": "Use only the exact three approved bottom-strip lines for the Scarcity image: LIMITED TO 100 WORLDWIDE / Once it sells out, it’s gone. / CLAIM YOUR EDITION. Do not use the Scarcity copy table headline or CTA as replacement overlay text.",
+        "composition": "Limited Release Wall with a full-width upper lifestyle/product image across approximately 76-78% of the square canvas and a shallow full-width matte-black scarcity strip across the bottom approximately 22-24%",
+        "overlay_rule": "Use only the exact three approved bottom-strip lines: LIMITED TO 100 WORLDWIDE / Once it sells out, it’s gone. / CLAIM YOUR EDITION. Do not use the copy-table Headline or another CTA as replacement overlay text.",
+        "fixed_overlay_lines": BASEBALL_INSTANT_EXPERIENCE_COVER_LINES,
+        "typography_mode": "bottom_strip",
         "extra_rules": (
             "- Add a thin restrained metallic-gold divider across the top edge of the black strip.\n"
             "- All scarcity wording must be contained inside the bottom strip; no wording may appear beside or over the product image.\n"
             "- No left/right split, no right sidebar and no vertical scarcity panel.\n"
             "- Do not add an unverified remaining count, price, discount, shipping claim or certificate claim."
+        ),
+    },
+    {
+        "concept_id": "scarcity",
+        "group_heading": "GROUP 3 — NUMBERED COLLECTOR PROOF SCARCITY",
+        "prompt_heading": "IMAGE GENERATION PROMPT",
+        "route": "Numbered Collector Proof Scarcity",
+        "supporting_label": "Numbered Collector Proof",
+        "copy_row": "Numbered Collector Proof Scarcity Copy Variation 1",
+        "purpose": "Use one fact-supported sporting memory, then convert through the verified finite release and visible numbered collector proof.",
+        "room_type": "premium collector gallery detail area",
+        "wall_colour": "muted forest green",
+        "wall_material": "dark oak wall panels with a narrow matte-stone proof shelf",
+        "camera_side": "close left three-quarter product angle that reveals rigid frame depth without distorting the artwork",
+        "camera_height": "slightly elevated above the certificate plane but level with the frame centre",
+        "shot_distance": "close craftsmanship and proof composition, with the complete frame occupying approximately 68-76% of usable width",
+        "lens": "85mm natural compressed product-photography character",
+        "lighting": "controlled gallery light from camera-left with one soft daylight fill from camera-right",
+        "time_of_day": "midday",
+        "overlay_position": "restrained lower-right architectural negative space outside the product and certificate",
+        "product_position": "left of centre with its full timber depth visible and a separate proof element below-right",
+        "architectural_cue": "one narrow matte-stone shelf beneath the frame for a separate approved limited-edition proof element",
+        "composition": "Numbered Collector Proof close composition emphasizing frame craftsmanship, glass and one separate approved limited-edition proof element",
+        "overlay_rule": "Use only the exact approved proof-cover lines: ONLY 100 WILL EVER EXIST / When the final edition is claimed, it retires forever. / SECURE YOUR EDITION. Keep all wording separate from the artwork and certificate.",
+        "fixed_overlay_lines": NUMBERED_COLLECTOR_PROOF_COVER_LINES,
+        "typography_mode": "collector_proof",
+        "extra_rules": (
+            "- Show a hand-numbered certificate only when approved product data verifies it; otherwise use an existing approved badge, plaque or edition proof and do not invent a certificate.\n"
+            "- Never invent a specific edition number or remaining quantity, and never place fake proof wording inside the original artwork.\n"
+            "- The separate proof element must remain secondary, physically believable and must not obscure the product.\n"
+            "- No full-width bottom strip, side panel or crowded memorabilia display."
         ),
     },
 )
@@ -3354,7 +3443,7 @@ def validate_instant_experience_set_differentiation(visuals=None):
 
 
 def build_instant_experience_typography_quality_rules(visual):
-    if visual["concept_id"] == "scarcity":
+    if visual.get("typography_mode") == "bottom_strip":
         route_rules = """APPROVED SCARCITY STRIP TYPOGRAPHY
 
 - Preserve the current full-width horizontal bottom strip, current upper product-region proportions and thin gold divider.
@@ -3364,6 +3453,15 @@ def build_instant_experience_typography_quality_rules(visual):
 - Set Once it sells out, it’s gone. beneath it in smaller warm ivory text.
 - Set CLAIM YOUR EDITION beneath that as controlled muted-gold typography, not a fake button.
 - Never squeeze, stretch, condense, split or break words."""
+    elif visual.get("typography_mode") == "collector_proof":
+        route_rules = """APPROVED NUMBERED COLLECTOR PROOF TYPOGRAPHY
+
+- Add the exact proof-cover wording as a crisp, flat post-production graphic after composing the product and separate verified proof element.
+- Use Montserrat SemiBold for the Headline and Montserrat Medium or SemiBold for the supporting line and CTA.
+- Keep ONLY 100 WILL EVER EXIST as a short, unified Headline and SECURE YOUR EDITION as one controlled muted-gold line.
+- Keep every advertising word outside the product, artwork, frame, glass and separate certificate or edition proof.
+- Maintain at least a 7% safe margin and preserve clear negative space around the wording.
+- Do not paint wording onto the wall, certificate or artwork, and do not use a fake button, bevel, glow or metallic extrusion."""
     else:
         route_rules = """APPROVED FLOATING LIFESTYLE TYPOGRAPHY
 
@@ -3371,6 +3469,7 @@ def build_instant_experience_typography_quality_rules(visual):
 - Use Montserrat SemiBold for the Headline and Montserrat Medium or SemiBold for the CTA where compatible with current Sports Cave branding.
 - Use warm ivory for the Headline and controlled muted gold for the CTA unless exact user-provided wording or an approved route colour requires otherwise.
 - Keep the Headline to a maximum of two lines and the CTA on one line.
+- The CTA must use exactly the same approved words as Claim Your Edition, Secure Your Edition, Own This Edition or Claim Yours Before It’s Gone from the concept's Copy Variation 1, rendered in uppercase on-image.
 - Maintain at least a 7% safe margin from every canvas edge.
 - Keep every advertising word outside the product and away from faces, artwork text, logos, signatures, badges, plaques and edition details.
 - Preserve clean natural negative space around the wording.
@@ -3380,26 +3479,32 @@ INSTANT EXPERIENCE ON-IMAGE TYPOGRAPHY - MANDATORY
 
 {route_rules}
 
-Any misspelling, missing word, duplicated word, changed punctuation, wrong CTA, extra generated text or weak mobile readability is a hard failure. Preserve exact user-supplied wording character-for-character."""
+Any misspelling, missing word, duplicated word, changed punctuation, CTA outside the approved direct edition-acquisition family, extra generated text or weak mobile readability is a hard failure. Preserve exact user-supplied wording character-for-character when it already complies with the mandatory CTA contract."""
 
 
 def _instant_experience_route_wording_rules(visual):
-    if visual["concept_id"] == "scarcity":
-        own_wording = """- Exact permitted on-image Headline: LIMITED TO 100 WORLDWIDE
-- Exact permitted supporting line: Once it sells out, it’s gone.
-- Exact permitted on-image CTA: CLAIM YOUR EDITION"""
+    fixed_overlay_lines = tuple(visual.get("fixed_overlay_lines") or ())
+    if fixed_overlay_lines:
+        own_wording = "\n".join(
+            (
+                f"- Exact permitted on-image Headline: {fixed_overlay_lines[0]}",
+                f"- Exact permitted supporting line: {fixed_overlay_lines[1]}",
+                f"- Exact permitted on-image CTA: {fixed_overlay_lines[2]}",
+            )
+        )
     else:
         own_wording = f"""- Exact permitted on-image Headline: copy the complete finished Headline from {visual['copy_row']} character-for-character.
 - Exact permitted supporting line: none.
-- Exact permitted on-image CTA: copy the complete finished CTA from {visual['copy_row']} character-for-character."""
+- Exact permitted on-image CTA: use the complete approved CTA words from {visual['copy_row']} and render them in uppercase without changing the words."""
 
     forbidden_sources = []
     for other in INSTANT_EXPERIENCE_STANDARD_VISUALS:
         if other["concept_id"] == visual["concept_id"]:
             continue
-        if other["concept_id"] == "scarcity":
+        other_fixed_lines = tuple(other.get("fixed_overlay_lines") or ())
+        if other_fixed_lines:
             forbidden_sources.append(
-                "Scarcity: LIMITED TO 100 WORLDWIDE / Once it sells out, it’s gone. / CLAIM YOUR EDITION"
+                f"{other['route']}: {' / '.join(other_fixed_lines)}"
             )
         else:
             forbidden_sources.append(
@@ -3416,7 +3521,7 @@ These are the only permitted advertising words for this cover. Never place Prima
 Forbidden other-route wording:
 {forbidden_text}
 
-Before printing the final standalone image prompt, replace every copy-row source reference above with the actual finished Headline and CTA strings generated for that row. Print the exact permitted and forbidden strings inside the standalone prompt. Do not leave brackets, placeholders or unresolved source references. Reject and regenerate if any other route's wording appears."""
+Before printing the final standalone image prompt, replace every copy-row source reference above with the actual finished Headline and the uppercase on-image form of the CTA generated for that row. Print the exact permitted and forbidden strings inside the standalone prompt. Do not leave brackets, placeholders or unresolved source references. Reject and regenerate if any other route's wording appears."""
 
 
 def build_instant_experience_set_differentiation_rules(visual):
@@ -3449,7 +3554,7 @@ Resolved sibling fingerprints supplied for comparison:
 
 Keep this route's resolved scene and approved layout. Across every pair in the three-cover set, at least five of these attributes must differ: room type, wall colour, wall material, camera side or angle, product prominence or position, lighting condition, text position, supporting architectural element.
 
-Do not repeat the same desk, shelves, plant, wall palette, camera relationship, lighting and typography composition with cosmetic changes. If an explicit user selection matches another route, preserve it and create differentiation through the remaining automatic attributes. Nostalgia remains memory-led editorial lifestyle; Ownership remains identity and display-led; Scarcity remains direct-response collector urgency with its approved bottom strip. Never force the Scarcity strip onto another route.
+Do not repeat the same desk, shelves, plant, wall palette, camera relationship, lighting and typography composition with cosmetic changes. If an explicit user selection matches another route, preserve it and create differentiation through the remaining automatic attributes. Framed Greatness remains the wider emotional Collector Shrine; Pure Limited-Release remains the clean wall with the approved bottom strip; Numbered Collector Proof remains the close craftsmanship and proof composition. Never force the bottom strip onto another route.
 
 {_instant_experience_route_wording_rules(visual)}"""
 
@@ -3459,6 +3564,7 @@ def build_instant_experience_image_quality_contract(visual):
     return "\n\n".join(
         (
             SPORTS_CAVE_IE_CORE_IMAGE_QUALITY_RULES_V2,
+            build_instant_experience_creative_cta_rules(visual["concept_id"]),
             build_instant_experience_typography_quality_rules(visual),
             build_instant_experience_set_differentiation_rules(visual),
             SPORTS_CAVE_IE_FINAL_REJECTION_GATE_V2,
@@ -3479,8 +3585,8 @@ def standard_instant_experience_fingerprint(index, visual, *, category=""):
         "cover_layout": visual["composition"],
         "urgency_placement": (
             "bottom scarcity strip only"
-            if visual["concept_id"] == "scarcity"
-            else "none in feed creative"
+            if visual.get("typography_mode") == "bottom_strip"
+            else "integrated scarcity typography"
         ),
         "creative_cta": visual["copy_row"],
         "room_type": visual["room_type"],
@@ -3557,29 +3663,45 @@ def build_standard_instant_experience_image_prompt(
         visual,
         category=category,
     )
-    scarcity_panel_lines = "\n".join(BASEBALL_INSTANT_EXPERIENCE_COVER_LINES)
-    if visual["concept_id"] == "scarcity":
+    fixed_overlay_lines = tuple(visual.get("fixed_overlay_lines") or ())
+    fixed_overlay_text = "\n".join(fixed_overlay_lines)
+    if visual.get("typography_mode") == "bottom_strip":
         on_image_wording_source = (
             "- On-image wording source: use the exact approved three-line bottom scarcity strip copy. "
-            "Do not replace it with the Scarcity copy table headline or CTA."
+            "Pure Limited-Release Scarcity Copy Variation 1 must use CTA Claim Your Edition and end its Primary Text with "
+            "Claim your edition. Do not replace the strip with the copy-table Headline or another CTA."
         )
         collector_control_block = f"""BOTTOM SCARCITY STRIP COPY
 
 Use these exact three lines inside the bottom strip only when the 100-edition limit is verified:
 
-{scarcity_panel_lines}
+{fixed_overlay_text}
 
 Do not add, remove, rewrite, localise or reorder these words. Do not add an unverified remaining count, price, discount, shipping claim or certificate claim."""
+    elif fixed_overlay_lines:
+        on_image_wording_source = (
+            "- On-image wording source: use the exact approved three-line Numbered Collector Proof copy. "
+            "Numbered Collector Proof Scarcity Copy Variation 1 must use CTA Secure Your Edition and end its Primary Text with "
+            "Secure your edition. Keep the wording separate from the artwork and proof element."
+        )
+        collector_control_block = f"""NUMBERED COLLECTOR PROOF COPY
+
+Use these exact three lines only when the 100-edition limit and supporting proof are verified:
+
+{fixed_overlay_text}
+
+Do not add, remove, rewrite, localise or reorder these words. Never invent a certificate, edition number, remaining quantity, price, discount or shipping claim."""
     else:
         on_image_wording_source = (
-            f"- On-image wording source: use the exact Headline and CTA from {visual['copy_row']}. "
-            "Print those exact finished strings in this standalone prompt before the composition notes. Do not leave placeholders."
+            f"- On-image wording source: use the exact Headline and the same CTA words from {visual['copy_row']}. "
+            "The CTA field must be Claim Your Edition, Secure Your Edition, Own This Edition or Claim Yours Before It’s Gone; render its on-image form in uppercase. "
+            "Print the exact finished Headline and uppercase CTA inside this standalone prompt before the composition notes. Do not leave placeholders."
         )
-        collector_control_block = """SCARCITY STRIP RULE
+        collector_control_block = """SCARCITY PRESENTATION RULE
 
-Do not use the Scarcity bottom strip in this route.
+Do not use the Pure Limited-Release bottom strip in this route.
 
-No hard black scarcity panel, no scarcity overlay wording, no price, no discount and no offer language."""
+Use the resolved integrated premium scarcity typography area. Do not add a price, discount or unverified offer."""
     return f"""{visual["prompt_heading"]}
 
 Copy this prompt into a fresh image-generation conversation with the exact uploaded Sports Cave product image attached.
@@ -3726,8 +3848,6 @@ def _ie_visual_value(settings, key, fallback):
 
 def instant_experience_creative_cta_for_route(route_id, *, settings=None, exact_offer=""):
     route = INSTANT_EXPERIENCE_ROUTE_CONFIGS.get(route_id, INSTANT_EXPERIENCE_ROUTE_CONFIGS["ACT"])
-    if route_id == "BUILD" and exact_offer:
-        return "Shop the Offer"
     return route["creative_cta_family"][0]
 
 
@@ -3894,7 +4014,7 @@ Cover:
 - Intimate morning or late-afternoon natural light.
 - Use one short product-specific hook and, at most, one supporting line.
 - Maximum approximately 14 total overlay words.
-- No feed urgency CTA on the cover when feed urgency is disabled."""
+- Use only an approved This Edition creative CTA; the acquisition CTA does not add scarcity language to the emotional route."""
     if route_id == "BELONG":
         return f"""BELONG ROUTE RULES
 
@@ -3922,7 +4042,7 @@ Cover:
 - 45-55mm natural lens character.
 - Contemporary but believable wall/material contrast.
 - Dusk daylight plus restrained practical lighting is allowed.
-- Use an identity-led hook, one short support line and one restrained CTA.
+- Use an identity-led hook, one short support line and one approved This Edition creative CTA.
 - Maximum approximately 16 total overlay words."""
     if route_id == "BUILD":
         return f"""BUILD ROUTE RULES
@@ -3935,7 +4055,7 @@ Copy:
 - Use the exact entered multi-buy or collection offer only when supplied and verified: {exact_offer or "None supplied"}.
 - Do not generate invented or lookalike artworks to create a multi-product wall.
 - A multi-product promise must not link to one unrelated PDP.
-- Valid creative CTA territory includes Choose Your Legends, Build Your Wall, Shop the Collection and Shop the Offer.
+- Use only an approved This Edition creative CTA. Keep collection or offer wording in the route copy, not in a replacement CTA.
 
 Cover:
 - If the cover displays multiple products, two to four exact product reference assets must be supplied.
@@ -4143,7 +4263,7 @@ Analyse the attached image and product title before writing.
 
 Use the supplied product name as the source of identity. Do not identify or guess a person, club, country, achievement, year, record, final, trophy or rivalry solely from the image.
 
-{build_country_campaign_localisation_note(category, country)}
+{build_country_campaign_localisation_note(category, country, campaign_type="Instant Experience")}
 
 {build_universal_sports_cave_rules(category)}
 
@@ -4176,7 +4296,7 @@ COPY DIVERSITY RULES
 - Each option must have one dominant psychological job.
 - No shared opening sentence.
 - No duplicated headline.
-- No duplicated creative CTA.
+- Every creative CTA must use the approved This Edition family and match its Primary Text ending.
 - Only ACT may use the black-and-gold bottom scarcity strip.
 - Only one option may use "Greatness doesn't fade."
 - FEEL must not sound like ACT with urgency lines removed.
@@ -4230,7 +4350,7 @@ def build_instant_experience_visual_output_requirements(
     )
     return f"""INSTANT EXPERIENCE VISUAL REQUIREMENTS
 
-Return exactly three complete grouped Instant Experience concepts in the standard order: Nostalgia, Ownership, then Scarcity.
+Return exactly three complete grouped Instant Experience concepts in the standard order: Framed Greatness Scarcity, Pure Limited-Release Scarcity, then Numbered Collector Proof Scarcity.
 
 Do not output a fourth prompt.
 Do not output one shared prompt with variations.
@@ -4261,9 +4381,9 @@ FINAL INSTANT EXPERIENCE IMAGE CHECK
 
 - Exactly three group sections are present.
 - Each group contains exactly one IMAGE GENERATION PROMPT and exactly one three-row COPY VARIATIONS table.
-- Nostalgia contains no permitted or rendered scarcity language; scarcity wording may appear only inside its explicit forbidden-wording list.
-- Ownership is a visibly different lifestyle/ownership composition.
-- Scarcity uses the full-width upper product image and full-width bottom black-and-gold collector strip treatment.
+- Framed Greatness begins every Primary Text with the exact approved opener, uses one fact-supported nostalgia sentence, then becomes scarcity-dominant.
+- Pure Limited-Release begins with scarcity immediately and uses the full-width upper product image and full-width bottom black-and-gold collector strip treatment.
+- Numbered Collector Proof uses one brief fact-supported nostalgia line, then a visibly different close craftsmanship and verified proof composition.
 - Each prompt includes exact product identity, selected sport, selected country, exact overlay-row mapping from Copy Variation 1, product/artwork lock, frame and glass realism, physical mounting, room realism, square 1024 x 1024 composition and no automatic image generation.
 - Each prompt includes the shared Sports Cave image-realism marker exactly once."""
 
@@ -4470,9 +4590,9 @@ def build_ads_text_first_image_generation_gate(campaign_type, instant_experience
         )
 
     if campaign_type == "Instant Experience":
-        ad_package_items = """1. GROUP 1 — NOSTALGIA with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
-2. GROUP 2 — OWNERSHIP with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
-3. GROUP 3 — SCARCITY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+        ad_package_items = """1. GROUP 1 — FRAMED GREATNESS SCARCITY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+2. GROUP 2 — PURE LIMITED-RELEASE SCARCITY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
+3. GROUP 3 — NUMBERED COLLECTOR PROOF SCARCITY with one IMAGE GENERATION PROMPT and one three-row COPY VARIATIONS table.
 4. Exactly nine complete ad-copy combinations total.
 5. Exactly one shared INSTANT EXPERIENCE SETUP block after the three groups.
 6. Relevant placement, sizing, export, consistency, artwork-preservation and realism instructions.
@@ -4495,7 +4615,7 @@ No Description or Meta Ad Description field is allowed."""
     approval_question = "Would you like me to generate Card 1?"
     if campaign_type == "Instant Experience":
         completion_instruction = (
-            "After GROUP 3 — SCARCITY and the shared INSTANT EXPERIENCE SETUP block are complete, stop. "
+            "After GROUP 3 — NUMBERED COLLECTOR PROOF SCARCITY and the shared INSTANT EXPERIENCE SETUP block are complete, stop. "
             "Do not ask which cover to generate and do not ask a follow-up generation question."
         )
     else:
@@ -4505,7 +4625,7 @@ No Description or Meta Ad Description field is allowed."""
             f'"{approval_question}"'
         )
     direct_instruction_examples = (
-        '"generate the image now", "generate the Nostalgia Cover" or "generate the Scarcity Cover"'
+        '"generate the image now", "generate the Framed Greatness Scarcity Cover" or "generate the Numbered Collector Proof Scarcity Cover"'
         if campaign_type == "Instant Experience"
         else '"generate the image now", "generate Card 1" or "generate FEEL"'
     )
@@ -4574,8 +4694,8 @@ def build_campaign_visual_output_contract(
     contract_version = ads_prompt_contract_version_for_campaign(campaign_type).replace("; ", "\n")
     if campaign_type == "Instant Experience":
         copy_schema_preservation = (
-            "Return the finished standard Instant Experience output in this order: GROUP 1 — NOSTALGIA, "
-            "GROUP 2 — OWNERSHIP, GROUP 3 — SCARCITY, then one shared INSTANT EXPERIENCE SETUP block. "
+            "Return the finished standard Instant Experience output in this order: GROUP 1 — FRAMED GREATNESS SCARCITY, "
+            "GROUP 2 — PURE LIMITED-RELEASE SCARCITY, GROUP 3 — NUMBERED COLLECTOR PROOF SCARCITY, then one shared INSTANT EXPERIENCE SETUP block. "
             "Each group must contain one standalone image-generation prompt followed by three matching "
             "Primary Text, Headline and CTA variations. Preserve every setup instruction, destination rule and URL parameter. "
             "Do not add Description, Meta Ad Description, route-package, multi-route mode or old control-mode sections.\n\n"
@@ -4622,7 +4742,8 @@ def build_campaign_visual_output_contract(
         final_question = "Would you like me to generate Card 1?"
     if campaign_type == "Instant Experience":
         final_response_termination = (
-            "Only after GROUP 1 — NOSTALGIA, GROUP 2 — OWNERSHIP, GROUP 3 — SCARCITY "
+            "Only after GROUP 1 — FRAMED GREATNESS SCARCITY, GROUP 2 — PURE LIMITED-RELEASE SCARCITY, "
+            "GROUP 3 — NUMBERED COLLECTOR PROOF SCARCITY "
             "and the shared INSTANT EXPERIENCE SETUP block have been printed, stop. "
             "Do not ask a follow-up question and do not generate images."
         )
@@ -5180,25 +5301,28 @@ This block strengthens the standard Instant Experience grouped concept output on
 
 {SPORTS_CAVE_IE_CORE_COPY_QUALITY_RULES_V2}
 
+{build_instant_experience_creative_cta_rules()}
+
 STANDARD INSTANT EXPERIENCE GROUPED COPY DIVERSITY
 
-- Return exactly three grouped concepts: GROUP 1 — NOSTALGIA, GROUP 2 — OWNERSHIP and GROUP 3 — SCARCITY.
+- Return exactly three grouped concepts: GROUP 1 — FRAMED GREATNESS SCARCITY, GROUP 2 — PURE LIMITED-RELEASE SCARCITY and GROUP 3 — NUMBERED COLLECTOR PROOF SCARCITY.
 - Each concept must contain exactly one IMAGE GENERATION PROMPT and one COPY VARIATIONS table.
 - Each concept table must contain exactly three completed rows.
 - Each row must contain one complete Primary Text, one Headline and one CTA.
 - The full response must contain exactly nine complete ad-copy combinations.
 - No Description or Meta Ad Description field is allowed.
 - No row may be placeholder copy.
-- No shared opening sentence.
+- Route 1 must use its exact fixed opener in all three of its own variations; Routes 2 and 3 must not use that opener.
 - No duplicated headline.
-- No duplicated CTA.
-- Scarcity must be concentrated in the Scarcity concept.
-- Nostalgia must not contain scarcity, offer or discount language.
-- Ownership must stay identity/display-led and avoid hard FOMO.
-- A supplied offer may be used only when the exact offer is supplied, fact-safe and permitted by the existing Scarcity route contract.
+- Every CTA and matching Primary Text ending must pass the central Instant Experience creative CTA contract.
+- All three concepts must remain scarcity-first while using materially different supporting structures and scene compositions.
+- Framed Greatness uses its exact opener, one factual nostalgia sentence and then dominant verified scarcity.
+- Pure Limited-Release begins with scarcity immediately and contains no nostalgia, identity or ownership opening.
+- Numbered Collector Proof uses one factual nostalgia sentence, then verified finite-release and certificate/proof scarcity.
+- A supplied offer may be used only when exact, fact-safe and permitted by the existing campaign contract; never let it replace the edition scarcity.
 - Every claim must remain supported by the product title, supplied facts, visible artwork or approved claim path.
 - Use natural selected-country English.
-- Copy Variation 1 supplies the exact on-image Headline and CTA for Nostalgia and Ownership. Scarcity keeps its exact approved three-line strip wording.
+- Copy Variation 1 supplies the exact on-image Headline and CTA for Framed Greatness. Pure Limited-Release and Numbered Collector Proof keep their exact approved three-line wording.
 - Generate all copy first in working memory so each standalone image prompt can print its exact permitted wording and the exact forbidden Headline/CTA strings assigned to the other concepts. Do not expose this working order or change the approved response order."""
     single_primary_rule = (
         "Instant Experience must always preserve exactly three concept groups with three Primary Text, "
@@ -6043,11 +6167,9 @@ Do not apply Carousel character limits to the Instant Experience headline.
 
 CALL TO ACTION
 
-Generate exactly five valid Meta-style CTA button-label options.
+Generate exactly five creative CTA options using only Claim Your Edition, Secure Your Edition, Own This Edition or Claim Yours Before It’s Gone.
 
-Include {BASEBALL_INSTANT_EXPERIENCE_CTA} only if it is an approved button label in the user's Meta account. Otherwise use valid Meta-style button labels such as Shop Now, Learn More, View Shop, See More or Get Offer.
-
-Do not invent sentence-style button copy.
+The matching Primary Text must end with the corresponding sentence-case CTA. Keep Meta's native fixed button as Shop Now.
 
 INSTANT EXPERIENCE SETUP GUIDE
 
@@ -6076,7 +6198,7 @@ Use this exact workflow in the generated setup section:
    Limited Edition
 
 10. Under Fixed button, set the label to:
-    one of the generated CALL TO ACTION button-label options.
+    Shop Now
 
 11. Set the Fixed button destination to the exact selected product-page URL supplied in the campaign form:
     {product_url}
@@ -6165,11 +6287,13 @@ def build_product_url_instruction(product_url):
     return "Use the selected product's live product page URL where a destination URL is required. Do not invent a URL."
 
 
-def build_country_campaign_localisation_note(category, country):
+def build_country_campaign_localisation_note(category, country, *, campaign_type=""):
     country_key = normalize_country_language_key(country)
     category_key = str(category or "").strip()
     if category_key == "Football":
         if country_key == "Australia":
+            if campaign_type == "Instant Experience":
+                return "AU football/soccer localisation: use football or soccer depending on the product context. Keep the approved This Edition creative CTA."
             return "AU football/soccer localisation: use football or soccer depending on the product context. Keep Claim Your Edition."
         if country_key == "UK":
             return "UK football localisation: use football, supporters, wall, home bar, collection and proper fans where natural."
@@ -6336,7 +6460,7 @@ Analyse the attached image and product title before writing.
 
 Use the supplied product name as the source of identity. Do not identify or guess a person, club, country, achievement, year, record, final, trophy, rivalry or manufacturing origin solely from the image or selected country.
 
-{build_country_campaign_localisation_note(category, country)}
+{build_country_campaign_localisation_note(category, country, campaign_type="Instant Experience")}
 
 {build_universal_sports_cave_rules(category)}
 
@@ -6351,21 +6475,21 @@ PROMOTION OR OFFER
 
 Exact Promotion or Offer entered: {exact_offer or "None supplied"}
 
-Serialize this field independently of Moment Type. If a non-empty offer is supplied, preserve it exactly. Do not use it in Nostalgia or Ownership. Use it only in Scarcity variation 3 if the product facts and campaign context support an offer-led collector test. Never invent, rewrite, improve or expand the offer.
+Serialize this field independently of Moment Type. If a non-empty offer is supplied, preserve it exactly. Use it only in Pure Limited-Release Scarcity Variation 3 when the product facts and campaign context support an offer-led collector test. Never let it replace the verified edition scarcity. Never invent, rewrite, improve or expand the offer.
 
 OBJECTIVE
 
 Create one standard Meta Instant Experience package grouped into three clear concepts:
 
-1. NOSTALGIA
-2. OWNERSHIP
-3. SCARCITY
+1. FRAMED GREATNESS SCARCITY
+2. PURE LIMITED-RELEASE SCARCITY
+3. NUMBERED COLLECTOR PROOF SCARCITY
 
 Return exactly these sections in this order:
 
-1. GROUP 1 — NOSTALGIA
-2. GROUP 2 — OWNERSHIP
-3. GROUP 3 — SCARCITY
+1. GROUP 1 — FRAMED GREATNESS SCARCITY
+2. GROUP 2 — PURE LIMITED-RELEASE SCARCITY
+3. GROUP 3 — NUMBERED COLLECTOR PROOF SCARCITY
 4. INSTANT EXPERIENCE SETUP
 
 Do not output five global copy variations.
@@ -6404,41 +6528,42 @@ Table rules:
 
 CONCEPT-SPECIFIC COPY RULES
 
-NOSTALGIA — Moment & Memory:
-- Purpose: make the fan remember the athlete, rivalry, race, match, era or sporting moment.
-- All three Nostalgia variations must lead with emotion, memory or recognition.
-- Feel product-specific and use three different opening hooks.
-- Contain no hard scarcity, no offer and no discount language.
-- Avoid claim, only, selling fast, gone, last chance and miss out.
-- Avoid generic product-description openings and polished corporate ad language.
-- Adapt current or future sporting subjects to awe, anticipation or excitement instead of pretending they are nostalgic.
-- Suitable CTA territory: Remember the Moment, See the Edition, Relive It, See It Framed.
+FRAMED GREATNESS SCARCITY — Collector Shrine:
+- Purpose: create desire with one factual sporting memory, then sell the finite collector release.
+- The first sentence of every Primary Text must be exactly: Greatness doesn’t fade. It gets framed.
+- Sentence 2 must be one short, product-specific nostalgia line supported by the product title, supplied facts or verified artwork information.
+- Pivot immediately into authentic scarcity: only 100 editions worldwide and permanent retirement once sold out, only when those claims are approved.
+- Keep nostalgia brief and scarcity dominant. Use three materially different supported nostalgia lines after the fixed opener.
+- Never invent achievements, venues, rivalries, statistics, dates, opponents or historical details.
+- Every Headline must be scarcity-led and contain no more than 4-6 words.
+- Finish every Primary Text with the sentence-case version of its approved CTA. Copy Variation 1 must use Secure Your Edition and end with Secure your edition.
 
-OWNERSHIP — Identity & Display:
-- Purpose: make the fan picture the artwork on their wall and feel that owning it says something about who they are.
-- All three Ownership variations must focus on identity, belonging, pride or personal display.
-- Keep the artwork and sporting subject as the emotional centre.
-- Avoid turning the copy into an interior-design advertisement.
-- Avoid hard FOMO.
-- Use no more than one restrained collector cue.
-- Use three materially different opening hooks.
-- Suitable CTA territory: Make It Yours, Own the Moment, Bring It Home, Put It on Your Wall.
+PURE LIMITED-RELEASE SCARCITY — Limited Release Wall:
+- Purpose: make the verified finite release and permanent sell-out finality the immediate reason to act.
+- Begin every Primary Text with scarcity immediately.
+- Do not begin with nostalgia, identity, ownership, room transformation or emotional display language.
+- State that only 100 editions are available worldwide and that the artwork retires permanently once sold out, only when those claims are approved.
+- Use three different direct scarcity hooks and sentence structures.
+- Never invent a remaining quantity, sales velocity, restock promise, offer or product fact.
+- Every Headline must be pure scarcity and contain no more than 4-6 words.
+- Finish every Primary Text with the sentence-case version of its approved CTA. Copy Variation 1 must use Claim Your Edition and end with Claim your edition.
 
-SCARCITY — Collector & Limited Edition:
-- Purpose: convert established desire using verified limited-edition collector scarcity.
-- All three Scarcity variations must feel urgent and collector-focused.
-- Use different hooks and sentence structures.
-- Use only verified product facts.
-- Never invent remaining quantities, sales velocity, certificate claims or offers.
-- Preserve "Limited to 100 worldwide" only when verified for the selected product.
-- Preserve "Once it sells out, it's gone" where approved.
-- Suitable CTA territory: Claim Your Edition, Secure Yours, Claim Your Number, Reserve Your Edition.
+NUMBERED COLLECTOR PROOF SCARCITY — Numbered Collector Proof:
+- Purpose: convert through the finite collector release and verified numbered proof.
+- Begin every Primary Text with one short product-specific nostalgia line supported by the product title, supplied facts or verified artwork information.
+- Do not use Greatness doesn’t fade. It gets framed. in this route.
+- Pivot immediately into the verified 100-edition release, verified hand-numbered certificate or approved limited-edition proof, and supported permanent retirement.
+- When a hand-numbered certificate is not verified, do not claim or depict one; use only an existing approved badge, plaque or edition proof.
+- Never invent a certificate, edition number, remaining quantity, achievement, venue, rivalry, statistic, date or subject relationship.
+- Every Headline must be scarcity-led and contain no more than 4-6 words.
+- Finish every Primary Text with the sentence-case version of its approved CTA. Copy Variation 1 must use Secure Your Edition and end with Secure your edition.
 
 COPY FIELD FORMAT RULES
 
 - Every Primary Text must contain 3-5 short, mobile-readable sentences.
 - Every Headline must contain no more than 4-6 words. 4 to 6 words max.
-- Every CTA must contain approximately 2-4 words.
+- Every CTA must use one exact approved direct edition-acquisition phrase from the central contract.
+- Every CTA and matching Primary Text ending must pass the central Instant Experience creative CTA contract.
 - Keep the fixed Meta/Instant Experience button as: Shop Now.
 - Preserve the current Primary Text, Headline and CTA columns and all existing row counts.
 
@@ -6467,9 +6592,12 @@ FINAL COPY CHECK
 - The output contains exactly nine complete ad-copy combinations.
 - No Description or Meta Ad Description field is present.
 - No placeholder copy remains.
-- Nostalgia contains no hard scarcity, offer or discount language.
-- Ownership focuses on identity and display without hard FOMO.
-- Scarcity retains the verified collector treatment.
+- All three groups are scarcity-led and use materially different supporting structures.
+- Framed Greatness begins with its exact fixed opener, then one fact-supported nostalgia sentence before dominant verified scarcity.
+- Pure Limited-Release begins with scarcity immediately and uses the approved full-width bottom strip.
+- Numbered Collector Proof begins with one brief fact-supported nostalgia line, then verified finite-release and certificate/proof scarcity.
+- Every creative CTA belongs to the approved direct edition-acquisition family and agrees with the final sentence of its matching Primary Text.
+- Pure Limited-Release Copy Variation 1 and its fixed strip use Claim Your Edition; Numbered Collector Proof Copy Variation 1 uses Secure Your Edition.
 - Promotion or Offer has been preserved exactly when used.
 - Product URL and UTM parameters remain exact."""
 
@@ -6533,7 +6661,7 @@ Analyse the attached image and product title before writing.
 
 Use the supplied product name as the source of identity. Do not identify or guess a person, club, country, achievement, year, record, final, trophy or rivalry solely from the image.
 
-{build_country_campaign_localisation_note(category, country)}
+{build_country_campaign_localisation_note(category, country, campaign_type="Instant Experience")}
 
 {build_universal_sports_cave_rules(category)}
 
@@ -6572,17 +6700,16 @@ Rules:
 - 4 to 6 words max.
 - Urgent and specific to the selected category.
 - For Football, use football-specific urgency.
-- Strong style examples: Football Glory Framed; Only 100 Made; Claim Your Edition; For Real Football Fans; Legends Belong Framed.
+- Strong style examples: Football Glory Framed; Only 100 Made; For Real Football Fans; Legends Belong Framed.
 
 CALL TO ACTION
 
-Create exactly 5 valid Meta-style CTA button-label options.
+Create exactly 5 creative CTA options.
 
 Rules:
-- Use short button labels suitable for Meta, such as Shop Now, Learn More, View Shop, See More or Get Offer.
-- Do not invent sentence-style button copy.
-- Make the CTA labels work with the same Instant Experience creative and destination.
-- Avoid repeating the same scarcity wording across every option.
+- Use only Claim Your Edition, Secure Your Edition, Own This Edition or Claim Yours Before It’s Gone.
+- End each matching Primary Text with the corresponding sentence-case CTA.
+- Keep Meta's native fixed button as Shop Now.
 
 INSTANT EXPERIENCE COVER PROMPT
 
@@ -6641,7 +6768,7 @@ FINAL QUALITY CHECK
 - Instant Experience Cover Prompt is present.
 - Instant Experience Setup is present.
 - The cover prompt uses top 60-68% hero artwork and bottom 32-40% black/gold CTA panel.
-- The cover prompt includes Claim Your Edition and uses LIMITED TO 100 WORLDWIDE only when the quantity is verified.
+- The cover prompt includes CLAIM YOUR EDITION and uses LIMITED TO 100 WORLDWIDE only when the quantity is verified.
 - The cover prompt may use Once it sells out, it's gone. only when it matches the approved generated copy.
 - Country wording is localised naturally.
 - No unsupported facts are invented."""
@@ -7678,6 +7805,43 @@ class InstantExperienceCopyCSVError(ValueError):
     pass
 
 
+def _instant_experience_copy_variation_error(
+    variation,
+    *,
+    concept_id="",
+    variation_number=0,
+):
+    variation = variation or {}
+    for field_key, label in INSTANT_EXPERIENCE_COPY_FIELDS:
+        if not str(variation.get(field_key) or "").strip():
+            return f"{label} is required."
+
+    cta = str(variation.get("cta") or "").strip()
+    if cta not in INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS:
+        allowed = ", ".join(INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS)
+        return f"CTA must be exactly one of: {allowed}."
+
+    expected_primary_image_cta = INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS.get(concept_id)
+    if variation_number == 1 and expected_primary_image_cta and cta != expected_primary_image_cta:
+        concept = next(
+            (item for item in INSTANT_EXPERIENCE_CONCEPTS if item["id"] == concept_id),
+            None,
+        )
+        display_name = concept["display_name"] if concept else concept_id
+        return (
+            f"CTA must be {expected_primary_image_cta} so it matches the fixed "
+            f"{display_name} cover."
+        )
+
+    expected_ending = INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS[cta]
+    primary_text = str(variation.get("primary_text") or "").rstrip()
+    if not primary_text.endswith(expected_ending):
+        return (
+            f'Primary Text must end with "{expected_ending}" to match CTA "{cta}".'
+        )
+    return ""
+
+
 def _instant_experience_copy_widget_key(
     context_key,
     concept_id,
@@ -7848,6 +8012,10 @@ def parse_instant_experience_copy_csv(data, result):
         concept["id"]: _blank_instant_experience_variations()
         for concept in INSTANT_EXPERIENCE_CONCEPTS
     }
+    concepts_by_id = {
+        concept["id"]: concept
+        for concept in INSTANT_EXPERIENCE_CONCEPTS
+    }
     seen = set()
     for row_number, (row, expected) in enumerate(zip(rows, expected_rows), start=2):
         if None in row or any(value is None for value in row.values()):
@@ -7872,10 +8040,21 @@ def parse_instant_experience_copy_csv(data, result):
                 f"CSV row {row_number} duplicates {expected['route_key']} variation {expected['variation']}."
             )
         seen.add(row_key)
-        parsed[expected["route_key"]][row_key[1] - 1] = {
+        variation = {
             field_key: _preserve_multiline_text(row.get(field_key))
             for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS
         }
+        validation_error = _instant_experience_copy_variation_error(
+            variation,
+            concept_id=expected["route_key"],
+            variation_number=row_key[1],
+        )
+        if validation_error:
+            route_name = concepts_by_id[expected["route_key"]]["display_name"]
+            raise InstantExperienceCopyCSVError(
+                f"{route_name} variation {expected['variation']}: {validation_error}"
+            )
+        parsed[expected["route_key"]][row_key[1] - 1] = variation
     return parsed
 
 
@@ -8025,10 +8204,16 @@ def _instant_experience_concept_copy_notes_from_workflow(workflow):
     return mapped
 
 
-def _instant_experience_variation_complete(variation):
-    return all(
-        str((variation or {}).get(field_key) or "").strip()
-        for field_key, _label in INSTANT_EXPERIENCE_COPY_FIELDS
+def _instant_experience_variation_complete(
+    variation,
+    *,
+    concept_id="",
+    variation_number=0,
+):
+    return not _instant_experience_copy_variation_error(
+        variation,
+        concept_id=concept_id,
+        variation_number=variation_number,
     )
 
 
@@ -8036,17 +8221,28 @@ def _instant_experience_concept_complete_count(workflow, concept_id):
     notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
     return sum(
         1
-        for variation in notes.get(concept_id, [])
-        if _instant_experience_variation_complete(variation)
+        for variation_number, variation in enumerate(notes.get(concept_id, []), start=1)
+        if _instant_experience_variation_complete(
+            variation,
+            concept_id=concept_id,
+            variation_number=variation_number,
+        )
     )
 
 
 def instant_experience_copy_complete(workflow):
     notes = _instant_experience_concept_copy_notes_from_workflow(workflow)
     return all(
-        _instant_experience_variation_complete(variation)
+        _instant_experience_variation_complete(
+            variation,
+            concept_id=concept["id"],
+            variation_number=variation_number,
+        )
         for concept in INSTANT_EXPERIENCE_CONCEPTS
-        for variation in notes.get(concept["id"], [])
+        for variation_number, variation in enumerate(
+            notes.get(concept["id"], []),
+            start=1,
+        )
     )
 
 
@@ -8268,6 +8464,10 @@ def instant_experience_package_ready(result, workflow):
 
 def _instant_experience_package_items(result, workflow):
     _compact_instant_experience_slots(workflow)
+    if not instant_experience_copy_complete(workflow):
+        raise ValueError(
+            "Instant Experience copy must be complete and use approved This Edition CTAs before packaging."
+        )
     slots = workflow.get("slots") or {}
     items = []
     for concept in INSTANT_EXPERIENCE_CONCEPTS:
@@ -8657,7 +8857,13 @@ def _render_instant_experience_concepts(result, workflow):
                     variations[index - 1] = variation
                 concept_notes[concept_id] = variations
                 complete_count = sum(
-                    1 for variation in variations if _instant_experience_variation_complete(variation)
+                    1
+                    for variation_number, variation in enumerate(variations, start=1)
+                    if _instant_experience_variation_complete(
+                        variation,
+                        concept_id=concept_id,
+                        variation_number=variation_number,
+                    )
                 )
                 image_ready = bool(
                     ((workflow.get("slots") or {}).get(slot["id"]) or {}).get("valid")

@@ -70,19 +70,28 @@ def processed_slots(campaign_type, *, count=None):
 
 
 def instant_experience_ad_notes():
-    return {
-        "instant_experience_concepts": {
-            concept["id"]: [
-                {
-                    "primary_text": f"{concept['display_name']} primary {index}\n\nSecond paragraph.",
-                    "headline": f"{concept['display_name']} headline {index}",
-                    "cta": f"{concept['display_name']} CTA {index}",
-                }
-                for index in range(1, 4)
+    concepts = {}
+    for concept_index, concept in enumerate(ads_page.INSTANT_EXPERIENCE_CONCEPTS):
+        variations = []
+        for index in range(1, 4):
+            cta = ads_page.INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS[
+                (concept_index + index - 1)
+                % len(ads_page.INSTANT_EXPERIENCE_APPROVED_CREATIVE_CTAS)
             ]
-            for concept in ads_page.INSTANT_EXPERIENCE_CONCEPTS
-        }
-    }
+            if index == 1:
+                cta = ads_page.INSTANT_EXPERIENCE_PRIMARY_IMAGE_CTAS[concept["id"]]
+            variations.append(
+                {
+                    "primary_text": (
+                        f"{concept['display_name']} primary {index}\n\nSecond paragraph. "
+                        f"{ads_page.INSTANT_EXPERIENCE_PRIMARY_TEXT_CTA_ENDINGS[cta]}"
+                    ),
+                    "headline": f"{concept['display_name']} headline {index}",
+                    "cta": cta,
+                }
+            )
+        concepts[concept["id"]] = variations
+    return {"instant_experience_concepts": concepts}
 
 
 class AdsImageProcessingTests(unittest.TestCase):
@@ -94,9 +103,9 @@ class AdsImageProcessingTests(unittest.TestCase):
         self.assertEqual(
             [slot["label"] for slot in ads_image_workflow.campaign_image_slots("Instant Experience")],
             [
-                "Nostalgia Cover",
-                "Ownership Cover",
-                "Scarcity Cover",
+                "Framed Greatness Scarcity Cover",
+                "Pure Limited-Release Scarcity Cover",
+                "Numbered Collector Proof Scarcity Cover",
             ],
         )
         self.assertEqual(ads_image_workflow.campaign_image_slots("Single Image / Video"), ())
@@ -619,12 +628,15 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         _metadata,
     ):
         result, workflow = self.build_result_and_workflow("Instant Experience")
-        long_primary = "Opening line\n\nSecond paragraph with O'Neal, J\u00fcrgen and exact spacing."
+        long_primary = (
+            "Opening line\n\nSecond paragraph with O'Neal, J\u00fcrgen and exact spacing. "
+            "Secure your edition."
+        )
         workflow["ad_notes"] = instant_experience_ad_notes()
         workflow["ad_notes"]["instant_experience_concepts"]["nostalgia"][0] = {
             "primary_text": long_primary,
             "headline": "Remember The Kid",
-            "cta": "See the Edition",
+            "cta": "Secure Your Edition",
         }
 
         def upload_success(_token, destination, items, **_kwargs):
@@ -656,14 +668,15 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         notes_text = notes_item["data"].decode("utf-8")
         self.assertEqual(notes_item["relative_path"], "01-nostalgia/ad-copy.txt")
         self.assertIn("SPORTS CAVE INSTANT EXPERIENCE", notes_text)
-        self.assertIn("CONCEPT:\r\nNostalgia", notes_text)
+        self.assertIn("CONCEPT:\r\nFramed Greatness Scarcity", notes_text)
         self.assertIn(
             "VARIATION 1\r\n\r\nPRIMARY TEXT:\r\n"
-            "Opening line\r\n\r\nSecond paragraph with O'Neal, J\u00fcrgen and exact spacing.",
+            "Opening line\r\n\r\nSecond paragraph with O'Neal, J\u00fcrgen and exact spacing. "
+            "Secure your edition.",
             notes_text,
         )
         self.assertIn("HEADLINE:\r\nRemember The Kid", notes_text)
-        self.assertIn("CTA:\r\nSee the Edition", notes_text)
+        self.assertIn("CTA:\r\nSecure Your Edition", notes_text)
         self.assertIn("VARIATION 3", notes_text)
         self.assertNotIn("VARIATION 4", notes_text)
         self.assertNotIn("DESCRIPTIONS", notes_text)
@@ -722,10 +735,13 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         )
         self.assertEqual(hashlib.sha256(nostalgia_item["data"]).hexdigest(), original_hash)
         self.assertEqual(outcomes["instant-experience-nostalgia"]["status"], "saved")
-        self.assertEqual(outcomes["instant-experience-nostalgia"]["concept"], "Nostalgia")
+        self.assertEqual(
+            outcomes["instant-experience-nostalgia"]["concept"],
+            "Framed Greatness Scarcity",
+        )
         self.assertEqual(
             [(event[0], event[1], event[2]) for event in progress_events],
-            [(1, 6, "Nostalgia Cover"), (1, 6, "Nostalgia Cover")],
+            [(1, 6, "Framed Greatness Scarcity Cover"), (1, 6, "Framed Greatness Scarcity Cover")],
         )
 
     @patch("ads_page.dropbox_integration.get_metadata_if_exists", return_value=None)
