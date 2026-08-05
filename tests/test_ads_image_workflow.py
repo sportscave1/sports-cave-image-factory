@@ -110,6 +110,30 @@ class AdsImageProcessingTests(unittest.TestCase):
         )
         self.assertEqual(ads_image_workflow.campaign_image_slots("Single Image / Video"), ())
 
+    def test_instant_experience_future_package_paths_use_canonical_route_slugs(self):
+        self.assertEqual(
+            [concept["folder"] for concept in ads_image_workflow.INSTANT_EXPERIENCE_CONCEPTS],
+            [
+                "01_framed_greatness_scarcity_hybrid",
+                "02_pure_limited_release_scarcity",
+                "03_collector_proof_scarcity",
+            ],
+        )
+        self.assertEqual(
+            [concept["filename_prefix"] for concept in ads_image_workflow.INSTANT_EXPERIENCE_CONCEPTS],
+            [
+                "framed_greatness_scarcity_hybrid_cover_original",
+                "pure_limited_release_scarcity_cover_original",
+                "collector_proof_scarcity_cover_original",
+            ],
+        )
+        emitted = "\n".join(
+            concept["folder"]
+            for concept in ads_image_workflow.INSTANT_EXPERIENCE_CONCEPTS
+        )
+        for obsolete in ("01-nostalgia", "02-ownership", "03-scarcity"):
+            self.assertNotIn(obsolete, emitted)
+
     def test_instant_experience_originals_are_inspected_without_reencoding(self):
         source = image_bytes("PNG", size=(1024, 1024), color=(12, 34, 56))
 
@@ -610,12 +634,12 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertEqual(
             [item["relative_path"] for item in upload_batch.call_args.args[2]],
             [
-                "01-nostalgia/nostalgia-cover-original.png",
-                "01-nostalgia/ad-copy.txt",
-                "02-ownership/ownership-cover-original.png",
-                "02-ownership/ad-copy.txt",
-                "03-scarcity/scarcity-cover-original.png",
-                "03-scarcity/ad-copy.txt",
+                "01_framed_greatness_scarcity_hybrid/framed_greatness_scarcity_hybrid_cover_original.png",
+                "01_framed_greatness_scarcity_hybrid/ad-copy.txt",
+                "02_pure_limited_release_scarcity/pure_limited_release_scarcity_cover_original.png",
+                "02_pure_limited_release_scarcity/ad-copy.txt",
+                "03_collector_proof_scarcity/collector_proof_scarcity_cover_original.png",
+                "03_collector_proof_scarcity/ad-copy.txt",
             ],
         )
         self.assertEqual(outcomes["_instant_experience_package"]["status"], "saved")
@@ -663,10 +687,13 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         notes_item = next(
             item
             for item in upload_batch.call_args.args[2]
-            if item["relative_path"] == "01-nostalgia/ad-copy.txt"
+            if item["relative_path"] == "01_framed_greatness_scarcity_hybrid/ad-copy.txt"
         )
         notes_text = notes_item["data"].decode("utf-8")
-        self.assertEqual(notes_item["relative_path"], "01-nostalgia/ad-copy.txt")
+        self.assertEqual(
+            notes_item["relative_path"],
+            "01_framed_greatness_scarcity_hybrid/ad-copy.txt",
+        )
         self.assertIn("SPORTS CAVE INSTANT EXPERIENCE", notes_text)
         self.assertIn("CONCEPT:\r\nFramed Greatness Scarcity", notes_text)
         self.assertIn(
@@ -731,7 +758,8 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         nostalgia_item = next(
             item
             for item in upload_batch.call_args.args[2]
-            if item["relative_path"] == "01-nostalgia/nostalgia-cover-original.png"
+            if item["relative_path"]
+            == "01_framed_greatness_scarcity_hybrid/framed_greatness_scarcity_hybrid_cover_original.png"
         )
         self.assertEqual(hashlib.sha256(nostalgia_item["data"]).hexdigest(), original_hash)
         self.assertEqual(outcomes["instant-experience-nostalgia"]["status"], "saved")
@@ -785,9 +813,9 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
         self.assertEqual(
             filenames,
             [
-                "01-nostalgia/nostalgia-cover-original.png",
-                "02-ownership/ownership-cover-original.png",
-                "03-scarcity/scarcity-cover-original.png",
+                "01_framed_greatness_scarcity_hybrid/framed_greatness_scarcity_hybrid_cover_original.png",
+                "02_pure_limited_release_scarcity/pure_limited_release_scarcity_cover_original.png",
+                "03_collector_proof_scarcity/collector_proof_scarcity_cover_original.png",
             ],
         )
         self.assertTrue(all(row["status"] == "saved" for row in outcomes.values()))
@@ -807,7 +835,7 @@ class AdsImageDropboxSaveTests(unittest.TestCase):
             failures = []
             for item in items:
                 filename = item["relative_path"]
-                if filename == "02-ownership/ownership-cover-original.png":
+                if filename == "02_pure_limited_release_scarcity/pure_limited_release_scarcity_cover_original.png":
                     failures.append({"relative_path": filename, "error": "rate limited"})
                 else:
                     successes.append(

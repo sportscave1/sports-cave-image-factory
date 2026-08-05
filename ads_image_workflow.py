@@ -38,8 +38,8 @@ INSTANT_EXPERIENCE_CONCEPTS = (
         "slot_id": "instant-experience-nostalgia",
         "display_name": "Framed Greatness Scarcity",
         "supporting_label": "Collector Shrine",
-        "folder": "01-nostalgia",
-        "filename_prefix": "nostalgia-cover-original",
+        "folder": "01_framed_greatness_scarcity_hybrid",
+        "filename_prefix": "framed_greatness_scarcity_hybrid_cover_original",
         "position": 1,
     },
     {
@@ -47,8 +47,8 @@ INSTANT_EXPERIENCE_CONCEPTS = (
         "slot_id": "instant-experience-ownership",
         "display_name": "Pure Limited-Release Scarcity",
         "supporting_label": "Limited Release Wall",
-        "folder": "02-ownership",
-        "filename_prefix": "ownership-cover-original",
+        "folder": "02_pure_limited_release_scarcity",
+        "filename_prefix": "pure_limited_release_scarcity_cover_original",
         "position": 2,
     },
     {
@@ -56,8 +56,8 @@ INSTANT_EXPERIENCE_CONCEPTS = (
         "slot_id": "instant-experience-scarcity",
         "display_name": "Numbered Collector Proof Scarcity",
         "supporting_label": "Numbered Collector Proof",
-        "folder": "03-scarcity",
-        "filename_prefix": "scarcity-cover-original",
+        "folder": "03_collector_proof_scarcity",
+        "filename_prefix": "collector_proof_scarcity_cover_original",
         "position": 3,
     },
 )
