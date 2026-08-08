@@ -42,6 +42,8 @@ EXPORT_JPG_QUALITY = 92
 PREVIEW_WEBP_QUALITY = 70
 PREVIEW_WEBP_METHOD = 4
 MEMORY_LIMIT_MB = 430
+TEMP_RUN_MAX_AGE_SECONDS = 6 * 60 * 60
+TEMP_ROOT_ENV = "SPORTS_CAVE_TEMP_DIR"
 MEMORY_LIMIT_MESSAGE = (
     "Memory limit reached before completion. Try a smaller uploaded image or upgrade the Render instance."
 )
@@ -100,6 +102,55 @@ def close_image(image):
 def collect_garbage(stage, error_message=MEMORY_LIMIT_MESSAGE):
     gc.collect()
     ensure_memory_available(stage, error_message=error_message)
+
+
+def app_temp_root():
+    configured = str(os.getenv(TEMP_ROOT_ENV, "") or "").strip()
+    if configured:
+        root = Path(configured)
+    else:
+        root = Path(tempfile.gettempdir()) / "sports-cave-image-factory"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def create_temp_run_parent():
+    root = app_temp_root() / "mockup-runs"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def is_path_within_directory(path, directory):
+    try:
+        resolved_path = Path(path).resolve()
+        resolved_directory = Path(directory).resolve()
+    except (OSError, RuntimeError):
+        return False
+    return resolved_path == resolved_directory or resolved_directory in resolved_path.parents
+
+
+def cleanup_stale_temp_runs(temp_root=None, *, max_age_seconds=TEMP_RUN_MAX_AGE_SECONDS, max_delete=20):
+    root = Path(temp_root) if temp_root else create_temp_run_parent()
+    if not root.exists():
+        return []
+    if not is_path_within_directory(root, app_temp_root()):
+        raise ValueError("Refusing to clean a directory outside the app-owned temp root.")
+
+    cutoff = datetime.now().timestamp() - max(60, int(max_age_seconds or TEMP_RUN_MAX_AGE_SECONDS))
+    deleted = []
+    for child in sorted(root.iterdir(), key=lambda path: path.stat().st_mtime if path.exists() else 0):
+        if len(deleted) >= max(1, int(max_delete or 1)):
+            break
+        if not child.is_dir() or not child.name.startswith("mockup-run-"):
+            continue
+        try:
+            if child.stat().st_mtime >= cutoff:
+                continue
+            shutil.rmtree(child)
+            deleted.append(child)
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
+    return deleted
 
 
 def validate_lifestyle_upload_size(image_file):
@@ -2732,6 +2783,8 @@ def generate_product_images(
     base_dir=None,
     status_callback=None,
     final_prompt_items=None,
+    output_root=None,
+    asset_completed_callback=None,
 ):
     def report(message, progress=None):
         if callable(status_callback):
@@ -2748,13 +2801,16 @@ def generate_product_images(
         base_dir = Path(base_dir)
 
     templates_dir = base_dir / "templates"
-    output_dir = base_dir / "output"
+    output_dir = Path(output_root) if output_root is not None else base_dir / "output"
 
     product_slug = slugify(product_name) or "sports-cave-product"
     sport_slug = slugify(sport_category) or "sports"
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    run_dir = output_dir / "runs" / f"{product_slug}-{timestamp}"
+    run_prefix = "mockup-run-" if output_root is not None else ""
+    run_dir = output_dir / f"{run_prefix}{product_slug}-{timestamp}"
+    if output_root is None:
+        run_dir = output_dir / "runs" / f"{product_slug}-{timestamp}"
 
     review_dir = run_dir / "review"
     preview_dir = run_dir / PREVIEW_FOLDER_NAME
@@ -2913,9 +2969,6 @@ def generate_product_images(
                 job["jpg_name"],
             )
 
-        review_paths.append(review_path)
-        webp_paths.append(webp_path)
-        jpg_paths.append(jpg_path)
         asset_record = build_asset_record(
             key=job["key"],
             label=job["label"],
@@ -2924,27 +2977,35 @@ def generate_product_images(
             webp_path=webp_path,
             jpg_path=jpg_path,
         )
-        generated_assets[job["key"]] = {
-            "review_path": review_path,
-            "preview_path": None,
-            "webp_path": webp_path,
-            "jpg_path": jpg_path,
-            "asset_record": asset_record,
-        }
-        assets.append(asset_record)
-
-        collect_garbage(f"After mockup generation: {job['label']}")
-
-    report("Creating lightweight previews...", 88)
-    for job in jobs:
-        review_path = generated_assets[job["key"]]["review_path"]
         preview_path = create_preview_file(
             review_path,
             preview_dir,
             f"{Path(review_path).stem}-preview.webp",
         )
-        generated_assets[job["key"]]["preview_path"] = preview_path
-        generated_assets[job["key"]]["asset_record"]["preview_path"] = preview_path
+        asset_record["preview_path"] = preview_path
+
+        if callable(asset_completed_callback):
+            callback_updates = asset_completed_callback(
+                dict(asset_record),
+                dict(job),
+                run_dir=run_dir,
+            )
+            if callback_updates:
+                asset_record.update(callback_updates)
+
+        review_paths.append(asset_record.get("review_path"))
+        webp_paths.append(asset_record.get("webp_path"))
+        jpg_paths.append(asset_record.get("jpg_path"))
+        generated_assets[job["key"]] = {
+            "review_path": asset_record.get("review_path"),
+            "preview_path": asset_record.get("preview_path"),
+            "webp_path": asset_record.get("webp_path"),
+            "jpg_path": asset_record.get("jpg_path"),
+            "asset_record": asset_record,
+        }
+        assets.append(asset_record)
+
+        collect_garbage(f"After mockup generation: {job['label']}")
 
     black_framed_webp_path = generated_assets["black"]["webp_path"]
     black_framed_jpg_path = generated_assets["black"]["jpg_path"]

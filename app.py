@@ -16,6 +16,7 @@ import re
 import shutil
 import secrets
 import tempfile
+import threading
 import time
 import traceback
 from urllib.parse import parse_qs, quote, urlparse
@@ -39,6 +40,7 @@ import streamlit as st
 
 from activity_log import clear_activity_actor, record_activity_log, set_activity_actor
 import dropbox_integration
+import mockup_storage
 import os_accounts
 import prompt_store
 import sc_auth
@@ -312,6 +314,14 @@ MOCKUPS_ZIP_GROUP_OPTIONS = [
     (ASSET_CATEGORY_SOCIAL, "Social Mockups"),
     (ASSET_CATEGORY_PRODUCT, "Product Images"),
 ]
+MOCKUPS_MAX_CONCURRENT_GENERATIONS = max(
+    1,
+    int(os.getenv("MOCKUPS_MAX_CONCURRENT_GENERATIONS", "1") or "1"),
+)
+MOCKUPS_GENERATION_SEMAPHORE = threading.BoundedSemaphore(MOCKUPS_MAX_CONCURRENT_GENERATIONS)
+MOCKUPS_GENERATION_ACTIVE_KEY = "mockups_generation_active_run_id"
+MOCKUPS_LAST_RUN_SIGNATURE_KEY = "mockups_last_run_signature"
+MOCKUPS_DROPBOX_RETRY_ATTEMPTS = 3
 SPORT_OPTIONS = [
     "AFL",
     "Baseball",
@@ -3611,6 +3621,9 @@ def init_session_state():
     if "mockups_upload_processing_cache" not in st.session_state:
         st.session_state.mockups_upload_processing_cache = {}
 
+    if MOCKUPS_GENERATION_ACTIVE_KEY not in st.session_state:
+        st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = None
+
 
 def log_app_memory(stage):
     try:
@@ -4519,6 +4532,29 @@ def _mockups_upload_processing_cache():
     return st.session_state.mockups_upload_processing_cache
 
 
+def hash_uploaded_file_stream(uploaded_file, *, chunk_size=1024 * 1024):
+    digest = hashlib.sha1()
+    total = 0
+    if hasattr(uploaded_file, "seek"):
+        uploaded_file.seek(0)
+    try:
+        while True:
+            chunk = uploaded_file.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+            total += len(chunk)
+            if total > image_factory.MAX_UPLOAD_SIZE_BYTES:
+                raise ValueError(
+                    "Uploaded image is too large for the current Render instance. "
+                    "Please upload a JPG or WebP under 20MB."
+                )
+    finally:
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+    return digest.hexdigest()[:16], total
+
+
 def process_uploaded_artwork_once(uploaded_file):
     Image, ImageOps, UnidentifiedImageError = get_pillow_modules()
     if uploaded_file is None:
@@ -4555,31 +4591,27 @@ def process_uploaded_artwork_once(uploaded_file):
         raise ValueError("Unsupported file type. Upload JPG, JPEG, PNG, or WEBP.")
 
     read_started = time.perf_counter()
-    upload_bytes = uploaded_file.getvalue()
-    signature = hashlib.sha1(upload_bytes).hexdigest()[:16]
+    signature, measured_size = hash_uploaded_file_stream(uploaded_file)
     logging.info(
         "MOCKUPS_UPLOAD read_bytes signature=%s bytes=%s elapsed_ms=%s",
         signature,
-        len(upload_bytes),
+        measured_size,
         int((time.perf_counter() - read_started) * 1000),
     )
-    if len(upload_bytes) <= 0:
+    if measured_size <= 0:
         raise ValueError("Uploaded file is empty.")
-    if len(upload_bytes) > image_factory.MAX_UPLOAD_SIZE_BYTES:
-        raise ValueError(
-            "Uploaded image is too large for the current Render instance. "
-            "Please upload a JPG or WebP under 20MB."
-        )
 
     source_image = None
     preview_image = None
     preview_path = None
     try:
         pil_started = time.perf_counter()
-        source_image = Image.open(io.BytesIO(upload_bytes))
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+        source_image = Image.open(uploaded_file)
         width, height = source_image.size
         upload_details = {
-            "file_size": file_size if file_size is not None else len(upload_bytes),
+            "file_size": file_size if file_size is not None else measured_size,
             "width": width,
             "height": height,
             "signature": signature,
@@ -5452,6 +5484,147 @@ def should_defer_uploaded_preview(upload_details):
     )
 
 
+def mockups_generation_signature(upload_details, product_name, sport_category):
+    payload = json.dumps(
+        {
+            "upload": {
+                "signature": (upload_details or {}).get("signature"),
+                "size": (upload_details or {}).get("file_size"),
+                "width": (upload_details or {}).get("width"),
+                "height": (upload_details or {}).get("height"),
+            },
+            "product_name": str(product_name or "").strip(),
+            "sport_category": str(sport_category or "").strip(),
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def resolve_mockups_dropbox_run(access_token, product_slug):
+    root_path = _files_team_root(access_token)
+    destination_parent = dropbox_integration.normalize_dropbox_path(
+        f"{root_path}/04_OUTPUT/product-images"
+    )
+    dropbox_integration.ensure_folder_path(
+        access_token,
+        destination_parent,
+        root_path=root_path,
+    )
+    folder_name = dropbox_integration.sanitize_path_component(
+        product_slug or "mockups",
+        fallback="mockups",
+    )
+    proposed = dropbox_integration.join_upload_path(destination_parent, folder_name)
+    destination = proposed
+    existing = dropbox_integration.get_metadata_if_exists(access_token, proposed)
+    if existing:
+        destination = dropbox_integration.numbered_path(access_token, proposed)
+    dropbox_integration.ensure_folder_path(
+        access_token,
+        destination,
+        root_path=root_path,
+    )
+    return {
+        "root_path": root_path,
+        "destination_parent": destination_parent,
+        "destination": destination,
+        "folder_name": destination.rsplit("/", 1)[-1],
+    }
+
+
+def make_mockup_asset_upload_callback(access_token, destination, uploaded_rows, failures):
+    def upload_asset(asset_record, job, *, run_dir):
+        del job, run_dir
+        upload_result = mockup_storage.upload_asset_files_to_dropbox(
+            access_token,
+            destination,
+            asset_record,
+            conflict="replace",
+            retries=MOCKUPS_DROPBOX_RETRY_ATTEMPTS,
+            cleanup_successful=True,
+        )
+        uploaded_rows.extend(upload_result["successes"])
+        failures.extend(upload_result["failures"])
+        if upload_result["failures"]:
+            logging.warning("Mockups Dropbox upload failed for one generated asset.")
+        return upload_result["asset"]
+
+    return upload_asset
+
+
+def finalise_mockups_dropbox_result(result, dropbox_run, uploaded_rows, failures):
+    result = normalize_generation_result(result)
+    black_asset = next(
+        (asset for asset in result.get("assets") or () if asset.get("key") == "black"),
+        {},
+    )
+    if not result.get("black_framed_dropbox_path"):
+        result["black_framed_dropbox_path"] = black_asset.get("webp_path_dropbox_path")
+    result["dropbox_root_path"] = dropbox_run.get("root_path")
+    result["dropbox_saved_path"] = dropbox_run.get("destination")
+    result["dropbox_destination_parent"] = dropbox_run.get("destination_parent")
+    result["dropbox_uploaded_files"] = list(uploaded_rows or ())
+    result["dropbox_upload_failures"] = list(failures or ())
+    result["dropbox_retry_files"] = mockup_storage.result_retry_files(result)
+    result["dropbox_upload_status"] = (
+        "failed" if result["dropbox_upload_failures"] or result["dropbox_retry_files"] else "saved"
+    )
+    if result["dropbox_upload_status"] == "saved":
+        mockup_storage.cleanup_generated_master_dirs(result.get("run_dir"))
+    return result
+
+
+def retry_mockups_dropbox_upload(result):
+    access_token = _files_access_token()
+    updated = mockup_storage.retry_result_uploads(
+        access_token,
+        result,
+        conflict="replace",
+        retries=MOCKUPS_DROPBOX_RETRY_ATTEMPTS,
+        cleanup_successful=True,
+    )
+    uploaded = updated.get("dropbox_uploaded_files") or []
+    if uploaded:
+        _files_save_upload_metadata(uploaded, current_os_user(), asset_type="mockups")
+        saved_path = updated.get("dropbox_saved_path")
+        _files_clear_directory_cache(
+            updated.get("dropbox_destination_parent"),
+            *_files_changed_directory_paths(saved_path, uploaded),
+        )
+    return updated
+
+
+def get_mockup_dropbox_temporary_link(path):
+    clean_path = dropbox_integration.normalize_dropbox_path(path)
+    if not clean_path:
+        return ""
+    cache = st.session_state.setdefault("mockups_dropbox_link_cache", {})
+    cached = cache.get(clean_path) or {}
+    if cached.get("expires_at", 0) > time.monotonic() and cached.get("link"):
+        return cached["link"]
+    access_token = _files_access_token()
+    link = dropbox_integration.get_temporary_link(access_token, clean_path)
+    cache[clean_path] = {
+        "link": link,
+        "expires_at": time.monotonic() + 3 * 60 * 60,
+    }
+    return link
+
+
+def render_mockup_dropbox_file_link(label, dropbox_path, key):
+    if not dropbox_path:
+        return False
+    try:
+        link = get_mockup_dropbox_temporary_link(dropbox_path)
+    except Exception as error:
+        logging.warning("Mockups Dropbox link unavailable: %s", error.__class__.__name__)
+        st.caption("Dropbox link unavailable right now.")
+        return False
+    render_external_link(label, link, key)
+    return True
+
+
 def get_sport_category(selected_option, custom_value):
     if selected_option == "Custom":
         return custom_value.strip()
@@ -5467,6 +5640,13 @@ def normalize_asset(asset):
         "preview_path": None,
         "webp_path": None,
         "jpg_path": None,
+        "webp_path_dropbox_path": None,
+        "jpg_path_dropbox_path": None,
+        "webp_path_dropbox_metadata": None,
+        "jpg_path_dropbox_metadata": None,
+        "dropbox_retry_files": [],
+        "dropbox_upload_failures": [],
+        "dropbox_upload_status": None,
         "include_in_zip": True,
         "asset_group": "generated",
         "zip_group": None,
@@ -5627,6 +5807,14 @@ def normalize_generation_result(result):
         "lifestyle_pack_error": None,
         "manifest_path": None,
         "uploaded_files": [],
+        "dropbox_root_path": None,
+        "dropbox_saved_path": None,
+        "dropbox_destination_parent": None,
+        "dropbox_uploaded_files": [],
+        "dropbox_upload_failures": [],
+        "dropbox_retry_files": [],
+        "dropbox_upload_status": None,
+        "black_framed_dropbox_path": None,
         "drive_root_id": None,
         "drive_root_url": None,
         "drive_run_id": None,
@@ -6496,8 +6684,28 @@ def build_current_mockup_prompt_items_for_result(result):
         result.get("sport_category"),
         labels_by_filename=PROMPT_LABELS,
         local_only=True,
-        artwork_reference_available=bool(result.get("black_framed_webp_path")),
+        artwork_reference_available=bool(
+            result.get("black_framed_webp_path")
+            or result.get("black_framed_dropbox_path")
+        ),
     )
+
+
+def write_lifestyle_prompt_text_files(result):
+    run_dir = Path(result["run_dir"])
+    prompt_dir = run_dir / image_factory.PROMPTS_FOLDER_NAME
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    prompt_paths = []
+    prompt_items = result.get("final_prompt_items") or build_current_mockup_prompt_items_for_result(result)
+    for prompt_item in prompt_items:
+        filename = Path(prompt_item["filename"]).name
+        prompt_path = prompt_dir / filename
+        prompt_path.write_text(str(prompt_item["prompt"]).strip() + "\n", encoding="utf-8")
+        prompt_paths.append(str(prompt_path))
+    result["final_prompt_items"] = [dict(item) for item in prompt_items]
+    result["prompt_dir"] = str(prompt_dir)
+    result["prompt_paths"] = prompt_paths
+    return result
 
 
 def ensure_lifestyle_prompts(result):
@@ -6516,10 +6724,15 @@ def ensure_lifestyle_prompts(result):
         result["prompt_paths"] = existing_prompt_paths
         return result
 
-    if not result["run_dir"] or not result["black_framed_webp_path"]:
+    if not result["run_dir"]:
         return result
 
     result["final_prompt_items"] = build_current_mockup_prompt_items_for_result(result)
+
+    if not result["black_framed_webp_path"] or not Path(result["black_framed_webp_path"]).exists():
+        result = write_lifestyle_prompt_text_files(result)
+        write_local_manifest(result)
+        return result
 
     prompt_dir, _, prompt_paths, _ = image_factory.generate_lifestyle_prompt_pack(
         result["product_name"],
@@ -6661,6 +6874,8 @@ def asset_has_downloadable_file(asset):
         file_path = asset.get(path_key)
         if file_path and Path(file_path).exists():
             return True
+        if asset.get(f"{path_key}_dropbox_path"):
+            return True
     return False
 
 
@@ -6675,6 +6890,10 @@ def get_asset_downloadable_paths(asset):
         if file_path and Path(file_path).exists():
             paths.append(Path(file_path))
     return paths
+
+
+def result_is_dropbox_backed(result):
+    return bool((result or {}).get("dropbox_saved_path"))
 
 
 def get_selected_zip_assets(result, selected_groups):
@@ -6834,19 +7053,33 @@ def render_asset_selection_controls(result):
 def render_asset_download_controls(asset, run_dir):
     download_cols = st.columns(2)
     with download_cols[0]:
-        render_download_button(
-            "WEBP",
-            asset.get("webp_path"),
-            "image/webp",
-            key=f"download-webp::{run_dir}::{asset['key']}",
-        )
+        if asset.get("webp_path"):
+            render_download_button(
+                "WEBP",
+                asset.get("webp_path"),
+                "image/webp",
+                key=f"download-webp::{run_dir}::{asset['key']}",
+            )
+        else:
+            render_mockup_dropbox_file_link(
+                "WEBP",
+                asset.get("webp_path_dropbox_path"),
+                f"dropbox-webp::{run_dir}::{asset['key']}",
+            )
     with download_cols[1]:
-        render_download_button(
-            "JPG",
-            asset.get("jpg_path"),
-            "image/jpeg",
-            key=f"download-jpg::{run_dir}::{asset['key']}",
-        )
+        if asset.get("jpg_path"):
+            render_download_button(
+                "JPG",
+                asset.get("jpg_path"),
+                "image/jpeg",
+                key=f"download-jpg::{run_dir}::{asset['key']}",
+            )
+        else:
+            render_mockup_dropbox_file_link(
+                "JPG",
+                asset.get("jpg_path_dropbox_path"),
+                f"dropbox-jpg::{run_dir}::{asset['key']}",
+            )
 
 
 def get_asset_full_resolution_path(asset):
@@ -6861,6 +7094,16 @@ def get_asset_full_resolution_path(asset):
     return None
 
 
+def get_asset_full_resolution_dropbox_path(asset):
+    for candidate in (
+        asset.get("webp_path_dropbox_path"),
+        asset.get("jpg_path_dropbox_path"),
+    ):
+        if candidate:
+            return candidate
+    return None
+
+
 def render_preview_card(asset, run_dir, image_width=380, caption_text=None):
     preview_path = asset.get("preview_path")
     if preview_path and Path(preview_path).exists():
@@ -6872,7 +7115,8 @@ def render_preview_card(asset, run_dir, image_width=380, caption_text=None):
         st.caption(caption_text)
 
     full_resolution_path = get_asset_full_resolution_path(asset)
-    if not full_resolution_path:
+    full_resolution_dropbox_path = get_asset_full_resolution_dropbox_path(asset)
+    if not full_resolution_path and not full_resolution_dropbox_path:
         return
 
     state_key = f"show-full-resolution::{run_dir}::{asset['key']}"
@@ -6883,11 +7127,28 @@ def render_preview_card(asset, run_dir, image_width=380, caption_text=None):
         st.rerun()
 
     if st.session_state.get(state_key):
-        st.image(
-            str(full_resolution_path),
-            caption=f"{asset['label']} - full resolution",
-            use_container_width=True,
-        )
+        if full_resolution_path:
+            st.image(
+                str(full_resolution_path),
+                caption=f"{asset['label']} - full resolution",
+                use_container_width=True,
+            )
+        else:
+            try:
+                full_resolution_link = get_mockup_dropbox_temporary_link(
+                    full_resolution_dropbox_path
+                )
+                st.image(
+                    full_resolution_link,
+                    caption=f"{asset['label']} - full resolution",
+                    use_container_width=True,
+                )
+            except Exception:
+                render_mockup_dropbox_file_link(
+                    "Open full resolution",
+                    full_resolution_dropbox_path,
+                    f"open-full-resolution::{run_dir}::{asset['key']}",
+                )
         st.caption(
             "This full-resolution file only loads after you click the button. "
             "Copy or open this version when you want the best quality for ChatGPT."
@@ -7294,6 +7555,33 @@ def render_final_zip_download(result):
         st.button("Download ZIP", key=f"download-filtered-zip-disabled::{result['run_dir']}", disabled=True, use_container_width=True)
         return
 
+    if result_is_dropbox_backed(result):
+        selected_manifest = mockup_storage.dropbox_selected_manifest(
+            result["assets"],
+            selected_groups,
+        )
+        selected_file_count = len(selected_manifest)
+        st.caption(f"{selected_file_count} files selected in Dropbox")
+        if selected_file_count <= 0:
+            st.warning("No Dropbox files are available for the selected image groups yet.")
+            return
+        saved_path = str(result.get("dropbox_saved_path") or "")
+        if saved_path and st.button(
+            "Open Dropbox Folder",
+            key=f"open-dropbox-export::{result['run_dir']}",
+            icon=":material/folder_open:",
+            use_container_width=True,
+        ):
+            _open_files_folder(saved_path)
+        with st.expander("Dropbox files", expanded=False):
+            for entry in selected_manifest:
+                render_mockup_dropbox_file_link(
+                    entry["relative_path"],
+                    entry["dropbox_path"],
+                    f"dropbox-selected::{result['run_dir']}::{entry['relative_path']}",
+                )
+        return
+
     selected_assets = get_selected_zip_assets(result, selected_groups)
     selected_manifest = _mockup_dropbox_manifest(result, selected_groups)
     selected_file_count = len(selected_manifest)
@@ -7320,6 +7608,51 @@ def render_final_zip_download(result):
             logging.warning("Mockups ZIP creation failed: %s", error)
             st.warning("Could not create the ZIP.")
     _render_mockups_dropbox_save(result, selected_groups, selected_manifest, show_button=False)
+
+
+def render_mockups_dropbox_status(result):
+    if not result_is_dropbox_backed(result):
+        return
+    status = result.get("dropbox_upload_status")
+    saved_path = str(result.get("dropbox_saved_path") or "")
+    if status == "saved":
+        st.success("Saved to Dropbox")
+        if saved_path and st.button(
+            "Open Dropbox folder",
+            key=f"open-auto-dropbox::{hashlib.sha1(saved_path.encode('utf-8')).hexdigest()[:12]}",
+            icon=":material/folder_open:",
+        ):
+            _open_files_folder(saved_path)
+        return
+
+    failures = list(result.get("dropbox_upload_failures") or ())
+    retry_files = list(result.get("dropbox_retry_files") or ())
+    st.warning(
+        "Dropbox upload did not finish. The remaining generated files are held only in the app temp folder for retry."
+    )
+    if failures:
+        st.caption(f"{len(failures)} file upload step(s) need retry.")
+    if retry_files and st.button(
+        "Retry Dropbox Upload",
+        key=f"retry-dropbox-upload::{hashlib.sha1(str(result.get('run_dir') or saved_path).encode('utf-8')).hexdigest()[:12]}",
+        use_container_width=True,
+    ):
+        try:
+            updated = retry_mockups_dropbox_upload(result)
+        except Exception as error:
+            logging.exception("Mockups Dropbox retry failed")
+            result["dropbox_upload_status"] = "failed"
+            result["dropbox_upload_failures"] = [{"error": str(error)[:300]}]
+            st.session_state.last_generation_result = result
+            st.warning("Dropbox upload still needs attention.")
+        else:
+            updated["status_text"] = (
+                "Saved to Dropbox"
+                if updated.get("dropbox_upload_status") == "saved"
+                else "Dropbox upload needs retry."
+            )
+            st.session_state.last_generation_result = updated
+            st.rerun()
 
 
 def render_prompt_cards(result, prompt_paths, heading, caption=None):
@@ -7484,9 +7817,13 @@ def render_optional_package_controls(result):
 def render_generation_result(result):
     result = normalize_generation_result(result)
     result = ensure_lifestyle_prompts(result)
-    result = ensure_primary_download_zip(result)
+    if not result_is_dropbox_backed(result):
+        result = ensure_primary_download_zip(result)
     st.session_state.last_generation_result = result
-    st.success(result.get("status_text") or "Core Sports Cave product images are ready.")
+    if result.get("dropbox_upload_status") == "failed":
+        st.warning("Core images were generated, but Dropbox upload needs a retry.")
+    else:
+        st.success(result.get("status_text") or "Core Sports Cave product images are ready.")
 
     if result.get("shopify_uploads_dir"):
         with suppress(FileNotFoundError):
@@ -7510,6 +7847,8 @@ def render_generation_result(result):
         )
 
     render_generated_previews(result)
+
+    render_mockups_dropbox_status(result)
 
     if result["lifestyle_pack_error"]:
         st.warning(
@@ -7793,6 +8132,8 @@ def render_mockups_page():
 
     if generate_clicked:
         temp_artwork_path = None
+        semaphore_acquired = False
+        run_signature = None
         status_container = st.empty()
         progress_bar = st.progress(0)
 
@@ -7820,12 +8161,44 @@ def render_mockups_page():
 
             update_status("Validating upload...", 5)
             upload_details = upload_details or validate_uploaded_artwork(uploaded_file)
+            run_signature = mockups_generation_signature(
+                upload_details,
+                product_name,
+                sport_category,
+            )
+            if st.session_state.get(MOCKUPS_GENERATION_ACTIVE_KEY) == run_signature:
+                update_status("This generation is already running.", 5)
+                return
+            semaphore_acquired = MOCKUPS_GENERATION_SEMAPHORE.acquire(blocking=False)
+            if not semaphore_acquired:
+                raise RuntimeError("Another image generation is already running. Try again when it finishes.")
+            st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = run_signature
+            st.session_state[MOCKUPS_LAST_RUN_SIGNATURE_KEY] = run_signature
+
+            image_factory.cleanup_stale_temp_runs()
+            product_slug = image_factory.slugify(product_name.strip()) or "sports-cave-product"
+            update_status("Connecting Dropbox...", 8)
+            access_token = _files_access_token()
+            dropbox_run = resolve_mockups_dropbox_run(access_token, product_slug)
+            uploaded_rows = []
+            upload_failures = []
+            asset_upload_callback = make_mockup_asset_upload_callback(
+                access_token,
+                dropbox_run["destination"],
+                uploaded_rows,
+                upload_failures,
+            )
 
             update_status("Preparing lightweight working image...", 15)
             log_app_memory("Mockup generation start")
             suffix = Path(uploaded_file.name).suffix or ".jpg"
+            temp_parent = image_factory.create_temp_run_parent()
             uploaded_file.seek(0)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=suffix,
+                dir=temp_parent,
+            ) as temp_file:
                 shutil.copyfileobj(uploaded_file, temp_file)
                 temp_artwork_path = Path(temp_file.name)
             uploaded_file.seek(0)
@@ -7837,16 +8210,28 @@ def render_mockups_page():
                 base_dir=BASE_DIR,
                 status_callback=lambda msg, progress=None: update_status(msg, progress),
                 final_prompt_items=final_prompt_items,
+                output_root=temp_parent,
+                asset_completed_callback=asset_upload_callback,
             )
 
-            update_status("Creating downloads...", 92)
-            result = rebuild_result_artifacts(result)
-            image_factory.cleanup_old_runs(
-                BASE_DIR / "output",
-                keep_latest=image_factory.MAX_STORED_RUNS,
-                active_run_dir=Path(result["run_dir"]),
+            update_status("Finalising Dropbox save...", 92)
+            result = finalise_mockups_dropbox_result(
+                result,
+                dropbox_run,
+                uploaded_rows,
+                upload_failures,
             )
-            result["status_text"] = "Done"
+            if uploaded_rows:
+                _files_save_upload_metadata(uploaded_rows, current_os_user(), asset_type="mockups")
+                _files_clear_directory_cache(
+                    dropbox_run["destination_parent"],
+                    *_files_changed_directory_paths(dropbox_run["destination"], uploaded_rows),
+                )
+            result["status_text"] = (
+                "Saved to Dropbox"
+                if result.get("dropbox_upload_status") == "saved"
+                else "Dropbox upload needs retry."
+            )
             image_factory.log_memory("Completion")
             status_container.empty()
             progress_bar.empty()
@@ -7859,22 +8244,30 @@ def render_mockups_page():
                 metadata={
                     "product_name": product_name.strip(),
                     "sport_category": sport_category,
+                    "dropbox_status": result.get("dropbox_upload_status"),
+                    "dropbox_path": result.get("dropbox_saved_path"),
                 },
             )
             st.session_state.last_generation_result = result
+        except ValueError as error:
+            logging.info("Mockups generation validation failed: %s", error)
+            status_container.error(str(error))
         except image_factory.MemoryLimitExceededError as error:
             logging.exception("Generation stopped by memory limit")
             status_container.error(str(error))
-            st.error(str(error))
+        except (dropbox_integration.DropboxApiError, dropbox_integration.DropboxConfigError) as error:
+            logging.exception("Dropbox upload failed during mockup generation")
+            status_container.error("Dropbox upload failed. No image was reported as saved.")
         except Exception as error:
             logging.exception("Generation failed")
-            status_container.error("Generation failed. See details below.")
-            st.error("Generation failed. See details below.")
-            st.exception(error)
+            status_container.error("Generation failed. Full traceback is logged in Render.")
         finally:
             if temp_artwork_path is not None:
-                with suppress(FileNotFoundError, PermissionError):
-                    temp_artwork_path.unlink()
+                mockup_storage.safe_unlink_temp_file(temp_artwork_path)
+            if semaphore_acquired:
+                MOCKUPS_GENERATION_SEMAPHORE.release()
+            if run_signature and st.session_state.get(MOCKUPS_GENERATION_ACTIVE_KEY) == run_signature:
+                st.session_state[MOCKUPS_GENERATION_ACTIVE_KEY] = None
 
     if st.session_state.last_generation_result is not None:
         render_generation_result(st.session_state.last_generation_result)
@@ -7894,6 +8287,13 @@ def current_product_upload_source_metadata():
             folder_path = str(query_path or "").strip()
     root_path = dropbox_integration.normalize_dropbox_path(root_cache.get("path") or "")
     folder_path = dropbox_integration.normalize_dropbox_path(folder_path)
+    result_dropbox_folder = dropbox_integration.normalize_dropbox_path(
+        result.get("dropbox_saved_path") or ""
+    )
+    if result_dropbox_folder:
+        folder_path = result_dropbox_folder
+    if not root_path and result.get("dropbox_root_path"):
+        root_path = dropbox_integration.normalize_dropbox_path(result.get("dropbox_root_path"))
     if root_path and (
         folder_path.casefold() == root_path.casefold()
         or not dropbox_integration.path_is_within_root(folder_path, root_path)
