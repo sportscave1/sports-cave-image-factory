@@ -6893,7 +6893,10 @@ def get_asset_downloadable_paths(asset):
 
 
 def result_is_dropbox_backed(result):
-    return bool((result or {}).get("dropbox_saved_path"))
+    return any(
+        asset.get("webp_path_dropbox_path") or asset.get("jpg_path_dropbox_path")
+        for asset in (result or {}).get("assets") or ()
+    )
 
 
 def get_selected_zip_assets(result, selected_groups):
@@ -7404,6 +7407,8 @@ def _save_mockups_to_dropbox(
         items,
         conflict=file_conflict,
         progress_callback=update_progress,
+        simple_limit=0,
+        chunk_size=mockup_storage.MOCKUP_DROPBOX_UPLOAD_CHUNK_SIZE,
     )
     progress.empty()
     upload_result["destination"] = destination
@@ -7450,7 +7455,7 @@ def _render_mockups_dropbox_save(result, selected_groups, manifest, *, show_butt
     if show_button:
         with st.container(key="mockups-dropbox-actions"):
             if st.button(
-                "Save to Dropbox",
+                "Save All to Dropbox",
                 key=f"mockups-save-dropbox::{run_key}",
                 icon=":material/cloud_upload:",
                 use_container_width=True,
@@ -7489,7 +7494,7 @@ def _render_mockups_dropbox_save(result, selected_groups, manifest, *, show_butt
     )
     action_cols = st.columns([1, 1])
     if action_cols[0].button(
-        "Save files",
+        "Save All",
         key=f"mockups-dropbox-confirm::{run_key}",
         use_container_width=True,
     ):
@@ -7540,7 +7545,7 @@ def _render_mockups_dropbox_save(result, selected_groups, manifest, *, show_butt
 def render_final_zip_download(result):
     result = normalize_generation_result(result)
     st.subheader("Export mockups")
-    st.caption("Choose the image groups, then save them to Dropbox or download a ZIP.")
+    st.caption("Choose the image groups, then save all selected files to Dropbox or download a ZIP.")
 
     selected_groups = []
     filter_cols = st.columns(len(MOCKUPS_ZIP_GROUP_OPTIONS))
@@ -7551,7 +7556,7 @@ def render_final_zip_download(result):
                 selected_groups.append(group_key)
 
     if not selected_groups:
-        st.warning("Select at least one image group to download.")
+        st.warning("Select at least one image group to save or download.")
         st.button("Download ZIP", key=f"download-filtered-zip-disabled::{result['run_dir']}", disabled=True, use_container_width=True)
         return
 
@@ -8176,19 +8181,6 @@ def render_mockups_page():
             st.session_state[MOCKUPS_LAST_RUN_SIGNATURE_KEY] = run_signature
 
             image_factory.cleanup_stale_temp_runs()
-            product_slug = image_factory.slugify(product_name.strip()) or "sports-cave-product"
-            update_status("Connecting Dropbox...", 8)
-            access_token = _files_access_token()
-            dropbox_run = resolve_mockups_dropbox_run(access_token, product_slug)
-            uploaded_rows = []
-            upload_failures = []
-            asset_upload_callback = make_mockup_asset_upload_callback(
-                access_token,
-                dropbox_run["destination"],
-                uploaded_rows,
-                upload_failures,
-            )
-
             update_status("Preparing lightweight working image...", 15)
             log_app_memory("Mockup generation start")
             suffix = Path(uploaded_file.name).suffix or ".jpg"
@@ -8211,26 +8203,12 @@ def render_mockups_page():
                 status_callback=lambda msg, progress=None: update_status(msg, progress),
                 final_prompt_items=final_prompt_items,
                 output_root=temp_parent,
-                asset_completed_callback=asset_upload_callback,
             )
 
-            update_status("Finalising Dropbox save...", 92)
-            result = finalise_mockups_dropbox_result(
-                result,
-                dropbox_run,
-                uploaded_rows,
-                upload_failures,
-            )
-            if uploaded_rows:
-                _files_save_upload_metadata(uploaded_rows, current_os_user(), asset_type="mockups")
-                _files_clear_directory_cache(
-                    dropbox_run["destination_parent"],
-                    *_files_changed_directory_paths(dropbox_run["destination"], uploaded_rows),
-                )
+            update_status("Finalising previews...", 92)
+            result = normalize_generation_result(result)
             result["status_text"] = (
-                "Saved to Dropbox"
-                if result.get("dropbox_upload_status") == "saved"
-                else "Dropbox upload needs retry."
+                "Core image previews are ready. Save All to Dropbox at the bottom when finished."
             )
             image_factory.log_memory("Completion")
             status_container.empty()
@@ -8244,8 +8222,7 @@ def render_mockups_page():
                 metadata={
                     "product_name": product_name.strip(),
                     "sport_category": sport_category,
-                    "dropbox_status": result.get("dropbox_upload_status"),
-                    "dropbox_path": result.get("dropbox_saved_path"),
+                    "storage": "temporary_until_manual_save",
                 },
             )
             st.session_state.last_generation_result = result
@@ -8255,9 +8232,6 @@ def render_mockups_page():
         except image_factory.MemoryLimitExceededError as error:
             logging.exception("Generation stopped by memory limit")
             status_container.error(str(error))
-        except (dropbox_integration.DropboxApiError, dropbox_integration.DropboxConfigError) as error:
-            logging.exception("Dropbox upload failed during mockup generation")
-            status_container.error("Dropbox upload failed. No image was reported as saved.")
         except Exception as error:
             logging.exception("Generation failed")
             status_container.error("Generation failed. Full traceback is logged in Render.")

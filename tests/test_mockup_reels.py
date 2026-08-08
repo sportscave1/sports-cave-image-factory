@@ -589,13 +589,13 @@ class MockupReelsTests(unittest.TestCase):
         ]
 
         self.assertIn('st.subheader("Export mockups")', final_zip)
-        self.assertIn("Save to Dropbox", source)
+        self.assertIn("Save All to Dropbox", source)
         self.assertIn("Download ZIP", final_zip)
         for label in ("Core Images", "Social Mockups", "Product Images"):
             self.assertIn(label, source)
         self.assertIn("MOCKUPS_ZIP_GROUP_OPTIONS", final_zip)
         self.assertNotIn('"Reels"', source)
-        self.assertIn("Select at least one image group to download.", final_zip)
+        self.assertIn("Select at least one image group to save or download.", final_zip)
         self.assertIn("value=True", final_zip)
         self.assertIn("selected_assets = get_selected_zip_assets(result, selected_groups)", final_zip)
         self.assertIn("assets=selected_assets", source)
@@ -603,6 +603,8 @@ class MockupReelsTests(unittest.TestCase):
         self.assertIn('"relative_path": entry["archive_name"]', dropbox_save)
         self.assertIn('"local_path": entry["path"]', dropbox_save)
         self.assertIn("dropbox_integration.upload_batch", dropbox_save)
+        self.assertIn("simple_limit=0", dropbox_save)
+        self.assertIn("chunk_size=mockup_storage.MOCKUP_DROPBOX_UPLOAD_CHUNK_SIZE", dropbox_save)
         self.assertIn('conflict_labels = {', dropbox_ui)
         self.assertIn('"Merge and replace matching files"', dropbox_ui)
         self.assertIn('"Save as a new numbered folder"', dropbox_ui)

@@ -292,6 +292,30 @@ class MockupMemoryPipelineTests(unittest.TestCase):
                 self.assertEqual(updated["dropbox_upload_status"], "saved")
                 self.assertEqual(updated["dropbox_retry_files"], [])
 
+    def test_mockups_generation_does_not_auto_save_to_dropbox(self):
+        source = Path(app.__file__).read_text(encoding="utf-8")
+        block = source[
+            source.index("if generate_clicked:")
+            : source.index("if st.session_state.last_generation_result is not None:")
+        ]
+
+        self.assertNotIn("_files_access_token()", block)
+        self.assertNotIn("resolve_mockups_dropbox_run", block)
+        self.assertNotIn("asset_completed_callback=", block)
+        self.assertNotIn("finalise_mockups_dropbox_result", block)
+        self.assertIn("temporary_until_manual_save", block)
+
+    def test_manual_mockup_save_uses_streaming_upload_batch(self):
+        source = Path(app.__file__).read_text(encoding="utf-8")
+        block = source[
+            source.index("def _save_mockups_to_dropbox")
+            : source.index("\n\ndef _open_files_folder")
+        ]
+
+        self.assertIn("dropbox_integration.upload_batch", block)
+        self.assertIn("simple_limit=0", block)
+        self.assertIn("chunk_size=mockup_storage.MOCKUP_DROPBOX_UPLOAD_CHUNK_SIZE", block)
+
     def test_duplicate_generation_guard_is_nonblocking(self):
         self.assertTrue(app.MOCKUPS_GENERATION_SEMAPHORE.acquire(blocking=False))
         try:
@@ -303,7 +327,7 @@ class MockupMemoryPipelineTests(unittest.TestCase):
         source = Path(app.__file__).read_text(encoding="utf-8")
         block = source[
             source.index("except image_factory.MemoryLimitExceededError")
-            : source.index("except (dropbox_integration.DropboxApiError")
+            : source.index("except Exception as error:", source.index("except image_factory.MemoryLimitExceededError"))
         ]
         self.assertEqual(block.count("status_container.error(str(error))"), 1)
         self.assertNotIn("st.error(str(error))", block)

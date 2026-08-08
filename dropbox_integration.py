@@ -1040,7 +1040,16 @@ def finish_upload_session(
     return _metadata_to_dict(metadata)
 
 
-def upload_local_file(access_token, dropbox_path, local_path, *, conflict="cancel", progress_callback=None):
+def upload_local_file(
+    access_token,
+    dropbox_path,
+    local_path,
+    *,
+    conflict="cancel",
+    progress_callback=None,
+    simple_limit=DROPBOX_SIMPLE_UPLOAD_LIMIT,
+    chunk_size=DROPBOX_UPLOAD_CHUNK_SIZE,
+):
     source = Path(local_path)
     with source.open("rb") as stream:
         return upload_stream(
@@ -1050,10 +1059,21 @@ def upload_local_file(access_token, dropbox_path, local_path, *, conflict="cance
             size=source.stat().st_size,
             conflict=conflict,
             progress_callback=progress_callback,
+            simple_limit=simple_limit,
+            chunk_size=chunk_size,
         )
 
 
-def upload_batch(access_token, current_folder, items, *, conflict="cancel", progress_callback=None):
+def upload_batch(
+    access_token,
+    current_folder,
+    items,
+    *,
+    conflict="cancel",
+    progress_callback=None,
+    simple_limit=DROPBOX_SIMPLE_UPLOAD_LIMIT,
+    chunk_size=DROPBOX_UPLOAD_CHUNK_SIZE,
+):
     """Upload independent items and retain successes when another item fails."""
     clean_folder = normalize_dropbox_path(current_folder)
     successes = []
@@ -1082,6 +1102,8 @@ def upload_batch(access_token, current_folder, items, *, conflict="cancel", prog
                     local_path,
                     conflict=conflict,
                     progress_callback=on_file_progress,
+                    simple_limit=simple_limit,
+                    chunk_size=chunk_size,
                 )
             else:
                 stream = item.get("stream")
@@ -1096,6 +1118,8 @@ def upload_batch(access_token, current_folder, items, *, conflict="cancel", prog
                     size=item.get("size"),
                     conflict=conflict,
                     progress_callback=on_file_progress,
+                    simple_limit=simple_limit,
+                    chunk_size=chunk_size,
                 )
             if metadata is None:
                 failures.append({"relative_path": clean_relative, "error": "cancelled"})
