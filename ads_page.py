@@ -3243,14 +3243,16 @@ PROFESSIONAL INTERIOR-PHOTOGRAPHY REALISM
 
 LIGHTING, GLASS AND MOUNTING PHYSICS
 
-- Use one identifiable primary light source and no more than one secondary practical light source unless an explicit selected variable requires more.
+- Use premium natural side lighting around 4000-4700K, with one identifiable primary light source and no more than one secondary practical light source unless an explicit selected variable requires more.
 - All wall shadows, frame shadows, highlights and reflections must agree with those light sources.
 - Mount the frame with believable separation approximately 6-10 mm from the wall.
-- Cast a natural soft shadow behind and slightly below or away from the frame according to the primary light direction.
-- Framed products require transparent protective glass with enough restrained reflection to feel physically real and premium.
-- Glass reflections must originate from visible or physically plausible room light sources, remain confined to the glass surface and never continue across the timber frame or wall.
+- Add a narrow contact shadow, a softer secondary wall shadow and a slightly stronger shadow beneath the frame, all following the room lighting direction.
+- Preserve realistic frame depth, ambient occlusion, wall contact, natural material response and visible detail in the black timber frame.
+- Framed products require clear gallery-style glass that is always visible, with subtle realistic partial reflections covering approximately 8-15% of the glass at approximately 3-6% opacity.
+- Glass reflections must originate from visible or physically plausible room light sources, match the room's real light source, remain confined to the glass surface, stop at the inner frame edge and never continue across the timber frame or wall.
 - For near-front views use extremely restrained broad reflections. For three-quarter views allow a slightly stronger reflection on the far side only.
 - No glare may obscure faces, wording, vehicles, signatures, plaques, badges or edition details.
+- Never allow full-surface glare, plastic haze, fake bloom, glowing edges, conflicting light directions, a uniform black drop shadow, or a product that looks flat, floating or digitally pasted on.
 - A dramatic wall sunbeam without a corresponding physically consistent glass response is a realism failure.
 
 ANTI-AI INTERIOR CONTROL
@@ -3351,8 +3353,12 @@ Inspect and correct the composed image before returning it. Reject and regenerat
 - the product misses the required approximately 82-88% canvas width or complete-frame visibility
 - the room does not match every resolved scene variable or looks like generic AI staging
 - architecture, furniture, lighting direction, shadows or reflections are physically inconsistent
-- glass is absent, crosses onto the frame or wall, or obscures product details
-- the frame floats, intersects objects, sits flush without believable mounting depth or looks digitally pasted on
+- glass is missing, unrealistic, crosses onto the frame or wall, or hides artwork details
+- reflections obscure faces, wording, signatures, plaques, badges or edition details
+- mounting gap, narrow contact shadow, softer secondary wall shadow or stronger lower frame shadow is missing
+- frame and wall shadows conflict with the room lighting direction
+- the frame floats, intersects objects, sits flush without believable 6-10 mm mounting depth, looks flat or looks digitally pasted on
+- the overall result does not look like premium professional interior photography
 - on-image wording is misspelled, incomplete, duplicated, re-punctuated, substituted or joined by extra text
 - the on-image CTA is not exactly CLAIM YOUR EDITION
 - a CTA field is outside the approved direct edition-acquisition family

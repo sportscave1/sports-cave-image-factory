@@ -4983,6 +4983,19 @@ PRIMARY TEXT VARIATIONS
         )
         for marker in image_markers:
             self.assertEqual(contract.count(marker), 3, marker)
+        restored_effects = (
+            "clear gallery-style glass that is always visible",
+            "approximately 8-15% of the glass at approximately 3-6% opacity",
+            "stop at the inner frame edge",
+            "narrow contact shadow, a softer secondary wall shadow and a slightly stronger shadow beneath the frame",
+            "premium natural side lighting around 4000-4700K",
+            "uniform black drop shadow",
+            "glass is missing, unrealistic",
+            "mounting gap, narrow contact shadow, softer secondary wall shadow or stronger lower frame shadow is missing",
+            "premium professional interior photography",
+        )
+        for expected in restored_effects:
+            self.assertEqual(contract.count(expected), 3, expected)
         self.assertEqual(contract.count("| Description | Description Key | Description Label | Description Copy | Headline | CTA |"), 3)
         self.assertIn("ADS INSTANT EXPERIENCE STANDARD V7 PREMIUM ROOM V4", contract)
 
